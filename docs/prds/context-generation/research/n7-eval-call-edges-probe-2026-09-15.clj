@@ -4,7 +4,7 @@
 ;; The observed default already had the canonical test dependencies loaded.
 (require 'clojure.edn 'seon.fn 'seon.db 'seon.operator 'seon.test
          'seon.test-support 'seon.fn-test 'seon.operator.runtime
-         'seon.cluster.source)
+         'seon.cluster.source 'seon.sci.eval 'seon.turn 'clojure.test)
 
 ;; This exact ordinary-form request refused before the change.
 (let [database (seon.db/db (seon.operator/connection "default"))]
@@ -82,3 +82,83 @@
       (:seon.fn/spec
        (seon.db/pull (seon.db/db fixture) [:seon.fn/spec]
                     [:seon.fn/sym "seon.fn/analyze-forms"]))))})
+
+;; Resumed persistence probe. Load the canonical test namespace first, then
+;; evaluate this form under default's carried projection. Every database and
+;; SCI context below belongs to the canonical isolated fixture in that JVM.
+(let [evidence (atom {})]
+(seon.test-support/with-database
+    (fn [connection]
+      (let [namespace-name 'my.agents.call-edges
+            process "call-edges-process"
+            source "(do (seon.db/q '[:find (count ?function) . :where [?function :seon.fn/sym _]]) (my.turn/wait {:my.turn/note \"Waiting.\"}))"]
+        (seon.test-support/seed-cluster! connection "call-edges")
+        (#'seon.fn-test/transact-fixture!
+         connection
+         [{:seon.ns/name namespace-name
+           :seon.ns/source "(ns my.agents.call-edges)"
+           :seon.ns/requires [[:seon.ns/name 'my.turn]]}
+          {:seon.agent/id "call-edges-direct"
+           :seon.agent/namespace [:seon.ns/name namespace-name]}
+          {:seon.agent/id "call-edges-fold"
+           :seon.agent/namespace [:seon.ns/name namespace-name]}])
+        (let [ctx (seon.test-support/fork-cluster-ctx connection)
+              cluster (seon.test-support/cluster-handle
+                       {:seon.db/connection connection
+                        :seon.cluster/name "call-edges"
+                        :seon.db.process/id process
+                        :seon.sci.eval/ctx ctx})]
+          (doseq [run-id ["call-edges-direct" "call-edges-fold"]]
+            (#'seon.fn-test/transact-fixture!
+             connection
+             (seon.turn/open-tx
+              {:seon.turn/id run-id
+               :seon.turn/agent [:seon.agent/id run-id]
+               :seon.turn/opened-tx "datomic.tx"}))
+            (#'seon.fn-test/transact-fixture!
+             connection
+             (seon.turn/plan-tx
+              {:seon.turn/id run-id :seon.db.process/id process
+               :seon.turn/starting-ns [:seon.ns/name namespace-name]
+               :seon.turn/sources [{:seon.cluster.eval/source source}]}))
+            (if (= run-id "call-edges-direct")
+              (let [database (seon.db/db connection)
+                    captured (atom [])
+                    evaluation
+                    (binding [seon.db/*read-evidence-sink* captured]
+                      (seon.sci.eval/evaluate
+                       (merge (select-keys cluster [:seon.sci.admit/caps
+                                                   :seon.config/on-core-error])
+                              {:seon.cluster.eval/source source
+                               :seon.cluster.eval/ns [:seon.ns/name namespace-name]
+                               :seon.sci.eval/ctx ctx
+                               :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms cluster)
+                               :seon.db/db database :seon.db/connection connection})))]
+                (swap! evidence assoc :n7/evaluation evaluation)
+                (clojure.test/is (= {:my.turn/disposition :wait :my.turn/note "Waiting."}
+                       (:seon.sci.admit/value evaluation)) (pr-str evaluation))
+                (#'seon.fn-test/transact-fixture!
+                 connection
+                 (seon.turn/receipt-settle-tx
+                  (seon.db/db connection)
+                  {:seon.turn/id run-id :seon.cluster.eval/ordinal 0
+                   :seon.eval/shown (:seon.eval/shown evaluation)
+                   :seon.cluster.eval/read-evidence (seon.db/read-evidence @captured)
+                   :seon.cluster.eval/read-basis-transaction (seon.db/basis-t database)})))
+              (clojure.test/is (= [:closed 1]
+                     (#'seon.turn/resume-turn
+                      {:seon.turn.loop/cluster cluster
+                       :seon.turn.loop/work {:seon.agent/id run-id
+                                             :seon.turn/id run-id
+                                             :seon.cluster.eval/ordinal 0}
+                       :seon.turn.loop/now (java.util.Date.)
+                       :seon.turn.loop/report (fn [outcome n] [outcome n])}))))
+            (let [calls (set (seon.db/q '[:find [?symbol ...]
+                                    :in $ ?id
+                                    :where [?evaluation :seon.cluster.eval/id ?id]
+                                    [?evaluation :seon.fn/calls ?callee]
+                                    [?callee :seon.fn/sym ?symbol]]
+                                  (seon.db/db connection) (seon.turn/receipt-identity run-id 0)))]
+              (clojure.test/is (contains? calls "seon.db/q") (pr-str calls))
+              (do (clojure.test/is (contains? calls "my.turn/wait") (pr-str calls)) (swap! evidence assoc (keyword run-id) calls))))))))
+ @evidence)

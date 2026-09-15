@@ -51,3 +51,14 @@ After a valid function-contract accretion is adopted, an in-process canonical
 regression sees that same contract without restarting default, globally
 reloading a shared fixture, disabling instrumentation, or substituting a
 hand-built schema population. Retained older database values remain immutable.
+
+## Fresh-base probe — 2026-09-15, 23:42Z
+
+The resumed N7 lane initialized a fresh canonical base in default's existing
+JVM by loading test-support and realizing the base with default's carried
+projection. Its stored `analyze-forms` contract has the optional declaration
+row. The previously blocked regression passed 12 assertions (run 67062), then
+12 again after adoption (67086). Therefore this issue concerns reuse of an
+already retained base across adoption, not a stale contract in newly populated
+fixtures. No fixture source or contract was changed. Explicit fresh namespace
+initialization does not satisfy the automatic-refresh acceptance above.

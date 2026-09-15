@@ -8,23 +8,25 @@ tags: [research, database, test, architecture]
 
 ## Outcome and boundary
 
-Implementation commit: `f402c5d3d` on `steward-platform`.
+Implementation commits: `f402c5d3d` (analysis) and `924fdbf3a` (persistence),
+on `steward-platform`.
 
-The `seon.fn` side is implemented: ordinary submitted forms can use the same
-batch analyzer as declarations, and their existing evaluation identity can own
-the returned `:seon.fn/calls` refs. Namespace membership comes from program
-rows, including accepted declarations in the submitted batch; no prefix filter,
-synthetic function, second edge attribute, or alternate analyzer was added.
+**Guarantee:** every ordinary submitted evaluation uses the existing batch
+analysis and commits its resolved call refs on its evaluation identity through
+the same settlement writer that commits read evidence.
 
-**The issue remains open.** The protected `src/seon/turn.clj` still excludes
-ordinary evaluations from analysis. The exact proposed integration diff below
-is not applied, loaded, or verified. No ordinary-turn persistence or full
-population-invariant closure is claimed.
+The turn integration is applied and verified in default's JVM. Both the direct
+settlement API and ordinary turn fold persist `seon.db/q` and `my.turn/wait`
+refs. Declaration edges remain on their program rows. No second analyzer,
+edge family, callable identity, or namespace prefix rule was added.
 
-The new canonical regression is written but its live run is blocked by the
-old contract retained in default's canonical fixture. The existing declaration
-regression passes. The isolated gate was refused before test launch by the
-orchestrator-only policy; namespace and platform gates are queued.
+The two canonical in-process regressions pass after development adoption:
+**24 assertions, zero failures, zero errors**. No test JVM was launched in the
+resumed assignment. The orchestrator's namespace/platform gates remain pending.
+The issue is narrowed to its historical acceptance item: re-evaluating old
+ablation conclusions; new evaluation persistence is fixed. The separate
+retained-fixture lifecycle issue remains open; a fresh canonical base has the
+correct contract and passes, so no fixture production change was needed.
 
 ## Grounding and dependency ledger
 
@@ -62,11 +64,11 @@ runtime target query. `5deb40e4e` fixed namespace relevance, not this residual.
 Initial read/probe HEAD was `51e1998843d8063654f82e9aaf381674bdb9a4d4`;
 the attempted gate snapshot used `d5787c4f8d4a6269e1e28952830d2406a44ec77d`.
 
-## Changes and per-member verdict
+## Initial analysis slice — before turn integration
 
 Only [agent-form-calls-to-core-namespaces-are-not-indexed](../../../seon/issues/agent-form-calls-to-core-namespaces-are-not-indexed.md)
-is assigned here. **Open, narrowed to protected turn integration and its live
-persistence proof.**
+is assigned here. At that checkpoint it was open for protected turn integration and its live
+persistence proof; the resumed verdict is above.
 
 1. `analyze-forms` admits absence of a declaration row. A supplied row still
    must satisfy the complete declaration contract; explicit nil is not admitted
@@ -160,105 +162,95 @@ were observed, but complete source convergence was not established. An earlier
 hook publication refused because source changed during analysis. Hook feedback
 contained shadowed-var warnings in fn.clj, no blocking fn.clj finding.
 
-## Protected integration diff — not applied
+## Resumed integration — 2026-09-15
 
-The owning recorder is in turn.clj, not sci/eval.clj. Widen its existing batch
-to all submitted forms and carry the resulting form facts into the existing
-settlement relation writer beside read evidence. Including accepted function
-declarations supplies same-batch target identities before the settlement
-transaction; the pre-install function gate still owns its necessary earlier
-candidate analysis. This is the existing analyzer and writer, not an additional
-edge store or source parser.
+The owner freed turn.clj after `72d7dc3a9`; `git status` confirmed it clean.
+`analyze-settlement` now admits ordinary forms. `resume-turn` supplies every
+submitted form to its existing batch and attaches ordinary call facts to the
+existing evaluation identity. Both continue through `receipt-settle-call`'s
+relation assertions beside read evidence. Accepted declaration rows remain in
+the batch, supplying same-batch callable identities. The pre-install function
+gate retains its earlier candidate analysis; no alternate analysis path was
+introduced.
 
-The direct settlement API's existing analysis entrance must also admit ordinary
-forms. This patch was generated against the observed protected working file;
-it is a proposal requiring the owner's REPL-first integration proof:
+Both changed private function forms were read from a candidate file and
+`eval`uated in `seon.turn` through MCP JVM mode before production edits.
+The replacement persistence regression exercises each function with real
+canonical data: direct `seon.sci.eval/evaluate` followed by settlement, then
+`resume-turn` with the ordinary real SCI evaluation path. The old assertion
+that ordinary evaluations have no call edges is deleted in the same commit.
+The two turn examples use distinct agents, because the first direct-settlement
+probe intentionally does not close its turn. `plan-tx` already creates the
+evaluation identity, so the test does not call `receipt-start-tx` again.
 
-```diff
---- a/src/seon/turn.clj
-+++ b/src/seon/turn.clj
-@@ -913,8 +913,7 @@
- 
- (defn- analyze-settlement
-   [database request]
--  (if-let [form (when (:seon.program/row request)
--                  (settlement-form database request))]
-+  (if-let [form (settlement-form database request)]
-     (let [[form-facts program-row]
-           (seon.fn/analyze-form
-            database
-@@ -4532,24 +4531,23 @@
-                                      reader-event
-                                      (assoc :seon.sci.eval/event reader-event)))))
-                       evaluations)}))
--            defining
-+            submitted
-             (into []
--                  (keep-indexed
-+                  (map-indexed
-                    (fn [index {form :seon.turn.loop/admitted-form evaluation :seon.sci.eval/evaluation}]
--                     (when (and (:seon.program/row evaluation)
--                                (not (get-in evaluation [:seon.program/row :seon.fn/sym])))
--                       [index
--                        {:seon.cluster.eval/source
--                         (:seon.cluster.eval/source form)
--                         :seon.cluster.eval/ns
--                         (:seon.cluster.eval/ns form)
--                         :seon.program/row
--                         (:seon.program/row evaluation)}])))
-+                     [index
-+                      (cond->
-+                       {:seon.cluster.eval/source
-+                        (:seon.cluster.eval/source form)
-+                        :seon.cluster.eval/ns
-+                        (:seon.cluster.eval/ns form)}
-+                        (:seon.program/row evaluation)
-+                        (assoc :seon.program/row (:seon.program/row evaluation)))]))
-                   evaluated)
-             analyzed
-             (cond
-               (:seon.error/kind evaluated) evaluated
--              (seq defining) (phase #(seon.fn/analyze-forms database (mapv second defining)))
-+              (seq submitted) (phase #(seon.fn/analyze-forms database (mapv second submitted)))
-               :else [])]
-         (if (:seon.error/kind analyzed)
-           (do
-@@ -4562,9 +4560,11 @@
-           (let [evaluated
-                 (reduce
-                  (fn [all [[index _] [form-facts row]]]
--                   (-> all
--                       (assoc-in [index :seon.sci.eval/evaluation :seon.program/row] row)
--                       (assoc-in
-+                   (cond-> all
-+                     row
-+                     (assoc-in [index :seon.sci.eval/evaluation :seon.program/row] row)
-+                     true
-+                     (assoc-in
-                         [index :seon.sci.eval/evaluation :seon.turn/form-facts]
-                         (assoc form-facts
-                                :db/id
-@@ -4572,7 +4572,7 @@
-                                 (receipt-identity
-                                  run-id (:seon.cluster.eval/ordinal (nth all index)))]))))
-                  evaluated
--                 (map vector defining analyzed))
-+                 (map vector submitted analyzed))
-                 gated evaluated
-                 requests
-                 (mapv
+Exact commands, each with `(seon.operator/connection "default")`:
+
+```clojure
+(seon.test/run
+ #'seon.fn-test/settled-form-records-calls-across-every-program-namespace conn)
+(seon.test/run
+ #'seon.fn-test/ordinary-form-analysis-keeps-call-edges-without-a-declaration conn)
 ```
 
-After integration, replace the stale no-edge expectation in
-`seon.fn-test/settled-form-records-calls-across-every-program-namespace`.
-The required full proof uses the real virtual-reply turn harness: install a
-contracted function and a test calling it, evaluate an ordinary form calling
-a core function and a my.* function, inspect both persisted refs on that
-evaluation identity, and require tests-reaching/check selection to find the
-installed test. Assert the evaluation and target rows exist before querying
-edges. The current fn-only regression does not claim that proof.
+| Phase | Test | Pass / fail / error | Recorded run / basis | MCP time |
+|---|---|---|---|---|
+| Retained old fixture, 23:40:00Z | ordinary-form-analysis | 1 / 0 / 1 | 67058 / 536872325 | 2,143 ms |
+| Candidate test setup, 23:42:33Z | settled-form | 7 / 6 / 0 | 67061 / 536872328 | 3,918 ms |
+| Fresh base, before edits, 23:42:38Z | ordinary-form-analysis | 12 / 0 / 0 | 67062 / 536872329 | 11,115 ms |
+| Corrected candidate, before edits, 23:43:03Z | settled-form | 12 / 0 / 0 | 67063 / 536872330 | 3,862 ms |
+| After adoption, 23:46:09Z | settled-form | 12 / 0 / 0 | 67084 / 536872342 | 4,512 ms |
+| After adoption, 23:46:14Z | ordinary-form-analysis | 12 / 0 / 0 | 67086 / 536872343 | 13,202 ms |
 
-## Gates, cleanup, and landing
+The fresh base was initialized by loading the canonical test-support namespace
+in the existing JVM, then realizing its base with default's explicit carried
+projection. A first preparation without that projection refused initial schema
+population; the corrected preparation used `seon.schema/call-with-projection`,
+as `seon.test/run` does. No schema roster or contract override was supplied.
+This is explicit fresh fixture initialization, **not** proof that an already
+retained fixture automatically follows adoption. That independent lifecycle
+issue remains open. Default was never stopped, reforked, or restarted.
+
+The complete live persistence result is retained in the evidence EDN and its
+reproducible probe below. In **2,459 ms**, both direct and folded evaluation
+identities had exactly these call targets:
+
+```clojure
+#{"clojure.core/do" "my.turn/wait" "seon.db/q"}
+```
+
+The real evaluation returned `{:my.turn/disposition :wait,
+:my.turn/note "Waiting."}`, outcome `:ok`, duration **103 ms**, and the exact
+shown text. A separate **11,708 ms** graph probe committed the analyzed
+agent-authored function/test rows and returned
+`["seon.db/n7-observed-test"]` from `tests-reaching` over
+`"seon.db/n7-observed"`; transitive `my.turn/wait` reach also contained it.
+This is installed program-graph reachability, not execution of that synthetic
+test or a claim that the function passed the separate accretion gate.
+
+`bin/seon init --dev default --changed src/seon/turn.clj --changed
+test/seon/fn_test.clj` exited zero after loaded definitions, SCI acquisition,
+and instrumentation. It reported development convergence at source commit
+`6aa9d851-0cfa-50c8-8962-eaa48cc5df29`, digest
+`39e2f56129402c42f32165b6015065a2b47fb0b589ad209afd7a05afccb452cd`.
+The post-edit runs used that adopted definition. A subsequent observation
+found current-src had advanced again to `6aa9d8bd-e156-5a4c-a877-bab45dc9db72`;
+no claim of permanent equality across concurrent publication is made.
+
+The persistence slice is **2 files, 80 insertions, 62 deletions**, **9,704 bytes**
+of binary diff. `git diff --check` passed. The gate-request file now contains
+only `seon.fn-test` and `seon.cluster.turn-test`, one namespace per line.
+No test JVMs or provider calls ran. Historical evaluation rows and old ablation
+scores are not backfilled; that exact acceptance residual stays in the issue.
+Other N7 members and protected SCI/render owners are outside this slice.
+
+The three changed Markdown documents pass their file validators. Repository
+pin lint still reports unrelated audit citations; those files were preserved.
+The publication shell exited, the completed preparation future was unbound,
+and the lane's `tmp/n7-eval-call-edges` scratch directory was removed after
+retaining the probe and complete results here. No owned background shell or
+scratch cluster remains.
+
+## Initial gate attempt and cleanup history
 
 Attempted, once:
 
@@ -269,7 +261,7 @@ bin/test --paths src/seon/fn.clj test/seon/fn_test.clj -- seon.fn-test
 Exit **75**, before any test JVM or test assertions. Snapshot phase: **2 s**.
 Exact refusal: `test runs are orchestrator-only right now (orchestrator batches
 gates; set 2026-09-15 21:05Z)`. No platform invocation was attempted after this
-explicit policy refusal. Both serial commands are queued in
+explicit policy refusal. The affected namespace names are now queued in
 `tmp/orchestrator/gate-requests/n7-eval-call-edges.txt`.
 No gate success is claimed.
 

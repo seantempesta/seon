@@ -5,7 +5,25 @@ severity: friction
 tags: [issue, agent, sci, class/n7, wave/program-graph-indexing]
 ---
 
-# Ordinary evaluations lack persisted program call edges
+# Historical call-edge analyses need re-evaluation
+
+## Current verdict — 2026-09-15
+
+New ordinary evaluation persistence is **resolved** by `f402c5d3d` and
+`924fdbf3a`. Default's real SCI probe persisted both `seon.db/q` and
+`my.turn/wait` edges through direct settlement and the ordinary turn fold.
+After development adoption, the canonical in-process persistence and analysis
+regressions passed **24 assertions, zero failures/errors** (run entities 67084
+and 67086). `tests-reaching` found the installed test over its function and
+through transitive `my.turn/wait` reach. Exact commands and complete values:
+[the residual landing](../../prds/context-generation/research/n7-eval-call-edges-2026-09-15.md).
+
+**Remaining scope:** the original acceptance item to re-derive historical
+ablation conclusions made from missing call edges. This change does not
+backfill stored evaluations or re-run the archived ablation. The orchestrator's
+batched namespace/platform gate is also pending; no new test JVM was launched.
+The runtime namespace-dependent omission is no longer an open implementation
+item. The dated sections below preserve the original root-cause evidence.
 
 ## Problem
 
