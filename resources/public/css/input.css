@@ -7,6 +7,9 @@
 @import "tailwindcss" source(none);
 @plugin "@tailwindcss/typography";
 
+/* Block render pairs: see blocks.css (html-views lane). */
+@import "./blocks.css";
+
 /* Scan the fresh JVM source files for classes. */
 @source "../../../src/**/*.clj";
 @source "../../../src/**/*.cljc";
@@ -785,6 +788,64 @@ details.tool-call-details[open] .tool-preview {
 }
 .seon-data-entry + .seon-data-entry { border-top: 1px solid var(--color-base-850); }
 .seon-data-pager { display: flex; gap: 1rem; }
+.seon-session-page {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  line-height: 1.6;
+  color: var(--color-text-200);
+  background: var(--color-base-950);
+  padding: 1rem;
+  min-width: 0;
+}
+.seon-main:has(.seon-session-page) { width: 100%; max-width: none; padding: 0; }
+.seon-session-page *, .seon-session-page pre, .seon-session-page code {
+  min-width: 0;
+  max-width: 100%;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+.seon-session-page h2 { font-size: 0.75rem; font-weight: 600; color: var(--color-text-100); }
+.seon-session-toolbar, .seon-session-heading, .seon-session-selection {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+.seon-session-heading { justify-content: space-between; padding: 0.75rem 0; }
+.seon-session-heading p, .seon-session-meta { color: var(--color-text-400); font-size: 0.625rem; }
+.seon-session-toolbar button, .seon-session-heading a {
+  border: 1px solid var(--color-base-700);
+  padding: 0.25rem 0.5rem;
+  color: var(--color-text-200);
+  background: var(--color-base-900);
+}
+.seon-session-selection { gap: 0.2rem; padding: 0.5rem 0; }
+.seon-session-selection a { color: var(--color-text-400); padding: 0 0.35rem; }
+.seon-session-selection a[aria-current="true"] { color: var(--color-signal); border-bottom: 1px solid var(--color-signal); }
+.seon-session-scroll { height: 65vh; overflow-y: auto; border: 1px solid var(--color-base-800); }
+.seon-session-boundary { border-top: 1px solid var(--color-base-800); color: var(--color-text-400); font-size: 0.625rem; padding: 0.4rem 0.6rem; }
+.seon-session-line { display: grid; grid-template-columns: 5.5rem minmax(0, 1fr); }
+.seon-session-gutter { padding: 0.5rem 0.6rem; font-size: 0.625rem; color: var(--color-text-400); border-right: 1px solid var(--color-base-800); }
+.seon-session-gutter span { display: block; }
+.seon-session-line pre, .seon-session-raw { margin: 0; padding: 0.5rem 0.75rem; font: inherit; overflow: visible; }
+.seon-session-record { margin-top: 0.75rem; border-top: 1px solid var(--color-base-800); padding-top: 0.5rem; }
+.seon-syntax-prompt { color: var(--color-signal); }
+.seon-syntax-comment { color: var(--color-text-400); }
+.seon-syntax-keyword, .seon-syntax-result { color: var(--color-info); }
+.seon-syntax-string { color: var(--color-success); }
+.seon-syntax-number { color: var(--color-warning); }
+.seon-syntax-delimiter { color: var(--color-text-500); }
+.seon-syntax-symbol { color: var(--color-text-100); }
+.seon-emission-error, .seon-origin-error { color: var(--color-error); }
+.seon-emission-error .seon-syntax-string { color: inherit; }
+.seon-origin-opening { color: var(--color-signal); }
+@media (max-width: 750px) {
+  .seon-session-page { padding: 0.5rem; }
+  .seon-session-line { grid-template-columns: 4.25rem minmax(0, 1fr); }
+  .seon-session-gutter { padding: 0.5rem 0.35rem; }
+}
+
 .seon-data-leaf {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -1832,6 +1893,50 @@ pre.seon-debug-candidate-preview,
   min-width: 0;
   min-height: 0;
   overflow: auto;
+}
+.seon-debug-turn,
+.seon-debug-turn-detail,
+.seon-debug-turn-header,
+.seon-debug-build-groups,
+.seon-runtime-turns td {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+.seon-debug-turn {
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--color-base-800);
+}
+.seon-debug-turn h4 {
+  margin: 0.75rem 0 0.35rem;
+  color: var(--color-text-100);
+}
+.seon-debug-turn p,
+.seon-debug-turn li,
+.seon-debug-turn summary {
+  white-space: pre-wrap;
+}
+.seon-debug-turn details > summary {
+  cursor: pointer;
+  padding: 0.5rem 0;
+}
+.seon-debug-turn-detail {
+  display: block;
+  padding: 0.75rem;
+  background: var(--color-base-900);
+}
+.seon-debug-turn-detail pre {
+  overflow: visible;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+.seon-debug-build-groups ol {
+  padding-left: 1.25rem;
+}
+.seon-debug .seon-runtime-turns {
+  table-layout: fixed;
 }
 .seon-eval-entry {
   min-width: 0;

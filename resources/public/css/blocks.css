@@ -1,0 +1,5 @@
+/* Block render pairs — the user-facing HTML of every rendered concern
+   (plan, settings, inbox, notes, help, identity, faults, transactions).
+   Owned by the html-views lane; imported by input.css so both source files
+   build into one output.css through bin/css. Semantic component classes
+   only; utilities come from input.css's safelist. */
