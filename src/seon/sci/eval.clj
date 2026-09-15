@@ -414,7 +414,8 @@
                  (assoc :seon.fn/doc (:doc metadata))
                  (:macro metadata) (assoc :seon.fn/macro? true)
                  (:malli/schema metadata)
-                 (assoc :seon.fn/spec (pr-str (:malli/schema metadata)))
+                 (assoc :seon.fn/spec
+                        (pr-str (accretion/data-contract! (:malli/schema metadata))))
                  (contains? #{:io :compute} (:seon.workload metadata))
                  (assoc :seon.fn/workload (:seon.workload metadata)))
 

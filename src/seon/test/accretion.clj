@@ -47,6 +47,19 @@
     (str "Schema " (:seon.schema/key row)
          " has no Malli generator; functions using it will skip auto-check.")))
 
+(defn data-contract!
+  "Refuse function objects before a durable contract is printed as EDN."
+  {:malli/schema [:=> [:cat :seon.schema/value] :seon.schema/value]}
+  [contract]
+  (when (some fn? (tree-seq coll? seq contract))
+    (let [message (str "Function install refused: contracts are data; "
+                       "use a registered predicate schema or a quoted symbol "
+                       "naming an admitted predicate.")]
+      (throw (ex-info message
+                      {:seon.error/kind ::non-data-contract
+                       :seon.error/message message}))))
+  contract)
+
 (defn candidate-capabilities
   "Derive capabilities reached by a candidate's own indexed call edges."
   {:malli/schema

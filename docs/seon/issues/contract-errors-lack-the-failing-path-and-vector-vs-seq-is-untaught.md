@@ -51,3 +51,8 @@ The vector-help sentence and the canonical :seon.db/attributes description
 are now documented. Their isolated help/example/grammar gate passed
 8 tests / 274 assertions; the live help trial with those bytes scored 12/12.
 The issue remains open for the shown-message boundary above.
+
+The exact run-5 function literal is now refused before `pr-str`, with the
+registered-predicate / quoted-symbol alternatives in its shown error.
+Candidate first-install and replacement isolation pass the canonical SCI
+regression; the selected isolated gate passed 10 tests / 318 assertions.

@@ -121,3 +121,65 @@ and adds no identity constraint. Source grounding:
 - Isolated gate: **8 tests / 274 assertions**, 0 failures/errors
   (`run.swOoip`, removed by the runner).
 - The item 3 paid trial included the new vector sentence and scored 12/12.
+
+## Item 2 — refuse function objects before printing contracts
+
+`seon.test.accretion/data-contract!` checks evaluated contract metadata before
+`definition-row` prints it. Its refusal is the ordinary evaluation error,
+so the existing candidate isolation retains no rejected function or program
+row. Its exact message is:
+
+> Function install refused: contracts are data; use a registered predicate schema or a quoted symbol naming an admitted predicate.
+
+The exact captured run-5 definition is in
+`test/seon/contracts_install_test.clj`. The regression proves first-install
+and replacement refusals, retained-root identity and durable source after
+a rejected replacement, and no `#object` in shown text. Quoted symbols pass
+this check and reach the existing predicate admission rules; those rules
+still require a qualified, documented, generatable, proven-pure predicate.
+The shared fixture uses the canonical database, real SCI candidate evaluation,
+real declaration installation and schema bridge, with `:panic` contracts.
+
+- Fast run: **2 tests / 46 assertions**, 0 failures/errors, including the
+  previous run-4 ordinary-turn install-refusal regression.
+- Final isolated gate after sharing the fixture: **10 tests / 318
+  assertions**, 0 failures/errors (`run.jCLOPa`, removed by the runner).
+- MCP on default evaluated the exact captured function in a disposable
+  candidate and returned the refusal with no program row or `#object`.
+  After the final wording edit, a live call to the adopted data-contract!
+  returned the exact message above. The same live observation found the
+  new attribute description and vector help in default's current projection.
+
+## Remaining item 1 boundary
+
+All returned-message, doc-map and successful-`vec` assertions pass. The
+shown-text assertion exposes `src/seon/error.clj:718`: its renderer replaces
+the improved message with a reconstruction. That file is outside the
+assignment's listed ownership, and permission to extend the change there
+is pending. The concrete proposed change is to prefix its current rendering
+with the existing `:seon.error/message`:
+
+```diff
+-      (str "Contract violation in " operation " " (name member)
++      (str (when-let [message (:seon.error/message fact)] (str message "\n"))
++           "Contract violation in " operation " " (name member)
+```
+
+The constructor edit and failing shown-text regression remain uncommitted
+until that last boundary can be fixed and gated as the single item 1 commit.
+
+The initial graph-based reproduction also exposed missing
+`:example/order-row` in base installation after the fixture admitted its
+schemas. It was replaced with the existing direct SCI/install seams, which
+test this assignment without asserting graph propagation health. The first
+failure printer expanded a graph into tens of megabytes; later assertions
+carry only the relevant evaluation evidence. An extra instrument namespace
+run observed two pre-existing-scope arity/arglist assertions failing; the
+many-problem bounded-headline regression passed. The final selected gates
+above are the verification claims, not that extra namespace run.
+
+Scratch shutdown re-observed the already-filed
+[cross-checkout process-census issue](../../../seon/issues/operator-down-misses-a-live-scratch-jvm-from-another-checkout.md):
+main's `down` found zero records while PID 89956 was alive. The creating
+worktree's exact `stop contracts-plan` stopped it through the PREPL and the
+empty JVM exited. No process was killed by a substring match.
