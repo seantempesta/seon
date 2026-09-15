@@ -394,9 +394,7 @@
    ::summary (str (name (::face node)) " "
                   (or (:seon.render.data/total node)
                       (count (or (::items node) (::entries node))))
-                  " items, depth " (count path))
-   ::summarize? (boolean (some #(= ::elided (::face %))
-                              (or (::items node) (::entries node))))})
+                  " items, depth " (count path))})
 
 (declare emit-node emit-text)
 
