@@ -1187,3 +1187,18 @@ half-edit. Measured targets in the issue.
 - Lanes: rereads-2 (empty-change re-reads), contracts-and-plan (contract
   paths, `:fn` literal refusal, plan completing-call line, note example).
 
+## 2026-09-15 14:45Z — cycle 9: the run-5 wave lands; run 6 starts
+
+- rereads-2 ended: unchanged re-reads append nothing and refresh evidence
+  (`60e4e13bb`), failed evaluations never become generated reads
+  (`2795a3f3b`), stale-but-unchanged count on the panel (`70340e9f0`).
+  contracts-and-plan: plan render names the completing call for the
+  selected step (`f2277a861`), help explains vector inputs and attribute
+  map schemas (`2d3d624c5`), function objects refused before printing
+  contracts (`5bc825c5d`); item 1 (contract path in the AI render,
+  error.clj) authorized and in progress. HEAD gate at 187889cdb: 22 tests /
+  608 assertions green; new gate running with the batch.
+- The overnight wakeup did not fire between 00:44 and 08:43 local (the
+  session was idle); resumed at 08:43. Adoption converged; run 6 reseeded
+  14:45Z with the provider on.
+
