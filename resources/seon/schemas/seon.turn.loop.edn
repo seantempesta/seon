@@ -205,6 +205,12 @@
                  [:map
                   [:seon.cluster.eval/source :seon.cluster.eval/source]
                   [:seon.cluster.eval/ns :seon.cluster.eval/ns]],
+                 :idle? [:= true],
+                 :pass-report
+                 [:or :seon.turn.loop/turn-report
+                  [:map
+                   [:seon.agent/id :seon.agent/id]
+                   [:seon.turn.loop/idle? :seon.turn.loop/idle?]]],
                  :turn-report
                  [:map
                   [:seon.turn/id {:optional true} :seon.turn/id]

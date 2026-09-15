@@ -33,6 +33,7 @@
                       [:seon.agent/id :seon.agent/id]
                       [:seon.agent/eid :int]
                       [:seon.flow/graph :seon.flow/graph]
+                      [:seon.flow/started {:optional true} :seon.flow/started]
                       [:seon.cluster.wake/channel :seon.flow/channel]
                       [:seon.turn.loop/completion
                        :seon.flow/channel]

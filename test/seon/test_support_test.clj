@@ -209,6 +209,19 @@
     (async/>!! events ::published)
     (is (= ::published
            (test-support/await-event! events ::published)))
+    (let [state (atom ::ready)]
+      (is (= ::ready (test-support/await-event! state ::already-published)))
+      (is (empty? (.getWatches state)))
+      (let [waiting (future (test-support/await-event! state ::changed nil?))]
+        (reset! state nil)
+        (is (nil? (test-support/await-event! waiting ::watch-finished)))
+        (is (empty? (.getWatches state)))))
+    (let [failure (ex-info "event publisher failed" {::publisher :failed})]
+      (is (identical? failure
+                      (try
+                        (test-support/await-event!
+                         (future (throw failure)) ::failed-publisher)
+                        (catch Throwable caught caught)))))
     (is (= {::rule ::refused}
            (test-support/refusal-data
             #(throw (ex-info "refused" {::rule ::refused})))))

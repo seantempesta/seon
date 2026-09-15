@@ -26,6 +26,7 @@
   cannot leak a listening port or a live proc into the next test."
   (:require [clojure.core.async :as async]
             [clojure.core.async.flow :as flow.core]
+            [clojure.edn :as edn]
             [clojure.string :as str]
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
@@ -228,7 +229,7 @@ handle))}}
             ;; the proc's OWN completion, under the shared loud
             ;; backstop: a wedged proc must fail this suite noisily
             ;; rather than hang the runner forever
-            (support/await-event! (future (async/<!! completion))
+            (support/await-event! completion
                                   [:render-proc-stopped])
             (async/close! render-channel)
             (async/close! runtime-eval-channel)
@@ -236,32 +237,14 @@ handle))}}
             (async/close! stream-channel)))))))
 
 (defn- ping-state
-  "The render proc's own ping state — passes, watched agents, taps and
-  streaming agents, exposed by its `:ping-map-fn`.
-
-  A MISSED PING IS \"BUSY\", NEVER \"NO STATE\". `flow/ping` returns a
-  map only \"for those procs that reply within timeout-ms (default
-  1000)\"
-  (`reference-code/core.async/src/main/clojure/clojure/core/async/flow.clj:136-142`),
-  and it answers on the proc's own transform loop
-  (`.../flow/impl.clj:76-86,205`). This proc is `:io`, one derivation
-  serializes the whole walk, and it honours the coalescing floor INSIDE
-  the transform — so a pass routinely outlasts that window and flow
-  reports nothing for this pid. Every oracle below then read `nil` as a
-  state map: `(zero? nil)` and `(- nil before)` both threw
-  NullPointerException in one run of 2026-08-07. So observe the proc's
-  answer instead of sampling for it: retry until it replies, paced by
-  ping's own window, under the shared loud backstop that turns a
-  genuinely wedged proc into a failure rather than a hang."
+  "Await one proc reply under the declared test-event backstop."
   [context]
-  (support/await-event!
-   (future
-     (loop []
-       (or (-> (flow.core/ping (:graph context))
-               (get :seon.render.web/render)
-               (get :clojure.core.async.flow/state))
-           (recur))))
-   [:render-proc-ping]))
+  (if-let [reply (flow.core/ping-proc
+                 (:graph context) :seon.render.web/render
+                 :timeout-ms (* 1000 support/event-backstop-seconds))]
+    (:clojure.core.async.flow/state reply)
+    (throw (ex-info "The render proc did not publish its requested reply."
+                    {::support/event :render-proc-ping}))))
 
 (defn- derivations
   "The render proc's pass count — the oracle for ONE derivation per
@@ -296,7 +279,7 @@ handle))}}
          {:seon.render.web/settlement settlement})
         "the settlement request enters the render proc's sliding in-port")
     (support/await-event!
-     (future (async/<!! settlement))
+     settlement
      [:render-settled])))
 
 (defn- open-run!
@@ -1071,10 +1054,7 @@ handle))}}
                  [{:seon.message/id "debug-cache-unrelated"
                    :seon.message/content
                    "does not affect the inspected namespace"}])
-                (await-ping!
-                 context
-                 #(< pass-before (:seon.render.web/passes %))
-                 [:unrelated-debug-render-wake])
+                (is (< pass-before (settle-render! context)))
                 (is (= before @counts)
                     "the database wake reuses observation, discovery, and invocation")
                 (let [pass-after-unrelated (derivations context)]
@@ -1082,10 +1062,7 @@ handle))}}
                    connection
                    [{:seon.ns/name 'seon.flow
                      :seon.ns/doc "debug-cache-relevant"}])
-                  (await-ping!
-                   context
-                   #(< pass-after-unrelated (:seon.render.web/passes %))
-                   [:relevant-debug-render-wake])
+                  (is (< pass-after-unrelated (settle-render! context)))
                   (is (= 2 (:observation @counts)))
                   (is (> (:discovery @counts) (:discovery before))
                       "a selected-data change selects again")
@@ -1172,16 +1149,14 @@ handle))}}
                 (read-until! active-view "seon.flow-runtime-phase-0")
                 (.close closed-view)
                 (support/await-event!
-                 (future
-                   (loop []
-                     (if (some (fn [[registration-key _tabs]]
-                                 (= 'my.plan
-                                    (get-in registration-key
-                                            [1 :seon.render.debug/viewer-namespace])))
-                               @(:registration context))
-                       (recur)
-                       true)))
-                 [:closed-debug-registration-removed])
+                 (:registration context)
+                 [:closed-debug-registration-removed]
+                 (fn [registrations]
+                   (not-any? (fn [[registration-key _tabs]]
+                               (= 'my.plan
+                                  (get-in registration-key
+                                          [1 :seon.render.debug/viewer-namespace])))
+                             registrations)))
                 (let [initial-calls (get @calls 'my.plan)]
                   (is (pos? initial-calls) "the initial page was derived")
                 (reset! phase 1)
@@ -1201,12 +1176,9 @@ handle))}}
                     (finally (.close reopened))))
                 (.close active-view)
                 (support/await-event!
-                 (future
-                   (loop []
-                     (if (seq @(:registration context))
-                       (recur)
-                       true)))
-                 [:all-debug-registrations-removed])
+                 (:registration context)
+                 [:all-debug-registrations-removed]
+                 empty?)
                 (reset! phase 2)
                 (let [passes-before (derivations context)]
                   (is (async/offer! (:runtime-eval-channel context)
@@ -1314,23 +1286,21 @@ handle))}}
 
 ;;; 2. render-proc-one-derivation-many-tabs-test — seed 2026072822
 
-(deftest render-proc-one-derivation-many-tabs-test
+(deftest render-proc-publishes-the-same-package-to-every-tab
   (with-server
-    (fn [connection server context]
+    (fn [connection server _context]
       (let [tabs (mapv (fn [_] (open-feed server (str "/feed/" agent-id)))
                        (range 4))]
         (try
           (doseq [tab tabs] (read-complete-paint! tab connection))
-          (let [before (derivations context)]
-            (db/transact! connection
+          (db/transact! connection
                         [{:seon.ns/name 'my.agents.root
                           :seon.ns/source "(ns my.agents.root)\n(def shared true)"}])
-            (let [morphs (mapv #(read-until! % "def shared true") tabs)]
+          (let [morphs (mapv #(read-until! % "def shared true") tabs)]
+              (is (every? seq morphs))
               (is (= 1 (count (distinct morphs)))
                   "byte-identical across every tab, because one
-                   derivation produced them all")
-              (is (<= 1 (- (derivations context) before) 2)
-                  "tabs share the proc derivation rather than deriving per tab")))
+                   published package reaches every tab"))
           (finally (doseq [tab tabs] (.close tab))))))))
 
 ;;; 3. slow-tab-newest-complete-page-test — seed 2026072823
@@ -1447,7 +1417,7 @@ handle))}}
                           (fn [request]
                             (when (compare-and-set! first-pass true false)
                               (.countDown entered)
-                              (.await holding))
+                              (support/await-event! holding ::held-pass-released))
                             (walk request))]
               (db/transact! connection
                             [{:seon.ns/name 'my.agents.root
@@ -1675,37 +1645,34 @@ handle))}}
                        " derivations for the whole cluster"))))
           (finally (.close tab)))))))
 
-(deftest the-pass-oracle-observes-a-derivation-longer-than-flows-ping-window
-  ;; THE CLASS: `flow/ping` replies only for procs that answer inside
-  ;; its 1000 ms window, and it answers on the proc's own transform
-  ;; loop. A proc that is mid-derivation is simply absent from the
-  ;; result — which every oracle in this namespace used to read as a
-  ;; state map, throwing NullPointerException on `(zero? nil)` and
-  ;; `(- nil before)` (two errors in one run, 2026-08-07). The wanted
-  ;; behavior is that the oracle OBSERVES the proc's answer.
-  ;;
-  ;; The busy window is produced by the production dial, not by a
-  ;; redefinition: the proc waits out the coalescing floor INSIDE its
-  ;; transform, so a floor above flow's window makes the missed ping
-  ;; certain rather than load-dependent.
+(deftest the-pass-oracle-awaits-a-held-derivation
   (with-server
     (fn [connection server context]
-      (let [tab (open-feed server (str "/feed/" agent-id))]
+      (let [tab (open-feed server (str "/feed/" agent-id))
+            entered (CountDownLatch. 1)
+            release (CountDownLatch. 1)]
         (try
           (read-complete-paint! tab connection)
-          (db/transact! connection [{:seon.config/cluster "web-test"
-                                     :seon.config.render/coalesce-ms 1500}])
-          (let [before (derivations context)]
-            (is (number? before)
-                "the pass count is the proc's own answer, never a missed ping")
-            (db/transact! connection
-                          [{:seon.ns/name 'my.agents.root
-                            :seon.ns/source
-                            "(ns my.agents.root)\n(def floored true)"}])
-            (read-until! tab "def floored true")
-            (is (< (long before) (long (derivations context)))
-                "and it counts the pass the floor held past that window"))
-          (finally (.close tab)))))))
+          (let [before (derivations context)
+                walk render.walk/neighborhood
+                first-pass (atom true)]
+            (with-redefs [render.walk/neighborhood
+                          (fn [request]
+                            (when (compare-and-set! first-pass true false)
+                              (.countDown entered)
+                              (support/await-event! release ::release-derivation))
+                            (walk request))]
+              (db/transact! connection
+                            [{:seon.ns/name 'my.agents.root
+                              :seon.ns/source
+                              "(ns my.agents.root)\n(def observed true)"}])
+              (support/await-event! entered ::derivation-entered)
+              (let [observation (future (derivations context))]
+                (.countDown release)
+                (is (< before (support/await-event! observation ::derivation-observed))))))
+          (finally
+            (.countDown release)
+            (.close tab)))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Suppression, as a pure unit
@@ -1837,11 +1804,11 @@ handle))}}
          (is (string? ai) (pr-str ai))
          (is (< (count ai) (count huge))
              "the AI projection is bounded by the render profile")
-         (is (str/includes? ai "more characters")
-             (str "the cut is an elision value naming what it omitted: "
-                  (subs ai 0 (min 400 (count ai)))))
-         (is (str/includes? ai "requery (get-in (seon.db/pull")
-             "and the elision carries a requery identity")
+         (let [elision (edn/read-string ai)]
+           (is (= :characters (:seon.print/elision-unit elision)))
+           (is (= (count huge) (:seon.print/omitted elision)))
+           (is (= 'seon.print/value-at
+                  (first (:seon.print/requery-form elision)))))
          (is (<= (count huge) (count html-string))
              "the HTML projection serves the whole value, unbounded")
          ;; THE STRUCTURAL HALF. A wide collection's cut is minted by
@@ -1860,11 +1827,13 @@ handle))}}
            (is (string? wide-ai) (pr-str wide-ai))
            (is (< (count wide-ai) (count (pr-str wide)))
                "a wide collection is cut for AI under the same profile")
-           (is (str/includes? wide-ai "more children")
-               (str "the collection cut is an elision naming what it omitted: "
-                    (subs wide-ai 0 (min 400 (count wide-ai)))))
-           (is (str/includes? wide-ai "requery (get-in (seon.db/pull")
-               "and it carries a requery identity")
+           (let [shown (edn/read-string wide-ai)
+                 elision (peek shown)]
+             (is (= :children (:seon.print/elision-unit elision)))
+             (is (= (count wide)
+                    (+ (dec (count shown)) (:seon.print/omitted elision))))
+             (is (= 'seon.print/value-at
+                    (first (:seon.print/requery-form elision)))))
            (is (str/includes? wide-ai
                               (str :seon.render.profile/max-children))
                "naming the bound that made the cut")

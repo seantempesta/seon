@@ -4927,7 +4927,11 @@
              (= selected timeout)
              ;; Disarm joins this same failure, including its admitted part.
              (async/put! failure-channel (offer-turn-backstop-fault! bound))
-             backstop-state (compare-and-set! backstop-state backstop nil))))))
+             :else
+             (do
+               (when backstop-state
+                 (compare-and-set! backstop-state backstop nil))
+               (async/close! failure-channel)))))))
     backstop))
 
 (defn step
@@ -4956,7 +4960,7 @@
                   [:=> [:cat :map :keyword [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
                          :seon.schema.admission/reason "The core.async.flow callback treats every incoming payload as a wake signal and never interprets it; payload values are intentionally unrestricted."
                          :gen/elements [nil false 0 "" :k [] {}]}]]
-                   [:tuple :map [:maybe [:map [::flow/report [:vector :seon.turn.loop/turn-report]]]]]]]}
+                   [:tuple :map [:maybe [:map [::flow/report [:vector :seon.turn.loop/pass-report]]]]]]]}
   ([]
    {:ins {:seon.agent/episode "One payload-free episode signal from the mailbox."}
     :outs {}
@@ -4998,7 +5002,8 @@
                           (reset! (:seon.agent/run-id turn-bound) derived))]
                   (if (nil? next)
                     [(dissoc state :seon.turn/id)
-                     nil]
+                     {::flow/report [{:seon.agent/id agent-id
+                                     :seon.turn.loop/idle? true}]}]
                     (let [report (turn
                                   {:seon.turn.loop/cluster cluster
                                    :seon.turn.work/next next}

@@ -713,7 +713,7 @@
                                 :seon.config.agent/turn-completion-backstop-ms
                                 turn-completion-backstop-ms
                                 :seon.agent/turn-stopped turn-stopped)
-            {graph :seon.flow/graph}
+            {graph :seon.flow/graph started :seon.flow/started}
             (seon.flow/start-graph!
              {:seon.flow/graph-definition
               (graph-definition
@@ -730,6 +730,7 @@
                    :seon.agent/eid eid
                    :seon.turn.loop/cluster agent-handle
                    :seon.flow/graph graph
+                   :seon.flow/started started
                    :seon.cluster.wake/channel wake-channel
                    :seon.schedule/channel schedule-channel
                    :seon.turn.loop/completion completion
@@ -769,7 +770,9 @@
             (if (= selected failure-channel)
               (do
                 (compare-and-set! active-backstop-state active-backstop nil)
-                (throw value))
+                (if value
+                  (throw value)
+                  (await-turn-completion! routing entry)))
               value))
           (let [backstop (async/timeout timeout-ms)
                 [value selected]

@@ -20,7 +20,7 @@
             [seon.schema :as schema]
             [seon.sci.eval :as sci.eval]
             [seon.test.cache :as cache])
-  (:import [java.util.concurrent CountDownLatch Future TimeUnit
+  (:import [java.util.concurrent CountDownLatch ExecutionException Future TimeUnit
             TimeoutException]))
 
 (set! *warn-on-reflection* true)
@@ -403,11 +403,26 @@
               (schema/projection-from-database @connection)))))))
 
 (defn await-event!
-  "Await one channel, latch, or future event with a loud backstop."
+  "Await one channel, latch, future, or watched reference with a loud backstop."
   ([event-source event]
    (await-event! event-source event (constantly true)))
   ([event-source event accept?]
    (cond
+     (instance? clojure.lang.IRef event-source)
+     (let [watch-key (Object.)
+           accepted (async/promise-chan)
+           publish! (fn [value]
+                      (when (accept? value)
+                        (async/offer! accepted [value])))]
+       (add-watch event-source watch-key
+                  (fn [_ _ _ value] (publish! value)))
+       (try
+         (publish! @event-source)
+         (first (await-event! accepted event))
+         (finally
+           (remove-watch event-source watch-key)
+           (async/close! accepted))))
+
      (instance? CountDownLatch event-source)
      (if (.await ^CountDownLatch event-source
                  event-backstop-seconds
@@ -423,7 +438,10 @@
        (.get ^Future event-source
              event-backstop-seconds
              TimeUnit/SECONDS)
+       (catch ExecutionException failure
+         (throw (.getCause failure)))
        (catch TimeoutException timeout
+         (.cancel ^Future event-source true)
          (throw
           (ex-info
            "The test future did not publish its required completion."
@@ -458,7 +476,7 @@
      :else
      (throw
       (ex-info
-       "The test event source is not a channel, latch, or future."
+       "The test event source is not a channel, latch, future, or watched reference."
        {::event event
         ::event-source (class event-source)})))))
 

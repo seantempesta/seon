@@ -8,6 +8,30 @@
             [seon.test-support :as test-support]
             [seon.turn :as turn]))
 
+(deftest cancelled-completion-observer-releases-every-existing-waiter
+  (test-support/with-database
+   (fn [connection]
+     (let [ctx (test-support/fork-cluster-ctx connection)
+           state (atom nil)
+           observer
+           (#'turn/arm-turn-completion-backstop!
+            {:seon.agent/executor
+             (cluster/projection-executor (:seon.sci.eval/projection-state ctx))
+             :seon.agent/timeout-ms
+             (* 1000 test-support/event-backstop-seconds)
+             :seon.agent/backstop-state state
+             :seon.agent/fault-channel (async/chan 1)
+             :seon.agent/agent-id "cancelled-observer"
+             :seon.agent/run-id (atom nil)})
+           completion (future (async/<!! (:seon.agent/failure-channel observer)))]
+       (is (identical? observer @state))
+       (try
+         (async/offer! (:seon.agent/cancel observer) :seon.agent/completed)
+         (is (nil? (test-support/await-event! completion ::observer-cancelled)))
+         (is (nil? @state))
+         (finally
+           (async/offer! (:seon.agent/cancel observer) :seon.agent/completed)))))))
+
 (deftest completion-observer-uses-the-admitted-provider-and-evaluation-parts
   (test-support/with-database
     (fn [connection]
