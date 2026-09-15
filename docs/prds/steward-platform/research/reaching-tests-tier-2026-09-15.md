@@ -147,6 +147,8 @@ The agent receives the structured result too, including every test result,
 the basis and program digest. The
 [live probe](reaching_tests_probe_2026_09_15.clj) documents the explicit
 classpath preparation and runs the same `seon.test/check`.
+The complete final response is preserved as
+[EDN evidence](reaching-tests-result-2026-09-15.edn).
 
 The documented agent example was also evaluated as written through SCI
 evaluation mode, with call preparation supplying the connection:
@@ -189,3 +191,43 @@ Markdown hook feedback reports existing gitlink-citation failures in
 `docs/prds/context-generation/research/agents-md-audit-2026-09-15.md`.
 Those foreign documentation failures are not evidence against this slice.
 No lane test JVM, full suite, lifecycle reset, or scratch cluster was used.
+
+## Convergence and automatic feedback
+
+Implementation commit: `e9af61d87` on `steward-platform`.
+
+A final live comparison observed both default's `:seon.source/commit-id` and
+`seon.cluster.source/current` at
+`6aa9bff0-a23c-5975-9f86-44459131e3c1`. The latest adoption transaction was
+536871752 and carried its submitted path, `src/seon/schedule.clj`.
+The hook's automatic feedback for that subsequent adoption reported zero
+reaching tests in 6626.754417 ms and the two escalation commands.
+
+The earlier coalesced batch containing this lane's final edits and concurrent
+render edits converged at `6aa9bf81-db38-526f-941f-b82b3fb44f9a`, then
+automatically checked seven selected tests in the same JVM: four passed,
+three failed, 55572.939417 ms, `next-tier: none`. The complete
+[hook result](reaching-tests-hook-result-2026-09-15.edn) preserves the failure
+messages and the identities each failing test reached:
+
+- `seon.render.retained-test/adoption-of-an-unrelated-namespace-re-renders-zero-evaluations`
+- `seon.render.web-debug-test/ledger-derives-shared-data-once`
+- `seon.render.web-debug-test/turn-details-use-the-loop-opening-and-exact-segments`
+
+These failures are the exact automatic-check boundary, not an attribution of
+cause. The first two include fixture transactions returning no `:db-after`;
+the third reports a Juniper `:example/order` schema declaration failure.
+Their owning files were concurrently edited and were not changed by this
+lane. The hook correctly retained convergence and withheld escalation.
+
+The gate request names `seon.test-reaching-test`, `seon.test-provenance-test`,
+`seon.test-runner-test`, `seon.test.selection-test`, `seon.dev.hook-test`, and
+`seon.source-reconciliation-test`, plus `seon.test.runner-test`, followed by
+the platform tier. It also
+requests the forbidden-to-lanes `bin/test-fast` comparison. The issue index
+entry for the newly recorded MCP diagnostic is left to the orchestrator.
+
+All lane shell sessions completed. The three lane-owned verification futures
+completed and were removed from `user`; disposable probe logs, classpath text,
+and thread dumps were removed after copying the durable evidence above.
+The shared hook publication records and orchestrator gate request remain.
