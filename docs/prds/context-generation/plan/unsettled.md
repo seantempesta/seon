@@ -1152,3 +1152,23 @@ half-edit. Measured targets in the issue.
   (`4a559d658`); stop dial and refused-install value in progress.
 - Run 5 waits for the stop dial + refused-install value; HEAD gate running.
 
+## 2026-09-15 06:15Z — run 5: stop dial works; 3/7 marked, 5 done
+
+- Run 5 (06:02Z, HEAD `747995bf4`+`d4a85dbdc`): 37 turns = 29 provider +
+  8 system in 3.3 min; 57 evaluations; 220,141 prompt (93 % hit) / 4,775
+  out; max prompt 13,372. **Zero fabricated responses** (stop dial), zero
+  faults, zero backstops. Steps marked 3/7 (read, define, test); the note
+  was saved and the order added but not marked; no report — budget
+  exhausted. The refused-install error value worked: the model read "empty
+  input returns nil" and fixed its contract; its deftest caught its own
+  arithmetic error (Bea 100 vs Ada 115) and it corrected the test. Losses:
+  ~5 turns finding `complete!`; a `:fn` literal in a contract printed as
+  `#object`; contract error without a path (lazy seq vs vector); `my.note`
+  id.
+- Explain probe (captured prompt): the model's top confusion is now the
+  since-diff appending re-reads whose change map is `{}` — "looks like
+  activity but carries none" — including its own erroring `Simplest:`
+  reply re-read as a generated read. Blocker filed
+  (`since-diff-appends-rereads-whose-changes-are-empty`); plus contract
+  error path / `:fn` literal / plan-render wording issues.
+
