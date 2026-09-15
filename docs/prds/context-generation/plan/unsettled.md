@@ -1201,4 +1201,11 @@ half-edit. Measured targets in the issue.
 - The overnight wakeup did not fire between 00:44 and 08:43 local (the
   session was idle); resumed at 08:43. Adoption converged; run 6 reseeded
   14:45Z with the provider on.
+- 14:50Z run 6: 7 turns (5 provider, 2 system) then STALLED at 14:46:11Z
+  — two new blockers with exact bytes: (1) the model wrote `(seon.db/q
+  '[…] [])` (imitating the collection-input example) and `q` returned `#{}`
+  silently instead of refusing — it then chased a phantom data problem;
+  (2) a reply consisting only of the stop sequence produced "no assistant
+  text" → provider fault → refusal → deferred; page said idle / checks
+  passed. Issues filed; lane run6-blockers. Run 6 is not a measurement.
 
