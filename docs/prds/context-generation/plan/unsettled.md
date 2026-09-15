@@ -1341,3 +1341,21 @@ half-edit. Measured targets in the issue.
   keeps the run facts and the in-flight lanes until they land; new design
   work goes to the steward platform's `plan/unsettled.md`.
 
+
+## 2026-09-15 17:25Z — run 8 facts; send arity regression fixed; merged to main
+
+- Run 8 (default, Juniper on deepseek-flash, reseeded): 6/7 plan steps
+  derived-complete; the report step blocked because every
+  `(my.message/send {…})` was refused "refused argument count" — af278535c
+  (the direct-write fix for send-inside-let) had moved `send`/`decline` to
+  a three-argument arity the agent never calls; the model called `done`
+  with 2 turns left; 0 fabricated `#:seon.repl` replies; ~$0.006.
+- Fix `928461bcc`: `send`/`decline` take one request map whose schema
+  declares the call-preparation keys (`:seon.db/connection`,
+  `:seon.agent/id`), the `my.note/add!` pattern. Gate: fast run 34/525
+  green; isolated gate green except the known parallel published-base
+  filestore loss (issue re-observed).
+- `main` fast-forwarded to `steward-platform` (`4fcf43d77`) and pushed,
+  owner's request. Lanes page-speed-and-estimate, test-provenance,
+  schema-audit still running with uncommitted edits; run 9 after adoption
+  converges.
