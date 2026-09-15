@@ -87,3 +87,14 @@ passed. The source regression also had an independently reproducible SCI
 fixture defect, corrected by acquiring the agent context through
 `fork-for-turn`. Subsequent data-lane gates run serially with one worker.
 The deleting actor is still unestablished.
+
+## HTML views recurrence — 2026-09-14
+
+Three-worker gate `tmp/test-runs/run.PzoKkQ`, published base
+`20cfe210df2d21069a035d88796ebd0b7a341b12c0844e31a501b44f5ce69a26`,
+lost key `5a669849-a0f4-49e1-a4e8-3c5808b928e0` during
+`seon.html-views-test/settings-pair-omits-absences-and-preserves-ai` fixture
+acquisition. Isolated confirmation passed; no worker-global drift was
+detected. A subsequent focused gate passed this test. The deleting actor
+remains unknown. Evidence: `tmp/html-views/final-gate-2.log:531` and
+`tmp/html-views/focused-gate.log`.

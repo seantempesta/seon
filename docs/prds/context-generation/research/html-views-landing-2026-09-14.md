@@ -70,3 +70,11 @@ Screenshot log: `fixture-my-plan-before → fixture-my-plan-verified; plan-befor
 
 Observed defects → change: Old cards hid the criteria, exposed ids and labelled completed dependencies as waiting. The first revision also gave done criteria too much visual weight; the final revision collapses only completed criteria. Desktop placement is still constrained by the shell.
 
+## Settings
+
+One table, overrides first and marked. Cluster defaults are collapsed and counted; absent settings are omitted and counted. Milliseconds become seconds, integer values use separators, model names have no EDN quotes.
+
+Screenshot log: `fixture-seon-agent-settings-before → fixture-seon-agent-settings-verified; settings-2 → settings-verified`.
+
+Observed defects → change: The original long table repeated Not set and buried overrides. A second inspection caught the misleading ms label beside a seconds value; the label now follows the displayed unit. Defaults expose native details with preserved open state.
+

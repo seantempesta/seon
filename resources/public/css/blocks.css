@@ -36,3 +36,14 @@
 .my-plan-item.is-completed summary { cursor: pointer; color: var(--color-text-400); }
 .my-plan .my-plan-progress strong { color: var(--color-text-300); font-weight: 400; }
 
+.seon-family-entry.seon-agent-settings { font: 0.75rem/1.55 var(--font-mono); overflow-wrap: anywhere; }
+.seon-agent-settings .seon-settings-table { table-layout: fixed; width: 100%; margin: 0.35rem 0; }
+.seon-agent-settings .seon-settings-table :is(th, td) { padding: 0.35rem 0; vertical-align: top; overflow-wrap: anywhere; }
+.seon-agent-settings .seon-settings-table th { width: 64%; padding-right: 0.75rem; text-transform: none; letter-spacing: normal; font-weight: 400; }
+.seon-agent-settings .seon-settings-table thead th { font-size: 0.625rem; color: var(--color-text-400); }
+.seon-agent-settings .seon-setting-override { display: block; font-size: 0.625rem; color: var(--color-signal); }
+.seon-agent-settings .seon-settings-defaults summary { cursor: pointer; color: var(--color-text-300); font-size: 0.625rem; }
+.seon-agent-settings .seon-settings-defaults dl > div { display: grid; grid-template-columns: minmax(0, 64fr) minmax(0, 36fr); gap: 0.75rem; padding: 0.3rem 0; border-top: 1px solid var(--color-base-800); }
+.seon-agent-settings .seon-settings-defaults :is(dt, dd) { margin: 0; font-weight: 400; font-size: 0.75rem; }
+.seon-agent-settings .seon-settings-absent { color: var(--color-text-400); font-size: 0.625rem; }
+

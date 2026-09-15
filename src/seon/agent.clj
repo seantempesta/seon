@@ -1,7 +1,8 @@
 (ns seon.agent
   "Read the calling agent's own record components."
   (:refer-clojure :exclude [identity])
-  (:require [seon.turn :as turn]
+  (:require [clojure.string :as str]
+            [seon.turn :as turn]
             [seon.ai :as ai]
             [seon.db :as db]
             [seon.config :as config]))
@@ -137,25 +138,41 @@
       (:seon.error/kind defaults) defaults
       :else
       (let [overrides (select-keys component attributes)
-            effective (merge defaults overrides)]
+            inherited (apply dissoc (select-keys defaults attributes) (keys overrides))
+            absent (- (count attributes) (count overrides) (count inherited))
+            label (fn [attribute]
+                    (str (str/replace (str/replace (namespace attribute) "seon.config." "") "." " / ")
+                         " / " (str/replace
+                                   (if (str/ends-with? (name attribute) "-ms")
+                                     (subs (name attribute) 0 (- (count (name attribute)) 3))
+                                     (name attribute)) "-" " ")))
+            display (fn [attribute value]
+                      (cond
+                        (and (number? value) (str/ends-with? (name attribute) "-ms"))
+                        (str (if (zero? (mod value 1000)) (quot value 1000) (double (/ value 1000))) " s")
+                        (integer? value) (format "%,d" value)
+                        (keyword? value) (name value)
+                        (sequential? value) (str/join ", " (map str value))
+                        :else (str value)))]
         [:section {:class "seon-family-entry seon-agent-settings seon-agent-content"}
          [:h3 "Settings"]
-         [:p "Agent overrides take precedence over cluster defaults."]
-         [:table {:style {:table-layout "fixed" :width "100%"}}
-          [:colgroup [:col {:style {:width "48%"}}]
-           [:col {:style {:width "34%"}}] [:col {:style {:width "18%"}}]]
-          [:thead [:tr [:th "Setting"] [:th "Value"] [:th "Source"]]]
+         [:table {:class "seon-settings-table"}
+          [:thead [:tr [:th "Setting"] [:th "Value"]]]
           (into [:tbody]
-                (map (fn [attribute]
+                (map (fn [[attribute value]]
                        [:tr
-                        [:th {:scope "row" :style {:overflow-wrap "anywhere"
-                                                  :text-transform "none" :letter-spacing "normal"}}
-                         [:code (str attribute)]]
-                        [:td {:style {:overflow-wrap "anywhere"}} [:code (if-let [entry (find effective attribute)]
-                                      (pr-str (val entry)) "Not set")]]
-                        [:td (cond (find overrides attribute) "Agent override"
-                                   (find defaults attribute) "Cluster default"
-                                   :else "Not set")]]))
-                (sort attributes))]
-         [:p "Change an override:"]
-         [:pre [:code "(my.agent/settings! {:seon.config.eval/time-limit-ms 5000})"]]]))))
+                        [:th {:scope "row" :title (str attribute)}
+                         (label attribute)
+                         [:span {:class "seon-setting-override"} "● override"]]
+                        [:td (display attribute value)]]))
+                (sort-by key overrides))
+          [:tbody [:tr [:td {:colspan 2}
+                        [:details {:class "seon-settings-defaults" :data-preserve-attr "open"}
+                         [:summary (str "defaults (" (count inherited) ")")]
+                         (into [:dl]
+                               (map (fn [[attribute value]]
+                                      [:div [:dt {:title (str attribute)} (label attribute)]
+                                       [:dd (display attribute value)]]))
+                               (sort-by key inherited))]]]]]
+         (when (pos? absent)
+           [:p {:class "seon-settings-absent"} (str absent " unset settings omitted")])]))))

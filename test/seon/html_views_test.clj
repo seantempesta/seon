@@ -56,3 +56,18 @@
       (readable! (plan/render-plan-html {:seon.agent/id "alice" :seon.db/db @connection})
                  ["done" "current" "datetime=" "The page reads clearly"])))))
 
+(deftest settings-pair-omits-absences-and-preserves-ai
+  (support/with-database
+    (fn [connection]
+      (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "html-views"})
+      (db/transact! connection [{:seon.agent/id "alice"
+                                 :seon.agent/settings {:seon.config.eval/time-limit-ms 10000}}])
+      (let [unit {:seon.db/db @connection :seon.agent/id "alice"}
+            html (agent/render-settings-html unit)
+            printed (hiccup/->string html)]
+        (readable! html ["override" "10 s" "defaults (" "unset settings omitted"])
+        (is (= 1 (count (re-seq #"<table" printed))))
+        (is (not (str/includes? printed "Not set")))
+        (is (not (str/includes? printed "settings!")))
+        (is (= (golden :settings) (agent/render-settings-ai unit)))))))
+
