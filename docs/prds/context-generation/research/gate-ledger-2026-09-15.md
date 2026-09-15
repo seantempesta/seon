@@ -42,3 +42,4 @@ the same namespace twice for the same HEAD.
 | 21:00Z | 1.81 s | 7 | after restart |
 | 21:10Z | 0.70 s | 7 | P1 edits adopted |
 | 21:45Z | 0.75 s | 7 | P1 committed; plan attributes the floor to retained-read replay and directory reconstruction |
+| 22:05Z | 0.18 s (cold after adoption 18.4 s) | 7 | debug-page-cost kills 1–2 adopted; cold path filed as an issue |
