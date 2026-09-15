@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, flow, render, web, architecture, wave/no-crash]
 ---
@@ -87,3 +87,9 @@ carries the fault.
 - `src/seon/flow.clj` — `var-process` and the error path into the fault
   committer;
 - `src/seon/oversight.clj` — the proc ping observation.
+
+## Resolution (2026-09-15 triage)
+
+Commit `11176e6db` protects both page derivation and diagnostic construction. HEAD 7e35df213 `src/seon/render/web.clj:2291-2304` catches each registration's Throwable and returns `failed-page-result`, with `unreportable-page-result` if that diagnostic also throws; the reduce continues for other registrations. The reported single-page exception can no longer escape this boundary and stop every page. Verified by `git show HEAD:src/seon/render/web.clj` (render-pass). This is source proof of the named trigger, not proof against every possible Flow failure or a browser paint observation.
+
+surface: render-debug-page

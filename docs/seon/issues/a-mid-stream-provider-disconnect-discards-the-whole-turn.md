@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, runtime, agent, ai, class/n10, wave/whole-system-arc]
 ---
@@ -184,3 +184,9 @@ Remaining acceptance is therefore narrow and unblocked: declare and install
 the attempt ref, settle the completion's truncation value through the one loop
 attempt owner, and prove it queryable after settlement without classifying the
 attempt itself as failed.
+
+## Resolution (2026-09-15 triage)
+
+Commit `a8a38313c` persists provider stream truncation on attempts. At HEAD 7e35df213, `src/seon/turn.clj:3736-3815` records the truncation via `error-tx` and attaches `:seon.ai.attempt/truncation` independently of attempt failure. This closes the explicitly remaining durable-fact gap after `8c6c2d90c` preserved partial completion text. Verified with `git log -3 --oneline -S ':seon.ai.attempt/truncation' -- src/seon` and `git show HEAD:src/seon/turn.clj`. No paid provider call was made.
+
+surface: turn-loop

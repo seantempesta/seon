@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, runtime, agent, database, class/n10, wave/live-drive-context]
 ---
@@ -242,3 +242,9 @@ naming convention), and `every-refusal-matches-its-declared-error-class` in
   producing a comment-only source; a census is the cheap falsifier.
 - Acceptance items 1–3 are therefore satisfied for model replies and unproven
   for the other two producers. The issue stays open on that account.
+
+## Resolution (2026-09-15 triage)
+
+Commit `caef3850e` deletes the separate form entity family: one entity per turn/ordinal holds source and outcome. HEAD 7e35df213 `src/seon/turn.clj:498-515` constructs ordered evaluation entities directly; there is no separately recorded final form for which an evaluation row can be missing. `120caf85e` removes the old work/loop owners. Verified using `git log -S 'seon.cluster.run.form' -- resources/seon/schemas` and `git show HEAD:src/seon/turn.clj`. This resolves the two-family accounting defect; it does not claim every possible interrupted evaluation has terminal evidence.
+
+surface: turn-loop

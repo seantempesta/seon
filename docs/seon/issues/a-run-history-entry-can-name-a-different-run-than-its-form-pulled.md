@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, render, agent, class/p1, wave/live-drive-render, wave/strict-repl-display]
 ---
@@ -71,3 +71,9 @@ A `db/pull` of a run by identity renders a value naming exactly that run,
 whatever run is current when the entry is rendered or re-rendered. A
 recurring proof renders two runs' entries within one session while a third
 run is open, and asserts each entry's identity matches its own form's lookup.
+
+## Resolution (2026-09-15 triage)
+
+The named `seon.cluster.run/render-ai` and separate captured run-form mechanism were removed by `7296d173b` and `caef3850e`. HEAD 7e35df213 `src/seon/repl.clj:322-354` builds emission from the pulled evaluation value and its saved `:seon.eval/shown`; `src/seon/turn.clj:498` creates one evaluation carrying source and outcome identity. The historical run-summary identity substitution path is gone. Verified with `git log -- src/seon/cluster/run.clj`, `git log -S 'seon.cluster.run.form' -- resources/seon/schemas`, and inspection of those HEAD owners.
+
+surface: context-generation
