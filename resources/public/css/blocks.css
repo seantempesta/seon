@@ -86,3 +86,13 @@
 .seon-error-entry a { color: var(--color-info); }
 .seon-error-faults > h2 { font-size: 0.75rem; color: var(--color-text-300); }
 .seon-error-faults-empty { font-size: 0.625rem; color: var(--color-text-400); }
+.seon-family-entry.seon-db-transaction-entry, .seon-family-entry.seon-db-rejection-entry { font: 0.75rem/1.55 var(--font-mono); overflow-wrap: anywhere; }
+.seon-db-transaction-entry h3 { color: var(--color-success); }
+.seon-db-rejection-entry h3 { color: var(--color-error); }
+.seon-db-transaction-entry dl > div, .seon-db-rejection-entry dl > div { display: grid; grid-template-columns: 6rem minmax(0, 1fr); gap: 0.5rem; }
+.seon-db-transaction-entry dt, .seon-db-rejection-entry dt { color: var(--color-text-400); font-size: 0.625rem; }
+.seon-db-transaction-entry dd, .seon-db-rejection-entry dd { margin: 0; }
+.seon-db-transaction-datoms { padding-left: 1.25rem; }
+.seon-db-transaction-datoms > li { padding: 0.3rem 0; border-bottom: 1px solid var(--color-base-800); }
+.seon-datom-action { font-size: 0.625rem; color: var(--color-text-400); }
+

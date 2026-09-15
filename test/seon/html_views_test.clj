@@ -139,3 +139,14 @@
         (is (= (golden :fault) (error/render-ai fault)))
         (is (= (golden :faults) (error/render-faults-ai {:seon.render/value [fault]})))))))
 
+(deftest transactions-render-values-without-entity-id-dumps
+  (support/with-database
+    (fn [connection]
+      (let [report (db/transact! connection [{:my.plan.item/id "first" :my.plan.item/title "Prepare"}])
+            refusal {:seon.db/transaction-refused true :seon.error/message "Duplicate identity"}
+            identity {:db-name :fixture :t 42 :datahike/commit-id #uuid "00000000-0000-0000-0000-000000000042"}
+            shown-report {:db-before identity :db-after identity :tx-data [] :tempids {} :tx-meta {}}]
+        (readable! (db/render-transaction-html report) ["Committed transaction" "Prepare" "Changes"])
+        (readable! (db/render-rejection-html refusal) ["Duplicate identity"])
+        (is (= (golden :transaction) (db/render-transaction-ai shown-report)))
+        (is (= (golden :rejection) (db/render-rejection-ai refusal)))))))

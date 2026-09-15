@@ -2599,27 +2599,54 @@
            (str "\nCommitted datoms:\n"
                 (str/join "\n" (map pr-str transaction-data)))))))
 
+(defn- transaction-value-html
+  [value]
+  (cond
+    (inst? value) (.format (java.text.SimpleDateFormat. "MMM d, yyyy HH:mm:ss") value)
+    (map? value) (into [:dl]
+                       (map (fn [[attribute child]]
+                              [:div [:dt (if (keyword? attribute) (name attribute) (str attribute))]
+                               [:dd (transaction-value-html child)]]))
+                       (sort-by (comp str key) (dissoc value :db/id)))
+    (and (vector? value) (= 2 (count value)) (qualified-keyword? (first value)))
+    (transaction-value-html (second value))
+    (coll? value) (into [:ul] (map #(vector :li (transaction-value-html %))) value)
+    (keyword? value) (name value)
+    :else (str value)))
+
 (defn render-transaction-html
   "Render a committed transaction report as bounded readable Hiccup."
   {:malli/schema
    [:=> [:cat :seon.db/transaction-report] :seon.render/hiccup]}
   [unit]
   (let [{database :db-after
-         transaction-data :tx-data
-         tempids :tempids}
+         transaction-data :tx-data}
         (rendered-value unit)
-        datom-count (count transaction-data)]
+        datom-count (count transaction-data)
+        identity-value (if (database-value? database)
+                         (database-value-identity database) database)]
     [:article {:class "seon-family-entry seon-db-transaction-entry"}
      [:h3 "Committed transaction"]
-     [:dl
-      [:div [:dt "Transaction"] [:dd (str (:t database))]]
-      [:div [:dt "Commit ID"] [:dd (str (:datahike/commit-id database))]]
-      [:div [:dt "Datoms"]
-       [:dd (str datom-count)]]
-      [:div [:dt "Tempids"] [:dd (pr-str tempids)]]]
+     [:p (str "Changes: " datom-count)]
+     [:details {:data-preserve-attr "open"} [:summary "Transaction details"]
+      [:dl
+       [:div [:dt "Transaction"] [:dd (str (:t identity-value))]]
+       (when-let [commit (:datahike/commit-id identity-value)]
+         [:div [:dt "Commit"] [:dd (str commit)]])]]
      (when (seq transaction-data)
        (into [:ol {:class "seon-db-transaction-datoms"}]
-             (map (fn [datom] [:li [:code (pr-str datom)]]))
+             (map (fn [datom]
+                    (let [attribute (:a datom)
+                          value (:v datom)
+                          reference? (and (database-value? database)
+                                          (db.utils/ref? database attribute))
+                          shown (if reference?
+                                  (pull database (vec (identity-attributes database)) value)
+                                  value)]
+                      [:li [:span {:class "seon-datom-action"} (if (:added datom) "Added" "Removed")]
+                       " " [:strong (str attribute)] " "
+                       (if (and reference? (empty? (dissoc shown :db/id)))
+                         "related record" (transaction-value-html shown))])))
              transaction-data))]))
 
 (defn render-rejection-ai
@@ -2650,11 +2677,12 @@
      (when (::conflict-attribute conflict)
        [:dl
         [:div [:dt "Attribute"]
-         [:dd (pr-str (::conflict-attribute conflict))]]
+         [:dd (str (::conflict-attribute conflict))]]
         [:div [:dt "Value"]
-         [:dd (pr-str (::conflict-value conflict))]]
+         [:dd (transaction-value-html (::conflict-value conflict))]]
         [:div [:dt "Existing owner"]
-         [:dd (pr-str (::conflict-owner conflict))]]])]))
+         [:dd (if (integer? (::conflict-owner conflict)) "Another record"
+                  (transaction-value-html (::conflict-owner conflict)))]]])]))
 
 (defn- transaction-result
   [report]

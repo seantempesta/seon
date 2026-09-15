@@ -118,3 +118,11 @@ Screenshot log: `fixture-seon-error-entry-before → fixture-seon-error-entry-ve
 
 Observed defects → change: Raw kind punctuation and lookup refs are removed. Live Juniper has zero routed faults; nonempty content is proven in the canonical fixture. Open/resolved cannot be derived: no resolution attribute or transition exists. See the recorded schema gap.
 
+## Transactions and rejections
+
+Committed changes are listed by attribute and readable value, without tempid or datom dumps. Dates are formatted, entity refs use identities, and transaction metadata is expandable. Rejection conflicts use the same value formatting.
+
+Screenshot log: `fixture-seon-db-transaction-entry-before → fixture-seon-db-transaction-entry-verified; fixture-seon-db-rejection-entry-before → fixture-seon-db-rejection-entry-verified; transactions-2 records absence`.
+
+Observed defects → change: The first screenshot found empty transaction/commit rows: raw database values require the existing database-value-identity projection. The final version uses that owner and hides optional metadata behind details. No transaction block is present in the live walk.
+
