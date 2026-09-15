@@ -299,30 +299,21 @@
   (testing "an alias names its target namespace, a refer names its Var"
     (is (= [:article {:class "seon-family-entry seon-namespace-alias-entry"}
             [:p {:class "seon-kicker"} "Namespace alias"]
-            [:p [:code "str"] " → " [:code "clojure.string"]]
-            [:details {:class "seon-namespace-binding-data"}
-             [:summary "libspec"]
-             [:pre [:code "[clojure.string :as str]"]]]]
+            [:p [:code "str"] " → " [:code "clojure.string"]]]
            (sut/render-alias-html
             {:seon.ns.alias/local 'str
              :seon.ns.alias/target-ns 'clojure.string}))
-        "the raw libspec sits under disclosure, not in the sentence")
+        "the alias is shown without a duplicate libspec")
     (is (= [:article {:class "seon-family-entry seon-namespace-refer-entry"}
             [:p {:class "seon-kicker"} "Namespace refer"]
-            [:p [:code "q"] " ← " [:code "seon.db/q"]]
-            [:details {:class "seon-namespace-binding-data"}
-             [:summary "libspec"]
-             [:pre [:code "[seon.db :refer [q]]"]]]]
+            [:p [:code "q"] " ← " [:code "seon.db/q"]]]
            (sut/render-refer-html
             {:seon.ns.refer/local 'q
              :seon.ns.refer/target-ns 'seon.db
              :seon.ns.refer/target-name 'q})))
     (is (= [:article {:class "seon-family-entry seon-namespace-import-entry"}
             [:p {:class "seon-kicker"} "Namespace import"]
-            [:p [:code "Date"] " → " [:code "java.util.Date"]]
-            [:details {:class "seon-namespace-binding-data"}
-             [:summary "import"]
-             [:pre [:code "java.util.Date"]]]]
+            [:p [:code "Date"] " → " [:code "java.util.Date"]]]
            (sut/render-import-html
             {:seon.ns.import/local 'Date
              :seon.ns.import/target-class 'java.util.Date}))))
@@ -550,5 +541,5 @@
     (is (str/includes? (sut/render-alias-ai same-name)
                        "(dir (quote seon.fn))"))
     (is (str/includes? (hiccup/->string html) "<code>str</code> → <code>clojure.string</code>"))
-    (is (str/includes? (hiccup/->string html)
-                       "[clojure.string :as str]"))))
+    (is (not (str/includes? (hiccup/->string html)
+                            "[clojure.string :as str]")))))

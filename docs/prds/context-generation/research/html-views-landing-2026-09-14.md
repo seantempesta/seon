@@ -134,3 +134,11 @@ Screenshot log: `fixture-seon-maintenance-entry-before → fixture-seon-maintena
 
 Observed defects → change: AI summary prose and diagnostic identifiers no longer determine HTML layout. A no-run specimen exposed a nil timestamp assumption; the renderer now asks for a time only when a result exists. Current root and Juniper have no maintenance pair to inspect live.
 
+## Namespace bindings
+
+Aliases, refers and imports retain their local name, direction and target with wrapping. Duplicate source-form disclosures are removed.
+
+Screenshot log: `fixture-seon-namespace-alias-entry-before → fixture-seon-namespace-alias-entry-verified; corresponding refer/import prefixes; namespace-2 records absence`.
+
+Observed defects → change: The old output repeated each binding as both a readable link and a libspec/import dump. The compact pair retains the actual binding. These standalone pairs are absent from the current Juniper walk.
+

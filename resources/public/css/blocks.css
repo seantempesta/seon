@@ -103,3 +103,6 @@
 .seon-maintenance-entry :is(time, span) { font-size: 0.625rem; color: var(--color-text-400); }
 .seon-maintenance-entry .is-success { color: var(--color-success); }
 .seon-maintenance-entry .is-attention { color: var(--color-warning); }
+.seon-family-entry:is(.seon-namespace-alias-entry, .seon-namespace-refer-entry, .seon-namespace-import-entry) { font: 0.75rem/1.55 var(--font-mono); overflow-wrap: anywhere; padding: 0.35rem 0; }
+.seon-family-entry:is(.seon-namespace-alias-entry, .seon-namespace-refer-entry, .seon-namespace-import-entry) .seon-kicker { color: var(--color-text-400); font-size: 0.625rem; }
+.seon-family-entry:is(.seon-namespace-alias-entry, .seon-namespace-refer-entry, .seon-namespace-import-entry) code { color: var(--color-info); font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; }

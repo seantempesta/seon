@@ -150,6 +150,19 @@
                    ["collect" "not run"])
         (is (= (golden :maintenance) (maintenance/render-report-ai report)))))))
 
+(deftest namespace-binding-pairs-preserve-ai
+  (support/with-database
+    (fn [_]
+      (doseq [[key value ai html expected]
+              [[:alias {:seon.ns.alias/local 'db :seon.ns.alias/target-ns 'seon.db}
+                render.ns/render-alias-ai render.ns/render-alias-html "seon.db"]
+               [:refer {:seon.ns.refer/local 'q :seon.ns.refer/target-ns 'seon.db :seon.ns.refer/target-name 'q}
+                render.ns/render-refer-ai render.ns/render-refer-html "seon.db/q"]
+               [:import {:seon.ns.import/local 'Date :seon.ns.import/target-class 'java.util.Date}
+                render.ns/render-import-ai render.ns/render-import-html "java.util.Date"]]]
+        (readable! (html value) [expected])
+        (is (= (golden key) (ai value)))))))
+
 (deftest transactions-render-values-without-entity-id-dumps
   (support/with-database
     (fn [connection]

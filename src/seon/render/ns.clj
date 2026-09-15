@@ -319,10 +319,7 @@
   [{local :seon.ns.alias/local target :seon.ns.alias/target-ns}]
   [:article {:class "seon-family-entry seon-namespace-alias-entry"}
    [:p {:class "seon-kicker"} "Namespace alias"]
-   [:p [:code (str local)] " → " [:code (str target)]]
-   [:details {:class "seon-namespace-binding-data"}
-    [:summary "libspec"]
-    [:pre [:code (pr-str [target :as local])]]]])
+   [:p [:code (str local)] " → " [:code (str target)]]])
 
 (defn render-refer-ai
   "Render source that says which Var one refer binding names.
@@ -346,10 +343,7 @@
     target-name :seon.ns.refer/target-name}]
   [:article {:class "seon-family-entry seon-namespace-refer-entry"}
    [:p {:class "seon-kicker"} "Namespace refer"]
-   [:p [:code (str local)] " ← " [:code (str target-ns "/" target-name)]]
-   [:details {:class "seon-namespace-binding-data"}
-    [:summary "libspec"]
-    [:pre [:code (pr-str [target-ns :refer [target-name]])]]]])
+   [:p [:code (str local)] " ← " [:code (str target-ns "/" target-name)]]])
 
 (defn render-import-ai
   "Render source naming the class one import binding makes available."
@@ -366,10 +360,7 @@
   [{local :seon.ns.import/local target :seon.ns.import/target-class}]
   [:article {:class "seon-family-entry seon-namespace-import-entry"}
    [:p {:class "seon-kicker"} "Namespace import"]
-   [:p [:code (str local)] " → " [:code (str (or target local))]]
-   [:details {:class "seon-namespace-binding-data"}
-    [:summary "import"]
-    [:pre [:code (pr-str (or target local))]]]])
+   [:p [:code (str local)] " → " [:code (str (or target local))]]])
 
 (defn- ns-form
   [namespace-name requires]
