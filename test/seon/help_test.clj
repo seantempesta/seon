@@ -38,14 +38,14 @@
          (is (identical? (sci/resolve ctx 'clojure.core/help)
                          (sci/resolve ctx 'seon.bootstrap/help))
              "bare help refers to the acquired macro rather than a boot-time copy")
-         (let [preview turn/preview-sources
+         (let [evaluate turn/evaluate-sources
                entered? (atom false)
                committed (atom nil)
-               opening (with-redefs [turn/preview-sources
+               opening (with-redefs [turn/evaluate-sources
                                     (fn [evaluation-request]
                                       (when (compare-and-set! entered? false true)
                                         (reset! committed (turn/system-turn request)))
-                                      (preview evaluation-request))]
+                                      (evaluate evaluation-request))]
                          (turn/system-turn request))
                saved (first (evaluation/of-agent @connection "help"))
                lines (some-> (:seon.eval/shown saved) str/split-lines)
@@ -125,9 +125,12 @@
              (let [latest (into {} (map (juxt :seon.cluster.eval/source :seon.eval/shown))
                                 (evaluation/of-agent @connection "help"))]
                (doseq [[entry text] (map vector initial
-                                        ["Observe the new plan" "Observe the new message" "no-provider true"
+                                        ["Observe the new plan" "Observe the new message" "no-provider"
                                          "Observe the first note"])]
-                 (is (str/includes? (get latest (:seon.cluster.eval/source entry)) text))))))
+                 (is (str/includes? (get latest (:seon.cluster.eval/source entry)) text)))
+               (is (true? (get-in (edn/read-string (get latest "(seon.agent/settings)"))
+                                  [:seon.repl/changes [:seon.config.ai/no-provider]
+                                   :seon.db.diff/after]))))))
          (finally
            (doseq [channel [(:seon.cluster.wake/channel handle)
                             (:seon.render/context-channel handle)

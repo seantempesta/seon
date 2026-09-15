@@ -55,6 +55,7 @@ turns**: opening plus one plan reread, with zero churn.
 | `d0817d49b` | Deterministic scalar ordering; whole map coordinates; broader generated printer property | Fast 49/234; isolated 49/238; no read-membership change. |
 | `6785c980c` | Native database decoding avoids unnecessary logical projection | Fast 41/272; isolated 41/276; no read-membership change. |
 | `eef44fcc3` | Preserve database-free relation queries | Fast DB/help 44/293; isolated 44/297; no read-membership change. |
+| `549ab70b5` | Derived prompt frame and trial parity | Fast frame 8/45; combined isolated 19/369; 0 idle system bytes. |
 
 The prompt-frame and provenance follow-ups pass their combined isolated
 gate: **19 tests / 369 assertions**, covering prompt, loop proof, REPL

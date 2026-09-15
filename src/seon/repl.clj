@@ -331,13 +331,14 @@
         unit (if (map? (:seon.render/value unit))
                (:seon.render/value unit)
                unit)
-        turn-ref (:seon.cluster.eval/run unit)
-        turn-eid (if (map? turn-ref) (:db/id turn-ref) turn-ref)
+        evaluation-id (:seon.cluster.eval/id unit)
         changed? (or (:seon.repl/changed-since? unit)
-                     (when (and database turn-eid)
-                       (some?
+                     (when (and database evaluation-id)
+                       (integer?
                         ((requiring-resolve 'seon.db/q)
-                         '[:find ?earlier . :in $ ?turn :where
+                         '[:find ?earlier . :in $ ?evaluation-id :where
+                           [?evaluation :seon.cluster.eval/id ?evaluation-id]
+                           [?evaluation :seon.cluster.eval/run ?turn]
                            [?turn :seon.turn/id ?id ?t]
                            [?turn :seon.turn/reply-size]
                            (not [?turn :seon.turn/attempts])
@@ -345,7 +346,7 @@
                            [?turn :seon.turn/agent ?agent]
                            [?earlier :seon.turn/agent ?agent]
                            [?earlier :seon.turn/id ?earlier-id ?before]
-                           [(< ?before ?t)]] database turn-eid))))]
+                           [(< ?before ?t)]] database evaluation-id))))]
    (cond-> (select-keys unit [:seon.ns/name
                              :seon.cluster.eval/id
                              :seon.cluster.eval/source

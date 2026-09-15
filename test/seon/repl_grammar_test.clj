@@ -87,6 +87,8 @@
            (is (= 'seon.bootstrap/render-help-ai (:seon.eval/renderer saved)))
            (is (= expected-response (repl/response (repl/entity-emission saved))))
            (is (= expected (repl/render-ai saved)))
+           (is (= expected (repl/render-ai (assoc saved :seon.db/db @connection)))
+               "the first system turn is still the opening when database provenance is supplied")
            (let [agent-ctx (:seon.sci.eval/ctx
                             (sci.eval/fork-for-turn
                              {:seon.sci.eval/ctx ctx :seon.db/db @connection

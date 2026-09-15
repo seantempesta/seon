@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [turn, since-diff, context, prompt-growth, design, owner-ruling]
 created: 2026-09-10
@@ -44,8 +44,16 @@ form, and an EDN change against the previous shown value. A full-value
 requery points at the new evaluation's real result handle. The opening
 remains full; the agent's own input remains byte-stable.
 
-Implementation and verification remain in progress in
+Implementation and verification are recorded in
 [context-renders-landing-2026-09-14.md](../../prds/context-generation/research/context-renders-landing-2026-09-14.md).
-The broader invariant also found root statistics reading excluded
-families and collection-bound queries with imprecise evidence. This issue
-is not resolved by removing only the original two churning forms.
+The broader invariant also fixed root statistics reading excluded families,
+collection-bound evidence, and promotion of turn-dependent agent queries.
+The recurring loop proves three no-event turns add zero evaluations and
+zero bytes; a plan write and a message each add only their own changed read.
+Responses are readable EDN with working full-value handles. The final
+provenance regression proves an opening is not falsely marked changed.
+The combined isolated gate passes 19 tests / 369 assertions; the final
+help trial scores 12/12. Owner-observed run 3 independently had only two
+system turns in 21 turns (opening plus a plan update). The requested
+stored-run-2 explain comparison remains unavailable after the owner's reset;
+the landing note does not claim that comparison was performed.
