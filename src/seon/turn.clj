@@ -359,7 +359,7 @@
                          {:optional true}
                          :seon.turn.work/situation]
                         [::opened-tx ::opened-tx]]]
-                  [:vector :some]]}
+                  :seon.store/transaction-data]}
   [db request]
   (let [{::keys [id agent trigger starting-ns]
          situation :seon.turn.work/situation} request
@@ -387,7 +387,7 @@
                              [::id ::id]
 
 ]]
-                  [:vector :some]]}
+                  :seon.store/transaction-data]}
   [request]
   [[:db.fn/call #'close-call request]])
 
@@ -430,7 +430,7 @@
                              [:seon.cluster.eval/at {:optional true}
                               :seon.cluster.eval/at]
                              [::sources :seon.cluster.reply/sources]]]
-                  [:vector :some]]}
+                  :seon.store/transaction-data]}
   [request]
   (plan-tx-for-author :agent request))
 
@@ -554,7 +554,7 @@
                         [:seon.cluster.eval/at {:optional true}
                          :seon.cluster.eval/at]
                         [::sources :seon.cluster.reply/sources]]]
-                  [:vector :some]]}
+                  :seon.store/transaction-data]}
   [db request]
   (let [{::keys [id reply reply-blob reply-size sources starting-ns]
          author :seon.cluster.eval/author} request
@@ -612,7 +612,7 @@
                               {:optional true}
                               :seon.turn.work/situation]
                              [::opened-tx ::opened-tx]]]
-                  [:vector :some]]}
+                  :seon.store/transaction-data]}
   [request]
   [[:db.fn/call #'open-call request]])
 
@@ -669,7 +669,7 @@
   ahead of execution. A digest-backed run cannot enter this path."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        :seon.turn/generated-form-request]
-                  [:vector :some]]}
+                  :seon.store/transaction-data]}
   [db request]
   (let [{::keys [id]
          receipt-at :seon.cluster.eval/at
@@ -748,7 +748,7 @@
 (defn refresh-tx
   "Transaction data refreshing one prior system-authored form."
   {:malli/schema
-   [:=> [:cat :seon.cluster.eval/id] [:vector :some]]}
+   [:=> [:cat :seon.cluster.eval/id] :seon.store/transaction-data]}
   [prior-form-id]
   [[:db.fn/call #'refresh-call prior-form-id]])
 
@@ -760,7 +760,7 @@
   "Append one ordinary system run from a prior refreshable evaluation."
   {:malli/schema
    [:=> [:cat :seon.db/database-value :seon.cluster.eval/id]
-    [:vector :some]]}
+    :seon.store/transaction-data]}
   [db prior-form-id]
   (let [request {:seon.cluster.eval/id prior-form-id}
         ;; ONE ENTITY: the frozen source and its terminal facts are the same
@@ -849,7 +849,7 @@
                 :seon.cluster.eval/author]
                [:seon.cluster.eval/ns {:optional true}
                 :seon.cluster.eval/ns]]]
-    [:vector :some]]}
+    :seon.store/transaction-data]}
   [request]
   [[:db.fn/call #'receipt-start-call request]])
 
@@ -893,7 +893,7 @@
            :seon.cluster.eval/author]
           [:seon.cluster.eval/ns {:optional true}
            :seon.cluster.eval/ns]]]
-    [:vector :some]]}
+    :seon.store/transaction-data]}
   [db request]
   (let [{::keys [id] :seon.cluster.eval/keys [ordinal]} request
         run (receipt-run db `receipt-start-call request)]
@@ -959,10 +959,10 @@
   {:malli/schema
    [:function
     [:=> [:cat :seon.cluster.eval/settle-request]
-     [:vector :some]]
+     :seon.store/transaction-data]
     [:=> [:cat :seon.db/database-value
           :seon.cluster.eval/settle-request]
-     [:vector :some]]]}
+     :seon.store/transaction-data]]}
   ([request]
    (receipt-settle-tx* request))
   ([database request]
@@ -975,7 +975,7 @@
   "Settle independent evaluations together, retaining each terminal fence."
   {:malli/schema
    [:=> [:cat :seon.db/database-value
-         [:vector :seon.cluster.eval/settle-request]] [:vector :some]]}
+         [:vector :seon.cluster.eval/settle-request]] :seon.store/transaction-data]}
   [database requests]
   (when (some :seon.program/row requests)
     (refuse! `receipt-settle-batch-call ::ordered-declarations-required
@@ -993,7 +993,7 @@
   ordered calls: a later declaration must see earlier declarations in the
   same transaction. Requests carry the turn's already analyzed rows."
   {:malli/schema
-   [:=> [:cat [:vector :seon.cluster.eval/settle-request]] [:vector :some]]}
+   [:=> [:cat [:vector :seon.cluster.eval/settle-request]] :seon.store/transaction-data]}
   [requests]
   (if (some :seon.program/row requests)
     (into [] (mapcat receipt-settle-tx) requests)
@@ -1638,7 +1638,7 @@
            :seon.test.accretion/report-size]
           [:seon.program/row {:optional true}
            :seon.program/row]]]
-    [:vector :some]]}
+    :seon.store/transaction-data]}
   [db request]
   (let [{::keys [id]
          :seon.cluster.eval/keys [ordinal]} request
@@ -1673,7 +1673,7 @@
   {:malli/schema [:=> [:cat [:map
                              [::id ::id]
                              [::now :inst]]]
-                  [:vector :some]]}
+                  :seon.store/transaction-data]}
   [request]
   [[:db.fn/call #'recover-call request]])
 
@@ -1687,7 +1687,7 @@
                        [:map
                         [::id ::id]
                         [::now :inst]]]
-                  [:vector :some]]}
+                  :seon.store/transaction-data]}
   [db request]
   (let [{::keys [id now]} request
         run (current-run db id)]
@@ -2321,7 +2321,9 @@
   "True when an admitted value contains sci's structured unbound marker.
   Admission has already bounded the ordinary value, so this walks data only;
   no class object or stringified exception crosses this seam."
-  {:malli/schema [:=> [:cat :any] :boolean]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
+                         :seon.schema.admission/reason "SCI admission inspects arbitrary result values for nested unbound markers, including scalars and nil; no candidate shape can be required before this inspection."
+                         :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
   [value]
   (boolean
    (some (fn [node]
@@ -3076,7 +3078,9 @@
   result. Anything else — a number, a map that merely looks similar, an
   error value — is not a disposition. An accepted provider reply ending
   without one permits another turn under the session bound."
-  {:malli/schema [:=> [:cat :any] [:maybe :my.turn/value]]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
+                         :seon.schema.admission/reason "The final SCI evaluation may return any value; this classifier returns a disposition only when the candidate satisfies my.turn/value."
+                         :gen/elements [nil false 0 "" :k [] {}]}]] [:maybe :my.turn/value]]}
   [value]
   (when (schema/valid-candidate-value? :my.turn/value value)
     value))
@@ -4949,8 +4953,10 @@
                   [:=> [:cat] [:map]]
                   [:=> [:cat :map] :map]
                   [:=> [:cat :map :keyword] :map]
-                  [:=> [:cat :map :keyword :any]
-                   [:tuple :map [:maybe [:map-of :keyword [:vector :some]]]]]]}
+                  [:=> [:cat :map :keyword [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
+                         :seon.schema.admission/reason "The core.async.flow callback treats every incoming payload as a wake signal and never interprets it; payload values are intentionally unrestricted."
+                         :gen/elements [nil false 0 "" :k [] {}]}]]
+                   [:tuple :map [:maybe [:map [::flow/report [:vector :seon.turn.loop/turn-report]]]]]]]}
   ([]
    {:ins {:seon.agent/episode "One payload-free episode signal from the mailbox."}
     :outs {}

@@ -17,8 +17,12 @@
   "True when Malli can construct a generator for `schema` with `options`."
   {:malli/schema
    [:function
-    [:=> [:cat :any] :boolean]
-    [:=> [:cat :any :map] :boolean]]}
+    [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
+                         :seon.schema.admission/reason "Malli generator discovery accepts arbitrary candidate declarations and compiled schemas, including invalid inputs for which it returns false."
+                         :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]
+    [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
+                         :seon.schema.admission/reason "Malli generator discovery accepts arbitrary candidate declarations and compiled schemas, including invalid inputs for which it returns false."
+                         :gen/elements [nil false 0 "" :k [] {}]}] :map] :boolean]]}
   ([schema]
    (generatable? schema {}))
   ([schema options]
@@ -49,7 +53,9 @@
 
 (defn data-contract!
   "Refuse function objects before a durable contract is printed as EDN."
-  {:malli/schema [:=> [:cat :seon.schema/value] :seon.schema/value]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
+                         :seon.schema.admission/reason "Pre-admission contract inspection accepts arbitrary candidate syntax, including function objects that it must refuse before durable EDN printing."
+                         :gen/elements [nil false 0 "" :k [] {}]}]] :seon.schema/value]}
   [contract]
   (when (some fn? (tree-seq coll? seq contract))
     (let [message (str "Function install refused: contracts are data; "

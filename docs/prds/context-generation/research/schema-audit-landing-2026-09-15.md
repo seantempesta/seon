@@ -8,17 +8,17 @@ tags: [schema, contracts, diagnostics]
 
 ## Verification boundary
 
-Work in progress. The checker intentionally reports every unjustified position; it does not exempt another lane's files. No default stop, refork, or reseed was performed. The run7-wave owned turn, message, plan, bootstrap, and accretion paths are excluded from edits, not from inspection.
+The owner released `seon.turn`, `seon.cluster.message`, and
+`seon.test.accretion` after run7-wave closed. Their 26 remaining positions
+are now corrected or justified on the exact schema node; both required gates
+passed as recorded below. No default stop, refork, or reseed was performed.
+The checker has no ownership exemptions.
 
-After the owner checkpointed the in-flight work as `6acd8818e`, work continued
-on `steward-platform`. The retained-call repair landed separately as
-`7e35df213`. A fresh read-only query after its convergence inspected 1,014
-public function specifications and still found exactly 26 unjustified
-positions, all in the explicitly excluded `seon.turn`,
-`seon.cluster.message`, and `seon.test.accretion` files. The owner's new
-request for a green Part A conflicts with retaining those explicit exclusions;
-the lane has requested permission to edit their contract metadata. The
-checker remains total and does not suppress their failures.
+The owner checkpointed the in-flight work as `6acd8818e` on
+`steward-platform`; the retained-call repair landed separately as
+`7e35df213`. Before this slice, a read-only query inspected 1,014 public
+function specifications and found exactly 26 unjustified positions in
+those three files.
 
 The post-checkpoint fast gate (`seon.schema-test`, inventory, instrument,
 database, help trial, REPL grammar) ran 94 tests and 666 assertions: the
@@ -35,7 +35,7 @@ Remaining explicitly recorded boundaries:
 - [Transparent schema wrapper coherence](../../../seon/issues/render-contract-coherence-stops-at-a-transparent-schema-wrapper.md): valid Malli wrappers are not completely dereferenced by the render-fit check.
 - [Projection-holder predicate](../../../seon/issues/schema-projection-state-contract-invokes-deref-as-a-predicate.md): replacing `deref` needs the caller's actual holder contract, not a permissive exemption.
 
-The full Part A checker is **not green**. Part B remains checkpointed work,
+The full Part A checker is **green**, including the previously excluded 26 positions. Part B remains checkpointed work,
 not a completed/gated claim; the owner requested finishing Part A first.
 
 ## Authority and dependency ledger
@@ -79,8 +79,8 @@ Every row from the live candidate query is retained, including false positives a
 | `seon.call-preparation/state?` | `:seon.schema/value` | Justified on schema node: A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape. |
 | `seon.cluster.agent/armer-step` | `:any`; `:some` | Justified on schema node: core.async.flow supplies per-port messages of different declared shapes and accepts heterogeneous non-nil output messages; the port determines each message contract. |
 | `seon.cluster.agent/mailbox-step` | `:any`; `:some` | Justified on schema node: core.async.flow supplies per-port messages of different declared shapes and accepts heterogeneous non-nil output messages; the port determines each message contract. |
-| `seon.cluster.message/render-inbox-ai` | `:seon.schema/value` | REQUIRED IN run7-wave OWNED PATH: correct or justify these positions; this lane does not edit them. |
-| `seon.cluster.message/render-inbox-html` | `:seon.schema/value` | REQUIRED IN run7-wave OWNED PATH: correct or justify these positions; this lane does not edit them. |
+| `seon.cluster.message/render-inbox-ai` | `:seon.schema/value` | Concrete union of the declaring inbox reference, pulled reference, and pulled message sequence. |
+| `seon.cluster.message/render-inbox-html` | `:seon.schema/value` | Concrete union of the declaring inbox reference, pulled reference, and pulled message sequence. |
 | `seon.cluster.store/connection-object?` | `:seon.schema/value` | Justified on schema node: A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape. |
 | `seon.cluster.store/connection?` | `:seon.schema/value` | Justified on schema node: A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape. |
 | `seon.cluster.store/database-value?` | `:seon.schema/value` | Justified on schema node: A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape. |
@@ -222,31 +222,31 @@ Every row from the live candidate query is retained, including false positives a
 | `seon.sci.kernel/interrupted?` | `:any` | Justified on schema node: A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape. |
 | `seon.shell/output?` | `:seon.schema/value` | Justified on schema node: A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape. |
 | `seon.shell/stdin?` | `:seon.schema/value` | Justified on schema node: A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape. |
-| `seon.test.accretion/data-contract!` | `:seon.schema/value` | REQUIRED IN run7-wave OWNED PATH: correct or justify these positions; this lane does not edit them. |
-| `seon.test.accretion/generatable?` | `:any`; `:any` | REQUIRED IN run7-wave OWNED PATH: correct or justify these positions; this lane does not edit them. |
+| `seon.test.accretion/data-contract!` | `:seon.schema/value` | Justified on the input node: pre-admission inspection must accept candidate syntax containing function objects so it can refuse them before EDN printing. |
+| `seon.test.accretion/generatable?` | `:any`; `:any` | Justified on each input node: Malli generator discovery inspects arbitrary candidate declarations, including invalid forms and compiled schemas. |
 | `seon.test.cache/-main` | `[:* :string]` | Justified on schema node: Clojure's command-line entry point receives any number of string arguments; the command parser owns option combinations and their diagnostics. |
 | `seon.test.fast/-main` | `[:* :string]` | Justified on schema node: Clojure's command-line entry point receives any number of string arguments; the command parser owns option combinations and their diagnostics. |
 | `seon.test.runner/-main` | `[:* :string]` | Justified on schema node: Clojure's command-line entry point receives any number of string arguments; the command parser owns option combinations and their diagnostics. |
 | `seon.test.runner/var-reference?` | `:seon.schema/value` | Justified on schema node: A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape. |
-| `seon.turn/append-generated-call` | `:some` | REQUIRED IN run7-wave OWNED PATH: correct or justify these positions; this lane does not edit them. |
-| `seon.turn/close-tx` | `:some` | REQUIRED IN run7-wave OWNED PATH: correct or justify these positions; this lane does not edit them. |
-| `seon.turn/disposition` | `:any` | REQUIRED IN run7-wave OWNED PATH: correct or justify these positions; this lane does not edit them. |
-| `seon.turn/open-call` | `:some` | REQUIRED IN run7-wave OWNED PATH: correct or justify these positions; this lane does not edit them. |
-| `seon.turn/open-tx` | `:some` | REQUIRED IN run7-wave OWNED PATH: correct or justify these positions; this lane does not edit them. |
-| `seon.turn/plan-call` | `:some` | REQUIRED IN run7-wave OWNED PATH: correct or justify these positions; this lane does not edit them. |
-| `seon.turn/plan-tx` | `:some` | REQUIRED IN run7-wave OWNED PATH: correct or justify these positions; this lane does not edit them. |
-| `seon.turn/receipt-settle-batch-call` | `:some` | REQUIRED IN run7-wave OWNED PATH: correct or justify these positions; this lane does not edit them. |
-| `seon.turn/receipt-settle-batch-tx` | `:some` | REQUIRED IN run7-wave OWNED PATH: correct or justify these positions; this lane does not edit them. |
-| `seon.turn/receipt-settle-call` | `:some` | REQUIRED IN run7-wave OWNED PATH: correct or justify these positions; this lane does not edit them. |
-| `seon.turn/receipt-settle-tx` | `:some`; `:some` | REQUIRED IN run7-wave OWNED PATH: correct or justify these positions; this lane does not edit them. |
-| `seon.turn/receipt-start-call` | `:some` | REQUIRED IN run7-wave OWNED PATH: correct or justify these positions; this lane does not edit them. |
-| `seon.turn/receipt-start-tx` | `:some` | REQUIRED IN run7-wave OWNED PATH: correct or justify these positions; this lane does not edit them. |
-| `seon.turn/recover-call` | `:some` | REQUIRED IN run7-wave OWNED PATH: correct or justify these positions; this lane does not edit them. |
-| `seon.turn/recover-tx` | `:some` | REQUIRED IN run7-wave OWNED PATH: correct or justify these positions; this lane does not edit them. |
-| `seon.turn/refresh-call` | `:some` | REQUIRED IN run7-wave OWNED PATH: correct or justify these positions; this lane does not edit them. |
-| `seon.turn/refresh-tx` | `:some` | REQUIRED IN run7-wave OWNED PATH: correct or justify these positions; this lane does not edit them. |
-| `seon.turn/step` | `:any`; `:some` | REQUIRED IN run7-wave OWNED PATH: correct or justify these positions; this lane does not edit them. |
-| `seon.turn/unbound-value?` | `:any` | REQUIRED IN run7-wave OWNED PATH: correct or justify these positions; this lane does not edit them. |
+| `seon.turn/append-generated-call` | `:some` | Concrete output: :seon.store/transaction-data, the existing writer-operation vector schema. |
+| `seon.turn/close-tx` | `:some` | Concrete output: :seon.store/transaction-data, the existing writer-operation vector schema. |
+| `seon.turn/disposition` | `:any` | Justified on the input node: classify an arbitrary final SCI result against my.turn/value. |
+| `seon.turn/open-call` | `:some` | Concrete output: :seon.store/transaction-data, the existing writer-operation vector schema. |
+| `seon.turn/open-tx` | `:some` | Concrete output: :seon.store/transaction-data, the existing writer-operation vector schema. |
+| `seon.turn/plan-call` | `:some` | Concrete output: :seon.store/transaction-data, the existing writer-operation vector schema. |
+| `seon.turn/plan-tx` | `:some` | Concrete output: :seon.store/transaction-data, the existing writer-operation vector schema. |
+| `seon.turn/receipt-settle-batch-call` | `:some` | Concrete output: :seon.store/transaction-data, the existing writer-operation vector schema. |
+| `seon.turn/receipt-settle-batch-tx` | `:some` | Concrete output: :seon.store/transaction-data, the existing writer-operation vector schema. |
+| `seon.turn/receipt-settle-call` | `:some` | Concrete output: :seon.store/transaction-data, the existing writer-operation vector schema. |
+| `seon.turn/receipt-settle-tx` | `:some`; `:some` | Concrete output: :seon.store/transaction-data, the existing writer-operation vector schema. |
+| `seon.turn/receipt-start-call` | `:some` | Concrete output: :seon.store/transaction-data, the existing writer-operation vector schema. |
+| `seon.turn/receipt-start-tx` | `:some` | Concrete output: :seon.store/transaction-data, the existing writer-operation vector schema. |
+| `seon.turn/recover-call` | `:some` | Concrete output: :seon.store/transaction-data, the existing writer-operation vector schema. |
+| `seon.turn/recover-tx` | `:some` | Concrete output: :seon.store/transaction-data, the existing writer-operation vector schema. |
+| `seon.turn/refresh-call` | `:some` | Concrete output: :seon.store/transaction-data, the existing writer-operation vector schema. |
+| `seon.turn/refresh-tx` | `:some` | Concrete output: :seon.store/transaction-data, the existing writer-operation vector schema. |
+| `seon.turn/step` | `:any`; `:some` | Input node justifies payload-free Flow signals; output carries the existing seon.turn.loop/turn-report schema. |
+| `seon.turn/unbound-value?` | `:any` | Justified on the input node: inspect arbitrary admitted SCI results for nested unbound markers. |
 
 ## Resource inventory
 
@@ -370,3 +370,135 @@ with `IndexOutOfBoundsException` at `seon.fn/exact-source:142`, through
 `analysis-rows-by-file` and `build-manifest`, without identifying the file.
 This repeats the documented boundary in
 [source-analysis-can-slice-changing-files-with-stale-offsets.md](../../../seon/issues/source-analysis-can-slice-changing-files-with-stale-offsets.md).
+
+## Released contract metadata — 2026-09-15
+
+Before editing, read-only default JVM probes used its carried projection:
+14 stored messages validated as `:seon.message/inbox-unit`; Juniper's lookup
+reference validated as `:seon.message/pulled-reference`. `open-tx` returned
+a `:db.fn/call` vector and `open-call` returned two entity maps, both valid
+`:seon.store/transaction-data`. Recovery builders for all 137 existing
+closed turns returned valid empty transaction vectors; no transaction was
+submitted. Candidate probes on nil, an integer, a string, a keyword, a vector,
+and a map confirmed that the admission classifiers inspect arbitrary values.
+The Flow output uses the same `:seon.turn.loop/turn-report` already declared
+by its sole report producer, `turn`; no live turn was executed by the probe.
+
+Two initial 20-second JVM probes timed out while calls lacked an explicitly
+bound projection. Passing default's carried projection through
+`schema/call-with-projection` completed the message/transaction probe in
+12 ms and recovery/candidate probe in 62 ms. No private SCI context changed.
+
+The first publication refused the inbox renderer's equivalent reference
+alias at render-contract-coherence. The existing transparent-wrapper issue
+records this limitation. Naming the declaring `:seon.message/inbox`
+alternative directly was insufficient: the checker also lacked declaring
+intersection implication. The existing `schema-accepts-schema?` now accepts
+an intersection when one of its guaranteed children proves the input, and
+compares the resolved forms after dereferencing named aliases. Unknown
+predicate implications still fail closed. The schema regression checks a
+constrained attribute against a union containing its scalar value shape.
+The exact helper was hot-evaluated in default before retrying publication,
+because its old admission path would otherwise reject the new contracts.
+One retry detected source changes during analysis and refused with both
+digests; no other lane's files or sessions were operated. Protected renderer
+and source owners were not edited.
+
+The corrected fast snapshot ran 152 tests / 1,369 assertions: the inventory
+and loop proof passed; two assertions in the existing virtual-turn test
+still expected full context in the initial ledger card. The renderer now
+loads it on expansion. An isolated gate (152 tests / 1,375 assertions,
+2 failures / 0 errors) confirmed that the expanded pre-reply context is empty
+for this direct-source virtual fixture: it never made a provider prompt.
+The test therefore retains its existing database assertion of the evaluation's
+namespace and checks the initial expansion control, instead of expecting that
+namespace in a prompt this fixture never produced. No renderer implementation changed. The isolated gate
+includes this corrected test.
+
+A subsequent adoption reached SCI acquisition and JVM instrumentation but
+reported source changed during development adoption; its attempted published
+commit was `6aa9875c-04ed-5726-af1c-e4eb46de2833`. Retrying preserves the
+convergence invariant rather than treating successful reload as adoption.
+
+Default printed `development cluster converged` at published commit
+`6aa98895-9a21-547c-9b47-20bb3e64478a`. A read-only live query inspected
+1,016 public function specifications with zero unjustified positions (16 ms).
+Final isolated gate: 152 tests / 1,373 assertions, zero failures/errors,
+exit 0. It removed successful root `run.QYAZCA`. The shared-operator result
+write timed out after 30 seconds and was explicitly NOT recorded; see
+[test-result persistence evidence](../../../seon/issues/test-results-persistence-can-time-out-during-development-adoption.md).
+`bin/test --platform` ran after that invocation exited: 85 tests / 514
+assertions, zero failures/errors, exit 0. Its successful root `run.oGANOa`
+was removed by the runner.
+The post-test-edit adoption reached instrumentation but detected another
+source change (`6aa989b2-ada5-50b0-b7e7-44fdcbde2439`); subsequent convergence is recorded below.
+
+Reproducible read-only probe (JVM mode, explicit default custody):
+
+```clojure
+(let [connection (seon.operator/connection "default")
+      instance (some #(when (identical? connection
+                                       (:seon.boot/cluster-connection %)) %)
+                     (vals @seon.operator.runtime/running-instances))
+      projection (:seon.schema/projection
+                  @(:seon.sci.eval/projection-state
+                    (:seon.turn.loop/cluster instance)))]
+  (seon.schema/call-with-projection
+   projection
+   (fn []
+     (let [database @connection
+           options {:registry (:seon.schema.projection/registry projection)}
+           messages (mapv #(seon.db/pull database '[*] %)
+                          (seon.db/q '[:find [?e ...]
+                                       :where [?e :seon.message/id]] database))
+           request {:seon.turn/id "schema-audit-read-only"
+                    :seon.turn/agent [:seon.agent/id "juniper"]
+                    :seon.turn/opened-tx "datomic.tx"}]
+       {:messages (count messages)
+        :messages-valid? (malli.core/validate :seon.message/inbox-unit
+                                             messages options)
+        :reference-valid? (malli.core/validate :seon.message/pulled-reference
+                                              [:seon.agent/id "juniper"] options)
+        :transaction-valid?
+        (mapv #(malli.core/validate :seon.store/transaction-data % options)
+              [(seon.turn/open-tx request)
+               (seon.turn/open-call database request)])}))))
+```
+
+Final gate commands (one invocation at a time):
+
+```sh
+bin/test --paths src/seon/turn.clj src/seon/cluster/message.clj src/seon/test/accretion.clj src/seon/schema.clj test/seon/schema_test.clj test/seon/turn_test.clj docs/prds/context-generation/research/schema-audit-landing-2026-09-15.md -- seon.schema-test seon.schema-audit-test seon.turn-test seon.cluster.message-test seon.test.accretion-test seon.instrument-test seon.db-test seon.help-trial-test seon.repl-grammar-test seon.loop-proof-test
+bin/test --platform
+```
+
+The slice gate queried the complete canonical graph, including resource
+schemas and guarded variadic arities. The loop proof passed in both the fast
+iteration and isolated gate. The platform gate used the shared tree snapshot
+and passed without changes to protected owners. The first gate waited 45
+seconds for a machine slot; no second test invocation was launched while it
+held or awaited one. Completed failed root `run.aoB4JT` was removed only after
+its regression passed and the process table showed no holder.
+
+Later adoption `6aa98aa9-cda0-50ec-8c59-bff59c6f2e5e` also detected source
+changes after instrumentation; the lane remained code-stable and retried.
+Final convergence: the operator printed `development cluster converged`.
+A read-only JVM query confirmed adopted and published commit IDs both equal
+`6aa98c42-b52a-57e3-993d-b7bf512de8dd`, source digest
+`5de229463576e785951ea4e1e6a8e2080f5f3686966232c36c23fabb7a3136a8`.
+Both `/ns/my.agents.juniper` and `/ns/my.agents.juniper/debug` returned HTTP
+200 by bounded curl. No schema resource changed in this slice; no reset is
+needed for it. The exact source/test changes were gated; the persistence
+limitation above remains explicit. Part B is a separate unfinished slice.
+
+Read-only digest comparison after the ninth adoption attempt identified the
+actual changed paths between its analyzed snapshot and current source:
+`test/seon/supplied_documentation_test.clj`, `src/seon/instrument.clj`,
+`test/seon/adoption_contract_freshness_test.clj`, and
+`test/seon/test_runner_test.clj`. None belongs to this slice. Analyzed digest
+`8db69b1d0b8bb40d6f750543c60887650e42cdce614ad7cda1c3063ac76fe907`
+differed from current
+`5de229463576e785951ea4e1e6a8e2080f5f3686966232c36c23fabb7a3136a8`.
+The comparison read `source-analysis-cache` and `source-snapshot`; the
+`build/current-src.edn` artifact was absent, which was reported rather than
+assumed present. No foreign file or session was modified.

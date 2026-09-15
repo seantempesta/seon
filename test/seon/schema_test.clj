@@ -549,6 +549,13 @@
                      [:=> [:cat attribute] :string])
               [:seon.schema.projection/forms attribute 1
                :seon.render/form]))))
+    (testing "a constrained attribute fits a union containing its value shape"
+      (is (= renderer
+             (get-in
+              (admit attribute
+                     [:and {:seon.render/ai renderer} :string [:string {:min 1}]]
+                     [:=> [:cat [:or :string [:vector :map]]] :string])
+              [:seon.schema.projection/forms attribute 1 :seon.render/ai]))))
     (testing "call preparation may supply an additional database value"
       (is (= renderer
              (get-in

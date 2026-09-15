@@ -1465,6 +1465,7 @@
         declaring (m/deref declaring)]
     (cond
       (= input-form declaring-form) true
+      (= (m/form input) (m/form declaring)) true
       (= :any (m/type input)) true
 
       (= :or (m/type declaring))
@@ -1476,6 +1477,12 @@
 
       (= :and (m/type input))
       (every? #(schema-accepts-schema? % declaring) (m/children input))
+
+      (= :and (m/type declaring))
+      ;; An intersection guarantees each child; any one sufficient child
+      ;; proves acceptance without guessing predicate implication.
+      (boolean
+       (some #(schema-accepts-schema? input %) (m/children declaring)))
 
       (and (= :map (m/type input))
            (map-shaped-schema? declaring))

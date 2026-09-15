@@ -460,19 +460,13 @@
 ;;; agent. One producer per projection answers both, because both are the same
 ;;; question asked from the two ends of one ref.
 ;;;
-;;; A DECLARED REVERSE UNIT HAS NO SCHEMA KEY OF ITS OWN. Both the render
-;;; contract coherence check and instrumentation read the FORWARD attribute's
-;;; schema, which describes one ref and not the collection the reverse pulls,
-;;; so the declared producer input is `:seon.schema/value` — the render seam's
-;;; own name for "the value this seam hands me". The honest collection shape
-;;; is `:seon.message/inbox-unit` and it is enforced one call inward,
-;;; at `inbox-html`, where instrumentation states it. The missing fact is
-;;; recorded in the research note.
+;;; A forward inbox attribute supplies a recipient reference; its reverse
+;;; supplies acquired message maps. Both input alternatives are declared.
 ;;; ---------------------------------------------------------------------------
 
 (defn render-inbox-ai
   "Read each acquired message once through its entity's AI pair."
-  {:malli/schema [:=> [:cat :seon.schema/value] :seon.render/source]}
+  {:malli/schema [:=> [:cat [:or :seon.message/inbox :seon.message/pulled-reference :seon.message/inbox-unit]] :seon.render/source]}
   [recipient-or-inbox]
   (if (and (sequential? recipient-or-inbox)
            (every? map? recipient-or-inbox))
@@ -519,7 +513,7 @@
   The reverse unit hands every message it acquired and renders them through
   [[inbox-html]]; a walk from one message hands that message's single
   recipient reference and renders it as the reference it is."
-  {:malli/schema [:=> [:cat :seon.schema/value :seon.db/database-value]
+  {:malli/schema [:=> [:cat [:or :seon.message/inbox :seon.message/pulled-reference :seon.message/inbox-unit] :seon.db/database-value]
                   :seon.render/hiccup]}
   [recipient-or-inbox database]
   ;; A LOOKUP REF IS ALSO SEQUENTIAL, so the collection branch is the one

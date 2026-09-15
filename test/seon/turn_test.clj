@@ -231,15 +231,15 @@
            (let [turn-id (:seon.turn/id
                           (db/pull database [:seon.turn/id]
                                    (get-in (first saved) [:seon.cluster.eval/run :db/id])))
-                 rendered (transcript/render-ledger-turn
-                        (merge handle
-                               {:seon.db/db database :seon.db/connection connection
-                                :seon.agent/id "a" :seon.turn/id turn-id
-                                :seon.sci.eval/time-limit-ms 2000}))
+                 render-request (merge handle
+                                  {:seon.db/db database :seon.db/connection connection
+                                   :seon.agent/id "a" :seon.turn/id turn-id
+                                   :seon.sci.eval/time-limit-ms 2000})
+                 rendered (transcript/render-ledger-turn render-request)
                  text (apply str (filter string? (tree-seq sequential? seq rendered)))
                  html (hiccup/->string rendered)]
              (is (str/includes? html "data-ledger-loaded") html)
-             (is (str/includes? html "my.agents.a") html)
+             (is (str/includes? html "seon-ledger-full-context") html)
              (is (str/includes? text "(+ 1 1)") html)
              (is (not (str/includes? html "items, depth")) html)
              (is (not (str/includes? html "read-evidence")) html))
