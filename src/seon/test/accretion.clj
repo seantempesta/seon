@@ -239,7 +239,7 @@
   (cond-> []
     (empty? test-results)
     (conj (str "No example test gates " function-symbol
-               "; add one to teach intended behavior."))
+               "; add a deftest in your namespace that calls it, then (my.test/run)."))
 
     (= :skipped-non-generatable
        (:seon.test.accretion/status check))

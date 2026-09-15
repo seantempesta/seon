@@ -81,9 +81,20 @@
   (let [forms (read-forms text)
         calls (when (vector? forms) (executable-calls forms))
         comments (filter #(str/starts-with? (str/trim %) ";;") (str/split-lines text))
+        answers
+        (:seon.trial/answers
+         (reduce (fn [state line]
+                   (let [comment (str/trim (subs (str/trim line) 2))
+                         dot (str/index-of comment ".")
+                         number (when dot (parse-long (subs comment 0 dot)))
+                         state (cond-> state number (assoc :seon.trial/number number))]
+                     (if-let [number (:seon.trial/number state)]
+                       (update-in state [:seon.trial/answers number] (fnil conj []) comment)
+                       state)))
+                 {} comments))
         answer (fn [number]
                  (str/lower-case
-                  (str/join " " (filter #(str/starts-with? (str/trim %) (str ";; " number ".")) comments))))
+                  (str/join " " (get answers number))))
         has? (fn [number term] (str/includes? (answer number) term))
         my-calls (filter #(some-> % first namespace (str/starts-with? "my.")) calls)
         known (set (db/q '[:find [?symbol ...] :where [?f :seon.fn/sym ?symbol]] database))

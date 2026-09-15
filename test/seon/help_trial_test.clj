@@ -1,5 +1,6 @@
 (ns seon.help-trial-test
   (:require [clojure.test :refer [deftest is]]
+            [clojure.edn :as edn]
             [clojure.core.async :as async]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
@@ -92,6 +93,11 @@
            good (score (str answers ";; I should read the orders.\n" query))]
        (is (= 12 (:seon.trial/passed good)) (pr-str good))
        (is (empty? (:seon.trial/failed good)))
+       (let [trial (edn/read-string
+                    (slurp "docs/prds/context-generation/research/help_trial_run7_wave_2_2026_09_15.edn"))
+             reply (get-in trial [:seon.trial/completion :seon.ai/text])]
+         (is (= 12 (:seon.trial/passed (score reply)))
+             "the actual trial's answer continues after each numbered question header"))
        (is (= 12 (:seon.trial/passed (score (str answers query "\n;; The prompt draws => itself.\n(defn increment {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 1))")))))
        (is (= 12 (:seon.trial/passed (score (str answers "(doc seon.db/q)")))))
        (doseq [[reply expected]

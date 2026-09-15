@@ -7,6 +7,20 @@ tags: [issue, test, datahike]
 
 # Parallel published-base acquisition can lose a filestore key
 
+## Run7-wave recurrence — 2026-09-15
+
+Three-worker named-path gate `run.nCxztY`, published base
+`1ffe4236497fefef5818ec000c0c89180903189934a750bc94455c1e5afb3233`,
+lost key `2a7db2a9-8a20-4448-8591-07850a3192d6` while
+`my.plan-api-test/plan-writes-use-one-request-map-and-return-the-changed-item`
+connected its fixture. The stack enters `konserve.filestore/migrate-old-files`,
+`konserve.tiered/sync-on-connect`, and `datahike.connector/connect`.
+Isolated confirmation passed in 17,360 ms with no prior worker-global drift.
+The gate reported 55 tests / 1,080 assertions / zero assertion failures /
+one acquisition error. The deleting actor is not established. Run7-wave's
+final full named-path gate uses `SEON_TEST_WORKERS=1`; this is a verification
+workaround, not a claim to have repaired this issue.
+
 ## Context-renders recurrence — 2026-09-15
 
 Owned-path turn gate `tmp/test-runs/run.1zymx6`, published base
