@@ -930,8 +930,9 @@
                           "db-conflict-owner"))
        (is (not (str/includes? (:seon.error/message rejected)
                                "ExceptionInfo")))
-       (is (= (:seon.error/message rejected)
-              (db/render-rejection-ai rejected)))
+       (is (str/includes? (db/render-rejection-ai rejected)
+                          "seon.db/transact! refused transaction data"))
+       (is (str/includes? (db/render-rejection-ai rejected) "db-conflict-owner"))
        (is (str/includes? (pr-str (db/render-rejection-html rejected))
                           "db-conflict-owner"))
        (is (= 'seon.db/render-rejection-ai

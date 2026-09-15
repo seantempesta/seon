@@ -58,7 +58,7 @@
   Admission is HANDED this fn; it never builds one, never owns the
   timer, and never decides when it fires — it only guarantees that a
   realization step cannot proceed without calling it."
-  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
   [value]
   (ifn? value))
 
@@ -77,7 +77,7 @@
 
 (defn canonical-edn
   "Return canonical readable EDN independent of ambient print bindings."
-  {:malli/schema [:=> [:cat :any] :string]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The canonical EDN encoder accepts arbitrary Clojure data and represents unsupported host values through admission.", :gen/elements [nil false 0 "" :k [] {}]}]] :string]}
   [value]
   (binding [*print-length* nil
             *print-level* nil
@@ -529,7 +529,7 @@
   accepted must be a value this can rebuild, and a node deep enough to
   exhaust the JVM stack would otherwise turn a stored result into an
   `Error` thrown out of a total operation."
-  {:malli/schema [:=> [:cat :seon.print/node] :any]}
+  {:malli/schema [:=> [:cat :seon.print/node] [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A print node represents an arbitrary original Clojure value; semantic decoding preserves its scalar or collection shape.", :gen/elements [nil false 0 "" :k [] {}]}]]}
   [print-node]
   (loop [stack []
          step [::open print-node]]

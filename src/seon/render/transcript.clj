@@ -1040,15 +1040,13 @@
 
 (defn render-history-ai
   "The prompt is this concern's AI projection, so emit no duplicate text."
-  {:malli/schema [:=> [:cat :seon.schema/value :seon.db/database-value]
-                  [:or :string :seon.error/value]]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The value renderer and its projections operate on arbitrary Clojure results, including scalar and nil results; the render profile owns presentation bounds.", :gen/elements [nil false 0 "" :k [] {}]}] :seon.db/database-value] [:or :string :seon.error/value]]}
   [_turns _database]
   "")
 
 (defn render-history-html
   "Show all turn headers, newest first, without repeating evaluations."
-  {:malli/schema [:=> [:cat :seon.schema/value :seon.db/database-value]
-                  :seon.render/hiccup]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The value renderer and its projections operate on arbitrary Clojure results, including scalar and nil results; the render profile owns presentation bounds.", :gen/elements [nil false 0 "" :k [] {}]}] :seon.db/database-value] :seon.render/hiccup]}
   [turns database]
   (let [rows (if (and (coll? turns) (every? map? turns)) turns [])
         ordered (sort-by (juxt #(get-in % [:seon.turn/opened-tx :db/id]) :seon.turn/id)

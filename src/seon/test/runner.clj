@@ -29,7 +29,7 @@
 
 (defn var-reference?
   "True for a host or SCI Var reference."
-  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
   [value]
   (or (var? value) (sci.utils/var? value)))
 
@@ -2657,7 +2657,7 @@
 
 (defn -main
   "Run the coordinator, prepare its immutable base, or run one worker."
-  {:malli/schema [:=> [:cat [:* :string]] :nil]}
+  {:malli/schema [:=> [:cat [:* {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Clojure's command-line entry point receives any number of string arguments; the command parser owns option combinations and their diagnostics.", :gen/elements [[]]} :string]] :nil]}
   [& arguments]
   (case (first arguments)
     "--worker"

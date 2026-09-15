@@ -143,7 +143,9 @@
   (:require [clojure.core.async.flow :as-alias flow]
             [clojure.edn :as edn]
             [clojure.string :as str]
-            [seon.ai.tokens :as tokens]
+            [clojure.test.check.generators :as gen]
+            [malli.core :as m]
+            [malli.error :as me]
             [seon.db :as db]
             [seon.id :as id]
             [seon.error.refusal :as error.refusal]
@@ -160,6 +162,25 @@
 ;;; ---------------------------------------------------------------------------
 ;;; Schemas — resources/seon/schema.edn
 ;;; ---------------------------------------------------------------------------
+
+(def compiled-schema-generator
+  "An actual Malli Schema object for the structured explanation boundary."
+  (gen/return (m/schema :string)))
+
+(def throwable-generator
+  "An actual Throwable for cause-chain contract generation."
+  (gen/fmap (fn [_] (ex-info "Generated cause-chain input" {})) (gen/return nil)))
+
+(defn throwable?
+  "Whether a candidate is a JVM Throwable."
+  {:malli/schema
+   [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
+                    :seon.schema.admission/reason "A total type predicate accepts any candidate and returns false for non-Throwables."
+                    :gen/elements [nil false 0 "" [] {}]}]] :boolean]}
+  [candidate]
+  (instance? Throwable candidate))
+
+(schema/register-core-predicate! 'seon.error/throwable? throwable?)
 
 (schema.edn/load! {})
 
@@ -182,7 +203,7 @@
   The pure cause-chain owner is `seon.error.refusal`, below both this
   rendering-aware normalizer and `seon.db`; this public entry delegates
   so existing callers retain one behavior without a dependency cycle."
-  {:malli/schema [:=> [:cat :any] [:maybe :map]]}
+  {:malli/schema [:=> [:cat [:maybe :seon.error/throwable]] [:maybe :map]]}
   [throwable]
   (error.refusal/refusal throwable))
 
@@ -674,10 +695,136 @@
        ", kind " (:seon.error/kind fact)
        ", signature " (:seon.error/signature fact) "."))
 
+(defn- value-description
+  [value]
+  (cond
+    (nil? value) "nil"
+    (instance? clojure.lang.LazySeq value) "a lazy sequence"
+    (vector? value) "a vector"
+    (map? value) "a map"
+    (set? value) "a set"
+    (sequential? value) "a sequence"
+    (string? value) "a string"
+    (keyword? value) "a keyword"
+    (symbol? value) "a symbol"
+    (boolean? value) "a boolean"
+    (integer? value) "an integer"
+    (number? value) "a number"
+    :else (str "an instance of " (.getName (class value)))))
+
+(defn explain-problem
+  "Translate Malli's structured problem into semantic refusal evidence.
+   No message parsing or value printing occurs at this seam."
+  {:malli/schema [:=> [:cat :seon.error/explain-request] :seon.error/problem-description]}
+  [{:seon.error/keys [problem path argument parent]}]
+  (let [schema-type (m/type (:schema problem))
+        missing? (= :malli.core/missing-key (:type problem))
+        message (or (me/error-message problem) "the declared schema")
+        expected (case schema-type
+                   :vector "a vector" :sequential "a sequence" :map "a map"
+                   :set "a set" :string "a string" :int "an integer"
+                   :double "a double" :boolean "a boolean" :keyword "a keyword"
+                   :qualified-keyword "a namespaced keyword" :symbol "a symbol"
+                   :qualified-symbol "a namespaced symbol" :nil "nil"
+                   :fn message
+                   (str "a value satisfying " message))]
+    {:seon.error/path (vec path)
+     :seon.error/argument argument
+     :seon.error/expected (m/form (:schema problem))
+     :seon.error/expected-description
+     (if missing? (str "the required key " (pr-str (last path)) " with " expected) expected)
+     :seon.error/offending (if (and missing? (map? parent)) parent (:value problem))
+     :seon.error/actual-description
+     (if missing? (str "a map missing " (pr-str (last path))) (value-description (:value problem)))
+     :seon.error/fix
+     (cond
+       missing? (str "Supply " (pr-str (last path)) " with " expected ".")
+       (and (= :vector schema-type) (sequential? (:value problem)))
+       "Convert the sequence with vec before calling the function."
+       (= :fn schema-type) message
+       :else (str "Supply " expected " at " (pr-str (vec path)) "."))}))
+
+(defn- refusal-value-text
+  [unit value path]
+  (let [root (or (:seon.repl/handle unit) (:seon.render.value/root unit))
+        profile (:seon.render/profile unit)
+        unit (cond-> (dissoc unit :seon.repl/handle :seon.render.value/root)
+               (and path (qualified-symbol? root) profile)
+               (assoc :seon.render/profile
+                      (assoc profile :seon.print/requery-id (list 'get-in root path))))
+        projection
+        (render.value/prepare
+         (-> unit
+             (assoc :seon.render/value value
+                    :seon.render.value/options {:seon.render.value/structural? true})
+             (update :seon.render.call/id
+                     #(or % [:seon.error/diagnostic-offending])))
+         (get unit :seon.render/output :seon.render/ai))]
+    (if (string? (:seon.render.value/text projection))
+      (:seon.render.value/text projection)
+      (str "<value rendering unavailable: " (:seon.error/message projection) ">"))))
+
+(defn- refusal-data
+  [fact data]
+  (let [evidence (merge fact data)]
+    (cond
+      (seq (:seon.error/problems data)) data
+
+      (string? (:seon.sci.reader/text evidence))
+      {:seon.error/diagnostic-operation 'seon.sci.reader/read
+       :seon.error/problems
+       [{:seon.error/argument "source"
+         :seon.error/path (into [] (keep evidence) [:seon.sci.reader/line :seon.sci.reader/column])
+         :seon.error/expected :seon.cluster.eval/source
+         :seon.error/expected-description "readable Clojure source"
+         :seon.error/offending (:seon.sci.reader/text evidence)
+         :seon.error/actual-description "unreadable source"
+         :seon.error/fix
+         (if (= :stray-closer (:seon.sci.reader/error-kind evidence))
+           "Balance the delimiters in this reply; every reply is read from scratch."
+           (str "Correct the reader error: " (:seon.error/message fact)))}]}
+
+      (and (:seon.schema/definition evidence) (:seon.schema/error evidence))
+      {:seon.error/diagnostic-operation 'seon.schema/register!
+       :seon.error/problems
+       [{:seon.error/argument (str (:seon.schema/identity evidence))
+         :seon.error/path (get evidence :seon.schema/path [])
+         :seon.error/expected :seon.schema/definition
+         :seon.error/expected-description "a complete authored schema"
+         :seon.error/offending (:seon.schema/definition evidence)
+         :seon.error/actual-description "an incomplete schema"
+         :seon.error/fix (:seon.error/message fact)}]}
+
+      :else data)))
+
+(defn- refusal-text
+  [unit fact data]
+  (let [stored-problems? (seq (:seon.error/problems data))
+        data (refusal-data fact data)
+        operation (:seon.error/diagnostic-operation data)
+        problems (:seon.error/problems data)
+        example (not-empty (get-in fact [:seon.error/doc :example]))]
+    (when (and operation (seq problems))
+      (str/join
+       "\n"
+       (map-indexed
+        (fn [index {:seon.error/keys [path argument expected expected-description
+                               offending actual-description fix]}]
+          (let [location (when stored-problems?
+                           [:seon.error/data :seon.error/problems index])]
+          (str operation " refused " argument " at " (pr-str path)
+               ": expected " expected-description " ("
+               (refusal-value-text unit expected (when location (conj location :seon.error/expected)))
+               "), got " actual-description
+               " " (refusal-value-text unit offending (when location (conj location :seon.error/offending)))
+               ". Fix: " fix
+               " Example: " (or example "No docstring example is available."))))
+        problems)))))
+
 (defn refusal-prose
   "`:seon.render/ai` — a refused transition and its atomic outcome."
   {:malli/schema
-   [:=> [:cat :seon.schema/value] [:string {:min 1}]]}
+   [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The total error render boundary receives a raw error, an acquired entity or a render unit and must describe unrecognized values without refusing them.", :gen/elements [nil false 0 "" :k [] {}]}]] [:string {:min 1}]]}
   [error-value]
   (let [fact (or (:seon.error/fact error-value) error-value)
         source (if (:seon.error/data-edn fact)
@@ -700,7 +847,7 @@
 (defn instrumentation-prose
   "`:seon.render/ai` — detailed steering for a validation failure."
   {:malli/schema
-  [:=> [:cat :seon.schema/value] [:string {:min 1}]]}
+  [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The total error render boundary receives a raw error, an acquired entity or a render unit and must describe unrecognized values without refusing them.", :gen/elements [nil false 0 "" :k [] {}]}]] [:string {:min 1}]]}
   [error-value]
   (let [fact (or (:seon.error/fact error-value) error-value)
         data (if (:seon.error/data-edn fact)
@@ -714,7 +861,9 @@
                      (:seon.instrument/expected fact))
         received (or (:seon.error/diagnostic-offending data)
                      (:seon.instrument/args fact))]
-    (if operation
+    (if-let [prose (refusal-text error-value fact data)]
+      prose
+      (if operation
       (str (when-let [message (:seon.error/message fact)] (str message "\n"))
            "Contract violation in " operation " " (name member)
            ": expected " (pr-str expected)
@@ -728,7 +877,7 @@
              (str "\n" (pr-str {:seon.error/doc documentation}))))
       (str (:seon.error/message fact)
            (when (:seon.error/id fact)
-             (str " " (evidence-prose fact)))))))
+             (str " " (evidence-prose fact))))))))
 
 (defn- notice-ai-prose
   "`:seon.render/ai` — the steering prose an agent is told, from a notice.
@@ -840,7 +989,7 @@
   The notice arm remains through slice 1 so existing committed facts and the
   failover context retain their current face until their emission sweep."
   {:malli/schema
-   [:=> [:cat :seon.schema/value] [:string {:min 1}]]}
+   [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The total error render boundary receives a raw error, an acquired entity or a render unit and must describe unrecognized values without refusing them.", :gen/elements [nil false 0 "" :k [] {}]}]] [:string {:min 1}]]}
   [error-value]
   (if (:seon.error/fact error-value)
     (notice-ai-prose error-value)
@@ -1247,7 +1396,7 @@
   Registry-free leaves use the structural fallback: a map containing
   `:seon.error/message`. Once a projection is active, its declared classes are
   the complete authority and a message alone is not an error class."
-  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
   [value]
   (if (schema/current-projection)
     (boolean (seq (matched-error-classes value)))
@@ -1310,17 +1459,18 @@
 
 (defn render-ai
   "Render the flat error value, preserving its recorded diagnostic data."
-  {:malli/schema [:=> [:cat :seon.schema/value] [:string {:min 1}]]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The total error render boundary receives a raw error, an acquired entity or a render unit and must describe unrecognized values without refusing them.", :gen/elements [nil false 0 "" :k [] {}]}]] [:string {:min 1}]]}
   [unit]
   (let [value (rendered-error-value unit)
         source (when (:seon.error/data-edn value) (fact-source value))]
-    (pr-str (merge (if (map? source) source
+    (or (refusal-text unit (or source value) (:seon.error/data (or source value)))
+        (pr-str (merge (if (map? source) source
                        (if (map? value) value {}))
-                   (select-keys value [:seon.error/kind :seon.error/message])))))
+                   (select-keys value [:seon.error/kind :seon.error/message]))))))
 
 (defn render-html
   "Render one fault's kind, message, time, function, turn, and evidence link."
-  {:malli/schema [:=> [:cat :seon.schema/value] :seon.render/hiccup]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The total error render boundary receives a raw error, an acquired entity or a render unit and must describe unrecognized values without refusing them.", :gen/elements [nil false 0 "" :k [] {}]}]] :seon.render/hiccup]}
   [unit]
   (let [value (if (map? (:seon.render/value unit))
                 (:seon.render/value unit) unit)
@@ -1332,7 +1482,10 @@
     (into
      [:article {:class "seon-family-entry seon-error-entry"}
       [:p {:class "seon-kicker"} (some-> (:seon.error/kind value) name)]
-      [:h3 {:class "seon-error-message"} (:seon.error/message value)]]
+      [:h3 {:class "seon-error-message"}
+       (or (refusal-text (assoc unit :seon.render/output :seon.render/html)
+                         value (:seon.error/data value))
+           (:seon.error/message value))]]
      (concat
       (when-let [at (:seon.error/at value)]
         (let [instant (str (if (instance? java.util.Date at)
@@ -1414,9 +1567,7 @@
 
 (defn render-faults-html
   "Render faults routed to a steward, or already acquired faults, newest first."
-  {:malli/schema [:function
-                  [:=> [:cat :seon.render/unit] :seon.render/hiccup]
-                  [:=> [:cat :seon.schema/value :seon.db/database-value] :seon.render/hiccup]]}
+  {:malli/schema [:function [:=> [:cat :seon.render/unit] :seon.render/hiccup] [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The total error render boundary receives a raw error, an acquired entity or a render unit and must describe unrecognized values without refusing them.", :gen/elements [nil false 0 "" :k [] {}]}] :seon.db/database-value] :seon.render/hiccup]]}
   ([unit] (render-faults-html (faults-input unit) (:seon.db/db unit)))
   ([faults database]
   (let [acquired? (and (sequential? faults) (not (keyword? (first faults))))
@@ -1440,7 +1591,7 @@
 
 (defn time-limit-prose
   "`:seon.render/ai` — evaluation time-limit evidence without guessing cause."
-  {:malli/schema [:=> [:cat :seon.schema/value] [:string {:min 1}]]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The total error render boundary receives a raw error, an acquired entity or a render unit and must describe unrecognized values without refusing them.", :gen/elements [nil false 0 "" :k [] {}]}]] [:string {:min 1}]]}
   [unit]
   (let [value (rendered-error-value unit)
         entries (or (:seon.eval/fn-entries value)
@@ -1455,7 +1606,7 @@
 
 (defn edit-prose
   "`:seon.render/ai` — selection evidence for an edit that did not apply."
-  {:malli/schema [:=> [:cat :seon.schema/value] [:string {:min 1}]]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The total error render boundary receives a raw error, an acquired entity or a render unit and must describe unrecognized values without refusing them.", :gen/elements [nil false 0 "" :k [] {}]}]] [:string {:min 1}]]}
   [unit]
   (let [value (rendered-error-value unit)
         marker (error-marker value)
@@ -1472,7 +1623,7 @@
 
 (defn elision-prose
   "`:seon.render/ai` — a neutral account of bounded render-walk elision."
-  {:malli/schema [:=> [:cat :seon.schema/value] [:string {:min 1}]]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The total error render boundary receives a raw error, an acquired entity or a render unit and must describe unrecognized values without refusing them.", :gen/elements [nil false 0 "" :k [] {}]}]] [:string {:min 1}]]}
   [unit]
   (let [value (rendered-error-value unit)
         marker (error-marker value)
@@ -1486,7 +1637,7 @@
 
 (defn elision-html
   "`:seon.render/html` — a neutral elision notice, never an error card."
-  {:malli/schema [:=> [:cat :seon.schema/value] :seon.render/hiccup]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The total error render boundary receives a raw error, an acquired entity or a render unit and must describe unrecognized values without refusing them.", :gen/elements [nil false 0 "" :k [] {}]}]] :seon.render/hiccup]}
   [unit]
   (let [value (rendered-error-value unit)
         marker (error-marker value)
@@ -1504,7 +1655,7 @@
 
 (defn unclassified-prose
   "`:seon.render/ai` — an honest failure projection with no class match."
-  {:malli/schema [:=> [:cat :seon.schema/value] [:string {:min 1}]]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The total error render boundary receives a raw error, an acquired entity or a render unit and must describe unrecognized values without refusing them.", :gen/elements [nil false 0 "" :k [] {}]}]] [:string {:min 1}]]}
   [unit]
   (let [value (rendered-error-value unit)
         marker (error-marker value)
@@ -1519,7 +1670,7 @@
 
 (defn mcp-prose
   "`:seon.render/ai` — retrieval evidence for a failed MCP value lookup."
-  {:malli/schema [:=> [:cat :seon.schema/value] [:string {:min 1}]]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The total error render boundary receives a raw error, an acquired entity or a render unit and must describe unrecognized values without refusing them.", :gen/elements [nil false 0 "" :k [] {}]}]] [:string {:min 1}]]}
   [unit]
   (let [value (rendered-error-value unit)
         marker (error-marker value)
@@ -1536,7 +1687,7 @@
 
 (defn index-refusal-prose
   "`:seon.render/ai` — the precise evidence that stopped program indexing."
-  {:malli/schema [:=> [:cat :seon.schema/value] [:string {:min 1}]]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The total error render boundary receives a raw error, an acquired entity or a render unit and must describe unrecognized values without refusing them.", :gen/elements [nil false 0 "" :k [] {}]}]] [:string {:min 1}]]}
   [unit]
   (let [value (rendered-error-value unit)
         marker (error-marker value)

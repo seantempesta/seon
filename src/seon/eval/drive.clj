@@ -300,8 +300,7 @@
 (defn run-episode!
   "Run one objective in an already-running cluster instance."
   {:malli/schema
-   [:=> [:cat :seon.boot/instance :seon.schema/value]
-    :seon.schema/value]}
+   [:=> [:cat :seon.boot/instance :seon.eval.drive/episode-request] :seon.eval.drive/episode-result]}
   [instance request]
   (let [connection (:seon.boot/cluster-connection instance)
         process (cluster/process-identity (:seon.boot/advertisement instance))
@@ -365,7 +364,7 @@
 
 (defn run-sample!
   "Start, run, and retire one isolated sample cluster."
-  {:malli/schema [:=> [:cat :seon.schema/value] :seon.schema/value]}
+  {:malli/schema [:=> [:cat :seon.eval.drive/sample-request] :seon.eval.drive/episode-result]}
   [request]
   (let [root (:seon.eval.drive/root request)
         sample-id (str (:seon.eval.drive/sample-id request))
@@ -442,6 +441,6 @@
 
 (defn run-sample-json!
   "Run one sample and return its qualified JSON projection."
-  {:malli/schema [:=> [:cat :seon.schema/value] :string]}
+  {:malli/schema [:=> [:cat :seon.eval.drive/sample-request] :string]}
   [request]
   (json/write-str (json-value (run-sample! request))))

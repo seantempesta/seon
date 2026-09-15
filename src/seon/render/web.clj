@@ -93,7 +93,7 @@
 
   The gate resolves and runs this, so it is real code rather than a contract
   stub."
-  {:malli/schema [:=> [:cat :any] :boolean]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
   [x]
   (instance? org.httpkit.server.HttpServer x))
 
@@ -114,7 +114,7 @@
 
 (defn mult?
   "True for a core.async mult — the fan-out the render packages ride."
-  {:malli/schema [:=> [:cat :any] :boolean]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
   [value]
   (satisfies? clojure.core.async/Mult value))
 
@@ -2452,15 +2452,7 @@
   only while its run lacks a terminal fact. An interest pass is a
   repaint from facts, so it drops every cached partial before deriving;
   reconnect can never restore one."
-  {:malli/schema [:function
-                  [:=> [:cat] [:map]]
-                  [:=> [:cat :map] :map]
-                  [:=> [:cat :map :keyword] :map]
-                  [:=> [:cat :map :keyword :any]
-                   ;; `[state out]`, where `out` is nil when suppression
-                   ;; found nothing to say and otherwise ONE complete
-                   ;; package map on `::pages`
-                   [:tuple :map [:or :nil :map]]]]}
+  {:malli/schema [:function [:=> [:cat] [:map]] [:=> [:cat :map] :map] [:=> [:cat :map :keyword] :map] [:=> [:cat :map :keyword [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The value renderer and its projections operate on arbitrary Clojure results, including scalar and nil results; the render profile owns presentation bounds.", :gen/elements [nil false 0 "" :k [] {}]}]] [:tuple :map [:or :nil :map]]]]}
   ([]
    {:ins {}
     :outs {}
@@ -2654,7 +2646,7 @@
   The first proc package is a keyframe because the direct paint has no proc
   revision. Later contiguous packages may use deltas; gaps use keyframes.
   A missing package reaches the client as a typed signal before close."
-  {:malli/schema [:=> [:cat :any :seon.render.web/feed-request] :any]}
+  {:malli/schema [:=> [:cat :map :seon.render.web/feed-request] :map]}
   [request {:keys [:seon.agent/id]
             connection :seon.store/connection-object
             pages-mult :seon.render.web/pages-mult
@@ -2831,9 +2823,7 @@
   The response never paints. A successful POST is 204 with no body;
   the existing commit → route → render path paints the message and
   wakes the recipient. Refusals are 422 text values and commit nothing."
-  {:malli/schema [:=> [:cat :seon.render.web/service
-                       :seon.render.web/inbound]
-                  :any]}
+  {:malli/schema [:=> [:cat :seon.render.web/service :seon.render.web/inbound] [:map [:status :int] [:headers [:map-of :string :string]] [:body [:maybe :string]]]]}
   [{connection :seon.store/connection-object
     :keys [:seon.agent/id]
     caps :seon.sci.admit/caps

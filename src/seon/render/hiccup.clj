@@ -76,13 +76,13 @@
   function, but the guarded invocation kernel projects the record to
   ordinary data and strips this trusted-byte marker. Only system-authored
   Hiccup that has not crossed SCI admission can preserve it."
-  {:malli/schema [:=> [:cat :string] :any]}
+  {:malli/schema [:=> [:cat :string] [:fn (quote seon.render.hiccup/raw?)]]}
   [string]
   (->Raw (str string)))
 
 (defn raw?
   "True when `x` came from `raw`."
-  {:malli/schema [:=> [:cat :any] :boolean]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
   [x]
   (instance? Raw x))
 
@@ -119,7 +119,7 @@
   per element; over a 250-event page that cost 8.07 ms p50 against
   0.45 ms to SERIALIZE the same tree. Indexing with `nth` over a counted
   vector, and testing the common shapes first, is the whole fix."
-  {:malli/schema [:=> [:cat :any] :boolean]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
   [x]
   (cond
     (vector? x)
@@ -269,12 +269,7 @@
   has already admitted its input, so a throw would be a second opinion
   about the same value: exactly the behaviour the quarry's `parse-tag`
   had and this rewrite drops."
-  {:malli/schema [:=> [:cat :any]
-                  [:or [:map
-                        [:seon.render.hiccup/tag :string]
-                        [:seon.render.hiccup/id {:optional true} :string]
-                        [:seon.render.hiccup/classes [:vector :string]]]
-                   :seon.error/value]]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A foreign tag candidate may have any shape; invalid tags return a diagnostic instead of throwing.", :gen/elements [nil false 0 "" :k [] {}]}]] [:or [:map [:seon.render.hiccup/tag :string] [:seon.render.hiccup/id {:optional true} :string] [:seon.render.hiccup/classes [:vector :string]]] :seon.error/value]]}
   [head]
   (if-not (or (keyword? head) (symbol? head) (string? head))
     {:seon.error/kind ::unparseable-tag
@@ -510,7 +505,7 @@
     `-webkit-mask`, `--custom` untouched) and emit sorted;
   - an `:id` in the attribute map wins over the tag shorthand's;
   - no doctype: a shell prepends it around the rendered root."
-  {:malli/schema [:=> [:cat :any] :string]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The total Hiccup serializer accepts arbitrary candidates; invalid candidates have the documented empty-string result.", :gen/elements [nil false 0 "" :k [] {}]}]] :string]}
   [hiccup]
   (let [builder (StringBuilder. 256)]
     (if (append-node! builder hiccup)

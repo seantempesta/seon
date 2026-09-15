@@ -162,7 +162,7 @@
 
   Takes a value and returns a boolean. This predicate validates text, bytes,
   or blob-digest content for `write`."
-  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
   [value]
   (and (map? value)
        (= 1
@@ -176,7 +176,7 @@
 
   Takes a value and returns a boolean. This predicate validates an expected
   absence or expected digest for `write`."
-  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
   [value]
   (and (map? value)
        (= 1

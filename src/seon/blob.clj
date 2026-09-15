@@ -22,7 +22,7 @@
 
 (defn input-stream?
   "True when value is a JVM input stream."
-  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
   [value]
   (instance? InputStream value))
 
@@ -41,7 +41,7 @@
 
 (defn store-faithful-edn
   "Serialize a value exactly when EDN preserves value, class, and metadata."
-  {:malli/schema [:=> [:cat :any] [:maybe :string]]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The EDN round-trip probe accepts arbitrary Clojure values and reports unsupported objects by absence of faithful text.", :gen/elements [nil false 0 "" :k [] {}]}]] [:maybe :string]]}
   [value]
   (try
     (let [serialized (binding [*print-meta* true] (pr-str value))
@@ -54,7 +54,7 @@
 
 (defn store-faithful?
   "True exactly when the real EDN round trip preserves all fidelity axes."
-  {:malli/schema [:=> [:cat :any] :boolean]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
   [value]
   (boolean (store-faithful-edn value)))
 

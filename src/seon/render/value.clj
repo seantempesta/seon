@@ -147,7 +147,7 @@
 
 (defn window
   "Return one stable structural page from an ordinary bounded value."
-  {:malli/schema [:=> [:cat :any :int :int] :map]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The value renderer and its projections operate on arbitrary Clojure results, including scalar and nil results; the render profile owns presentation bounds.", :gen/elements [nil false 0 "" :k [] {}]}] :int :int] :map]}
   [value offset size]
   (try
     (if-let [entries (stable-entries value)]
@@ -501,7 +501,7 @@
 
 (defn artifact-value
   "Derive semantic drill data from an artifact's sole print node."
-  {:malli/schema [:=> [:cat :seon.render.value/artifact] :any]}
+  {:malli/schema [:=> [:cat :seon.render.value/artifact] [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The value renderer and its projections operate on arbitrary Clojure results, including scalar and nil results; the render profile owns presentation bounds.", :gen/elements [nil false 0 "" :k [] {}]}]]}
   [stored]
   (admit/semantic-value (:seon.sci.admit/print-node stored)))
 

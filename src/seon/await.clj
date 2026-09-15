@@ -11,7 +11,7 @@
 
 (defn blocking-deref?
   "True when a value supports Clojure's bounded blocking dereference."
-  {:malli/schema [:=> [:cat :any] :boolean]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
   [value]
   (instance? IBlockingDeref value))
 

@@ -1,4 +1,6 @@
-#:seon.schema{:arguments [:vector :any],
+#:seon.schema{:arguments [:vector [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
+                                        :seon.schema.admission/reason "SCI argument vectors contain arbitrary values; the called function owns each argument's contract."
+                                        :gen/elements [nil false 0 "" :k [] {}]}]],
               :registry-key :keyword,
               :malli-form
               [:fn
@@ -6,10 +8,13 @@
                 :gen/schema [:enum :string :int [:vector :keyword]]}
                seon.schema/malli-form?],
               :definition :seon.schema/malli-form,
-              :value :any,
+              :value [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
+                            :seon.schema.admission/reason "The shared value schema represents arbitrary in-memory Clojure values, including nil and host objects; callers declaring concrete data must use their own shape."
+                            :gen/elements [nil false 0 "" :k [] {}]}],
               :explanation :map,
               :namespace-name :string,
-              :kvs [:vector :any],
+              :kvs [:and [:vector :seon.schema/value]
+                    [:* [:cat :keyword :seon.schema/definition]]],
               :discarded-keys [:set :seon.schema/registry-key],
               :projection-row
               [:tuple [:or :keyword :string :symbol] :string :int],

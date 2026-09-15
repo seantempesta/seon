@@ -77,7 +77,7 @@
 
 (defn sink?
   "True for a partial sink: any function of one argument."
-  {:malli/schema [:=> [:cat :any] :boolean]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
   [x]
   (ifn? x))
 
@@ -945,7 +945,7 @@
   `::unparseable-body` with what was actually there — never nil, which
   would read downstream as an empty reply. A normal stop with empty content
   is an ordinary completion; the reply reader diagnoses the missing form."
-  {:malli/schema [:=> [:cat :any] :seon.ai/completion]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The decoded provider HTTP body is foreign data of any JSON shape; this total boundary reports malformed bodies as error values.", :gen/elements [nil false 0 "" :k [] {}]}]] :seon.ai/completion]}
   [body]
   (let [body-shape (cond
                      (map? body) (vec (sort (keys body)))

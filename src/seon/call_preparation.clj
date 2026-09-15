@@ -50,7 +50,7 @@
 
 (defn state?
   "True for the atom holding one cluster's supplied defaults and plans."
-  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
   [value]
   (instance? clojure.lang.IAtom value))
 
@@ -984,7 +984,7 @@
   `clojure.lang.Var` and `sci.lang.Var` carry `:ns`/`:name` metadata;
   anything else — a closure, a computed callee — has no provable identity
   and is left untouched."
-  {:malli/schema [:=> [:cat :seon.schema/value] [:maybe :seon.fn/sym]]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "SCI supplies JVM Vars, SCI Vars and interpreted function objects; an unrecognized callable has no durable identity.", :gen/elements [nil false 0 "" :k [] {}]}]] [:maybe :seon.fn/sym]]}
   [callee]
   (let [{ns-value :ns name-value :name} (meta callee)]
     (when (and ns-value name-value)
@@ -1159,8 +1159,7 @@
   one basis comparison, one string, one set lookup — no plan lookup, no
   Datalog, no supplier, no argument copy."
   {:malli/schema
-   [:=> [:cat :map :seon.schema/value :seon.schema/arguments]
-    :seon.schema/value]}
+   [:=> [:cat :map [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "SCI's call-preparation hook receives arbitrary host or interpreted callable objects and forwards arguments to that callable's own contract.", :gen/elements [nil false 0 "" :k [] {}]}] :seon.schema/arguments] :seon.schema/value]}
   [ctx callee arguments]
   (let [call-state (get ctx carrier)
         environment (env/of ctx)

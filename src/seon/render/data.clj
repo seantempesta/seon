@@ -45,9 +45,7 @@
   A path that leaves the value is a legible refusal rather than nil,
   because nil is also a legitimate value to have navigated to and the
   two must not look the same."
-  {:malli/schema [:=> [:cat :any :seon.render.data/cursor]
-                  [:or [:map [:seon.render.data/value :any]]
-                   :seon.error/value]]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The value renderer and its projections operate on arbitrary Clojure results, including scalar and nil results; the render profile owns presentation bounds.", :gen/elements [nil false 0 "" :k [] {}]}] :seon.render.data/cursor] [:or [:map [:seon.render.data/value [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The value renderer and its projections operate on arbitrary Clojure results, including scalar and nil results; the render profile owns presentation bounds.", :gen/elements [nil false 0 "" :k [] {}]}]]] :seon.error/value]]}
   [value {:keys [:seon.render.data/path]}]
   (reduce (fn [found step]
             (let [inner (:seon.render.data/value found)

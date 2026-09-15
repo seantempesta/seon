@@ -398,12 +398,7 @@
   wake, deliveries counted in the ping map. The wake channel arrives as
   an in-port — the same channel the routing entry names — so listener
   routing, the arm prime, and the self-rewake all target ONE edge."
-  {:malli/schema [:function
-                  [:=> [:cat] [:map]]
-                  [:=> [:cat :map] :map]
-                  [:=> [:cat :map :keyword] :map]
-                  [:=> [:cat :map :keyword :any]
-                   [:tuple :map [:maybe [:map-of :keyword [:vector :some]]]]]]}
+  {:malli/schema [:function [:=> [:cat] [:map]] [:=> [:cat :map] :map] [:=> [:cat :map :keyword] :map] [:=> [:cat :map :keyword [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "core.async.flow supplies per-port messages of different declared shapes and accepts heterogeneous non-nil output messages; the port determines each message contract.", :gen/elements [nil false 0 "" :k [] {}]}]] [:tuple :map [:maybe [:map-of :keyword [:vector [:some {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "core.async.flow supplies per-port messages of different declared shapes and accepts heterogeneous non-nil output messages; the port determines each message contract.", :gen/elements [false 0 "" :k [] {}]}]]]]]]]}
   ([]
    {:ins {}
     :outs {:seon.agent/episode
@@ -861,12 +856,7 @@
   `offer!`. A quiescence request acknowledges that every earlier arm wake
   has settled before cluster teardown disarms agent graphs. The stop
   transition publishes the cluster graph's completion."
-  {:malli/schema [:function
-                  [:=> [:cat] [:map]]
-                  [:=> [:cat :map] :map]
-                  [:=> [:cat :map :keyword] :map]
-                  [:=> [:cat :map :keyword :any]
-                   [:tuple :map [:maybe [:map-of :keyword [:vector :some]]]]]]}
+  {:malli/schema [:function [:=> [:cat] [:map]] [:=> [:cat :map] :map] [:=> [:cat :map :keyword] :map] [:=> [:cat :map :keyword [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "core.async.flow supplies per-port messages of different declared shapes and accepts heterogeneous non-nil output messages; the port determines each message contract.", :gen/elements [nil false 0 "" :k [] {}]}]] [:tuple :map [:maybe [:map-of :keyword [:vector [:some {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "core.async.flow supplies per-port messages of different declared shapes and accepts heterogeneous non-nil output messages; the port determines each message contract.", :gen/elements [false 0 "" :k [] {}]}]]]]]]]}
   ([]
    {:ins {}
     :outs {}

@@ -1,4 +1,26 @@
-#:seon.error{:run [:and #:seon.db{:index true} :seon.db/ref],
+#:seon.error{:throwable
+             [:fn {:error/message "must be a JVM Throwable"
+                   :gen/gen seon.error/throwable-generator} seon.error/throwable?],
+             :explain-request
+             [:map
+              [:seon.error/problem
+               [:map [:schema [:fn {:error/message "must be a compiled Malli schema"
+                                   :gen/gen seon.error/compiled-schema-generator} malli.core/schema?]]
+                [:value :seon.schema/value]
+                [:type {:optional true} :keyword]]]
+              [:seon.error/path :seon.render.data/path]
+              [:seon.error/argument :string]
+              [:seon.error/parent {:optional true} :seon.schema/value]],
+             :problem-description
+             [:map
+              [:seon.error/path :seon.render.data/path]
+              [:seon.error/argument :string]
+              [:seon.error/expected :seon.schema/value]
+              [:seon.error/expected-description :string]
+              [:seon.error/offending :seon.schema/value]
+              [:seon.error/actual-description :string]
+              [:seon.error/fix :string]],
+             :run [:and #:seon.db{:index true} :seon.db/ref],
              :data-blob :seon.blob/digest,
              :doc
              [:map

@@ -138,7 +138,7 @@
   Sci's own vocabulary and its own shape: `sci/init` returns a map
   carrying the interpreter's environment, and `sci/fork` derives one
   from another."
-  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
   [value]
   (and (map? value) (contains? value :env)))
 
@@ -146,7 +146,7 @@
 
 (defn projection-state?
   "True for the replacement reference holding one immutable environment."
-  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
   [value]
   (env/environment-state? value))
 
@@ -518,8 +518,7 @@
   named two different values in one agent's context and a later turn could
   read the wrong one. Any valid symbol is admissible; this binds the name in
   the `result` namespace the handle qualifies."
-  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :qualified-symbol :any]
-                  :qualified-symbol]}
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :qualified-symbol [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "SCI result bindings retain the actual arbitrary result object, including nil, without serialization.", :gen/elements [nil false 0 "" :k [] {}]}]] :qualified-symbol]}
   [ctx handle value]
   (let [namespace-name 'result
         intern-name (symbol (name handle))]

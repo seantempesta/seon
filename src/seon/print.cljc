@@ -22,13 +22,13 @@
 
 (defn sink?
   "True when a value consumes the admitted emitter event stream."
-  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
   [value]
   (satisfies? Sink value))
 
 (defn print-number?
   "True for a number with a stock Clojure print face."
-  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
   [value]
   (number? value))
 
@@ -50,7 +50,7 @@
 
 (defn print-char?
   "True for a character with a stock Clojure print face."
-  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
   [value]
   (char? value))
 
@@ -400,8 +400,7 @@
 
 (defn value-at
   "Read a path through maps, sets, vectors, and lists without changing keys."
-  {:malli/schema [:=> [:cat :seon.schema/value :seon.render.data/path]
-                  :seon.schema/value]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The value renderer and its projections operate on arbitrary Clojure results, including scalar and nil results; the render profile owns presentation bounds.", :gen/elements [nil false 0 "" :k [] {}]}] :seon.render.data/path] :seon.schema/value]}
   [value path]
   (reduce (fn [parent key]
             (if (and (sequential? parent) (integer? key) (not (neg? key)))
@@ -411,7 +410,7 @@
 
 (defn compare-values
   "Order whole values structurally without rendering their contents or invoking pairs."
-  {:malli/schema [:=> [:cat :seon.schema/value :seon.schema/value] :int]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The value renderer and its projections operate on arbitrary Clojure results, including scalar and nil results; the render profile owns presentation bounds.", :gen/elements [nil false 0 "" :k [] {}]}] [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The value renderer and its projections operate on arbitrary Clojure results, including scalar and nil results; the render profile owns presentation bounds.", :gen/elements [nil false 0 "" :k [] {}]}]] :int]}
   [left right]
   (letfn [(category [value]
             (cond (nil? value) "nil"
@@ -894,7 +893,7 @@
 
 (defn node-child?
   "True when `value` occupies one print node's child slot."
-  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
   [value]
   (and (map? value) (keyword? (::face value))))
 
@@ -938,7 +937,7 @@
   and its children are handed back to this loop, so the face table is
   declared once and the depth a contract admits is the depth admission
   admits."
-  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
   [value]
   (let [valid? (node-face-validator)]
     (loop [pending (list value)]

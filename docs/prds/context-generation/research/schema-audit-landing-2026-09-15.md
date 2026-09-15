@@ -71,7 +71,7 @@ Every row from the live candidate query is retained, including false positives a
 | `seon.effect/request!` | `:seon.schema/value`; `:seon.schema/value`; `:seon.schema/value`; `:seon.schema/value` | Justified on schema node: The effect boundary reports malformed owners and requests as values; the resolved capability's own declared contract validates the heterogeneous request. |
 | `seon.env/environment-state?` | `:seon.schema/value` | Justified on schema node: A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape. |
 | `seon.env/environment?` | `:seon.schema/value` | Justified on schema node: A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape. |
-| `seon.error.refusal/refusal` | `:seon.schema/value` | Justified on schema node: Throwable normalization accepts arbitrary source values; a non-Throwable has no exception data. |
+| `seon.error.refusal/refusal` | `:seon.schema/value` | Concrete `[:maybe :seon.error/throwable]`; cause-chain operations accept Throwables or nil, not arbitrary values.
 | `seon.error/ai-prose` | `:seon.schema/value` | Justified on schema node: The total error render boundary receives a raw error, an acquired entity or a render unit and must describe unrecognized values without refusing them. |
 | `seon.error/diagnostic` |  | False positive in broad candidate query: nested value reference or literal, not a requested permissive input slot. |
 | `seon.error/edit-prose` | `:seon.schema/value` | Justified on schema node: The total error render boundary receives a raw error, an acquired entity or a render unit and must describe unrecognized values without refusing them. |
@@ -81,7 +81,7 @@ Every row from the live candidate query is retained, including false positives a
 | `seon.error/index-refusal-prose` | `:seon.schema/value` | Justified on schema node: The total error render boundary receives a raw error, an acquired entity or a render unit and must describe unrecognized values without refusing them. |
 | `seon.error/instrumentation-prose` | `:seon.schema/value` | Justified on schema node: The total error render boundary receives a raw error, an acquired entity or a render unit and must describe unrecognized values without refusing them. |
 | `seon.error/mcp-prose` | `:seon.schema/value` | Justified on schema node: The total error render boundary receives a raw error, an acquired entity or a render unit and must describe unrecognized values without refusing them. |
-| `seon.error/refusal` | `:any` | Justified on schema node: Throwable normalization accepts arbitrary source values; a non-Throwable has no exception data. |
+| `seon.error/refusal` | `:any` | Concrete `[:maybe :seon.error/throwable]`; cause-chain operations accept Throwables or nil, not arbitrary values.
 | `seon.error/refusal-prose` | `:seon.schema/value` | Justified on schema node: The total error render boundary receives a raw error, an acquired entity or a render unit and must describe unrecognized values without refusing them. |
 | `seon.error/render-ai` | `:seon.schema/value` | Justified on schema node: The total error render boundary receives a raw error, an acquired entity or a render unit and must describe unrecognized values without refusing them. |
 | `seon.error/render-faults-html` | `:seon.schema/value` | Justified on schema node: The total error render boundary receives a raw error, an acquired entity or a render unit and must describe unrecognized values without refusing them. |
@@ -222,7 +222,29 @@ Every row from the live candidate query is retained, including false positives a
 
 ## Resource inventory
 
-Pending final graph/resource reconciliation. No stored attribute is narrowed in place. Read-only installed-schema query confirmed that `:seon.reconcile/adopt-identities`, `:seon.render.walk/lookup`, `:seon.schema/arguments`, and `:seon.schema/kvs` are schema declarations, not installed database attributes in default.
+The original graph query returned the following declarations with literal `:any`/`:some` tokens. Each actual permissive node either receives a local reason or already had one. No stored attribute is narrowed in place.
+
+| Attribute or schema | Permissive shape | Decision |
+|---|---|---|
+| `:seon.error/source` | `:any` | Existing justified total fault-normalization boundary accepts any source. |
+| `:seon.reconcile/adopt-identities` | `[:set [:vector :any]]` | Concrete `[:set [:tuple :qualified-keyword :seon.schema/value]]`; reconciliation identity is attribute plus its value. In-memory only. |
+| `:seon.render/unit` | `[:map-of :qualified-keyword :any]` | Existing justified carrier for different renderer inputs; their called contracts validate those inputs. |
+| `:seon.render/value` | `:any` | Existing justified arbitrary live result object. |
+| `:seon.render.data/path` | `[:vector :any]` | Local reason: get-in keys and set members can be arbitrary Clojure objects. |
+| `:seon.render.data/window` | tuple key and value `:any` | Two local reasons: arbitrary collection keys and actual result values. |
+| `:seon.render.walk/lookup` | `:any` | Concrete entity selector union, plus `[entity-selector declared-attribute]` for declared concerns (`walk.clj:650`). A first probe exposed this second existing shape; it is included. In-memory only. |
+| `:seon.schema/arguments` | `[:vector :any]` | Local reason: arbitrary arguments are checked by the called function's contract. |
+| `:seon.schema/kvs` | `[:vector :any]` | Vector plus repeated `[:cat :keyword :seon.schema/definition]`; rejects incomplete pairs. In-memory only. |
+| `:seon.schema/value` | `:any` | Local reason: arbitrary Clojure data and host objects. Concrete callers must declare their shape. |
+| `:seon.sci.admit/value` | `:any` | Existing justified admission of the actual evaluation result. |
+| `:seon.sci.eval/args` | `[:vector :any]` | Existing justified argument carrier; function contracts decide argument shapes. |
+| `:seon.sci.eval/binding` | bound value `:any` | Existing justified private SCI binding of arbitrary objects. |
+| `:seon.sci.eval/evaluation` | admitted value `:any` | Existing justified actual evaluation result. |
+| `:seon.sci.eval/invocation-result` | admitted value `:any` | Existing justified callable return value. |
+| `:seon.turn.loop/evaluation` | admitted value `:any` | Existing justified actual evaluation result; separate durable evidence does not constrain that object's type. |
+| `:seon.turn.work/answered?` | `[:= :any]` | Literal enum value; not a permissive schema. |
+
+ Read-only installed-schema query confirmed that `:seon.reconcile/adopt-identities`, `:seon.render.walk/lookup`, `:seon.schema/arguments`, and `:seon.schema/kvs` are schema declarations, not installed database attributes in default.
 
 ## Checker checkpoint
 
@@ -236,3 +258,28 @@ Pending final graph/resource reconciliation. No stored attribute is narrowed in 
 ## Concrete contracts and refusal grammar
 
 Pending final verification.
+
+## Development adoption incident — 2026-09-15
+
+The uncommitted `:seon.error/throwable` declaration referenced the new
+`seon.error/throwable?` predicate before the running JVM had loaded it.
+Publication failed during schema population with `Predicate
+seon.error/throwable? has no admitted callable in the corpus projection.`
+A read-only JVM probe confirmed that `ns-resolve` returned no Var. Fresh
+test JVMs loaded the declaration, so those tests did not establish live
+development adoption.
+
+The predicate now precedes schema loading and uses the existing
+`schema/register-core-predicate!` assertion. Its contract is public and
+total; its named generator produces actual Throwables. For this already
+running JVM, the three exact authored predicate/generator forms were read
+from `src/seon/error.clj` and evaluated in that namespace before retrying
+`bin/seon init --dev default`. This was a hot load, not a cluster reset.
+Verification: `bin/seon init --dev default` exited 0 and printed
+`development cluster converged`, followed by commit
+`6aa97734-76d5-5654-8464-7a3d32d6363e`, digest
+`8b813cec907f1d4f01b4d498dd4837c5390b67a0b901fe3993861d9b8327fd63`.
+A separate live query confirmed default's `:seon.source/commit-id` equals
+`seon.cluster.source/current`. A subsequent evidence query timed out during
+another adoption; it is not counted as successful evidence. Part A/B resumed
+only after the explicit convergence line.

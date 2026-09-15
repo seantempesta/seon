@@ -1,4 +1,41 @@
-{:seon.eval.drive/absent [:= true]
+{:seon.eval.drive/nonblank-string
+ [:and {:gen/elements ["sample"]} [:string {:min 1}]
+  [:not {:error/message "must contain a non-whitespace character"}
+   [:fn {:error/message "is blank" :gen/schema [:= " "]} clojure.string/blank?]]]
+ :seon.eval.drive/episode-request
+ [:map
+  [:seon.eval.drive/id :seon.eval.drive/nonblank-string]
+  [:seon.eval.drive/objective :seon.eval.drive/nonblank-string]
+  [:seon.eval.drive/agent-ids [:sequential {:min 1} :seon.eval.drive/nonblank-string]]
+  [:seon.eval.drive/run-cap :seon.eval.drive/run-cap]
+  [:seon.eval.drive/remote-timeout-ms [:int {:min 1}]]]
+ :seon.eval.drive/sample-request
+ [:map
+  [:seon.eval.drive/root :seon.eval.drive/nonblank-string]
+  [:seon.eval.drive/objective :seon.eval.drive/nonblank-string]
+  [:seon.eval.drive/sample-id {:optional true} :seon.schema/value]
+  [:seon.eval.drive/run-cap {:optional true} :seon.eval.drive/run-cap]
+  [:seon.eval.drive/remote-timeout-ms {:optional true} [:int {:min 1}]]]
+ :seon.eval.drive/episode-result
+ [:map
+  [:seon.eval.drive/id :seon.eval.drive/nonblank-string]
+  [:seon.eval.drive/episode-semantics :string]
+  [:seon.eval.drive/cluster :string]
+  [:seon.eval.drive/agent-id :seon.agent/id]
+  [:seon.eval.drive/agent-ids [:sequential {:min 1} :seon.agent/id]]
+  [:seon.eval.drive/message-id :seon.message/id]
+  [:seon.eval.drive/ending-commit :uuid]
+  [:seon.eval.drive/grading-branch :seon.store/branch]
+  [:seon.eval.drive/terminal :seon.eval.drive/terminal-state]
+  [:seon.eval.drive/run-ids :seon.eval.drive/run-ids]
+  [:seon.eval.drive/runs [:vector :map]]
+  [:seon.eval.drive/model-attempts [:vector :map]]
+  [:seon.eval.drive/receipts [:vector :seon.eval.drive/evaluation]]
+  [:seon.eval.drive/completed-result :seon.schema/value]
+  [:seon.eval.drive/transcript :string]
+  [:seon.eval.drive/model :seon.config.ai/model]
+  [:seon.eval.drive/thinking :seon.ai/thinking]]
+ :seon.eval.drive/absent [:= true]
  :seon.eval.drive/value :seon.schema/value
  :seon.eval.drive/evaluation
  [:map

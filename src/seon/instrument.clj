@@ -9,7 +9,6 @@
   (:require [clojure.edn :as edn]
             [clojure.walk :as walk]
             [malli.core :as m]
-            [malli.error :as me]
             [malli.instrument :as mi]
             [malli.registry :as mr]
             [seon.db :as db]
@@ -17,8 +16,7 @@
             [seon.env :as env]
             [seon.error :as error]
             [seon.schema :as schema]
-            [seon.schema.edn :as schema.edn]
-            [seon.sci.admit :as admit]))
+            [seon.schema.edn :as schema.edn]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schemas — resources/seon/schema.edn
@@ -32,7 +30,7 @@
 
 (defn instrumented
   "Loaded Vars bearing their own host wrapper, derived without a registry."
-  {:malli/schema [:=> [:cat] [:set :any]]}
+  {:malli/schema [:=> [:cat] [:set [:fn clojure.core/var?]]]}
   []
   (into #{}
         (comp (mapcat ns-interns)
@@ -71,7 +69,7 @@
   cover this one is arming a smaller world than the cluster it claims to
   reproduce, and every contract in the difference is enforced in production
   and checked by nothing."
-  {:malli/schema [:=> [:cat [:sequential :symbol]] [:set :any]]}
+  {:malli/schema [:=> [:cat [:sequential :symbol]] [:set [:fn clojure.core/var?]]]}
   [namespaces]
   (into #{}
         (comp (keep find-ns)
@@ -86,31 +84,6 @@
 ;;; ---------------------------------------------------------------------------
 ;;; The reporter
 ;;; ---------------------------------------------------------------------------
-
-(defn- admitted-value
-  [caps value]
-  (:seon.sci.admit/value
-   (admit/admit
-    {:seon.sci.admit/value value
-     :seon.sci.admit/interrupt-fn (constantly nil)
-     :seon.sci.admit/caps caps
-     ;; the reporter may not panic on the way to reporting a panic
-     :seon.config/on-core-error :record})))
-
-(def ^:private contract-evidence-caps
-  ;; The admitted inline ceiling is 4,096 characters. These structural caps
-  ;; leave room for the function, arm, expected shape, and problem count while
-  ;; retaining the exact offending key/value pair. They narrow the caller's
-  ;; caps only for contract evidence; the original value is never admitted or
-  ;; retained wholesale past this bounded construction.
-  {:seon.config.eval.result/max-depth 8
-   :seon.config.eval.result/max-collection 4
-   :seon.config.eval.result/max-string 256
-   :seon.config.eval.result/max-nodes 32})
-
-(defn- evidence-caps
-  [caps]
-  (merge-with min caps contract-evidence-caps))
 
 (defn- flat-error-value?
   [value]
@@ -133,15 +106,6 @@
     :malli.core/invalid-output (when (flat-error-value? (:value data))
                                  (:value data))
     nil))
-
-(defn- offending-leaf
-  "One exact map key plus bounded value, or one bounded scalar value."
-  [caps path value]
-  (if (and (empty? path) (map? value))
-    (if-let [[entry-key entry-value] (first value)]
-      {(admitted-value caps entry-key) (admitted-value caps entry-value)}
-      {})
-    (admitted-value caps value)))
 
 (def ^:private non-caller-namespace-prefixes
   ;; DERIVED FROM WHAT THESE FRAMES ARE, not from a hand list of ours: the
@@ -171,13 +135,6 @@
                    ":" (.getLineNumber frame) ")"))))
         (.getStackTrace (Thread/currentThread))))
 
-(def ^:private headline-problem-paths
-  ;; The headline is a CONCISE DIAGNOSIS — `seon.instrument-test`'s bounded
-  ;; headline regression measures it at under 64 estimated tokens — so the
-  ;; paths it names are the first few a reader can act on. The complete list
-  ;; is data on the value, never omitted.
-  4)
-
 (defn- problem-path
   "One Malli problem's path INTO THE ARGUMENT, as ordinary data.
 
@@ -188,18 +145,6 @@
   [kind problem]
   (vec (cond-> (:in problem)
          (= :malli.core/invalid-input kind) next)))
-
-(defn- offending-value
-  "The exact Malli-reported key/value pair, nested only along its path."
-  [caps kind problem]
-  (let [path (:in problem)
-        ;; Input explanations begin with the positional argument index. The
-        ;; surrounding args vector already represents that position.
-        path (if (= :malli.core/invalid-input kind) (next path) path)
-        value (reduce (fn [child key] {key child})
-                      (offending-leaf caps path (:value problem))
-                      (reverse path))]
-    (if (= :malli.core/invalid-input kind) [value] value)))
 
 (defn- program-graph-arglists
   [function-symbol]
@@ -291,143 +236,98 @@
         function-symbol (assoc ::fn (str function-symbol)))})))
 
 (defn- violation
-  "One malli report as a flat, bounded, agent-readable value.
-  `:args` can hold ANYTHING — a live Datahike connection is an ordinary
-  argument at these boundaries — so it goes through the one codec, the
-  same as every other error payload. With no caps to bound it, the args
-  are OMITTED rather than printed: a description that can hang is worse
-  than no description."
-  ;; malli's report data names the OFFENDING SCHEMA and the OFFENDING
-  ;; VALUE separately, and they are different keys per arm
-  ;; (`core.cljc:2215,2218`): input is checked against the args vector,
-  ;; output against the returned value. Explaining the whole `:=>`
-  ;; schema instead — the first thing this reporter did — humanizes to
-  ;; the useless "should be a valid function".
-  [caps kind data]
-  (let [fallback (minimal-violation kind data)]
-    (try
-      (if-let [inner (buried-error kind data)]
-        inner
-        (if (= :malli.core/invalid-arity kind)
-          (let [function-symbol (:fn-name data)
-                {status :seon.instrument.lookup/status
-                 arglists ::arglists
-                 cause :seon.instrument.lookup/cause}
-                (diagnostic-arglists function-symbol)]
-            (cond-> (error/diagnostic
-                     {:seon.error/kind ::contract-violated
-                      :seon.instrument/contract-violated (str function-symbol)
-                      :seon.error/message (:seon.error/message fallback)
-                      :seon.error/diagnostic-layer :instrumentation
-                      :seon.error/diagnostic-operation function-symbol
-                      :seon.error/diagnostic-member :arity
-                      :seon.error/diagnostic-expected arglists
-                      :seon.error/diagnostic-offending (:arity data)
-                      :seon.error/diagnostic-cause (or cause kind)
-                      :seon.error/diagnostic-evidence
-                      (when arglists
-                        {:seon.instrument.lookup/status status
-                         ::arglists arglists})
-                      :seon.error/data (:seon.error/data fallback)})
-              arglists
-              (-> (update :seon.error/message
-                          str "; declared arglists: " (pr-str arglists))
-                  (update :seon.error/data assoc ::arglists arglists))))
-          (let [[offended value] (case kind
-                                  :malli.core/invalid-output [(:output data) (:value data)]
-                                  :malli.core/invalid-guard [(:guard data) [(:args data) (:value data)]]
-                                  [(:input data) (:args data)])
-          explanation (m/explain offended value)
-          problems (:errors explanation)
-          problem-count (count problems)
-          bounded-caps (when caps (evidence-caps caps))
-          first-problem (first problems)
-          problem-message (or (some-> first-problem me/error-message)
-                              "does not satisfy the declared schema")
-          ;; EVERY PROBLEM, EACH WITH ITS PATH. Reporting one of N was the
-          ;; absence-as-health shape one level up: a two-problem refusal
-          ;; showed a single "missing required key" and an offending value
-          ;; naming a DIFFERENT key than the one the reader had to supply.
-          ;; The paths come first because for a missing required key the
-          ;; path is the key.
-          problem-paths
-          (into [] (comp (map #(problem-path kind %)) (remove empty?))
-                problems)
-          problem-rows
-          (mapv (fn [problem]
-                  (cond-> {:seon.instrument.problem/message
-                           (or (me/error-message problem)
-                               "does not satisfy the declared schema")}
-                    (seq (problem-path kind problem))
-                    (assoc :seon.instrument.problem/path
-                           (problem-path kind problem))))
-                problems)
-          representative-problem
-          (when (and bounded-caps (seq problem-rows))
-            (admitted-value bounded-caps problem-rows))
-          schema-form (m/form offended)
-          expected (if (and (= :malli.core/invalid-input kind)
-                            (= :cat (first schema-form))
-                            (= 2 (count schema-form)))
-                     (second schema-form)
-                     schema-form)
-          expected-value (when bounded-caps
-                           (admitted-value bounded-caps expected))
-          offending (when (and bounded-caps first-problem)
-                      (offending-value bounded-caps kind first-problem))
-          function-symbol (:fn-name data)
-          caller (caller-frame)
-          arm (case kind :malli.core/invalid-output :output
-                         :malli.core/invalid-guard :guard :input)]
-      (error/diagnostic
-       {:seon.error/kind ::contract-violated
-        :seon.instrument/contract-violated (str function-symbol)
-        ;; Store semantic evidence once. The terminal render path owns the
-        ;; only presentation fit; embedding printed schemas, problem trees,
-        ;; and arguments here made it print a print and repeat one payload.
-        :seon.error/message
-        (str function-symbol " violated its contract ("
-             (name kind) "): " problem-message
-             (when first-problem
-               (str (when (= :malli.core/invalid-input kind)
-                      (str "; argument " (first (:in first-problem)) " (0-based)"))
-                    "; schema path " (pr-str (:path first-problem))
-                    "; expected " (m/type (:schema first-problem))
-                    ", got " (if (nil? (:value first-problem)) "nil"
-                                 (.getSimpleName (class (:value first-problem))))))
-             (when (seq problem-paths)
-               ;; THE HEADLINE IS BOUNDED LIKE EVERY OTHER RENDERED
-               ;; VALUE, and the omission is COUNTED rather than silent.
-               ;; A 200-problem violation names the first few paths a
-               ;; reader can act on; the complete list rides
-               ;; `:seon.instrument/problem-paths` and the evidence.
-               (let [shown (vec (take headline-problem-paths problem-paths))
-                     remaining (- (count problem-paths) (count shown))]
-                 (str " at " (pr-str shown)
-                      (when (pos? remaining)
-                        (str " and " remaining " more"))))))
-        :seon.error/diagnostic-layer :instrumentation
-        :seon.error/diagnostic-operation function-symbol
-        :seon.error/diagnostic-member
-        (if (= :malli.core/invalid-output kind) :return :arguments)
-        :seon.error/diagnostic-expected expected-value
-        :seon.error/diagnostic-offending offending
-        :seon.error/diagnostic-cause kind
-        :seon.error/diagnostic-evidence
-        (when representative-problem
-          (cond-> {:seon.instrument/problem-count problem-count
-                   :seon.instrument/problems representative-problem}
-            caller (assoc :seon.instrument/caller caller)))
-        :seon.error/data
-        (cond-> {::malli kind
-                 ::arm arm
-                 ::problem-count problem-count}
-          (seq problem-paths) (assoc ::problem-paths problem-paths)
-          caller (assoc ::caller caller)
-          function-symbol (assoc ::fn (str function-symbol))
-)}))))
-      (catch Throwable _
-        fallback))))
+  "Retain the actual offending values; the error render pair owns projection."
+  [_caps kind data]
+  (try
+    (or
+     (buried-error kind data)
+     (let [function-symbol (:fn-name data)
+           {arglists ::arglists :as lookup} (diagnostic-arglists function-symbol)
+           arguments (:args data)
+           arglist (some #(when (or (= (count %) (count arguments))
+                                    (some #{'&} %)) %) arglists)
+           arity? (= :malli.core/invalid-arity kind)
+           [offended value]
+           (case kind
+             :malli.core/invalid-output [(:output data) (:value data)]
+             :malli.core/invalid-guard [(:guard data) [arguments (:value data)]]
+             [(:input data) arguments])
+           explanation (when-not arity? (m/explain offended value))
+           arm (case kind :malli.core/invalid-output :output
+                          :malli.core/invalid-guard :guard :input)
+           problems
+           (if arity?
+             [{:seon.error/argument "argument count"
+               :seon.error/path []
+               :seon.error/expected arglists
+               :seon.error/expected-description "the declared arglists"
+               :seon.error/offending (:arity data)
+               :seon.error/actual-description "an argument count of"
+               :seon.error/fix "Call one of the declared arglists."}]
+             (mapv
+              (fn [problem]
+                (let [position (first (:in problem))
+                      label (when (and (= :input arm) (= :catn (m/type offended)))
+                              (first (:path problem)))
+                      binding (when (and (= :input arm) (integer? position))
+                                (nth arglist position nil))
+                      argument (case arm
+                                 :output "return value"
+                                 :guard "arguments and return value"
+                                 (str (or label (when (and (symbol? binding) (not= '_ binding)) binding)
+                                          (str "argument " position " (0-based)"))))]
+                  (assoc
+                   (error/explain-problem
+                    {:seon.error/problem problem
+                     :seon.error/path (problem-path kind problem)
+                     :seon.error/parent
+                     (when (and (= :input arm) (seq (:in problem)))
+                       (get-in (vec arguments) (pop (vec (:in problem)))))
+                     :seon.error/argument argument})
+                   :seon.error/schema-path (vec (:path problem)))))
+              (:errors explanation)))
+           first-problem (first problems)
+           expected (if arity? arglists (m/form offended))
+           expected (if (and (vector? expected) (= :cat (first expected))
+                             (= 2 (count expected)))
+                      (second expected) expected)
+           offending (if arity? (:arity data)
+                         (if (= :input arm)
+                           [(:value (first (:errors explanation)))]
+                           (:value (first (:errors explanation)))))
+           paths (into [] (comp (map :seon.error/path) (remove empty?)) problems)
+           caller (caller-frame)]
+       (error/diagnostic
+        {:seon.error/kind ::contract-violated
+         :seon.instrument/contract-violated (str function-symbol)
+         :seon.error/message
+         (str function-symbol " refused " (:seon.error/argument first-problem)
+              " at " (pr-str (:seon.error/path first-problem))
+              ": expected " (:seon.error/expected-description first-problem)
+              ", got " (:seon.error/actual-description first-problem)
+              ". Fix: " (:seon.error/fix first-problem))
+         :seon.error/diagnostic-layer :instrumentation
+         :seon.error/diagnostic-operation function-symbol
+         :seon.error/diagnostic-member (case arm :output :return :guard :guard
+                                              (if arity? :arity :arguments))
+         :seon.error/diagnostic-expected expected
+         :seon.error/diagnostic-offending offending
+         :seon.error/diagnostic-cause kind
+         :seon.error/diagnostic-evidence
+         (if arity?
+           (select-keys lookup [:seon.instrument.lookup/status ::arglists])
+           (cond-> {::problem-count (count problems)}
+             caller (assoc ::caller caller)))
+         :seon.error/data
+         (cond-> {::malli kind ::arm arm ::fn (str function-symbol)
+                  ::problem-count (count problems)
+                  :seon.error/problems problems}
+           arity? (assoc ::arity (:arity data))
+           arglists (assoc ::arglists arglists)
+           (seq paths) (assoc ::problem-paths paths)
+           caller (assoc ::caller caller))})))
+    (catch Throwable _
+      (minimal-violation kind data))))
 
 (defn- throwing-report
   "The `:panic` reporter: raise the violation as our own flat error.
@@ -643,8 +543,7 @@
     supplied-projection :seon.schema/projection}]
   (cond
     (not (#{:panic :record} mode))
-    (let [bounded-caps (evidence-caps (or caps contract-evidence-caps))]
-      (error/diagnostic
+    (error/diagnostic
        {:seon.error/kind ::invalid-mode
         :seon.error/message
         "Instrumentation requires :panic or :record core-error mode."
@@ -653,10 +552,10 @@
         :seon.error/diagnostic-member :seon.config/on-core-error
         :seon.error/diagnostic-expected [:enum :panic :record]
         :seon.error/diagnostic-offending
-        (if (nil? mode) ::nil (admitted-value bounded-caps mode))
+        (if (nil? mode) ::nil mode)
         :seon.error/diagnostic-cause ::invalid-mode
         :seon.error/diagnostic-evidence
-        {:seon.instrument/accepted-modes [:panic :record]}}))
+        {:seon.instrument/accepted-modes [:panic :record]}})
 
     :else
     (let [projection (or supplied-projection (schema/handed-projection))]

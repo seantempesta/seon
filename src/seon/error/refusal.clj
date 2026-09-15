@@ -5,7 +5,7 @@
   "Deepest classified `ex-data`, retaining its exception message when absent;
   else deepest non-empty data, or nil."
   {:malli/schema
-   [:=> [:cat :seon.schema/value] [:or :nil :map]]}
+   [:=> [:cat [:maybe :seon.error/throwable]] [:or :nil :map]]}
   [throwable]
   (loop [candidate throwable
          deepest nil

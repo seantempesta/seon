@@ -135,6 +135,6 @@
 
 (defn -main
   "Prepare the selected snapshot's base; retain it while its launcher lives."
-  {:malli/schema [:=> [:cat [:* :string]] :nil]}
+  {:malli/schema [:=> [:cat [:* {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Clojure's command-line entry point receives any number of string arguments; the command parser owns option combinations and their diagnostics.", :gen/elements [[]]} :string]] :nil]}
   [& arguments]
   (apply ensure-base! arguments))

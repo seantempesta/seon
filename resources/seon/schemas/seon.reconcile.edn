@@ -1,4 +1,4 @@
-#:seon.reconcile{:adopt-identities [:set [:vector :any]],
+#:seon.reconcile{:adopt-identities [:set [:tuple :qualified-keyword :seon.schema/value]],
                  :converged? :boolean,
                  :desired [:vector [:map]],
                  :operations [:int {:min 0}],

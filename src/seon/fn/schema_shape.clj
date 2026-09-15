@@ -110,10 +110,7 @@
 (defn normalized-form
   "Canonical normalized form for one compiled Malli schema."
   {:malli/schema
-   [:function
-    [:=> [:cat :seon.schema/value] :seon.schema/value]
-    [:=> [:cat :seon.schema/value :map] :seon.schema/value]
-    [:=> [:cat :seon.schema/value :map :map] :seon.schema/value]]}
+   [:function [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli's form/AST boundary accepts both compiled Schema objects and raw forms; their embedded literals may have arbitrary Clojure shapes.", :gen/elements [nil false 0 "" :k [] {}]}]] :seon.schema/value] [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli's form/AST boundary accepts both compiled Schema objects and raw forms; their embedded literals may have arbitrary Clojure shapes.", :gen/elements [nil false 0 "" :k [] {}]}] :map] :seon.schema/value] [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli's form/AST boundary accepts both compiled Schema objects and raw forms; their embedded literals may have arbitrary Clojure shapes.", :gen/elements [nil false 0 "" :k [] {}]}] :map :map] :seon.schema/value]]}
   ([compiled]
    (normalized-form compiled {} {}))
   ([compiled forms]
@@ -143,7 +140,7 @@
 
 (defn fingerprint
   "SHA-256 identity for one canonical normalized schema form."
-  {:malli/schema [:=> [:cat :seon.schema/value] :string]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli's form/AST boundary accepts both compiled Schema objects and raw forms; their embedded literals may have arbitrary Clojure shapes.", :gen/elements [nil false 0 "" :k [] {}]}]] :string]}
   [form]
   (schema/sha-256
    [(.getBytes ^String (schema/canonical-data-string form)
@@ -173,7 +170,7 @@
 
 (defn typed-key-facts
   "Typed database facts for one Malli map-entry key."
-  {:malli/schema [:=> [:cat :seon.schema/value] :map]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli's form/AST boundary accepts both compiled Schema objects and raw forms; their embedded literals may have arbitrary Clojure shapes.", :gen/elements [nil false 0 "" :k [] {}]}]] :map]}
   [value]
   (let [kind (key-kind value)
         base {:seon.schema.map-entry/key-kind kind
@@ -302,10 +299,7 @@
 (defn shape-row
   "Shared content-addressed row for one compiled Malli schema."
   {:malli/schema
-   [:function
-    [:=> [:cat :seon.schema/value] :map]
-    [:=> [:cat :seon.schema/value :map] :map]
-    [:=> [:cat :seon.schema/value :map :map] :map]]}
+   [:function [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli's form/AST boundary accepts both compiled Schema objects and raw forms; their embedded literals may have arbitrary Clojure shapes.", :gen/elements [nil false 0 "" :k [] {}]}]] :map] [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli's form/AST boundary accepts both compiled Schema objects and raw forms; their embedded literals may have arbitrary Clojure shapes.", :gen/elements [nil false 0 "" :k [] {}]}] :map] :map] [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli's form/AST boundary accepts both compiled Schema objects and raw forms; their embedded literals may have arbitrary Clojure shapes.", :gen/elements [nil false 0 "" :k [] {}]}] :map :map] :map]]}
   ([compiled]
    (shape-row compiled {} {}))
   ([compiled forms]

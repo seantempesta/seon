@@ -1057,7 +1057,7 @@
     }
   }
 }
-.seon-family-entry.my-plan, .seon-family-entry.my-plan-ready {
+.my-plan, .my-plan-ready, .my-plan-item {
   font: 0.75rem/1.55 var(--font-mono);
   overflow-wrap: anywhere;
 }
@@ -1076,79 +1076,110 @@
   margin: 0.35rem 0;
   accent-color: var(--color-success);
 }
-.my-plan .my-plan-steps {
+.my-plan-steps {
   list-style: decimal;
   padding-left: 1.5rem;
   margin: 0.5rem 0 0;
 }
-.my-plan .my-plan-steps > li {
+.my-plan-steps > li {
   padding-left: 0.25rem;
   margin: 0;
 }
-.my-plan .my-plan-steps > li::marker {
+.my-plan-steps > li::marker {
   color: var(--color-text-400);
   font-size: 0.625rem;
 }
-.seon-family-entry.my-plan-item {
-  padding: 0.5rem 0;
-  border: 0;
-  border-bottom: 1px solid var(--color-base-800);
-  border-radius: 0;
-  background: transparent;
+.my-plan-item {
+  display: grid;
   gap: 0.2rem;
-  font: 0.75rem/1.55 var(--font-mono);
-  overflow-wrap: anywhere;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--color-base-800);
 }
-.seon-family-entry.my-plan-item.is-current {
+.my-plan-item.is-current {
   border-left: 1px solid var(--color-signal);
   padding-left: 0.65rem;
   background: var(--color-base-900);
 }
-.seon-family-entry.my-plan-item.is-completed {
-  opacity: 1;
+.my-plan-item h3 {
+  margin: 0;
+  color: var(--color-text-100);
+  font-size: 0.76rem;
+  font-weight: 500;
+  line-height: 1.35;
 }
 .my-plan-item.is-completed h3, .my-plan-item.is-completed .my-plan-expected {
   color: var(--color-text-400);
 }
-.my-plan-item .my-plan-status {
+.my-plan-status {
   display: flex;
   flex-wrap: wrap;
   gap: 0.25rem 0.75rem;
-  font-size: 0.625rem;
-  color: var(--color-text-400);
+  font-size: 0.72rem;
+  line-height: 1.5;
+  color: var(--color-text-200);
 }
-.my-plan-item .my-plan-state {
+.my-plan-state {
   font: inherit;
-  letter-spacing: normal;
-  text-transform: none;
   color: var(--color-text-400);
 }
-.my-plan-item .my-plan-expected {
+.my-plan-item.is-current .my-plan-state {
+  color: var(--color-signal);
+}
+.my-plan-item.is-blocked .my-plan-state {
+  color: var(--color-warning);
+}
+.my-plan-item.is-completed .my-plan-state {
+  color: var(--color-success);
+}
+.my-plan-expected {
+  margin-top: 0.12rem !important;
   border: 0;
-  padding: 0;
   font-size: 0.75rem;
   color: var(--color-text-300);
 }
 .my-plan-item.is-current .my-plan-expected {
   color: var(--color-text-100);
 }
-.my-plan-item h3 {
-  font-size: 0.75rem;
-  line-height: 1.55;
+.my-plan-relation {
+  color: var(--color-text-400);
+  font-size: 0.64rem;
+  line-height: 1.5;
 }
-.my-plan-item .my-plan-relation {
-  font-size: 0.625rem;
+.my-plan-relation code {
+  color: var(--color-text-300);
+}
+.my-plan-item details {
+  color: var(--color-text-500);
+  font-size: 0.66rem;
+}
+.my-plan-item details > summary {
+  color: var(--color-text-400);
+  cursor: pointer;
+}
+.my-plan-item details[open] > summary {
+  margin-bottom: 0.35rem;
 }
 .my-plan-item.is-completed details {
   font: 0.625rem/1.55 var(--font-mono);
 }
-.my-plan-item.is-completed summary {
-  cursor: pointer;
+.my-plan-progress {
   color: var(--color-text-400);
+  font-size: 0.68rem;
 }
-.my-plan .my-plan-progress strong {
+.my-plan-progress strong {
   color: var(--color-text-300);
   font-weight: 400;
+}
+.my-plan-ready {
+  display: grid;
+  gap: 0.35rem;
+  margin-top: 0.55rem;
+}
+.my-plan-ready > h3 {
+  margin: 0;
+  color: var(--color-text-400);
+  font-size: 0.66rem;
+  font-weight: 500;
 }
 .seon-family-entry.seon-agent-settings {
   font: 0.75rem/1.55 var(--font-mono);
@@ -2726,167 +2757,6 @@ details.tool-call-details[open] .tool-preview {
   line-height: 1.5;
   white-space: pre-wrap;
 }
-.my-plan-item {
-  display: grid;
-  gap: 0.28rem;
-  padding: 0.55rem 0.65rem;
-  background: color-mix(in srgb, #1a1918 72%, transparent);
-  @supports (color: color-mix(in lab, red, red)) {
-    background: color-mix(in srgb, var(--color-base-900) 72%, transparent);
-  }
-  border: 1px solid var(--color-base-800);
-  border-left: 2px solid var(--color-info);
-  border-radius: 0.2rem;
-}
-.my-plan-item.is-current {
-  border-left-color: var(--color-signal);
-}
-.my-plan-item.is-blocked {
-  border-left-color: var(--color-warning);
-}
-.my-plan-item.is-completed {
-  opacity: 0.78;
-  border-left-color: var(--color-success);
-}
-.my-plan-item h3 {
-  margin: 0;
-  color: var(--color-text-100);
-  font-size: 0.76rem;
-  font-weight: 500;
-  line-height: 1.35;
-}
-.my-plan-id {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  color: var(--color-text-500);
-  font-family: var(--font-mono);
-  font-size: 0.6rem;
-}
-.my-plan-state {
-  color: var(--color-info);
-  font-family: var(--font-sans);
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-.my-plan-item.is-current .my-plan-state {
-  color: var(--color-signal);
-}
-.my-plan-item.is-blocked .my-plan-state {
-  color: var(--color-warning);
-}
-.my-plan-item.is-completed .my-plan-state {
-  color: var(--color-success);
-}
-.my-plan-item > p:not(.my-plan-id):not(.my-plan-expected) {
-  color: var(--color-text-200);
-  font-size: 0.72rem;
-  line-height: 1.5;
-}
-.my-plan-expected {
-  margin-top: 0.12rem !important;
-  padding-top: 0.28rem;
-  border-top: 1px solid var(--color-base-800);
-  color: var(--color-info);
-  font-size: 0.66rem;
-}
-.my-plan-relation {
-  color: var(--color-text-400) !important;
-  font-size: 0.64rem !important;
-}
-.my-plan-relation code {
-  color: var(--color-text-300);
-}
-.my-plan-item details {
-  color: var(--color-text-500);
-  font-size: 0.66rem;
-}
-.my-plan-item details > summary, .my-plan-help > summary {
-  color: var(--color-text-400);
-  cursor: pointer;
-}
-.my-plan-item details[open] > summary {
-  margin-bottom: 0.35rem;
-}
-.my-plan-reference {
-  color: var(--color-text-500) !important;
-  font-size: 0.6rem !important;
-}
-.my-plan > h2 {
-  margin-bottom: 0.2rem;
-}
-.my-plan-progress {
-  color: var(--color-text-400);
-  font-size: 0.68rem;
-}
-.my-plan-progress strong {
-  color: var(--color-success);
-}
-.my-plan-focus {
-  display: grid;
-  gap: 0.25rem;
-  margin-top: 0.55rem;
-  padding: 0.35rem 0.5rem;
-  border-left: 2px solid var(--color-signal);
-  color: var(--color-text-200);
-}
-.my-plan-focus > * {
-  margin: 0;
-}
-.my-plan-focus h3 {
-  color: var(--color-text-50);
-  font-size: 0.8rem;
-}
-.my-plan-kicker {
-  color: var(--color-signal);
-  font-size: 0.58rem;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-.my-plan-help {
-  margin-top: 0.7rem;
-  color: var(--color-text-400);
-  font-size: 0.65rem;
-}
-.my-plan-help pre {
-  margin-top: 0.35rem;
-  white-space: pre-wrap;
-}
-.my-plan-ready, .my-plan-blocked, .my-plan-completed, .my-plan-obligations {
-  display: grid;
-  gap: 0.35rem;
-  margin-top: 0.55rem;
-}
-.my-plan-steps {
-  margin-top: 0.65rem;
-}
-.my-plan-steps > h3 {
-  margin: 0 0 0.4rem;
-  color: var(--color-text-400);
-  font-size: 0.66rem;
-  font-weight: 500;
-}
-.my-plan-tree, .my-plan-children {
-  display: grid;
-  gap: 0.4rem;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.my-plan-children {
-  margin: 0.5rem 0 0 1.25rem;
-  padding-left: 0.85rem;
-  border-left: 2px solid var(--color-base-800);
-}
-.my-plan-ready > h3, .my-plan-blocked > h3, .my-plan-completed > h3, .my-plan-obligations > h3 {
-  margin: 0;
-  color: var(--color-text-400);
-  font-size: 0.66rem;
-  font-weight: 500;
-}
 @media (max-width: 40rem) {
   .seon-message-meta {
     align-items: flex-start;
@@ -3130,11 +3000,6 @@ details.tool-call-details[open] .tool-preview {
   min-width: 0;
   min-height: 0;
   overflow: auto;
-}
-.seon-debug-grid:has(> .seon-debug-prompt-detail) {
-  grid-template-columns: minmax(0, 1fr);
-  grid-auto-rows: max-content;
-  align-content: start;
 }
 .seon-debug-experiment:has(> .seon-debug-graph) {
   display: grid;
@@ -3429,17 +3294,6 @@ details.tool-call-details[open] .tool-preview {
 .seon-debug-stored-value > summary {
   cursor: pointer;
 }
-.seon-debug-context-actions {
-  margin-top: 0.75rem;
-  padding-top: 0.6rem;
-  border-top: 1px solid var(--color-base-800);
-}
-.seon-debug-context-actions > h4 {
-  margin: 0 0 0.35rem;
-  color: var(--color-text-200);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
 .seon-debug-data-details {
   padding: 0.6rem 1rem;
   border-bottom: 1px solid var(--color-base-700);
@@ -3545,21 +3399,16 @@ pre.seon-debug-candidate-preview, .seon-debug-candidate-preview pre {
   overflow-wrap: anywhere;
   word-break: break-word;
 }
-.seon-debug-evidence, .seon-debug-selection-detail, .seon-debug-prompt-detail {
+.seon-debug-evidence, .seon-debug-selection-detail {
   margin-top: 0.5rem;
   color: var(--color-text-400);
   font-family: var(--font-mono);
   font-size: 0.7rem;
 }
-.seon-debug-evidence > summary, .seon-debug-selection-detail > summary, .seon-debug-prompt-detail > summary {
+.seon-debug-evidence > summary, .seon-debug-selection-detail > summary {
   padding: 0.35rem 0;
   color: var(--color-text-200);
   cursor: pointer;
-}
-.seon-debug-prompt-detail {
-  min-width: 0;
-  min-height: 0;
-  overflow: auto;
 }
 .seon-eval-entry {
   min-width: 0;
@@ -3591,15 +3440,6 @@ pre.seon-debug-candidate-preview, .seon-debug-candidate-preview pre {
 }
 .seon-help li + li, .seon-eval-lines li + li {
   margin-top: 0.5rem;
-}
-.seon-debug-provider-prompt > summary {
-  cursor: pointer;
-  padding: 0.75rem 0;
-}
-.seon-debug-prompt-detail > summary {
-  padding: 0.35rem 0.5rem;
-  border-bottom: 1px solid var(--color-base-800);
-  background: var(--color-base-900);
 }
 .seon-debug-observation .seon-data-map {
   grid-template-columns: fit-content(30ch) minmax(0, 1fr);
@@ -3656,10 +3496,6 @@ pre.seon-debug-candidate-preview, .seon-debug-candidate-preview pre {
     border-right: 0;
     border-bottom: 1px solid var(--color-base-800);
   }
-  .seon-debug-prompt-detail {
-    overflow: visible;
-    border-top: 1px solid var(--color-base-800);
-  }
   .seon-debug-observation .seon-data-map {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
@@ -3685,9 +3521,6 @@ pre.seon-debug-candidate-preview, .seon-debug-candidate-preview pre {
   min-height: 0;
   overflow: hidden;
 }
-.seon-debug-pane-ai {
-  border-right: 1px solid var(--color-base-800);
-}
 .seon-debug-caption {
   flex: 0 0 auto;
   margin: 0;
@@ -3706,14 +3539,6 @@ pre.seon-debug-candidate-preview, .seon-debug-candidate-preview pre {
   padding: 0.75rem;
   overflow: auto;
   background: var(--color-base-950);
-}
-.seon-debug-pane-ai .seon-debug-body {
-  margin: 0;
-  color: var(--color-text-100);
-  font-family: var(--font-mono);
-  font-size: 0.75rem;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
 }
 .seon-debug-pane-html .seon-debug-body {
   padding: 0.5rem;

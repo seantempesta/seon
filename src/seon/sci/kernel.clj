@@ -30,7 +30,7 @@
 
 (defn interrupted?
   "True when a throwable or one of its causes is SCI's interrupt."
-  {:malli/schema [:=> [:cat :any] :boolean]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
   [throwable]
   (loop [candidate throwable]
     (cond
@@ -317,7 +317,7 @@
 
 (defn arm?
   "True for a live arm value as handed out by `current-arm`."
-  {:malli/schema [:=> [:cat :any] :boolean]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
   [value]
   (and (map? value)
        (instance? AtomicLong (::entries value))
@@ -439,9 +439,7 @@
   arm, and the displaced arm's deadline is a latch on its own value rather
   than a clock on this thread, so nothing about it is lost while it waits.
   A nil `carried-arm` runs `work` unarmed, unchanged."
-  {:malli/schema [:=> [:cat [:or :nil :seon.sci.kernel/arm]
-                       [:fn clojure.core/ifn?]]
-                  :any]}
+  {:malli/schema [:=> [:cat [:or :nil :seon.sci.kernel/arm] [:fn clojure.core/ifn?]] [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The caller's body determines its return type; adopting the kernel arm preserves that exact result.", :gen/elements [nil false 0 "" :k [] {}]}]]}
   [carried-arm work]
   (if-not carried-arm
     (work)
@@ -473,10 +471,7 @@
   symbol when one exists: it prefixes the message and rides in the data. A
   form evaluation supplies no symbol, which is the ONLY difference between
   the two entrances — the classification itself is identical."
-  {:malli/schema [:=> [:cat :seon.sci.kernel/failure-request
-                       :any
-                       :seon.sci.admit/record]
-                  :seon.error/value]}
+  {:malli/schema [:=> [:cat :seon.sci.kernel/failure-request [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A kernel failure can carry any thrown or returned value; normalization must preserve evidence of an unrecognized failure.", :gen/elements [nil false 0 "" :k [] {}]}] :seon.sci.admit/record] :seon.error/value]}
   [{subject :seon.fn/sym
     time-limit-kind ::time-limit-kind
     failure-kind ::failure-kind}

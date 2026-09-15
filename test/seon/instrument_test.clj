@@ -133,9 +133,7 @@
   1)
 
 (defn ^{:malli/schema
-        [:=>
-         [:cat :any]
-         [:vector :int]]}
+        [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The instrumentation regression deliberately returns arbitrary supplied values to exercise an invalid-output explanation.", :gen/elements [nil false 0 "" :k [] {}]}]] [:vector :int]]}
   many-problem-output
   [value]
   value)
@@ -229,7 +227,7 @@
        (is (= :seon.error/fact
               (:seon.error/diagnostic-expected (:seon.error/data data)))
            "a cluster re-arm retains the JVM wrapper's bounded evidence policy")
-       (is (re-find #"invalid-input" (ex-message failure)))))))
+       (is (str/includes? (ex-message failure) "refused fact at []: expected a map, got a string"))))))
 
 (deftest projection-gates-inspect-the-complete-candidate-population
   (instrumented!
@@ -325,9 +323,10 @@
        (is (:db-after registration) (pr-str registration))
        (is (env/environment? environment) (pr-str environment))
        (let [diagnostic (ex-data failure)]
-         (is (= (str "Wrong number of args (0) passed to: " function-symbol
-                     "; declared arglists: ([rows])")
-                (:seon.error/message diagnostic)))
+         (is (str/includes? (error/render-ai diagnostic)
+                            (str function-symbol " refused argument count at []:")))
+         (is (str/includes? (error/render-ai diagnostic) "([rows])"))
+         (is (str/includes? (error/render-ai diagnostic) "0"))
          (is (= {:seon.error/diagnostic-layer :instrumentation
                  :seon.error/diagnostic-operation function-symbol
                  :seon.error/diagnostic-member :arity
@@ -418,11 +417,9 @@
             data (ex-data failure)
             message (:seon.error/message data)
             problems (get-in data
-                             [:seon.error/data
-                              :seon.error/diagnostic-evidence
-                              :seon.instrument/problems])]
+                             [:seon.error/data :seon.error/problems])]
         (is (str/includes? message "seon.instrument-test"))
-        (is (str/includes? message "should be an integer"))
+        (is (str/includes? message "expected an integer"))
         (is (not (str/includes? message ":seon.print/face"))
             "the print-node tree is rendered rather than serialized inline")
         (is (not (str/includes? message "\n"))
@@ -461,7 +458,7 @@
             (is (= expected-arm (:seon.instrument/arm instrument-data)))
             (is (str/includes? message function-name)
                 "the bounded headline still names the violated function")
-            (is (str/includes? message (name expected-kind)))
+            (is (str/includes? message "refused"))
             (is (< (tokens/estimate message) 64)
                 "the headline is a concise diagnosis measured in estimated tokens")
             (is (= 200 (:seon.instrument/problem-count instrument-data))
@@ -469,7 +466,32 @@
       (finally
         (instrument/remove!)))))
 
-(deftest registry-sized-contract-evidence-is-bounded-at-construction
+(deftest refusal-value-projection-obeys-the-profile-and-html-keeps-the-whole-value
+  (let [raw (concat (range 8) ["candidate-final"])
+        wrapped (instrument/wrap-interpreted
+                 'my.agents.audit/vector-input "[:=> [:cat [:vector :int]] :int]"
+                 (schema/handed-projection) :panic
+                 (config/result-caps (test-support/effective-config)) (constantly 1))
+        refusal (try (wrapped raw) (catch Exception failure (ex-data failure)))
+        unit {:seon.render/value refusal
+              :seon.repl/handle 'result/eaudit
+              :seon.render/profile
+              {:seon.render.profile/id ::refusal-profile
+               :seon.render.profile/token-budget 2048
+               :seon.render.profile/max-depth 8
+               :seon.render.profile/max-children 3
+               :seon.render.profile/max-string-length 256
+               :seon.render.profile/composition :multiline}}
+        ai (error/render-ai unit)
+        html (pr-str (error/render-html unit))]
+    (is (identical? raw (get-in refusal [:seon.error/data :seon.error/problems 0 :seon.error/offending])))
+    (is (str/includes? ai "expected a vector") ai)
+    (is (str/includes? ai ":seon.print/omitted") ai)
+    (is (str/includes? ai "(get-in result/eaudit [:seon.error/data :seon.error/problems 0 :seon.error/offending])") ai)
+    (is (not (str/includes? ai "candidate-final")) ai)
+    (is (str/includes? html "candidate-final") html)))
+
+(deftest registry-sized-contract-evidence-retains-the-offending-object
   (let [caps (config/result-caps (test-support/effective-config))
         inline-ceiling 4096
         allocation-ceiling (* 16 1024 1024)
@@ -496,20 +518,16 @@
                          before)
             data (ex-data failure)
             instrument-data (:seon.error/data data)
-            received (first (:seon.error/diagnostic-offending instrument-data))
-            [offending-key offending-value] (first received)]
-        (is (< (tokens/estimate (pr-str data)) 1024)
-            "the constructed error value stays below the estimated-token
-             equivalent of the former 4,096-character ceiling")
+            received (first (:seon.error/diagnostic-offending instrument-data))]
+        (is (identical? registry received)
+            "the seam retains the actual object; presentation alone elides it")
         (is (< allocated allocation-ceiling)
             (str "construction allocated " allocated
                  " bytes; the issue baseline was 150,063,304"))
         (is (= 1 (:seon.instrument/problem-count instrument-data)))
         (is (= :int (:seon.error/diagnostic-expected instrument-data)))
-        (is (contains? registry offending-key)
-            "the bounded argument retains an exact offending registry key")
-        (is (some? offending-value)
-            "and retains that key's structurally admitted value context"))
+        (is (identical? registry
+                        (get-in instrument-data [:seon.error/problems 0 :seon.error/offending]))))
       (finally
         (instrument/remove!)))))
 

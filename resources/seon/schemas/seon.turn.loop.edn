@@ -107,7 +107,7 @@
                     {:seon.schema.admission/exemption
                      :seon.schema.admission/polymorphic-boundary,
                      :seon.schema.admission/reason
-                     "An evaluation carries any already-admitted Clojure value; receipt settlement separately projects its durable representation.",
+                     "An evaluation carries any actual Clojure result value; evaluation settlement separately records its durable shown text.",
                      :gen/elements [nil true 0 "" :k [] {} #{}]}]]
                   [:seon.eval/shown {:optional true} :seon.eval/shown]
                   [:seon.cluster.eval/error

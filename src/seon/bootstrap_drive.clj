@@ -429,7 +429,7 @@
 
 (defn -main
   "Run the requested drives and print each report path with its grade."
-  {:malli/schema [:=> [:cat [:* :string]] [:vector :map]]}
+  {:malli/schema [:=> [:cat [:* {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Clojure's command-line entry point receives any number of string arguments; the command parser owns option combinations and their diagnostics.", :gen/elements [[]]} :string]] [:vector :map]]}
   [& arguments]
   (let [request
         (case (count arguments)

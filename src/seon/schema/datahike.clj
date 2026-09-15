@@ -16,7 +16,7 @@
 (defn form-children
   "The non-property children of one Malli form."
   {:malli/schema
-   [:=> [:cat :seon.schema/value] [:vector :seon.schema/value]]}
+   [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema.", :gen/elements [nil false 0 "" :k [] {}]}]] [:vector :seon.schema/value]]}
   [form]
   (if (vector? form)
     (into [] (remove map?) (rest form))
@@ -31,7 +31,7 @@
   declared `:seon.schema/definition` was a narrower promise than the
   function keeps, which only an armed contract could say out loud."
   {:malli/schema
-   [:=> [:cat :map :seon.schema/value] :seon.schema/value]}
+   [:=> [:cat :map [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema.", :gen/elements [nil false 0 "" :k [] {}]}]] :seon.schema/value]}
   [projection form]
   (cond
     (= :seon.db/ref form) form
@@ -46,7 +46,7 @@
 (defn resolve-malli-form
   "Resolve aliases against the canonical JVM declaration population."
   {:malli/schema
-   [:=> [:cat :seon.schema/value] :seon.schema/value]}
+   [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema.", :gen/elements [nil false 0 "" :k [] {}]}]] :seon.schema/value]}
   [form]
   (resolve-malli-form-in
    {:seon.schema.projection/forms (packaged-forms)}
@@ -73,14 +73,14 @@
   declaration through it, and a child is often not a parseable form on its
   own."
   {:malli/schema
-   [:=> [:cat :seon.schema/value] :seon.schema/value]}
+   [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema.", :gen/elements [nil false 0 "" :k [] {}]}]] :seon.schema/value]}
   [form]
   (if (vector? form) (first form) form))
 
 (defn resolve-datahike-form-in
   "Resolve aliases and wrappers in one projection to the stored form."
   {:malli/schema
-   [:=> [:cat :map :seon.schema/value] :seon.schema/value]}
+   [:=> [:cat :map [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema.", :gen/elements [nil false 0 "" :k [] {}]}]] :seon.schema/value]}
   [projection form]
   (let [resolved (resolve-malli-form-in projection form)]
     (if (= :and (form-head resolved))
@@ -90,7 +90,7 @@
 (defn resolve-datahike-form
   "Resolve aliases and wrappers against canonical JVM declarations."
   {:malli/schema
-   [:=> [:cat :seon.schema/value] :seon.schema/value]}
+   [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema.", :gen/elements [nil false 0 "" :k [] {}]}]] :seon.schema/value]}
   [form]
   (resolve-datahike-form-in
    {:seon.schema.projection/forms (packaged-forms)}
@@ -121,7 +121,7 @@
 
 (defn form->datahike-value-type-in
   "The Datahike value type represented by a form in one projection."
-  {:malli/schema [:=> [:cat :map :seon.schema/value] :keyword]}
+  {:malli/schema [:=> [:cat :map [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema.", :gen/elements [nil false 0 "" :k [] {}]}]] :keyword]}
   [projection form]
   (let [resolved (resolve-datahike-form-in projection form)
         head (form-head resolved)]
@@ -185,7 +185,7 @@
 
 (defn form->datahike-value-type
   "The Datahike value type represented by a canonical JVM Malli form."
-  {:malli/schema [:=> [:cat :seon.schema/value] :keyword]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema.", :gen/elements [nil false 0 "" :k [] {}]}]] :keyword]}
   [form]
   (form->datahike-value-type-in
    {:seon.schema.projection/forms (packaged-forms)}
@@ -193,7 +193,7 @@
 
 (defn form->cardinality
   "The Datahike cardinality represented by one Malli form."
-  {:malli/schema [:=> [:cat :seon.schema/value] :keyword]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema.", :gen/elements [nil false 0 "" :k [] {}]}]] :keyword]}
   [form]
   (let [resolved (resolve-datahike-form form)]
     (if (and (vector? resolved)
@@ -212,7 +212,7 @@
 (defn form->child-form
   "The stored child form for a collection schema, or the scalar form."
   {:malli/schema
-   [:=> [:cat :seon.schema/value] :seon.schema/value]}
+   [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema.", :gen/elements [nil false 0 "" :k [] {}]}]] :seon.schema/value]}
   [form]
   (let [resolved (resolve-datahike-form form)]
     (if (and (vector? resolved)
@@ -552,8 +552,7 @@
 
 (defn decode-attribute-value-in
   "Decode one attribute value against exactly one projection."
-  {:malli/schema [:=> [:cat :map :keyword :seon.schema/value]
-                  :seon.schema/value]}
+  {:malli/schema [:=> [:cat :map :keyword [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema.", :gen/elements [nil false 0 "" :k [] {}]}]] :seon.schema/value]}
   [projection attr value]
   (if-not (edn-encoded-attr-in? projection attr)
     value
@@ -574,7 +573,6 @@
 
    Resolves the declaration population ONCE; a caller decoding more than one
    attribute resolves it itself and calls [[decode-attribute-value-in]]."
-  {:malli/schema [:=> [:cat :keyword :seon.schema/value]
-                  :seon.schema/value]}
+  {:malli/schema [:=> [:cat :keyword [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema.", :gen/elements [nil false 0 "" :k [] {}]}]] :seon.schema/value]}
   [attr value]
   (decode-attribute-value-in (schema/declaration-projection) attr value))

@@ -4,13 +4,21 @@
                     [:seon.render.data/offset
                      :seon.render.data/offset]],
                    :offset [:int {:min 0}],
-                   :path [:vector :any],
+                   :path [:vector [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
+                                         :seon.schema.admission/reason "Clojure associative paths may use arbitrary map keys, set members or numeric sequence indices."
+                                         :gen/elements [nil false 0 "" :k [] {}]}]],
                    :total [:int {:min 0}],
                    :next-offset :seon.render.data/offset,
                    :window
                    [:map
                     [:seon.render.data/entries
-                     [:vector [:tuple :any :any]]]
+                     [:vector [:tuple
+                               [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
+                                      :seon.schema.admission/reason "A structural page preserves arbitrary Clojure map keys, set members or sequence indices."
+                                      :gen/elements [nil false 0 "" :k [] {}]}]
+                               [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
+                                      :seon.schema.admission/reason "A structural page preserves arbitrary values from the original Clojure result."
+                                      :gen/elements [nil false 0 "" :k [] {}]}]]]]
                     [:seon.render.data/offset :seon.render.data/offset]
                     [:seon.render.data/total :seon.render.data/total]
                     [:seon.render.data/next-offset

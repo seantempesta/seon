@@ -28,8 +28,8 @@
          (is (= (get (:seon.schema.projection/forms (schema/handed-projection))
                      :my.plan.item/title)
                 (:seon.schema/form result)))
-         (is (str/starts-with? (db/render-rejection-ai result) "Expected: [:string"))
-         (is (str/includes? (db/render-rejection-ai result) "\nGot: 42"))))
+         (is (str/starts-with? (db/render-rejection-ai result) "seon.db/transact! refused transaction data at"))
+         (is (str/includes? (db/render-rejection-ai result) "got an integer 42. Fix:"))))
      (testing "the supplied projection owns constraints on the same attribute"
        (let [forms (:seon.schema.projection/forms (schema/handed-projection))
              projection (schema/declaration-projection
@@ -56,6 +56,17 @@
        (is (= :map (first (:seon.db/entity-form result))))
        (is (some #(= [:my.plan.item/title :my.plan.item/title] %)
                  (:seon.db/entity-form result)))))))
+
+(deftest unknown-key-suggestion-comes-from-present-attributes
+  (test-support/with-database
+   (fn [connection]
+     (let [unknown (keyword "my.plan" "item/id")
+           result (refused connection [{unknown "feedback/typo"
+                                       :my.plan.item/title "A real step"}]
+                           unknown "feedback/typo" [0 unknown])
+           shown (db/render-rejection-ai result)]
+       (is (= [:my.plan.item/id] (:seon.db/registered-candidates result)))
+       (is (str/includes? shown "Fix: Use :my.plan.item/id;") shown)))))
 
 (deftest nested-component-and-lookup-violations
   (test-support/with-database

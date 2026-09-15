@@ -12,7 +12,7 @@
 
 (defn -main
   "Arm contracts, run the named test namespaces, exit with the tally."
-  {:malli/schema [:=> [:cat [:* :string]] :nil]}
+  {:malli/schema [:=> [:cat [:* {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Clojure's command-line entry point receives any number of string arguments; the command parser owns option combinations and their diagnostics.", :gen/elements [[]]} :string]] :nil]}
   [& args]
   (let [namespaces (mapv symbol args)
       started (java.time.Instant/now)

@@ -96,7 +96,7 @@
 
   A missing reply is explicitly unknown; presence in the graph never implies
   health."
-  {:malli/schema [:=> [:cat :any [:maybe :map]] :map]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "core.async.flow permits arbitrary process identifiers; this projection preserves the supplied identifier, including for a missing reply.", :gen/elements [nil false 0 "" :k [] {}]}] [:maybe :map]] :map]}
   [proc-id reply]
   (if reply
     {:seon.oversight/proc proc-id

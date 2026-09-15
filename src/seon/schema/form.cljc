@@ -16,20 +16,20 @@
 
 (defn attr-form-properties
   "The Malli properties map from an attribute-schema form, or nil."
-  {:malli/schema [:=> [:cat :any] [:maybe :map]]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli declarations contain arbitrary literal values and predicates; schema inspection preserves that data, and body wrappers return the caller's result unchanged.", :gen/elements [nil false 0 "" :k [] {}]}]] [:maybe :map]]}
   [form]
   (when (vector? form)
     (some (fn [x] (when (map? x) x)) (rest form))))
 
 (defn map-shape?
   "True if `v` looks like a Malli `:map` schema form."
-  {:malli/schema [:=> [:cat :any] :boolean]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
   [v]
   (and (vector? v) (= :map (first v))))
 
 (defn map-entries
   "Entries of a `:map` form with its head and optional properties stripped."
-  {:malli/schema [:=> [:cat :any] [:vector :any]]}
+  {:malli/schema [:=> [:cat [:or :nil [:sequential :seon.schema/value]]] [:vector [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A raw Malli map entry contains a key, optional property map and schema form; this inspection preserves those heterogeneous values.", :gen/elements [nil false 0 "" :k [] {}]}]]]}
   [v]
   (let [body (rest v)
         body (if (and (seq body) (map? (first body))) (rest body) body)]
@@ -37,7 +37,7 @@
 
 (defn schema-properties
   "The `:map` schema's properties map between its head and entries, or nil."
-  {:malli/schema [:=> [:cat :any] [:maybe :map]]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli declarations contain arbitrary literal values and predicates; schema inspection preserves that data, and body wrappers return the caller's result unchanged.", :gen/elements [nil false 0 "" :k [] {}]}]] [:maybe :map]]}
   [v]
   (when (map-shape? v)
     (let [body (rest v)]
@@ -46,7 +46,7 @@
 
 (defn namespaced-properties
   "Qualified Malli properties carried by one authored schema form."
-  {:malli/schema [:=> [:cat :any] :map]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli declarations contain arbitrary literal values and predicates; schema inspection preserves that data, and body wrappers return the caller's result unchanged.", :gen/elements [nil false 0 "" :k [] {}]}]] :map]}
   [form]
   (into {}
         (comp
@@ -122,7 +122,7 @@
    canonical EDN, and the Datahike bridge all keep reading the narrow form,
    and a component attribute declared tomorrow is widened without an edit.
    Idempotent, so a form may pass through more than once."
-  {:malli/schema [:=> [:cat :any] :any]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli declarations contain arbitrary literal values and predicates; schema inspection preserves that data, and body wrappers return the caller's result unchanged.", :gen/elements [nil false 0 "" :k [] {}]}]] [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli declarations contain arbitrary literal values and predicates; schema inspection preserves that data, and body wrappers return the caller's result unchanged.", :gen/elements [nil false 0 "" :k [] {}]}]]}
   [form]
   (walk/postwalk
    (fn [value]
@@ -137,7 +137,7 @@
 
 (defn enum-members
   "Members of an `:enum` form after its optional properties map, or []."
-  {:malli/schema [:=> [:cat :any] [:vector :any]]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli enum members are arbitrary literal values; non-enum candidate forms return an empty vector.", :gen/elements [nil false 0 "" :k [] {}]}]] [:vector [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli enum members are arbitrary literal values; non-enum candidate forms return an empty vector.", :gen/elements [nil false 0 "" :k [] {}]}]]]}
   [form]
   (if (and (vector? form) (= :enum (first form)))
     (let [body (rest form)
@@ -147,6 +147,6 @@
 
 (defn nilable-value-schema?
   "True when `v` is a top-level `[:maybe X]` value registration."
-  {:malli/schema [:=> [:cat :any] :boolean]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
   [v]
   (and (vector? v) (= :maybe (first v))))

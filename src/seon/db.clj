@@ -41,7 +41,7 @@
 
 (defn connection?
   "True for a live (unreleased) Datahike connection."
-  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
   [value]
   (and (connector/connection? value)
        (some? (:wrapped-atom value))
@@ -49,7 +49,7 @@
 
 (defn database-value?
   "True for any Datahike database value."
-  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
   [value]
   (db.utils/db? value))
 
@@ -1498,20 +1498,7 @@
 (defn q
   "Run a Datalog query over explicit inputs or the current database value."
   {:malli/schema
-   [:=>
-    [:catn
-     [::query-or-database
-      [:or
-       :seon.db/database-value
-       :seon.error/value
-       :seon.db/query
-       :seon.db/query-args]]
-     [::arguments [:* :seon.schema/value]]]
-    [:or :seon.schema/value :seon.error/value]
-    [:fn {:error/message
-          "The supplied arguments must match the query's :in (default [$]); every source input must be a database value. Use (seon.db/q query input ...) with $ elided, or (seon.db/q database query input ...) with the database first."
-          :error/fn seon.db/query-guard-message}
-     seon.db/query-call-valid?]]}
+   [:=> [:catn [:seon.db/query-or-database [:or :seon.db/database-value :seon.error/value :seon.db/query :seon.db/query-args]] [:seon.db/arguments [:* {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Datahike Datalog bindings carry arbitrary values. The function guard derives input count and database source positions from the parsed query.", :gen/elements [[]]} :seon.schema/value]]] [:or :seon.schema/value :seon.error/value] [:fn #:error{:message "The supplied arguments must match the query's :in (default [$]); every source input must be a database value. Use (seon.db/q query input ...) with $ elided, or (seon.db/q database query input ...) with the database first.", :fn seon.db/query-guard-message} seon.db/query-call-valid?]]}
   [query-or-database & arguments]
   (if (error-value? query-or-database)
     query-or-database
@@ -1845,14 +1832,7 @@
 (defn datoms
   "Eager ordinary datoms from an explicit or current database value."
   {:malli/schema
-   [:=>
-    [:cat
-     [:or :seon.db/database-value :seon.error/value
-      :seon.db/index-lookup :keyword]
-     [:* :seon.schema/value]]
-    [:or :seon.db/datoms :seon.error/value]
-    [:fn {:error/message "Use (seon.db/datoms index & components) or (seon.db/datoms database index & components); an index argument map takes no trailing arguments, and an index has at most four components."}
-     seon.db/datoms-call-valid?]]}
+   [:=> [:cat [:or :seon.db/database-value :seon.error/value :seon.db/index-lookup :keyword] [:* {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Datahike index components include arbitrary attribute values. The function guard checks index, component count and argument-map exclusivity.", :gen/elements [[]]} :seon.schema/value]] [:or :seon.db/datoms :seon.error/value] [:fn #:error{:message "Use (seon.db/datoms index & components) or (seon.db/datoms database index & components); an index argument map takes no trailing arguments, and an index has at most four components."} seon.db/datoms-call-valid?]]}
   [database-or-index & arguments]
   (if (or (db.utils/db? database-or-index)
           (error-value? database-or-index))
@@ -2360,8 +2340,7 @@
 
 (defn apply-diff
   "Apply plain changed paths to a previously shown value."
-  {:malli/schema [:=> [:cat :seon.schema/value :seon.db.diff/paths]
-                  :seon.schema/value]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A prior shown Clojure value may be scalar, nil or any collection; editscript paths determine the changed subvalues.", :gen/elements [nil false 0 "" :k [] {}]}] :seon.db.diff/paths] :seon.schema/value]}
   [before changes]
   (editscript/patch
    before
@@ -2375,11 +2354,7 @@
 (defn diff
   "Compare shown values, or replay a pure database read since a basis."
   {:malli/schema
-   [:function
-    [:=> [:cat :seon.db.diff/values-request] :seon.db.diff/paths]
-    [:=> [:cat :seon.db/basis-t :seon.test/var
-         [:* :seon.schema/value]]
-     [:or :seon.db.diff/result :seon.error/value]]]}
+   [:function [:=> [:cat :seon.db.diff/values-request] :seon.db.diff/paths] [:=> [:cat :seon.db/basis-t :seon.test/var [:* {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Arguments are forwarded to the supplied Var; its program-graph contract and read plan own their shapes and arity.", :gen/elements [[]]} :seon.schema/value]] [:or :seon.db.diff/result :seon.error/value]]]}
   ([{before :seon.db.diff/before after :seon.db.diff/after}]
    (value-changes before after))
   ([basis function-var & arguments]
@@ -2498,7 +2473,19 @@
             nil))]
     {:seon.error/kind ::rejected
      :seon.error/message (rejection-message conflict throwable)
-     :seon.error/data (merge data conflict)
+     :seon.error/data
+     (cond-> (merge data conflict)
+       conflict
+       (assoc :seon.error/diagnostic-operation 'seon.db/transact!
+              :seon.error/problems
+              [{:seon.error/argument "transaction data"
+                :seon.error/path [(::conflict-attribute conflict)]
+                :seon.error/expected
+                (get (dbi/-schema (d/db connection)) (::conflict-attribute conflict))
+                :seon.error/expected-description "a value satisfying the attribute's uniqueness constraint"
+                :seon.error/offending conflict
+                :seon.error/actual-description "a value already assigned to an entity"
+                :seon.error/fix "Update the existing owner, or choose an unused value."}]))
      ::transaction-refused true}))
 
 (defn- stamp-receipt
@@ -2538,13 +2525,31 @@
    #(m/validator form {:registry (:seon.schema.projection/registry projection)})))
 
 (defn- invalid-write
-  [attribute form value path entity-form cause candidates]
+  [projection attribute form value path entity-form cause candidates]
+  (let [problem
+        (if (= ::attribute-not-installed cause)
+          {:seon.error/argument "transaction data"
+           :seon.error/path path
+           :seon.error/expected :qualified-keyword
+           :seon.error/expected-description "an installed attribute"
+           :seon.error/offending attribute
+           :seon.error/actual-description "an undeclared attribute"
+           :seon.error/fix "Use a declared attribute from the entity's schema."}
+          ((requiring-resolve 'seon.error/explain-problem)
+           {:seon.error/argument "transaction data"
+            :seon.error/path path
+            :seon.error/problem
+            (cond-> {:schema (m/schema form {:registry (:seon.schema.projection/registry projection)})
+                     :value value :in path}
+              (= :malli.core/missing-key cause) (assoc :type cause))}))]
   (diagnostic
    (cond->
     {:seon.error/kind ::invalid-write
      :seon.error/message
-     (str "Attribute " (pr-str attribute) " expected " (pr-str form)
-          ", got " (pr-str value) ".")
+     (str "seon.db/transact! refused transaction data at " (pr-str path)
+          ": expected " (:seon.error/expected-description problem)
+          ", got " (:seon.error/actual-description problem)
+          ". Fix: " (:seon.error/fix problem))
      ::transaction-refused true
      ::attribute attribute
      :seon.schema/form form
@@ -2556,9 +2561,10 @@
      :seon.error/diagnostic-expected form
      :seon.error/diagnostic-offending value
      :seon.error/diagnostic-cause cause
+     :seon.error/data {:seon.error/problems [problem]}
      :seon.error/diagnostic-evidence {::path path}}
      entity-form (assoc ::entity-form entity-form)
-     candidates (assoc ::registered-candidates candidates))))
+     candidates (assoc ::registered-candidates candidates)))))
 
 (declare write-map-error write-attribute-error)
 
@@ -2603,7 +2609,7 @@
         authored (get (:seon.schema.projection/forms projection) attribute)]
     (cond
       (and (nil? installed) (not (contains? datahike.schema/schema-keys attribute)))
-      (invalid-write attribute :seon.error/unknown value path entity-form
+      (invalid-write projection attribute :seon.error/unknown value path entity-form
                      ::attribute-not-installed
                      (registered-attribute-candidates
                       (installed-attribute-declarations database) attribute))
@@ -2631,8 +2637,24 @@
             (when (and authored
                        (not ((write-validator projection form)
                              (write-value database projection attribute value single?))))
-              (invalid-write attribute authored value path entity-form
+              (invalid-write projection attribute authored value path entity-form
                              ::invalid-value nil)))))))
+
+(defn- write-key-candidates
+  "Missing declared keys in the closest schema selected by present attributes."
+  [projection row]
+  (let [present (set (keys row))
+        candidates
+        (->> (schema/candidate-shapes-in projection row)
+             (map (fn [shape]
+                    (let [required (:seon.schema/required-attrs shape)]
+                      {:matched (count (filter present required))
+                       :missing (set (remove present required))})))
+             (filter #(and (pos? (:matched %)) (seq (:missing %)))))
+        rank (fn [candidate] [(- (:matched candidate)) (count (:missing candidate))])
+        best (some->> candidates (sort-by rank) first rank)]
+    (into (sorted-set)
+          (comp (filter #(= best (rank %))) (mapcat :missing)) candidates)))
 
 (defn- write-map-error
   [database projection row path]
@@ -2645,8 +2667,8 @@
                      (get schemas attribute)))
                  (keys row)))
         forms (:seon.schema.projection/forms projection)
-        entity-form (some->> schema-keys first (get forms))]
-    (or
+        entity-form (some->> schema-keys first (get forms))
+        failure (or
      (some (fn [[attribute value]]
              (if (= :db/id attribute)
                (write-ref-error database projection value (conj path attribute) entity-form)
@@ -2669,11 +2691,22 @@
                     in (:in failure)
                     attribute (or (first in) (first (keys row)))
                     value (get-in row in :seon.error/unknown)]
-                (invalid-write attribute
+                (invalid-write projection attribute
                                (or (get forms attribute) (get forms schema-key))
                                value (into path in) (get forms schema-key)
                                (or (:type failure) ::invalid-entity) nil))))
-          schema-keys))))))
+          schema-keys))))]
+    (if (and failure (= ::attribute-not-installed
+                        (get-in failure [:seon.error/data :seon.error/diagnostic-cause])))
+      (let [candidates (write-key-candidates projection row)]
+        (if (= 1 (count candidates))
+          (-> failure
+              (assoc ::registered-candidates (vec candidates))
+              (assoc-in [:seon.error/data :seon.error/problems 0 :seon.error/fix]
+                        (str "Use " (first candidates)
+                             "; it is the missing declared key for the attributes in this map.")))
+          failure))
+      failure)))
 
 (defn- write-error
   [database projection transaction]
@@ -2834,35 +2867,14 @@
   {:malli/schema
    [:=> [:cat :seon.db/transaction-refused-error] [:string {:min 1}]]}
   [unit]
-  (let [value (rendered-value unit)]
-    (if (= ::invalid-write (:seon.error/kind value))
-      (str "Expected: " (pr-str (:seon.schema/form value))
-           "\nGot: " (pr-str (::offending value))
-           "\nAttribute: " (::attribute value) " at " (pr-str (::path value))
-           (when-let [form (::entity-form value)]
-             (str "\nEntity: " (pr-str form)))
-           (when-let [candidates (::registered-candidates value)]
-             (str "\nRegistered candidates: " (pr-str candidates))))
-      (:seon.error/message value))))
+  ((requiring-resolve 'seon.error/render-ai) unit))
 
 (defn render-rejection-html
   "Render a rejected database transaction as readable Hiccup."
   {:malli/schema
    [:=> [:cat :seon.db/transaction-refused-error] :seon.render/hiccup]}
   [unit]
-  (let [value (rendered-value unit)
-        conflict (:seon.error/data value)]
-    [:article {:class "seon-family-entry seon-db-rejection-entry"}
-     [:h3 (:seon.error/message value)]
-     (when (::conflict-attribute conflict)
-       [:dl
-        [:div [:dt "Attribute"]
-         [:dd (str (::conflict-attribute conflict))]]
-        [:div [:dt "Value"]
-         [:dd (transaction-value-html (::conflict-value conflict))]]
-        [:div [:dt "Existing owner"]
-         [:dd (if (integer? (::conflict-owner conflict)) "Another record"
-                  (transaction-value-html (::conflict-owner conflict)))]]])]))
+  ((requiring-resolve 'seon.error/render-html) unit))
 
 (defn- transaction-result
   [report]

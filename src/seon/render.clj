@@ -831,7 +831,7 @@
   same rule `seon.repl/missing-text` follows for a value that was never
   stored. A sorted map and canonical printing make the line's bytes a
   function of the refusal alone."
-  {:malli/schema [:=> [:cat :seon.schema/value] [:string {:min 1}]]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The value renderer and its projections operate on arbitrary Clojure results, including scalar and nil results; the render profile owns presentation bounds.", :gen/elements [nil false 0 "" :k [] {}]}]] [:string {:min 1}]]}
   [unit]
   (admit/canonical-edn (unknown-evidence-of unit)))
 
@@ -843,7 +843,7 @@
   class `seon.render.lint` counts, so a page full of refusals is still a lint
   finding rather than a new unstyled, uncounted block. What is new is inside
   it — the same line the agent reads."
-  {:malli/schema [:=> [:cat :seon.schema/value] :seon.render/hiccup]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The value renderer and its projections operate on arbitrary Clojure results, including scalar and nil results; the render profile owns presentation bounds.", :gen/elements [nil false 0 "" :k [] {}]}]] :seon.render/hiccup]}
   [unit]
   [:div {:class "seon-render-unavailable seon-render-unknown"}
    [:span {:class "seon-render-unknown-label"} "renderer unavailable"]
@@ -1071,8 +1071,7 @@
   A selected producer's output is terminal projection data: it is never fed
   back into selection. Admission remains wholly owned by the guarded kernel."
   {:malli/schema
-   [:=> [:cat :map :any :seon.print/node :seon.render/output]
-    :seon.print/node]}
+   [:=> [:cat :map [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The value renderer and its projections operate on arbitrary Clojure results, including scalar and nil results; the render profile owns presentation bounds.", :gen/elements [nil false 0 "" :k [] {}]}] :seon.print/node :seon.render/output] :seon.print/node]}
   [request value node output]
   (project-node* request output [] node value))
 
@@ -1515,25 +1514,7 @@
 (defn call-with-walk-context
   "Call `body` with one agent's ambient walk custody."
   {:malli/schema
-   [:=>
-    [:catn
-     [:seon.render.walk/context
-      [:map
-       [:seon.agent/id :seon.agent/id]
-       [:seon.db/db {:optional true} :seon.db/database-value]
-       [:seon.sci.admit/caps {:optional true} :seon.sci.admit/caps]
-       [:seon.sci.eval/ctx {:optional true} :seon.sci.eval/ctx]
-       [:seon.sci.eval/time-limit-ms
-        {:optional true}
-        :seon.sci.eval/time-limit-ms]
-       [:seon.config/on-core-error
-        {:optional true}
-        :seon.config/on-core-error]
-       [:seon.db/connection
-        {:optional true}
-        :seon.db/connection]]]
-     [:seon.render.walk/body [:fn clojure.core/ifn?]]]
-    :any]}
+   [:=> [:catn [:seon.render.walk/context [:map [:seon.agent/id :seon.agent/id] [:seon.db/db {:optional true} :seon.db/database-value] [:seon.sci.admit/caps {:optional true} :seon.sci.admit/caps] [:seon.sci.eval/ctx {:optional true} :seon.sci.eval/ctx] [:seon.sci.eval/time-limit-ms {:optional true} :seon.sci.eval/time-limit-ms] [:seon.config/on-core-error {:optional true} :seon.config/on-core-error] [:seon.db/connection {:optional true} :seon.db/connection]]] [:seon.render.walk/body [:fn clojure.core/ifn?]]] [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The value renderer and its projections operate on arbitrary Clojure results, including scalar and nil results; the render profile owns presentation bounds.", :gen/elements [nil false 0 "" :k [] {}]}]]}
   [context body]
   (binding [*walk-context* context
             db/*conn*

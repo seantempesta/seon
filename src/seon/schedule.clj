@@ -115,7 +115,7 @@
 
 (defn valid-cron?
   "True when `expression` is a valid five-field Unix cron expression."
-  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
   [expression]
   (try
     (when (string? expression)
@@ -126,7 +126,7 @@
 
 (defn valid-timezone?
   "True when `timezone` names an installed IANA time zone."
-  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
   [timezone]
   (try
     (when (string? timezone)
@@ -730,12 +730,7 @@
   and relevant-fact callbacks offer the same payload-free kick. Every transform
   derives due work and the next instant again from the current database value."
   {:malli/schema
-   [:function
-    [:=> [:cat] [:map]]
-    [:=> [:cat :seon.schedule/proc-request] :map]
-    [:=> [:cat :map :keyword] :map]
-    [:=> [:cat :map :keyword :any]
-     [:tuple :map [:maybe [:map-of :keyword [:vector :some]]]]]]}
+   [:function [:=> [:cat] [:map]] [:=> [:cat :seon.schedule/proc-request] :map] [:=> [:cat :map :keyword] :map] [:=> [:cat :map :keyword [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "core.async.flow supplies per-port messages of different declared shapes and accepts heterogeneous non-nil output messages; the port determines each message contract.", :gen/elements [nil false 0 "" :k [] {}]}]] [:tuple :map [:maybe [:map-of :keyword [:vector [:some {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "core.async.flow supplies per-port messages of different declared shapes and accepts heterogeneous non-nil output messages; the port determines each message contract.", :gen/elements [false 0 "" :k [] {}]}]]]]]]]}
   ([]
    {:ins {}
     :outs {}

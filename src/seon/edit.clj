@@ -455,7 +455,7 @@
 
   Takes a request value and returns a boolean. This predicate validates
   `:my.edit/form-request`; call `form` to perform the edit."
-  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
   [request]
   (and (map? request)
        (case (:my.edit/operation request)

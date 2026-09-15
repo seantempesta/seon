@@ -99,7 +99,7 @@
 
 (defn socket-server?
   "True for the java.net.ServerSocket an io-prepl listens on."
-  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
   [value]
   (instance? java.net.ServerSocket value))
 
@@ -112,7 +112,7 @@
   This is the ruled 2026-08-13 input narrowing: cluster names contain no path
   separator and are neither `.` nor `..`, so cluster-path derivation cannot
   escape or alias the cluster root."
-  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
   [value]
   (and (string? value)
        (not (empty? value))
@@ -420,9 +420,7 @@
 
 (defn mcp-valf
   "Project marked MCP returns; preserve ordinary io-prepl returns unchanged."
-  {:malli/schema [:=> [:cat :seon.boot/cluster-name
-                       :seon.config/effective :any]
-                  :string]}
+  {:malli/schema [:=> [:cat :seon.boot/cluster-name :seon.config/effective [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Clojure's prepl hands the projection arbitrary evaluation results, including live JVM objects and nil.", :gen/elements [nil false 0 "" :k [] {}]}]] :string]}
   [cluster-name bootstrap-effective value]
   ;; A host eval can redefine Vars shared by every cohosted cluster. This
   ;; distinct input invalidates retained render calls; a newest-database wake
@@ -448,9 +446,7 @@
 
 (defn mcp-get-value
   "Read and drill one stored MCP value artifact without mutating REPL state."
-  {:malli/schema [:=> [:cat :seon.boot/cluster-name :seon.blob/digest
-                       :seon.render.data/path :int]
-                  :any]}
+  {:malli/schema [:=> [:cat :seon.boot/cluster-name :seon.blob/digest :seon.render.data/path :int] [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The MCP retrieval boundary returns the arbitrary original evaluation value at the requested path.", :gen/elements [nil false 0 "" :k [] {}]}]]}
   [cluster-name content-digest path offset]
   (if-let [connection (:seon.boot/cluster-connection
                        (mcp-instance cluster-name))]

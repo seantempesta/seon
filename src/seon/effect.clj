@@ -726,12 +726,7 @@
 (defn request!
   "Validate, record, dispatch, bound, and settle one capability request."
   {:malli/schema
-   [:function
-    [:=> [:cat :seon.schema/value :seon.schema/value]
-     :seon.schema/value]
-    [:=> [:cat :seon.schema/value :seon.schema/value
-          :seon.effect/execution-options]
-     :seon.schema/value]]}
+   [:function [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The effect boundary reports malformed owners and requests as values; the resolved capability's own declared contract validates the heterogeneous request.", :gen/elements [nil false 0 "" :k [] {}]}] [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The effect boundary reports malformed owners and requests as values; the resolved capability's own declared contract validates the heterogeneous request.", :gen/elements [nil false 0 "" :k [] {}]}]] :seon.schema/value] [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The effect boundary reports malformed owners and requests as values; the resolved capability's own declared contract validates the heterogeneous request.", :gen/elements [nil false 0 "" :k [] {}]}] [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The effect boundary reports malformed owners and requests as values; the resolved capability's own declared contract validates the heterogeneous request.", :gen/elements [nil false 0 "" :k [] {}]}] :seon.effect/execution-options] :seon.schema/value]]}
   ([owner request]
    (request* owner request {}))
   ([owner request execution]

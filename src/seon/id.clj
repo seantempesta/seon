@@ -31,10 +31,7 @@
   With no arguments, mint a fresh event identity. Data is deliberately
   polymorphic: scalars and collections are hashed exactly as printed."
   {:malli/schema
-   [:function
-    [:=> [:cat] [:string {:min 12 :max 12}]]
-    [:=> [:cat :any] [:string {:min 12 :max 12}]]
-    [:=> [:cat :any [:int {:min 1 :max 64}]] [:string {:min 1 :max 64}]]]}
+   [:function [:=> [:cat] [:string {:min 12, :max 12}]] [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Identity hashes Clojure's printed representation of arbitrary data, including nested heterogeneous values and nil.", :gen/elements [nil false 0 "" :k [] {}]}]] [:string {:min 12, :max 12}]] [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Identity hashes Clojure's printed representation of arbitrary data, including nested heterogeneous values and nil.", :gen/elements [nil false 0 "" :k [] {}]}] [:int {:min 1, :max 64}]] [:string {:min 1, :max 64}]]]}
   ([] (id (random-uuid)))
   ([data] (id data default-length))
   ([data n]
@@ -43,8 +40,7 @@
 (defn digest
   "The stable id of a thing that IS its `parts`: `length` hex characters of
   the SHA-256 over their ordered `pr-str`."
-  {:malli/schema [:=> [:cat [:int {:min 1 :max 64}] [:sequential :any]]
-                  [:string {:min 1 :max 64}]]}
+  {:malli/schema [:=> [:cat [:int {:min 1, :max 64}] [:sequential [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Identity hashes Clojure's printed representation of arbitrary data, including nested heterogeneous values and nil.", :gen/elements [nil false 0 "" :k [] {}]}]]] [:string {:min 1, :max 64}]]}
   [length parts]
   (id (vec parts) length))
 

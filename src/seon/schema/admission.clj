@@ -437,7 +437,7 @@
 
 (defn -main
   "Read one admission request as EDN from stdin and print its findings."
-  {:malli/schema [:=> [:cat [:* :string]] :nil]}
+  {:malli/schema [:=> [:cat [:* {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Clojure's command-line entry point receives any number of string arguments; the command parser owns option combinations and their diagnostics.", :gen/elements [[]]} :string]] :nil]}
   [& _]
   (prn (admit (edn/read-string (slurp *in*))))
   nil)
