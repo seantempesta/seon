@@ -913,8 +913,7 @@
 
 (defn- analyze-settlement
   [database request]
-  (if-let [form (when (:seon.program/row request)
-                  (settlement-form database request))]
+  (if-let [form (settlement-form database request)]
     (let [[form-facts program-row]
           (seon.fn/analyze-form
            database
@@ -4532,24 +4531,21 @@
                                      reader-event
                                      (assoc :seon.sci.eval/event reader-event)))))
                       evaluations)}))
-            defining
+            submitted
             (into []
-                  (keep-indexed
+                  (map-indexed
                    (fn [index {form :seon.turn.loop/admitted-form evaluation :seon.sci.eval/evaluation}]
-                     (when (and (:seon.program/row evaluation)
-                                (not (get-in evaluation [:seon.program/row :seon.fn/sym])))
-                       [index
-                        {:seon.cluster.eval/source
-                         (:seon.cluster.eval/source form)
-                         :seon.cluster.eval/ns
-                         (:seon.cluster.eval/ns form)
-                         :seon.program/row
-                         (:seon.program/row evaluation)}])))
+                     [index
+                      (cond->
+                       {:seon.cluster.eval/source (:seon.cluster.eval/source form)
+                        :seon.cluster.eval/ns (:seon.cluster.eval/ns form)}
+                        (:seon.program/row evaluation)
+                        (assoc :seon.program/row (:seon.program/row evaluation)))]))
                   evaluated)
             analyzed
             (cond
               (:seon.error/kind evaluated) evaluated
-              (seq defining) (phase #(seon.fn/analyze-forms database (mapv second defining)))
+              (seq submitted) (phase #(seon.fn/analyze-forms database (mapv second submitted)))
               :else [])]
         (if (:seon.error/kind analyzed)
           (do
@@ -4562,9 +4558,9 @@
           (let [evaluated
                 (reduce
                  (fn [all [[index _] [form-facts row]]]
-                   (-> all
-                       (assoc-in [index :seon.sci.eval/evaluation :seon.program/row] row)
-                       (assoc-in
+                   (cond-> all
+                       row (assoc-in [index :seon.sci.eval/evaluation :seon.program/row] row)
+                       true (assoc-in
                         [index :seon.sci.eval/evaluation :seon.turn/form-facts]
                         (assoc form-facts
                                :db/id
@@ -4572,7 +4568,7 @@
                                 (receipt-identity
                                  run-id (:seon.cluster.eval/ordinal (nth all index)))]))))
                  evaluated
-                 (map vector defining analyzed))
+                 (map vector submitted analyzed))
                 gated evaluated
                 requests
                 (mapv

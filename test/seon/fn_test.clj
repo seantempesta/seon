@@ -9,6 +9,7 @@
             [seon.fn.analyzer :as analyzer]
             [seon.id :as id]
             [seon.program :as program]
+            [seon.sci.eval :as sci.eval]
             [seon.test-support :as test-support]))
 
 (def ^:private boot-process
@@ -465,55 +466,76 @@
   (test-support/with-database
     (fn [connection]
       (let [namespace-name 'my.agents.call-edges
-            run-id "call-edges-run"
             process "call-edges-process"
-            source
-            (str "(do (seon.db/q '[:find (count ?function) . "
-                 ":where [?function :seon.fn/sym _]]) "
-                 "(seon.run/complete \"done\"))")]
-        (db/transact!
+            source "(do (seon.db/q '[:find (count ?function) . :where [?function :seon.fn/sym _]]) (my.turn/wait {:my.turn/note \"Waiting.\"}))"]
+        (test-support/seed-cluster! connection "call-edges")
+        (transact-fixture!
          connection
          [{:seon.ns/name namespace-name
            :seon.ns/source "(ns my.agents.call-edges)"
            :seon.ns/requires [[:seon.ns/name 'my.turn]]}
-          {:seon.agent/id "call-edges-agent"
-           :seon.agent/namespace
-           [:seon.ns/name namespace-name]}])
-        (db/transact!
-         connection
-         (turn/open-tx
-          {:seon.turn/id run-id :seon.turn/agent [:seon.agent/id "call-edges-agent"] :seon.turn/opened-tx "datomic.tx"}))
-
-        (db/transact!
-         connection
-         (turn/plan-tx
-          {:seon.turn/id run-id :seon.db.process/id process :seon.turn/starting-ns [:seon.ns/name namespace-name] :seon.turn/sources [{:seon.cluster.eval/source source}]}))
-        (db/transact!
-         connection
-         (turn/receipt-start-tx
-          {:seon.turn/id run-id
-           :seon.cluster.eval/ordinal 0
-           :seon.cluster.eval/at (java.util.Date.)}))
-        (db/transact!
-         connection
-         (turn/receipt-settle-tx
-          @connection
-          {:seon.turn/id run-id
-           :seon.cluster.eval/ordinal 0
-           :seon.eval/shown ":done"}))
-        (is (empty?
-             (db/q '[:find [?attribute ...]
-                     :in $ ?form-id
-                     :where
-                     [?form :seon.cluster.eval/id ?form-id]
-                     [?form ?attribute]
-                     [(contains? #{:seon.fn/calls
-                                   :seon.fn/keywords
-                                   :seon.test/subject}
-                                 ?attribute)]]
-                   @connection
-                   (turn/receipt-identity run-id 0)))
-            "ordinary eval rows carry no duplicate program-graph facts")))))
+          {:seon.agent/id "call-edges-direct"
+           :seon.agent/namespace [:seon.ns/name namespace-name]}
+          {:seon.agent/id "call-edges-fold"
+           :seon.agent/namespace [:seon.ns/name namespace-name]}])
+        (let [ctx (test-support/fork-cluster-ctx connection)
+              cluster (test-support/cluster-handle
+                       {:seon.db/connection connection
+                        :seon.cluster/name "call-edges"
+                        :seon.db.process/id process
+                        :seon.sci.eval/ctx ctx})]
+          (doseq [run-id ["call-edges-direct" "call-edges-fold"]]
+            (transact-fixture!
+             connection
+             (turn/open-tx
+              {:seon.turn/id run-id
+               :seon.turn/agent [:seon.agent/id run-id]
+               :seon.turn/opened-tx "datomic.tx"}))
+            (transact-fixture!
+             connection
+             (turn/plan-tx
+              {:seon.turn/id run-id :seon.db.process/id process
+               :seon.turn/starting-ns [:seon.ns/name namespace-name]
+               :seon.turn/sources [{:seon.cluster.eval/source source}]}))
+            (if (= run-id "call-edges-direct")
+              (let [database (db/db connection)
+                    captured (atom [])
+                    evaluation
+                    (binding [db/*read-evidence-sink* captured]
+                      (sci.eval/evaluate
+                       (merge (select-keys cluster [:seon.sci.admit/caps
+                                                   :seon.config/on-core-error])
+                              {:seon.cluster.eval/source source
+                               :seon.cluster.eval/ns [:seon.ns/name namespace-name]
+                               :seon.sci.eval/ctx ctx
+                               :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms cluster)
+                               :seon.db/db database :seon.db/connection connection})))]
+                (is (= {:my.turn/disposition :wait :my.turn/note "Waiting."}
+                       (:seon.sci.admit/value evaluation)) (pr-str evaluation))
+                (transact-fixture!
+                 connection
+                 (turn/receipt-settle-tx
+                  (db/db connection)
+                  {:seon.turn/id run-id :seon.cluster.eval/ordinal 0
+                   :seon.eval/shown (:seon.eval/shown evaluation)
+                   :seon.cluster.eval/read-evidence (db/read-evidence @captured)
+                   :seon.cluster.eval/read-basis-transaction (db/basis-t database)})))
+              (is (= [:closed 1]
+                     (#'turn/resume-turn
+                      {:seon.turn.loop/cluster cluster
+                       :seon.turn.loop/work {:seon.agent/id run-id
+                                             :seon.turn/id run-id
+                                             :seon.cluster.eval/ordinal 0}
+                       :seon.turn.loop/now (java.util.Date.)
+                       :seon.turn.loop/report (fn [outcome n] [outcome n])}))))
+            (let [calls (set (db/q '[:find [?symbol ...]
+                                    :in $ ?id
+                                    :where [?evaluation :seon.cluster.eval/id ?id]
+                                    [?evaluation :seon.fn/calls ?callee]
+                                    [?callee :seon.fn/sym ?symbol]]
+                                  (db/db connection) (turn/receipt-identity run-id 0)))]
+              (is (contains? calls "seon.db/q") (pr-str calls))
+              (is (contains? calls "my.turn/wait") (pr-str calls)))))))))
 
 (deftest settled-agent-form-has-static-index-edge-parity
   (let [root (fixture-root)
