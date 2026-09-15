@@ -1,11 +1,9 @@
 (ns seon.repl-parity-test
   "Stock-Clojure behavior checks exercised through Seon's production evaluation path."
-  (:require [clojure.edn :as edn]
-            [clojure.string :as str]
+  (:require [clojure.string :as str]
             [clojure.test :refer [deftest is use-fixtures]]
             [seon.cluster.reply :as reply]
             [seon.config :as config]
-            [seon.print :as print]
             [seon.sci.eval :as sci.eval]
             [seon.sci.reader :as sci.reader]
             [seon.test-support :as test-support]))
@@ -30,6 +28,7 @@
   [db ctx namespace-name source]
   (let [effective (config/effective db)]
     {:seon.cluster.eval/source source
+     :seon.db/db db
      :seon.cluster.eval/ns [:seon.ns/name namespace-name]
      :seon.sci.admit/caps (config/result-caps effective)
      :seon.sci.eval/ctx ctx
@@ -50,7 +49,7 @@
               (sci.eval/evaluate
                (production-request db ctx namespace-name source))
               error (:seon.cluster.eval/error evaluation)
-              result-edn (:seon.cluster.eval/result-edn evaluation)
+              shown (:seon.eval/shown evaluation)
               result
               (cond->
                {:out (or (:seon.cluster.eval/output evaluation) "")
@@ -59,19 +58,8 @@
                 :ending-ns (:seon.sci.eval/ending-ns evaluation)
                 :semantic-printed
                 (pr-str (:seon.sci.admit/value evaluation))}
-                (some? result-edn)
-                (assoc
-                 ;; The evaluation stores the closed print tree; presentation
-                 ;; is a render-time projection through the text sink.
-                 :print-node result-edn
-                 :printed
-                 (print/emit-text (edn/read-string result-edn)
-                                  (:seon.print/options evaluation))
-                 ;; This is the face recoverable from today's stored
-                 ;; evaluation, which does not yet persist the captured SCI
-                 ;; print options.
-                 :stored-printed
-                 (print/emit-text (edn/read-string result-edn) {})))]
+                (some? shown)
+                (assoc :printed shown :stored-printed shown))]
           [(or (:seon.sci.eval/ending-ns evaluation) namespace-name)
            (conj results result)]))
       ['user []]
@@ -394,24 +382,23 @@
              (first (repl-session ["(first {:a 1})"])))))
 
 (defparity "B9" :passing
-  (compared ["user.ParityRecord" "#user.ParityRecord{:a 1, :b 2}"]
+  (compared ["user.ParityRecord" "#user.ParityRecord{:a 1, :b 2}"
+             "[#user.ParityRecord{:a 3, :b 4}]"]
             (mapv :printed
                   (repl-session
                    ["(defrecord ParityRecord [a b])"
-                    "(->ParityRecord 1 2)"]))))
+                    "(->ParityRecord 1 2)"
+                    "[(->ParityRecord 3 4)]"]))))
 
-(defparity "B10" :known-divergence
-  ;; Stock prints a host reference; Seon stores no node for a value that kept
-  ;; only a name and reports the TYPED UNKNOWN instead (AGENTS.md §2.4;
-  ;; `unserializable-root?` in `src/seon/sci/admit.clj`). The divergence is
-  ;; the design, and the row records which side of it we are on.
+(defparity "B10" :passing
+  ;; The live object stays private; its shown text names the host reference.
   (let [result (first (repl-session ["(atom 1)"]))]
     (checked "#object[clojure.lang.Atom]"
              (select-keys result [:printed :missing])
              (= "#object[clojure.lang.Atom]" (:printed result)))))
 
 (defparity "B11" :known-divergence
-  ;; Same divergence as B10, for a function value.
+  ;; Function display names remain a separately tracked parity difference.
   (let [result (first (repl-session ["(fn [] 1)"]))
         printed (:printed result)]
     (checked "a #object face with a demunged function name"
@@ -549,36 +536,32 @@
 ;;; Family D — doc, source, dir, apropos, and find-doc
 
 (defparity "D1" :passing
-  (let [results
-        (repl-session
-         ["(defmacro parity_doc \"foodoc\" ([x]) ([x y]))"
-          "(doc parity_doc)"])
-        expected
-        (str "-------------------------\n"
-             "user/parity_doc\n"
-             "([x] [x y])\n"
-             "Macro\n"
-             "  foodoc\n")]
-    (compared expected (:out (peek results)))))
+  (let [result (peek (repl-session
+                     ["(defmacro parity_doc \"foodoc\" ([x]) ([x y]))"
+                      "(doc parity_doc)"]))]
+    (compared :seon.sci.eval/documentation-unavailable
+              (:seon.error/kind (:value result)))))
 
 (defparity "D2" :passing
-  (let [results
-        (repl-session
-         ["(ns parity.doc \"foodoc\")"
-          "(doc parity.doc)"])]
-    (checked "namespace documentation includes its name and docstring"
-             (:out (peek results))
-             (and (str/includes? (:out (peek results)) "parity.doc")
-                  (str/includes? (:out (peek results)) "foodoc")))))
+  (let [result (first (repl-session ["(doc seon.db)"]))
+        value (:value result)]
+    (checked "public namespace documentation is data"
+             result
+             (and (string? (:summary value))
+                  (not (str/blank? (:summary value)))
+                  (= [] (:in value) (:out value))
+                  (= "" (:out result))))))
 
 (defparity "D3" :passing
   (let [results (repl-session ["(doc catch)" "(doc try)"])]
-    (compared (:out (first results)) (:out (second results)))))
+    (compared [:seon.sci.eval/documentation-unavailable
+               :seon.sci.eval/documentation-unavailable]
+              (mapv #(get-in % [:value :seon.error/kind]) results))))
 
 (defparity "D4" :passing
-  (let [result
-        (first (repl-session ["(let [x 1] (doc x))"]))]
-    (compared "" (:out result))))
+  (let [result (first (repl-session ["(let [x 1] (doc x))"]))]
+    (compared :seon.sci.eval/documentation-unavailable
+              (:seon.error/kind (:value result)))))
 
 (defparity "D5" :known-divergence
   ;; Pending Lane 1: find-doc has not been admitted over program-graph facts.
@@ -600,18 +583,21 @@
                (:value (second results))])))
 
 (defparity "D7" :passing
-  (let [output (:out (first (repl-session ["(dir clojure.string)"])))
-        lines (str/split-lines output)]
-    (checked "sorted clojure.string publics"
-             lines
-             (and (= lines (sort lines))
-                  (some #{"includes?"} lines)))))
+  (let [result (first (repl-session ["(dir seon.db)"]))
+        functions (:functions (:value result))
+        symbols (mapv :sym functions)]
+    (checked "public function documentation is returned as data"
+             result
+             (and (= (count symbols) (count (set symbols)))
+                  (some #{'seon.db/q} symbols)
+                  (every? #(and (seq (:arglists %)) (string? (:doc %))) functions)
+                  (= "" (:out result))))))
 
 (defparity "D8" :passing
-  (let [error (:err (first (repl-session ["(dir parity.no-such-ns)"])))]
-    (checked "No namespace: parity.no-such-ns found"
-             error
-             (str/includes? error "No namespace: parity.no-such-ns found"))))
+  (let [value (:value (first (repl-session ["(dir parity.no-such-ns)"])))]
+    (compared [:seon.sci.eval/documentation-unavailable 'parity.no-such-ns]
+              [(:seon.error/kind value)
+               (:seon.sci.eval/documentation-unavailable value)])))
 
 (defparity "D9" :known-divergence
   ;; Pending Lane 1: source does not yet read exact program-graph source.

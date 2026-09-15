@@ -289,6 +289,7 @@
               [:seon.print/text :string]
               [:seon.print/hiccup :seon.render/hiccup]],
              :omitted [:int {:min 1}],
+             :elisions [:vector {:description "Complete omitted-member coordinates retained when a print map is decoded as data."} :seon.print/node]
              :elision-unit
              [:enum :children :characters :subtree :tokens],
              :requery-id :seon.schema/value,

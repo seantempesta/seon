@@ -45,11 +45,12 @@
                    :seon.eval/allocated-bytes]
                   [:seon.eval/outcome :seon.eval/outcome]],
                  :request
-                 [:map
+                 [:and
+                  [:map
                   [:seon.sci.admit/value :seon.sci.admit/value]
                   [:seon.sci.admit/interrupt-fn
                    :seon.sci.admit/interrupt-fn]
-                  [:seon.sci.admit/caps :seon.sci.admit/caps]
+                  [:seon.sci.admit/caps :map]
                   [:seon.config/on-core-error
                    :seon.config/on-core-error]
                   [:seon.sci.admit/unbounded?
@@ -60,7 +61,10 @@
                    :seon.schema/projection]
                   [:seon.sci.admit/record
                    {:optional true}
-                   :seon.sci.admit/record]],
+                   :seon.sci.admit/record]]
+                  [:or
+                   [:map [:seon.sci.admit/unbounded? [:= true]]]
+                   [:map [:seon.sci.admit/caps :seon.sci.admit/caps]]]],
                  :value [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
                                :seon.schema.admission/reason "MCP and error evidence may contain any Clojure value before their bounded external projection."
                                :gen/elements [nil true 0 "" :k [] {} #{}]}],

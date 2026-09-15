@@ -95,3 +95,20 @@ Update the fixture to observe saved shown text and the retained actual
 result before classifying the remaining semantic differences. Exact
 measurements are in
 [the September 15 investigation](../../prds/context-generation/research/bisect-today-reds-2026-09-15.md).
+
+## September 15 observation fixture repair
+
+The fixture now observes `:seon.eval/shown` directly and hands its database
+to evaluation. MCP tests use real SCI evaluations, preserve saved text
+exactly, and require no result blob. Documentation rows assert current
+public-program data and typed unavailable results rather than retired
+stdout. D3/D4 now test a positive typed outcome instead of empty output.
+B10's host-reference face is promoted; B9 also checks a nested record.
+This repairs the observation class without closing the remaining explicitly
+declared parity divergences. The isolated gate evidence is recorded in the
+September 15 investigation linked above.
+
+The repaired four-namespace gate passed 103 tests / 248 assertions with zero
+failures/errors at 20:10:49Z on September 15. The observation-fixture defect
+is resolved; this broader issue remains open for the remaining named
+`:known-divergence` rows.

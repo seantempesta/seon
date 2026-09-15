@@ -3,7 +3,6 @@
   (:require [clojure.edn :as edn]
             [clojure.string :as str]
             [clojure.test :refer [deftest is]]
-            [seon.blob :as blob]
             [seon.cluster :as cluster]
             [seon.config :as config]
             [seon.db :as db]
@@ -11,11 +10,29 @@
             [seon.operator.runtime :refer [running-instances]]
             [seon.oversight :as oversight]
             [seon.print :as print]
+            [seon.render :as render]
             [seon.render.value :as render.value]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
             [seon.sci.admit :as admit]
+            [seon.sci.eval :as sci.eval]
             [seon.test-support :as support]))
+
+(deftest missing-artifacts-have-a-real-marker-under-armed-admission
+  (let [missing {:seon.sci.admit/reason :over-bound :seon.sci.admit/bytes 123}
+        artifact (render.value/artifact missing)]
+    (is (= missing (render.value/artifact-value artifact)))
+    (is (some? (:seon.sci.admit/print-node artifact)))
+    (let [refusal (support/refusal-data
+                   #(admit/admit-value
+                     {:seon.sci.admit/value missing
+                      :seon.sci.admit/caps {}
+                      :seon.sci.admit/interrupt-fn (fn [])
+                      :seon.config/on-core-error :record}))]
+      (is (= :seon.instrument/contract-violated (:seon.error/kind refusal)))
+      (is (= "seon.sci.admit/admit-value"
+             (:seon.instrument/contract-violated refusal))
+          "bounded admission still requires its declared limits"))))
 
 (defn- projected
   [cluster-name effective value]
@@ -32,23 +49,27 @@
         environment
         (env/environment
          {:seon.boot/cluster-name cluster-name
+          :seon.db/connection connection
           :seon.db/basis-t (db/basis-t @connection)
           :seon.schema/projection projection})]
     {:seon.boot/cluster-connection connection
+     :seon.turn.loop/cluster (env/carry-state {} (env/environment-state environment))
      :seon.sci.eval/ctx
      (env/carry-state {} (env/environment-state environment))}))
 
 (defn- sci-evaluation
-  [effective value]
-  (let [admitted
-        (admit/admit
-         {:seon.sci.admit/value value
-          :seon.sci.admit/interrupt-fn (fn [])
-          :seon.sci.admit/caps (config/result-caps effective)
-          :seon.config/on-core-error :record})]
-    (assoc admitted
-           :seon.cluster.eval/ns [:seon.ns/name 'user]
-           :seon.sci.eval/ending-ns 'user)))
+  [effective source]
+  (support/with-database
+    (fn [connection]
+      (sci.eval/evaluate
+       {:seon.cluster.eval/source source
+        :seon.cluster.eval/ns [:seon.ns/name 'user]
+        :seon.db/db @connection
+        :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
+        :seon.sci.admit/caps (config/result-caps effective)
+        :seon.render/profile (render/agent-render-profile effective)
+        :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms effective)
+        :seon.config/on-core-error :panic}))))
 
 (defn- observed-query-shape
   []
@@ -95,10 +116,8 @@
         (apply str
                (repeat (inc (:seon.config.eval.result/max-string effective))
                        \x))
-        evaluation-shaped-value
-        {:seon.sci.admit/value (vec (range 50000))
-         :seon.cluster.eval/result-edn oversized-string}
-        result (projected cluster-name effective evaluation-shaped-value)]
+        nested-value {:rows (vec (range 50000)) :text oversized-string}
+        result (projected cluster-name effective nested-value)]
     (is (< (utf8-size result) 8192)
         "nested collection and string bulk cannot escape the value window")
     (is (true? (:seon.dev.mcp/windowed? result)))
@@ -107,62 +126,54 @@
 (deftest sci-evaluations-project-the-repl-text-face
   (let [cluster-name "mcp-text-face-test"
         effective (config/defaults)
-        result-edn (:seon.cluster.eval/result-edn
-                    (admit/admit
-                     {:seon.sci.admit/value (vec (range 50000))
-                      :seon.sci.admit/interrupt-fn (fn [])
-                      :seon.sci.admit/caps (config/result-caps effective)
-                      :seon.config/on-core-error :record}))
-        evaluation {:seon.cluster.eval/result-edn result-edn
-                    :seon.cluster.eval/ns [:seon.ns/name 'user]
-                    :seon.sci.eval/ending-ns 'user
-                    :seon.sci.admit/record {:seon.eval/outcome :ok}}
+        evaluation (sci-evaluation effective "(vec (range 50000))")
         result (projected cluster-name effective evaluation)
         face (:seon.dev.mcp/value result)]
     (is (string? (:seon.dev.mcp/text face))
         "an SCI evaluation projects the printed REPL face")
     (is (str/starts-with? (:seon.dev.mcp/text face) "[0 1 2")
         "the text face reads like a REPL value")
-    (is (not (contains? face :seon.cluster.eval/result-edn))
-        "the node tree never rides the envelope; the text replaces it")
+    (is (= (:seon.eval/shown evaluation) (:seon.dev.mcp/text face))
+        "the saved observation is not rendered again")
+    (is (not (contains? face :seon.sci.admit/value))
+        "the live result does not ride beside its shown text")
     (is (< (utf8-size result) 8192))))
 
 (deftest sci-top-level-strings-use-the-shared-value-window
   (let [cluster-name "mcp-top-level-string-window-test"
         effective (config/defaults)
         evaluation (sci-evaluation effective
-                                    (apply str (repeat 1048576 \x)))
-        artifact
-        (render.value/artifact
-         {:seon.sci.admit/print-node
-          (edn/read-string (:seon.cluster.eval/result-edn evaluation))})
-        artifact-content (render.value/artifact-edn artifact)
+                                    "(apply str (repeat 1048576 \\x))")
         result (projected cluster-name effective evaluation)
         text (get-in result [:seon.dev.mcp/value :seon.dev.mcp/text])]
     (is (< (utf8-size result) 8192)
         "a scalar face is bounded by the same window as structural values")
-    (is (< (* 10 (utf8-size text)) (:seon.blob/size result))
-        "the inline face is at least an order of magnitude smaller than its artifact")
-    (is (true? (:seon.dev.mcp/windowed? result)))
-    (is (= (blob/digest artifact-content) (:seon.blob/digest result))
-        "windowing retains the complete artifact digest")
-    (is (= (count artifact-content) (:seon.blob/size result))
-        "windowing retains the complete artifact size")))
+    (is (= (:seon.eval/shown evaluation) text))
+    (is (false? (:seon.dev.mcp/windowed? result)))
+    (is (not (contains? result :seon.blob/digest))
+        "SCI results retain their live objects, not serialized result blobs")))
 
 (deftest ordinary-mcp-results-always-use-the-explicit-mcp-profile
   (let [cluster-name "mcp-unconditional-fit-test"
         effective (assoc (config/defaults)
                          :seon.config.eval.result/blob-threshold 1000000)
         text (apply str (repeat 36 \x))
-        result (projected cluster-name effective
-                          (sci-evaluation effective
-                                           (observed-query-shape)))
+        result (projected cluster-name effective (observed-query-shape))
         face (:seon.dev.mcp/value result)
-        rendered (:seon.dev.mcp/text face)]
+        rendered (pr-str face)
+        elisions (filter #(and (map? %) (:seon.print/omitted %))
+                         (tree-seq coll? seq face))]
     (is (str/includes? rendered (pr-str text))
         "the observed 36-character strings remain readable")
     (is (str/includes? rendered ":seon.render.profile/mcp")
         "the below-blob-threshold result still carries the MCP fit profile")
+    (is (some #(= [] (:seon.render.data/path %)) elisions)
+        "collection elisions retain their coordinates")
+    (is (some #(seq (:seon.render.data/path %)) elisions)
+        "nested map-member elisions retain their coordinates too")
+    (is (every? #(and (pos-int? (:seon.print/omitted %))
+                     (string? (:seon.print/requery-refusal %))) elisions)
+        "a cut without a stored artifact names why it cannot be requeried")
     (is (false? (:seon.dev.mcp/windowed? result))
         "presentation fitting does not invent a durable artifact")))
 
@@ -170,7 +181,7 @@
   (let [cluster-name "mcp-small-sci-value-test"
         effective (config/defaults)
         evaluation
-        (assoc (sci-evaluation effective 42)
+        (assoc (sci-evaluation effective "42")
                :seon.sci.eval/internal-detail (apply str (repeat 5000 \x)))
         result (projected cluster-name effective evaluation)
         face (:seon.dev.mcp/value result)]
@@ -445,6 +456,11 @@
                  content-digest)]
             (is (true? (:seon.dev.mcp/retrievable? stored))
                 "retrievability is returned only after the root commits")
+            (let [requery (some :seon.print/requery-form
+                                (tree-seq coll? seq (:seon.dev.mcp/value stored)))]
+              (is (seq requery) "a clipped value supplies an executable requery")
+              (is (= value (eval requery))
+                  "the advertised requery reads the complete stored value"))
             (is (= content-digest artifact-id)
                 "the content digest identifies its durable artifact root")
             (is (true?
@@ -471,12 +487,11 @@
           (finally
             (swap! running-instances dissoc cluster-name)))))))
 
-(deftest sci-value-artifacts-drill-from-the-result-root
+(deftest ordinary-value-artifacts-drill-from-the-result-root
   (let [cluster-name "mcp-sci-value-test"
         effective (config/defaults)
-        sci-result (sci-evaluation effective (vec (range 2000)))
-        nested-result
-        (sci-evaluation effective {:alpha (vec (range 2000)) :omega 42})]
+        value (vec (range 2000))
+        nested-value {:alpha value :omega 42}]
     (support/with-database
       {:seon.test-support/fresh-store? true}
       (fn [connection]
@@ -486,9 +501,9 @@
         (swap! running-instances assoc cluster-name
                (running-instance connection cluster-name))
         (try
-          (let [stored (projected cluster-name effective sci-result)
+          (let [stored (projected cluster-name effective value)
                 content-digest (:seon.blob/digest stored)
-                nested-stored (projected cluster-name effective nested-result)
+                nested-stored (projected cluster-name effective nested-value)
                 root (cluster/mcp-get-value
                       cluster-name content-digest [] 0)
                 nested (cluster/mcp-get-value

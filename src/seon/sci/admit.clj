@@ -148,6 +148,12 @@
   (when (instance? sci.impl.types.SciTypeInstance value)
     (str (sci.types/-get-type value))))
 
+(defn record-name
+  "The declared SCI or JVM name of a record value."
+  {:malli/schema [:=> [:cat :map] :string]}
+  [value]
+  (or (sci-named value) (.getName (class value))))
+
 (defn- class-name
   [value]
   (let [class-name* (.getName (class value))]
@@ -263,7 +269,7 @@
 
       ;; a record IS map-like; it keeps its fields and the name sci gives it.
       (record? value)
-      (let [name* (or (sci-named value) (.getName (class value)))]
+      (let [name* (record-name value)]
         (write! state (str "#:seon.print{:face :seon.print/record, :name "
                            (canonical-edn name*) ", :entries "))
         (write! state "[")
@@ -480,14 +486,12 @@
                               ::elided true}
     ::print/failed {::opaque (::print/class print-node)
                     ::projection-error (::print/message print-node)}
-    (::print/elided ::print/pruned) ::elided))
+    (::print/elided ::print/pruned) print-node))
 
 (defn- semantic-parts
   "One node's child nodes and how they rebuild it, or nil when it is a leaf.
 
-  `::pair-count` and `::elided?` are all a map or record needs to reassemble:
-  an entry the walk could not keep is not a vector, and its absence is the
-  `::elided` marker the original derivation added."
+  Non-pair entries retain the complete elision data alongside map members."
   [node]
   (case (::print/face node)
     (::print/vector ::print/list ::print/set)
@@ -497,8 +501,7 @@
     (let [entries (::print/entries node)
           pairs (filterv vector? entries)]
       [(into [] (mapcat (fn [entry] [(first entry) (second entry)])) pairs)
-       {::pair-count (count pairs)
-        ::elided? (boolean (some #(not (vector? %)) entries))}])
+       {::elisions (filterv (complement vector?) entries)}])
 
     ::print/throwable [[(::print/value node)] nil]
 
@@ -515,10 +518,11 @@
     ::print/vector (vec children)
     ::print/list (apply list children)
     ::print/set (set children)
-    ::print/map (cond-> (into {} (map vec) (partition 2 children))
-                  (::elided? shape) (assoc ::elided true))
-    ::print/record (assoc (into {} (map vec) (partition 2 children))
-                          ::type (::print/name node))
+    (::print/map ::print/record)
+    (cond-> (into {} (map vec) (partition 2 children))
+      (seq (::elisions shape)) (assoc ::elided true
+                                     ::print/elisions (::elisions shape))
+      (= ::print/record (::print/face node)) (assoc ::type (::print/name node)))
     (::print/throwable ::print/object) (first children)))
 
 (defn semantic-value

@@ -368,20 +368,29 @@
             threshold (:seon.config.eval.result/blob-threshold effective)
             oversized? (> (count content) threshold)
             artifact-backed? oversized?
-            print-node (:seon.sci.admit/print-node artifact)
             profile
             (cond-> (assoc (render/agent-render-profile effective)
                            :seon.render.profile/id :seon.render.profile/mcp)
               (and artifact-backed? connection)
               (assoc :seon.print/requery-id
-                     [:seon.blob/digest content-digest])
+                     (list 'seon.render.value/artifact-value
+                           (list 'seon.render.value/read-artifact
+                                 (list 'seon.blob/get
+                                       (list 'seon.operator/connection cluster-name)
+                                       content-digest))))
 
               (not (and artifact-backed? connection))
               (assoc :seon.print/requery-refusal
                      (if artifact-backed?
                        "the cluster has no database connection"
                        "the value has no durable MCP artifact")))
-            projected-node print-node
+            projection
+            (render.value/prepare
+             {:seon.render/value (render.value/artifact-value artifact)
+              :seon.render/profile profile
+              :seon.render.value/root [:seon.blob/digest content-digest]
+              :seon.sci.admit/caps caps})
+            projected-node (:seon.render.value/tree projection)
             staged (when (and artifact-backed? connection)
                      (blob/stage! connection content))
             stored-digest

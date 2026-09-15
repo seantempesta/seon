@@ -52,6 +52,15 @@ were reread before continuing.
    sharing the admission owner's SCI/JVM name derivation. Parity B9 retains
    its exact record-name-and-fields expectation.
 
+### Four-namespace gate
+
+The required `bin/test --paths` invocation with all nine code/schema/test
+paths and all four namespaces passed **103 tests / 248 assertions,
+0 failures / 0 errors**, exit 0, at 20:10:49Z. Snapshot basis `6dc70f30a`,
+content digest `8b385a2dbb6d3e24f106dda301e8d68ef9700f9267e7a6eceb5a2fee95271425`.
+The core repair issues are resolved and archived; the broader parity-divergence
+issue remains open for its separate, explicitly recorded language differences.
+
 ### Fixture gate
 
 `SEON_TEST_WORKERS=1 SEON_TEST_SLOTS=1 bin/test --paths test/seon/effect_test.clj test/seon/search_test.clj -- seon.effect-test seon.search-test`
@@ -62,6 +71,13 @@ The final fixture gate completed at 19:58:43Z: **19 tests / 102 assertions,
 An earlier isolated fixture gate reported 3 failures / 0 errors in the new
 search test's incomplete schema update; the final test changes the declared
 attribute through `:db/add`. All effect tests passed both isolated runs.
+The fixture slice landed as `6dc70f30a` before the rendering gate.
+
+The Markdown edit hook's broad scan reported nine citation errors in the
+foreign `docs/prds/context-generation/research/agents-md-audit-2026-09-15.md`
+(repository commit cited as a dependency gitlink revision). That file was
+not edited by this lane; the diagnostic does not describe these source or
+test changes.
 
 ### Repair probes
 
@@ -109,6 +125,11 @@ The first fixture gate was stopped before test execution after discovering
 the default multiworker pool. Its processes exited. Subsequent isolated
 gates explicitly set `SEON_TEST_WORKERS=1 SEON_TEST_SLOTS=1`; only one test
 invocation is active at a time.
+The four-namespace gate reports incomplete `:seon.test` rows for the
+macro-generated parity group and runs it through the canonical serial worker
+alongside the single pool worker. This is the existing test-provenance
+boundary, not an extra test invocation or a modified runner. All protected
+runner/test-support paths remain untouched by this lane.
 
 ## Assignment and verification boundary
 
@@ -255,8 +276,8 @@ this is a diagnosis landing, not a fixed or green result. No repair
 Recurring subjects and remaining work are recorded in:
 
 - [Fixture declaration provenance](../../../seon/issues/archive/test-program-rows-omit-admission-provenance.md).
-- [Ordinary MCP value rendering](../../../seon/issues/mcp-ordinary-values-bypass-the-value-renderer.md).
-- [Missing-marker admission](../../../seon/issues/missing-artifact-marker-refuses-its-own-admission-contract.md).
+- [Ordinary MCP value rendering](../../../seon/issues/archive/mcp-ordinary-values-bypass-the-value-renderer.md).
+- [Missing-marker admission](../../../seon/issues/archive/missing-artifact-marker-refuses-its-own-admission-contract.md).
 - [REPL parity observations](../../../seon/issues/repl-parity-divergences.md).
 
 [Machine-readable evidence](bisect-today-reds-2026-09-15.json) preserves

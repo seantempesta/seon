@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, render, schema, wave/print-path]
 ---
@@ -21,7 +21,7 @@ The live JVM probe
 `(seon.render.value/artifact {:seon.sci.admit/reason :over-bound :seon.sci.admit/bytes 100})`
 refuses the nested admission at
 `[:seon.sci.admit/caps :seon.config.eval.result/max-bytes]`.
-See [the investigation](../../prds/context-generation/research/bisect-today-reds-2026-09-15.md).
+See [the investigation](../../../prds/context-generation/research/bisect-today-reds-2026-09-15.md).
 
 ## Owner
 
@@ -33,3 +33,11 @@ in `resources/seon/schemas/seon.sci.admit.edn`.
 A missing marker renders as its reason and measured size under the same
 armed contracts used in production. Its construction must fit the one
 admission contract without an invented bound or a nil node.
+
+## Verification, September 15
+
+The four-namespace HEAD-plus-owned-paths gate passed **103 tests / 248
+assertions, 0 failures / 0 errors**, exit 0, at 20:10:49Z. The snapshot
+basis was `6dc70f30a`; the exact command and content digest are in the landing
+note. This includes the armed missing-marker check, executable artifact
+requery, nested-map elision coordinates, and root/nested SCI record rendering.

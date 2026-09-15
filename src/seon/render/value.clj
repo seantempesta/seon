@@ -126,10 +126,12 @@
                      ((requiring-resolve 'seon.config/defaults))))
         root (or (:seon.repl/handle unit) (:seon.render.value/root unit))
         root (when (and (qualified-symbol? root) (= "result" (namespace root))) root)]
-    (if root
-      (assoc profile :seon.print/requery-id root)
-      (assoc profile :seon.print/requery-refusal
-             "the value has no result handle"))))
+    (cond
+      root (assoc profile :seon.print/requery-id root)
+      (or (:seon.print/requery-id profile)
+          (:seon.print/requery-refusal profile)) profile
+      :else (assoc profile :seon.print/requery-refusal
+                   "the value has no result handle"))))
 
 (defn- stable-entries
   [value]
@@ -298,7 +300,8 @@
       (coll? value)
       (let [map-value? (map? value)
             set-value? (set? value)
-            face (cond map-value? :seon.print/map set-value? :seon.print/set
+            face (cond (record? value) :seon.print/record
+                       map-value? :seon.print/map set-value? :seon.print/set
                        (vector? value) :seon.print/vector :else :seon.print/list)
             child-key (if map-value? :seon.print/entries :seon.print/items)
             limit (if ai? (:seon.render.profile/max-children profile) Long/MAX_VALUE)
@@ -334,6 +337,7 @@
                              (conj result (if map-value? [key-node node] node))))))))]
         (cond-> {:seon.print/face face child-key children
                  :seon.render.data/path path}
+          (record? value) (assoc :seon.print/name (admit/record-name value))
           (and set-value? (sorted? value)) (assoc :seon.print/ordered? true)
           total (assoc :seon.render.data/total total)))
 
