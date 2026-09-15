@@ -10,6 +10,7 @@ typography, namespace-page layout, or debug layout.
 - [Typography and density](#typography-and-density)
 - [Current rendering boundary](#current-rendering-boundary)
 - [Anti-patterns](#anti-patterns)
+- [The product bar (owner, 2026-09-14)](#the-product-bar-owner-2026-09-14)
 - [Target caution](#target-caution)
 
 ## Maintained source
@@ -138,3 +139,46 @@ for a contiguous revision and the keyframe after a gap
 Canonical namespace pages, root/agent aliases, and both debug variants are
 current routes (`src/seon/render/route.clj:5-16`). Keep visual work inside those
 current boundaries unless the owner explicitly resumes a named target.
+
+## The product bar (owner, 2026-09-14)
+
+The namespace page and the debug page are user-facing product surfaces,
+judged as if shown in a funding presentation: someone who has never seen
+Seon opens the page and understands within ten seconds what this agent is
+doing, what it saw, and what went wrong. Every visual change is verified
+by LOOKING at a screenshot of the live page at 1440 px and 700 px before
+it is committed; the screenshot log (file → defects seen → change) goes in
+the landing note. A page that is "green" but unread is unverified.
+
+Information design for a UI that is scanned, not read:
+
+- **Summary before detail.** The first screen answers the question; the
+  evidence is below or on demand. A wall of collapsed headers is not a
+  summary.
+- **State in form, not only in words.** A dot plus a word for state; the
+  semantic colours (`--color-success`, `--color-warning`, `--color-error`,
+  `--color-info`) are reserved for state and never used as accent.
+- **Faithful and formatted are two layers.** Stored bytes (prompt text,
+  replies, shown text) are rendered exactly, tokenised into spans whose
+  text concatenates back to the bytes; formatting sits in the spans and
+  around the block, never inside the bytes. An agent's `:error` evaluation
+  is history, styled as history, never as a page failure.
+- **Repeated things compose as one object.** Cards, rows, and labels in a
+  series share edges, baselines, and inner padding; a recurring element
+  sits in the same place on each. Consecutive identical items fold into one
+  row with a count.
+- **Not everything is a card.** Border, fill, and radius say "separate
+  object"; spend them on the one thing that needs lifting.
+- **The page at rest is complete.** Everything meant to be read is present
+  on first paint; "Loading…" placeholders that depend on the feed are a
+  defect on the initial GET, and the initial GET stays under one second.
+- **Words are design material.** Labels name what a person recognises
+  (agent, namespace, turn, plan step), never the mechanism (`subject`,
+  `viewer`, `output :seon.render/html`, lookup refs, db ids, `#inst`).
+- **Structure encodes truth.** Turn ordinals, plan positions, and step
+  states are shown because the order and the state are facts; decorative
+  numbering or dividers are not.
+- **Whole-page layout.** A normal scrolling document with a compact sticky
+  header; no `body { overflow: hidden }` with an inner 90k-px scroller; no
+  fixed column that leaves half of a 700 px screen empty.
+
