@@ -1430,3 +1430,36 @@ half-edit. Measured targets in the issue.
   instrument.clj's report text.
 - Reaching-tests tier spec written (tmp/orchestrator/reaching-tests-tier-
   spec.md); launches when test-provenance releases src/seon/test.clj.
+
+## 2026-09-15 19:40Z — the read cost, run 10, class-kill wave 2
+
+- Owner: "find and fix the problem with queries taking this long"; then
+  "keep prioritizing bug fixing and launch multiple agents once they are
+  clearly documented … eliminate entire classes rather than papering over
+  things"; also "get rid of all of this mysterious naming" (door → sci,
+  `9dd65ec5e`).
+- Read cost, established with ThreadMXBean on default: Datahike answers in
+  0–10 ms; `seon.db` rebuilt the schema projection per read when none was
+  handed (1.77 GB / 0.5 s floor; 46 GB for `'[*]`; the "reusable" path
+  8.8 s / 35 GB re-querying every function's source). The projection reached
+  reads by dynamic var, absent on the interpreted path (run 9/10 `dir`/`doc`
+  300–976 ms each). Kill, law 2.1: database values carry their projection
+  state (`d5e5b870e` at the minting seams; `f68b79e01` at `evaluate`'s
+  bound read database); the rebuild fallback is a loud warning. Verified:
+  `'[*]` pull-many 1 ms / 1 MB; `doc` 9 ms cold through the supplier.
+- Run 10 (all fixes live): 7/7 steps including the report — first full
+  success. Run 11 started after the refork (test-provenance's schema:
+  RESET NEEDED `131fa2a56`; reforked 19:30Z, converged, reseeded).
+- Adoption freshness landed (`5ffc491ae`): wrappers re-arm on authored
+  change; refused adoption retries once. test-provenance landed
+  (`7f484d4bb`; launcher fixtures copy bin/ wholesale). Bisect: today's 53/9
+  reds in mcp/effect/repl-parity/search PREDATE today (identical at four
+  boundaries); resumed to fix the classes (stale fixtures, missing
+  declaration provenance, MCP rendering/admission) now that cluster.clj is
+  free.
+- Wave 2 (class kills, specs in tmp/orchestrator/wave2/): p1-ambient-state
+  (values carry their world; 12 members), n7-query-classification (hand
+  lists → facts + queries; 10), refusal-grammar (one grammar for every
+  refusal an agent sees; Part B remainder), fixtures-events (P2 clocks, P3
+  producer-less keys, N2 vacuous proofs; runner flakes). Queued behind
+  bisect: n1-total-render (23 members, render owners) then n11-duplicates.
