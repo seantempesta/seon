@@ -8,20 +8,27 @@ tags: [research, agent, sci, test]
 
 ## Verification boundary
 
-The core API changes are committed. The assignment is not fully green: bare
-test referrals remain absent in the excluded SCI acquisition owner, the older
-auto-check tests retain admission failures, and the required loop proof retains
-its named-basis prompt failure. These boundaries are detailed below.
+The authorized follow-up below supersedes the initial referral and auto-check
+fixture boundaries. All three older auto-check tests are retained: they assert
+current gate selection, candidate isolation, and seeded contract checking.
+No test was deleted to obtain a green result.
+
+The core API changes and authorized follow-up are committed. Both bare test
+referrals resolve in Juniper's retained default context, and all older auto-check
+tests are green without deleting tests. The final required gate has one foreign
+named-basis prompt assertion failure; platform is green. Exact counts and the
+assertion are below. Shared publication/adoption is not claimed globally converged.
 Default was neither stopped, reforked, nor reseeded. All default probes were
 read-only JVM calls, including evaluations of documentation in Juniper's retained
 SCI context. Source changes use the configured development adoption hook.
 
-The assignment excludes `src/seon/sci/eval.clj`. Its `build-base-ctx` installs
-bare `help`, `dir`, and `doc` in `clojure.core`; it does not install `deftest` or
-`is`. Bootstrap seed referrals are now explicit, but this does not repair every
-created or retained namespace. A narrow scope question was sent to the owner;
-no authorization to edit this excluded file has arrived. The live retained
-context still reports `{:retained? true, :deftest? false, :is? false}`.
+The initial assignment excluded `src/seon/sci/eval.clj`. Its `build-base-ctx` installed
+bare `help`, `dir`, and `doc` in `clojure.core`; it did not install `deftest` or
+`is`. Bootstrap seed referrals were made explicit, but that did not repair every
+created or retained namespace. At the first checkpoint, the live retained
+context reported `{:retained? true, :deftest? false, :is? false}`. The owner
+then authorized the file and the remaining fixture repairs; the follow-up below
+records their completion.
 
 Concurrent render edits reached `src/seon/plan.clj` during this lane. Verification
 therefore moved to `tmp/core-functions-wt`, based on `d71ec0852`, with only this
@@ -275,7 +282,7 @@ iteration had 8 tests, 41 assertions and one cwd-wrapper error, repaired here.
 The three old auto-check failures reproduce without this lane's source changes:
 **8 tests, 24 assertions, 2 failures, 2 errors** at `d71ec0852`, using
 `bin/test-fast --paths test/seon/test/accretion_test.clj -- seon.test.accretion-test`.
-The [auto-check issue](../../../seon/issues/auto-check-reports-its-own-contract-violation-to-the-agent.md)
+The [auto-check issue](../../../seon/issues/archive/auto-check-reports-its-own-contract-violation-to-the-agent.md)
 records the exact admission boundaries. The full broad gate remains red; a
 later focused green gate does not erase that evidence.
 
@@ -340,6 +347,9 @@ orchestrator's live files and foreign worktrees were preserved.
 
 ## Concrete remaining referral change
 
+Historical proposal: the owner authorized this exact scope on 2026-09-14.
+Both seams are now patched; see the follow-up evidence below.
+
 The excluded owner can add these two entries where `install-program-doc!`
 already updates `clojure.core`, and likewise to `build-base-ctx`'s initial core
 referrals:
@@ -354,3 +364,120 @@ referrals, resolve both bare names, evaluate a bare test declaration, and check
 the retained-context update separately. Bootstrap-specific referrals are not
 that proof. This proposed change is recorded for review and has not been
 applied to the excluded file.
+
+## Authorized follow-up — 2026-09-14
+
+`build-base-ctx` and `install-program-doc!` now put the existing SCI
+`clojure.test/deftest` and `is` Vars in `clojure.core`, alongside `dir`/`doc`.
+The canonical regression checks a namespace with no test referrals, both the
+initial base and acquired context, evaluates a bare test declaration, and
+admits an ordinary test through `seon.db/transact!`. A separate regression
+starts with an old base lacking the referrals, forks an agent context, updates
+the base, and uses `fork-for-turn` to receive the new bindings in the identical
+retained context. It then evaluates another bare test declaration.
+
+The two remaining admission failures exposed a real schema defect:
+`:my.turn/usage-unit` is a render request but declared `:seon.db/attributes true`.
+The bridge consequently required every ordinary test to carry usage=true.
+Removing that erroneous marker preserves the render request's contract and
+lets normal test entities follow their existing `:seon.test/test` schema.
+The regression does not manufacture a usage fact. The older fixtures now
+assert admission, carry declared program provenance and namespace refs, and
+use sets for unordered call edges. Their redundant extra-schema row was removed.
+
+### Exact foreign loop-proof boundary
+
+The required path-limited fast run at `6a0781d21`, with only this follow-up's
+four files overlaid, reports:
+
+```text
+FAIL in (virtual-loop-end-to-end) (loop_proof_test.clj:533)
+three-form reply, actual handles, and additive history
+expected: (= (stored-text (clojure.core/deref connection)) (:seon.cluster.prompt/text (prompt)))
+```
+
+The actual comparison is false. Current history has 9,763 UTF-8 bytes,
+SHA-256 `8dad0ea03a31fbbe3c90011d72af80955f5bf7902e2cf9e9c8601b2289b78bfc`;
+the named-turn prompt has 9,583 bytes,
+SHA-256 `992c26150af40d5c0bf80a90ed5580421a7038cd2e482cefe79a7f82e72bdfe1`.
+Both contain the three sources `(+ 1 1)`, `(+ 2 2)`, `(+ 3 3)`;
+only current history includes their later response lines with values 2, 4, 6.
+This is the same assertion reproduced before this follow-up and follows
+`63ac0608a`'s named-opening-basis change in `src/seon/render.clj`. The lane
+did not edit that owner or the concurrently edited loop-proof test.
+
+### Final gate and live evidence
+
+All four follow-up source/test paths were overlaid on HEAD `6a0781d21`:
+`src/seon/sci/eval.clj`, `resources/seon/schemas/my.turn.edn`,
+`test/seon/sci/documentation_test.clj`, `test/seon/test/accretion_test.clj`.
+The selected namespaces were `seon.sci.documentation-test`,
+`seon.test.accretion-test`, `seon.core-functions-test`, `my.examples-test`,
+`seon.help-trial-test`, `seon.repl-grammar-test`, `seon.loop-proof-test`.
+
+| Command | Result |
+|---|---|
+| `bin/test-fast --paths <four paths> -- <seven namespaces>` | 27 tests, 564 assertions, 1 failure, 0 errors; only the foreign assertion above. |
+| `bin/test --paths <four paths> -- <seven namespaces>` | 27 tests, 568 assertions, 1 failure, 0 errors; the same assertion independently confirmed. Coordinator: 227 seconds. |
+| `bin/test --paths <four paths> --platform` | 84 tests, 505 assertions, 0 failures, 0 errors. Coordinator: 129 seconds. |
+
+Both isolated gates used snapshot
+`b56627525353c93d82f684b62f57ddd928feb99bf4e0571f385367fb6533299b`.
+The first referral iteration had a test syntax error, immediately repaired;
+the next iteration exposed two asserted admission errors, repaired by the usage
+request schema change. No failing semantic assertion was removed.
+
+Normal development adoption first failed in the tracked
+`seon.fn/exact-source:142` offset race. The lane applied the hot-reloaded
+`seon.sci.eval` owner, invoked `install-program-doc!` on the existing base, and
+used `fork-for-turn` with Juniper's existing `:seon.sci.eval/agent-ctx` to receive
+that base update. A `finally` re-armed instrumentation with the existing
+projection. The operation returned in 329 ms:
+
+```clojure
+{:same-retained-context? true, :same-database-basis? true}
+```
+
+The separate read-only JVM verification returned in 3 ms:
+
+```clojure
+(let [instance (get @seon.operator.runtime/running-instances "default")
+      ctx (get-in @(:seon.agent/routing instance)
+                  [:seon.agent/armed "juniper" :seon.turn.loop/cluster
+                   :seon.sci.eval/agent-ctx])]
+  (sci.core/binding [sci.core/ns (sci.core/create-ns 'my.agents.juniper)]
+    {:retained? (some? ctx)
+     :deftest? (boolean (sci.core/resolve ctx 'deftest))
+     :is? (boolean (sci.core/resolve ctx 'is))}))
+
+{:retained? true, :deftest? true, :is? true}
+```
+
+A later normal adoption reached SCI acquisition and JVM instrumentation, then
+reported source changes during adoption. A final read-only probe returned in
+6 ms and independently observed the schema repair in default:
+
+```clojure
+{:referrals {:deftest? true, :is? true}
+ :usage-schema "[:map {:description \"A usage-test render request, not an additional entity constraint on every test.\", :seon.render/form my.turn/usage-form} [:seon.test/sym :seon.test/sym] [:seon.test/usage [:= true]]]"
+ :published "6aa8b667-340d-5504-8a30-53684ef05b5d"
+ :adopted "6aa8b5af-69a7-5a00-92a1-04661375d322"}
+```
+
+An extra closing parenthesis in that final probe's first attempt was rejected
+by the MCP reader before evaluation; the corrected form produced the value
+above. Neither verification wrote database facts or evaluated a Juniper turn.
+Default was never stopped, reforked, or reseeded.
+
+Follow-up commits: `1a0e688e5` (referrals, ordinary test admission and regressions),
+`6d497561d` (all older auto-check fixtures, preserved assertions).
+The referral, checker, and ordinary test admission issues are resolved and
+archived. Explicit runtime usage metadata loss remains a separate filed issue;
+no usage flag was invented to obtain admission.
+
+All follow-up test and adoption commands exited. The successful platform root
+was removed by the gate; the retained failed root `tmp/test-runs/run.ChYKZC`
+was removed after process and cwd-holder checks found no live owner. The lane's
+top-level logs were removed after recording results here. `tmp/core-functions-wt`
+remains absent. Foreign edits, test roots and operator hook processes were left
+alone.

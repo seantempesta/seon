@@ -7,6 +7,14 @@ tags: [issue, source, operator, class/p1, wave/publication-velocity]
 
 # Source analysis can slice changing files with stale offsets
 
+Core-functions follow-up, 2026-09-14: development publication on default
+again failed at `seon.fn/exact-source:142`, this time with
+`IndexOutOfBoundsException` from `PersistentVector/nth`. The trace continues
+through `analysis-rows-by-file`, `build-manifest`, and `cluster/stable-manifest`.
+Concurrent edits were present, but the exception did not identify the source
+file. The lane continued with path-limited gate snapshots and retried normal
+development adoption; it did not stop or refork default.
+
 During the 2026-09-09 schema re-declaration investigation, a plain
 `bin/test-fast seon.schema-redeclare-test` child published from the changing
 working tree. `seon.fn/exact-source` threw `StringIndexOutOfBoundsException`:

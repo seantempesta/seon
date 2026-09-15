@@ -7,6 +7,11 @@ tags: [issue, mcp, runtime]
 
 # Default component probe timed out after development adoption
 
+Core-functions follow-up, 2026-09-14: `runtime_status` again reported health
+and Flow unknown with `Read timed out` for default PID 23557 / PREPL 49971.
+The read-only retained SCI referral probe returned in 2 ms. No lifecycle
+operation occurred; the small probe proves access, not Flow health.
+
 Debug-turns, 2026-09-14: default PID 23557 / PREPL 49971 returned
 health/Flow unknown with `Read timed out`. The subsequent MCP JVM query
 returned a live connection and 187 turn identities in 7292 ms. A selected

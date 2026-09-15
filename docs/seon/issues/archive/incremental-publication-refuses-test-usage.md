@@ -27,7 +27,7 @@ Verify the incremental test-row projection and matching of the usage-specific
 shape on the real source fixture. A normal test wording change must publish
 without inventing a usage declaration or weakening database admission.
 Related, previously resolved function-row case:
-[missing function provenance](archive/incremental-publication-refuses-missing-function-provenance.md).
+[missing function provenance](incremental-publication-refuses-missing-function-provenance.md).
 
 ## Canonical SCI reproduction — 2026-09-14
 
