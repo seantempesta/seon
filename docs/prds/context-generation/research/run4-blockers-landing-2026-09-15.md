@@ -41,9 +41,10 @@ whereas the issue's abbreviated example names a vector of order maps.
 The captured source is the regression authority for that live evaluation.
 
 Part 1's install decision is owned by `seon.turn/gate-function-install`,
-after evaluation has already interned and rendered the Var. A narrow caller
-change is awaiting the owner's response because turn.clj is explicitly
-excluded. The backstop owner and all other excluded paths remain untouched.
+which originally ran after evaluation had interned and rendered the Var.
+That caller was initially excluded; the owner authorized its narrow change
+in the continuation below. The backstop and other excluded owners remain
+untouched.
 
 ## Verification
 
@@ -113,14 +114,13 @@ It constructs the body without calling the provider.
         :provider-stop (get body "stop")}))))
 ```
 
-## Commits and remaining assignment
+## Commits and scope
 
 - `4a559d658`: part 3, reader diagnostics and exact captured evidence.
 - `ae2c180a4`: part 2, stop default, attempt persistence and replay.
-- Part 1 remains unimplemented because its existing decision owner is in
-  the explicitly excluded `src/seon/turn.clj`. The issue records the exact
-  seam and the candidate-context option; the owner must assign that narrow
-  caller change before this lane can finish it. No backstop changes were made.
+- Part 1 was initially deferred at the explicitly excluded `src/seon/turn.clj`.
+  The owner subsequently authorized the narrow caller change; the continuation
+  below records that implementation. No backstop changes were made.
 
 No default restart, refork, or reseed performed.
 All lane-launched commands ended. Successful gate roots were removed by
@@ -138,4 +138,112 @@ the reader implementation was already committed in HEAD.
 bin/test-fast --paths config/default.edn test/seon/ai_test.clj -- seon.ai-test seon.run4-reader-test seon.sci.reader-test seon.cluster.reply-test seon.repl-grammar-test seon.help-trial-test
 bin/test --paths config/default.edn test/seon/ai_test.clj -- seon.ai-test seon.run4-reader-test seon.sci.reader-test seon.cluster.reply-test seon.repl-grammar-test seon.help-trial-test
 bin/test --platform --paths config/default.edn test/seon/ai_test.clj
+```
+
+## Authorized part 1 continuation
+
+The owner authorized the narrow `turn.clj` install seam. The file was read
+immediately before patching; unrelated work was preserved.
+
+`evaluate-for-install` hands the parsed event to the ordinary evaluator and
+uses the existing candidate fork for function declarations. The existing
+gate now decides each function before the next form executes. It reuses the
+candidate evaluation, checks the analyzed function, and transfers only an
+accepted function root through the same transfer helper used after commit.
+Refusal discards candidate bindings and runs the error value through the
+existing shown-result projection before the result handle is bound.
+
+The error has the install-refused kind, generated arguments, expected and
+actual evidence, and `Fix the contract or the function and re-evaluate the
+defn.` as its message. The result retains complete diagnostic data; the AI
+render displays a nested contract error by kind and message instead of its
+large instrumentation map. Associated optional map entries were declared in
+the existing evaluation and candidate/error schemas; no durable entity or
+new gate was introduced.
+
+The real graph regression uses captured definition `faef54087471`, then
+`(dir my.agents.juniper)` in the same reply. It verifies one error, no
+function row, no callable SCI Var, a real directory value without that
+function, successful subsequent installation, and preservation of its root
+and source after a refused replacement. Initial regression lookup/arity
+mistakes were corrected using the actual turn ref and `dir` signature.
+Focused fast verification passed 11 tests / 55 assertions.
+
+The combined fast gate at `f9ed564ef` ran 16 tests / 430 assertions. Two
+failures came from the since-corrected `dir` test invocation; the other six
+are the committed continuation test's retired no-form message expectations,
+documented in `docs/seon/issues/archive/turn-continuation-test-expects-retired-no-form-text.md`.
+The loop proof and remaining accretion checks passed. The first isolated gate
+confirmed only those six stale expectation failures (16 tests / 434 assertions).
+After the owning correction `e7bf60541`, the final isolated gate at
+`dabd311d0` passed 16 tests / 434 assertions, zero failures and errors.
+The final platform gate passed 84 tests / 505 assertions, zero failures and
+errors. The final fast gate passed 16 tests / 430 assertions, zero failures
+and errors. All lane-launched shells ended; the failed isolated root was
+removed after checking holders and verifying the owning expectation fix.
+Successful roots were removed by the runner, and lane logs were deleted
+after their results were recorded here.
+
+The part 1 gates select only these changed production/test paths:
+`src/seon/sci/eval.clj`, `src/seon/test/accretion.clj`, `src/seon/turn.clj`,
+`resources/seon/schemas/seon.sci.eval.edn`,
+`resources/seon/schemas/seon.test.accretion.edn`, and
+`test/seon/run4_install_test.clj`. Explicit namespaces are
+`seon.run4-install-test seon.test.accretion-test seon.loop-proof-test seon.turn-continue-test`;
+the final platform gate uses the same paths with `--platform`.
+
+### Live JVM verification
+
+The hot-reloaded default JVM was probed through `turn/evaluate-sources`,
+using its current database and a disposable candidate context. This did not
+write a turn, alter Juniper's retained context, or call a provider; durable
+turn/row/result-handle assertions belong to the real graph regression above.
+An initial `user` namespace probe refused because no such program namespace
+row existed; the verified form uses the existing Juniper namespace.
+
+The final result was `:kind :seon.test.accretion/install-refused`,
+`:arguments [[]]`, `:expected "[:map [:customer :string] [:total :int]]"`,
+`:actual-kind :seon.instrument/contract-violated`, `:errors 1`,
+`:callable? false`, `:directory-returned? true`, `:listed? false`.
+The actual field honestly retains the output-contract refusal returned by
+the instrumented invocation. It does not claim a recovered raw nil value.
+Exact reproducer:
+
+```clojure
+(let [instance (get @seon.operator.runtime/running-instances "default")
+      connection (seon.operator/connection "default")
+      database @connection
+      projection (seon.schema/projection-from-database database)]
+  (seon.schema/call-with-projection
+   projection
+   (fn []
+     (let [ctx (seon.sci.eval/fork-candidate-ctx
+                {:seon.sci.eval/ctx (:seon.sci.eval/ctx instance)
+                 :seon.db/db database :seon.db/connection connection
+                 :seon.agent/id "juniper"})
+           source (some (fn [[id text]] (when (= id "faef54087471") text))
+                        (:run4/evaluations
+                         (clojure.edn/read-string (slurp "test/seon/run4_replies.edn"))))
+           items (seon.turn/evaluate-sources
+                  {:seon.turn.loop/cluster (:seon.turn.loop/cluster instance)
+                   :seon.db/db database :seon.sci.eval/ctx ctx
+                   :seon.agent/id "juniper" :seon.cluster.eval/ordinal 0
+                   :seon.ns/name 'my.agents.juniper
+                   :seon.cluster.reply/sources
+                   [{:seon.cluster.eval/source source :seon.ns/name 'my.agents.juniper}
+                    {:seon.cluster.eval/source "(dir my.agents.juniper)"
+                     :seon.ns/name 'my.agents.juniper}]})
+           outcomes (mapv :seon.sci.eval/evaluation items)
+           value (:seon.sci.admit/value (first outcomes))
+           directory (:seon.sci.admit/value (second outcomes))]
+       {:kind (:seon.error/kind value)
+        :arguments (:seon.test.accretion/arguments value)
+        :expected (:seon.test.accretion/expected value)
+        :actual-kind (:seon.error/kind (:seon.test.accretion/actual value))
+        :shown (:seon.eval/shown (first outcomes))
+        :errors (count (filter :seon.cluster.eval/error outcomes))
+        :callable? (boolean (sci.core/resolve ctx 'my.agents.juniper/largest-customer))
+        :directory-returned? (vector? (:functions directory))
+        :listed? (boolean (some #(= 'my.agents.juniper/largest-customer (:sym %))
+                               (:functions directory)))}))))
 ```

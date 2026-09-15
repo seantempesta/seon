@@ -106,6 +106,12 @@
                           :seon.test.accretion/install-refused]
                          [:seon.error/kind :seon.error/kind]
                          [:seon.error/message :seon.error/message]
+                         [:seon.test.accretion/arguments {:optional true}
+                          :seon.schema/arguments]
+                         [:seon.test.accretion/expected {:optional true}
+                          :seon.test.accretion/expected]
+                         [:seon.test.accretion/actual {:optional true}
+                          :seon.test.accretion/actual]
                          [:seon.fn/sym :seon.fn/sym]
                          [:seon.test.accretion/orientation
                           :seon.test.accretion/orientation]
@@ -192,6 +198,10 @@
                          [:seon.agent/id :seon.agent/id]],
                         :candidate-request
                         [:map
+                         [:seon.test.accretion/candidate-ctx {:optional true}
+                          :seon.test.accretion/candidate-ctx]
+                         [:seon.test.accretion/evaluation {:optional true}
+                          :seon.test.accretion/evaluation]
                          [:seon.sci.eval/ctx :seon.sci.eval/ctx]
                          [:seon.db/db :seon.db/database-value]
                          [:seon.db/connection :seon.db/connection]

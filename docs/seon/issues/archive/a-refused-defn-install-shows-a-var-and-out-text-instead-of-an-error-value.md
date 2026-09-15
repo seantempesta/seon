@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [sci, contracts, auto-check, errors, repl, live-test]
 created: 2026-09-15
@@ -68,3 +68,25 @@ preserve the previously accepted callable. The regression source is
 `faef54087471` in `test/seon/run4_replies.edn`; it must assert the stored
 error, absent program row, and the same retained context's `dir` result.
 The turn-completion backstop is unrelated and remains outside this change.
+
+## Resolution — authorized continuation, 2026-09-15
+
+The owner authorized the narrow `turn.clj` caller change. Function
+declarations now evaluate once in the existing candidate context; the gate
+checks that evaluation before the next form and transfers only an accepted
+function root. Refusal renders and binds one flat error result and discards
+candidate bindings. Its kind, generated arguments, expected/actual evidence
+and actionable message are available directly on the result value.
+
+The canonical real-agent-graph regression replays `faef54087471` and checks
+one error, no function row, no retained callable, and a successful directory
+read without the function. It also accepts a valid replacement and verifies
+that another refused replacement preserves its callable identity and source.
+The focused armed gate passed 11 tests / 55 assertions; the final isolated
+gate passed 16 tests / 434 assertions and the platform gate passed 84 tests /
+505 assertions, all green. The live hot-reloaded JVM independently
+returned one error, arguments `[[]]`, no callable and no directory entry.
+
+Full commands, final gate results, live source and the separate continuation
+test expectation boundary are recorded in
+[the landing note](../../../prds/context-generation/research/run4-blockers-landing-2026-09-15.md).

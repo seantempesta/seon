@@ -292,10 +292,16 @@
    [:=> [:cat :seon.test.accretion/gate-report]
     :seon.test.accretion/install-refused-error]}
   [report]
-  (assoc report
-         :seon.test.accretion/install-refused true
+  (merge report
+         (select-keys (get-in report [:seon.test.accretion/auto-check
+                                     :seon.test.accretion/failure])
+                      [:seon.test.accretion/arguments
+                       :seon.test.accretion/expected
+                       :seon.test.accretion/actual])
+         {:seon.test.accretion/install-refused true
          :seon.error/kind :seon.test.accretion/install-refused
-         :seon.error/message (:seon.test.accretion/orientation report)))
+         :seon.error/message
+         "Fix the contract or the function and re-evaluate the defn."}))
 
 (defn- render-failure
   [failure]
@@ -308,7 +314,10 @@
     (str "Auto-check seed " (:seon.test.accretion/seed failure)
          "\narguments: " (pr-str (:seon.test.accretion/arguments failure))
          "\nexpected: " (:seon.test.accretion/expected failure)
-         "\nactual: " (pr-str (:seon.test.accretion/actual failure))
+         "\nactual: " (let [actual (:seon.test.accretion/actual failure)]
+                          (if (:seon.error/kind actual)
+                            (str (:seon.error/kind actual) " — " (:seon.error/message actual))
+                            (pr-str actual)))
          (when-let [explanation (:seon.test.accretion/explanation failure)]
            (str "\nwhy: " explanation)))))
 
@@ -322,7 +331,8 @@
     (str/join
      "\n\n"
      (concat
-      [(:seon.test.accretion/orientation unit)]
+      [(str (:seon.error/kind unit) "\n" (:seon.error/message unit))
+       (:seon.test.accretion/orientation unit)]
       (mapcat
        (fn [group]
          (let [members (:seon.test.accretion/failures group)

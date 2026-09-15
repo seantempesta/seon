@@ -1,5 +1,7 @@
 #:seon.sci.eval{:evaluation
                 [:map
+                 [:seon.test.accretion/candidate-ctx {:optional true}
+                  :seon.test.accretion/candidate-ctx]
                  [:seon.sci.admit/value
                   {:optional true}
                   [:any

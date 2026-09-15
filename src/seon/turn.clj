@@ -3075,8 +3075,14 @@
   (if-let [function-symbol
            (when (get-in evaluation [:seon.program/row :seon.fn/spec])
              (get-in evaluation [:seon.program/row :seon.fn/sym]))]
-    (let [database @(:seon.db/connection cluster)
-          analyzed-row (:seon.program/row evaluation)
+    (let [database (:seon.db/db form)
+          analysis (seon.fn/analyze-forms
+                    database [(assoc (select-keys form [:seon.cluster.eval/source
+                                                        :seon.cluster.eval/ns])
+                                     :seon.program/row (:seon.program/row evaluation))])
+          _ (when (:seon.error/kind analysis)
+              (throw (ex-info (:seon.error/message analysis) analysis)))
+          [form-facts analyzed-row] (first analysis)
           test-symbols (seon.fn/gate-set database function-symbol)
           seed (accretion/seed-for receipt-id)
           candidate
@@ -3085,6 +3091,9 @@
             :seon.db/db database
             :seon.db/connection (:seon.db/connection cluster)
             :seon.agent/id agent-id
+            :seon.test.accretion/candidate-ctx
+            (:seon.test.accretion/candidate-ctx evaluation)
+            :seon.test.accretion/evaluation evaluation
             :seon.cluster.eval/source
             (:seon.cluster.eval/source form)
             :seon.cluster.eval/ns (:seon.cluster.eval/ns form)
@@ -3121,30 +3130,21 @@
            :seon.test.accretion/status
            (:seon.test.accretion/status check)
            :seon.test.accretion/report-edn (pr-str report)}
-          evaluation (merge evaluation evidence
-                            {:seon.program/row analyzed-row})]
+          evaluation (merge (dissoc evaluation :seon.test.accretion/candidate-ctx)
+                            evidence
+                            {:seon.program/row analyzed-row
+                             :seon.turn/form-facts
+                             (assoc form-facts :db/id [:seon.cluster.eval/id receipt-id])})]
       (if (:seon.test.accretion/install? report)
-        (append-output evaluation
+        (append-output ((requiring-resolve 'seon.sci.eval/accept-candidate!)
+                        {:seon.sci.eval/ctx base-ctx :seon.db/db database
+                         :seon.sci.eval/evaluation evaluation})
                        (:seon.test.accretion/advisories report))
-        (let [refusal (accretion/install-refusal report)
-              admitted
-              (admit/admit
-               {:seon.sci.admit/value refusal
-                :seon.sci.admit/interrupt-fn (constantly nil)
-                :seon.sci.admit/caps (:seon.sci.admit/caps cluster)
-                :seon.schema/projection
-                (schema/projection-from-database database)
-                :seon.config/on-core-error
-                (:seon.config/on-core-error cluster)})]
-          (-> evaluation
-              (dissoc :seon.program/row)
-              (merge admitted)
-              (assoc :seon.cluster.eval/error (accretion/render-ai refusal)
-                     :seon.error/kind
-                     :seon.test.accretion/install-refused)))))
+        ((requiring-resolve 'seon.sci.eval/refuse-install)
+         form evaluation (accretion/install-refusal report))))
     (if (get-in evaluation [:seon.program/row :seon.fn/sym])
-      (dissoc evaluation :seon.program/row)
-      evaluation)))
+      (dissoc evaluation :seon.program/row :seon.test.accretion/candidate-ctx)
+      (dissoc evaluation :seon.test.accretion/candidate-ctx))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The proc
@@ -4308,6 +4308,7 @@
                         :seon.cluster.eval/ordinal ordinal
                         :seon.turn/id run-id})
                              :seon.db/db database
+                             :seon.db/connection connection
                              :seon.render/profile
                              (render/request-profile
                               {:seon.db/db database
@@ -4323,7 +4324,12 @@
                   :seon.sci.eval/ctx ctx
                   :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms cluster)
                   :seon.config/on-core-error (:seon.config/on-core-error cluster)}
-                 #((requiring-resolve 'seon.sci.eval/evaluate) request)))
+                 #(gate-function-install
+                   cluster ctx agent-id
+                   (if run-id (receipt-identity run-id ordinal)
+                       (id/id [agent-id form]))
+                   request
+                   ((requiring-resolve 'seon.sci.eval/evaluate-for-install) request))))
               evaluation
               (if (:seon.error/kind evaluation)
                 {:seon.sci.admit/value evaluation
@@ -4458,7 +4464,8 @@
             (into []
                   (keep-indexed
                    (fn [index {form :seon.turn.loop/admitted-form evaluation :seon.sci.eval/evaluation}]
-                     (when (:seon.program/row evaluation)
+                     (when (and (:seon.program/row evaluation)
+                                (not (get-in evaluation [:seon.program/row :seon.fn/sym])))
                        [index
                         {:seon.cluster.eval/source
                          (:seon.cluster.eval/source form)
@@ -4494,16 +4501,7 @@
                                  run-id (:seon.cluster.eval/ordinal (nth all index)))]))))
                  evaluated
                  (map vector defining analyzed))
-                gated
-                (mapv
-                 (fn [{ordinal :seon.cluster.eval/ordinal form :seon.turn.loop/admitted-form
-                       evaluation :seon.sci.eval/evaluation :as item}]
-                   (assoc item :seon.sci.eval/evaluation
-                          (gate-function-install
-                           cluster ctx agent-id
-                           (receipt-identity run-id ordinal)
-                           form evaluation)))
-                 evaluated)
+                gated evaluated
                 requests
                 (mapv
                  (fn [{ordinal :seon.cluster.eval/ordinal evaluation :seon.sci.eval/evaluation}]
