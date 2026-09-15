@@ -1314,4 +1314,18 @@ half-edit. Measured targets in the issue.
   admitted callable in the corpus projection" — same class as the
   hot-adopted handle change (a half-edit adopted onto the owner's cluster);
   lane told to fix before continuing. Run 8 waits on convergence.
+- 17:00Z owner: "fix all bugs and errors you are finding"; success may
+  simply be deftests (TDD); tasks stored in the db so agents can inspect
+  and add them; a user question is a task whose response is the write.
+  PRD §11: a task kind = refs to a detector fn, a context fn, and deftest
+  templates, plus writes/budget; an instance = a plan item with subject +
+  tests; done = every test verified after creation; a `:my.task` pair
+  renders statement, subject, context, tests with results, exact calls.
+  Lanes: page-speed-and-estimate (debug page 1.7 s → < 1 s; token prior
+  derived from attempts), test-provenance (build slice 1: `:seon.test/run`
+  + program-digest, results to `:current-src` via the one writer,
+  recording failure non-zero, `seon.test/verified?`), schema-audit
+  (adoption fix first). Queued behind schema-audit's files: fault steward
+  routing (error.clj), A06/A16 (db.clj); behind page-speed: A14
+  (transcript.clj). Adoption gate for half-edits stays a platform issue.
 
