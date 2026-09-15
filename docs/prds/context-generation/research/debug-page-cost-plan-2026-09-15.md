@@ -355,3 +355,70 @@ Gate request rewritten with the three render namespaces once each. The
 orchestrator's batched gate remains the final proof. This repair changes only
 `src/seon/render.clj`, `src/seon/turn.clj`,
 `test/seon/render/retained_test.clj`, and this landing note.
+
+### Batch 7: cold worker projection repair
+
+Read `tmp/orchestrator/gate-results/batch-7/debug-page-cost.md` end to end and
+the named log's published-base evidence. Reapplied the testing, REPL, Datastar
+and data-oriented Clojure skills. The warm retained test passed 25 assertions
+(run 64756); replacing its inherited SCI fork with `cluster-ctx` also passed
+(64758). Neither alone reproduced the worker's entering projection.
+
+The [cold fixture probe](debug_page_cost_cold_fixture_probe_2026_09_15.clj)
+uses the runner's packaged bootstrap projection, clones Batch 7's published
+base through the canonical `create-base`, substitutes only that fresh base for
+the scoped test invocation, and constructs fresh SCI contexts with explicit
+database, connection and projection state. `with-database` still creates the
+test's isolated branch and carries the environment; existing test requests
+carry fixed profiles. All substitutions restore on exit and each cloned base
+is closed. No default live SCI context is reused.
+
+This reproduced the exact namespace fallback: **17 pass / 8 fail / 0 error**,
+run **64770**, 22:57:46Z, basis 536872029. A separate probe found **0 function
+contracts in the base context's carried projection versus 1045 in the same
+database**. The fixture renderer's contract was absent from the former and
+present in the latter. `create-base` called `db/db` before carrying its own
+projection, so the worker's schema-only bootstrap projection became its world.
+The warm JVM had supplied a richer projection and concealed the defect.
+
+Fix the canonical owner once: after population/connection, derive the exact
+database projection, create its projection state, carry it on the connection,
+and pass it explicitly to `cluster-ctx`. `test/seon/test_support.clj` was clean
+when this lane expanded to that root cause. No renderer, profile, runner or
+contract was weakened. The existing seven failing tests provide recurring
+coverage when the orchestrator runs them in its fresh workers.
+
+The new `create-base` form was evaluated before editing the file; the same
+cold retained probe then passed **25 / 0 / 0**, run **64772**, 22:58:31Z.
+The adoption test initially used a stale loaded deftest (64774: 10 / 4 / 0);
+loading the current three namespace files through `seon.test/with-test-loader`
+removed that additional development-JVM difference. Exact tests below all ran
+via `(seon.test/run #'namespace/test (seon.operator/connection "default"))`
+inside the committed cold fixture probe's scope, one test per invocation:
+
+| Test (namespace prefix below) | Run / UTC | pass / fail / error |
+|---|---|---|
+| retained-test/equal-committed-database-skips-read-replay | 64862 / 23:01:24 | 25 / 0 / 0 |
+| retained-test/adoption-of-an-unrelated-namespace-re-renders-zero-evaluations | 64776 / 22:59:14 | 16 / 0 / 0 |
+| web-debug-test/turn-details-use-the-loop-opening-and-exact-segments | 64781 / 22:59:28 | 95 / 0 / 0 |
+| web-debug-test/reverse-declarations-receive-the-actual-relationship-value | 64860 / 23:01:09 | 3 / 0 / 0 |
+| web-debug-test/agent-identity-groups-scalars-and-keeps-declared-components | 64863 / 23:01:31 | 3 / 0 / 0 |
+| web-debug-test/saved-history-preserves-shown-text-with-numeric-lookups | 64893 / 23:01:51 | 11 / 0 / 0 |
+| web-context-test/a-new-message-does-not-reinvoke-the-identity-pair | 64891 / 23:01:37 | 6 / 0 / 0 |
+
+Every test namespace has prefix `seon.render.`. The hook initially refused;
+the existing `refresh-source!` owner invoked through MCP timed out at 60s.
+A subsequent source query verified adopted commit
+**6aa9ccb8-31a7-5bab-95f8-f97e1026ce9c** and the stored `create-base` repair.
+The final retained run 64862 is after that verified adoption, satisfying the
+same-regression rerun. One MCP request reported session-lost; a new session
+completed the saved-history probe. PID **69622** remained alive throughout.
+These transient tool failures are observations, not claims of a restart.
+
+An unbound attempt to build a new base from source still reached the separately
+open canonical population missing-projection issue. This repair verifies the
+gate's published-base path; it does not claim to repair that earlier population
+boundary. The loop-opening test again logged two agent-already-running refusals
+while all its assertions passed. No test JVM, process restart, foreign session,
+or foreign edited file was operated. Three gate namespaces were rewritten once
+each; the orchestrator's fresh-worker gate remains final proof.
