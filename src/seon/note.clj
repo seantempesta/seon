@@ -273,17 +273,21 @@
    (add-note! id content true about connection agent-id)))
 
 (defn forget!
-  "Forget one current note while retaining its Datahike history."
+  "Forget one current note and return its final content.
+
+  Read the removed note from the transaction's database-before."
   {:malli/schema
    [:=> [:cat :my.note/id :seon.db/connection :seon.agent/id]
-    [:or :my.note/id :seon.error/value]]}
+    [:or :my.note/note :seon.error/value]]}
   [id connection agent-id]
   (let [result
         (transact-note!
          connection agent-id
          [[:db.fn/call #'forget-note-call
            {:my.note/id id :seon.agent/id agent-id}]])]
-    (if (error-value? result) result id)))
+    (if (error-value? result)
+      result
+      (note-row (db/pull (:db-before result) note-selector [:my.note/id id])))))
 
 (defn notes
   "List this agent's bounded current notes in identity order."

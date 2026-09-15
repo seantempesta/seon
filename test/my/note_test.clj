@@ -56,8 +56,9 @@
   (with-notes
     (fn [connection]
       (note/add! "temporary" "Remember until done." connection "alice")
-      (is (= "temporary"
-             (note/forget! "temporary" connection "alice")))
+      (is (= {:my.note/id "temporary" :my.note/content "Remember until done."}
+             (select-keys (note/forget! "temporary" connection "alice")
+                          [:my.note/id :my.note/content])))
       (is (nil? (db/pull @connection '[*] [:my.note/id "temporary"])))
       (is (= ["Remember until done."]
              (db/q '[:find [?content ...]
