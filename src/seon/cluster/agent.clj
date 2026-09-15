@@ -232,11 +232,11 @@
         (when agent-id
           [:article {:class "seon-family-entry seon-agent-identity-entry"}
            [:header
-            [:p {:class "seon-kicker"} "Identity"]
-            [:h3 [:a {:href (route/path :seon.render.route/agent {:id agent-id})}
-                  agent-id]]]
+            [:h3 "Identity"]]
            (into [:dl]
-                 (cond-> []
+                 (cond-> [[:div [:dt "Agent"]
+                           [:dd [:a {:href (route/path :seon.render.route/agent {:id agent-id})}
+                                 agent-id]]]]
                    namespace-name
                    (conj [:div [:dt "Namespace"]
                           [:dd [:a {:href (route/path :seon.render.route/namespace
@@ -350,7 +350,7 @@
      [:dl
       [:div [:dt "Namespace"] [:dd [:code (str (:seon.ns/name unit))]]]
       [:div [:dt "Cluster"] [:dd (:seon.cluster/name unit)]]
-      [:div [:dt "Bootstrap run"]
+      [:div [:dt "Opening turn"]
        [:dd [:code (:seon.turn/id unit)]]]]]))
 
 (defn assigned-to

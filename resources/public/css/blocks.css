@@ -70,3 +70,12 @@
 .seon-help-instructions > li::marker { color: var(--color-signal); }
 .seon-help.seon-help-instructions code { color: var(--color-info); font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; }
 
+.seon-family-entry.seon-agent-identity-entry, .seon-family-entry.seon-agent-creation-entry { font: 0.75rem/1.55 var(--font-mono); overflow-wrap: anywhere; }
+.seon-agent-identity-entry > header h3, .seon-agent-creation-entry > h3 { font-size: 0.75rem; margin: 0 0 0.4rem; color: var(--color-text-400); }
+.seon-agent-identity-entry dl > div, .seon-agent-creation-entry dl > div { display: grid; grid-template-columns: 5rem minmax(0, 1fr); gap: 0.5rem; }
+.seon-agent-identity-entry dl :is(dt, dd), .seon-agent-creation-entry dl :is(dt, dd) { margin: 0; font: inherit; overflow-wrap: anywhere; }
+.seon-agent-identity-entry dl dt, .seon-agent-creation-entry dl dt { color: var(--color-text-400); font-size: 0.625rem; }
+.seon-agent-identity-entry a { color: var(--color-info); text-underline-offset: 0.2em; }
+.seon-root-agents table { table-layout: fixed; width: 100%; border-collapse: collapse; font-size: 0.625rem; }
+.seon-root-agents :is(th, td) { vertical-align: top; padding: 0.3rem; overflow-wrap: anywhere; border-bottom: 1px solid var(--color-base-800); }
+

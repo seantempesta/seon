@@ -102,3 +102,11 @@ Screenshot log: `fixture-seon-help-before → fixture-seon-help-verified; help-2
 
 Observed defects → change: The original list used inconsistent typography and left forms undifferentiated. The final list uses the mono stack, signal markers and inline code color. Help is absent from the current main-page walk; fixture proof is not claimed as live pair paint.
 
+## Identity
+
+Agent, namespace and steward each get one readable line. Creation names the opening turn; partial identity handling remains in its existing owner.
+
+Screenshot log: `fixture-seon-agent-identity-entry-before → fixture-seon-agent-identity-entry-verified; fixture-seon-agent-creation-entry-before → fixture-seon-agent-creation-entry-verified; identity-2`.
+
+Observed defects → change: The old layout lacked consistent row alignment. All values and links now wrap; no raw agent lookup reference is shown.
+

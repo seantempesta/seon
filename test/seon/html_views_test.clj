@@ -114,3 +114,19 @@
         (readable! html ["<code>(dir my.plan)</code>" "<code>(doc seon.db/q)</code>"])
         (is (= (golden :help) (bootstrap/render-help-ai unit)))))))
 
+(deftest identity-pairs-preserve-ai
+  (support/with-database
+    (fn [connection]
+      (db/transact! connection (cluster.agent/creation-tx
+                               {:seon.agent/id "alice" :seon.ns/name 'my.agents.alice
+                                :seon.cluster/name "fixture"}))
+      (let [unit {:seon.agent/id "alice" :seon.db/db @connection}
+            creation {:seon.agent/id "alice" :seon.ns/name 'my.agents.alice
+                      :seon.cluster/name "fixture" :seon.turn/id "opening"}]
+        (readable! (cluster.agent/render-identity-html unit) ["Agent" "alice" "my.agents.alice" "Steward"])
+        (readable! (cluster.agent/render-id-html "alice" @connection) ["alice" "Steward"])
+        (readable! (cluster.agent/render-creation-html creation) ["alice" "Opening turn"])
+        (is (= (golden :identity) (cluster.agent/render-identity-ai unit)))
+        (is (= (golden :id) (cluster.agent/render-id-ai "alice")))
+        (is (= (golden :creation) (cluster.agent/render-creation-ai creation)))))))
+
