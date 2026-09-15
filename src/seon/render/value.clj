@@ -282,7 +282,7 @@
                  total (assoc :seon.render.data/total total)
                  prefix (assoc :seon.print/prefix prefix))))
         exhausted? (and ai? (not (pos? @remaining)))
-        selected (when (and (map? value) (:seon.sci.eval/ctx unit)
+        selected (when (and (not ai?) (map? value) (:seon.sci.eval/ctx unit)
                             (not (get-in unit [:seon.render.value/options
                                               :seon.render.value/structural?])))
                    (let [node {:seon.print/face :seon.print/map :seon.print/entries []}
@@ -291,7 +291,7 @@
                      (when (not= node projected) projected)))]
     (when ai? (vswap! remaining dec))
     (cond
-      ;; A declared pair shapes a reached value before structural limits apply.
+      ;; Block pairs shape HTML; AI results retain the map's attributes.
       selected selected
 
       (and (coll? value) (not= 0 total) ai?
@@ -461,10 +461,7 @@
                   [:div {:id id :class "seon-data-panel"}
                    (breadcrumbs unit path)
                    (pager unit path display)
-                   (:seon.print/hiccup emitted)
-                   (when truncated?
-                     [:p {:class "seon-data-capped"}
-                      "elided — this value is larger than the configured window"])]}
+                   (:seon.print/hiccup emitted)]}
            (:seon.render.call/selected-producer initial-tree)
            (assoc :seon.render.call/selected-producer
                   (:seon.render.call/selected-producer initial-tree))))))))
@@ -473,9 +470,7 @@
   "Return the text sink result from one already prepared projection."
   {:malli/schema [:=> [:cat :seon.render.value/projection] :string]}
   [projection]
-  (str (:seon.render.value/text projection)
-       (when (:seon.render.value/truncated? projection)
-         " ; elided — this value is larger than the configured window")))
+  (:seon.render.value/text projection))
 
 (defn render-html-data
   "Return the hiccup sink result from one already prepared projection."

@@ -6,6 +6,7 @@
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
+            [seon.ai.tokens :as tokens]
             [seon.db :as db]
             [sci.core :as sci]
             [clojure.test :refer [deftest is]]
@@ -44,7 +45,7 @@
          :seon.sci.eval/time-limit-ms 2000
          :seon.config/on-core-error :panic))
 
-(deftest declared-pairs-render-inside-response-values
+(deftest block-pairs-remain-explicit
   (support/with-database
    (fn [connection]
      (let [report (db/transact! connection
@@ -94,15 +95,121 @@
                                  [directory repl/render-directory-ai]
                                  [step plan/render-item-ai]
                                  [whole-plan plan/format-plan-ai]]]
-         (let [response {:outer/value [{:seon.repl/value raw}]}
-               shown (value/render-ai (assoc request :seon.render/value response))]
-           (is (= (render-pair raw)
-                  (get-in (edn/read-string shown) [:outer/value 0 :seon.repl/value]))
-               (pr-str {:seon.test/shown shown
-                        :seon.test/matching-pairs
-                        (into [] (keep #(when (:seon.render/ai %)
-                                         (select-keys % [:seon.schema/key :seon.render/ai])))
-                              (schema/matching-shapes-in (schema/handed-projection) raw))}))))))))
+         (is (= (render-pair raw)
+                (render/render-ai (assoc request :seon.render/value raw)))))))))
+
+(deftest result-maps-retain-attributes-through-real-evaluation
+  (support/with-database
+   (fn [connection]
+     (support/seed-cluster! connection "render-results")
+     (let [written (db/transact! connection
+                     [{:seon.agent/id "render-results"}
+                      {:seon.turn/id "render-results-turn"
+                       :seon.turn/agent [:seon.agent/id "render-results"]
+                       :seon.turn/opened-tx (db/basis-t (db/db connection))
+                       :seon.turn/reply (.repeat "turn detail " 1000)}
+                      {:seon.effect/id "render-results-effect"
+                       :seon.effect/run [:seon.turn/id "render-results-turn"]
+                       :seon.effect/owner [:seon.fn/sym "seon.db/q"]
+                       :seon.effect/form-ordinal 0
+                       :seon.effect/ordinal 0
+                       :seon.effect/opened-at (java.util.Date. 0)
+                       :seon.effect/request-edn "{}"
+                       :seon.effect/result-edn (.repeat "payload " 1000)
+                       :seon.effect/duration-ms 12}])
+           database (db/db connection)
+           ctx (support/fork-cluster-ctx connection "render-results")
+           configuration (support/effective-config)
+           profile (assoc (render/agent-render-profile configuration)
+                          :seon.render.profile/max-children 32
+                          :seon.render.profile/max-string-length 128)
+           handle 'result/e0123456789ab]
+       (is (:db-after written) (pr-str written))
+       (doseq [lookup [[:seon.fn/sym "seon.db/q"]
+                       [:seon.config/cluster "render-results"]
+                       [:seon.turn/id "render-results-turn"]
+                       [:seon.effect/id "render-results-effect"]]]
+         (let [raw (db/pull database '[*] lookup)
+               result (evaluation/evaluate
+                        {:seon.cluster.eval/source (pr-str (list 'seon.db/pull (list 'quote '[*]) lookup))
+                         :seon.sci.eval/ctx ctx :seon.db/db database
+                         :seon.render/profile profile :seon.repl/handle handle
+                         :seon.sci.admit/caps (config/result-caps configuration)
+                         :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms configuration)
+                         :seon.config/on-core-error :panic})
+               shown (:seon.eval/shown result)
+               parsed (edn/read-string shown)
+               cuts (filter #(and (map? %) (:seon.print/omitted %))
+                            (tree-seq coll? seq parsed))]
+           (is (seq raw) (pr-str lookup))
+           (is (nil? (:seon.cluster.eval/error result)) (pr-str result))
+           (is (= raw (:seon.sci.admit/value result)))
+           (is (map? parsed) shown)
+           (is (<= (tokens/estimate shown) (:seon.render.profile/token-budget profile)) shown)
+           (is (seq (dissoc parsed :seon.print/elision)) shown)
+           (is (every? (set (keys raw)) (keys (dissoc parsed :seon.print/elision))) shown)
+           (is (seq cuts) shown)
+           (evaluation/bind-result! ctx handle raw)
+           (doseq [cut cuts]
+             (let [path (:seon.render.data/path cut)
+                   original (print/value-at raw path)]
+               (is (= (count original) (:seon.render.data/total cut)))
+               (is (= (- (count original) (:seon.render.data/next-offset cut))
+                      (:seon.print/omitted cut)))
+               (is (= original (sci/eval-form ctx (:seon.print/requery-form cut))))))
+           (let [prepared (value/prepare
+                            (assoc (render-request connection raw)
+                                   :seon.render/profile profile :seon.repl/handle handle))]
+             (is (= (value/render-ai-data prepared)
+                    (value/render-ai-data (assoc prepared :seon.render.value/truncated? true))))
+             (is (not (str/includes? (pr-str (:seon.render.value/html prepared))
+                                    "seon-data-capped"))))))))))
+
+(deftest background-poll-keeps-identity-while-payloads-grow
+  (support/with-database
+   (fn [connection]
+     (support/seed-cluster! connection "poll-render")
+     (let [configuration (support/effective-config)
+           profile (render/agent-render-profile configuration)
+           observations
+           (mapv
+            (fn [size]
+              (let [payload (.repeat "x" size)
+                    written (db/transact! connection
+                              [{:seon.agent/id "poll-render"}
+                               {:seon.turn/id "poll-render-turn"
+                                :seon.turn/agent [:seon.agent/id "poll-render"]
+                                :seon.turn/opened-tx (db/basis-t (db/db connection))}
+                               {:seon.effect/id "poll-render-effect"
+                                :seon.effect/run [:seon.turn/id "poll-render-turn"]
+                                :seon.effect/owner [:seon.fn/sym "seon.db/q"]
+                                :seon.effect/form-ordinal 0 :seon.effect/ordinal 0
+                                :seon.effect/opened-at (java.util.Date. 0)
+                                :seon.effect/request-edn "{}"
+                                :seon.effect/result-edn payload
+                                :seon.effect/duration-ms 12}])
+                    ctx (support/fork-cluster-ctx connection "poll-render")
+                    result (evaluation/evaluate
+                             {:seon.cluster.eval/source
+                              "(my.background/poll {:my.background/result [:seon.effect/id \"poll-render-effect\"]})"
+                              :seon.sci.eval/ctx ctx :seon.db/db (db/db connection)
+                              :seon.render/profile profile
+                              :seon.repl/handle 'result/e0123456789ab
+                              :seon.sci.admit/caps (config/result-caps configuration)
+                              :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms configuration)
+                              :seon.config/on-core-error :panic})
+                    shown (:seon.eval/shown result)
+                    parsed (edn/read-string shown)]
+                (is (:db-after written) (pr-str written))
+                (is (nil? (:seon.cluster.eval/error result)) (pr-str result))
+                (is (= "poll-render-effect" (:seon.effect/id parsed)) shown)
+                (is (= 12 (:seon.effect/duration-ms parsed)))
+                (is (= size (get-in parsed [:seon.effect/result-edn :seon.print/omitted])))
+                (is (= payload (get-in result [:seon.sci.admit/value :seon.effect/result-edn])))
+                (is (< (tokens/estimate shown) (:seon.render.profile/token-budget profile)))
+                (tokens/estimate shown)))
+            [8000 80000])]
+       (is (< (abs (- (first observations) (second observations))) 16))))))
 
 (defn- lexical-hiccup-text
   [form]
