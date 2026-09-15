@@ -7,6 +7,27 @@ tags: [issue, test, datahike]
 
 # Parallel published-base acquisition can lose a filestore key
 
+## Context-renders recurrence — 2026-09-15
+
+Owned-path turn gate `tmp/test-runs/run.1zymx6`, published base
+`5f121585eb18ce908d9823db643f75ca9f60c5de8baf59a4db888317ede74f93`,
+lost key `87693937-5244-4f59-99be-e2076ef68226` during
+`seon.turn-test/recovery-closes-a-turn-with-no-evaluations` acquisition.
+The stack enters Konserve tiered sync and Datahike connect. The runner's
+isolated confirmation passed and reported no earlier worker-global drift.
+Overall: 25 tests / 531 assertions, zero failures and one acquisition
+error. The deleting actor remains unknown. The fresh path-limited gate
+passed recovery acquisition; it instead reported two debug-HTML assertions.
+That later acquisition does not prove this store race resolved.
+
+The focused continuation/status/REPL gate `tmp/test-runs/run.6Y77Tm`
+then lost key `3104b0f0-37c6-42a9-8bac-8d6616268561` in base
+`626b8ed267b4da513b1a5bdf6ee8166edf44367cbc4d9665b5eca47b25d301ac`.
+The status accounting worker exited 1 after arming, before `task-complete`;
+the stderr names `NoSuchFileException`. Overall: 19 tests / 225 assertions,
+zero failures and one worker-exchange error. Final verification uses the
+same canonical gate with `SEON_TEST_WORKERS=1`.
+
 Evidence-listens recurrence, 2026-09-09: three-worker owned-path gate
 `tmp/test-runs/run.KnfZkw`, base
 `e62e5f0737a960e14d69729106558439c3efa3ff2b084b12a34c7e2e56830ec0`,

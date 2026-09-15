@@ -57,6 +57,8 @@ turns**: opening plus one plan reread, with zero churn.
 | `549ab70b5` | Derived prompt frame and trial parity | Fast frame 8/45; combined isolated 19/369; 0 idle system bytes. |
 | `bb008321d` | Correct initial-versus-changed provenance and refresh the help concurrency regression | Fast 9/302; isolated 19/369; plan 269, inbox 452, idle 0 bytes. |
 | `d2af195bf` | Evaluate every elision hint from an actually stored result | Fast loop 4/233; combined isolated 19/369; 0 idle system bytes. |
+| `e9285d9c5` | Record measured opening and final help-trial artifacts | Final help 12/12, zero fabricated response maps; no code change. |
+| `e7bf60541` | Align continuation assertion with the landed concise reader diagnostic | Fast 1/146; isolated continuation/status/REPL 19/236; no read-membership change. |
 
 The prompt-frame and provenance follow-ups pass their combined isolated
 gate: **19 tests / 369 assertions**, covering prompt, loop proof, REPL
@@ -208,6 +210,101 @@ re-armed in the disposable scratch JVM.
 A plain final platform run hit concurrent deletion of `web/debug-ai-html`
 while `test/seon/turn_test.clj:230` still referenced it. Those files were
 left to debug-turns. The HEAD-plus-owned-paths platform gate passed
-**84 tests / 505 assertions**. A final platform rerun at the latest commits
-and the additional turn-continuation check are still running. Cleanup and
-their results are recorded below when complete.
+**84 tests / 505 assertions**. The latest platform rerun also passed
+84 / 505 (`bin/test --platform --paths test/seon/turn_continue_test.clj`).
+
+The expanded owner fast run reports **38 tests / 202 assertions, 10 failures
+and 4 errors**, all in `seon.cluster.agent-test`. Status and REPL tests pass.
+The failures reproduce the previously documented routing/process fixture,
+terminal observation and episode-cap boundaries in
+[turn consumer fixtures](../../../seon/issues/turn-consumer-fixtures-read-retired-result-storage.md).
+No agent-test edits were retained; this suite is not claimed green.
+
+The first additional turn gate hit the existing
+[published-base filestore-key race](../../../seon/issues/parallel-test-base-connect-can-lose-a-filestore-key.md)
+before one recovery test's assertions; isolated confirmation passed.
+This does not establish parallel store safety or identify the deleting actor.
+The fresh combined turn gate passed acquisition and continuation but reports
+**25 tests / 537 assertions, 2 failures**, both at `turn_test.clj:242`:
+the current debug ledger no longer prints the expected `my.agents.a` label.
+That concurrent debug-turns HTML/test boundary was left untouched. A focused
+continuation/status/REPL gate verifies this lane's final test change:
+**19 tests / 236 assertions, zero failures or errors**, using
+`SEON_TEST_WORKERS=1 bin/test --paths test/seon/turn_continue_test.clj --
+seon.turn-continue-test seon.cluster.status-test seon.repl-test`.
+The continuation fast regression separately passes 1 / 146. The one-worker
+choice follows another confirmed published-base key loss in the parallel
+gate; no assertion, fixture population or instrumentation was weakened.
+
+The last read-only default check, basis `536872291`, confirms the boot
+context carrier exists and the requested run-2 turn is still absent.
+The explain comparison remains unmeasured, including its fabricated-response
+count. No explain call was spent against a replacement session.
+
+## Cleanup
+
+The disposable help cluster was downed with the operator and its root
+removed after checking for live holders. Both lane worktrees were removed.
+All lane command sessions exited; holderless failed test roots and lane
+scratch logs were deleted after recording their evidence here and in the
+existing issues. No foreign worktree, process, session or working-tree edit
+was cleaned. Default was never stopped, reforked or reseeded by this lane.
+
+## Paths touched by this lane
+
+```text
+docs/prds/context-generation/research/context-renders-landing-2026-09-14.md
+docs/prds/context-generation/research/context_renders_after_2026_09_14.edn
+docs/prds/context-generation/research/context_renders_before_2026_09_14.edn
+docs/prds/context-generation/research/context_renders_probe_2026_09_14.clj
+docs/prds/context-generation/research/help_trial_2026_09_09.clj
+docs/prds/context-generation/research/help_trial_context_renders_2026_09_14.edn
+docs/prds/context-generation/research/help_trial_context_renders_direct_2026_09_14.edn
+docs/prds/context-generation/research/help_trial_context_renders_final_2026_09_14.edn
+docs/seon/issues/bound-pull-selector-evidence-retains-all-attributes.md
+docs/seon/issues/derived-map-render-pairs-compete-with-less-specific-entity-pairs.md
+docs/seon/issues/parallel-test-base-connect-can-lose-a-filestore-key.md
+docs/seon/issues/seon-db-reads-rebuild-the-projection-per-call-when-none-is-handed.md
+docs/seon/issues/system-turn-drops-live-results-after-saving-shown-text.md
+docs/seon/issues/system-turns-reread-self-churning-data-and-look-like-the-agents-own-forms.md
+docs/seon/issues/turn-consumer-fixtures-read-retired-result-storage.md
+resources/seon/schemas/my.agent.edn
+resources/seon/schemas/my.plan.edn
+resources/seon/schemas/seon.agent.edn
+resources/seon/schemas/seon.ai.attempt.edn
+resources/seon/schemas/seon.cluster.eval.edn
+resources/seon/schemas/seon.db.diff.edn
+resources/seon/schemas/seon.eval.edn
+resources/seon/schemas/seon.plan.edn
+resources/seon/schemas/seon.render.profile.edn
+resources/seon/schemas/seon.repl.edn
+resources/seon/schemas/seon.runtime.edn
+resources/seon/schemas/seon.turn.edn
+resources/seon/schemas/seon.turn.loop.edn
+resources/seon/schemas/seon.wake.edn
+src/seon/agent.clj
+src/seon/cluster.clj
+src/seon/cluster/agent.clj
+src/seon/cluster/prompt.clj
+src/seon/cluster/status.clj
+src/seon/db.clj
+src/seon/plan.clj
+src/seon/print.cljc
+src/seon/render.clj
+src/seon/render/transcript.clj
+src/seon/render/value.clj
+src/seon/repl.clj
+src/seon/turn.clj
+test/my/plan_test.clj
+test/seon/cluster/prompt_test.clj
+test/seon/db_test.clj
+test/seon/fixtures/html_views_ai.edn
+test/seon/help_test.clj
+test/seon/loop_proof_test.clj
+test/seon/print_test.clj
+test/seon/render/value_test.clj
+test/seon/repl_grammar_test.clj
+test/seon/test_support.clj
+test/seon/turn_continue_test.clj
+test/seon/turn_test.clj
+```

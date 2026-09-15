@@ -7,6 +7,34 @@ tags: [issue, test, runtime, class/p3, wave/contract-gate]
 
 # Turn consumers retain obsolete fixture and observation contracts
 
+## Context-renders verification — 2026-09-15 05:21 UTC
+
+The HEAD-plus-paths fast invocation of `seon.cluster.agent-test`,
+`seon.cluster.status-test`, and `seon.repl-test` reports **38 tests / 202
+assertions / 10 failures / 4 errors**. All failures are in the agent
+namespace: parallel-turn counting, routing conservation, terminal wait,
+source-submission's `inst?` assertion on a transaction ref, park/wake,
+disarm backstop, and episode-cap observations. Routing again reports the
+missing fixture process `8111-1700000000000`; its armer remains running
+with zero armed agents. These are the same consumer boundaries recorded
+below, not a green owner-suite claim. Status and REPL tests pass.
+
+Command: `bin/test-fast --paths test/seon/turn_continue_test.clj --
+seon.cluster.agent-test seon.cluster.status-test seon.repl-test`.
+The selected continuation-test change only updates the asserted reader
+diagnostic. No agent-test edits were retained. The recurring context loop
+and persistent-result regressions pass separately; their exact counts
+are in the context-renders landing note.
+
+A subsequent isolated turn gate at `0439448cb` plus the continuation-test
+path reports **25 tests / 537 assertions / 2 failures / 0 errors**.
+Both failures are `turn_test.clj:242`: the virtual-turn regression expects
+`my.agents.a` in `debug-turn-html`, while the current ledger renders source,
+reply and result sections without that namespace label. The continuation
+regression passes. The context-renders lane leaves this concurrent
+debug-ledger boundary unchanged; no source-behavior failure is inferred
+from these HTML assertions.
+
 ## Runtime-loop resumption baseline — 2026-09-10 01:46 UTC
 
 At `617e538f3`, the HEAD-only agent namespace and the loop repair overlay
