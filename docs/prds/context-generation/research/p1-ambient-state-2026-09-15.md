@@ -800,3 +800,7 @@ P1's lifecycle/adoption, foreign-write fence, operator-init, source-offset and
 generator residuals remain as previously recorded; this does not close the
 whole class. All lane-owned shell invocations finished. Retained foreign gate
 roots were preserved.
+
+Repair slice committed as `72d7dc3a9`. Re-gate request rewritten at
+`tmp/orchestrator/gate-requests/p1-ambient-state.txt` after all 52 named
+regressions passed. The lane stops here without waiting for the gate.
