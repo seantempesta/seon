@@ -6,6 +6,31 @@ tags: [research, debug, web, prompt]
 
 # Debug session product — 2026-09-14
 
+## Main-page layout
+
+Removed the recency primary/rail grid and its 52rem/10rem inner scroll
+constraints. Both DOM and visual order now come from the walked unit's
+declared relationship or identity: plan, runtime, inbox, notes, settings,
+identity, faults, namespace. Unknown concerns follow those known concerns;
+walk membership and stable morph targets are unchanged. The existing runtime
+turn table is a native disclosure and wraps when expanded. The show-everything
+checkbox and its dead CSS are removed.
+
+| Images in `tmp/debug-product/` | Observed defect | Change |
+|---|---|---|
+| `layout-1-agent-{1440,700}.png` | Full width and concern order fixed; first capture still had the cached expanded runtime projection before adoption completed. | Verify source convergence and capture again; no ad hoc cache reset. |
+| `layout-2-agent-{1440,700}.png` | Plan progress and all pending/blocked steps readable; runtime is a summary with turn disclosure. All blocks full width. | Keep one column at both widths: it reads consistently and makes task progress the first content. |
+| `layout-2-{1440,700}-top.png`, `layout-2-{1440,700}-end.png` | Debug stays byte-faithful and wrapped; selected underline stays visible. | No further debug layout change in this slice. |
+
+Adopted and published source both read
+`6aa89eed-5b00-57bd-a674-de8dce871ddf`. After adoption the browser asserted
+plan/runtime/inbox order, absence of show-everything, no inner scroll
+containers, and exact document width at **1440 and 700 px**. Expanding the
+runtime table also preserves document width. Main GET measured
+**200 / 0.437193 s**; debug GET **200 / 0.003072 s**.
+Fast gate: **27 tests / 184 assertions, green**. Isolated gate:
+**87 tests / 583 assertions, zero failures or errors**.
+
 ## Shared-header review follow-up
 
 The orchestrator's review widened the shell pass to both namespace pages.

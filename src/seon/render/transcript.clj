@@ -1141,8 +1141,8 @@
             (str ": " (first (str/split-lines content)))))]))
 
 (defn- runtime-turn-table [turns latest-trigger connection]
-  [:section {:class "seon-turn-history"}
-   [:h3 (str "Turns (" (count turns) ")")]
+  [:details {:class "seon-turn-history" :data-preserve-attr "open"}
+   [:summary (str "Turns (" (count turns) ")")]
    (if (seq turns)
      [:table {:class "seon-runtime-turns" :style {:width "100%" :text-align "left"}}
       [:thead [:tr (for [label ["Opened" "Duration" "Trigger" "Evaluations" "Reply"]]

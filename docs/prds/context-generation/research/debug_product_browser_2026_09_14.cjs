@@ -53,7 +53,24 @@ const assert = require('node:assert/strict');
       await page.goto('http://127.0.0.1:7994/ns/my.agents.juniper');
       await page.locator('.seon-session-header').waitFor();
       await page.screenshot({ path: `tmp/debug-product/${process.argv[2] || 'a-final'}-agent-${width}.png`, fullPage: true });
+      await page.screenshot({ path: `tmp/debug-product/${process.argv[2] || 'a-final'}-agent-${width}-top.png` });
       assert.match(await page.locator('h1').first().textContent(), /juniper/);
+      const blocks = page.locator('.seon-rank-layout > .seon-walk-unit');
+      assert.equal(await blocks.first().getAttribute('data-walk-path'), '[:seon.agent/plan]');
+      assert.match(await blocks.nth(1).textContent(), /Runtime/);
+      assert.equal(await blocks.nth(2).getAttribute('data-walk-path'), '[:seon.message/_inbox]');
+      assert.equal(await page.getByText('show everything', { exact: true }).count(), 0);
+      const mainLayout = await page.evaluate(() => ({
+        documentWidth: document.documentElement.scrollWidth,
+        innerScrollers: [...document.querySelectorAll('.seon-namespace-page *')]
+          .filter(el => ['auto', 'scroll'].includes(getComputedStyle(el).overflowY)
+            && el.scrollHeight > el.clientHeight + 1).map(el => el.className)
+      }));
+      assert.equal(mainLayout.documentWidth, width);
+      assert.deepEqual(mainLayout.innerScrollers, []);
+      await page.locator('.seon-turn-history summary').click();
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), width);
+      console.log(JSON.stringify({ page: 'agent', width, ...mainLayout }));
       await page.close();
     }
   } finally { await browser.close(); }

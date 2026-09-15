@@ -79,6 +79,12 @@ The same header appears on the ordinary namespace page, with agent/debug
 navigation. Debug history uses normal document scrolling, with selected-turn
 facts and navigation in the sticky header. Re-read disclosures reveal entries
 in place, and the last emission scrolls into view on load.
+The ordinary page is one full-width column ordered by declared concern:
+plan, runtime, inbox, notes, settings, identity, faults, namespace bindings.
+The walk still owns membership and stable block identities; presentation
+order no longer promotes the most recently changed empty block. Blocks have
+no inner scroll boxes. Runtime's existing turn table is an expandable
+disclosure, with a fixed-layout wrapping table when opened.
 Compaction wipes the agent's evaluations;
 the next system turn regenerates the opening. There is no manual
 Add/remove/revision/proof/adoption path for editing context.

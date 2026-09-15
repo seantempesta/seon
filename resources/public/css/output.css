@@ -2679,7 +2679,9 @@ details.tool-call-details[open] .tool-preview {
   color: var(--color-error);
 }
 .seon-main:has(.seon-rank-layout) {
-  max-width: 116ch;
+  width: 100%;
+  max-width: none;
+  padding: 1rem;
 }
 .seon-transcript {
   display: flex;
@@ -2799,69 +2801,64 @@ details.tool-call-details[open] .tool-preview {
   flex-direction: column;
   gap: 0.55rem;
   min-width: 0;
+  font: 0.75rem/1.6 var(--font-mono);
 }
-.seon-floor-control {
-  display: inline-flex;
-  align-items: center;
-  align-self: flex-end;
-  gap: 0.4rem;
-  color: var(--color-text-400);
-  font-size: 0.625rem;
-  cursor: pointer;
-  user-select: none;
-}
-.seon-floor-control input {
-  accent-color: var(--color-signal);
+.seon-namespace-page *, .seon-main > .seon-session-header * {
+  min-width: 0;
+  max-width: 100%;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 .seon-rank-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(15rem, 1fr);
+  display: flex;
+  flex-direction: column;
   gap: 0.65rem;
-  align-items: start;
-  min-height: 20rem;
-  max-height: 52rem;
-  overflow-y: auto;
-  overscroll-behavior: contain;
 }
 .seon-walk-unit {
   min-width: 0;
+  width: 100%;
+  padding: 0.75rem;
   border: 1px solid var(--color-base-800);
-  border-radius: 0.25rem;
-  background: var(--color-base-900);
+  background: var(--color-base-950);
 }
-.seon-rank-primary {
-  grid-column: 1;
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  max-height: 52rem;
-  overflow: auto;
+.seon-turn-history {
+  margin-top: 0.5rem;
 }
-.seon-rank-rail, .seon-rank-deep {
-  grid-column: 2;
-  max-height: 10rem;
-  overflow: auto;
-}
-.seon-rank-deep {
-  border-color: var(--color-base-850);
+.seon-turn-history > summary {
+  cursor: pointer;
   color: var(--color-text-400);
+  font-size: 0.625rem;
+}
+.seon-runtime-turns {
+  table-layout: fixed;
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.625rem;
+}
+.seon-runtime-turns :is(th, td) {
+  padding: 0.35rem;
+  vertical-align: top;
+  border-bottom: 1px solid var(--color-base-800);
+}
+.seon-runtime-turns th {
+  color: var(--color-text-400);
+  font-weight: 400;
+}
+.seon-runtime-turns th:nth-child(1), .seon-runtime-turns th:nth-child(2) {
+  width: 10%;
+}
+.seon-runtime-turns th:nth-child(3) {
+  width: 30%;
+}
+.seon-runtime-turns th:nth-child(4) {
+  width: 10%;
+}
+.seon-runtime-turns th:nth-child(5) {
+  width: 40%;
 }
 @media (max-width: 52rem) {
   .seon-main:has(.seon-rank-layout) {
-    max-width: 78ch;
-  }
-  .seon-rank-layout {
-    grid-template-columns: 1fr;
-    min-height: 0;
-    max-height: none;
-    overflow: visible;
-    overscroll-behavior: auto;
-  }
-  .seon-rank-primary, .seon-rank-rail, .seon-rank-deep {
-    grid-column: 1;
-    position: static;
-    max-height: none;
-    overflow: visible;
+    padding: 0.5rem;
   }
 }
 .seon-body:has(.seon-debug) {

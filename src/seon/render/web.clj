@@ -352,12 +352,23 @@
           :seon.render.value/root [:seon.agent/id agent-id])
    (:seon.render.walk/path unit)))
 
-(defn- rank-class
-  [rank]
-  (cond
-    (zero? rank) "seon-rank-primary"
-    (<= rank 3) "seon-rank-rail"
-    :else "seon-rank-deep"))
+(defn- page-order
+  "Keep the agent's task and runtime ahead of supporting record blocks.
+  This is presentation order over declared relationships and identities."
+  [unit]
+  (let [path (:seon.render.walk/path unit)
+        lookup (:seon.render.walk/lookup unit)
+        identity-attribute (when (vector? lookup) (first lookup))]
+    (cond
+      (= :seon.agent/plan (first path)) 0
+      (= :seon.runtime/agent identity-attribute) 1
+      (= :seon.message/_inbox (first path)) 2
+      (= :my.note/_agent (first path)) 3
+      (= :seon.agent/settings (first path)) 4
+      (empty? path) 5
+      (= :seon.error/_steward (first path)) 6
+      (= :seon.ns/name identity-attribute) 7
+      :else 8)))
 
 (defn surface-html
   "Serialize one walked HTML unit into its stable morph wrapper."
@@ -370,7 +381,7 @@
         output (:seon.render/output unit)
         id (unit-id agent-id unit)
         attributes {:id id
-                    :class ["seon-walk-unit" (rank-class rank)]
+                    :class "seon-walk-unit"
                     :style (str "order:" rank)
                     :data-rank rank
                     :data-unit-id id
@@ -493,11 +504,11 @@
 
             (not (:seon.error/kind fleet-output))
             (assoc :seon.render/output fleet-output)))
-        units (cond-> walked-units fleet-unit (conj fleet-unit))
+        units (sort-by page-order (cond-> walked-units fleet-unit (conj fleet-unit)))
         ranks (into {}
                     (map-indexed (fn [rank unit]
                                    [(:seon.render.walk/path unit) rank]))
-                    (reverse units))
+                    units)
         rows (mapv (fn [unit]
                      (let [element-id (unit-id id unit)
                            rank (get ranks (:seon.render.walk/path unit))
@@ -527,13 +538,18 @@
                     (map (juxt :seon.render.web/element-id
                                :seon.render.walk/path))
                     rows)
+        orders (into {stream-strip-id Long/MAX_VALUE}
+                     (map (fn [row]
+                            [(:seon.render.web/element-id row)
+                             (get ranks (:seon.render.walk/path row) Long/MAX_VALUE)]))
+                     rows)
         page (into (sorted-map-by
                     (fn [left right]
-                      (let [path-order (path-compare (get paths left)
-                                                     (get paths right))]
-                        (if (zero? path-order)
-                          (compare left right)
-                          path-order))))
+                      (let [order (compare (get orders left) (get orders right))]
+                        (if (zero? order)
+                          (let [path-order (path-compare (get paths left) (get paths right))]
+                            (if (zero? path-order) (compare left right) path-order))
+                          order))))
                    (map (juxt :seon.render.web/element-id
                               :seon.render.web/html))
                    rows)
@@ -3094,13 +3110,7 @@
                                           (:seon.store/connection-object service) agent-id
                                           (:seon.sci.admit/caps service)
                                           (assoc service ::transcript/debug? false))))
-                    [:section {:class "seon-namespace-page"
-                               :data-signals__ifmissing
-                               "{showEverything:false}"}
-                     [:label {:class "seon-floor-control"}
-                      [:input {:type "checkbox"
-                               :data-bind "showEverything"}]
-                      [:span "show everything"]]
+                    [:section {:class "seon-namespace-page"}
                      (into [:section {:class "seon-rank-layout"}]
                            (map hiccup/raw)
                            unit-html)
