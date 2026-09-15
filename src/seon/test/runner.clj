@@ -1085,48 +1085,12 @@
            ::instrumentation-unavailable true})))
       declared)))
 
-(defn- arming-decision
-  "The shipped decisions, admission caps and program namespaces one arm needs.
-
-  DECIDED ONCE, BEFORE THE FIRST ARM, AND CARRIED. Deriving it again for a
-  mid-run re-arm asks `seon.config/result-caps` its own question under the
-  contracts the first arm installed, and the compiled shipped effective config
-  does not satisfy `:seon.config/effective` — eighteen optional dials it
-  legitimately leaves absent. On the first arm nothing is instrumented so the
-  call answers; on a re-arm the worker died, and the namespaces it held were
-  reported red as `confirmation parallel-only`, which mis-attributed a day of
-  someone else's diagnosis (`docs/seon/issues/the-test-runners-re-arm-kills-
-  the-worker-under-its-own-contract.md`).
-
-  That the effective config fails its own key's schema is a separate defect,
-  filed there; the arming path must not be the thing that discovers it."
-  []
-  (let [decisions (config/defaults)
-        caps (config/result-caps decisions)]
-    (when (:seon.error/kind caps)
-      (throw
-       (ex-info (:seon.error/message caps)
-                (assoc caps ::instrumentation-unavailable true))))
-    {::decisions decisions
-     ::caps caps
-     ::program (declared-program-namespaces)}))
-
 (def ^:private arm-contracts! (requiring-resolve 'seon.test.arm/arm-contracts!))
 
 (defn- initialize-contracts!
   "Load selected tests and acquire the one arming value for workers and test-fast."
   [role namespaces]
-  (schema/call-with-projection
-   (packaged-test-projection role)
-   #(doseq [namespace-name namespaces] (require namespace-name)))
-  ;; Acquire after requires so declared predicate callables are present.
-  (let [projection (packaged-test-projection role)
-        decision (arming-decision)
-        applied (arm-contracts! decision projection role namespaces)]
-    {::projection projection
-     ::namespaces namespaces
-     ::decision decision
-     ::instrumented (:seon.instrument/instrumented applied)}))
+  ((requiring-resolve 'seon.test.arm/initialize-contracts!) role namespaces))
 
 (defn- reassert-contracts!
   "Re-arm this worker JVM when a task left its contracts stripped.

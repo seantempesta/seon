@@ -3,12 +3,14 @@
             [clojure.test :refer [deftest is]]
             [seon.instrument :as instrument]
             [seon.test.arm :as arm]
+            [seon.test.runner :as runner]
             [seon.test-support :as test-support]))
 
 (deftest initialization-acquires-one-projection
   (test-support/preserving-instrumentation-state
    (fn []
-     (let [acquire @#'arm/packaged-test-projection
+     (doseq [initialize [#'arm/initialize-contracts! #'runner/initialize-contracts!]]
+       (let [acquire @#'arm/packaged-test-projection
              acquisitions (atom [])
              initialized
              (with-redefs-fn
@@ -17,13 +19,13 @@
                   (let [projection (acquire role)]
                     (swap! acquisitions conj projection)
                     projection))}
-               #(#'arm/initialize-contracts! "one-projection" ['seon.test.runner-test]))
+               #(initialize "one-projection" ['seon.test.runner-test]))
              program (#'arm/declared-program-namespaces)
              armable (instrument/armable program)
              installed (instrument/instrumented)]
-         (is (= 1 (count @acquisitions)))
+         (is (= 1 (count @acquisitions)) (str initialize))
          (is (identical? (first @acquisitions)
                          (:seon.test.runner/projection initialized)))
          (is (seq armable) "An absent program cannot prove complete arming.")
          (is (empty? (set/difference armable installed))
-             "Every armable program Var carries its real contract wrapper.")))))
+             "Every armable program Var carries its real contract wrapper."))))))

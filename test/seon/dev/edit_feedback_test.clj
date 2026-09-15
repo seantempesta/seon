@@ -49,60 +49,84 @@
     (is (= [failure failure failure nil]
            (edn/read-string (::stdout result))))))
 
+(def ^:private queued-editor-probe
+  '(do
+     (binding [*in* (java.io.StringReader. "{}")
+               *out* (java.io.StringWriter.)]
+       (load-file "bin/seon-hook"))
+     (let [paths (mapv #(str (root-file %))
+                      ["src/seon/test/arm.clj" "src/seon/test/runner.clj"
+                       "test/seon/test/runner_test.clj"
+                       "test/seon/dev/hook_test.clj"
+                       "test/seon/dev/edit_feedback_test.clj"])
+           config {:current-source {:enabled true :timeout-seconds 1}}
+           publications (atom [])
+           responses (atom [])
+           edit (fn [path]
+                  (current-source-feedback
+                   {:hook_event_name "PostToolUse" :tool_name "Edit"
+                    :tool_input {:file_path path}}
+                   config))]
+       (io/make-parents source-worker-path)
+       (spit source-worker-path
+             (pr-str {:seon.hook/pid (.pid (java.lang.ProcessHandle/current))}))
+       (with-redefs [load-config (constantly config)
+                     publish-source-paths
+                     (fn [batch-paths _ id]
+                       (swap! publications conj
+                              {:seon.hook/publication id :seon.hook/paths batch-paths})
+                       ;; Inject edit events while the first publication is
+                       ;; on the stack. Feedback must return before it settles;
+                       ;; no scheduling interval determines batch membership.
+                       (when (= 1 (count @publications))
+                         (doseq [path (conj paths (first paths))]
+                           (swap! responses conj
+                                  {:seon.probe/path path :seon.probe/feedback (edit path)})))
+                       "refused: probe publication")]
+         (let [initial (edit (first paths))]
+           (run-source-worker!)
+           (prn {:seon.probe/paths paths
+                 :seon.probe/initial initial
+                 :seon.probe/publications @publications
+                 :seon.probe/responses @responses
+                 :seon.probe/results (mapv #(edn/read-string (slurp %))
+                                           (.listFiles source-results-path))
+                 :seon.probe/pending? (.exists pending-source-path)
+                 :seon.probe/worker? (.exists source-worker-path)}))))))
+
 (deftest concurrent-editors-queue-without-waiting-for-publication
-  (let [directory (fixture-directory)
-        config (io/file directory "hook.edn")
-        state (io/file directory "state")
-        paths (mapv #(str (io/file repo-root %))
-                    ["src/seon/cluster.clj" "src/seon/cluster/source.clj"
-                     "test/seon/cluster/source_test.clj"
-                     "test/seon/cluster/boot_test.clj"
-                     "test/seon/dev/edit_feedback_test.clj"])
-        operator-root (str (.relativize (.toPath repo-root)
-                                        (.toPath (io/file directory "operator"))))]
+  (let [directory (fixture-directory)]
     (try
-      (spit config
-            (pr-str {:docstring-lint {:enabled false}
-                     :review {:enabled false}
-                     :current-source {:enabled true :root operator-root
-                                      :cluster "missing" :quiet-seconds 5
-                                      :timeout-seconds 20}}))
-      (let [requests
-            (mapv (fn [path]
-                    (future
-                      (run-process
-                       {::command [(str (io/file repo-root "bin/seon-hook"))]
-                        ::directory repo-root
-                        ::environment {"SEON_HOOK_CONFIG" (str config)
-                                       "SEON_HOOK_STATE_DIR" (str state)}
-                        ::input (json/generate-string
-                                 {:hook_event_name "PostToolUse" :tool_name "Edit"
-                                  :tool_input {:file_path path}})})))
-                  paths)
-            responses (mapv #(test-support/await-event! % "coalesced hook result") requests)
-            worker-state (edn/read-string (slurp (io/file state ".source-worker.edn")))
-            worker-handle (java.lang.ProcessHandle/of (:seon.hook/pid worker-state))
-            _ (when (.isPresent worker-handle)
-                (.get (.onExit (.get worker-handle)) 30 java.util.concurrent.TimeUnit/SECONDS))
-            result-files (vec (.listFiles (io/file state "source-publications")))]
-        (is (= 1 (count result-files)) "one real operator request covers five editors")
-        (doseq [response responses]
-          (is (zero? (::exit response)) (::stderr response))
-          (is (str/includes? (::stdout response) "queued for publication"))
-          (is (str/includes? (::stdout response) "seon.cluster.source/current")))
-        (when (= 1 (count result-files))
-          (let [result (edn/read-string (slurp (first result-files)))
-                id (:seon.hook/publication result)
-                worker (java.lang.ProcessHandle/of (:seon.hook/worker-pid result))]
-            (is (= (set paths) (set (:seon.hook/paths result))))
-            (is (str/includes? (:seon.hook/feedback result) "refused")
-                "the real operator refuses the absent JVM; absence is never convergence")
-            (doseq [[path response] (map vector paths responses)]
-              (is (str/includes? (::stdout response) id))
-              (is (str/includes? (::stdout response) path)))
-            (when (.isPresent worker)
-              (.get (.onExit (.get worker)) 5 java.util.concurrent.TimeUnit/SECONDS))
-            (is (not (.exists (io/file state ".source-worker.edn")))))))
+      (let [result (run-process
+                    {::command ["bb" "-e" (pr-str queued-editor-probe)]
+                     ::directory repo-root
+                     ::environment {"SEON_HOOK_STATE_DIR" (str directory)}
+                     ::deadline-ms (* 1000 test-support/event-backstop-seconds)})
+            _ (is (zero? (::exit result)) (::stderr result))
+            observed (edn/read-string (::stdout result))
+            paths (:seon.probe/paths observed)
+            publications (:seon.probe/publications observed)
+            [initial successor] publications
+            responses (:seon.probe/responses observed)
+            results (:seon.probe/results observed)]
+        (is (= 2 (count publications)) "One initial batch and exactly one successor.")
+        (is (= [(first paths)] (:seon.hook/paths initial)))
+        (is (= (vec (sort paths)) (:seon.hook/paths successor)))
+        (is (not= (:seon.hook/publication initial) (:seon.hook/publication successor)))
+        (is (str/includes? (:seon.probe/initial observed) (:seon.hook/publication initial)))
+        (is (= (inc (count paths)) (count responses)))
+        (doseq [{:seon.probe/keys [path feedback]} responses]
+          (is (str/includes? feedback "queued for publication"))
+          (is (str/includes? feedback (:seon.hook/publication successor)))
+          (is (str/includes? feedback path))
+          (is (str/includes? feedback "seon.cluster.source/current")))
+        (is (= 2 (count results)))
+        (is (= (set (map :seon.hook/publication publications))
+               (set (map :seon.hook/publication results))))
+        (is (every? #(= "refused: probe publication" (:seon.hook/feedback %)) results)
+            "Terminal refusals remain refusals, never convergence.")
+        (is (false? (:seon.probe/pending? observed)))
+        (is (false? (:seon.probe/worker? observed))))
       (finally (test-support/delete-recursively! directory)))))
 
 (deftest pre-edit-blocks-reconstructed-error-level-findings
