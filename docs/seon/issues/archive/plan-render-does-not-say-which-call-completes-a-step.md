@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [my.plan, render, help, live-test]
 created: 2026-09-15
@@ -27,3 +27,16 @@ the id.
 - `my.note/add!`'s docstring example includes `:my.note/id`; the
   executable-example regression already runs examples, so the example
   must be complete to pass.
+
+## Resolution — 2026-09-15
+
+`seon.plan/render-plan-ai` derives the exact `my.plan/complete!` call from
+the current step and teaches that `current!` selects and completion clears
+the selection. The HTML pair's source bytes are unchanged. my.plan's
+docstrings agree; my.note/add!'s existing complete id-bearing example passes
+the executable-example regression.
+
+The selected isolated gate passed 38 tests / 547 assertions. The unchanged
+live help-trial harness scored 12/12 on the new prompt. Exact bytes and
+provider evidence are in the
+[landing note](../../../prds/context-generation/research/contracts-and-plan-landing-2026-09-15.md).

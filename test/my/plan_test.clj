@@ -482,6 +482,10 @@
         (is (= "juniper/render-plan"
                (get-in current [:my.plan/current-step :my.plan.item/id])))
         (is (str/includes? ai "(seon.plan/plan {})"))
+        (is (str/includes? ai "(my.plan/complete! {:my.plan.item/id \"juniper/render-plan\"})"))
+        (is (str/includes? ai "my.plan/current! selects; completing clears the selection"))
+        (is (not (str/includes? (plan/render-plan-ai (dissoc current :my.plan/current-step))
+                               "(my.plan/complete!")))
         (is (str/includes? printed "1 of 4 steps completed"))
         (is (str/includes? printed "Current step: "))
         (is (not (str/includes? printed ":open nil"))

@@ -1,6 +1,7 @@
 (ns my.plan
   "Read and maintain my objective and ordered plan steps.
 
+  current! selects a step; complete! completes it and clears the selection.
   Use add!, update!, current! and complete! with request maps. A completed
   step has :my.plan.item/completed-tx. Verify its done-when before completion.
 
@@ -154,7 +155,8 @@
   "Select the named open item as current and return it.
 
   Returns the step map with :my.plan/state :current. The step must belong
-  to my plan and must not already be completed.
+  to my plan and must not already be completed. Use my.plan/complete! to
+  complete it after verifying its criterion; completing clears the selection.
 
   Example:
   (let [step (my.plan/add! {:my.plan.item/id \"focus-step\"

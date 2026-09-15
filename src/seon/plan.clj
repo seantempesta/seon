@@ -1140,12 +1140,27 @@
            "}\n :seon.plan/update-example " (pr-str (update-example view)) "}"))))
 
 (defn render-plan-ai
-  "Read my complete plan with one thinking comment; doc carries the write examples."
+  "Read my plan and teach the completing call for its selected step."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/source]}
   [unit]
-  (str ";; My plan is my instructions; a step is done when it has :completed-tx. (doc my.plan) shows how to add, complete, and remove steps; ids are (seon.id/id title 8).\n"
-       (repl/source-text
-        (list 'seon.plan/plan {}))))
+  (let [database (:seon.db/db unit)
+        component (or (:seon.render/value unit) unit)
+        selected (:my.plan/current-step component)
+        current-id (or (when (map? selected) (:my.plan.item/id selected))
+                       (when (and database selected)
+                         (:my.plan.item/id
+                          (db/pull database [:my.plan.item/id]
+                                   (if (map? selected) (:db/id selected) selected)))))
+        current-id (or current-id
+                       (when (and database (:seon.agent/id unit))
+                         (:my.plan.item/id (current database (:seon.agent/id unit)))))]
+    (str ";; My plan is my instructions. "
+         (if current-id
+           (str "After seeing the result and verifying the criterion, complete this step with "
+                "(my.plan/complete! {:my.plan.item/id " (pr-str current-id) "}). ")
+           "No step is selected. ")
+         "my.plan/current! selects; completing clears the selection.\n"
+         (repl/source-text (list 'seon.plan/plan {})))))
 
 (defn render-plan-html
   "Show the objective, current focus, progress, and every step with its state."
