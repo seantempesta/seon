@@ -98,3 +98,26 @@ The first scratch publication saw source changes during analysis and refused.
 A detached `tmp/contracts-plan-wt` at HEAD plus only this lane's files,
 with `reference-code` linked, supplied the stable publication. No foreign
 session or file was operated. Default was never stopped, reforked or reseeded.
+
+## Item 4 — complete examples and collection/attribute guidance
+
+`my.note/add!` already had the complete executable example at inherited HEAD:
+
+```clojure
+(my.note/add! {:my.note/id "observation"
+               :my.note/content "Verified the customer total."})
+```
+
+No redundant source edit was needed: `my.examples-test` executes that exact
+example from the live program doc map. The help owner adds one sentence:
+`[:vector X] needs a vector; use vec to convert a lazy seq.` The canonical
+`:seon.db/attributes` declaration now explains that the property declares
+map entries as database attributes, leaves the map open to extra keys,
+and adds no identity constraint. Source grounding:
+`src/seon/schema/form.cljc:66` derives stored attributes from map entries.
+
+- Fast path-isolated help/example/grammar run: **8 tests / 270 assertions**,
+  0 failures/errors.
+- Isolated gate: **8 tests / 274 assertions**, 0 failures/errors
+  (`run.swOoip`, removed by the runner).
+- The item 3 paid trial included the new vector sentence and scored 12/12.

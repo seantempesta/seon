@@ -1,4 +1,4 @@
-#:seon.db{:attributes :boolean,
+#:seon.db{:attributes [:boolean {:description "On a map schema, :seon.db/attributes true declares its entries as database attributes; the map stays open to extra keys and gains no identity constraint."}],
           :lookup-ref-value
           [:or :string :uuid :keyword :symbol :int
            [:schema {:registry

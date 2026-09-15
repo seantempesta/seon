@@ -33,3 +33,21 @@ created: 2026-09-15
 - `(doc :example/order-row)` (or the schema's render) explains
   `:seon.db/attributes true` in one line; help says `[:vector X]` needs a
   vector (use `vec`).
+
+## Contracts-and-plan verification, 2026-09-15
+
+The refusal constructor now reports the existing Malli coordinate. The live
+JVM returned `argument 0 (0-based); schema path [0]; expected :vector, got
+LazySeq`. The canonical SCI regression reproduces the captured run-5 call
+and proves `vec` returns Ada/115.
+
+An additional presentation boundary was found: `seon.error/instrumentation-prose`
+reconstructs a message from expected/offending evidence and discards
+`:seon.error/message`. Its shown text still omits the new coordinate. A
+scope extension to that renderer has been requested; the shown-text
+assertion remains red until that boundary is repaired.
+
+The vector-help sentence and the canonical :seon.db/attributes description
+are now documented. Their isolated help/example/grammar gate passed
+8 tests / 274 assertions; the live help trial with those bytes scored 12/12.
+The issue remains open for the shown-message boundary above.
