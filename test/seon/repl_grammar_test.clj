@@ -1,5 +1,9 @@
 (ns seon.repl-grammar-test
   (:require [clojure.core.async :as async]
+            [clojure.edn :as edn]
+            [clojure.test.check :as check]
+            [clojure.test.check.generators :as gen]
+            [clojure.test.check.properties :as prop]
             [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [seon.bootstrap :as bootstrap]
@@ -16,6 +20,20 @@
             [seon.sci.admit :as admit]
             [seon.test-support :as support]
             [seon.turn :as turn]))
+
+(deftest shown-value-diffs-are-deterministic-readable-snapshot-paths
+  (support/assert-check!
+   (check/quick-check
+    100
+    (prop/for-all [before gen/any-printable-equatable
+                  after gen/any-printable-equatable]
+      (let [request {:seon.db.diff/before before :seon.db.diff/after after}
+            changes (db/diff request)
+            text (pr-str changes)]
+        (and (= after (db/apply-diff before changes))
+             (= changes (edn/read-string text))
+             (= text (pr-str (db/diff request))))))
+    :seed 20260914)))
 
 (deftest prompt-precedes-exact-multiline-agent-input
   (let [emission {:seon.ns/name 'my.agents.juniper

@@ -1912,13 +1912,24 @@
    (fn [latest [basis _ evaluation]]
      (let [source (assoc evaluation :seon.ns/name
                          (get-in evaluation [:seon.cluster.eval/ns :seon.ns/name])
-                         :seon.turn/basis-t basis)]
+                         :seon.turn/basis-t basis)
+           shown (repl/shown-value (:seon.eval/shown evaluation ""))
+           previous (get latest (source-key source))
+           shown (if (and previous (map? shown) (:seon.repl/changes shown)
+                          (= :system (:seon.cluster.eval/author evaluation))
+                          (not= :call (get-in evaluation [:seon.cluster.eval/run
+                                                        :seon.turn.work/situation])))
+                   (db/apply-diff (:seon.repl/shown-value previous)
+                                  (:seon.repl/changes shown))
+                   shown)
+           source (assoc source :seon.repl/shown-value shown)]
        (assoc latest (source-key source) source)))
    {}
    (sort-by (juxt first second)
             (db/q '[:find ?t ?ordinal
                     (pull ?evaluation
                           [* {:seon.cluster.eval/ns [:seon.ns/name]}
+                           {:seon.cluster.eval/run [:db/id :seon.turn.work/situation]}
                            {:seon.cluster.eval/read-evidence [*]}])
                     :in $ ?id
                     :where [?agent :seon.agent/id ?id]
@@ -2099,6 +2110,21 @@
                                                  :seon.cluster.eval/comment]
                                                 (:seon.cluster.eval/comment source))))
                                   (range) selected previews)
+                  evaluated
+                  (mapv (fn [source item]
+                          (if-let [previous (get latest (source-key source))]
+                            (let [evaluation (:seon.sci.eval/evaluation item)
+                                  changed (db/diff
+                                           {:seon.db.diff/before (:seon.repl/shown-value previous)
+                                            :seon.db.diff/after
+                                            (repl/shown-value (:seon.eval/shown evaluation ""))})]
+                              (update item :seon.sci.eval/evaluation
+                                      #(-> %
+                                           (dissoc :seon.eval/renderer)
+                                           (assoc :seon.eval/shown
+                                                  (pr-str {:seon.repl/changes changed})))) )
+                            item))
+                        selected evaluated)
                   text-by-source
                   (into {} (map (fn [source item]
                                   [(source-key source)

@@ -1430,7 +1430,8 @@
                                '[* {:seon.cluster.eval/ns [:seon.ns/name]}]
                                (mapv :seon.render.history/subject entries))
             emitted (mapv #((requiring-resolve 'seon.repl/text)
-                             ((requiring-resolve 'seon.repl/entity-emission) %)) saved)
+                             ((requiring-resolve 'seon.repl/entity-emission)
+                              (assoc % :seon.db/db (:seon.db/db acquired)))) saved)
             segments (mapv #(str (when (pos? %1) "\n\n") %2) (range) emitted)]
         (if (= capture (apply str segments))
           (assoc acquired :seon.cluster.prompt/text capture

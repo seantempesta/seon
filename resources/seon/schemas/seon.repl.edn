@@ -11,6 +11,8 @@
             :columns [:vector :keyword]
             :rows [:vector [:vector :seon.schema/value]]
             :schemas [:map-of :qualified-keyword :seon.schema/value]
+            :changes :seon.db.diff/paths
+            :shown-value :seon.schema/value
             :comment [:string {:min 1}],
             :subject :seon.render.walk/lookup,
             :interrupted

@@ -10,6 +10,29 @@ Work in progress. No final verification claim yet.
 
 ## Commits
 
+- `0c70a1cb4` — do not promote turn-dependent agent queries into generated
+  reads. Isolated gate 4/216 tests/assertions; three turns including the
+  production wildcard query add zero generated evaluations and system bytes.
+
+## Change-only rereads (rule 2)
+
+Changed generated evaluations store a plain EDN changed-path map. The full
+live result stays behind the committed evaluation handle. The REPL emits
+the fixed system comment, unchanged read form, delta, and executable
+`(get-in result/e… [])` hint. Timing is omitted from changed emissions so
+identical changes remain byte-identical. Historical shown values reconstruct
+by applying their saved deltas; no second durable full-value copy exists.
+
+Measured by the real virtual loop: plan objective change **269 emission
+bytes / 77 changed-subtree bytes**; message arrival **452 / 124 bytes**.
+Both responses parse as EDN, evaluate their full-value hints, and fit the
+same eight-times-subtree assertion. Three no-event turns still append
+**0 evaluations / 0 system bytes**. Fast loop/grammar: **7 tests / 245
+assertions**. Isolated loop/grammar gate including the generated EDN diff
+property: **8 tests / 250 assertions**, all green. The full DB namespace's
+previously recorded projection-cost failure remains for the performance
+slice; its assertion has not been relaxed or removed.
+
 - `e81b119f2` — retain stored system results in the agent's SCI context.
   **RESET NEEDED for `e81b119f2`**: boot must supply the context-state carrier.
   Fast 6/232 and isolated 6/236 tests/assertions pass; zero no-event system bytes.

@@ -29,7 +29,35 @@
      :seon.test/sha256 (schema/sha-256 [encoded])}))
 
 (defn- stored-text [database]
-  (str/join "\n\n" (map repl/render-ai (evaluation/of-agent database "juniper"))))
+  (str/join "\n\n" (map #(repl/render-ai (assoc % :seon.db/db database))
+                           (evaluation/of-agent database "juniper"))))
+
+(defn- assert-changed-response! [database handle system]
+  (let [turn-eid (:db/id (db/pull database [:db/id] [:seon.turn/id (:seon.turn/id system)]))
+        entries (filter #(= turn-eid (get-in % [:seon.cluster.eval/run :db/id]))
+                        (evaluation/of-agent database "juniper"))
+        ctx (agent/acquire-context! handle "juniper")]
+    (is (= 1 (count entries)))
+    (doseq [entry entries
+            :let [emission (repl/entity-emission (assoc entry :seon.db/db database))
+                  text (repl/text emission)
+                  changes (:seon.repl/changes (edn/read-string (:seon.eval/shown entry)))
+                  hint (last (str/split-lines text))]]
+      (is (seq changes))
+      (is (str/starts-with? text ";; changed since your last turn\n"))
+      (is (map? (edn/read-string (repl/response emission))))
+      (is (= text (repl/text (assoc emission :seon.eval/duration-ms 999))))
+      (is (str/starts-with? hint ";; full value: "))
+      (when (str/starts-with? hint ";; full value: ")
+        (is (= @(sci/resolve ctx (:seon.repl/handle emission))
+               (sci/eval-form ctx (edn/read-string (subs hint (count ";; full value: ")))))))
+      (is (<= (:seon.test/bytes (bytes-evidence text))
+              (* 8 (:seon.test/bytes (bytes-evidence (pr-str changes))))))
+      (println {:seon.test/stage :changed-response
+                :seon.test/source (:seon.cluster.eval/source entry)
+                :seon.test/added-system-bytes (:seon.test/bytes (bytes-evidence text))
+                :seon.test/changed-subtree-bytes
+                (:seon.test/bytes (bytes-evidence (pr-str changes)))}))))
 
 (deftest running-fixture-settles-its-seeded-wake
   (support/with-database
@@ -598,7 +626,8 @@
                      changed (filter #(= :changed (:seon.turn/status %)) (:seon.turn/forms system))]
                  (is (string? (:seon.turn/id system)) (pr-str system))
                  (is (= ['(seon.plan/plan {})]
-                        (mapv (comp read-string :seon.cluster.eval/source) changed)))))
+                        (mapv (comp read-string :seon.cluster.eval/source) changed)))
+                 (assert-changed-response! @connection handle system)))
              (testing "changed reads answer only observed wakes"
                (let [prefix (stored-text @connection)
                      message (db/transact!
@@ -611,6 +640,7 @@
                        changed (filter #(= :changed (:seon.turn/status %))
                                        (:seon.turn/forms system))]
                    (is (= 1 (count changed)) "one message appends exactly the generated inbox read")
+                   (assert-changed-response! @connection handle system)
                    (is (= #{'(seon.db/pull '[{:seon.message/_inbox
                                              [:seon.message/id :seon.message/content
                                               {:seon.message/from [:seon.agent/id]}]}]

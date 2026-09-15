@@ -1,5 +1,12 @@
 #:seon.db.diff
 {:before :seon.schema/value,
+ :removed? :boolean,
+ :values-request [:map
+                  [:seon.db.diff/before :seon.schema/value]
+                  [:seon.db.diff/after :seon.schema/value]],
+ :paths [:map-of [:vector :seon.schema/value]
+         [:or [:map [:seon.db.diff/after :seon.schema/value]]
+              [:map [:seon.db.diff/removed? [:= true]]]]],
  :after :seon.schema/value,
  :identity :seon.schema/value,
  :changed-attributes [:vector :qualified-keyword],

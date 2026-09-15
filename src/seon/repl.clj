@@ -48,6 +48,19 @@
                        [?config :seon.config.run/max-episode-runs ?limit]] database))]
     (str "turns left: " remaining " of " maximum)))
 
+(defn shown-value
+  "Read a complete shown EDN value; preserve terminal prose as its string."
+  {:malli/schema [:=> [:cat :string] :seon.schema/value]}
+  [shown]
+  (try
+    (with-open [reader (java.io.PushbackReader. (java.io.StringReader. shown))]
+      (let [end (Object.)
+            value (edn/read {:eof end} reader)]
+        (if (and (not (identical? end value))
+                 (identical? end (edn/read {:eof end} reader)))
+          value shown)))
+    (catch Exception _ shown)))
+
 (defn source-text
   "Print a generated form with reader quotes and explicit keyword keys."
   {:malli/schema [:=> [:cat :seon.repl/expression] :seon.render/source]}
@@ -161,7 +174,9 @@
                 :seon.repl/note (some-> (def-note source) pr-str)
                 :seon.repl/ns (when (and ending-ns (not= ending-ns prompt-ns))
                                 (str ending-ns))
-                :seon.repl/ms (when (int? duration) (str duration))}]
+                :seon.repl/ms (when (and (int? duration)
+                                        (not (:seon.repl/changed-since? emission)))
+                               (str duration))}]
     (into []
           (keep (fn [response-key]
                   (when-some [text (get by-key response-key)]
@@ -203,9 +218,15 @@
   what taught agents to echo results instead of writing forms."
   {:malli/schema [:=> [:cat :seon.repl/emission] :string]}
   [emission]
-  (let [answer (response emission)]
+  (let [answer (response emission)
+        changed (when (and (:seon.repl/changed-since? emission)
+                           (:seon.eval/shown emission))
+                  (shown-value (:seon.eval/shown emission)))
+        full-handle (:seon.repl/handle emission)]
     (str (input-text emission)
-         (when answer (str "\n" answer)))))
+         (when answer (str "\n" answer))
+         (when (and full-handle (map? changed) (:seon.repl/changes changed))
+           (str "\n;; full value: " (pr-str (list 'get-in full-handle [])))))))
 
 (defn- token-boundary? [character]
   (or (Character/isWhitespace ^char character)
@@ -314,18 +335,17 @@
         turn-eid (if (map? turn-ref) (:db/id turn-ref) turn-ref)
         changed? (or (:seon.repl/changed-since? unit)
                      (when (and database turn-eid)
-                       (true?
+                       (some?
                         ((requiring-resolve 'seon.db/q)
-                         '[:find ?changed . :in $ ?turn :where
-                           [?turn :seon.turn/id _ ?t]
-                           [?turn :seon.turn/reply-size _ ?t]
+                         '[:find ?earlier . :in $ ?turn :where
+                           [?turn :seon.turn/id ?id ?t]
+                           [?turn :seon.turn/reply-size]
                            (not [?turn :seon.turn/attempts])
                            (not [?turn :seon.turn.work/situation :call])
                            [?turn :seon.turn/agent ?agent]
                            [?earlier :seon.turn/agent ?agent]
-                           [?earlier :seon.turn/id _ ?before]
-                           [(< ?before ?t)]
-                           [(identity true) ?changed]] database turn-eid))))]
+                           [?earlier :seon.turn/id ?earlier-id ?before]
+                           [(< ?before ?t)]] database turn-eid))))]
    (cond-> (select-keys unit [:seon.ns/name
                              :seon.cluster.eval/id
                              :seon.cluster.eval/source

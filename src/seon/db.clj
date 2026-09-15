@@ -7,6 +7,8 @@
             [clojure.set :as set]
             [clojure.string :as str]
             [clojure.walk :as walk]
+            [editscript.core :as editscript]
+            [editscript.edit :as editscript.edit]
             [malli.core :as m]
             [datahike.api :as d]
             [datahike.connector :as connector]
@@ -25,6 +27,7 @@
             [seon.ai.tokens :as tokens]
             [seon.env :as env]
             [seon.error.refusal :as error.refusal]
+            [seon.print :as print]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
             [seon.schema.form :as schema.form])
@@ -2208,13 +2211,58 @@
                             (list 'var (symbol function-symbol))
                             arguments)))))))))
 
+(defn- value-changes
+  [before after]
+  (let [edits (editscript/get-edits
+               (editscript/diff before after
+                                {:algo :quick :str-diff :none
+                                 :vec-timeout Long/MAX_VALUE}))
+        ;; Paths name coordinates in snapshots, not shifting edit indices.
+        ;; A sequence insertion/deletion replaces its containing sequence.
+        sequence-paths
+        (into #{} (keep (fn [[path operation]]
+                         (when (and (seq path) (#{:+ :-} operation)
+                                    (sequential? (print/value-at before (pop path))))
+                           (pop path)))) edits)
+        paths (distinct (concat sequence-paths (map first edits)))
+        covered? (fn [path]
+                   (some #(and (< (count %) (count path))
+                               (= % (subvec path 0 (count %)))) sequence-paths))
+        operations (into {} (map (juxt first second)) edits)]
+    (into (sorted-map-by print/compare-values)
+          (comp (remove covered?)
+                (map (fn [path]
+                       [path (if (and (= :- (get operations path))
+                                      (not (contains? sequence-paths path)))
+                               {:seon.db.diff/removed? true}
+                               {:seon.db.diff/after (print/value-at after path)})])))
+          paths)))
+
+(defn apply-diff
+  "Apply plain changed paths to a previously shown value."
+  {:malli/schema [:=> [:cat :seon.schema/value :seon.db.diff/paths]
+                  :seon.schema/value]}
+  [before changes]
+  (editscript/patch
+   before
+   (editscript.edit/edits->script
+    (mapv (fn [[path change]]
+            (if (:seon.db.diff/removed? change)
+              [path :-]
+              [path :r (:seon.db.diff/after change)]))
+          changes))))
+
 (defn diff
-  "Changes in one pure database read since a basis transaction."
+  "Compare shown values, or replay a pure database read since a basis."
   {:malli/schema
-   [:=> [:cat :seon.db/basis-t :seon.test/var
+   [:function
+    [:=> [:cat :seon.db.diff/values-request] :seon.db.diff/paths]
+    [:=> [:cat :seon.db/basis-t :seon.test/var
          [:* :seon.schema/value]]
-    [:or :seon.db.diff/result :seon.error/value]]}
-  [basis function-var & arguments]
+     [:or :seon.db.diff/result :seon.error/value]]]}
+  ([{before :seon.db.diff/before after :seon.db.diff/after}]
+   (value-changes before after))
+  ([basis function-var & arguments]
   (let [database (current-database-value)
         function-symbol (callee-symbol function-var)]
     (cond
@@ -2247,7 +2295,7 @@
             (if (error-value? plan)
               plan
               (perform-diff database projection plan basis function-var
-                            arguments function-symbol))))))))
+                            arguments function-symbol)))))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Writes through the one synchronous transaction boundary
