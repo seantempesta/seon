@@ -29,6 +29,20 @@
               [:my.message/to :my.message/to]
               [:my.message/content :my.message/content]
               [:my.message/about {:optional true} :my.message/about]],
+ :my.message/send-request
+             [:map
+              [:my.message/to :my.message/to]
+              [:my.message/content :my.message/content]
+              [:my.message/about {:optional true} :my.message/about]
+              [:seon.db/connection :seon.db/connection]
+              [:seon.agent/id :seon.agent/id]],
+ :my.message/decline-request
+             [:map
+              [:my.message/to :my.message/to]
+              [:my.message/about :my.message/about]
+              [:my.message/reason :my.message/reason]
+              [:seon.db/connection :seon.db/connection]
+              [:seon.agent/id :seon.agent/id]],
  :my.message/reason [:string {:min 1}],
  :my.message/to [:string {:min 1}],
  :my.message/value

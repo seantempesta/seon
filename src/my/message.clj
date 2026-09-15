@@ -37,10 +37,11 @@
 
   Example:
   (my.message/send {:my.message/to \"root\" :my.message/content \"The verification passed.\"})"
-  {:malli/schema [:=> [:cat :my.message/message :seon.db/connection :seon.agent/id]
+  {:malli/schema [:=> [:cat :my.message/send-request]
                   [:or :seon.message/message :seon.error/value]]}
-  [request connection agent-id]
-  (message/send! request connection agent-id))
+  [request]
+  (message/send! (dissoc request :seon.db/connection :seon.agent/id)
+                 (:seon.db/connection request) (:seon.agent/id request)))
 
 (defn decline
   "Send a reason for declining an assignment to its sender.
@@ -52,8 +53,10 @@
   (my.message/decline {:my.message/to \"root\"
                        :my.message/about \"example-message\"
                        :my.message/reason \"The required input is unavailable.\"})"
-  {:malli/schema [:=> [:cat :my.message/declination :seon.db/connection :seon.agent/id]
+  {:malli/schema [:=> [:cat :my.message/decline-request]
                   [:or :seon.message/message :seon.error/value]]}
-  [request connection agent-id]
-  (message/send! (assoc request :my.message/content (:my.message/reason request))
-                 connection agent-id))
+  [request]
+  (message/send! (-> request
+                     (dissoc :seon.db/connection :seon.agent/id)
+                     (assoc :my.message/content (:my.message/reason request)))
+                 (:seon.db/connection request) (:seon.agent/id request)))

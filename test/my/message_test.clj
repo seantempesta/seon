@@ -119,8 +119,9 @@
       (support/seed-cluster! connection "message-write")
       (let [sent (my.message/send {:my.message/to "alice"
                                    :my.message/content "Verified."
-                                   :my.message/about "m-1"}
-                                  connection "bob")
+                                   :my.message/about "m-1"
+                                   :seon.db/connection connection
+                                   :seon.agent/id "bob"})
             stored (message/read (:seon.message/id sent) @connection)
             original (db/pull @connection '[*] [:seon.message/id "m-1"])]
         (is (string? (:seon.message/id sent)) (pr-str sent))
@@ -130,8 +131,9 @@
         (is (nil? (:seon.message/inbox original)))
         (is (some? (:seon.message/read-tx original)))
         (let [missing (my.message/send {:my.message/to "absent"
-                                        :my.message/content "No recipient."}
-                                       connection "bob")]
+                                        :my.message/content "No recipient."
+                                        :seon.db/connection connection
+                                        :seon.agent/id "bob"})]
           (is (= :seon.message/unknown-recipient (:seon.error/kind missing)))
           (is (= 3 (db/q '[:find (count ?m) . :where [?m :seon.message/id _]] @connection))))))))
 
