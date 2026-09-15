@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, wave/live-drive-render, wave/render-test]
 ---
@@ -20,3 +20,9 @@ Verification must exercise actual proc initialization and repeated updates,
 including a database wake replacing an evaluation wake. A process whose state
 already lost the atom requires reconstruction. Live browser verification and
 visible failure reporting remain pending; source load alone does not close this.
+
+## Resolution (2026-09-15 triage)
+
+surface: render-debug-page
+
+At HEAD `859c9258c`, `git show HEAD:src/seon/render/web.clj | rg -n 'runtime-revision|observed-runtime-revision'` returns no matches. The old revision atom and numeric observed-state mechanism are absent. The current Flow owner at `src/seon/render/web.clj:2430` receives runtime-evaluation events through a channel; page revision numbers are separately derived from prior packages at `:1814–1822`. There is no remaining numeric write to the atom described in this note. This is deletion/current-state proof, not browser-health proof; default MCP health timed out independently during triage.

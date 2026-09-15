@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, render, runtime, wave/agent-context]
 ---
@@ -36,4 +36,10 @@ lookup, and execute that exact generated form in the canonical fixture.
 An absent owner must never become a generated nil lookup.
 
 The exact source and terminal facts are retained with the
-[loop live landing note](../../prds/context-generation/research/loop-live-landing-2026-09-09.md).
+[loop live landing note](../../../prds/context-generation/research/loop-live-landing-2026-09-09.md).
+
+## Resolution (2026-09-15 triage)
+
+surface: context-generation
+
+Fix `fd8646edd` introduced runtime ownership resolution. At HEAD `859c9258c`, `src/seon/render/transcript.clj:1058–1077` follows `:seon.runtime/agent`, falls back to an explicitly supplied agent id, and returns a typed diagnostic if neither resolves. `:1083–1097` returns that diagnostic before constructing source, otherwise places the resolved id into the lookup. Verified with `git show HEAD:src/seon/render/transcript.clj` and `git log -S runtime-owner -- src/seon/render/transcript.clj`. The missing-owner path can no longer construct the recorded nil lookup.

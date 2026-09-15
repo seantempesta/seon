@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, render, runtime, class/n11, wave/generated-receipts]
 ---
@@ -70,3 +70,9 @@ still performs the separate neighborhood `:seon.render/form` plus
 `:seon.render/ai` pairing described above. Removing that provider-context path
 requires the stored generated-run integration; the transcript boundary fix
 does not claim that work complete.
+
+## Resolution (2026-09-15 triage)
+
+surface: context-generation
+
+Commit `6f00d3050` removes `generic-history-entries` from the provider path. At HEAD `859c9258c`, `src/seon/render/walk.clj:875–910` obtains `seon.eval/of-agent` evaluations and renders those saved entities; it no longer joins a generated form to an independently rendered neighborhood value. `src/seon/turn.clj:2039–2078` owns system-turn evaluation and storage; `src/seon/cluster/prompt.clj:194` acquires history at the turn basis. Verified with `git log -S generic-history-entries -- src/seon/render/walk.clj` and `git show HEAD:<path>`. This closes the removed fabricated-history mechanism; previews remain a separate, explicitly prospective operation.

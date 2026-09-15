@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, boot, schema, projection, publication, class/p1]
 ---
@@ -65,3 +65,9 @@ stores no registry entry or database row. The durable predicate reference
 is inside an authored schema or function contract. An unresolved reference
 there is a live declaration problem, whereas a function identity with no
 source/spec is not a predicate requirement.
+
+## Resolution (2026-09-15 triage)
+
+surface: adoption-publication
+
+Commit `3d13aa0f7` supplies the previously missing real publication/fork/boot regression. At HEAD `859c9258c`, `test/seon/predicate_publication_test.clj:16–97` publishes the old predicate and referencing schema, reconciles the actual current manifest, verifies an identity-only tombstone, boots a fresh fork, and checks old SCI resolution is absent and `seon.shell/stdin?` present. The historical offending row was never retained, so its precise cause remains unknown; the note's alleged tombstone requirement is falsified by this sequence. Current projections require definition facts, not identity alone. Verification: inspected the entire regression at HEAD; the focused canonical fast run is recorded in the slice C landing note.

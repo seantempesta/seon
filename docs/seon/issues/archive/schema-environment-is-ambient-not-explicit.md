@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, schema, runtime, test, class/p1, wave/explicit-environment-proof]
 ---
@@ -28,14 +28,14 @@ co-hosted clusters, or two parallel tests — share their declarations:
 
 Together these are the owner's "specs all being shared". They are the mechanism
 behind the five 2026-08-06/07 projection-binding fixture bites, and they block
-the [2026-08-07 test-infrastructure ruling](../../prds/sci-execution-runtime/plan/README.md):
+the [2026-08-07 test-infrastructure ruling](../../../prds/sci-execution-runtime/plan/README.md):
 no amount of fixture care makes a thread-hopping test correct while the
 environment is ambient.
 
 ## Evidence
 
 Probes and full results:
-[parallel-isolation-audit-2026-08-07.md](../../prds/sci-execution-runtime/research/parallel-isolation-audit-2026-08-07.md).
+[parallel-isolation-audit-2026-08-07.md](../../../prds/sci-execution-runtime/research/parallel-isolation-audit-2026-08-07.md).
 
 - `src/seon/schema.clj:537-541` — the four dynamic vars that select the
   population; `:588-598` is the resolution chain; `:653-666` is the registry
@@ -68,7 +68,7 @@ deleting the ambient half.
 ## Status 2026-08-08 — two criteria closed; criterion 1 is blocked, with a cause
 
 Evidence:
-[schema-environment-explicit-2026-08-08.md](../../prds/sci-execution-runtime/research/schema-environment-explicit-2026-08-08.md).
+[schema-environment-explicit-2026-08-08.md](../../../prds/sci-execution-runtime/research/schema-environment-explicit-2026-08-08.md).
 This issue STAYS OPEN for the one criterion that is not a `seon.schema`
 change.
 
@@ -98,7 +98,7 @@ is how `seon.instrument` sees contracts a cluster declared but the packaged
 resources do not. Instrumentation is a live consumer of the defect, and
 `seon.schema` cannot repair it — its only options are answering wrongly on a
 thread hop or refusing a caller with no other way to ask. Recorded on the owner's existing note,
-[instrumentation-compiles-under-one-clusters-projection](instrumentation-compiles-under-one-clusters-projection.md),
+[instrumentation-compiles-under-one-clusters-projection](../instrumentation-compiles-under-one-clusters-projection.md),
 which BLOCKS this criterion and should land before the Phase 3 sweep. The
 reverted change is recorded in the facade's own comment in
 `src/seon/schema.clj` so it can be re-applied as that issue's falsifier, and
@@ -115,7 +115,7 @@ Also still open, and NOT a `seon.schema` change: the four projection dynamic var
 `seon.error`, `seon.schema.edn`, and the test bracket, and the mechanism that
 replaces them — the call-preparation hook — is landed but not yet consumed.
 `malli-form?` is the sharpest instance and is filed separately
-([malli-form-predicate-resolves-the-declaration-population-itself](malli-form-predicate-resolves-the-declaration-population-itself.md)):
+([malli-form-predicate-resolves-the-declaration-population-itself](../malli-form-predicate-resolves-the-declaration-population-itself.md)):
 Malli invokes a registered predicate with one argument, so it cannot be
 handed a projection, and `*packaged-forms*` is load-bearing until the
 environment carries it. Owner: the Phase 3 production sweep, landing the
@@ -251,4 +251,10 @@ re-resolved.
 The runner carrier and its explicit unhanded regressions are complete. This
 issue remains open only for the separately recorded process-global Malli
 instrumentation facade, whose owner and falsifier are
-[instrumentation compiles under one cluster's projection](instrumentation-compiles-under-one-clusters-projection.md).
+[instrumentation compiles under one cluster's projection](../instrumentation-compiles-under-one-clusters-projection.md).
+
+## Resolution (2026-09-15 triage)
+
+surface: context-generation
+
+The final outstanding mechanism in this note was removed by `16c6c7bc5`: `seon-registry` no longer exists at HEAD `859c9258c`. `src/seon/instrument.clj:475–493` caches contract compilation on the calling projection and supplies its registry; `:521–522` reads declarations without Malli's global registry. `src/seon/schema.clj:904–913` refuses an unhanded declaration population instead of silently selecting packaged declarations; `:942–976` asserts predicate Var identity without a mutable predicate map. Earlier projection-owned validator fixes remain in place. Verified `git show HEAD:<path>` and `git log -S seon-registry -- src/seon/schema.clj`. Dynamic carrier bindings still exist; this closes the three demonstrated shared-state defects, not a claim that every API has been rewritten to positional projection arguments. The former residual owner is already archived at `archive/instrumentation-compiles-under-one-clusters-projection.md`.
