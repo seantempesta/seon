@@ -1307,4 +1307,11 @@ half-edit. Measured targets in the issue.
   explicit coverage when built); MVP = an owed response about a message,
   with a small pure predicate + test as the reusable result, exported to
   two new files. PRD §10 rewritten from both audits with the build order.
+- 16:55Z run7-wave ended (`af278535c` send writes directly, `d31d31639`
+  done-query at settlement, `93a5a2c49` help clarified; help trial 12/12;
+  no RESET NEEDED). Adoption on default is broken by schema-audit's
+  in-flight `seon.error.edn` edit: "Predicate seon.error/throwable? has no
+  admitted callable in the corpus projection" — same class as the
+  hot-adopted handle change (a half-edit adopted onto the owner's cluster);
+  lane told to fix before continuing. Run 8 waits on convergence.
 
