@@ -39,3 +39,9 @@ attempts. The canonical real-proc fixture exercises the same control owner,
 including the three-form three-transaction count and private result handles.
 Reconstruct an existing HTTP service to acquire its newly carried routing;
 hot-reloading functions alone cannot add an input to a captured service map.
+
+## Re-verified at HEAD (2026-09-15)
+
+surface: render-debug-page
+
+OPEN, UNVERIFIABLE-WITHOUT-GATE for the final HTTP control behavior. Fix `e6832e8d8` is present at HEAD `a5f3d7565`: `src/seon/cluster.clj:2774–2783` carries routing into the view; `:2333–2345` carries it into the HTTP service; `src/seon/render/web.clj:2390–2394` preserves the supplied top-level routing. Read-only default MCP JVM probe `(let [instance (#'seon.cluster/mcp-instance "default") view (:seon.render.web/view instance)] {:instance-routing? (some? (:seon.agent/routing instance)) :view-routing? (some? (:seon.agent/routing view)) :served? (some? (:seon.render.web/served instance))})` returned all three true in 2 ms. This verifies instance/view custody, not the server closure's captured map or a completed HTTP POST. The owner's CPU correction forbids new JVMs and limits default probes to read-only, so the remaining gate is `bin/test-fast seon.turn-test` (`virtual-turns-use-the-proc-and-compaction-is-agent-scoped`, control entry at `test/seon/turn_test.clj:160`). A separately authorized disposable virtual-turn POST would verify the captured live service. No POST or new JVM was launched. The old missing-routing failure is not reproduced; blocker status remains pending that final boundary.

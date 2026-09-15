@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, render, web, class/n11, wave/live-drive-render, wave/visual-qa]
 ---
@@ -51,7 +51,7 @@ single elision, with a trailing `… 5711 more characters of 7349; requery by
 :seon.render.profile/agent`.
 
 Full walk with per-page verdicts:
-[ui-verification-2026-08-14](../../prds/context-generation/research/ui-verification-2026-08-14.md).
+[ui-verification-2026-08-14](../../../prds/context-generation/research/ui-verification-2026-08-14.md).
 
 ### Design-lab observation, 2026-09-05
 
@@ -79,3 +79,9 @@ No page contains a `seon-print-elision` (or any node) whose text begins
 emits an elision VALUE describing the omission, rendered as markup. One
 recurring proof asserts that no rendered page's text contains a printed
 Hiccup vector, so the class cannot return through another producer.
+
+## Resolution (2026-09-15 triage)
+
+surface: render-debug-page
+
+Commit `9248692d6` deletes the presentation-clipping seams. At HEAD `a5f3d7565`, `src/seon/render.clj:1118–1123` returns the selected output unchanged; `render-html` uses that pass-through at `:1143–1159`. `src/seon/render/web.clj:360–377` places the returned Hiccup directly inside the article and calls `hiccup/->string`. The value renderer's HTML branch returns its Hiccup sink (`src/seon/render/value.clj:454–460`, `:509–529`), without AI presentation cuts. `git grep -n 'rendered HTML' HEAD -- src` finds no old placeholder. This removes both the escaped-Hiccup elision mechanism and its label-only preview remainder. Verified source; no fresh browser-paint or full page-test claim.

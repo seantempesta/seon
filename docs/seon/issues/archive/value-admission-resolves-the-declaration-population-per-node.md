@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, schema, performance, runtime, class/p1, wave/seon-env-p3]
 ---
@@ -29,7 +29,7 @@ declaration population through `candidate-forms`
 thread that falls through to `packaged-forms`, which re-lists and re-merges
 every schema resource on the classpath — the exact fallback the
 2026-08-07 declaration-population family was closed against
-([archived owner issue](archive/packaged-forms-rereads-every-schema-resource-per-call.md)).
+([archived owner issue](../archive/packaged-forms-rereads-every-schema-resource-per-call.md)).
 
 The generation atom in front of it does not help: it compares the resolved
 forms with `=` AFTER paying for the resolution, so it saves rebuilding the
@@ -226,7 +226,7 @@ cheaper) is the seon.env Phase 3 sweep: admission receives
 `:seon.schema/projection` from the environment it is already handed, and
 `shape-projection`'s process-global generation atom disappears with the rest
 of the derived-state slots
-([PRD](../../prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md)).
+([PRD](../../../prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md)).
 The threading above is worth landing first because it is measurable today
 and does not wait on Phase 3.
 
@@ -270,7 +270,7 @@ Two measurements that bound the cost, both on this cluster:
   `seon.schema.datahike` (lines 71, 72, 112, 113, 184, 203, 205, 220, 223) —
   the Malli-to-Datahike bridge, a caller this note does not currently name.
   Filed as the user-visible surface in
-  [Return `/data` without a five-second stall](data-page-takes-five-and-a-half-seconds-for-three-kilobytes.md).
+  [Return `/data` without a five-second stall](../data-page-takes-five-and-a-half-seconds-for-three-kilobytes.md).
 
 The diagnostic is also 80% of the boot log's volume: `data/clusters/default/
 logs/seon.log` is 87 lines, of which 70 are `DECLARATION POPULATION FALLBACK`
@@ -483,3 +483,9 @@ The ambient declaration fallback is now a flat
 final isolated publication/refork/start cycle produced zero fallback lines.
 Together with the walk regression and measurements above, this closes the
 per-node admission-resolution class.
+
+## Resolution (2026-09-15 triage)
+
+surface: context-generation
+
+At HEAD `a5f3d7565`, `src/seon/sci/admit.clj:697–708` places the supplied/handed projection in walk state once; `:194–197` asks `identity-only-projection-in` with that value, without resolving declarations. `src/seon/schema.clj:3158–3172` retains descriptors on that projection, not a process-global generation atom. `src/seon/cluster.clj:351–366` supplies the instance environment's projection through MCP admission. `src/seon/render/walk.clj:674–678` binds the acquired projection across the walk. `test/seon/sci/admit/declaration_population_test.clj:74–100` counts resource reads with runner carriers explicitly cleared. Verified current owners and the existing regression; the per-node resource-resolution mechanism and its named cache/MCP remainders are removed. The separate unhanded DB decoding cost remains in [seon-db-reads-rebuild-the-projection-per-call-when-none-is-handed.md](../seon-db-reads-rebuild-the-projection-per-call-when-none-is-handed.md).

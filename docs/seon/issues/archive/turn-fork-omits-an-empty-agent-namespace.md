@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, sci, agent, runtime, class/p3, wave/per-run-fork-context]
 ---
@@ -16,7 +16,7 @@ not register it. A generated opening that asks for `(dir my.agents.root)`
 therefore fails instead of returning an empty directory.
 
 This is distinct from the resolved arity-reporting defect in
-[`archive/a-wrong-arity-call-reports-a-missing-namespace.md`](archive/a-wrong-arity-call-reports-a-missing-namespace.md):
+[`archive/a-wrong-arity-call-reports-a-missing-namespace.md`](../archive/a-wrong-arity-call-reports-a-missing-namespace.md):
 the current failure is SCI's own `clojure.repl/dir` lookup of a namespace that
 the turn fork never installed.
 
@@ -92,3 +92,9 @@ the acquired base still lacks that agent-only namespace. It passed on
 
 The issue remains open until a fresh-cluster proof confirms that
 `bootstrap:root`'s own namespace directory form settles successfully.
+
+## Resolution (2026-09-15 triage)
+
+surface: context-generation
+
+Fix `74bf73859` remains present at HEAD `a5f3d7565`. `src/seon/sci/eval.clj:1682–1708` now receives a persistent agent context or forks once, derives the assigned namespace independently of definitions, and calls `sci/add-namespace!` whenever it is absent. Therefore zero stored definitions cannot skip registration. `test/seon/sci/eval_test.clj:1155–1180` retains the empty-assignment regression. Verified committed source and the fix commit. No fresh boot is claimed; the old restore-definitions-only condition has been removed.
