@@ -326,33 +326,40 @@
         (swap! running-instances dissoc cluster-name)))))
 
 (deftest live-runtime-observation-hands-its-projection-to-flow-health
-  (let [cluster-name "mcp-runtime-projection-test"]
-    (support/with-database
-      {:seon.test-support/fresh-store? true}
-      (fn [connection]
-        (config/apply! {:seon.db/connection connection
-                        :seon.boot/cluster-name cluster-name})
-        (support/seed-cluster! connection cluster-name)
-        (swap! running-instances assoc cluster-name
-               (assoc (running-instance connection cluster-name)
-                      :seon.flow/graph ::graph))
-        (try
-          (with-redefs
-           [cluster/readiness
-            (fn [_] {:seon.boot/cluster-name cluster-name})
-            oversight/cluster-flow-status
-            (fn [database _]
-              (let [effective (config/effective database cluster-name)]
-                (if (:seon.error/kind effective)
-                  effective
-                  {:seon.oversight/plumbing []})))]
-            (let [result (cluster/mcp-runtime-observation cluster-name)]
-              (is (= :observed (:seon.dev.mcp/health result)))
-              (is (= {:seon.oversight/plumbing []}
-                     (:seon.dev.mcp/flow result)))
-              (is (not (contains? result :seon.error/kind)))))
-          (finally
-            (swap! running-instances dissoc cluster-name)))))))
+  (let [cluster-name "mcp-runtime-projection-test"
+        fresh-stores (atom 0)
+        acquire @#'support/with-fresh-database]
+    (with-redefs-fn
+      {#'support/with-fresh-database
+       (fn [& args] (swap! fresh-stores inc) (apply acquire args))}
+      (fn []
+        (support/with-database
+         (fn [connection]
+           (config/apply! {:seon.db/connection connection
+                          :seon.boot/cluster-name cluster-name})
+           (support/seed-cluster! connection cluster-name)
+           (swap! running-instances assoc cluster-name
+                  (assoc (running-instance connection cluster-name)
+                         :seon.flow/graph ::graph))
+           (try
+             (with-redefs
+              [cluster/readiness
+               (fn [_] {:seon.boot/cluster-name cluster-name})
+               oversight/cluster-flow-status
+               (fn [database _]
+                 (let [effective (config/effective database cluster-name)]
+                   (if (:seon.error/kind effective)
+                     effective
+                     {:seon.oversight/plumbing []})))]
+               (let [result (cluster/mcp-runtime-observation cluster-name)]
+                 (is (= :observed (:seon.dev.mcp/health result)))
+                 (is (= {:seon.oversight/plumbing []}
+                        (:seon.dev.mcp/flow result)))
+                 (is (not (contains? result :seon.error/kind)))))
+             (finally
+               (swap! running-instances dissoc cluster-name)))))))
+    (is (zero? @fresh-stores)
+        "Flow-health projection needs only an ordinary canonical branch.")))
 
 (defn- oversized-values-share-one-digest-across-storeless-and-stored-modes
   [connection]

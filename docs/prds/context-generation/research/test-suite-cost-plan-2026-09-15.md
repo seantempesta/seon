@@ -274,3 +274,84 @@ projection where available rather than build a second projection:
 The initial foreign MCP edits (database projection carriage and its existing
 config regression) landed independently before this lane's commit. They were
 preserved; this slice changes only the artifact cases and their fixture count.
+
+### Row 6 — canonical branches for pure consumers
+
+The no-auth regression now applies its manifest on the canonical database,
+then calls `config/effective` and `ai/targets`, retaining both output assertions
+and observing zero `cluster/start!` calls. Its obsolete long-test marker is
+removed. The flow-health regression uses an ordinary canonical branch and
+retains all three output assertions plus zero fresh-store acquisitions.
+Direct MCP JVM probes: **7 pass / 0 fail / 0 error, 2 tests**. The C:148 real
+boot consumer test remains unchanged. Syntax lint: no errors; the pre-existing
+C:148 `name` shadow warning remains.
+
+### Recorded in-process runs after the owner's additional REPL instruction
+
+The owner added the `seon.test/run` requirement after the earlier direct probes
+and the row 2/4/5 commits. Each new definition had been loaded into default's
+JVM and exercised on real scratch data; those earlier direct deftest calls
+were **not** recorded `seon.test/run` calls. After the additional instruction,
+the following exact forms were run (each with explicit default custody):
+
+```clojure
+(seon.test/run #'seon.problems-test/absent-facts-produce-no-entries (seon.operator/connection "default"))
+(seon.test/run #'seon.cluster.mcp-test/artifact-lifecycle-preserves-identity-paging-and-retraction (seon.operator/connection "default"))
+(seon.test/run #'seon.contracts-plan-test/refusal-grammar-survives-real-evaluation (seon.operator/connection "default"))
+(seon.test/run #'seon.contracts-plan-test/installed-contract-refusal-names-the-run5-failing-coordinate (seon.operator/connection "default"))
+(seon.test/run #'seon.cluster.agent-test/disarm-waits-for-the-turn-proc-stop-transition (seon.operator/connection "default"))
+(seon.test/run #'seon.config-application-test/no-auth-is-consumed-as-the-credential-alternative (seon.operator/connection "default"))
+(seon.test/run #'seon.cluster.mcp-test/live-runtime-observation-hands-its-projection-to-flow-health (seon.operator/connection "default"))
+```
+
+| Slice / test | Recorded run entity | Pass / fail / error |
+|---|---:|---|
+| Row 2 | 64405 | 0 / 0 / 1 |
+| Row 3 | 64401 | 0 / 0 / 1 |
+| Row 4 grammar | 64393 | 0 / 0 / 1 |
+| Row 4 installation | 64407 | 0 / 0 / 1 |
+| Row 5 | 64406 | 0 / 0 / 1 |
+| Row 6 config | 64408 | 0 / 0 / 1 |
+| Row 6 observation | 64409 | 0 / 0 / 1 |
+
+Every recorded result fails before assertions at the same protected boundary:
+`seon.cluster/accrete-schema-population!` (`cluster.clj:1322`) →
+`seon.db/transact!`, missing the carried projection during canonical population.
+The complete returned result maps were saved and read, including their error
+messages and evidence references; no green recorded result is claimed.
+Result recording itself succeeds. The stronger recorded path therefore has
+an unresolved fixture-population boundary despite the earlier direct probes.
+No claim is made that the two acquisition paths have identical live state.
+The row-3 diagnostic and unapplied construction-time diff above document the
+missing input without modifying the protected owners.
+
+Before the final row-6 file edit, the complete proposed observation deftest
+was evaluated through MCP with `eval` in `seon.cluster.mcp-test`, then its
+recorded regression was run. The edit was submitted through `apply_patch`,
+queuing publication `2f05c93e-97b2-4321-bb54-8d00a5eaa9aa`. An explicit
+`bin/seon init --dev default --changed` request includes all six owned test
+paths so the earlier shell edits also enter the development publication.
+
+Final publication observation after session restart: the hook reports
+convergence at `6aa9c539-7bd7-5f86-9435-e1e8fd5d54dc`; a live query of default's
+`:seon.source/commit-id` equals `seon.cluster.source/current` at that exact ID.
+The publication's reaching check reports unavailable at canonical fixture
+preparation. The explicit operator shell is no longer running.
+
+Post-publication row-6 reruns used the exact `seon.test/run` forms above:
+no-auth **3 pass / 0 fail / 0 error**, recorded run **64445**; flow-health
+**0 pass / 0 fail / 1 error**, recorded run **64443**. The latter's complete
+returned value now names `seon.program/base-context-injected-symbols`
+(`program.cljc:21`) → `schema/declaration-population`, missing projection,
+before assertions. This is the final observed foreign boundary; the earlier
+population-transaction failure is historical evidence, not the current
+attribution for that run. No production repair or foreign session operation
+was attempted. The orchestrator's isolated gate remains outstanding.
+
+All rows 2–6 are implemented. Path-limited slices: row 4 `e3af34340`, row 5
+`59bf0ed7e`, row 2 `ef5adf54f`, row 3 `fc90bb972`, and the final row-6 commit
+containing this note. Owned test paths are exactly the six assigned paths;
+the only additional committed files are this landing note and its diagnostic
+probe script. Gate request includes `seon.contracts-install-test` because it
+also consumes the shared contracts fixture. No test JVM, paid provider call,
+production edit, default restart, or scratch worktree was used.

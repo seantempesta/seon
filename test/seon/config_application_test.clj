@@ -14,6 +14,7 @@
             [seon.ai :as ai]
             [seon.cluster :as cluster]
             [seon.config :as config]
+            [seon.db :as db]
             [seon.flow :as flow]
             [seon.fn :as seon.fn]
             [seon.render.web :as web]
@@ -230,30 +231,26 @@
       (finally
         (test-support/delete-recursively! root)))))
 
-(deftest ^{:seon.test/long "Starts a real cluster to exercise credential selection."}
-  no-auth-is-consumed-as-the-credential-alternative
-  (let [root (fresh-root)]
-    (try
-      (let [instance
-            (cluster/start!
-             {:seon.boot/root root
-              :seon.boot/cluster-name "application-no-auth"
-              :seon.config/manifest
-              (-> applied
-                  (assoc :seon.config.ai/no-auth true)
-                  (dissoc :seon.config.ai.backup/model
-                          :seon.config.ai.backup/endpoint
-                          :seon.config.ai.backup/api-key-variable
-                          :seon.config.ai.backup/timeout-ms))})
-            connection (:seon.boot/cluster-connection instance)
-            primary
-            (-> (config/effective @connection "application-no-auth")
-                ai/targets
-                :seon.ai/primary)]
-        (try
-          (is (true? (:seon.config.ai/no-auth primary)))
-          (is (not (contains? primary :seon.ai/api-key-variable)))
-          (finally
-            (cluster/stop! instance))))
-      (finally
-        (test-support/delete-recursively! root)))))
+(deftest no-auth-is-consumed-as-the-credential-alternative
+  (let [starts (atom 0)
+        start cluster/start!]
+    (with-redefs [cluster/start!
+                  (fn [& args] (swap! starts inc) (apply start args))]
+      (test-support/with-database
+       (fn [connection]
+         (config/apply!
+          {:seon.db/connection connection
+           :seon.boot/cluster-name "application-no-auth"
+           :seon.config/manifest
+           (-> applied
+               (assoc :seon.config.ai/no-auth true)
+               (dissoc :seon.config.ai.backup/model
+                       :seon.config.ai.backup/endpoint
+                       :seon.config.ai.backup/api-key-variable
+                       :seon.config.ai.backup/timeout-ms))})
+         (let [primary (-> (config/effective (db/db connection) "application-no-auth")
+                           ai/targets :seon.ai/primary)]
+           (is (true? (:seon.config.ai/no-auth primary)))
+           (is (not (contains? primary :seon.ai/api-key-variable)))))))
+    (is (zero? @starts)
+        "Credential selection is proved without starting a cluster.")))
