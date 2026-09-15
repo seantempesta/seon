@@ -48,7 +48,7 @@ against old output (9 tests, 156 assertions, 23 failures, 1 error), which is
 baseline evidence, not a gate result. Old note rendering refused acquired
 references before its screenshot could be emitted; the live baseline records
 that raw about-reference. Final fixtures show zero document overflow in all
-40 captures (20 HTML specimens, both viewport sizes).
+38 captures (19 HTML class groups, both viewport sizes; identity/id share a group).
 
 Live placement remains an explicit boundary: at 1440 pixels the shell gives
 empty Faults the broad column and plan/settings a 261-pixel, 160-pixel-high
@@ -141,4 +141,117 @@ Aliases, refers and imports retain their local name, direction and target with w
 Screenshot log: `fixture-seon-namespace-alias-entry-before → fixture-seon-namespace-alias-entry-verified; corresponding refer/import prefixes; namespace-2 records absence`.
 
 Observed defects → change: The old output repeated each binding as both a readable link and a libspec/import dump. The compact pair retains the actual binding. These standalone pairs are absent from the current Juniper walk.
+## Final verification and live adoption
 
+- `bin/test-fast --paths <owned paths> -- seon.html-views-test`: **10 tests,
+  171 assertions, zero failures/errors** (`tmp/html-views/final-pairs-fast.log`).
+  Twenty per-pair AI golden strings match exactly. Each HTML pair asserts
+  expected visible text and rejects `#inst`, `:db/id`, and raw agent lookup refs.
+- `bin/test --paths <owned paths> -- seon.html-views-test my.plan-test
+  my.note-test seon.cluster.message-test seon.render.ns-test`: **62 tests,
+  458 assertions, zero failures/errors** (`tmp/html-views/final-pairs-gate.log`).
+- The required gate including `seon.render.web-test` ran **119 tests,
+  837 assertions, zero assertion failures and one error**:
+  `canonical-debug-feed-repaints-when-the-subject-changes` timed out waiting
+  for its subject marker, including isolated confirmation. See the
+  [recorded feed failure](../../../seon/issues/debug-feed-subject-change-regression-times-out.md).
+  Log: `tmp/html-views/focused-gate.log`.
+- The wider affected-namespace run had **208 tests, 1,324 assertions,
+  24 failures and 3 errors** (`tmp/html-views/final-gate-2.log`). An unchanged
+  HEAD snapshot reproduced all 24 assertion failures plus the identity error:
+  **56 tests, 358 assertions, 24 failures and 1 error**
+  (`tmp/html-views/head-boundary.log`). These concern existing identity
+  creation, bootstrap expectations, maintenance fact queries and the unhanded
+  database-query timing bound. No causal attribution to another lane is made.
+  The other errors were the separately recorded feed timeout and the
+  [published-base file loss](../../../seon/issues/parallel-test-base-connect-can-lose-a-filestore-key.md);
+  that settings fixture passed isolated confirmation and the later gate.
+- Final explicit `bin/test --platform`: **84 tests, 505 assertions,
+  zero failures/errors** (`tmp/html-views/platform.log`). No `--all` or
+  `--full` invocation was used. The runner's printed skipped-coverage suggestion
+  was not executed.
+
+The owned-path selection includes the ten source owners, `blocks.css`,
+`html_views_test.clj`, its golden EDN, and the existing message/ns tests.
+The final browser-inspection script edit only strengthens the read-only
+browser evidence; no production Clojure or CSS changed after these gates.
+
+Final explicit `bin/seon init --dev default --changed src/seon/plan.clj`
+converged in the existing PID 23557. MCP then read both the cluster's adopted
+`:seon.source/commit-id` and `seon.cluster.source/current` as
+`6aa89c04-03d8-5bb8-a9f2-b6ebf608888e`. The source digest was
+`1957e273a738118916517a23957759607a0a2c582d348b693322a495f2d89888`.
+Log: `tmp/html-views/final-adoption.log`. Earlier source-changed adoption
+refusals did not cause a restart, refork, reseed or agent message.
+This proof exercised **in-place development adoption**, followed by actual
+browser paint; it is not inferred from a hot-reloaded Var alone.
+
+`test/seon/html_views_inspect.cjs` now clicks the native defaults summary and
+asserts it remains open through capture at each width. The expanded live
+view shows 16 defaults, including `65,536`, `32,768`, `180 s`, `0.5 s`, and
+plain model names. Datastar's existing `data-preserve-attr="open"` mechanism
+keeps these disclosures stable across morphs; its implementation is
+`reference-code/datastar/library/src/plugins/watchers/patchElements.ts:562`.
+The same attribute is used for completed criteria and transaction details.
+Evidence: `tmp/html-views/inspect-adopted.log` and
+`settings-expanded-1440.png` / `settings-expanded-700.png`.
+
+### Live screenshots after convergence
+
+Each linked image was captured on Juniper after the successful adoption.
+The desktop shell restriction is visible in these images; the fixture images
+above isolate the renderer's content. Nonempty faults, help, transactions,
+maintenance and standalone namespace bindings remain fixture-only evidence
+because those values are absent from the current live walk.
+
+| Block | 1440 × 900 | 700 × 900 |
+| --- | --- | --- |
+| plan | [plan-adopted-1440.png](../../../../tmp/html-views/plan-adopted-1440.png) | [plan-adopted-700.png](../../../../tmp/html-views/plan-adopted-700.png) |
+| settings | [settings-adopted-1440.png](../../../../tmp/html-views/settings-adopted-1440.png) | [settings-adopted-700.png](../../../../tmp/html-views/settings-adopted-700.png) |
+| messages | [messages-adopted-1440.png](../../../../tmp/html-views/messages-adopted-1440.png) | [messages-adopted-700.png](../../../../tmp/html-views/messages-adopted-700.png) |
+| inbox | [inbox-adopted-1440.png](../../../../tmp/html-views/inbox-adopted-1440.png) | [inbox-adopted-700.png](../../../../tmp/html-views/inbox-adopted-700.png) |
+| notes | [notes-adopted-1440.png](../../../../tmp/html-views/notes-adopted-1440.png) | [notes-adopted-700.png](../../../../tmp/html-views/notes-adopted-700.png) |
+| identity | [identity-adopted-1440.png](../../../../tmp/html-views/identity-adopted-1440.png) | [identity-adopted-700.png](../../../../tmp/html-views/identity-adopted-700.png) |
+| faults | [faults-adopted-1440.png](../../../../tmp/html-views/faults-adopted-1440.png) | [faults-adopted-700.png](../../../../tmp/html-views/faults-adopted-700.png) |
+
+### Commits and cleanup
+
+One path-limited commit per block; no `input.css`, `output.css`, web,
+transcript, REPL, dir or doc implementation was committed by this lane.
+`bin/css` rebuilt output after every CSS edit. No extra token or safelist
+entry is needed. The build artifact remains the orchestrator's checkpoint.
+
+| Block | Commit |
+| --- | --- |
+| plan | `5d59aa991` |
+| settings | `20193870c` |
+| messages | `322def5d8` |
+| notes | `e5c08fecb` |
+| help | `09fb21ae3` |
+| identity | `6fb5039af` |
+| faults | `597ef8b68` |
+| transactions | `78df20669` |
+| maintenance | `7a4d3923d` |
+| namespace | `4dc8a1831` |
+
+The ten source paths are `src/seon/plan.clj`, `src/seon/agent.clj`,
+`src/seon/cluster/message.clj`, `src/seon/note.clj`, `src/seon/bootstrap.clj`,
+`src/seon/cluster/agent.clj`, `src/seon/error.clj`, `src/seon/db.clj`,
+`src/seon/maintenance.clj`, and `src/seon/render/ns.clj`.
+Additional touched paths: `resources/public/css/blocks.css`,
+`test/seon/html_views_test.clj`, `test/seon/fixtures/html_views_ai.edn`,
+`test/seon/cluster/message_test.clj`, `test/seon/render/ns_test.clj`, the
+three browser scripts named above, this landing note, and the four issue
+notes linked here (layout, fixture-file loss, debug-feed timeout, fault resolution).
+
+All own gate/browser shells completed. Failed roots `run.PzoKkQ` and
+`run.Mbhn31` were deleted after the finished sessions and process-table check
+showed no JVM/BB holder. `run.AC8WUl` was already absent. Successful gates
+removed their roots. Temporary commit-splitting copies and scripts were
+removed. Requested screenshots, fixture HTML and gate logs remain as evidence
+under `tmp/html-views/`; no scratch cluster or worktree was created. Foreign
+working-tree edits and untracked files were preserved.
+
+The outstanding fault-state requirement is tracked in
+[fault-resolution-has-no-declared-fact.md](../../../seon/issues/fault-resolution-has-no-declared-fact.md).
+A renderer cannot derive repair from an absent steward or from fault age.

@@ -1,2 +1,27 @@
-const {chromium}=require('playwright');
-(async()=>{const browser=await chromium.launch({headless:true,channel:'chrome'});try{const p=await browser.newPage({viewport:{width:700,height:900}});await p.goto('http://127.0.0.1:7994/');console.log(JSON.stringify(await p.evaluate(()=>({width:innerWidth,document:document.documentElement.scrollWidth,overflow:[...document.querySelectorAll('main *')].filter(e=>e.getBoundingClientRect().right>innerWidth).slice(0,12).map(e=>({tag:e.tagName,class:e.className,width:e.clientWidth,right:e.getBoundingClientRect().right}))}))));await p.goto('http://127.0.0.1:7994/ns/my.agents.juniper');await p.locator('.seon-settings-defaults').evaluate(e=>e.open=true); console.log(await p.locator('.seon-settings-defaults').evaluate(e=>({open:e.open,html:e.outerHTML}))); await p.locator('.seon-agent-settings').scrollIntoViewIfNeeded();await p.screenshot({path:'tmp/html-views/settings-expanded-700.png'});console.log(await p.locator('.seon-settings-defaults').innerText());}finally{await browser.close();}})().catch(e=>{console.error(e);process.exitCode=1;});
+// Read-only browser evidence: root overflow and the native defaults disclosure.
+const { chromium } = require('playwright');
+(async () => {
+  const browser = await chromium.launch({ headless: true, channel: 'chrome' });
+  try {
+    const page = await browser.newPage();
+    for (const width of [1440, 700]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.goto('http://127.0.0.1:7994/');
+      console.log(JSON.stringify(await page.evaluate(() => ({
+        width: innerWidth, document: document.documentElement.scrollWidth,
+        overflow: [...document.querySelectorAll('main *')]
+          .filter(el => el.getBoundingClientRect().right > innerWidth).slice(0, 12)
+          .map(el => ({ tag: el.tagName, class: el.className, width: el.clientWidth,
+            right: el.getBoundingClientRect().right }))
+      }))));
+      await page.goto('http://127.0.0.1:7994/ns/my.agents.juniper');
+      const details = page.locator('.seon-settings-defaults');
+      await details.locator('summary').click();
+      await page.waitForFunction(() => document.querySelector('.seon-settings-defaults')?.open);
+      await page.locator('.seon-agent-settings').scrollIntoViewIfNeeded();
+      await page.screenshot({ path: `tmp/html-views/settings-expanded-${width}.png` });
+      if (!await details.evaluate(el => el.open)) throw Error('Defaults closed during capture');
+      console.log(JSON.stringify({ width, defaults: await details.innerText() }));
+    }
+  } finally { await browser.close(); }
+})().catch(error => { console.error(error); process.exitCode = 1; });
