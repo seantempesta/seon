@@ -1,12 +1,41 @@
 (ns seon.test.runner-test
   (:require [clojure.set :as set]
+            [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [seon.instrument :as instrument]
             [seon.test.arm :as arm]
+            [seon.test.cache :as cache]
             [seon.test.runner :as runner]
             [seon.test-runner-failure-fixture]
             [seon.test-support :as test-support]))
+
+(deftest unused-workers-own-no-checkout
+  (let [root (doto (io/file "tmp" (str "unused-workers-" (random-uuid))) .mkdirs)
+        snapshot (io/file root "snapshot")
+        serial (io/file root "serial")
+        confirmation (io/file root "confirmation")
+        admitted (delay
+                   (cache/worker-checkout! (str snapshot) (str serial))
+                   {::runner/worker-id "serial"})
+        task {::runner/task-id "admitted"}]
+    (try
+      (.mkdirs (io/file snapshot "src"))
+      (spit (io/file snapshot "src" "identity.clj") "immutable snapshot bytes")
+      (is (= [] (#'runner/run-task-pool! nil [] admitted [] [])))
+      (is (not (realized? admitted)))
+      (is (not (.exists serial)))
+      (is (not (.exists confirmation)))
+      (with-redefs-fn
+        {#'runner/execute-worker-task! (fn [_ worker admitted-task]
+                                        (assoc admitted-task ::runner/executed-by
+                                               (::runner/worker-id worker)))}
+        #(is (= [(assoc task ::runner/executed-by "serial")]
+                (#'runner/run-task-pool! nil [] admitted [] [task]))))
+      (is (= "immutable snapshot bytes"
+             (slurp (io/file serial "src" "identity.clj"))))
+      (is (not (.exists confirmation)))
+      (finally (test-support/delete-recursively! root)))))
 
 (deftest default-red-does-not-launch-confirmation
   (let [task {::runner/task-id "default-red"

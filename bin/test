@@ -706,8 +706,6 @@ mkdir -p "$worker_parent"
 for worker_number in $(seq 1 "$worker_count"); do
   populate_checkout_root "$worker_parent/pool-$worker_number"
 done
-populate_checkout_root "$worker_parent/serial"
-populate_checkout_root "$worker_parent/confirmation"
 source_root=$original_source_root
 for worker_root in "$worker_parent/"*; do
   populate_cache_links "$worker_root"

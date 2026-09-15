@@ -117,3 +117,14 @@ Read today's `batch-1/fixtures-events.md` (207 tests, 6191 assertions,
 0 failures/errors) and `batch-2c/phases.txt` (5 s checkouts, 44 s publication,
 748 s coordinator/tests). These are baseline evidence, not post-change gates.
 Preserved foreign edits, including projection carriage in test_support.clj.
+
+Row 7 (checkout half): launcher no longer creates serial/confirmation
+checkouts. Worker admission materializes from the immutable snapshot through
+the existing bounded cache copy owner; serial acquisition is delayed until
+unresolved or leftover tasks need it. Publication remains eager and unchanged.
+Regression `unused-workers-own-no-checkout` observes absent directories before
+admission and exact snapshot bytes after serial admission. Hot-reloaded cache
+and runner JVM probe returned zero tasks and `:serial-acquired? false`.
+The first probe correctly refused an unreloaded cache Var; reloading the
+changed dependency before its caller resolved it. Shell syntax and diff checks
+passed; the orchestrator gate remains pending.

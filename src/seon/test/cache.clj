@@ -56,6 +56,23 @@
           (and (.isAlive handle)
                (= started (str (.orElse (.startInstant (.info handle)) nil)))))))))
 
+(defn worker-checkout!
+  "Materialize an admitted worker's checkout from the immutable gate snapshot."
+  {:malli/schema [:=> [:cat :string :string] :string]}
+  [snapshot checkout]
+  (locking #'worker-checkout!
+    (when-not (.isDirectory (io/file checkout "src"))
+      (copy-checkout! snapshot checkout)
+      (doseq [directory ["data" "logs" "tmp" "target"]]
+        (.mkdirs (io/file checkout directory)))
+      (doseq [entry (.listFiles (io/file snapshot "target"))
+              :when (Files/isSymbolicLink (.toPath entry))]
+        (Files/createSymbolicLink
+         (.toPath (io/file checkout "target" (.getName entry)))
+         (Files/readSymbolicLink (.toPath entry))
+         (make-array java.nio.file.attribute.FileAttribute 0))))
+    checkout))
+
 (defn- referenced? [directory]
   (boolean
    (some (fn [file]

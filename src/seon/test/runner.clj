@@ -1846,6 +1846,8 @@
 
 (defn- start-worker!
   [worker-id checkout-root operator-root]
+  (cache/worker-checkout! (System/getProperty "seon.test.root")
+                          (.getPath checkout-root))
   (.mkdirs (io/file operator-root "logs"))
   (let [error-log (io/file operator-root "logs" "worker-stderr.log")
         published-base (System/getProperty "seon.test.published-base")
@@ -2121,7 +2123,7 @@
                ^java.util.concurrent.Callable
                (on-caller-loader
                 (fn []
-                  (mapv #(execute-worker-task! progress serial-worker %)
+                  (mapv #(execute-worker-task! progress (force serial-worker) %)
                         unresolved-tasks)))))
             parallel-results (mapcat #(.get %) parallel-futures)
             serial-results (if serial-future (.get serial-future) [])
@@ -2136,9 +2138,9 @@
                             :else (recur (conj tasks entry)))))
             leftover-results
             (when (seq leftovers)
-              (if (and serial-worker
-                       (not @(::worker-retired? serial-worker)))
-                (mapv #(execute-worker-task! progress serial-worker %)
+              (if (and (force serial-worker)
+                       (not @(::worker-retired? (force serial-worker))))
+                (mapv #(execute-worker-task! progress (force serial-worker) %)
                       leftovers)
                 (mapv (fn [task]
                         (let [test-symbols (mapv str (::task-symbols task))
@@ -2552,8 +2554,7 @@
         pool-size (worker-count)
         confirming (confirmation-symbols)
         worker-ids (if (seq confirming) []
-                      (conj (mapv #(str "pool-" %) (range 1 (inc pool-size)))
-                            "serial"))
+                      (mapv #(str "pool-" %) (range 1 (inc pool-size))))
         workers* (atom [])
         shutdown-hook
         (Thread. (fn [] (doseq [worker @workers*] (stop-worker! worker)))
@@ -2613,8 +2614,12 @@
               workers (mapv #(.get %) worker-futures)
               pool-workers (filterv #(str/starts-with? (::worker-id %) "pool-")
                                     workers)
-              serial-worker (first (filter #(= "serial" (::worker-id %))
-                                           workers))
+              serial-worker
+              (delay
+                (let [checkout (worker-checkout "serial")
+                      worker (start-worker! "serial" checkout checkout)]
+                  (swap! workers* conj worker)
+                  (initialize-worker! worker namespaces)))
               explicit? (= "explicit" selection-mode)
               bulk (when-not explicit? (bulk-selection selection-mode manifest))
               all-vars (test-vars-in namespaces)
