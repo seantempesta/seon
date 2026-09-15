@@ -79,3 +79,10 @@
 .seon-root-agents table { table-layout: fixed; width: 100%; border-collapse: collapse; font-size: 0.625rem; }
 .seon-root-agents :is(th, td) { vertical-align: top; padding: 0.3rem; overflow-wrap: anywhere; border-bottom: 1px solid var(--color-base-800); }
 
+.seon-family-entry.seon-error-entry { padding: 0.5rem 0 0.5rem 0.6rem; border-left: 1px solid var(--color-error); font: 0.75rem/1.55 var(--font-mono); overflow-wrap: anywhere; }
+.seon-error-entry .seon-kicker, .seon-error-entry :is(time, .seon-error-run, .seon-error-function, .seon-error-link) { font-size: 0.625rem; color: var(--color-text-400); }
+.seon-error-entry .seon-kicker { color: var(--color-error); }
+.seon-error-entry .seon-error-message { color: var(--color-text-100); font-weight: 500; }
+.seon-error-entry a { color: var(--color-info); }
+.seon-error-faults > h2 { font-size: 0.75rem; color: var(--color-text-300); }
+.seon-error-faults-empty { font-size: 0.625rem; color: var(--color-text-400); }

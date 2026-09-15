@@ -1330,23 +1330,25 @@
                    turn)]
     (into
      [:article {:class "seon-family-entry seon-error-entry"}
-      [:p {:class "seon-kicker"} (str (:seon.error/kind value))]
+      [:p {:class "seon-kicker"} (some-> (:seon.error/kind value) name)]
       [:h3 {:class "seon-error-message"} (:seon.error/message value)]]
      (concat
       (when-let [at (:seon.error/at value)]
         (let [instant (str (if (instance? java.util.Date at)
                              (.toInstant ^java.util.Date at) at))]
-          [[:time {:class "seon-error-at" :datetime instant} instant]]))
+          [[:time {:class "seon-error-at" :datetime instant :title instant
+                   :data-text (str "new Date('" instant "').toLocaleString()")}
+            (if (inst? at) (.format (java.text.SimpleDateFormat. "MMM d, HH:mm:ss") at) instant)]]))
       (when-let [function (:seon.instrument/fn value)]
         [[:p {:class "seon-error-function"} "Function: " (str function)]])
       (when turn-ref
         [[:p {:class "seon-error-run"}
           [:a {:href (render.route/path :seon.render.route/data {}
                                         {:entity (pr-str turn-ref)})}
-           (str "Turn: " (pr-str turn-ref))]]])
+           (str "Turn: " (if (vector? turn-ref) (second turn-ref) "identity unavailable"))]]])
       (when-let [id (:seon.error/id value)]
         [[:p {:class "seon-error-link"}
-          [:a {:href (evidence-path id)} "Inspect durable evidence"]]])))))
+           [:a {:href (evidence-path id)} "Inspect evidence"]]])))))
 
 (defn- fault-order
   [fault]

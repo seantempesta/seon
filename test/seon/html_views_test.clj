@@ -130,3 +130,12 @@
         (is (= (golden :id) (cluster.agent/render-id-ai "alice")))
         (is (= (golden :creation) (cluster.agent/render-creation-ai creation)))))))
 
+(deftest fault-pairs-preserve-ai
+  (support/with-database
+    (fn [connection]
+      (let [fault {:seon.error/kind :example/failed :seon.error/message "Connection lost"}]
+        (readable! (error/render-html fault) ["failed" "Connection lost"])
+        (readable! (error/render-faults-html [fault] @connection) ["Faults (1)" "Connection lost"])
+        (is (= (golden :fault) (error/render-ai fault)))
+        (is (= (golden :faults) (error/render-faults-ai {:seon.render/value [fault]})))))))
+

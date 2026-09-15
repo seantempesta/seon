@@ -110,3 +110,11 @@ Screenshot log: `fixture-seon-agent-identity-entry-before → fixture-seon-agent
 
 Observed defects → change: The old layout lacked consistent row alignment. All values and links now wrap; no raw agent lookup reference is shown.
 
+## Faults
+
+Fault kind, message, local time and turn reference are readable; evidence remains linked. Fault collection uses the same child renderer.
+
+Screenshot log: `fixture-seon-error-entry-before → fixture-seon-error-entry-verified; fixture-seon-error-faults-before → fixture-seon-error-faults-verified; faults-2`.
+
+Observed defects → change: Raw kind punctuation and lookup refs are removed. Live Juniper has zero routed faults; nonempty content is proven in the canonical fixture. Open/resolved cannot be derived: no resolution attribute or transition exists. See the recorded schema gap.
+
