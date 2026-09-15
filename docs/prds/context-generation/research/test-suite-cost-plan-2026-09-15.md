@@ -691,3 +691,45 @@ No foreign session was operated. Protected render, turn, SCI and fixture edits
 were preserved. The gate request is narrowed to **`seon.test.runner-test`**.
 No test JVM was launched. Kondo reports no new findings; the runner's existing
 shadowed bindings and unused private declaration remain outside this slice.
+
+### Landing (tests): batch 8 installation projection
+
+Lane `slow-tests-merge`. Batch 8 confirmed the four-case grammar green cold
+after `27b9f7165` supplied the populated canonical projection; the namespace
+took 36 s. The remaining installation scenario reproduced in-process on a
+new canonical memory base and fresh `cluster-ctx`: `:malli.core/invalid-schema`
+for `:example/order-row`. The fixture created a separate environment state
+without handing it to the connection or its body. Schema evaluation advanced
+the SCI state while host contract compilation still saw the earlier state.
+
+`with-grammar-agent` now carries that same state on its scratch connection,
+acquires SCI from `db/db` with that state, and invokes the body through
+`schema/call-with-projection-state`. No schema roster or production edit.
+The representative probe verified identical connection/context state,
+successful definition installation, and `{:customer "Ada" :total 115}`.
+
+Exact regression in every run:
+`(seon.test/run #'seon.contracts-plan-test/installed-contract-refusal-names-the-run5-failing-coordinate (seon.operator/connection "default"))`.
+Each ran inside `schema/call-with-projection` using
+`(schema/build-projection (schema.edn/packaged-forms))`, with a new
+`(#'seon.test-support/create-base nil)`, a scoped `with-redefs-fn` binding
+`#'seon.test-support/database-base` to `(delay base)`, and `close-base!` in
+`finally`. The fixture acquired a fresh SCI context for each invocation.
+
+| Definition | Recorded run | Pass / fail / error |
+|---|---:|---:|
+| Before fix, fresh base | 64956 | 13 / 0 / 1 |
+| New form evaluated before file edit, fresh base | 64963 | 26 / 0 / 0 |
+| Saved file explicitly loaded, fresh base | 64968 | 26 / 0 / 0 |
+
+Complete MCP values were read. Publication request
+`d675ed2b-9cfd-4363-8631-9747e973fd1c` still had an empty result file;
+the final run proves the saved definition, not completed development adoption.
+The existing publication boundary is recorded in
+`docs/seon/issues/incremental-publication-cannot-select-the-live-operator.md`.
+MCP session-loss reports required reconnecting; retained futures survived,
+as described in `docs/seon/issues/mcp-session-loss-claims-unobserved-restart.md`.
+No default lifecycle operation or test JVM. Preserved foreign render, SCI,
+turn and their test edits. `git diff --check` passed; kondo reported only the
+fixture's existing missing docstrings. Gate request remains solely
+`seon.contracts-plan-test`; the orchestrator's cold gate is final proof.

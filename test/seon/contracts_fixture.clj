@@ -82,8 +82,9 @@
                      :seon.db/connection connection
                      :seon.db/basis-t (db/basis-t database)
                      :seon.schema/projection projection})))
-           ctx (sci-eval/cluster-ctx database connection state)]
-       (body connection ctx nil)))))
+           _ (db/carry-connection-projection-state! connection state)
+           ctx (sci-eval/cluster-ctx (db/db connection) connection state)]
+       (schema/call-with-projection-state state #(body connection ctx nil))))))
 
 (defn install-orders! [connection ctx]
   (with-open [reader (java.io.PushbackReader. (java.io.StringReader. fixture/schema-source))]
