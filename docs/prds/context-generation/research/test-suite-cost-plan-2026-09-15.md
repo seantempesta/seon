@@ -180,3 +180,34 @@ acknowledgement, pending disarm before execution, and completed disarm after
 running the actual queued runnable. The original bounded wait remains in
 `finally`, so failure still releases the proc. MCP JVM scratch-fixture probe:
 **5 passed, 0 failed, 0 errors, 1 test**. Syntax lint: zero errors/warnings.
+
+### Row 2 — exhaustive family subsets
+
+`absent-facts-produce-no-entries` now enumerates all 16 distinct subsets once,
+then acquires one additional recurrence scenario and observes 1→5 occurrences.
+All membership, schema, HTML/log row-count, Hiccup, signature-count and
+occurrence assertions moved from the deleted standalone projection test;
+only its two self-equality assertions were dropped. Empty log output counts
+zero nonblank rows. The test observes **17 acquisitions**, **18 derived
+values**, and exactly one call to each renderer for each value. The separate
+60-trial committed-error property is byte-identical to the entering HEAD.
+
+Live verification boundary: the unchanged `found` helper sees loaded Vars
+absent from the fixture's sealed source population, including
+`seon.db/carry-connection-projection-state!`, the new render evidence helpers,
+`seon.test/prepare-tests!` and the runner confirmation helpers. The direct
+REPL invocation reported **110 pass / 74 fail / 0 error**; a one-fixture
+probe positively observed those seven `:seon.problems/stale-vars` entries
+before committing any family fact. No production or foreign session was
+changed to remove them. The committed
+[probe script](slow_tests_merge_probe_2026_09_15.clj) removes only that
+separately observed family at the private test-helper boundary for diagnosis:
+**184 pass / 0 fail / 0 error, 46,738 ms**. This verifies the reshaped family
+logic and counters, not a green isolated gate. The regression itself retains
+its exact-family check. Syntax lint has zero errors; two pre-existing warnings
+remain at `dead` and the unrelated `derive` binding.
+
+MCP repeatedly reported `session-lost` although the PID and probe Vars
+survived. Reconnecting retrieved completed results; no default lifecycle
+operation was issued. This matches the already-recorded boundary in
+`p1-ambient-state-2026-09-15.md` (commit `40bdd357c`).

@@ -9,10 +9,10 @@
   maintain, and the whole point of deriving is that nobody does.
 
   So the shape of the suite is: one fixture per database-fact family,
-  the empty cluster, a GENERATIVE ABSENCE PROPERTY over those fixtures,
+  the empty cluster, an exhaustive absence check over those fixtures,
   and one process-image interaction proof for stale Vars. Whatever is
   absent produces nothing and whatever is present produces exactly its
-  own family. Fixed seed 20260727, one fresh in-memory database per trial,
+  own family. All 16 family subsets, one canonical database branch per subset,
   and the attributes come from
   `canonical-database-attributes` — the live boot derivation, not a
   hand-listed fixture set."
@@ -410,81 +410,69 @@
 ;;; ---------------------------------------------------------------------------
 
 (deftest absent-facts-produce-no-entries
-  (let [result
-        (tc/quick-check
-         40
-         (prop/for-all
-          [present (gen/set (gen/elements (keys families)))]
-          (with-db
-            (fn [connection]
-              (doseq [family present] ((families family) connection))
-              (let [value (found connection)
-                    expected (cond-> present
-                               (present :seon.problems/failed-runs)
-                               (conj :seon.problems/error-signatures))]
-                (and
-                 ;; every family that has facts is reported, once
-                 (every? (fn [family] (seq (get value family))) present)
-                 ;; and NOTHING else appears — this is the half that a
-                 ;; stored status would fail
-                 (empty? (remove expected (keys value)))
-                 ;; empty means empty: `{}`, never `{family []}`
-                 (= (empty? present) (= {} value))
-                 (seon.schema/valid-candidate-value? :seon.problems/problems
-                                                     value))))))
-         :seed 20260727)]
-    (test-support/assert-check! result "Absent facts produced entries.")))
-
-;;; ---------------------------------------------------------------------------
-;;; Structured twins — one family value, two presentations
-;;; ---------------------------------------------------------------------------
-
-(deftest projection-twins-preserve-the-generated-family-structure
-  (test-support/assert-check!
-   (tc/quick-check
-    24
-    (prop/for-all [present
-                   (gen/not-empty
-                    (gen/set (gen/elements (vec (keys families)))))
-                   error-occurrences (gen/choose 1 5)]
-      (with-db
-        (fn [connection]
-          (doseq [family present]
-            (if (= :seon.problems/error-signatures family)
-              (dotimes [_ error-occurrences] (commit-error! connection))
-              ((get families family) connection)))
+  (let [subsets (reduce (fn [sets family]
+                          (into sets (map #(conj % family) sets)))
+                        [#{}] (keys families))
+        exercised (atom [])
+        acquisitions (atom 0)
+        render-calls (atom {})
+        acquire with-db
+        log-report problems/log-report
+        html-report problems/html-report
+        verify-value
+        (fn [connection present occurrences]
           (let [value (found connection)
+                expected (cond-> present
+                           (present :seon.problems/failed-runs)
+                           (conj :seon.problems/error-signatures))
+                _ (reset! render-calls {})
                 log (problems/log-report value)
                 html (problems/html-report value)
-                routed-log (problems/log-report value)
-                routed-html (problems/html-report value)
-                rows
-                (filter
-                 (fn [node]
-                   (and (vector? node)
-                        (= "seon-problems-row"
-                           (:class (nth node 1 nil)))))
-                 (tree-seq sequential? seq html))]
-            (and
-             (seon.schema/valid-candidate-value?
-              :seon.problems/problems value)
-             (= present (set/intersection present (set (keys value))))
-             (= (+ (count present) (if (present :seon.problems/failed-runs) 1 0))
-                (count (str/split-lines log)))
-             (= (+ (count present) (if (present :seon.problems/failed-runs) 1 0)) (count rows))
-             (= log routed-log)
-             (= html routed-html)
-             (hiccup/hiccup? html)
-             (or (not (contains? present
-                                 :seon.problems/error-signatures))
-                 (let [signature (first (filter #(= :seon.db/rejected (:seon.error/kind %))
-                                                (:seon.problems/error-signatures value)))]
-                   (and (= error-occurrences
-                           (:seon.problems/occurrences signature))
-                        (= (if (present :seon.problems/failed-runs) 2 1)
-                           (count (:seon.problems/error-signatures value)))))))))))
-    :seed 202607280902)
-   "problems projection twins"))
+                rows (filter
+                      (fn [node]
+                        (and (vector? node)
+                             (= "seon-problems-row" (:class (nth node 1 nil)))))
+                      (tree-seq sequential? seq html))
+                row-count (+ (count present)
+                             (if (present :seon.problems/failed-runs) 1 0))]
+            (is (= {:log 1 :html 1} @render-calls)
+                "Each derived value reaches each renderer exactly once.")
+            (is (every? #(seq (get value %)) present))
+            (is (= expected (set (keys value))))
+            (is (= (empty? present) (= {} value)))
+            (is (seon.schema/valid-candidate-value? :seon.problems/problems value))
+            (is (= present (set/intersection present (set (keys value)))))
+            (is (= row-count (count (remove str/blank? (str/split-lines log)))))
+            (is (= row-count (count rows)))
+            (is (hiccup/hiccup? html))
+            (when (present :seon.problems/error-signatures)
+              (let [signatures (:seon.problems/error-signatures value)
+                    signature (first (filter #(= :seon.db/rejected
+                                                  (:seon.error/kind %)) signatures))]
+                (is (= occurrences (:seon.problems/occurrences signature)))
+                (is (= (if (present :seon.problems/failed-runs) 2 1)
+                       (count signatures)))))))]
+    (with-redefs [with-db (fn [body] (swap! acquisitions inc) (acquire body))
+                  problems/log-report
+                  (fn [value] (swap! render-calls update :log (fnil inc 0))
+                    (log-report value))
+                  problems/html-report
+                  (fn [value] (swap! render-calls update :html (fnil inc 0))
+                    (html-report value))]
+      (doseq [present subsets]
+        (with-db
+          (fn [connection]
+            (swap! exercised conj present)
+            (doseq [family present] ((families family) connection))
+            (verify-value connection present 1))))
+      (with-db
+        (fn [connection]
+          (commit-error! connection)
+          (verify-value connection #{:seon.problems/error-signatures} 1)
+          (dotimes [_ 4] (commit-error! connection))
+          (verify-value connection #{:seon.problems/error-signatures} 5))))
+    (is (= 16 (count @exercised) (count (set @exercised))))
+    (is (= 17 @acquisitions))))
 
 (deftest the-block-derives-at-the-units-own-database-value
   (with-db
