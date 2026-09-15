@@ -111,3 +111,9 @@ indexing). The class therefore reproduces without lanes and without a
 long-lived live cluster; publication/indexing write amplification alone
 accounts for order-of-magnitude regrowth. Store reset again this
 session after this census.
+
+## Re-verified at HEAD (2026-09-15)
+
+surface: store-process
+
+OPEN, UNVERIFIABLE. Read-only `du -sk data/store` returned `41234936 data/store` (42,224,574,464 allocated bytes; 39.32 GiB). One footprint does not prove daily growth or name a writer. The original specimen was deleted. HEAD `968a02c26` includes exclusive collection ordering, but ordering does not establish recurring reclamation. Needed: timestamped baseline and a second physical/current/history/unreachable census across a day of accounted publication/turn work. No collection/reset was run. Blocker severity remains an unverified storage-exhaustion risk, not a confirmed failed agent run.

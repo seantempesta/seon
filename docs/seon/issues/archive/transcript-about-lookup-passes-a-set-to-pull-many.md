@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, render, database, class/n13, wave/live-drive-render]
 ---
@@ -49,3 +49,9 @@ the public `seon.db/pull-many` contract.
   once without a core fault.
 - Re-rendering after the result commits does not create any new error message
   or transaction.
+
+## Resolution (2026-09-15 triage)
+
+surface: render-debug-page
+
+Fix `9fa48fa20` replaced the rejected set construction. At HEAD `968a02c26`, `src/seon/render/transcript.clj:210–229` builds `(into [] (comp (keep ...) (distinct)) messages)` from `:seon.message/about` refs and passes that vector directly to `db/pull-many`. Verified the complete construction/call branch with `git show HEAD:src/seon/render/transcript.clj` and its history. The stated set-input contract failure cannot occur at this caller. No JVM or gate launched.

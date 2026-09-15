@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: blocker
 tags: [issue, render, web, agent, class/n11, wave/ui-watchability, wave/live-drive-render]
 ---
@@ -51,7 +51,7 @@ Beside the run blocks the page shows only two message blocks and 17
 empty.
 
 Full walk with screenshots described:
-[ui-verification-2026-08-14](../../prds/context-generation/research/ui-verification-2026-08-14.md).
+[ui-verification-2026-08-14](../../../prds/context-generation/research/ui-verification-2026-08-14.md).
 
 ## Owner
 
@@ -70,3 +70,9 @@ than as one wall. The AI and HTML projections show the SAME entries, differing
 only by profile and projection. A recurring proof asserts that a settled
 run's rendered agent page contains each of its forms' sources and each
 receipt's value.
+
+## Resolution (2026-09-15 triage)
+
+surface: render-debug-page
+
+The session UI changed. At HEAD `968a02c26`, `src/seon/render/web.clj:3038–3057` routes the debug session to `render-ledger`; `src/seon/render/transcript.clj:2120–2170` supplies per-turn bodies, model replies and evaluated results. The ordinary agent route remains a namespace record page (`web.clj:3137–3145`, `:2958–2982`); its runtime table shows counts and the first reply line (`transcript.clj:1138–1166`). Claiming complete evaluations appear on that ordinary page would still be false. The residual cross-surface history/parity work is owned by [agent-html-still-uses-the-retired-transcript-assembler.md](../agent-html-still-uses-the-retired-transcript-assembler.md), whose current triage section records the changed route and verification need at friction severity. Superseded by that narrower owner; this is source evidence, not browser-paint proof.

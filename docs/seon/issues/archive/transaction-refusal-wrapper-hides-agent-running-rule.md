@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, database, render, runtime, wave/context-fixes]
 ---
@@ -101,3 +101,9 @@ that the transient caller receives this value in the original process.
 `agent-already-running` refusal and `supervision-not-committed` fault while
 provider calls were disabled. This does not prove the wrapper defect recurred;
 it records the remaining supervision boundary without attributing its cause.
+
+## Resolution (2026-09-15 triage)
+
+surface: turn-loop
+
+Fix `79d8d7ac8` is present at HEAD `968a02c26`: `src/seon/error/refusal.clj:4–25` retains the deepest classified cause before falling back to unclassified data. `test/seon/db_test.clj:170–202` covers wrapper order and real transaction contention. Read-only default MCP JVM probe `(seon.error.refusal/refusal (ex-info "classified" {:seon.error/kind :seon.turn/refused :seon.turn/rule :seon.turn/agent-already-running} (ex-info "inner" {:seon.turn/id nil})))` returned in 3 ms: `{:seon.error/kind :seon.turn/refused, :seon.turn/rule :seon.turn/agent-already-running, :seon.error/message "classified"}`. Cause preservation is proven; separate supervision faults are not thereby resolved.

@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, wave/test-fixture]
 ---
@@ -28,3 +28,9 @@ Turn-cut did not change the runner or another lane's session. Its explicit
 assignment requires stopping when another lane's work blocks its gate.
 Acceptance: the shipped shell runs default, explicit, and platform selections
 without supplying an artificial path merely to avoid an empty array.
+
+## Resolution (2026-09-15 triage)
+
+surface: runner-gate
+
+HEAD `968a02c26`, `bin/test:504–509`, guards expansion with `[ ${#snapshot_paths[@]} -gt 0 ]`; the empty branch derives overlay paths without expanding the array. Read committed source and ran `/bin/bash -uc 'snapshot_paths=(); overlay_paths=(); if [ ${#snapshot_paths[@]} -gt 0 ]; then overlay_paths=("${snapshot_paths[@]}"); else printf "empty-path branch reached\n"; fi'`. Exit 0, output `empty-path branch reached`. This proves the precise shell fix, not a complete gate. No JVM launched.
