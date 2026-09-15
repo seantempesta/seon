@@ -231,3 +231,107 @@ All lane shell sessions completed. The three lane-owned verification futures
 completed and were removed from `user`; disposable probe logs, classpath text,
 and thread dumps were removed after copying the durable evidence above.
 The shared hook publication records and orchestrator gate request remain.
+
+## Batch 3 correction — 2026-09-15
+
+Read the reaching-tests batch report and every reconciliation failure block
+in `tmp/orchestrator/gate-results/batch-3/named.log`. The retained root
+`tmp/test-runs/run.wIYxON` was not operated or removed. No test JVM was started.
+
+### Reconciliation cause and repair
+
+The first setup transaction failed before reconciliation or adoption ran.
+A direct canonical-fixture probe of the exact `before` value returned
+`:seon.db/invalid-write` at `[1 :seon.schema.admission/source]`: the first
+synthetic core function row lacked its required admission-source fact. The
+second core function row had the same omission. The later nil identities,
+missing tombstone, missing arity, and missing unrelated agent fact were
+consequences of that refused setup transaction.
+
+The fixture now declares `:seon.schema.admission/source :core` on both core
+rows and prints the complete setup refusal if it fails. The agent-authored
+row remains `:agent`. Production reconciliation and adoption recording did
+not change; the proposed adoption-regression attribution was falsified.
+
+The exact live regression invocation was:
+
+```clojure
+(seon.test/run
+ #'seon.source-reconciliation-test/source-reconciliation-preserves-identities-and-unrelated-facts
+ (seon.operator/connection "default"))
+```
+
+It ran with the default connection's projection, after evaluating the changed
+test definition in the JVM. Result: **14 passes, 0 failures, 0 errors**, basis
+536871777, run entity 64327, at 2026-09-15T22:15:54.826Z. The complete
+[recorded result](reaching-batch3-reconciliation-2026-09-15.edn) is retained.
+
+### Remove work from empty checks
+
+A direct timed probe on one immutable default database measured config
+reading at 2.606334 ms, empty reach at 0.057542 ms, `my.note/add!` reach at
+5155.742584 ms, and provenance at 1417.585 ms under concurrent development.
+The old check always captured provenance before selection and queried each
+changed identity a second time for failure attribution.
+
+`changed-reach` now carries each identity's already-derived reaching set into
+selection and failure attribution. Provenance is captured only when there is
+a test to run. Empty and deferred results retain the observed basis and next
+tier but omit `:seon.test.run/program-digest`: no program was tested, and no
+run identity or digest is manufactured. The result contract explicitly admits
+that absence. Real executed tests retain the existing provenance owner.
+
+After evaluating the candidate forms through MCP JVM mode and re-arming with
+default's projection, representative results were read completely:
+
+- `changed-reach` and `reaching` on the reconciliation test identity returned
+  that exact singleton, preserving its failure attribution.
+- Direct `check-in-process` with no changed identities: 2.938583 ms.
+- Public `check` on the same docs-only request: **1.80625 ms**; a prior
+  adopted-definition probe measured 4.683834 ms.
+- The coalesced hook adoption at `6aa9c3e8-fcb9-5173-b980-2a9e68453762`
+  printed `tests run 0 / passed 0 / failed 0 / elapsed 3.718125 ms`.
+
+The exact complete public result was:
+
+```clojure
+{:seon.test.run/basis-t 536871794
+ :seon.test/elapsed-ms 1.80625
+ :seon.test/failed []
+ :seon.test/next-tier [["bin/test" "--paths" "docs/README.md"]
+                      ["bin/test" "--paths" "docs/README.md" "--platform"]]
+ :seon.test/passed [] :seon.test/results [] :seon.test/tests []}
+```
+
+The new regression removes the source seal from its canonical fixture,
+positively verifies that provenance is unavailable, and checks that an empty
+check still returns no tests, no digest, and no stored run. It avoids timing
+thresholds and mocks: absence of the seal makes unnecessary provenance work
+observable as a failure.
+
+### Exact post-adoption boundary
+
+The mandatory candidate-first REPL instruction arrived after these source
+edits. The candidate forms `changed-reach`, `reaching`, `check-in-process`,
+and `check` were then explicitly evaluated via MCP and exercised as above;
+no subsequent production edit was made. The covering deftests were run
+individually through `seon.test/run` and stored their results.
+
+After coalesced adoption, the new empty-check regression and the same
+reconciliation regression both returned **0 passes, 0 failures, 1 error**
+before their bodies could run. The canonical base population now refuses its
+schema transaction with `:seon.schema/missing-projection`. An independent
+`(seon.test-support/with-database (fn [_] :fixture-ready))` probe reproduced
+that exact boundary. This does not refute the earlier 14-assertion result or
+establish a cause in another lane's edits. It prevents claiming a final green
+regression rerun in this live JVM. Full results:
+[empty check](reaching-batch3-empty-2026-09-15.edn),
+[reconciliation rerun](reaching-batch3-postadopt-2026-09-15.edn).
+The [fixture issue](../../../seon/issues/canonical-fixture-population-missing-carried-projection.md)
+names the independent evidence. Concurrent fixture/runner changes were not
+edited, reloaded, reverted, or included in this slice.
+
+The gate request was replaced with only `seon.source-reconciliation-test`
+and `seon.test-reaching-test`. The existing schema file also received foreign
+fixture-observation additions during this slice; the commit includes only
+this lane's optional-digest hunk, preserving those additions uncommitted.

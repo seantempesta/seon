@@ -11,22 +11,25 @@
       (let [namespace-ref [:seon.ns/name 'sample.development]
             kept [:seon.fn/sym "sample.development/value"]
             removed [:seon.fn/sym "sample.development/removed"]
-            agent [:seon.fn/sym "sample.agent/value"]
+            agent-function [:seon.fn/sym "sample.agent/value"]
             before
             [{:seon.ns/name 'sample.development
               :seon.ns/source "(ns sample.development)"}
              {:seon.fn/sym (second kept) :seon.fn/ns namespace-ref
+              :seon.schema.admission/source :core
               :seon.fn/source "(defn value [] 1)"
               :seon.fn/arglists "([])" :seon.fn/private? false
               :seon.fn/doc "old documentation"
               :seon.fn/arities [{:seon.fn.arity/arity "0"
                                 :seon.fn.arity/order 0}]}
              {:seon.fn/sym (second removed) :seon.fn/ns namespace-ref
+              :seon.schema.admission/source :core
               :seon.fn/source "(defn removed [] nil)"}
-             {:seon.fn/sym (second agent) :seon.fn/ns namespace-ref
+             {:seon.fn/sym (second agent-function) :seon.fn/ns namespace-ref
               :seon.fn/source "(defn value [] :agent)"
               :seon.schema.admission/source :agent}]
-            _ (is (not (:seon.error/kind (db/transact! connection before))))
+            setup (db/transact! connection before)
+            _ (is (not (:seon.error/kind setup)) (pr-str setup))
             kept-id (:db/id (db/pull @connection [:db/id] kept))
             removed-id (:db/id (db/pull @connection [:db/id] removed))
             old-arity (:db/id (first (:seon.fn/arities
@@ -61,7 +64,7 @@
         (is (nil? (db/pull after '[*] old-arity)))
         (is (= "([x])" (:seon.fn/arglists (db/pull after '[*] kept))))
         (is (nil? (:seon.fn/doc (db/pull after '[*] kept))))
-        (is (= "(defn value [] :agent)" (:seon.fn/source (db/pull after '[*] agent))))
+        (is (= "(defn value [] :agent)" (:seon.fn/source (db/pull after '[*] agent-function))))
         (is (= ":string" (:seon.schema/form
                           (db/pull after '[*] [:seon.schema/key :sample.development/new-schema]))))
         (is (= "sample.development/new-value"

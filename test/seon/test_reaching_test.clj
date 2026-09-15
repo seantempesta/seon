@@ -111,3 +111,23 @@
             (is (.contains (:seon.test/failure-message result "") test-symbol))
             (is (= 1 (:seon.test/error-count
                        (db/pull (db/db connection) '[*] [:seon.test/sym test-symbol]))))))))))
+
+(deftest empty-check-does-not-acquire-run-provenance
+  (support/with-database
+    (fn [connection]
+      (support/seed-cluster! connection "default")
+      (let [seals (db/q '[:find [?entity ...] :where [?entity :seon.source/digest]]
+                        (db/db connection))
+            removed (db/transact! connection
+                                  (mapv #(vector :db.fn/retractAttribute % :seon.source/digest) seals))]
+        (is (seq seals))
+        (is (:db-after removed) (pr-str removed))
+        (is (:seon.error/kind (runner/provenance (db/db connection))))
+        (let [result (sut/check {:seon.db/connection connection
+                                 :seon.test/changed []
+                                 :seon.test/paths ["docs/README.md"]})]
+          (is (= [] (:seon.test/tests result)) (pr-str result))
+          (is (nil? (:seon.test.run/program-digest result)))
+          (is (empty? (:seon.test/failed result)))
+          (is (empty? (db/q '[:find [?run ...] :where [?run :seon.test.run/id]]
+                            (db/db connection)))))))))

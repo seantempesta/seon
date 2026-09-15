@@ -138,6 +138,13 @@
                 (vec (distinct (concat tests (mapcat #(functions/tests-reaching database %) members)))))))
       :else (unknown (pr-str program-identity) "The reaching set cannot bound a schema change."))))
 
+(defn- changed-reach [database changed]
+  (reduce (fn [reaches change]
+            (let [selected (identity-tests database change)]
+              (if (:seon.error/kind selected) (reduced selected)
+                  (assoc reaches change (set selected)))))
+          {} changed))
+
 (defn reaching
   "Return tests reaching changed function, test, or namespace identities.
 
@@ -146,11 +153,9 @@
   {:malli/schema [:=> [:cat :seon.test/reaching-request]
                   [:or [:vector :seon.test/sym] :seon.error/value]]}
   [{database :seon.db/db changed :seon.test/changed}]
-  (reduce (fn [tests change]
-            (let [selected (identity-tests database change)]
-              (if (:seon.error/kind selected) (reduced selected)
-                  (vec (sort (distinct (into tests selected)))))))
-          [] changed))
+  (let [reaches (changed-reach database changed)]
+    (if (:seon.error/kind reaches) reaches
+        (vec (sort (distinct (mapcat val reaches)))))))
 
 (defn- namespace-tests [database namespaces]
   (db/q '[:find [?symbol ...] :in $ [?ns ...]
@@ -193,13 +198,13 @@
   (let [started (System/nanoTime)
         database (db/db connection)
         effective (config/effective database (or cluster "default"))
-        provenance (runner/provenance database)
         paths (mapv relative-path paths)
         widened (seq (concat (filter selection/widening-path? paths)
                              (for [change changed
                                    :when (and (vector? change)
                                               (= :seon.schema/key (first change)))]
                                (str "schema " (second change)))))
+        reaches (when-not widened (changed-reach database changed))
         selected (if (and widened defer? (not (seq namespaces)))
                    []
                    (if widened
@@ -208,7 +213,11 @@
                                         (db/q '[:find [?name ...]
                                                 :where [?t :seon.test/ns ?n]
                                                 [?n :seon.ns/name ?name]] database)))
-                   (reaching {:seon.db/db database :seon.test/changed changed})))]
+                   (if (:seon.error/kind reaches) reaches
+                       (vec (sort (distinct (mapcat val reaches)))))))
+        runnable (if (and widened defer?) [] selected)
+        provenance (when (and (not (:seon.error/kind selected)) (seq runnable))
+                     (runner/provenance database))]
     (cond
       (:seon.error/kind effective) effective
       (:seon.error/kind provenance) provenance
@@ -218,13 +227,12 @@
             namespaces (vec (sort (distinct (or (seq namespaces)
                                                 (map #(symbol (namespace (symbol %))) selected)))))
             deadline (+ started (* 1000000 (:seon.test/check-time-limit-ms effective)))
-            reaches (if widened {}
-                        (into {} (map (fn [change] [change (set (identity-tests database change))])) changed))
             initial (cond-> {:seon.test/tests [] :seon.test/passed [] :seon.test/failed []
                              :seon.test/results []
-                             :seon.test.run/basis-t (:seon.test.run/basis-t provenance)
-                             :seon.test.run/program-digest (:seon.test.run/program-digest provenance)
+                             :seon.test.run/basis-t (db/basis-t database)
                              :seon.test/next-tier (commands paths namespaces)}
+                      provenance (assoc :seon.test.run/program-digest
+                                        (:seon.test.run/program-digest provenance))
                       widened (assoc :seon.test/widened
                                      (str "the reaching set cannot bound this change: "
                                           (str/join ", " widened))))
@@ -241,7 +249,7 @@
             result
             (if (:seon.error/kind prepared)
               (assoc prepared :seon.test/next-tier :none)
-            (loop [remaining (if (and widened defer?) [] selected) result initial]
+            (loop [remaining runnable result initial]
               (if-let [test-symbol (first remaining)]
                 (let [_ (reset! progress test-symbol)
                       remaining-ms (quot (- deadline (System/nanoTime)) 1000000)]
@@ -290,7 +298,9 @@
   supplied affected namespaces, or all declared test namespaces when unknown.
   Hook callers set :seon.test/defer-widened? to report widening without running.
   Red results return :seon.test/next-tier :none. Every failure names its test
-  and the changed identities it reaches. Selection, loading, and execution
+  and the changed identities it reaches. Empty or deferred checks do not mint
+  run provenance or compute a program digest; no program was tested.
+  Selection, loading, and execution
   share the total :seon.test/check-time-limit-ms fact; each test also has
   the declared event backstop. Timeout requests interruption and reports it."
   {:malli/schema [:=> [:cat :seon.test/check-request]

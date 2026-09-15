@@ -123,7 +123,7 @@
              [:seon.test/changed :seon.test/changed]]]]
   [:seon.test/results :seon.test/results]
   [:seon.test.run/basis-t :seon.test.run/basis-t]
-  [:seon.test.run/program-digest :seon.test.run/program-digest]
+  [:seon.test.run/program-digest {:optional true} :seon.test.run/program-digest]
   [:seon.test/elapsed-ms :double]
   [:seon.test/next-tier :seon.test/next-tier]
   [:seon.test/widened {:optional true} :string]
