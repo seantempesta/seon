@@ -10,6 +10,8 @@ Work in progress. No final verification claim yet.
 
 ## Commits
 
+- `6785c980c` — native database decoding avoids unnecessary projection
+  compilation; isolated DB gate 41 tests / 276 assertions.
 - `d0817d49b` — deterministic printer scalar ordering and intact map
   coordinates; isolated gate 49 tests / 238 assertions.
 - `1f18b99fc` — change-only rereads, isolated gate 8 tests / 250 assertions.
@@ -47,6 +49,12 @@ ten-unhanded-queries ≤ twice raw cost assertion and codec/evidence tests.
 This closes the earlier DB timing verification boundary. Opening/read
 membership is unchanged; the last loop proof is zero system bytes over
 three idle turns.
+
+The relation-only Datalog follow-up preserves queries with no database input.
+Its direct regression and the actual help scorer pass: fast 44 tests / 293
+assertions; isolated 44 tests / 297 assertions. The measured ten-query sample
+was 32,135,210 ns raw versus 27,681,375 ns wrapped; the existing ≤2×
+assertion is unchanged.
 
 ## Change-only rereads (rule 2)
 

@@ -115,6 +115,12 @@
               (str "ten seon.db/q calls took " wrapped-total
                    " ns versus " raw-total " ns raw"))))))))
 
+(deftest relation-only-queries-need-no-database-schema
+  (is (= [:sample/fail]
+         (db/q '[:find [?key ...] :in [[?key ?passed]]
+                 :where [(false? ?passed)]]
+               [[:sample/pass true] [:sample/fail false]]))))
+
 (deftest handed-family-query-stays-below-five-milliseconds
   (test-support/with-database
    (fn [connection]

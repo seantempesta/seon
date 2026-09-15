@@ -906,7 +906,7 @@
 
 (defn- read-declarations
   [database]
-  (let [origin (schema-database database)]
+  (let [origin (when database (schema-database database))]
     {::installed-schema (:schema origin)
      ::read-projection
      (delay (or (schema/handed-projection)
