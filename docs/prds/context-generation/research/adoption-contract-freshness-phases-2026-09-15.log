@@ -1,0 +1,255 @@
+CASE a
+● current-src: publication started
+● current-src: request accepted
+● current-src: bootstrap configuration
+● current-src: store acquisition
+● current-src: source build
+● current-src: source snapshot
+● current-src: analysis started: 325 source inputs
+● current-src: analysis complete
+● current-src: branch publication started
+● current-src: schema population started
+● current-src: schema population complete
+● current-src: instruction rows
+● current-src: program rows started
+● current-src: contract projection started: 2562 schemas, 1026 functions
+● current-src: contract projection complete
+● current-src: contract rows: 1536/9216
+● current-src: contract rows: 3072/9216
+● current-src: contract rows: 4608/9216
+● current-src: contract rows: 6144/9216
+● current-src: contract rows: 7680/9216
+● current-src: contract rows: 9216/9216
+● current-src: program population compiled: 34404 entities, 16832 identities, 30719 keyword facts
+● current-src: population: 81955/81955
+● current-src: program rows complete
+● current-src: initialization rows
+● current-src: branch publication complete
+● current-src: development schema declarations
+● current-src: development program reconciliation
+● current-src: development loaded definitions
+● current-src: development reload my.adoption-freshness
+● current-src: development reload seon.ai.tokens
+● current-src: development reload seon.edit
+● current-src: development reload seon.error.refusal
+● current-src: development reload seon.fn.analyzer
+● current-src: development reload seon.fn.signature
+● current-src: development reload seon.fs
+● current-src: development reload seon.id
+● current-src: development reload seon.render.agent
+● current-src: development reload seon.render.route
+● current-src: development reload seon.schema.form
+● current-src: development reload seon.schema.internal
+● current-src: development reload seon.schema
+● current-src: development reload seon.fn.schema-shape
+● current-src: development reload seon.program
+● current-src: development reload seon.schema.datahike
+● current-src: development reload seon.schema.edn
+● current-src: development reload my.edit
+● current-src: development reload my.fs
+● current-src: development reload seon.cluster.process
+● current-src: development reload seon.cluster.wake
+● current-src: development reload seon.env
+● current-src: development reload seon.print
+● current-src: development reload seon.db
+● current-src: development reload seon.blob
+● current-src: development reload seon.call-preparation
+● current-src: development reload seon.cluster.instruction
+● current-src: development reload seon.cluster.store
+● current-src: development reload seon.cluster.registry
+● current-src: development reload seon.blob.retention
+● current-src: development reload seon.cluster.export
+● current-src: development reload seon.cluster.status
+● current-src: development reload seon.fs.jvm
+● current-src: development reload seon.edit.jvm
+● current-src: development reload seon.maintenance
+● current-src: development reload seon.reconcile
+● current-src: development reload seon.render.block
+● current-src: development reload seon.render.data
+● current-src: development reload seon.render.hiccup
+● current-src: development reload seon.run
+● current-src: development reload my.turn
+● current-src: development reload seon.background
+● current-src: development reload my.background
+● current-src: development reload seon.sci.admit
+● current-src: development reload seon.render.value
+● current-src: development reload seon.ai
+● current-src: development reload seon.repl
+● current-src: development reload seon.cluster.message
+● current-src: development reload my.message
+● current-src: development reload seon.error
+● current-src: development reload seon.await
+● current-src: development reload seon.config
+● current-src: development reload seon.agent
+● current-src: development reload my.agent
+● current-src: development reload seon.eval
+● current-src: development reload seon.note
+● current-src: development reload my.note
+● current-src: development reload seon.plan
+● current-src: development reload my.plan
+● current-src: development reload seon.schedule
+● current-src: development reload seon.sci.kernel
+● current-src: development reload seon.flow
+● current-src: development reload seon.effect
+● current-src: development reload my.web
+● current-src: development reload seon.instrument
+● current-src: development reload seon.render
+● current-src: development reload seon.render.lint
+● current-src: development reload seon.render.walk
+● current-src: development reload seon.sci.reader
+● current-src: development reload seon.cluster.reply
+● current-src: development reload seon.search
+● current-src: development reload seon.schema.admission
+● current-src: development reload seon.shell
+● current-src: development reload my.shell
+● current-src: development reload seon.shell.jvm
+● current-src: development reload seon.test.accretion
+● current-src: development reload seon.fn
+● current-src: development reload seon.cluster.source
+● current-src: development reload seon.test.arm
+● current-src: development reload seon.test.cache
+● current-src: development reload seon.test.selection
+● current-src: development reload seon.test.runner
+● current-src: development reload seon.test
+● current-src: development reload my.test
+● current-src: development reload seon.test.fast
+● current-src: development reload seon.turn
+● current-src: development reload seon.bootstrap
+● current-src: development reload seon.context
+● current-src: development reload seon.cluster.prompt
+● current-src: development reload seon.problems
+● current-src: development reload seon.render.transcript
+● current-src: development reload seon.sci.eval
+● current-src: development reload seon.cluster.agent
+● current-src: development reload seon.oversight
+● current-src: development reload seon.render.ns
+● current-src: development reload seon.render.web
+● current-src: development reload seon.cluster
+● current-src: development reload seon.artifact
+● current-src: development reload seon.eval.drive
+● current-src: development reload seon.bootstrap-drive
+● current-src: development reload seon.operator
+● current-src: development reload seon.web.extract
+● current-src: development reload seon.web.jvm
+● current-src: development reload seon.web.search
+● current-src: development SCI acquisition
+● current-src: development JVM instrumentation
+● current-src: development cluster converged
+● :current-src commit 6aa9894b-9959-56fb-90d4-72617ed0dd39 digest 73f7f965e7ebb48c8d3c3882ad1b345c8ae9146cd5a62d1d643d15a2be05c5e2
+real 75.04
+user 0.23
+sys 0.17
+CASE b-refused
+● current-src: publication started
+● current-src: request accepted
+● current-src: bootstrap configuration
+● current-src: store acquisition
+● current-src: source build
+● current-src: source snapshot
+● current-src: analysis started: 325 source inputs
+● current-src: analysis complete
+● current-src: branch publication started
+● current-src: schema population started
+● current-src: schema population complete
+● current-src: instruction rows
+● current-src: program rows started
+● current-src: contract projection started: 2563 schemas, 1026 functions
+● current-src: contract projection complete
+● current-src: contract rows: 1537/9217
+● current-src: contract rows: 3074/9217
+● current-src: contract rows: 4611/9217
+● current-src: contract rows: 6148/9217
+● current-src: contract rows: 7685/9217
+● current-src: contract rows: 9217/9217
+● current-src: program population compiled: 34409 entities, 16837 identities, 30719 keyword facts
+● current-src: population: 81965/81965
+● current-src: program rows complete
+● current-src: initialization rows
+● current-src: branch publication complete
+● current-src: development schema declarations
+● current-src: development program reconciliation
+● current-src: development loaded definitions
+● current-src: development reload my.adoption-freshness
+● current-src: development SCI acquisition
+● current-src: development JVM instrumentation
+✗ Source changed during development adoption; the next edit must converge it.
+#:seon.source{:commit-id #uuid "6aa98abc-d4ce-5a56-94a5-8c3b3721ca47"}
+real 92.81
+user 15.45
+sys 0.92
+CASE b-converged
+● current-src: publication started
+● current-src: request accepted
+● current-src: bootstrap configuration
+● current-src: store acquisition
+● current-src: source build
+● current-src: source snapshot
+● current-src: analysis started: 325 source inputs
+● current-src: analysis complete
+● current-src: branch publication started
+● current-src: schema population started
+● current-src: schema population complete
+● current-src: instruction rows
+● current-src: program rows started
+● current-src: contract projection started: 2563 schemas, 1026 functions
+● current-src: contract projection complete
+● current-src: contract rows: 1537/9217
+● current-src: contract rows: 3074/9217
+● current-src: contract rows: 4611/9217
+● current-src: contract rows: 6148/9217
+● current-src: contract rows: 7685/9217
+● current-src: contract rows: 9217/9217
+● current-src: program population compiled: 34409 entities, 16837 identities, 30719 keyword facts
+● current-src: population: 81965/81965
+● current-src: program rows complete
+● current-src: initialization rows
+● current-src: branch publication complete
+● current-src: development schema declarations
+● current-src: development program reconciliation
+● current-src: development loaded definitions
+● current-src: development reload my.adoption-freshness
+● current-src: development SCI acquisition
+● current-src: development JVM instrumentation
+● current-src: development cluster converged
+● :current-src commit 6aa98b38-8dec-58d2-aaea-e75b8af21b12 digest ee66cba59630b235b9a086fe7f6192ff3786586d79f7e4aa53d4c7d3addc1412
+real 74.21
+user 20.67
+sys 1.37
+CASE c
+● current-src: publication started
+● current-src: request accepted
+● current-src: bootstrap configuration
+● current-src: store acquisition
+● current-src: source build
+● current-src: source snapshot
+● current-src: analysis started: 325 source inputs
+● current-src: analysis complete
+● current-src: branch publication started
+● current-src: schema population started
+● current-src: schema population complete
+● current-src: instruction rows
+● current-src: program rows started
+● current-src: contract projection started: 2562 schemas, 1026 functions
+● current-src: contract projection complete
+● current-src: contract rows: 1536/9216
+● current-src: contract rows: 3072/9216
+● current-src: contract rows: 4608/9216
+● current-src: contract rows: 6144/9216
+● current-src: contract rows: 7680/9216
+● current-src: contract rows: 9216/9216
+● current-src: program population compiled: 34408 entities, 16836 identities, 30719 keyword facts
+● current-src: population: 81963/81963
+● current-src: program rows complete
+● current-src: initialization rows
+● current-src: branch publication complete
+● current-src: development schema declarations
+● current-src: development program reconciliation
+● current-src: development loaded definitions
+● current-src: development reload my.adoption-freshness
+● current-src: development SCI acquisition
+● current-src: development JVM instrumentation
+● current-src: development cluster converged
+● :current-src commit 6aa989f1-b40f-503c-8144-168f4b0be9fe digest 172d67160d4f0ecbdab417f45eb88a14c9c08b3d64a571b38c20fc5e3b32d1cc
+real 81.14
+user 18.64
+sys 0.93

@@ -32,3 +32,11 @@ Carry the selected database through the error-rendering request. The same
 SCI form must display the flat contract refusal, including its documentation,
 without a projection exception or `#object` text. The run6 lane verifies its
 ordinary turn path separately and does not modify the MCP owner.
+
+Re-observed on 2026-09-15 in the isolated `freshness` cluster during the
+adoption-contract-freshness probe. SCI correctly classified a request-contract
+refusal as `error`, while `:seon.dev.mcp/text` showed `projection failed:
+seon.sci.kernel/invoke refused argument 0 (0-based) at [:seon.db/db]` with nil.
+The raw evaluation error remained available and was recorded separately in
+[the probe transcript](../../prds/context-generation/research/adoption-contract-freshness-2026-09-15.json).
+No MCP implementation changes were made by this lane.

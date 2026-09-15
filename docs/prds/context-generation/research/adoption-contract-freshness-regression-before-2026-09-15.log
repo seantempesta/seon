@@ -1,0 +1,64 @@
+bin/test: snapshot differences from HEAD 806659e06fea790b54fa737cd98e031e573357ce:
+bin/test:   A test/seon/adoption_contract_freshness_test.clj
+bin/test: end snapshot differences
+bin/test: PHASE snapshot elapsed-seconds=3
+bin/test: all 2 test JVM slots busy; waiting up to 1800s (SEON_TEST_SLOTS / SEON_TEST_SLOT_WAIT_SECONDS)
+bin/test: PHASE test-slot elapsed-seconds=25
+bin/test-fast: selected snapshot /Users/sean/src/seon/tmp/test-runs/run.iH7P2G
+WARNING: Using incubator modules: jdk.incubator.vector
+bin/test: PACKAGED TEST PROJECTION ACQUIRED pid= 39056 role= test-fast
+bin/test: PACKAGED TEST PROJECTION ACQUIRED pid= 39056 role= test-fast
+bin/test: CONTRACTS ARMED worker= test-fast mode= :panic namespaces= 1 program-namespaces= 103 registered= 985 instrumented= 985 program-armable= 982
+bin/test: 2026-09-15T18:18:15.105116Z BEGIN namespace seon.adoption-contract-freshness-test
+
+Testing seon.adoption-contract-freshness-test
+bin/test: 2026-09-15T18:18:15.128097Z BEGIN test seon.adoption-contract-freshness-test/adopted-contracts-govern-both-sci-and-host-calls
+
+FAIL in (adopted-contracts-govern-both-sci-and-host-calls) (adoption_contract_freshness_test.clj:155)
+WARNING: reset! already refers to: #'clojure.core/reset! in namespace: seon.fresh-operator, being replaced by: #'seon.fresh-operator/reset!
+WARNING: A restricted method in java.lang.foreign.Linker has been called
+WARNING: java.lang.foreign.Linker::downcallHandle has been called by org.apache.lucene.store.PosixNativeAccess in an unnamed module (file:/Users/sean/.m2/repository/org/apache/lucene/lucene-core/10.5.0/lucene-core-10.5.0.jar)
+WARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module
+WARNING: Restricted methods will be blocked in a future release unless native access is enabled
+
+Sep 15, 2026 12:19:20 PM org.apache.lucene.internal.vectorization.VectorizationProvider lookup
+WARNING: Java vector incubator module is not readable. For optimal vector performance, pass '--add-modules jdk.incubator.vector' to enable Vector API.
+2026-09-15T18:19:21.054Z seans-m5-macbook-pro INFO [seon.cluster:2352] - seon contract-freshness view: http://127.0.0.1:7817
+2026-09-15T18:20:03.310290Z :error datahike.db.utils [138 10] Expected number or lookup ref for entity id, got "my.agents.root" 
+  data: {:error :entity-id/syntax, :entity-id "my.agents.root"}
+Execution error (AssertionError) at seon.adoption-contract-freshness-test/probe! (adoption_contract_freshness_test.clj:98).
+Assert failed: A refused adoption must leave host and database contracts in the same generation.
+(= (pr-str (:malli/schema (meta (find-var (quote my.adoption-contract-probe/value))))) (:seon.fn/spec (db/pull (clojure.core/deref connection) [:seon.fn/spec] [:seon.fn/sym "my.adoption-contract-probe/value"])))
+
+Full report at:
+/var/folders/d6/78_m9wb92wg1f3qbt85s1r400000gn/T/clojure-17755408946507428397.edn
+
+expected: (= 0 (:seon.operator.subprocess/exit result))
+  actual: (not (= 0 1))
+
+FAIL in (adopted-contracts-govern-both-sci-and-host-calls) (adoption_contract_freshness_test.clj:157)
+WARNING: reset! already refers to: #'clojure.core/reset! in namespace: seon.fresh-operator, being replaced by: #'seon.fresh-operator/reset!
+WARNING: A restricted method in java.lang.foreign.Linker has been called
+WARNING: java.lang.foreign.Linker::downcallHandle has been called by org.apache.lucene.store.PosixNativeAccess in an unnamed module (file:/Users/sean/.m2/repository/org/apache/lucene/lucene-core/10.5.0/lucene-core-10.5.0.jar)
+WARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module
+WARNING: Restricted methods will be blocked in a future release unless native access is enabled
+
+Sep 15, 2026 12:19:20 PM org.apache.lucene.internal.vectorization.VectorizationProvider lookup
+WARNING: Java vector incubator module is not readable. For optimal vector performance, pass '--add-modules jdk.incubator.vector' to enable Vector API.
+2026-09-15T18:19:21.054Z seans-m5-macbook-pro INFO [seon.cluster:2352] - seon contract-freshness view: http://127.0.0.1:7817
+2026-09-15T18:20:03.310290Z :error datahike.db.utils [138 10] Expected number or lookup ref for entity id, got "my.agents.root" 
+  data: {:error :entity-id/syntax, :entity-id "my.agents.root"}
+Execution error (AssertionError) at seon.adoption-contract-freshness-test/probe! (adoption_contract_freshness_test.clj:98).
+Assert failed: A refused adoption must leave host and database contracts in the same generation.
+(= (pr-str (:malli/schema (meta (find-var (quote my.adoption-contract-probe/value))))) (:seon.fn/spec (db/pull (clojure.core/deref connection) [:seon.fn/spec] [:seon.fn/sym "my.adoption-contract-probe/value"])))
+
+Full report at:
+/var/folders/d6/78_m9wb92wg1f3qbt85s1r400000gn/T/clojure-17755408946507428397.edn
+
+expected: (str/includes? (:seon.operator.subprocess/output result) "adoption-contract-freshness: changed contract and resource enforced")
+  actual: (not (str/includes? "WARNING: reset! already refers to: #'clojure.core/reset! in namespace: seon.fresh-operator, being replaced by: #'seon.fresh-operator/reset!\nWARNING: A restricted method in java.lang.foreign.Linker has been called\nWARNING: java.lang.foreign.Linker::downcallHandle has been called by org.apache.lucene.store.PosixNativeAccess in an unnamed module (file:/Users/sean/.m2/repository/org/apache/lucene/lucene-core/10.5.0/lucene-core-10.5.0.jar)\nWARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module\nWARNING: Restricted methods will be blocked in a future release unless native access is enabled\n\nSep 15, 2026 12:19:20 PM org.apache.lucene.internal.vectorization.VectorizationProvider lookup\nWARNING: Java vector incubator module is not readable. For optimal vector performance, pass '--add-modules jdk.incubator.vector' to enable Vector API.\n2026-09-15T18:19:21.054Z seans-m5-macbook-pro INFO [seon.cluster:2352] - seon contract-freshness view: http://127.0.0.1:7817\n2026-09-15T18:20:03.310290Z :error datahike.db.utils [138 10] Expected number or lookup ref for entity id, got \"my.agents.root\" \n  data: {:error :entity-id/syntax, :entity-id \"my.agents.root\"}\nExecution error (AssertionError) at seon.adoption-contract-freshness-test/probe! (adoption_contract_freshness_test.clj:98).\nAssert failed: A refused adoption must leave host and database contracts in the same generation.\n(= (pr-str (:malli/schema (meta (find-var (quote my.adoption-contract-probe/value))))) (:seon.fn/spec (db/pull (clojure.core/deref connection) [:seon.fn/spec] [:seon.fn/sym \"my.adoption-contract-probe/value\"])))\n\nFull report at:\n/var/folders/d6/78_m9wb92wg1f3qbt85s1r400000gn/T/clojure-17755408946507428397.edn\n" "adoption-contract-freshness: changed contract and resource enforced"))
+bin/test: 2026-09-15T18:21:42.334294Z END test seon.adoption-contract-freshness-test/adopted-contracts-govern-both-sci-and-host-calls
+bin/test: 2026-09-15T18:21:42.334468Z END namespace seon.adoption-contract-freshness-test
+
+Ran 1 tests containing 3 assertions.
+2 failures, 0 errors.

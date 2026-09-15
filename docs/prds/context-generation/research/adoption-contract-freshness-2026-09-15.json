@@ -1,0 +1,345 @@
+[
+  {
+    "stage": "baseline-jvm",
+    "seon.dev.mcp/namespace": "user",
+    "seon.dev.mcp/session-id": "default",
+    "seon.dev.mcp/cluster": "freshness",
+    "seon.dev.mcp/mode": "jvm",
+    "seon.dev.mcp/events": [
+      {
+        "tag": "ret",
+        "val": {
+          "seon.dev.mcp/value": {
+            "probe/meta": [
+              "=>",
+              [
+                "cat",
+                "my.adoption-freshness/old-request"
+              ],
+              [
+                "or",
+                "string",
+                "int"
+              ]
+            ],
+            "probe/commit": null,
+            "probe/jvm": "my.adoption-freshness/value refused request at [:my.adoption-freshness/value]: expected a string, got an integer. Fix: Supply a string at [:my.adoption-freshness/value]."
+          },
+          "seon.dev.mcp/windowed?": false
+        },
+        "ns": "user",
+        "ms": 10
+      }
+    ],
+    "seon.dev.mcp/runtime": "clj",
+    "seon.dev.mcp/cluster-state": "alive",
+    "seon.dev.mcp/form": "(let [c (seon.operator/connection \"freshness\")] {:probe/meta (:malli/schema (meta #'my.adoption-freshness/value)) :probe/commit (:seon.source/commit-id (seon.db/pull @c [:seon.source/commit-id] [:seon.cluster/name \"freshness\"])) :probe/jvm (try (my.adoption-freshness/value {:my.adoption-freshness/value 42}) (catch Throwable e (ex-message e)))})",
+    "seon.dev.mcp/root": "/Users/sean/src/seon/tmp/adoption-freshness-root"
+  },
+  {
+    "stage": "baseline-sci",
+    "seon.dev.mcp/namespace": "user",
+    "seon.dev.mcp/session-id": "default",
+    "seon.dev.mcp/cluster": "freshness",
+    "seon.dev.mcp/mode": "door",
+    "seon.dev.mcp/events": [
+      {
+        "tag": "ret",
+        "val": {
+          "seon.dev.mcp/value": {
+            "seon.cluster.eval/ns": [
+              "seon.ns/name",
+              "user"
+            ],
+            "seon.sci.eval/ending-ns": "user",
+            "seon.sci.admit/record": {
+              "seon.eval/fn-entries": 0,
+              "seon.eval/host-interop-count": 0,
+              "seon.eval/duration-ms": 79,
+              "seon.eval/allocated-bytes": 276013928,
+              "seon.eval/outcome": "error"
+            },
+            "seon.cluster.eval/error": "my.adoption-freshness/value refused request at [:my.adoption-freshness/value]: expected a string, got an integer. Fix: Supply a string at [:my.adoption-freshness/value].",
+            "seon.dev.mcp/text": "#object[clojure.lang.ExceptionInfo \"projection failed: seon.sci.kernel/invoke refused argument 0 (0-based) at [:seon.db/db]: expected must be an immutable Datahike database value, got nil. Fix: must be an immutable Datahike database value\"]"
+          },
+          "seon.dev.mcp/windowed?": false
+        },
+        "ns": "user",
+        "ms": 100
+      }
+    ],
+    "seon.dev.mcp/runtime": "clj",
+    "seon.dev.mcp/cluster-state": "alive",
+    "seon.dev.mcp/form": "(my.adoption-freshness/value {:my.adoption-freshness/value 42})",
+    "seon.dev.mcp/root": "/Users/sean/src/seon/tmp/adoption-freshness-root"
+  },
+  {
+    "stage": "a-jvm",
+    "seon.dev.mcp/namespace": "user",
+    "seon.dev.mcp/session-id": "default",
+    "seon.dev.mcp/cluster": "freshness",
+    "seon.dev.mcp/mode": "jvm",
+    "seon.dev.mcp/events": [
+      {
+        "tag": "ret",
+        "val": {
+          "seon.dev.mcp/value": 42,
+          "seon.dev.mcp/windowed?": false
+        },
+        "ns": "user",
+        "ms": 1
+      }
+    ],
+    "seon.dev.mcp/runtime": "clj",
+    "seon.dev.mcp/cluster-state": "alive",
+    "seon.dev.mcp/form": "(my.adoption-freshness/value {:my.adoption-freshness/value 42})",
+    "seon.dev.mcp/root": "/Users/sean/src/seon/tmp/adoption-freshness-root"
+  },
+  {
+    "stage": "a-door",
+    "seon.dev.mcp/namespace": "user",
+    "seon.dev.mcp/session-id": "default",
+    "seon.dev.mcp/cluster": "freshness",
+    "seon.dev.mcp/mode": "door",
+    "seon.dev.mcp/events": [
+      {
+        "tag": "ret",
+        "val": {
+          "seon.dev.mcp/value": {
+            "seon.cluster.eval/ns": [
+              "seon.ns/name",
+              "user"
+            ],
+            "seon.sci.eval/ending-ns": "user",
+            "seon.sci.admit/record": {
+              "seon.eval/fn-entries": 0,
+              "seon.eval/host-interop-count": 0,
+              "seon.eval/duration-ms": 126,
+              "seon.eval/allocated-bytes": 326899776,
+              "seon.eval/outcome": "ok"
+            },
+            "seon.dev.mcp/text": "42"
+          },
+          "seon.dev.mcp/windowed?": false
+        },
+        "ns": "user",
+        "ms": 199
+      }
+    ],
+    "seon.dev.mcp/runtime": "clj",
+    "seon.dev.mcp/cluster-state": "alive",
+    "seon.dev.mcp/form": "(my.adoption-freshness/value {:my.adoption-freshness/value 42})",
+    "seon.dev.mcp/root": "/Users/sean/src/seon/tmp/adoption-freshness-root"
+  },
+  {
+    "stage": "c-jvm",
+    "seon.dev.mcp/namespace": "user",
+    "seon.dev.mcp/session-id": "default",
+    "seon.dev.mcp/cluster": "freshness",
+    "seon.dev.mcp/mode": "jvm",
+    "seon.dev.mcp/events": [
+      {
+        "tag": "ret",
+        "val": {
+          "seon.dev.mcp/value": {
+            "probe/message": "my.adoption-freshness/value refused return value at []: expected a string, got a keyword. Fix: Supply a string at [].",
+            "probe/expected": null,
+            "probe/member": null
+          },
+          "seon.dev.mcp/windowed?": false
+        },
+        "ns": "user",
+        "ms": 4
+      }
+    ],
+    "seon.dev.mcp/runtime": "clj",
+    "seon.dev.mcp/cluster-state": "alive",
+    "seon.dev.mcp/form": "(try (my.adoption-freshness/value {:my.adoption-freshness/value :probe}) (catch Throwable e {:probe/message (ex-message e) :probe/expected (:seon.error/diagnostic-expected (ex-data e)) :probe/member (:seon.error/diagnostic-member (ex-data e))}))",
+    "seon.dev.mcp/root": "/Users/sean/src/seon/tmp/adoption-freshness-root"
+  },
+  {
+    "stage": "c-door",
+    "seon.dev.mcp/namespace": "user",
+    "seon.dev.mcp/session-id": "default",
+    "seon.dev.mcp/cluster": "freshness",
+    "seon.dev.mcp/mode": "door",
+    "seon.dev.mcp/events": [
+      {
+        "tag": "ret",
+        "val": {
+          "seon.dev.mcp/value": {
+            "seon.cluster.eval/ns": [
+              "seon.ns/name",
+              "user"
+            ],
+            "seon.sci.eval/ending-ns": "user",
+            "seon.sci.admit/record": {
+              "seon.eval/fn-entries": 0,
+              "seon.eval/host-interop-count": 0,
+              "seon.eval/duration-ms": 108,
+              "seon.eval/allocated-bytes": 323605048,
+              "seon.eval/outcome": "error"
+            },
+            "seon.cluster.eval/error": "my.adoption-freshness/value refused return value at []: expected a string, got a keyword. Fix: Supply a string at [].",
+            "seon.dev.mcp/text": "#object[clojure.lang.ExceptionInfo \"projection failed: seon.sci.kernel/invoke refused argument 0 (0-based) at [:seon.db/db]: expected must be an immutable Datahike database value, got nil. Fix: must be an immutable Datahike database value\"]"
+          },
+          "seon.dev.mcp/windowed?": false
+        },
+        "ns": "user",
+        "ms": 121
+      }
+    ],
+    "seon.dev.mcp/runtime": "clj",
+    "seon.dev.mcp/cluster-state": "alive",
+    "seon.dev.mcp/form": "(my.adoption-freshness/value {:my.adoption-freshness/value :probe})",
+    "seon.dev.mcp/root": "/Users/sean/src/seon/tmp/adoption-freshness-root"
+  },
+  {
+    "stage": "b-refused-jvm",
+    "seon.dev.mcp/namespace": "user",
+    "seon.dev.mcp/session-id": "default",
+    "seon.dev.mcp/cluster": "freshness",
+    "seon.dev.mcp/mode": "jvm",
+    "seon.dev.mcp/events": [
+      {
+        "tag": "ret",
+        "val": {
+          "seon.dev.mcp/value": {
+            "probe/meta": [
+              "=>",
+              [
+                "cat",
+                "my.adoption-freshness/new-request"
+              ],
+              [
+                "or",
+                "string",
+                "int"
+              ]
+            ],
+            "probe/commit": "6aa989f1-b40f-503c-8144-168f4b0be9fe",
+            "probe/spec": "[:=> [:cat :my.adoption-freshness/third-request] [:or :string :int]]",
+            "probe/jvm": 42
+          },
+          "seon.dev.mcp/windowed?": false
+        },
+        "ns": "user",
+        "ms": 1967
+      }
+    ],
+    "seon.dev.mcp/runtime": "clj",
+    "seon.dev.mcp/cluster-state": "alive",
+    "seon.dev.mcp/form": "(let [c (seon.operator/connection \"freshness\")] {:probe/meta (:malli/schema (meta #'my.adoption-freshness/value)) :probe/commit (:seon.source/commit-id (seon.db/pull @c [:seon.source/commit-id] [:seon.cluster/name \"freshness\"])) :probe/spec (:seon.fn/spec (seon.db/pull @c [:seon.fn/spec] [:seon.fn/sym \"my.adoption-freshness/value\"])) :probe/jvm (my.adoption-freshness/value {:my.adoption-freshness/value 42})})",
+    "seon.dev.mcp/root": "/Users/sean/src/seon/tmp/adoption-freshness-root"
+  },
+  {
+    "stage": "b-converged-jvm",
+    "seon.dev.mcp/namespace": "user",
+    "seon.dev.mcp/session-id": "default",
+    "seon.dev.mcp/cluster": "freshness",
+    "seon.dev.mcp/mode": "jvm",
+    "seon.dev.mcp/events": [
+      {
+        "tag": "ret",
+        "val": {
+          "seon.dev.mcp/value": {
+            "probe/meta": [
+              "=>",
+              [
+                "cat",
+                "my.adoption-freshness/new-request"
+              ],
+              [
+                "or",
+                "string",
+                "int"
+              ]
+            ],
+            "probe/spec": "[:=> [:cat :my.adoption-freshness/new-request] [:or :string :int]]",
+            "probe/jvm": 42
+          },
+          "seon.dev.mcp/windowed?": false
+        },
+        "ns": "user",
+        "ms": 782
+      }
+    ],
+    "seon.dev.mcp/runtime": "clj",
+    "seon.dev.mcp/cluster-state": "alive",
+    "seon.dev.mcp/form": "(let [c (seon.operator/connection \"freshness\")] {:probe/meta (:malli/schema (meta #'my.adoption-freshness/value)) :probe/spec (:seon.fn/spec (seon.db/pull @c [:seon.fn/spec] [:seon.fn/sym \"my.adoption-freshness/value\"])) :probe/jvm (my.adoption-freshness/value {:my.adoption-freshness/value 42})})",
+    "seon.dev.mcp/root": "/Users/sean/src/seon/tmp/adoption-freshness-root"
+  },
+  {
+    "stage": "b-converged-door",
+    "seon.dev.mcp/namespace": "user",
+    "seon.dev.mcp/session-id": "default",
+    "seon.dev.mcp/cluster": "freshness",
+    "seon.dev.mcp/mode": "door",
+    "seon.dev.mcp/events": [
+      {
+        "tag": "ret",
+        "val": {
+          "seon.dev.mcp/value": {
+            "seon.cluster.eval/ns": [
+              "seon.ns/name",
+              "user"
+            ],
+            "seon.sci.eval/ending-ns": "user",
+            "seon.sci.admit/record": {
+              "seon.eval/fn-entries": 0,
+              "seon.eval/host-interop-count": 0,
+              "seon.eval/duration-ms": 110,
+              "seon.eval/allocated-bytes": 327771248,
+              "seon.eval/outcome": "ok"
+            },
+            "seon.dev.mcp/text": "42"
+          },
+          "seon.dev.mcp/windowed?": false
+        },
+        "ns": "user",
+        "ms": 114
+      }
+    ],
+    "seon.dev.mcp/runtime": "clj",
+    "seon.dev.mcp/cluster-state": "alive",
+    "seon.dev.mcp/form": "(my.adoption-freshness/value {:my.adoption-freshness/value 42})",
+    "seon.dev.mcp/root": "/Users/sean/src/seon/tmp/adoption-freshness-root"
+  },
+  {
+    "stage": "metadata-only-arm-probe-not-adoption",
+    "seon.dev.mcp/namespace": "user",
+    "seon.dev.mcp/session-id": "default",
+    "seon.dev.mcp/cluster": "freshness",
+    "seon.dev.mcp/mode": "jvm",
+    "seon.dev.mcp/events": [
+      {
+        "tag": "ret",
+        "val": {
+          "seon.dev.mcp/value": {
+            "probe/meta": [
+              "=>",
+              [
+                "cat",
+                "my.adoption-freshness/old-request"
+              ],
+              [
+                "or",
+                "string",
+                "int"
+              ]
+            ],
+            "probe/same-wrapper": true,
+            "probe/value": 42
+          },
+          "seon.dev.mcp/windowed?": false
+        },
+        "ns": "user",
+        "ms": 87
+      }
+    ],
+    "seon.dev.mcp/runtime": "clj",
+    "seon.dev.mcp/cluster-state": "alive",
+    "seon.dev.mcp/form": "(let [v #'my.adoption-freshness/value before (meta v) root @v projection (seon.schema/declaration-projection (seon.schema.edn/packaged-forms))] (try (alter-meta! v assoc :malli/schema [:=> [:cat :my.adoption-freshness/old-request] [:or :string :int]]) (seon.instrument/apply! {:seon.config/on-core-error :panic :seon.schema/projection projection}) {:probe/meta (:malli/schema (meta v)) :probe/same-wrapper (identical? root @v) :probe/value (with-bindings {(ns-resolve 'seon.schema '*projection*) nil (ns-resolve 'seon.schema '*projection-state*) nil (ns-resolve 'seon.schema '*packaged-forms*) nil} (v {:my.adoption-freshness/value 42}))} (finally (reset-meta! v before))))",
+    "seon.dev.mcp/root": "/Users/sean/src/seon/tmp/adoption-freshness-root"
+  }
+]

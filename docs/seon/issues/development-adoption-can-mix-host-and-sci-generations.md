@@ -88,3 +88,32 @@ UNVERIFIABLE-WITHOUT-GATE. HEAD `src/seon/cluster.clj:1868` still reconciles dat
 surface: adoption-publication
 
 Required namespaces: `seon.cluster.source-test` and `seon.custody-stability-test`, with an adoption/ordinary-call overlap fixture. New JVM launches are prohibited by the owner correction.
+
+## Deterministically reproduced on 2026-09-15
+
+The isolated `freshness` cluster, running checkout `806659e06`, reproduced a
+mixed contract state after a refused adoption. A one-shot progress callback
+restored the previous source file at `development loaded definitions`.
+Publication had admitted `:my.adoption-freshness/third-request`; the JVM loaded
+`:my.adoption-freshness/new-request`. Adoption then refused with `Source changed
+during development adoption` after SCI acquisition and JVM instrumentation.
+The previous adopted commit remained recorded, but the program row already
+named the new published contract. The next converging adoption repaired this
+particular state in 74.21 seconds.
+
+This supersedes the no-live-proof limitation in the earlier dated entry for
+**settled refusal state only**. Concurrent agent/render-call atomicity remains
+unverified. Ordinary source and schema-resource edits both converged with
+current contracts in the same probe; run 9's stale contract after convergence
+has not been reproduced on this checkout.
+
+Evidence and exact transcripts:
+[adoption contract freshness](../../prds/context-generation/research/adoption-contract-freshness-2026-09-15.md).
+The repair decision and class regression are in progress; this issue remains open.
+
+The test-first class regression subsequently failed at the wanted invariant
+on the real armed child-JVM adoption path (`bin/test-fast --paths
+ test/seon/adoption_contract_freshness_test.clj --
+ seon.adoption-contract-freshness-test`, completed 2026-09-15T18:21:42Z).
+The child had already verified the changed SCI contract before forcing the
+refusal. Repair and final gates remain pending the owner design decision.
