@@ -1,7 +1,7 @@
 ---
 type: issue
 status: open
-severity: blocker
+severity: friction
 tags: [issue, mcp, runtime]
 ---
 
@@ -120,3 +120,11 @@ edge is not established. Calls through `seon.render/shared-cache` timed out
 both with and without projection binding, while reading and resetting the
 same cache atom directly answered immediately. These accessor/SCI timeouts
 remain a distinct unresolved observation, not proof the cache reset hung.
+
+## Re-verified at HEAD (2026-09-15)
+
+Basis: `7e35df2131c71f476a85c6a38bfc8eb292cb36f5` (committed source; concurrent working-tree edits excluded).
+
+MCP `runtime_status` with root `/Users/sean/src/seon`, cluster `default` returned PID 23729, health `unknown`, Flow `unknown`, error `Read timed out`. The supported JVM probe `(+ 1 1)` in session `triage-b` then returned 2 in 2 ms. `bin/seon status` reported the same PID alive. This confirms unavailable health observation, not an adoption cause or a blocked agent. Severity is friction; the original component-write timeout was not repeated because its completion is unknown.
+
+surface: other

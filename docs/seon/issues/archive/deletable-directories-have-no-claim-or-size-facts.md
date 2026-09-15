@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, operator, database, class/n4, wave/directory-claims]
 ---
@@ -55,3 +55,11 @@ cleanup, and fixture child reaping are implemented. The remaining acceptance
 work is the scheduler lane's conservative ephemeral-root reaper and database
 maintenance-result facts; it consumes the existing `seon.operator` functions
 rather than adding another cleanup implementation.
+
+## Resolution (2026-09-15 triage)
+
+Basis: `7e35df2131c71f476a85c6a38bfc8eb292cb36f5` (committed source; concurrent working-tree edits excluded).
+
+HEAD `src/seon/operator.clj:216` publishes external claims before path creation; `:259` records footprint observations; `:374` implements the previously missing conservative reaper, refusing current/live/unclaimed roots and awaiting recorded process cleanup before deletion. `resources/seon/schemas/seon.maintenance.result.edn:154` declares reaper result facts; `src/seon/maintenance.clj` owns their projection. The note's implemented-boundary remainder has landed (including claim-error reporting in `b136f574f`). Read-only `bin/seon status` reports filesystem usable space (419.67 GiB at entry). No destructive reaper probe was run.
+
+surface: store-process

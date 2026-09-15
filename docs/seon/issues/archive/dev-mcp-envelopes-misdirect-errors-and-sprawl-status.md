@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: blocker
 tags: [issue, mcp, sci, wave/dev-mcp]
 ---
@@ -310,3 +310,11 @@ MCP runtime-status call returned health and Flow unknown with `Read timed out`.
 A subsequent supported JVM evaluation of `(+ 1 1)` returned 2 in 3 ms.
 No default lifecycle operation was performed. This independently reproduces
 the unavailable health observation above; it does not establish cluster death.
+
+## Resolution (2026-09-15 triage)
+
+Basis: `7e35df2131c71f476a85c6a38bfc8eb292cb36f5` (committed source; concurrent working-tree edits excluded).
+
+The note already records repairs `07fd06a51`, `4fea58d50`, and `98aadec8f` for selection, error frames and nil-deref diagnostics. Today's supported runtime-status result contains exactly one selected default row and no full problem facts. Its remaining runtime-health timeout is reproduced and owned by [default-component-probe-times-out-after-adoption](../default-component-probe-times-out-after-adoption.md). Consolidate the unavailable-health observation there; do not reopen the repaired envelope framing. The old error examples were not re-executed.
+
+surface: other

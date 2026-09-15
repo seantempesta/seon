@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, runtime, test, class/n4, wave/operator-launch-concurrency]
 ---
@@ -143,3 +143,11 @@ valid destination is enough, which is the catch this note already asks for.
 Second, smaller finding: `dev-dependency-cache-current.edn` is a single
 shared file that any checkout sharing this `target/` overwrites, so one
 worktree's dependency layout silently invalidates the main tree's cache.
+
+## Resolution (2026-09-15 triage)
+
+Basis: `7e35df2131c71f476a85c6a38bfc8eb292cb36f5` (committed source; concurrent working-tree edits excluded).
+
+Commit `bbeb6f651` accepts a populated cache destination; HEAD `dev_cache.clj:369` (`admit!`) catches both `FileAlreadyExistsException` and `DirectoryNotEmptyException`. `current-cache` scans valid digest directories instead of trusting only the selection file; `with-cache-lock` serializes builds; `refresh!` deletes only its own UUID staging directory in `finally`. Commit `9a8189cbc` removes source-URL locations from dependency hashes and `f2e3bcb34` keys classes only by dependency configuration, pins and JDK. Verified with `git show HEAD:dev_cache.clj` and `git log --oneline -- dev_cache.clj`; no concurrent rebuild was induced.
+
+surface: runner-gate
