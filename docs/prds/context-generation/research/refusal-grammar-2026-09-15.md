@@ -6,6 +6,62 @@ tags: [research, schema, render, sci]
 
 # Refusal grammar — 2026-09-15
 
+## Owner-authorized continuation
+
+Option 1 is authorized on 2026-09-15, including run-11 reference, auto-check,
+and contiguous unreadable-span cases. Before implementation, the repeated
+`rg -n '^tags:.*(contracts|errors)' docs/seon/issues/*.md` query at
+`ff60a3cf7` finds only `blocked-plan-values-refuse-pull-during-ai-projection.md`.
+The dated set is the six members in the table below plus
+`a-prose-line-without-a-comment-marker-becomes-one-error-per-word.md`.
+The broader catalog discriminator migration and blocked-plan pull behavior
+remain separately scoped residuals; this continuation owns their refusal text.
+
+Default PID 69622 answered the health probe (all three plumbing procs replied).
+A read-only JVM reader probe reproduced run 7 in 5 ms: the error retains line
+1, column 36 and the source but no invalid-token or enclosing-call evidence.
+The implementation will extend Edamame's existing delimiter loop's exception
+data, retain that data in Seon's existing reader events, and derive correction
+from the called function's declared map entries. No second parser is added.
+The dependency will be selected explicitly in deps.edn; changing its reference
+checkout alone is not executable evidence.
+
+### Continuation checkpoint — 20:06Z
+
+Edamame commit `63373df` retains `:edamame/token`, token kind and the enclosing
+collection elements in its existing delimiter loop. `deps.edn` now selects
+that checkout explicitly. The fresh-JVM reader regressions passed. A default
+JVM hot load of that parser (no lifecycle operation) and the adopted Seon
+reader/error functions produced this exact 67-estimated-token text:
+
+```text
+my.plan/current! refused source at [1 36]: expected readable Clojure source (:seon.cluster.eval/source), got unreadable source ":my.plan/item/id". Fix: Use :my.plan.item/id. Example: No docstring example is available.
+```
+
+Subsequent work adds the called function's example through the existing
+documentation owner. A read-only default schema query confirmed the run-11
+attribute's two failed union branches and its two supplied map entries.
+Malli's `subschemas` supplies the union's shared value path, so one declared
+explanation replaces branch-by-branch guesses.
+
+The first fast run was 90 tests / 612 assertions, three failures, zero errors.
+The old generic-render assertion required a raw map dump; the new run-11 case
+also exposed a pre-existing fixture omission: `contracts-fixture/with-agent`
+applied config but never seeded a cluster, leaving call preparation without
+its environment. It now calls the canonical `seed-cluster!` helper. The third
+fast run passed all four contracts-plan tests, including run 7 and run 11;
+its only remaining failure expected vector notation for Malli's actual list
+of generated arguments. The assertion now preserves the actual input shape.
+The isolated subject gate is running against worktree HEAD `caddf111b`, with
+only owned paths overlaid. This is not yet a passing gate claim.
+
+The opening's comment sentence is in `src/seon/cluster/instruction.clj`, now
+under the concurrent classification lane's edits. It is protected. Needed
+wording: “Prose lines are comments only when every line starts with `;`; a
+comment ends at the newline.” This lane leaves that file's bytes to its owner.
+Instrumentation's arming hunk is also excluded from the test overlay; only
+the report/grammar hunks belong to this lane.
+
 ## Result and exact boundary
 
 Design-gate checkpoint, not a completed class repair. No production code was
