@@ -31,3 +31,15 @@ ownership fact, followed by the queries that consume it.
   they query the facts.
 - Adding a valid member changes the query result without changing classifier
   code or a test expectation.
+
+## Design boundary — 2026-09-15
+
+N7 remains open. The bounded lane verified surviving prefix/route classifiers
+and declaration call edges on default, and identified deleted historical
+mechanisms without treating deletion as replacement coverage. The requested
+repository-wide literal-roster checker needs an agreed classification grammar;
+call/keyword edges alone do not distinguish declarations from copied rosters.
+The assignment's explicit cross-owner design stop applies before production
+edits. Three priced options, all nine member verdicts, exact live probes, and
+verification boundaries are recorded in
+[the N7 landing note](../../prds/context-generation/research/n7-query-classification-2026-09-15.md).
