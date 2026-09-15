@@ -54,3 +54,51 @@ Still open outside this lane. Declare the background receipt descriptor's AI
 producer and render only identity, disposition, and completion summary through
 the shared profile; keep the complete polled value behind its receipt/requery
 identity and repeat the eight-ref token measurement.
+
+## Verified at HEAD (2026-09-16, N1 verification)
+
+**CONFIRMED — the declared producer landed, and it introduced a different
+loss.**
+
+Half of the acceptance is met. `:seon.effect/receipt` now declares
+`:seon.render/ai seon.effect/render-ai`
+(`resources/seon/schemas/seon.effect.edn:22-26`), and `my.background/poll`
+now takes ONE ref per call (`src/my/background.clj:48-62`), so the filed
+eight-refs-per-poll shape no longer exists. The verbatim face for a small
+receipt, rendered live on `default` (pid 69622):
+
+```text
+Effect effect-1 · run unknown, form 2, effect 0 · returned in 12 ms.
+Request (~7 tokens): {:my.fs/path "README.md"}
+Result (~6 tokens): {:my.fs/content "..."}
+```
+
+But the producer still embeds the WHOLE payload inline — `payload-face` is
+`(str label " (~" (tokens/estimate payload) " tokens): " payload)`
+(`src/seon/effect.clj:48-50`) — so a polled result's cost is still
+proportional to its payload, which is the defect this note names. And when
+the payload is large enough for the profile to cut, the cut takes the whole
+face with it. Same cluster, same request, one 8,019-character
+`:seon.effect/result-edn`:
+
+```text
+{:seon.print/bound-by :seon.render.profile/token-budget,
+ :seon.print/elision-unit :characters, :seon.print/omitted 8159,
+ :seon.render.data/next-offset 0, :seon.render.data/path [],
+ :seon.render.data/total 8159}
+```
+
+210 characters, and not one of them is the effect id, disposition or
+duration: the agent polling this receipt learns nothing at all. The
+structural floor does better on the same value (468 characters, identity
+attributes intact, payload elided in place), so the declared producer is
+currently worse than no producer for exactly the case it was added for.
+
+surface: effect
+
+Fix sketch: `payload-face` should report the payload's estimated size and
+its requery identity, not its bytes — the receipt already carries
+`:seon.effect/result-blob` / `:seon.effect/result-size` for the drill. Then
+the face is O(1) per receipt, the profile never needs to cut it, and the
+identity line cannot be lost. Repeat the token measurement against a real
+polled receipt when the change lands.

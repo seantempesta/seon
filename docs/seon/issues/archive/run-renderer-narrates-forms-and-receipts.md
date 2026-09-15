@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, agent, render, class/n1, wave/strict-repl-display]
 ---
@@ -68,3 +68,31 @@ lane. The exact edit is to make the form producer return submitted source plus
 the receipt's actual rendered value/error data, delete `Form N` and background
 guidance narration, and update the focused run-render assertions to compare
 forms and values rather than English templates.
+
+## Verified at HEAD (2026-09-16, N1 verification)
+
+**RESOLVED by deletion of the owner.** `src/seon/cluster/run.clj` does not
+exist at HEAD; the run family was folded into `seon.turn` by `7296d173b`
+("Rename turn facts and writer into seon.turn"). Both named seams are gone:
+`grep -rn "render-form-ai\|render-receipt-ai" src/` matches only a docstring
+reference in `src/seon/context.clj:12`, and no `"Form N: "` source prefix or
+`Form N returned …` receipt template survives anywhere in `src/`.
+
+What replaces them satisfies the acceptance. A real stored failed
+evaluation from the live `default` cluster (pid 69622), rendered through
+`seon.repl/text`, is the submitted source followed by its actual outcome as
+DATA:
+
+```text
+user=> [:find ?note :in $ ?subject :where [?note :my.note/agent ?subject] …]
+#:seon.repl{:error "Execution error (ExceptionInfo) at sci.impl.utils/throw-error-with-location (utils.cljc:67).\nUnable to resolve symbol: ?note", :ns my.agents.juniper, :ms 3}
+```
+
+No ordinal narration, no result annotation, no background guidance in
+result position.
+
+The CLASS this note points at — a declared family producer replacing a
+queried value — is alive and is tracked where it belongs, on
+[an-entity-pull-returns-a-sentence-instead-of-its-attributes](an-entity-pull-returns-a-sentence-instead-of-its-attributes.md),
+which now carries fresh HEAD evidence including a pulled turn entity that
+renders to the empty string. Closing this note does not close that one.

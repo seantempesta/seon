@@ -97,3 +97,44 @@ The commit does not reclaim an absent-root claim, and the malformed branch
 still reports only the generic message "The external claim is invalid." It
 does not name the first unknown or mistyped key. The two acceptance criteria
 owned specifically by this note therefore remain unsatisfied.
+
+## Verified at HEAD (2026-09-16, N1 verification)
+
+**CONFIRMED — one acceptance criterion of three is met.**
+
+Met: `bin/seon status` on this healthy installation prints no refusal lines
+at all. A full status run (nine lines, 653 bytes) matched zero occurrences
+of `unreadable` or `claim is invalid`. The pre-rename spelling is also
+extinct: `grep -l "seon.dev.process" data/operator/claims/roots/*.edn`
+returns nothing across all 288 records.
+
+Not met, and the reason the note stays open: nothing reclaims a claim whose
+root is gone.
+
+```text
+$ ls data/operator/claims/roots/*.edn | wc -l          # 288
+$ records whose :seon.operator.claim/root no longer exists   # 149
+$ oldest record  Aug  5 15:51        newest  Sep 15 17:29
+$ largest record 5b379669-….edn      787,381 bytes
+```
+
+149 of 288 claim files name roots that have not existed for weeks, and the
+store keeps growing — one record has reached 787 KB. The note's first
+acceptance line ("reclaimed rather than reported forever") is unsatisfied;
+they are merely no longer PRINTED, which is the quieter half of the
+problem.
+
+Also not met: a genuinely unreadable record still says only
+`"The external claim is invalid."` (`resources/seon/operator/state.clj:837`).
+The classification at `:809-814` distinguishes
+`:seon.operator.claim/absent-root` from
+`:seon.operator.claim/malformed-record`, but neither branch names the first
+unknown or mistyped key, so a rename leftover still cannot be told from a
+truncated write.
+
+surface: operator (claim state)
+
+Fix sketch: reconcile on read — delete records classified
+`:seon.operator.claim/absent-root` (operator state is disposable by ruling)
+and have the malformed branch carry the first key it did not recognise,
+derived from the record's own keys against the claim schema.
