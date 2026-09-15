@@ -1945,6 +1945,8 @@
                         [?effect :seon.effect/form-ordinal ?ordinal]]
                       database run-id (:seon.cluster.eval/ordinal evaluation))))))
 
+(declare generated-read-fault)
+
 (defn- system-plan [database declared latest]
   (into []
         (comp
@@ -1977,7 +1979,10 @@
                        [(conj seen source-identity) (conj sources source)])))
                  [#{} []]
                  (concat declared
-                         (filter #(read-only-evaluation? database %)
+                         ;; Agent reads remain callable on demand. Only reads
+                         ;; independent of turn-taking can become generated reads.
+                         (filter #(and (read-only-evaluation? database %)
+                                       (nil? (generated-read-fault database % %)))
                                  (sort-by (juxt :seon.turn/basis-t
                                                 :seon.cluster.eval/ordinal)
                                           (vals latest))))))))

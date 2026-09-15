@@ -566,8 +566,10 @@
                      before (mapv :seon.cluster.eval/id (observed))]
                  (is (= sources (set (keep #(sources (:seon.cluster.eval/source %)) (observed))))
                      "both opening reads must exist")
-                 (dotimes [_ 3]
-                   (submit "(+ 10 20)")
+                 (dotimes [ordinal 3]
+                   (submit (if (zero? ordinal)
+                             "(seon.db/q '[:find (pull ?e [*]) :where [?e :my.plan.item/id]])"
+                             "(+ 10 20)"))
                    (let [refresh (turn/system-turn request)]
                      (is (nil? (:seon.error/kind refresh)) (pr-str refresh))
                      (is (seq (:seon.turn/forms refresh)))

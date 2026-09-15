@@ -10,6 +10,10 @@ Work in progress. No final verification claim yet.
 
 ## Commits
 
+- `e81b119f2` — retain stored system results in the agent's SCI context.
+  **RESET NEEDED for `e81b119f2`**: boot must supply the context-state carrier.
+  Fast 6/232 and isolated 6/236 tests/assertions pass; zero no-event system bytes.
+
 - `8df86358b` — preserved compact pairs and plan (rules 4 and 5), with the
   whole-item printer and marker groundwork described below. Fast runs:
   53/425 and 56/335 tests/assertions, both green; zero no-event system bytes.
@@ -88,6 +92,11 @@ The general correction admits only turn-independent retained agent reads
 to generation; turn-dependent queries remain available on demand.
 Declared opening reads still cross the fault guard. The plan opening
 already uses the explicit selector behind `(seon.plan/plan {})`.
+
+The promotion correction's isolated gate passes **4 tests / 216 assertions**.
+The three-turn no-event proof now includes that exact wildcard plan query as
+an agent evaluation. It still appends **0 generated evaluations / 0 system
+bytes**; a subsequent plan write appends exactly the declared plan read.
 
 Change-only rereads require working full-value handles. The existing
 [system-result issue](../../../seon/issues/system-turn-drops-live-results-after-saving-shown-text.md)
