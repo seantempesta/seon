@@ -231,3 +231,82 @@ problem pair's output. One function; no scenario code.
 Generated plan items reference the problem and the subject; sessions are
 ordinary turns; the ledger, the metric deltas, and the explain probe judge
 them. Adding a task class is a transaction of one `:seon.problem` row.
+
+## 9. The data model of a task (owner, 2026-09-15 09:45: "focus on the data model")
+
+A task is three pieces of data, nothing else: a **problem declaration**
+(what to find, what to show, what proves it done), a **context request**
+(who is asking, at what detail, at what basis), and the **plan** it
+generates (steps whose success is a function of the database). Every
+scenario — fix an error, answer a message, write a missing function,
+declare a contract — is a row of the first, a request of the second, and
+rows of the third. No task is code.
+
+### 9.1 Problem declaration (`seon.problem`, one entity per class)
+
+| attribute | type | meaning |
+|---|---|---|
+| `:seon.problem/id` | identity string | e.g. `"test/red"` |
+| `:seon.problem/find` | `:seon.db/query` | subjects; its read evidence is also the trigger (§8.1) |
+| `:seon.problem/context` | `:seon.db/pull-selector` | the neighbourhood from the subject, both ref directions |
+| `:seon.problem/done` | `:seon.db/query` bound to `?subject` | the success function of the whole task |
+| `:seon.problem/steps` | vector of step templates | each `{title, done-query, writes}`; the plan generator instantiates them with the subject |
+| `:seon.problem/writes` | set of fact families | what a fix may produce |
+| `:seon.problem/budget` | int | turns per session |
+| `:seon.problem/priority` | int | ordering when several fire |
+| render pair | on the entity schema | statement + subject + done as the opening block |
+
+### 9.2 Context request (`seon.render`, the keys every pair receives)
+
+| key | meaning |
+|---|---|
+| `:seon.render/viewer` | the namespace asking — the steward's own for a session; a dependent's when it reads the picture |
+| `:seon.render/subject` | the entity the context is about |
+| `:seon.render/detail` | the profile |
+| `:seon.render/basis` | the database basis (derived from the db value) |
+| `:seon.render/window` | how far back stats look |
+| `:seon.render/problem` | the declaration, when the context is for a task |
+
+Construction = `pull subject with problem.context` → render each entity
+through its pair with these keys → prepend the problem pair's block →
+the plan block. The same function serves the opening of a session and
+the debug page's "context for namespace X at detail D".
+
+### 9.3 Plan and the success function (`my.plan.item`, accretion)
+
+| attribute | type | meaning |
+|---|---|---|
+| `:my.plan.item/done-when` | string (exists) | the criterion in words, rendered for the model |
+| `:my.plan.item/done-query` | `:seon.db/query` bound to `?subject` (new) | the success FUNCTION; evaluated at every settlement; `completed-tx` recorded the first time it is true |
+| `:my.plan.item/subject` | ref (new) | what the step is about |
+| `:my.plan.item/problem` | ref (new) | the declaration that generated it |
+| `:my.plan.item/writes` | set (new, optional) | families this step may write |
+
+`complete!` on a step with a false done-query is a flat error naming the
+query and what it found (issue filed 2026-09-15 from run 7, where step 7
+"report" was completed with no message sent). A step with no done-query
+keeps today's behaviour for authored plans.
+
+### 9.4 The catalogue, as rows (first set)
+
+| id | find (subjects) | context (from subject) | done (bound to ?subject) | writes |
+|---|---|---|---|---|
+| `test/red` | tests with fail or error count > 0 | the test, its subject fn, the fn's callers and faults | fail-count 0 and error-count 0 at a later basis | fn, test |
+| `fault/recurring` | fault signatures with occurrences ≥ N on ops of a namespace | the op fn, the callers (via run→agent→ns), the last evaluations that raised it, the op's tests | no occurrence after basis T | fn, test, schema |
+| `fn/untested` | public fns with no reaching test | the fn, its contract, its callers, the ns's existing tests | a passing test reaches it | test |
+| `fn/uncontracted` | public fns without a complete `:seon.fn/spec` | the fn, its callers' argument shapes, related schemas | spec complete, no `:any` | fn, schema |
+| `schema/unrendered` | entity schemas without a pair | the schema, its attributes, entities using it, a sibling pair as example | pair rows exist and render | fn, schema |
+| `message/unanswered` | inbox messages | the message, the sender's identity and plan, the thread via `:about` | a message from me `:about` it exists; inbox edge gone | message |
+| `fn/missing` | call edges to symbols with no `:seon.fn` row | the caller, its contract, referenced schemas | the row exists with a complete spec and a passing reaching test | fn, test |
+| `example/failing` | docstring examples that fail to evaluate | the fn, the example, its contract | the example evaluates | fn |
+
+Each row is one transaction; thresholds (N, T) are config facts.
+
+### 9.5 What the loop does with them (no task code)
+
+gather: for each steward, run every `find`, instantiate plan items with
+`subject`/`problem`/`done-query`, order by priority → act: sessions →
+settle: evaluate done-queries, record completions, record metric deltas
+→ judge: the ledger and the explain probe. The only new code paths are
+the plan generator (find → items) and the settlement check (done-query →
+completed-tx); everything else is the existing walk, pairs, loop.
