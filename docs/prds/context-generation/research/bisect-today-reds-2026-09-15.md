@@ -142,7 +142,7 @@ explicitly not measured before/after test results.
 
 The production MCP root cause reaches protected `src/seon/cluster.clj`,
 `mcp-project`, specifically the unchanged full print node at line 384 and
-its direct semantic decode at line 411. Followed the assignment's explicit
+its direct semantic decode at line 410. Followed the assignment's explicit
 stop boundary: **no production or test implementation was changed**.
 The fixture repairs and admission fallback remain open in the issue notes;
 this is a diagnosis landing, not a fixed or green result. No repair
