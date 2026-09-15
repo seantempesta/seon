@@ -1086,3 +1086,22 @@ half-edit. Measured targets in the issue.
   production `generated-read-depends-on-turns` fault for juniper — the
   invariant caught a remaining dependent read; lane to name and fix it.
 
+## 2026-09-15 04:40Z — run 4 on the reforked cluster (HEAD `e81b119f2`+)
+
+- 36 turns in 3 min: 30 provider / 6 system (opening + plan re-read +
+  fault-message re-reads); 103 evaluations; 270,934 prompt (91 % hit) /
+  9,072 out; max prompt 22,802 tokens; **1/7 steps**; ended `:reset` with
+  0 turns left. Churn stays gone. Three new blockers, filed:
+  (1) the defn's auto-check correctly REFUSED the install (empty rows →
+  nil, not a map) but the evaluation showed `#'…/largest-customer` as the
+  value with the refusal in `:out`; the model hunted the missing `:seon.fn`
+  row for ~20 turns; (2) 30 fabricated `#:seon.repl` responses (run 2: 9)
+  — the form→response grammar teaches imitation; proposal: the provider
+  stop sequence `#:seon.repl` as a config dial plus the reader guard;
+  (3) the turn-completion backstop fired at 10,000 ms (the fixture's EVAL
+  limit) on provider turns of 22 s and 39 s, interrupting replies.
+- The explain probe cannot run on run 4: `acquire-context!` now refuses
+  with `:seon.render/capture-mismatch` (saved evaluations do not reconstruct
+  the captured prompt) — rendering changed under hot adoption mid-run, so
+  the rebuild ≠ the bytes sent; the probe should use the captured bytes.
+
