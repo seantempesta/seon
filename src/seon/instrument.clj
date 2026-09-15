@@ -1,8 +1,9 @@
 (ns seon.instrument
   "JVM-owned host wrappers with contracts compiled in the caller's projection.
 
-  A loaded Var has one wrapper. Repeated cluster arming preserves its identity;
-  teardown cannot remove it. A replaced Var root is armed on the next apply!.
+  A loaded Var has one wrapper for its authored contract. Repeated arming
+  preserves unchanged wrappers; teardown cannot remove them. Changed roots
+  or authored contracts are armed on the next apply!.
   Compiled validators belong to the immutable projection that defines them.
   Host calls without cluster custody use the packaged JVM program captured at
   arming; they never consult Malli's global registry."
@@ -352,7 +353,9 @@
               " at " (pr-str (:seon.error/path first-problem))
               ": expected " (:seon.error/expected-description first-problem)
               ", got " (:seon.error/actual-description first-problem)
-              ". Fix: " (:seon.error/fix first-problem))
+              ". Fix: " (:seon.error/fix first-problem)
+              (when (qualified-keyword? expected)
+                (str " Contract: " expected ".")))
          :seon.error/diagnostic-layer :instrumentation
          :seon.error/diagnostic-operation function-symbol
          :seon.error/diagnostic-member (case arm :output :return :guard :guard
@@ -520,7 +523,7 @@
 (defn- compiled-wrapper
   [projection function-symbol authored original caps]
   ((mi/-f->original schema/projection-cache-value)
-   projection [::wrapper function-symbol original]
+   projection [::wrapper function-symbol authored original]
    (fn []
      (let [contract (get (:seon.schema.projection/function-contracts projection)
                          function-symbol authored)
@@ -539,12 +542,18 @@
                     (:seon.schema.projection/registry projection)
                     (mr/var-registry))})))))
 
+(defn- current-wrapper?
+  [candidate authored current]
+  (let [metadata (meta current)]
+    (and (identical? candidate (::var metadata))
+         (= authored (::authored metadata)))))
+
 (defn- arm-var!
   [candidate authored bootstrap caps]
   (alter-var-root
    candidate
    (fn [current]
-     (if (identical? candidate (::var (meta current)))
+     (if (current-wrapper? candidate authored current)
        current
        (let [original (mi/-f->original current)
              function-symbol (var-symbol candidate)
@@ -563,7 +572,7 @@
                                            authored original caps)
                          @boot-wrapper))]
                  (apply wrapped arguments))))
-           {::mi/original original ::var candidate}))))))
+           {::mi/original original ::var candidate ::authored authored}))))))
 
 (defn- collect-contracts!
   "Read declarations from the program loaded into this JVM, without Malli's registry."
@@ -577,7 +586,8 @@
         (mapcat (comp vals ns-interns) (all-ns))))
 
 (defn apply!
-  "Arm previously unwrapped loaded Vars; existing wrappers remain identical.
+  "Arm loaded Vars whose wrapper does not enforce their current authored schema.
+  Unchanged wrappers remain identical; metadata-only contract edits re-arm.
 
   Cluster :record requests cannot disable shared host contracts. Interpreted
   function policy remains local to wrap-interpreted. New host calls validate
@@ -619,8 +629,8 @@
           :seon.error/diagnostic-cause ::missing-projection
           :seon.error/diagnostic-evidence nil})
         (let [contracts (collect-contracts! caps)
-              pending (remove (fn [[candidate _]]
-                                (identical? candidate (::var (meta @candidate))))
+              pending (remove (fn [[candidate authored]]
+                                (current-wrapper? candidate authored @candidate))
                               contracts)
               bootstrap (when (seq pending)
                           ((mi/-f->original schema/declaration-projection)

@@ -1,0 +1,669 @@
+bin/test: snapshot differences from HEAD ca5edcec0faf49270b304978980c621c691c127e:
+bin/test:   M	src/seon/cluster.clj
+bin/test:   M	src/seon/instrument.clj
+bin/test:   M	test/seon/instrument_test.clj
+bin/test:   M	test/seon/test_runner_test.clj
+bin/test:   A test/seon/adoption_contract_freshness_test.clj
+bin/test: end snapshot differences
+bin/test: PHASE snapshot elapsed-seconds=3
+bin/test: PHASE test-slot elapsed-seconds=0
+seon cache: inputs changed; rebuilding
+seon cache: discovering the dependency closure
+seon cache: compiled 372 dependency namespaces
+seon cache: lock wait-ms= 1 held-ms= 44509
+#:seon.dev-cache{:digest "a24f5f5098b3885802b5f6246a73851e5c3ce9955ea6dc619701e57661c2e945", :source-digest "d914176e36327115a08856828c09059e47d3160cdbd03ab2bf6fe95029bb981f", :namespaces 372, :status :rebuilt, :path "/Users/sean/src/seon/tmp/adoption-freshness-gate-wt/target/dev-dependency-classes/a24f5f5098b3885802b5f6246a73851e5c3ce9955ea6dc619701e57661c2e945", :test-digest "84dd30c042ad0991d762c18066312e806b82527b1fb3cb6b253aca7ea40d857b", :test-classpath-file "/Users/sean/src/seon/tmp/adoption-freshness-gate-wt/target/test-classpaths/84dd30c042ad0991d762c18066312e806b82527b1fb3cb6b253aca7ea40d857b.edn"}
+bin/test: PHASE dependency-cache-and-classpath elapsed-seconds=47
+bin/test: PHASE worker-checkouts elapsed-seconds=4
+bin/test: isolated operator root /Users/sean/src/seon/tmp/adoption-freshness-gate-wt/tmp/test-runs/run.dhn536 pid=61102 selection=platform tier
+bin/test: preparing or reusing published test base 84dd30c042ad0991d762c18066312e806b82527b1fb3cb6b253aca7ea40d857b
+bin/test: CACHE LOCK acquired wait-ms= 0
+bin/test: PUBLISH cached base 84dd30c042ad0991d762c18066312e806b82527b1fb3cb6b253aca7ea40d857b
+WARNING: Using incubator modules: jdk.incubator.vector
+WARN seon.db/projection-fallback caller= seon.db/q elapsed-ms= 947 Supply a database value carrying its projection state.
+bin/test: shared published test base ready at /Users/sean/src/seon/tmp/adoption-freshness-gate-wt/target/test-published-bases/84dd30c042ad0991d762c18066312e806b82527b1fb3cb6b253aca7ea40d857b/base
+bin/test: PREPARED cached base 84dd30c042ad0991d762c18066312e806b82527b1fb3cb6b253aca7ea40d857b elapsed-ms= 50934 work-ms= 50934
+bin/test: PHASE published-base elapsed-seconds=50
+WARNING: Using incubator modules: jdk.incubator.vector
+bin/test: PACKAGED TEST PROJECTION ACQUIRED pid= 61546 role= coordinator
+bin/test: 2026-09-15T19:06:44.220003Z START pid=61546 git=ca5edcec0faf49270b304978980c621c691c127e namespaces=202 workers=1 silence-backstop=300s
+bin/test: 2026-09-15T19:06:44.220483Z LOAD 1/202 my.agent-test
+bin/test: 2026-09-15T19:06:44.295170Z LOADED 1/202 my.agent-test
+bin/test: 2026-09-15T19:06:44.295279Z LOAD 2/202 my.background-test
+bin/test: 2026-09-15T19:06:44.304480Z LOADED 2/202 my.background-test
+bin/test: 2026-09-15T19:06:44.304574Z LOAD 3/202 my.edit-test
+bin/test: 2026-09-15T19:06:44.310853Z LOADED 3/202 my.edit-test
+bin/test: 2026-09-15T19:06:44.311003Z LOAD 4/202 my.examples-test
+bin/test: 2026-09-15T19:06:44.329676Z LOADED 4/202 my.examples-test
+bin/test: 2026-09-15T19:06:44.329784Z LOAD 5/202 my.fs-test
+bin/test: 2026-09-15T19:06:44.342980Z LOADED 5/202 my.fs-test
+bin/test: 2026-09-15T19:06:44.343080Z LOAD 6/202 my.message-test
+bin/test: 2026-09-15T19:06:44.377188Z LOADED 6/202 my.message-test
+bin/test: 2026-09-15T19:06:44.377301Z LOAD 7/202 my.note-test
+bin/test: 2026-09-15T19:06:44.388344Z LOADED 7/202 my.note-test
+bin/test: 2026-09-15T19:06:44.388449Z LOAD 8/202 my.plan-api-test
+bin/test: 2026-09-15T19:06:44.398614Z LOADED 8/202 my.plan-api-test
+bin/test: 2026-09-15T19:06:44.398755Z LOAD 9/202 my.plan-test
+bin/test: 2026-09-15T19:06:44.435260Z LOADED 9/202 my.plan-test
+bin/test: 2026-09-15T19:06:44.435417Z LOAD 10/202 my.turn-test
+bin/test: 2026-09-15T19:06:44.453958Z LOADED 10/202 my.turn-test
+bin/test: 2026-09-15T19:06:44.455800Z LOAD 11/202 my.web-test
+bin/test: 2026-09-15T19:06:44.493339Z LOADED 11/202 my.web-test
+bin/test: 2026-09-15T19:06:44.493453Z LOAD 12/202 seon.adoption-contract-freshness-test
+bin/test: 2026-09-15T19:06:44.502481Z LOADED 12/202 seon.adoption-contract-freshness-test
+bin/test: 2026-09-15T19:06:44.502990Z LOAD 13/202 seon.adoption-diagnostic-test
+WARNING: reset! already refers to: #'clojure.core/reset! in namespace: seon.fresh-operator, being replaced by: #'seon.fresh-operator/reset!
+bin/test: 2026-09-15T19:06:44.626793Z LOADED 13/202 seon.adoption-diagnostic-test
+bin/test: 2026-09-15T19:06:44.626905Z LOAD 14/202 seon.adoption-rows-test
+bin/test: 2026-09-15T19:06:44.632008Z LOADED 14/202 seon.adoption-rows-test
+bin/test: 2026-09-15T19:06:44.632108Z LOAD 15/202 seon.agent-situation-test
+bin/test: 2026-09-15T19:06:44.638897Z LOADED 15/202 seon.agent-situation-test
+bin/test: 2026-09-15T19:06:44.639Z LOAD 16/202 seon.ai.tokens-test
+bin/test: 2026-09-15T19:06:44.660533Z LOADED 16/202 seon.ai.tokens-test
+bin/test: 2026-09-15T19:06:44.662849Z LOAD 17/202 seon.ai-stream-fold-test
+bin/test: 2026-09-15T19:06:44.772030Z LOADED 17/202 seon.ai-stream-fold-test
+bin/test: 2026-09-15T19:06:44.772143Z LOAD 18/202 seon.ai-test
+bin/test: 2026-09-15T19:06:44.917484Z LOADED 18/202 seon.ai-test
+bin/test: 2026-09-15T19:06:44.917585Z LOAD 19/202 seon.await-owner-census-test
+bin/test: 2026-09-15T19:06:44.921776Z LOADED 19/202 seon.await-owner-census-test
+bin/test: 2026-09-15T19:06:44.921876Z LOAD 20/202 seon.await-test
+bin/test: 2026-09-15T19:06:44.932735Z LOADED 20/202 seon.await-test
+bin/test: 2026-09-15T19:06:44.932986Z LOAD 21/202 seon.background-blob-test
+bin/test: 2026-09-15T19:06:44.943755Z LOADED 21/202 seon.background-blob-test
+bin/test: 2026-09-15T19:06:44.943877Z LOAD 22/202 seon.background-test
+bin/test: 2026-09-15T19:06:44.948946Z LOADED 22/202 seon.background-test
+bin/test: 2026-09-15T19:06:44.949074Z LOAD 23/202 seon.blob.retention-test
+bin/test: 2026-09-15T19:06:44.962497Z LOADED 23/202 seon.blob.retention-test
+bin/test: 2026-09-15T19:06:44.962645Z LOAD 24/202 seon.blob-publication-test
+bin/test: 2026-09-15T19:06:44.974596Z LOADED 24/202 seon.blob-publication-test
+bin/test: 2026-09-15T19:06:44.974685Z LOAD 25/202 seon.blob-test
+bin/test: 2026-09-15T19:06:44.997503Z LOADED 25/202 seon.blob-test
+bin/test: 2026-09-15T19:06:44.997605Z LOAD 26/202 seon.blob-threshold-test
+bin/test: 2026-09-15T19:06:45.002686Z LOADED 26/202 seon.blob-threshold-test
+bin/test: 2026-09-15T19:06:45.002775Z LOAD 27/202 seon.bootstrap-drive-test
+bin/test: 2026-09-15T19:06:45.050335Z LOADED 27/202 seon.bootstrap-drive-test
+bin/test: 2026-09-15T19:06:45.050451Z LOAD 28/202 seon.bootstrap-test
+bin/test: 2026-09-15T19:06:45.071382Z LOADED 28/202 seon.bootstrap-test
+bin/test: 2026-09-15T19:06:45.071498Z LOAD 29/202 seon.bounded-boundary-census-test
+bin/test: 2026-09-15T19:06:45.093192Z LOADED 29/202 seon.bounded-boundary-census-test
+bin/test: 2026-09-15T19:06:45.093324Z LOAD 30/202 seon.call-preparation-test
+bin/test: 2026-09-15T19:06:45.140058Z LOADED 30/202 seon.call-preparation-test
+bin/test: 2026-09-15T19:06:45.140170Z LOAD 31/202 seon.cluster.agent-identity-test
+bin/test: 2026-09-15T19:06:45.150356Z LOADED 31/202 seon.cluster.agent-identity-test
+bin/test: 2026-09-15T19:06:45.150495Z LOAD 32/202 seon.cluster.agent-namespace-test
+bin/test: 2026-09-15T19:06:45.160056Z LOADED 32/202 seon.cluster.agent-namespace-test
+bin/test: 2026-09-15T19:06:45.160192Z LOAD 33/202 seon.cluster.agent-test
+bin/test: 2026-09-15T19:06:45.603688Z LOADED 33/202 seon.cluster.agent-test
+bin/test: 2026-09-15T19:06:45.603867Z LOAD 34/202 seon.cluster.armed-test
+bin/test: 2026-09-15T19:06:45.632362Z LOADED 34/202 seon.cluster.armed-test
+bin/test: 2026-09-15T19:06:45.632465Z LOAD 35/202 seon.cluster.boot-test
+bin/test: 2026-09-15T19:06:45.800059Z LOADED 35/202 seon.cluster.boot-test
+bin/test: 2026-09-15T19:06:45.800161Z LOAD 36/202 seon.cluster.cohost-boot-test
+bin/test: 2026-09-15T19:06:45.885321Z LOADED 36/202 seon.cluster.cohost-boot-test
+bin/test: 2026-09-15T19:06:45.885419Z LOAD 37/202 seon.cluster.evaluate-sources-test
+bin/test: 2026-09-15T19:06:45.897423Z LOADED 37/202 seon.cluster.evaluate-sources-test
+bin/test: 2026-09-15T19:06:45.897590Z LOAD 38/202 seon.cluster.export-test
+bin/test: 2026-09-15T19:06:45.915070Z LOADED 38/202 seon.cluster.export-test
+bin/test: 2026-09-15T19:06:45.915190Z LOAD 39/202 seon.cluster.fault-storage-test
+bin/test: 2026-09-15T19:06:45.927183Z LOADED 39/202 seon.cluster.fault-storage-test
+bin/test: 2026-09-15T19:06:45.927297Z LOAD 40/202 seon.cluster.instruction-test
+bin/test: 2026-09-15T19:06:45.939678Z LOADED 40/202 seon.cluster.instruction-test
+bin/test: 2026-09-15T19:06:45.939783Z LOAD 41/202 seon.cluster.mcp-test
+bin/test: 2026-09-15T19:06:45.969785Z LOADED 41/202 seon.cluster.mcp-test
+bin/test: 2026-09-15T19:06:45.969923Z LOAD 42/202 seon.cluster.message-assignment-test
+bin/test: 2026-09-15T19:06:45.979120Z LOADED 42/202 seon.cluster.message-assignment-test
+bin/test: 2026-09-15T19:06:45.979235Z LOAD 43/202 seon.cluster.message-test
+bin/test: 2026-09-15T19:06:46.028440Z LOADED 43/202 seon.cluster.message-test
+bin/test: 2026-09-15T19:06:46.028731Z LOAD 44/202 seon.cluster.problem-routing-test
+bin/test: 2026-09-15T19:06:46.041875Z LOADED 44/202 seon.cluster.problem-routing-test
+bin/test: 2026-09-15T19:06:46.041980Z LOAD 45/202 seon.cluster.program-restart-test
+bin/test: 2026-09-15T19:06:46.061176Z LOADED 45/202 seon.cluster.program-restart-test
+bin/test: 2026-09-15T19:06:46.061309Z LOAD 46/202 seon.cluster.prompt-test
+bin/test: 2026-09-15T19:06:46.162764Z LOADED 46/202 seon.cluster.prompt-test
+bin/test: 2026-09-15T19:06:46.162877Z LOAD 47/202 seon.cluster.registry-test
+bin/test: 2026-09-15T19:06:46.190980Z LOADED 47/202 seon.cluster.registry-test
+bin/test: 2026-09-15T19:06:46.191090Z LOAD 48/202 seon.cluster.reply-test
+bin/test: 2026-09-15T19:06:46.229112Z LOADED 48/202 seon.cluster.reply-test
+bin/test: 2026-09-15T19:06:46.229246Z LOAD 49/202 seon.cluster.resume-artifact-routing-test
+bin/test: 2026-09-15T19:06:46.235671Z LOADED 49/202 seon.cluster.resume-artifact-routing-test
+bin/test: 2026-09-15T19:06:46.235771Z LOAD 50/202 seon.cluster.source-test
+bin/test: 2026-09-15T19:06:46.282560Z LOADED 50/202 seon.cluster.source-test
+bin/test: 2026-09-15T19:06:46.282670Z LOAD 51/202 seon.cluster.status-test
+bin/test: 2026-09-15T19:06:46.292550Z LOADED 51/202 seon.cluster.status-test
+bin/test: 2026-09-15T19:06:46.292640Z LOAD 52/202 seon.cluster.store-test
+bin/test: 2026-09-15T19:06:46.326515Z LOADED 52/202 seon.cluster.store-test
+bin/test: 2026-09-15T19:06:46.326649Z LOAD 53/202 seon.cluster.store-transact-test
+bin/test: 2026-09-15T19:06:47.431238Z LOADED 53/202 seon.cluster.store-transact-test
+bin/test: 2026-09-15T19:06:47.431421Z LOAD 54/202 seon.cluster.turn-test
+bin/test: 2026-09-15T19:06:47.749365Z LOADED 54/202 seon.cluster.turn-test
+bin/test: 2026-09-15T19:06:47.749492Z LOAD 55/202 seon.cluster.wake-test
+bin/test: 2026-09-15T19:06:47.880829Z LOADED 55/202 seon.cluster.wake-test
+bin/test: 2026-09-15T19:06:47.880965Z LOAD 56/202 seon.cluster.web-binding-test
+bin/test: 2026-09-15T19:06:47.889219Z LOADED 56/202 seon.cluster.web-binding-test
+bin/test: 2026-09-15T19:06:47.889836Z LOAD 57/202 seon.cluster-test
+bin/test: 2026-09-15T19:06:47.903732Z LOADED 57/202 seon.cluster-test
+bin/test: 2026-09-15T19:06:47.903900Z LOAD 58/202 seon.concurrency-independence-test
+bin/test: 2026-09-15T19:06:47.950672Z LOADED 58/202 seon.concurrency-independence-test
+bin/test: 2026-09-15T19:06:47.951255Z LOAD 59/202 seon.concurrency-streams-test
+bin/test: 2026-09-15T19:06:48.037821Z LOADED 59/202 seon.concurrency-streams-test
+bin/test: 2026-09-15T19:06:48.039973Z LOAD 60/202 seon.concurrency-test
+bin/test: 2026-09-15T19:06:48.066435Z LOADED 60/202 seon.concurrency-test
+bin/test: 2026-09-15T19:06:48.068871Z LOAD 61/202 seon.config-application-test
+bin/test: 2026-09-15T19:06:48.085864Z LOADED 61/202 seon.config-application-test
+bin/test: 2026-09-15T19:06:48.086041Z LOAD 62/202 seon.config-test
+bin/test: 2026-09-15T19:06:48.168781Z LOADED 62/202 seon.config-test
+bin/test: 2026-09-15T19:06:48.168905Z LOAD 63/202 seon.context-capture-test
+bin/test: 2026-09-15T19:06:48.175537Z LOADED 63/202 seon.context-capture-test
+bin/test: 2026-09-15T19:06:48.175699Z LOAD 64/202 seon.context-cookbook-trial-test
+bin/test: 2026-09-15T19:06:48.181345Z LOADED 64/202 seon.context-cookbook-trial-test
+bin/test: 2026-09-15T19:06:48.181518Z LOAD 65/202 seon.context-selection-test
+bin/test: 2026-09-15T19:06:48.202584Z LOADED 65/202 seon.context-selection-test
+bin/test: 2026-09-15T19:06:48.202685Z LOAD 66/202 seon.context-test
+bin/test: 2026-09-15T19:06:48.207642Z LOADED 66/202 seon.context-test
+bin/test: 2026-09-15T19:06:48.207748Z LOAD 67/202 seon.contracts-install-test
+bin/test: 2026-09-15T19:06:48.237550Z LOADED 67/202 seon.contracts-install-test
+bin/test: 2026-09-15T19:06:48.237651Z LOAD 68/202 seon.contracts-plan-test
+bin/test: 2026-09-15T19:06:48.248442Z LOADED 68/202 seon.contracts-plan-test
+bin/test: 2026-09-15T19:06:48.248548Z LOAD 69/202 seon.core-functions-test
+bin/test: 2026-09-15T19:06:48.256874Z LOADED 69/202 seon.core-functions-test
+bin/test: 2026-09-15T19:06:48.257007Z LOAD 70/202 seon.custody-stability-test
+bin/test: 2026-09-15T19:06:48.330016Z LOADED 70/202 seon.custody-stability-test
+bin/test: 2026-09-15T19:06:48.330141Z LOAD 71/202 seon.data-shapes-test
+bin/test: 2026-09-15T19:06:48.354758Z LOADED 71/202 seon.data-shapes-test
+bin/test: 2026-09-15T19:06:48.354870Z LOAD 72/202 seon.datahike-fork-test
+bin/test: 2026-09-15T19:06:48.364102Z LOADED 72/202 seon.datahike-fork-test
+bin/test: 2026-09-15T19:06:48.364200Z LOAD 73/202 seon.db.declaration-population-test
+bin/test: 2026-09-15T19:06:48.375093Z LOADED 73/202 seon.db.declaration-population-test
+bin/test: 2026-09-15T19:06:48.375206Z LOAD 74/202 seon.db-immutability-test
+bin/test: 2026-09-15T19:06:48.379646Z LOADED 74/202 seon.db-immutability-test
+bin/test: 2026-09-15T19:06:48.379748Z LOAD 75/202 seon.db-test
+bin/test: 2026-09-15T19:06:49.402565Z LOADED 75/202 seon.db-test
+bin/test: 2026-09-15T19:06:49.402724Z LOAD 76/202 seon.db-transact-shape-test
+bin/test: 2026-09-15T19:06:49.488055Z LOADED 76/202 seon.db-transact-shape-test
+bin/test: 2026-09-15T19:06:49.488180Z LOAD 77/202 seon.dev.changed-test-test
+bin/test: 2026-09-15T19:06:49.502617Z LOADED 77/202 seon.dev.changed-test-test
+bin/test: 2026-09-15T19:06:49.502693Z LOAD 78/202 seon.dev.clj-kondo-test
+bin/test: 2026-09-15T19:06:49.508788Z LOADED 78/202 seon.dev.clj-kondo-test
+bin/test: 2026-09-15T19:06:49.508879Z LOAD 79/202 seon.dev.dependency-cache-test
+bin/test: 2026-09-15T19:06:49.584527Z LOADED 79/202 seon.dev.dependency-cache-test
+bin/test: 2026-09-15T19:06:49.584644Z LOAD 80/202 seon.dev.docstring-test
+bin/test: 2026-09-15T19:06:49.650338Z LOADED 80/202 seon.dev.docstring-test
+bin/test: 2026-09-15T19:06:49.650507Z LOAD 81/202 seon.dev.edit-feedback-test
+bin/test: 2026-09-15T19:06:49.686261Z LOADED 81/202 seon.dev.edit-feedback-test
+bin/test: 2026-09-15T19:06:49.686385Z LOAD 82/202 seon.dev.fresh-operator-export-test
+bin/test: 2026-09-15T19:06:49.694851Z LOADED 82/202 seon.dev.fresh-operator-export-test
+bin/test: 2026-09-15T19:06:49.694961Z LOAD 83/202 seon.dev.fresh-operator-test
+bin/test: 2026-09-15T19:06:49.826249Z LOADED 83/202 seon.dev.fresh-operator-test
+bin/test: 2026-09-15T19:06:49.826400Z LOAD 84/202 seon.dev.issues-test
+bin/test: 2026-09-15T19:06:49.857689Z LOADED 84/202 seon.dev.issues-test
+bin/test: 2026-09-15T19:06:49.857782Z LOAD 85/202 seon.dev.mcp-bridge-test
+bin/test: 2026-09-15T19:06:49.937021Z LOADED 85/202 seon.dev.mcp-bridge-test
+bin/test: 2026-09-15T19:06:49.937126Z LOAD 86/202 seon.dev.source-instrumentation-test
+bin/test: 2026-09-15T19:06:49.951071Z LOADED 86/202 seon.dev.source-instrumentation-test
+bin/test: 2026-09-15T19:06:49.951172Z LOAD 87/202 seon.directory-test
+bin/test: 2026-09-15T19:06:49.958743Z LOADED 87/202 seon.directory-test
+bin/test: 2026-09-15T19:06:49.958839Z LOAD 88/202 seon.edit.jvm-test
+bin/test: 2026-09-15T19:06:50.015074Z LOADED 88/202 seon.edit.jvm-test
+bin/test: 2026-09-15T19:06:50.015196Z LOAD 89/202 seon.edit-test
+bin/test: 2026-09-15T19:06:50.032100Z LOADED 89/202 seon.edit-test
+bin/test: 2026-09-15T19:06:50.032210Z LOAD 90/202 seon.effect-test
+bin/test: 2026-09-15T19:06:50.071551Z LOADED 90/202 seon.effect-test
+bin/test: 2026-09-15T19:06:50.071674Z LOAD 91/202 seon.env-test
+bin/test: 2026-09-15T19:06:50.185353Z LOADED 91/202 seon.env-test
+bin/test: 2026-09-15T19:06:50.185483Z LOAD 92/202 seon.error-class-schema-test
+bin/test: 2026-09-15T19:06:50.281558Z LOADED 92/202 seon.error-class-schema-test
+bin/test: 2026-09-15T19:06:50.281738Z LOAD 93/202 seon.error-test
+bin/test: 2026-09-15T19:06:50.429844Z LOADED 93/202 seon.error-test
+bin/test: 2026-09-15T19:06:50.429945Z LOAD 94/202 seon.eval.drive-test
+bin/test: 2026-09-15T19:06:50.435511Z LOADED 94/202 seon.eval.drive-test
+bin/test: 2026-09-15T19:06:50.435596Z LOAD 95/202 seon.eval-test
+bin/test: 2026-09-15T19:06:50.443811Z LOADED 95/202 seon.eval-test
+bin/test: 2026-09-15T19:06:50.443907Z LOAD 96/202 seon.flow-configuration-test
+bin/test: 2026-09-15T19:06:50.454253Z LOADED 96/202 seon.flow-configuration-test
+bin/test: 2026-09-15T19:06:50.454359Z LOAD 97/202 seon.flow-test
+bin/test: 2026-09-15T19:06:50.803715Z LOADED 97/202 seon.flow-test
+bin/test: 2026-09-15T19:06:50.803814Z LOAD 98/202 seon.fn.analyzer-test
+bin/test: 2026-09-15T19:06:50.829100Z LOADED 98/202 seon.fn.analyzer-test
+bin/test: 2026-09-15T19:06:50.829276Z LOAD 99/202 seon.fn-core-calls-test
+bin/test: 2026-09-15T19:06:50.833558Z LOADED 99/202 seon.fn-core-calls-test
+bin/test: 2026-09-15T19:06:50.833659Z LOAD 100/202 seon.fn-test
+bin/test: 2026-09-15T19:06:50.915628Z LOADED 100/202 seon.fn-test
+bin/test: 2026-09-15T19:06:50.915723Z LOAD 101/202 seon.fs.jvm-test
+bin/test: 2026-09-15T19:06:50.990709Z LOADED 101/202 seon.fs.jvm-test
+bin/test: 2026-09-15T19:06:50.990801Z LOAD 102/202 seon.fs-test
+bin/test: 2026-09-15T19:06:51.001973Z LOADED 102/202 seon.fs-test
+bin/test: 2026-09-15T19:06:51.002087Z LOAD 103/202 seon.gen.loop-test
+bin/test: 2026-09-15T19:06:51.048788Z LOADED 103/202 seon.gen.loop-test
+bin/test: 2026-09-15T19:06:51.048898Z LOAD 104/202 seon.help-test
+bin/test: 2026-09-15T19:06:51.068328Z LOADED 104/202 seon.help-test
+bin/test: 2026-09-15T19:06:51.068508Z LOAD 105/202 seon.help-trial-test
+bin/test: 2026-09-15T19:06:51.113152Z LOADED 105/202 seon.help-trial-test
+bin/test: 2026-09-15T19:06:51.113247Z LOAD 106/202 seon.html-views-test
+bin/test: 2026-09-15T19:06:51.133010Z LOADED 106/202 seon.html-views-test
+bin/test: 2026-09-15T19:06:51.133100Z LOAD 107/202 seon.id-test
+bin/test: 2026-09-15T19:06:51.140848Z LOADED 107/202 seon.id-test
+bin/test: 2026-09-15T19:06:51.140946Z LOAD 108/202 seon.instrument-test
+bin/test: 2026-09-15T19:06:51.256222Z LOADED 108/202 seon.instrument-test
+bin/test: 2026-09-15T19:06:51.256319Z LOAD 109/202 seon.loop-proof-test
+bin/test: 2026-09-15T19:06:51.339221Z LOADED 109/202 seon.loop-proof-test
+bin/test: 2026-09-15T19:06:51.339327Z LOAD 110/202 seon.maintenance-schema-test
+bin/test: 2026-09-15T19:06:51.379778Z LOADED 110/202 seon.maintenance-schema-test
+bin/test: 2026-09-15T19:06:51.379872Z LOAD 111/202 seon.maintenance-test
+bin/test: 2026-09-15T19:06:51.399931Z LOADED 111/202 seon.maintenance-test
+bin/test: 2026-09-15T19:06:51.400026Z LOAD 112/202 seon.no-provider-test
+bin/test: 2026-09-15T19:06:51.411101Z LOADED 112/202 seon.no-provider-test
+bin/test: 2026-09-15T19:06:51.411197Z LOAD 113/202 seon.operator-test
+bin/test: 2026-09-15T19:06:51.492983Z LOADED 113/202 seon.operator-test
+bin/test: 2026-09-15T19:06:51.493084Z LOAD 114/202 seon.oversight-test
+bin/test: 2026-09-15T19:06:51.512127Z LOADED 114/202 seon.oversight-test
+bin/test: 2026-09-15T19:06:51.512301Z LOAD 115/202 seon.plan-completion-test
+bin/test: 2026-09-15T19:06:51.521405Z LOADED 115/202 seon.plan-completion-test
+bin/test: 2026-09-15T19:06:51.521504Z LOAD 116/202 seon.predicate-publication-test
+bin/test: 2026-09-15T19:06:51.529805Z LOADED 116/202 seon.predicate-publication-test
+bin/test: 2026-09-15T19:06:51.529906Z LOAD 117/202 seon.print-test
+bin/test: 2026-09-15T19:06:51.652823Z LOADED 117/202 seon.print-test
+bin/test: 2026-09-15T19:06:51.652921Z LOAD 118/202 seon.problems-test
+bin/test: 2026-09-15T19:06:51.753361Z LOADED 118/202 seon.problems-test
+bin/test: 2026-09-15T19:06:51.753475Z LOAD 119/202 seon.program-test
+bin/test: 2026-09-15T19:06:51.812632Z LOADED 119/202 seon.program-test
+bin/test: 2026-09-15T19:06:51.812739Z LOAD 120/202 seon.public-contract-test
+bin/test: 2026-09-15T19:06:51.827610Z LOADED 120/202 seon.public-contract-test
+bin/test: 2026-09-15T19:06:51.827697Z LOAD 121/202 seon.read-evidence-test
+bin/test: 2026-09-15T19:06:51.842971Z LOADED 121/202 seon.read-evidence-test
+bin/test: 2026-09-15T19:06:51.843073Z LOAD 122/202 seon.receipt-write-carrier-test
+bin/test: 2026-09-15T19:06:51.915765Z LOADED 122/202 seon.receipt-write-carrier-test
+bin/test: 2026-09-15T19:06:51.915864Z LOAD 123/202 seon.reconcile-test
+bin/test: 2026-09-15T19:06:51.966273Z LOADED 123/202 seon.reconcile-test
+bin/test: 2026-09-15T19:06:51.966450Z LOAD 124/202 seon.registry-isolation-test
+bin/test: 2026-09-15T19:06:51.979328Z LOADED 124/202 seon.registry-isolation-test
+bin/test: 2026-09-15T19:06:51.979426Z LOAD 125/202 seon.render.block-test
+bin/test: 2026-09-15T19:06:51.983448Z LOADED 125/202 seon.render.block-test
+bin/test: 2026-09-15T19:06:51.983515Z LOAD 126/202 seon.render.call-test
+bin/test: 2026-09-15T19:06:51.988701Z LOADED 126/202 seon.render.call-test
+bin/test: 2026-09-15T19:06:51.988844Z LOAD 127/202 seon.render.context-nits-test
+bin/test: 2026-09-15T19:06:51.994474Z LOADED 127/202 seon.render.context-nits-test
+bin/test: 2026-09-15T19:06:51.994826Z LOAD 128/202 seon.render.data-test
+bin/test: 2026-09-15T19:06:52.010411Z LOADED 128/202 seon.render.data-test
+bin/test: 2026-09-15T19:06:52.010547Z LOAD 129/202 seon.render.episode-test
+bin/test: 2026-09-15T19:06:52.014981Z LOADED 129/202 seon.render.episode-test
+bin/test: 2026-09-15T19:06:52.015049Z LOAD 130/202 seon.render.faults-test
+bin/test: 2026-09-15T19:06:52.026094Z LOADED 130/202 seon.render.faults-test
+bin/test: 2026-09-15T19:06:52.026177Z LOAD 131/202 seon.render.hiccup-test
+bin/test: 2026-09-15T19:06:52.057941Z LOADED 131/202 seon.render.hiccup-test
+bin/test: 2026-09-15T19:06:52.058031Z LOAD 132/202 seon.render.history-test
+bin/test: 2026-09-15T19:06:52.130558Z LOADED 132/202 seon.render.history-test
+bin/test: 2026-09-15T19:06:52.130632Z LOAD 133/202 seon.render.lint-test
+bin/test: 2026-09-15T19:06:52.199815Z LOADED 133/202 seon.render.lint-test
+bin/test: 2026-09-15T19:06:52.199889Z LOAD 134/202 seon.render.ns-test
+bin/test: 2026-09-15T19:06:52.234716Z LOADED 134/202 seon.render.ns-test
+bin/test: 2026-09-15T19:06:52.234792Z LOAD 135/202 seon.render.page-review-test
+bin/test: 2026-09-15T19:06:52.246353Z LOADED 135/202 seon.render.page-review-test
+bin/test: 2026-09-15T19:06:52.246465Z LOAD 136/202 seon.render.page-settings-test
+bin/test: 2026-09-15T19:06:52.258486Z LOADED 136/202 seon.render.page-settings-test
+bin/test: 2026-09-15T19:06:52.258560Z LOAD 137/202 seon.render.retained-test
+bin/test: 2026-09-15T19:06:52.264098Z LOADED 137/202 seon.render.retained-test
+bin/test: 2026-09-15T19:06:52.264168Z LOAD 138/202 seon.render.root-pull-test
+bin/test: 2026-09-15T19:06:52.344419Z LOADED 138/202 seon.render.root-pull-test
+bin/test: 2026-09-15T19:06:52.344489Z LOAD 139/202 seon.render.route-test
+bin/test: 2026-09-15T19:06:52.355090Z LOADED 139/202 seon.render.route-test
+bin/test: 2026-09-15T19:06:52.355165Z LOAD 140/202 seon.render.runtime-test
+bin/test: 2026-09-15T19:06:52.364623Z LOADED 140/202 seon.render.runtime-test
+bin/test: 2026-09-15T19:06:52.364690Z LOAD 141/202 seon.render.transcript-run-test
+bin/test: 2026-09-15T19:06:52.433664Z LOADED 141/202 seon.render.transcript-run-test
+bin/test: 2026-09-15T19:06:52.433795Z LOAD 142/202 seon.render.transcript-test
+bin/test: 2026-09-15T19:06:52.563266Z LOADED 142/202 seon.render.transcript-test
+bin/test: 2026-09-15T19:06:52.563378Z LOAD 143/202 seon.render.value-options-test
+bin/test: 2026-09-15T19:06:52.619709Z LOADED 143/202 seon.render.value-options-test
+bin/test: 2026-09-15T19:06:52.619792Z LOAD 144/202 seon.render.value-test
+bin/test: 2026-09-15T19:06:52.730608Z LOADED 144/202 seon.render.value-test
+bin/test: 2026-09-15T19:06:52.730677Z LOAD 145/202 seon.render.walk-test
+bin/test: 2026-09-15T19:06:52.794624Z LOADED 145/202 seon.render.walk-test
+bin/test: 2026-09-15T19:06:52.794701Z LOAD 146/202 seon.render.web-adoption-test
+bin/test: 2026-09-15T19:06:53.017957Z LOADED 146/202 seon.render.web-adoption-test
+bin/test: 2026-09-15T19:06:53.018065Z LOAD 147/202 seon.render.web-context-test
+bin/test: 2026-09-15T19:06:53.036942Z LOADED 147/202 seon.render.web-context-test
+bin/test: 2026-09-15T19:06:53.037067Z LOAD 148/202 seon.render.web-debug-test
+bin/test: 2026-09-15T19:06:53.091398Z LOADED 148/202 seon.render.web-debug-test
+bin/test: 2026-09-15T19:06:53.091476Z LOAD 149/202 seon.render.web-feed-test
+bin/test: 2026-09-15T19:06:53.096626Z LOADED 149/202 seon.render.web-feed-test
+bin/test: 2026-09-15T19:06:53.096709Z LOAD 150/202 seon.render.web-performance-test
+bin/test: 2026-09-15T19:06:53.156647Z LOADED 150/202 seon.render.web-performance-test
+bin/test: 2026-09-15T19:06:53.156721Z LOAD 151/202 seon.render.web-test
+bin/test: 2026-09-15T19:06:53.156766Z LOADED 151/202 seon.render.web-test
+bin/test: 2026-09-15T19:06:53.156780Z LOAD 152/202 seon.render-coverage-test
+bin/test: 2026-09-15T19:06:53.254430Z LOADED 152/202 seon.render-coverage-test
+bin/test: 2026-09-15T19:06:53.254509Z LOAD 153/202 seon.render-simplification-test
+bin/test: 2026-09-15T19:06:53.371248Z LOADED 153/202 seon.render-simplification-test
+bin/test: 2026-09-15T19:06:53.371328Z LOAD 154/202 seon.render-source-test
+bin/test: 2026-09-15T19:06:53.449812Z LOADED 154/202 seon.render-source-test
+bin/test: 2026-09-15T19:06:53.449881Z LOAD 155/202 seon.repl-grammar-test
+bin/test: 2026-09-15T19:06:53.461209Z LOADED 155/202 seon.repl-grammar-test
+bin/test: 2026-09-15T19:06:53.461277Z LOAD 156/202 seon.repl-parity-test
+bin/test: 2026-09-15T19:06:53.511613Z LOADED 156/202 seon.repl-parity-test
+bin/test: 2026-09-15T19:06:53.511683Z LOAD 157/202 seon.repl-test
+bin/test: 2026-09-15T19:06:53.540958Z LOADED 157/202 seon.repl-test
+bin/test: 2026-09-15T19:06:53.541021Z LOAD 158/202 seon.rereads-panel-test
+bin/test: 2026-09-15T19:06:53.566848Z LOADED 158/202 seon.rereads-panel-test
+bin/test: 2026-09-15T19:06:53.566919Z LOAD 159/202 seon.rereads-test
+bin/test: 2026-09-15T19:06:53.566957Z LOADED 159/202 seon.rereads-test
+bin/test: 2026-09-15T19:06:53.566968Z LOAD 160/202 seon.returned-error-test
+bin/test: 2026-09-15T19:06:53.574969Z LOADED 160/202 seon.returned-error-test
+bin/test: 2026-09-15T19:06:53.575044Z LOAD 161/202 seon.run4-install-test
+bin/test: 2026-09-15T19:06:53.586198Z LOADED 161/202 seon.run4-install-test
+bin/test: 2026-09-15T19:06:53.586282Z LOAD 162/202 seon.run4-reader-test
+bin/test: 2026-09-15T19:06:53.593162Z LOADED 162/202 seon.run4-reader-test
+bin/test: 2026-09-15T19:06:53.593331Z LOAD 163/202 seon.run6-db-test
+bin/test: 2026-09-15T19:06:53.604523Z LOADED 163/202 seon.run6-db-test
+bin/test: 2026-09-15T19:06:53.604599Z LOAD 164/202 seon.run6-stall-test
+bin/test: 2026-09-15T19:06:53.615062Z LOADED 164/202 seon.run6-stall-test
+bin/test: 2026-09-15T19:06:53.615165Z LOAD 165/202 seon.schedule-test
+bin/test: 2026-09-15T19:06:53.710427Z LOADED 165/202 seon.schedule-test
+bin/test: 2026-09-15T19:06:53.710506Z LOAD 166/202 seon.schema.admission-gate-test
+bin/test: 2026-09-15T19:06:53.753683Z LOADED 166/202 seon.schema.admission-gate-test
+bin/test: 2026-09-15T19:06:53.753757Z LOAD 167/202 seon.schema.admission-test
+bin/test: 2026-09-15T19:06:53.765177Z LOADED 167/202 seon.schema.admission-test
+bin/test: 2026-09-15T19:06:53.765261Z LOAD 168/202 seon.schema.datahike-test
+bin/test: 2026-09-15T19:06:53.819080Z LOADED 168/202 seon.schema.datahike-test
+bin/test: 2026-09-15T19:06:53.819158Z LOAD 169/202 seon.schema.declaration-population-test
+bin/test: 2026-09-15T19:06:53.831184Z LOADED 169/202 seon.schema.declaration-population-test
+bin/test: 2026-09-15T19:06:53.831257Z LOAD 170/202 seon.schema.edn-test
+bin/test: 2026-09-15T19:06:53.860227Z LOADED 170/202 seon.schema.edn-test
+bin/test: 2026-09-15T19:06:53.860303Z LOAD 171/202 seon.schema.program-test
+bin/test: 2026-09-15T19:06:53.905439Z LOADED 171/202 seon.schema.program-test
+bin/test: 2026-09-15T19:06:53.905509Z LOAD 172/202 seon.schema-audit-test
+bin/test: 2026-09-15T19:06:53.914595Z LOADED 172/202 seon.schema-audit-test
+bin/test: 2026-09-15T19:06:53.914659Z LOAD 173/202 seon.schema-redeclare-test
+bin/test: 2026-09-15T19:06:53.920874Z LOADED 173/202 seon.schema-redeclare-test
+bin/test: 2026-09-15T19:06:53.920959Z LOAD 174/202 seon.schema-reference-graph-test
+bin/test: 2026-09-15T19:06:53.926769Z LOADED 174/202 seon.schema-reference-graph-test
+bin/test: 2026-09-15T19:06:53.926816Z LOAD 175/202 seon.schema-test
+bin/test: 2026-09-15T19:06:53.976134Z LOADED 175/202 seon.schema-test
+bin/test: 2026-09-15T19:06:53.976206Z LOAD 176/202 seon.schema-usage-guard-test
+bin/test: 2026-09-15T19:06:54.012717Z LOADED 176/202 seon.schema-usage-guard-test
+bin/test: 2026-09-15T19:06:54.012800Z LOAD 177/202 seon.sci.admit.declaration-population-test
+bin/test: 2026-09-15T19:06:54.090099Z LOADED 177/202 seon.sci.admit.declaration-population-test
+bin/test: 2026-09-15T19:06:54.090174Z LOAD 178/202 seon.sci.admit-test
+bin/test: 2026-09-15T19:06:54.196168Z LOADED 178/202 seon.sci.admit-test
+bin/test: 2026-09-15T19:06:54.196246Z LOAD 179/202 seon.sci.documentation-test
+bin/test: 2026-09-15T19:06:54.224466Z LOADED 179/202 seon.sci.documentation-test
+bin/test: 2026-09-15T19:06:54.224541Z LOAD 180/202 seon.sci.eval-instrumentation-test
+bin/test: 2026-09-15T19:06:54.231244Z LOADED 180/202 seon.sci.eval-instrumentation-test
+bin/test: 2026-09-15T19:06:54.231396Z LOAD 181/202 seon.sci.eval-test
+bin/test: 2026-09-15T19:06:54.418565Z LOADED 181/202 seon.sci.eval-test
+bin/test: 2026-09-15T19:06:54.418642Z LOAD 182/202 seon.sci.fork-isolation-test
+bin/test: 2026-09-15T19:06:54.422589Z LOADED 182/202 seon.sci.fork-isolation-test
+bin/test: 2026-09-15T19:06:54.422647Z LOAD 183/202 seon.sci.kernel-arm-carriage-test
+bin/test: 2026-09-15T19:06:54.435383Z LOADED 183/202 seon.sci.kernel-arm-carriage-test
+bin/test: 2026-09-15T19:06:54.435452Z LOAD 184/202 seon.sci.reader-test
+bin/test: 2026-09-15T19:06:54.514645Z LOADED 184/202 seon.sci.reader-test
+bin/test: 2026-09-15T19:06:54.514729Z LOAD 185/202 seon.sci.shown-text-test
+bin/test: 2026-09-15T19:06:54.520582Z LOADED 185/202 seon.sci.shown-text-test
+bin/test: 2026-09-15T19:06:54.520665Z LOAD 186/202 seon.search-test
+bin/test: 2026-09-15T19:06:54.538839Z LOADED 186/202 seon.search-test
+bin/test: 2026-09-15T19:06:54.538914Z LOAD 187/202 seon.shell.jvm-test
+bin/test: 2026-09-15T19:06:54.617179Z LOADED 187/202 seon.shell.jvm-test
+bin/test: 2026-09-15T19:06:54.617286Z LOAD 188/202 seon.source-reconciliation-test
+bin/test: 2026-09-15T19:06:54.624524Z LOADED 188/202 seon.source-reconciliation-test
+bin/test: 2026-09-15T19:06:54.624613Z LOAD 189/202 seon.supplied-documentation-test
+bin/test: 2026-09-15T19:06:54.637892Z LOADED 189/202 seon.supplied-documentation-test
+bin/test: 2026-09-15T19:06:54.637961Z LOAD 190/202 seon.test.accretion-test
+bin/test: 2026-09-15T19:06:54.657372Z LOADED 190/202 seon.test.accretion-test
+bin/test: 2026-09-15T19:06:54.657477Z LOAD 191/202 seon.test.selection-test
+bin/test: 2026-09-15T19:06:54.668992Z LOADED 191/202 seon.test.selection-test
+bin/test: 2026-09-15T19:06:54.669039Z LOAD 192/202 seon.test-provenance-test
+bin/test: 2026-09-15T19:06:54.675824Z LOADED 192/202 seon.test-provenance-test
+bin/test: 2026-09-15T19:06:54.675887Z LOAD 193/202 seon.test-runner-test
+bin/test: 2026-09-15T19:06:54.794182Z LOADED 193/202 seon.test-runner-test
+bin/test: 2026-09-15T19:06:54.794248Z LOAD 194/202 seon.test-support-test
+bin/test: 2026-09-15T19:06:54.818641Z LOADED 194/202 seon.test-support-test
+bin/test: 2026-09-15T19:06:54.818730Z LOAD 195/202 seon.transact-feedback-test
+bin/test: 2026-09-15T19:06:54.833060Z LOADED 195/202 seon.transact-feedback-test
+bin/test: 2026-09-15T19:06:54.833118Z LOAD 196/202 seon.transaction-result-test
+bin/test: 2026-09-15T19:06:54.838909Z LOADED 196/202 seon.transaction-result-test
+bin/test: 2026-09-15T19:06:54.838976Z LOAD 197/202 seon.turn-backstop-test
+bin/test: 2026-09-15T19:06:54.846143Z LOADED 197/202 seon.turn-backstop-test
+bin/test: 2026-09-15T19:06:54.846189Z LOAD 198/202 seon.turn-continue-test
+bin/test: 2026-09-15T19:06:54.864896Z LOADED 198/202 seon.turn-continue-test
+bin/test: 2026-09-15T19:06:54.864961Z LOAD 199/202 seon.turn-loop-test
+bin/test: 2026-09-15T19:06:54.947219Z LOADED 199/202 seon.turn-loop-test
+bin/test: 2026-09-15T19:06:54.947288Z LOAD 200/202 seon.turn-test
+bin/test: 2026-09-15T19:06:55.039607Z LOADED 200/202 seon.turn-test
+bin/test: 2026-09-15T19:06:55.039704Z LOAD 201/202 seon.turn-work-test
+bin/test: 2026-09-15T19:06:55.076572Z LOADED 201/202 seon.turn-work-test
+bin/test: 2026-09-15T19:06:55.076640Z LOAD 202/202 seon.web.jvm-test
+bin/test: 2026-09-15T19:06:55.145045Z LOADED 202/202 seon.web.jvm-test
+bin/test: 2026-09-15T19:06:55.145127Z SELECT building the program graph
+bin/test: 2026-09-15T19:07:02.758551Z SELECTION platform — platform tier only; platform 85, bulk 0, not reached 1553
+bin/test: 2026-09-15T19:07:02.765453Z TIER platform 85 tests
+bin/test: 2026-09-15T19:07:02.767579Z BEGIN worker=pool-1 task=seon.cluster.cohost-boot-test/a-second-cluster-boots-under-the-first-cluster-s-instrumentation
+bin/test: 2026-09-15T19:07:21.017017Z END worker=pool-1 elapsed-ms=18082 task=seon.cluster.cohost-boot-test/a-second-cluster-boots-under-the-first-cluster-s-instrumentation
+bin/test: 2026-09-15T19:07:21.020421Z BEGIN worker=pool-1 task=seon.cluster.registry-test/a-concurrent-create-wave-loses-nothing
+bin/test: 2026-09-15T19:07:21.650954Z END worker=pool-1 elapsed-ms=531 task=seon.cluster.registry-test/a-concurrent-create-wave-loses-nothing
+bin/test: 2026-09-15T19:07:21.651318Z BEGIN worker=pool-1 task=seon.cluster.registry-test/an-unwritten-cluster-retires-beside-its-unwritten-sibling
+bin/test: 2026-09-15T19:07:22.123410Z END worker=pool-1 elapsed-ms=365 task=seon.cluster.registry-test/an-unwritten-cluster-retires-beside-its-unwritten-sibling
+bin/test: 2026-09-15T19:07:22.123498Z BEGIN worker=pool-1 task=seon.cluster.registry-test/blob-lifetime-follows-schema-derived-history-reachability
+bin/test: 2026-09-15T19:07:22.684889Z END worker=pool-1 elapsed-ms=463 task=seon.cluster.registry-test/blob-lifetime-follows-schema-derived-history-reachability
+bin/test: 2026-09-15T19:07:22.684970Z BEGIN worker=pool-1 task=seon.cluster.registry-test/cluster-branch-is-one-injective-derivation
+bin/test: 2026-09-15T19:07:22.793118Z END worker=pool-1 elapsed-ms=6 task=seon.cluster.registry-test/cluster-branch-is-one-injective-derivation
+bin/test: 2026-09-15T19:07:22.794277Z BEGIN worker=pool-1 task=seon.cluster.registry-test/dry-run-enumerates-candidates-without-deleting
+bin/test: 2026-09-15T19:07:23.347960Z END worker=pool-1 elapsed-ms=451 task=seon.cluster.registry-test/dry-run-enumerates-candidates-without-deleting
+bin/test: 2026-09-15T19:07:23.348311Z BEGIN worker=pool-1 task=seon.cluster.registry-test/ensure-cluster-branches-from-the-source-commit-and-is-idempotent
+bin/test: 2026-09-15T19:07:23.714047Z END worker=pool-1 elapsed-ms=266 task=seon.cluster.registry-test/ensure-cluster-branches-from-the-source-commit-and-is-idempotent
+bin/test: 2026-09-15T19:07:23.714144Z BEGIN worker=pool-1 task=seon.cluster.registry-test/failed-forced-refork-keeps-the-prior-branch-reachable
+bin/test: 2026-09-15T19:07:24.120159Z END worker=pool-1 elapsed-ms=307 task=seon.cluster.registry-test/failed-forced-refork-keeps-the-prior-branch-reachable
+bin/test: 2026-09-15T19:07:24.121393Z BEGIN worker=pool-1 task=seon.cluster.registry-test/non-temporal-collection-marks-current-blob-references
+bin/test: 2026-09-15T19:07:24.413527Z END worker=pool-1 elapsed-ms=193 task=seon.cluster.registry-test/non-temporal-collection-marks-current-blob-references
+bin/test: 2026-09-15T19:07:24.413627Z BEGIN worker=pool-1 task=seon.cluster.registry-test/refusals-name-their-rule
+bin/test: 2026-09-15T19:07:24.730242Z END worker=pool-1 elapsed-ms=218 task=seon.cluster.registry-test/refusals-name-their-rule
+bin/test: 2026-09-15T19:07:24.730325Z BEGIN worker=pool-1 task=seon.cluster.registry-test/reset-returns-a-cluster-to-source-state
+bin/test: 2026-09-15T19:07:25.076183Z END worker=pool-1 elapsed-ms=246 task=seon.cluster.registry-test/reset-returns-a-cluster-to-source-state
+bin/test: 2026-09-15T19:07:25.076264Z BEGIN worker=pool-1 task=seon.cluster.registry-test/retiring-one-cluster-reclaims-only-its-own-tail
+bin/test: 2026-09-15T19:07:25.786523Z END worker=pool-1 elapsed-ms=609 task=seon.cluster.registry-test/retiring-one-cluster-reclaims-only-its-own-tail
+bin/test: 2026-09-15T19:07:25.786604Z BEGIN worker=pool-1 task=seon.cluster.registry-test/two-clusters-write-independently
+bin/test: 2026-09-15T19:07:26.091963Z END worker=pool-1 elapsed-ms=201 task=seon.cluster.registry-test/two-clusters-write-independently
+bin/test: 2026-09-15T19:07:26.092057Z BEGIN worker=pool-1 task=seon.cluster.source-test/activation-refusal-bounds-the-operator-face
+bin/test: 2026-09-15T19:07:26.189423Z END worker=pool-1 elapsed-ms=0 task=seon.cluster.source-test/activation-refusal-bounds-the-operator-face
+bin/test: 2026-09-15T19:07:26.189496Z BEGIN worker=pool-1 task=seon.cluster.source-test/digest-is-stable-and-refuses-an-absent-root
+bin/test: 2026-09-15T19:07:26.293705Z END worker=pool-1 elapsed-ms=8 task=seon.cluster.source-test/digest-is-stable-and-refuses-an-absent-root
+bin/test: 2026-09-15T19:07:26.293787Z BEGIN worker=pool-1 task=seon.cluster.source-test/existing-clusters-remain-on-their-chosen-source-commit
+bin/test: 2026-09-15T19:07:26.780880Z END worker=pool-1 elapsed-ms=390 task=seon.cluster.source-test/existing-clusters-remain-on-their-chosen-source-commit
+bin/test: 2026-09-15T19:07:26.780956Z BEGIN worker=pool-1 task=seon.cluster.source-test/failed-and-stale-builds-preserve-the-published-head
+bin/test: 2026-09-15T19:07:27.411538Z END worker=pool-1 elapsed-ms=534 task=seon.cluster.source-test/failed-and-stale-builds-preserve-the-published-head
+bin/test: 2026-09-15T19:07:27.411618Z BEGIN worker=pool-1 task=seon.cluster.source-test/flat-scratch-write-refusal-retires-the-candidate
+bin/test: 2026-09-15T19:07:27.607182Z END worker=pool-1 elapsed-ms=100 task=seon.cluster.source-test/flat-scratch-write-refusal-retires-the-candidate
+bin/test: 2026-09-15T19:07:27.607259Z BEGIN worker=pool-1 task=seon.cluster.source-test/incremental-first-party-publication-retains-complete-scalar-rows
+bin/test: 2026-09-15T19:07:56.323830Z END worker=pool-1 elapsed-ms=28617 task=seon.cluster.source-test/incremental-first-party-publication-retains-complete-scalar-rows
+bin/test: 2026-09-15T19:07:56.324146Z BEGIN worker=pool-1 task=seon.cluster.source-test/incremental-publication-does-not-change-an-existing-cluster
+bin/test: 2026-09-15T19:07:56.754488Z END worker=pool-1 elapsed-ms=333 task=seon.cluster.source-test/incremental-publication-does-not-change-an-existing-cluster
+bin/test: 2026-09-15T19:07:56.754577Z BEGIN worker=pool-1 task=seon.cluster.source-test/incremental-upsert-derives-scalar-safety-from-the-installed-schema
+bin/test: 2026-09-15T19:07:57.103378Z END worker=pool-1 elapsed-ms=251 task=seon.cluster.source-test/incremental-upsert-derives-scalar-safety-from-the-installed-schema
+bin/test: 2026-09-15T19:07:57.103482Z BEGIN worker=pool-1 task=seon.cluster.source-test/incremental-upsert-seals-one-activation-on-the-expected-commit
+bin/test: 2026-09-15T19:07:57.483899Z END worker=pool-1 elapsed-ms=283 task=seon.cluster.source-test/incremental-upsert-seals-one-activation-on-the-expected-commit
+bin/test: 2026-09-15T19:07:57.483990Z BEGIN worker=pool-1 task=seon.cluster.source-test/latest-test-evidence-survives-rebuilding-from-an-older-base
+bin/test: 2026-09-15T19:08:55.900198Z END worker=pool-1 elapsed-ms=58312 task=seon.cluster.source-test/latest-test-evidence-survives-rebuilding-from-an-older-base
+bin/test: 2026-09-15T19:08:55.900633Z BEGIN worker=pool-1 task=seon.cluster.source-test/publication-advances-one-branch-and-retires-scratch
+bin/test: 2026-09-15T19:08:56.633684Z END worker=pool-1 elapsed-ms=591 task=seon.cluster.source-test/publication-advances-one-branch-and-retires-scratch
+bin/test: 2026-09-15T19:08:56.633820Z BEGIN worker=pool-1 task=seon.cluster.source-test/publication-refuses-each-missing-activation-prerequisite-before-fork
+bin/test: 2026-09-15T19:08:57.764630Z END worker=pool-1 elapsed-ms=964 task=seon.cluster.source-test/publication-refuses-each-missing-activation-prerequisite-before-fork
+bin/test: 2026-09-15T19:08:57.764744Z BEGIN worker=pool-1 task=seon.cluster.source-test/source-tombstone-provenance-does-not-prevent-live-removal
+bin/test: 2026-09-15T19:08:59.063187Z END worker=pool-1 elapsed-ms=1168 task=seon.cluster.source-test/source-tombstone-provenance-does-not-prevent-live-removal
+bin/test: 2026-09-15T19:08:59.063291Z BEGIN worker=pool-1 task=seon.cluster.source-test/stale-incremental-upsert-preserves-the-newer-publication
+bin/test: 2026-09-15T19:08:59.647638Z END worker=pool-1 elapsed-ms=449 task=seon.cluster.source-test/stale-incremental-upsert-preserves-the-newer-publication
+bin/test: 2026-09-15T19:08:59.647727Z BEGIN worker=pool-1 task=seon.cluster.store-test/a-failed-release-never-drops-the-fence
+bin/test: 2026-09-15T19:08:59.838120Z END worker=pool-1 elapsed-ms=60 task=seon.cluster.store-test/a-failed-release-never-drops-the-fence
+bin/test: 2026-09-15T19:08:59.838205Z BEGIN worker=pool-1 task=seon.cluster.store-test/a-jvm-hosts-independent-stores
+bin/test: 2026-09-15T19:09:00.166212Z END worker=pool-1 elapsed-ms=202 task=seon.cluster.store-test/a-jvm-hosts-independent-stores
+bin/test: 2026-09-15T19:09:00.166301Z BEGIN worker=pool-1 task=seon.cluster.store-test/branch-connections-inherit-the-root-history-representation
+bin/test: 2026-09-15T19:09:00.432613Z END worker=pool-1 elapsed-ms=124 task=seon.cluster.store-test/branch-connections-inherit-the-root-history-representation
+bin/test: 2026-09-15T19:09:00.432748Z BEGIN worker=pool-1 task=seon.cluster.store-test/configuration-is-the-one-shape
+bin/test: 2026-09-15T19:09:00.595378Z END worker=pool-1 elapsed-ms=2 task=seon.cluster.store-test/configuration-is-the-one-shape
+bin/test: 2026-09-15T19:09:00.595489Z BEGIN worker=pool-1 task=seon.cluster.store-test/create-settings-apply-only-to-fresh-stores
+bin/test: 2026-09-15T19:09:00.890170Z END worker=pool-1 elapsed-ms=147 task=seon.cluster.store-test/create-settings-apply-only-to-fresh-stores
+bin/test: 2026-09-15T19:09:00.890256Z BEGIN worker=pool-1 task=seon.cluster.store-test/file-store-executes-ordered-multi-key-operations
+bin/test: 2026-09-15T19:09:01.107626Z END worker=pool-1 elapsed-ms=67 task=seon.cluster.store-test/file-store-executes-ordered-multi-key-operations
+bin/test: 2026-09-15T19:09:01.107735Z BEGIN worker=pool-1 task=seon.cluster.store-test/genesis-window-repairs-by-recreate
+bin/test: 2026-09-15T19:09:01.451293Z END worker=pool-1 elapsed-ms=194 task=seon.cluster.store-test/genesis-window-repairs-by-recreate
+bin/test: 2026-09-15T19:09:01.451405Z BEGIN worker=pool-1 task=seon.cluster.store-test/history-policy-is-creation-fixed-and-reopens-from-the-branch-record
+bin/test: 2026-09-15T19:09:01.712149Z END worker=pool-1 elapsed-ms=101 task=seon.cluster.store-test/history-policy-is-creation-fixed-and-reopens-from-the-branch-record
+bin/test: 2026-09-15T19:09:01.712327Z BEGIN worker=pool-1 task=seon.cluster.store-test/lock-file-is-one-sibling-derivation
+bin/test: 2026-09-15T19:09:01.880729Z END worker=pool-1 elapsed-ms=18 task=seon.cluster.store-test/lock-file-is-one-sibling-derivation
+bin/test: 2026-09-15T19:09:01.880830Z BEGIN worker=pool-1 task=seon.cluster.store-test/one-holder-per-store-in-one-process
+bin/test: 2026-09-15T19:09:02.096042Z END worker=pool-1 elapsed-ms=65 task=seon.cluster.store-test/one-holder-per-store-in-one-process
+bin/test: 2026-09-15T19:09:02.096139Z BEGIN worker=pool-1 task=seon.cluster.store-test/open-branch-refuses-what-the-roster-refutes
+bin/test: 2026-09-15T19:09:02.299077Z END worker=pool-1 elapsed-ms=57 task=seon.cluster.store-test/open-branch-refuses-what-the-roster-refutes
+bin/test: 2026-09-15T19:09:02.299177Z BEGIN worker=pool-1 task=seon.cluster.store-test/open-write-release-reopen-preserves-data
+bin/test: 2026-09-15T19:09:02.562838Z END worker=pool-1 elapsed-ms=120 task=seon.cluster.store-test/open-write-release-reopen-preserves-data
+bin/test: 2026-09-15T19:09:02.562930Z BEGIN worker=pool-1 task=seon.cluster.store-test/store-creation-never-follows-a-symlink-out-of-its-directory
+bin/test: 2026-09-15T19:09:02.799395Z END worker=pool-1 elapsed-ms=91 task=seon.cluster.store-test/store-creation-never-follows-a-symlink-out-of-its-directory
+bin/test: 2026-09-15T19:09:02.799508Z BEGIN worker=pool-1 task=seon.cluster.store-test/temporal-stores-answer-all-three-database-views
+bin/test: 2026-09-15T19:09:03.041875Z END worker=pool-1 elapsed-ms=100 task=seon.cluster.store-test/temporal-stores-answer-all-three-database-views
+bin/test: 2026-09-15T19:09:03.041974Z BEGIN worker=pool-1 task=seon.cluster.store-test/transact-normalizes-only-jdk-integers
+bin/test: 2026-09-15T19:09:03.301630Z END worker=pool-1 elapsed-ms=109 task=seon.cluster.store-test/transact-normalizes-only-jdk-integers
+bin/test: 2026-09-15T19:09:03.301738Z BEGIN worker=pool-1 task=seon.db.declaration-population-test/a-read-resolves-the-declaration-population-at-most-once
+bin/test: 2026-09-15T19:09:03.946075Z END worker=pool-1 elapsed-ms=492 task=seon.db.declaration-population-test/a-read-resolves-the-declaration-population-at-most-once
+bin/test: 2026-09-15T19:09:03.946191Z BEGIN worker=pool-1 task=seon.db.declaration-population-test/a-read-that-decodes-nothing-resolves-nothing
+bin/test: 2026-09-15T19:09:04.124913Z END worker=pool-1 elapsed-ms=36 task=seon.db.declaration-population-test/a-read-that-decodes-nothing-resolves-nothing
+bin/test: 2026-09-15T19:09:04.125011Z BEGIN worker=pool-1 task=seon.db.declaration-population-test/edn-backed-attributes-still-round-trip
+bin/test: 2026-09-15T19:09:04.291250Z END worker=pool-1 elapsed-ms=31 task=seon.db.declaration-population-test/edn-backed-attributes-still-round-trip
+bin/test: 2026-09-15T19:09:04.291344Z BEGIN worker=pool-1 task=seon.env-test/a-crossing-that-names-no-environment-is-refused-where-it-is-built
+bin/test: 2026-09-15T19:09:04.421998Z END worker=pool-1 elapsed-ms=3 task=seon.env-test/a-crossing-that-names-no-environment-is-refused-where-it-is-built
+bin/test: 2026-09-15T19:09:04.422134Z BEGIN worker=pool-1 task=seon.env-test/a-fork-resolves-its-own-environment-across-a-thread-hop
+bin/test: 2026-09-15T19:09:04.552468Z END worker=pool-1 elapsed-ms=5 task=seon.env-test/a-fork-resolves-its-own-environment-across-a-thread-hop
+bin/test: 2026-09-15T19:09:04.552584Z BEGIN worker=pool-1 task=seon.env-test/a-submission-delivers-exactly-its-own-environment
+bin/test: 2026-09-15T19:09:04.689300Z END worker=pool-1 elapsed-ms=10 task=seon.env-test/a-submission-delivers-exactly-its-own-environment
+bin/test: 2026-09-15T19:09:04.689394Z BEGIN worker=pool-1 task=seon.env-test/an-awaited-submission-carries-its-arm-and-a-detached-one-does-not
+bin/test: 2026-09-15T19:09:04.818021Z END worker=pool-1 elapsed-ms=3 task=seon.env-test/an-awaited-submission-carries-its-arm-and-a-detached-one-does-not
+bin/test: 2026-09-15T19:09:04.818104Z BEGIN worker=pool-1 task=seon.env-test/construction-refuses-up-front-and-names-the-failed-layer
+bin/test: 2026-09-15T19:09:04.946221Z END worker=pool-1 elapsed-ms=2 task=seon.env-test/construction-refuses-up-front-and-names-the-failed-layer
+bin/test: 2026-09-15T19:09:04.946319Z BEGIN worker=pool-1 task=seon.flow-configuration-test/every-built-graph-proc-declares-a-specific-workload
+bin/test: 2026-09-15T19:09:06.127140Z END worker=pool-1 elapsed-ms=1047 task=seon.flow-configuration-test/every-built-graph-proc-declares-a-specific-workload
+bin/test: 2026-09-15T19:09:06.127262Z BEGIN worker=pool-1 task=seon.flow-configuration-test/proc-construction-refuses-the-mixed-scaling-cliff
+bin/test: 2026-09-15T19:09:06.268756Z END worker=pool-1 elapsed-ms=1 task=seon.flow-configuration-test/proc-construction-refuses-the-mixed-scaling-cliff
+bin/test: 2026-09-15T19:09:06.268858Z BEGIN worker=pool-1 task=seon.fs-test/concurrent-deletions-treat-a-vanished-path-as-success
+bin/test: 2026-09-15T19:09:06.423879Z END worker=pool-1 elapsed-ms=4 task=seon.fs-test/concurrent-deletions-treat-a-vanished-path-as-success
+bin/test: 2026-09-15T19:09:06.424010Z BEGIN worker=pool-1 task=seon.fs-test/recursive-deletion-never-crosses-a-symlink
+bin/test: 2026-09-15T19:09:06.577025Z END worker=pool-1 elapsed-ms=3 task=seon.fs-test/recursive-deletion-never-crosses-a-symlink
+bin/test: 2026-09-15T19:09:06.577116Z BEGIN worker=pool-1 task=seon.fs-test/recursive-deletion-publishes-rate-bounded-progress
+bin/test: 2026-09-15T19:09:06.844535Z END worker=pool-1 elapsed-ms=114 task=seon.fs-test/recursive-deletion-publishes-rate-bounded-progress
+bin/test: 2026-09-15T19:09:06.844636Z BEGIN worker=pool-1 task=seon.schema.declaration-population-test/a-supplied-population-is-not-resolved-again
+bin/test: 2026-09-15T19:09:07.038705Z END worker=pool-1 elapsed-ms=32 task=seon.schema.declaration-population-test/a-supplied-population-is-not-resolved-again
+bin/test: 2026-09-15T19:09:07.038831Z BEGIN worker=pool-1 task=seon.schema.declaration-population-test/an-operation-resolves-the-declaration-population-once
+bin/test: 2026-09-15T19:09:07.372129Z END worker=pool-1 elapsed-ms=174 task=seon.schema.declaration-population-test/an-operation-resolves-the-declaration-population-once
+bin/test: 2026-09-15T19:09:07.372228Z BEGIN worker=pool-1 task=seon.schema.declaration-population-test/an-unhanded-declaration-projection-refuses-without-reading-resources
+bin/test: 2026-09-15T19:09:07.556972Z END worker=pool-1 elapsed-ms=13 task=seon.schema.declaration-population-test/an-unhanded-declaration-projection-refuses-without-reading-resources
+bin/test: 2026-09-15T19:09:07.557093Z BEGIN worker=pool-1 task=seon.sci.admit.declaration-population-test/a-supplied-projection-is-used-and-resolves-nothing
+bin/test: 2026-09-15T19:09:07.732703Z END worker=pool-1 elapsed-ms=16 task=seon.sci.admit.declaration-population-test/a-supplied-projection-is-used-and-resolves-nothing
+bin/test: 2026-09-15T19:09:07.732795Z BEGIN worker=pool-1 task=seon.sci.admit.declaration-population-test/an-admission-resolves-the-declaration-population-at-most-once
+bin/test: 2026-09-15T19:09:07.989080Z END worker=pool-1 elapsed-ms=100 task=seon.sci.admit.declaration-population-test/an-admission-resolves-the-declaration-population-at-most-once
+bin/test: 2026-09-15T19:09:07.989177Z BEGIN worker=pool-1 task=seon.sci.admit.declaration-population-test/an-admission-that-asks-no-identity-question-resolves-nothing
+bin/test: 2026-09-15T19:09:08.133864Z END worker=pool-1 elapsed-ms=2 task=seon.sci.admit.declaration-population-test/an-admission-that-asks-no-identity-question-resolves-nothing
+bin/test: 2026-09-15T19:09:08.133970Z BEGIN worker=pool-1 task=seon.sci.kernel-arm-carriage-test/adoption-is-strictly-nested
+bin/test: 2026-09-15T19:09:08.287513Z END worker=pool-1 elapsed-ms=2 task=seon.sci.kernel-arm-carriage-test/adoption-is-strictly-nested
+bin/test: 2026-09-15T19:09:08.287627Z BEGIN worker=pool-1 task=seon.sci.kernel-arm-carriage-test/an-unarmed-crossing-runs-unchanged
+bin/test: 2026-09-15T19:09:08.436574Z END worker=pool-1 elapsed-ms=1 task=seon.sci.kernel-arm-carriage-test/an-unarmed-crossing-runs-unchanged
+bin/test: 2026-09-15T19:09:08.436672Z BEGIN worker=pool-1 task=seon.sci.kernel-arm-carriage-test/detached-work-is-cut-by-the-limit-that-admitted-it
+bin/test: 2026-09-15T19:09:09.105600Z END worker=pool-1 elapsed-ms=520 task=seon.sci.kernel-arm-carriage-test/detached-work-is-cut-by-the-limit-that-admitted-it
+bin/test: 2026-09-15T19:09:09.105710Z BEGIN worker=pool-1 task=seon.sci.kernel-arm-carriage-test/entrances-on-another-thread-reach-the-governing-arm
+bin/test: 2026-09-15T19:09:09.269340Z END worker=pool-1 elapsed-ms=13 task=seon.sci.kernel-arm-carriage-test/entrances-on-another-thread-reach-the-governing-arm
+bin/test: 2026-09-15T19:09:09.269456Z BEGIN worker=pool-1 task=seon.test.selection-test/a-changed-file-selects-exactly-the-tests-that-reach-it
+bin/test: 2026-09-15T19:09:09.418763Z END worker=pool-1 elapsed-ms=3 task=seon.test.selection-test/a-changed-file-selects-exactly-the-tests-that-reach-it
+bin/test: 2026-09-15T19:09:09.418904Z BEGIN worker=pool-1 task=seon.test.selection-test/a-recorded-green-basis-round-trips
+bin/test: 2026-09-15T19:09:09.565665Z END worker=pool-1 elapsed-ms=3 task=seon.test.selection-test/a-recorded-green-basis-round-trips
+bin/test: 2026-09-15T19:09:09.565757Z BEGIN worker=pool-1 task=seon.test.selection-test/a-symlinked-input-is-digested-through-the-link-never-traversed
+bin/test: 2026-09-15T19:09:09.723005Z END worker=pool-1 elapsed-ms=6 task=seon.test.selection-test/a-symlinked-input-is-digested-through-the-link-never-traversed
+bin/test: 2026-09-15T19:09:09.723113Z BEGIN worker=pool-1 task=seon.test.selection-test/changed-inputs-are-decided-by-content-not-modification-time
+bin/test: 2026-09-15T19:09:09.873986Z END worker=pool-1 elapsed-ms=6 task=seon.test.selection-test/changed-inputs-are-decided-by-content-not-modification-time
+bin/test: 2026-09-15T19:09:09.874088Z BEGIN worker=pool-1 task=seon.test.selection-test/gate-inputs-no-call-edge-can-reach-widen
+bin/test: 2026-09-15T19:09:10.019470Z END worker=pool-1 elapsed-ms=1 task=seon.test.selection-test/gate-inputs-no-call-edge-can-reach-widen
+bin/test: 2026-09-15T19:09:10.019587Z BEGIN worker=pool-1 task=seon.test-runner-test/consecutive-cache-invocations-reuse-the-published-base
+bin/test: 2026-09-15T19:09:11.499566Z END worker=pool-1 elapsed-ms=1335 task=seon.test-runner-test/consecutive-cache-invocations-reuse-the-published-base
+bin/test: 2026-09-15T19:09:11.499666Z BEGIN worker=pool-1 task=seon.test-runner-test/coordinator-uses-the-prepared-worker-count
+bin/test: 2026-09-15T19:09:11.669007Z END worker=pool-1 elapsed-ms=0 task=seon.test-runner-test/coordinator-uses-the-prepared-worker-count
+bin/test: 2026-09-15T19:09:11.669117Z BEGIN worker=pool-1 task=seon.test-runner-test/dependency-configuration-excludes-first-party-source
+bin/test: 2026-09-15T19:09:11.925785Z END worker=pool-1 elapsed-ms=94 task=seon.test-runner-test/dependency-configuration-excludes-first-party-source
+bin/test: 2026-09-15T19:09:11.925877Z BEGIN worker=pool-1 task=seon.test-runner-test/dependency-source-digest-does-not-name-the-checkout
+bin/test: 2026-09-15T19:09:12.081760Z END worker=pool-1 elapsed-ms=2 task=seon.test-runner-test/dependency-source-digest-does-not-name-the-checkout
+bin/test: 2026-09-15T19:09:12.081859Z BEGIN worker=pool-1 task=seon.test-runner-test/published-base-retention-preserves-live-users-and-symlink-targets
+bin/test: 2026-09-15T19:09:12.238736Z END worker=pool-1 elapsed-ms=7 task=seon.test-runner-test/published-base-retention-preserves-live-users-and-symlink-targets
+bin/test: 2026-09-15T19:09:12.238829Z BEGIN worker=pool-1 task=seon.test-runner-test/selected-paths-overlay-head-for-preparation-and-every-worker
+bin/test: 2026-09-15T19:09:14.887925Z END worker=pool-1 elapsed-ms=2503 task=seon.test-runner-test/selected-paths-overlay-head-for-preparation-and-every-worker
+bin/test: 2026-09-15T19:09:14.888018Z BEGIN worker=pool-1 task=seon.test-runner-test/snapshot-digest-follows-selected-bytes
+bin/test: 2026-09-15T19:09:15.011480Z END worker=pool-1 elapsed-ms=3 task=seon.test-runner-test/snapshot-digest-follows-selected-bytes
+bin/test: 2026-09-15T19:09:15.011563Z BEGIN worker=pool-1 task=seon.test-support-test/a-canonical-database-is-the-production-source-population
+bin/test: 2026-09-15T19:09:25.945648Z END worker=pool-1 elapsed-ms=10814 task=seon.test-support-test/a-canonical-database-is-the-production-source-population
+bin/test: 2026-09-15T19:09:25.945795Z BEGIN worker=pool-1 task=seon.test-support-test/an-instrumentation-test-restores-the-entering-contracts-on-failure
+bin/test: 2026-09-15T19:09:26.193156Z END worker=pool-1 elapsed-ms=125 task=seon.test-support-test/an-instrumentation-test-restores-the-entering-contracts-on-failure
+bin/test: 2026-09-15T19:09:26.193229Z BEGIN worker=pool-1 task=seon.test-support-test/config-reconciliation-cannot-retract-the-schema-population
+bin/test: 2026-09-15T19:09:28.901392Z END worker=pool-1 elapsed-ms=2583 task=seon.test-support-test/config-reconciliation-cannot-retract-the-schema-population
+bin/test: 2026-09-15T19:09:28.901475Z BEGIN worker=pool-1 task=seon.test-support-test/explicit-synthetic-schema-rows-extend-only-that-database
+bin/test: 2026-09-15T19:09:29.239731Z END worker=pool-1 elapsed-ms=193 task=seon.test-support-test/explicit-synthetic-schema-rows-extend-only-that-database
+bin/test: 2026-09-15T19:09:29.240701Z BEGIN worker=pool-1 task=seon.test-support-test/fixture-resources-close-through-setup-and-cleanup-failures
+bin/test: 2026-09-15T19:09:29.391626Z END worker=pool-1 elapsed-ms=3 task=seon.test-support-test/fixture-resources-close-through-setup-and-cleanup-failures
+bin/test: 2026-09-15T19:09:29.391753Z BEGIN worker=pool-1 task=seon.test-support-test/recursive-cleanup-never-follows-a-symlink-out-of-tmp
+bin/test: 2026-09-15T19:09:29.539810Z END worker=pool-1 elapsed-ms=1 task=seon.test-support-test/recursive-cleanup-never-follows-a-symlink-out-of-tmp
+bin/test: 2026-09-15T19:09:29.539893Z BEGIN worker=pool-1 task=seon.test-support-test/shared-property-reporting-is-a-clojure-test-assertion
+bin/test: 2026-09-15T19:09:29.681645Z END worker=pool-1 elapsed-ms=0 task=seon.test-support-test/shared-property-reporting-is-a-clojure-test-assertion
+bin/test: 2026-09-15T19:09:29.681724Z BEGIN worker=pool-1 task=seon.test-support-test/shared-support-observes-events-refusals-and-cleanup
+bin/test: 2026-09-15T19:09:29.815129Z END worker=pool-1 elapsed-ms=1 task=seon.test-support-test/shared-support-observes-events-refusals-and-cleanup
+bin/test: 2026-09-15T19:09:29.816127Z TIER bulk 0 tests
+
+Ran 85 tests containing 514 assertions.
+0 failures, 0 errors.
+
+bin/test: skipped 53 long tests:
+ - seon.bootstrap-drive-test/one-fake-o1-drive-grades-on-its-ending-commit - 171.859 s pool: real cluster graph bootstrap, objective/fork drive, and ending-commit grading.
+ - seon.cluster.armed-test/a-message-committed-during-boot-arming-is-conserved - 48.642 s slowest pool member: every test boots a real armed cluster; fault-to-fact delivery is the proof.
+ - seon.cluster.armed-test/an-escaped-throwable-becomes-a-fact-and-a-message - 48.642 s slowest pool member: every test boots a real armed cluster; fault-to-fact delivery is the proof.
+ - seon.cluster.armed-test/boot-seeds-the-root-agent-and-arms-the-loop - 48.642 s slowest pool member: every test boots a real armed cluster; fault-to-fact delivery is the proof.
+ - seon.cluster.armed-test/booting-spends-no-model-call - 48.642 s slowest pool member: every test boots a real armed cluster; fault-to-fact delivery is the proof.
+ - seon.cluster.armed-test/the-first-cluster-proc-fault-at-resume-becomes-a-fact - 48.642 s slowest pool member: every test boots a real armed cluster; fault-to-fact delivery is the proof.
+ - seon.cluster.armed-test/two-clusters-in-one-jvm-own-distinct-live-program-contexts - 48.642 s slowest pool member: every test boots a real armed cluster; fault-to-fact delivery is the proof.
+ - seon.cluster.boot-test/a-dead-holders-run-is-unclaimed-by-the-time-start-returns - 60.475 s pool: real boot, simulated dead holder, restart recovery, and custody read-back.
+ - seon.cluster.boot-test/a-delayed-stop-never-kills-a-replacement - Restarts a real cluster generation to falsify stale teardown.
+ - seon.cluster.boot-test/a-failed-boot-never-takes-the-repl - Starts a real prepl over deliberately corrupted boot storage.
+ - seon.cluster.boot-test/a-failed-stop-remains-addressable-and-retryable - Injects failure into real cluster teardown and retries it.
+ - seon.cluster.boot-test/a-generated-prefix-resumes-on-the-same-run-after-jvm-kill - Kills a child JVM mid-generation and proves same-run continuation.
+ - seon.cluster.boot-test/boot-order-completes-in-one-start - 46.987 s pool: complete real boot plus sibling-cluster acquisition and independent config proof.
+ - seon.cluster.boot-test/development-adoption-targets-one-of-two-cohosted-clusters - Real source publication and two cohosted clusters verify named adoption and independent program facts.
+ - seon.cluster.boot-test/explicit-refork-destroys-the-old-branch-and-forks-current-source - 192.600 s pool: complete publication, real start, destructive composed refork, replacement boot, and read-back.
+ - seon.cluster.boot-test/incompatible-sovereign-schema-refusal-steers-the-operator - Starts a degraded real cluster against an incompatible store.
+ - seon.cluster.boot-test/incremental-source-refresh-preserves-agreement-across-real-edits - Publishes real source edits to cover complete fallback and incremental branch agreement.
+ - seon.cluster.boot-test/incremental-source-refresh-publishes-without-touching-existing-clusters - 186.733 s pool: complete incremental publication dominates, followed by existing-cluster and later-fork agreement.
+ - seon.cluster.boot-test/operator-root-history-policy-is-creation-fixed - 133.791 s pool: fresh physical-store creation plus real starts/reopens under both history policies.
+ - seon.cluster.boot-test/orderly-stop-awaits-the-active-loop-pass - Stops a real cluster while one flow pass remains active.
+ - seon.cluster.boot-test/partial-clusters-refuse-and-fresh-clusters-are-current - 114.810 s pool: real boot, program-fact corruption/refusal, and fresh-cluster currentness proof.
+ - seon.cluster.boot-test/refork-does-not-collide-with-the-store-its-caller-already-holds - 158.206 s pool: published real store plus child-JVM operator refork and collision/read-back proof.
+ - seon.cluster.boot-test/repl-is-live-after-ordered-boot - 47.230 s pool: published-base clone, real ordered boot, live prepl call, and stop.
+ - seon.cluster.boot-test/same-jvm-same-name-restart-releases-the-registered-prepl - 49.939 s pool: real start/stop/start generation proves registered prepl release.
+ - seon.cluster.boot-test/selected-config-repairs-locked-state-before-consumers-arm - 53.139 s pool: real boot, locked-state config repair, restart, and pre-arm fact proof.
+ - seon.cluster.boot-test/stale-advertisements-read-as-absent - Starts and stops a real cluster before probing advertisements.
+ - seon.cluster.boot-test/start-allows-an-older-complete-program-without-indexing - Restarts a real sovereign cluster from its older program facts.
+ - seon.cluster.boot-test/two-instances-are-isolated - Starts two real clusters to prove process-root isolation.
+ - seon.cluster.program-restart-test/an-agent-definition-survives-restart-and-another-agent-calls-it - 67.758 s pool: real cluster stop/restart plus cross-agent acquisition and call proof.
+ - seon.cluster.store-test/an-in-process-refusal-never-drops-the-os-fence - Spawns a foreign JVM to prove an in-process refusal retains the operating-system fence.
+ - seon.cluster.store-test/the-flock-fences-across-processes - Spawns and terminates a child JVM to cover the operating-system store fence.
+ - seon.concurrency-independence-test/n-agents-fold-independently-on-one-live-cluster - 136.721 s pool: one real cluster folds 5- and 10-agent plans concurrently and verifies every receipt.
+ - seon.concurrency-independence-test/receipt-diagnostic-selects-only-present-failure-facts - 136.721 s pool: one real cluster folds 5- and 10-agent plans concurrently and verifies every receipt.
+ - seon.concurrency-streams-test/message-flood-retains-every-source-vector-entry - Races shared-cluster database writes and multi-message delivery.
+ - seon.concurrency-streams-test/unique-namespace-race-keeps-one-winner-and-one-flat-refusal - Races shared-cluster database writes and multi-message delivery.
+ - seon.config-application-test/applied-values-shape-the-running-system - Starts a real cluster to observe applied runtime configuration.
+ - seon.config-application-test/no-auth-is-consumed-as-the-credential-alternative - Starts a real cluster to exercise credential selection.
+ - seon.dev.dependency-cache-test/refresh-preserves-a-recorded-jvms-exact-cache-directory - Preserves delayed AOT classes across refresh and heap pressure.
+ - seon.dev.edit-feedback-test/split-schema-edits-run-admission-before-publication - 59.518 s pool: real hook subprocesses cover schema admission before edit-hook publication.
+ - seon.dev.fresh-operator-export-test/export-verb-produces-an-openable-queryable-store - 200.542 s pool: real start JVM, export JVM, store copy/reidentify, reopen, and query proof.
+ - seon.dev.fresh-operator-test/forced-reset-clears-an-exact-dead-process-record - 92.850 s pool: init/start JVM, SIGKILL, exact process-record fencing, complete reset/republication.
+ - seon.dev.fresh-operator-test/fresh-process-loads-schema-before-every-operator-instrumentation - 93.065 s pool: complete init plus fresh-process whole-image instrumentation and readiness proof.
+ - seon.dev.fresh-operator-test/init-owns-current-source-and-dormant-cluster-lifecycle - 110.837 s pool: complete publication JVM plus named fork/refork, start, readiness, and store read-back.
+ - seon.dev.fresh-operator-test/isolated-cached-boot-reports-refusal-then-reaches-readiness - 90.430 s pool: refused cold boot, complete init, cached real-JVM boot, and every readiness phase.
+ - seon.dev.fresh-operator-test/live-init-reloads-schema-runtime-and-moved-predicate-owners-before-admission - 110.095 s pool: real init/start JVM, live namespace damage, republication/reload, and admission proof.
+ - seon.dev.fresh-operator-test/populated-stopped-cluster-reopens-after-full-operator-restart - 114.689 s pool: init/fork, two real JVM identities, stop/restart, and populated-store read-back.
+ - seon.dev.fresh-operator-test/source-less-root-reset-republishes-and-reforks-default - 94.568 s pool: destructive reset performs complete republication and default refork in a real JVM.
+ - seon.flow-test/forced-child-jvm-death-preserves-committed-facts - Forcibly terminates a child JVM to cover committed-fact survival across process death.
+ - seon.oversight-test/a-booted-cluster-tells-its-live-fleet-story - Boots a real cluster and fetches its root page to cover live fleet integration.
+ - seon.print-test/p-tee-generated-grammar-cannot-disagree - 93.195 s pool: 200 generated text/Hiccup lexical-equivalence trials over print options.
+ - seon.print-test/p-total-generated-grammar-emits-and-readable-faces-round-trip - 94.303 s pool: 200 generated grammar validation, text/Hiccup emission, and EDN read-back trials.
+ - seon.render.transcript-test/every-generated-history-is-ordered-and-total - 66.666 s pool: 40 fresh-branch generated histories with dual AI/HTML ordering and totality proofs.
+ - seon.sci.eval-instrumentation-test/an-instrumented-dev-cluster-builds-an-attempt-ready-prompt - Published-root start, whole-image instrumentation, and one attempt-ready prompt.
+bin/test: run skipped coverage with: bin/test --full
+bin/test: persistent results NOT recorded: :seon.cluster.source/refused Test recording requires a published current-src.
+bin/test: PHASE coordinator-and-tests elapsed-seconds=176
+bin/test: removed successful isolated operator root /Users/sean/src/seon/tmp/adoption-freshness-gate-wt/tmp/test-runs/run.dhn536

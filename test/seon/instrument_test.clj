@@ -547,6 +547,41 @@
            "and the second pass wrapped no wrapper: malli unwraps to
             ::original before re-instrumenting")))))
 
+(deftest authored-contract-changes-rearm-without-reloading
+  (let [var-name (symbol (str "contract-freshness-" (random-uuid)))
+        candidate (intern 'seon.instrument-test var-name identity)
+        old-key :seon.instrument-test/old-request
+        new-key :seon.instrument-test/new-request
+        projection (schema/build-projection
+                    (assoc (schema/snapshot)
+                           old-key [:map [::value :int]]
+                           new-key [:map [::value [:or :int :string]]]))]
+    (try
+      (schema/call-with-projection
+       projection
+       (fn []
+         (alter-meta! candidate assoc :malli/schema [:=> [:cat old-key] :map])
+         (instrument/apply! {:seon.config/on-core-error :panic
+                             :seon.schema/projection projection})
+         (let [before @candidate]
+           (is (thrown? Exception (candidate {::value "new input"})))
+           (alter-meta! candidate assoc :malli/schema [:=> [:cat new-key] :map])
+           (instrument/apply! {:seon.config/on-core-error :panic
+                               :seon.schema/projection projection})
+           (is (not (identical? before @candidate)))
+           (is (identical? (mi/-f->original before) (mi/-f->original @candidate))
+               "Only the contract changed; the loaded function was not replaced.")
+           (is (= {::value "new input"} (candidate {::value "new input"})))
+           (let [failure (try (candidate {::value false})
+                              (catch Exception refusal refusal))]
+             (is (= :seon.instrument/contract-violated (:seon.error/kind (ex-data failure))))
+             (is (str/includes? (ex-message failure) (str new-key))))
+           (let [current @candidate]
+             (instrument/apply! {:seon.config/on-core-error :panic
+                                 :seon.schema/projection projection})
+             (is (identical? current @candidate))))))
+      (finally (ns-unmap 'seon.instrument-test var-name)))))
+
 (deftest prefix-related-sibling-vars-keep-their-own-contracts
   (instrumented!
    (fn [_]

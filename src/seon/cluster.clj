@@ -1988,7 +1988,8 @@
     (when-not (= (:seon.source/digest published)
                  (:seon.source/digest (current-source-snapshot)))
       (refused! "Source changed during development adoption; the next edit must converge it."
-                {:seon.source/commit-id (:seon.source/commit-id published)}))
+                {:seon.source/commit-id (:seon.source/commit-id published)
+                 :seon.error/diagnostic-cause ::source-changed-during-adoption}))
     ;; This fact means indexing, reload, SCI acquisition, and instrumentation
     ;; succeeded. A reload or acquisition
     ;; error leaves the old commit, so the next edit retries reconciliation.
@@ -2011,7 +2012,9 @@
   With changed paths, reuse the published manifest for safe same-identity
   upserts. Same-identity metadata changes reconcile the existing manifest.
   Structural changes or a missing/stale artifact require complete analysis;
-  snapshot differences supply any paths missed by an editing hook."
+  snapshot differences supply any paths missed by an editing hook.
+  A final source-change refusal retries publication/adoption once immediately;
+  the last adopted source database remains the reconciliation basis."
   {:malli/schema
    [:function
     [:=> [:cat :seon.boot/root] :seon.source/published]
@@ -2036,18 +2039,33 @@
            _ (report-source-progress! "store acquisition")
            held-store (acquire-root-store! store-dir)]
        (try
-         (report-source-progress! "source build")
-         (schema/call-with-projection
-          (schema/declaration-projection (schema.edn/packaged-forms))
-          (fn []
-            (let [before-publication (source/current held-store)
-                  published (if (seq changed-paths)
-                              (incremental-source-refresh! root held-store changed-paths)
-                              (full-source-refresh! root held-store))]
-              (when instance
-                (development-source-refresh! held-store instance
-                                             before-publication published))
-              (dissoc published :seon.source/upsert-rows))))
+         (loop [retry? true]
+           (let [result
+                 (try
+                   (report-source-progress! "source build")
+                   (schema/call-with-projection
+                    (schema/declaration-projection (schema.edn/packaged-forms))
+                    (fn []
+                      (let [before-publication (source/current held-store)
+                            published (if (seq changed-paths)
+                                        (incremental-source-refresh! root held-store changed-paths)
+                                        (full-source-refresh! root held-store))]
+                        (when instance
+                          (development-source-refresh! held-store instance
+                                                       before-publication published))
+                        (dissoc published :seon.source/upsert-rows))))
+                   (catch clojure.lang.ExceptionInfo failure
+                     (if (and retry?
+                              (= ::source-changed-during-adoption
+                                 (get-in (ex-data failure)
+                                         [:seon.boot/offense :seon.error/diagnostic-cause])))
+                       ::retry-development-source
+                       (throw failure))))]
+             (if (= ::retry-development-source result)
+               (do
+                 (report-source-progress! "development source changed; retrying adoption once")
+                 (recur false))
+               result)))
          (finally
            (release-root-store! store-dir)))))))
 

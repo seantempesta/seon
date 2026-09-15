@@ -1,0 +1,86 @@
+bin/test: snapshot differences from HEAD 466f562e6cc83574cdcaa2ebd5f0874ffe57e298:
+bin/test:   M	src/seon/cluster.clj
+bin/test:   M	src/seon/instrument.clj
+bin/test:   M	test/seon/instrument_test.clj
+bin/test:   A test/seon/adoption_contract_freshness_test.clj
+bin/test: end snapshot differences
+bin/test: PHASE snapshot elapsed-seconds=2
+bin/test: all 2 test JVM slots busy; waiting up to 1800s (SEON_TEST_SLOTS / SEON_TEST_SLOT_WAIT_SECONDS)
+bin/test: PHASE test-slot elapsed-seconds=75
+seon cache: lock wait-ms= 0 held-ms= 311
+#:seon.dev-cache{:digest "be25ec7be762a5aa35f684128ca7d48bc907fc7c3d9fe6c54f16192477057646", :source-digest "c37e60bd236eb4c4ac6c7e7a68521c3c328f6460a03cfd3cfed1906dbbc82d97", :namespaces 364, :status :current, :path "/Users/sean/src/seon/target/dev-dependency-classes/be25ec7be762a5aa35f684128ca7d48bc907fc7c3d9fe6c54f16192477057646", :test-digest "1e3ae2a280d916256cabcfec6694fab50c257c43b2684a400b7f81b88e5957b9", :test-classpath-file "/Users/sean/src/seon/target/test-classpaths/1e3ae2a280d916256cabcfec6694fab50c257c43b2684a400b7f81b88e5957b9.edn"}
+bin/test: PHASE dependency-cache-and-classpath elapsed-seconds=2
+bin/test: PHASE worker-checkouts elapsed-seconds=3
+bin/test: isolated operator root /Users/sean/src/seon/tmp/test-runs/run.Wnv41k pid=57496 selection=seon.instrument-test seon.adoption-contract-freshness-test
+bin/test: preparing or reusing published test base 1e3ae2a280d916256cabcfec6694fab50c257c43b2684a400b7f81b88e5957b9
+bin/test: CACHE LOCK acquired wait-ms= 0
+bin/test: REUSE cached base 1e3ae2a280d916256cabcfec6694fab50c257c43b2684a400b7f81b88e5957b9 elapsed-ms= 3 work-ms= 3
+bin/test: PHASE published-base elapsed-seconds=0
+WARNING: Using incubator modules: jdk.incubator.vector
+bin/test: PACKAGED TEST PROJECTION ACQUIRED pid= 57956 role= coordinator
+bin/test: 2026-09-15T18:54:01.201108Z START pid=57956 git=466f562e6cc83574cdcaa2ebd5f0874ffe57e298 namespaces=2 workers=1 silence-backstop=300s
+bin/test: 2026-09-15T18:54:01.201459Z LOAD 1/2 seon.instrument-test
+bin/test: 2026-09-15T18:54:01.356323Z LOADED 1/2 seon.instrument-test
+bin/test: 2026-09-15T18:54:01.356424Z LOAD 2/2 seon.adoption-contract-freshness-test
+bin/test: 2026-09-15T18:54:01.362620Z LOADED 2/2 seon.adoption-contract-freshness-test
+bin/test: 2026-09-15T18:54:01.362709Z SELECT building the program graph
+bin/test: 2026-09-15T18:54:10.700581Z TIER platform 0 tests
+bin/test: 2026-09-15T18:54:10.702367Z TIER bulk 26 tests
+bin/test: 2026-09-15T18:54:10.703082Z BEGIN worker=pool-1 task=seon.instrument-test/a-flat-error-value-at-a-contract-boundary-is-its-own-face
+bin/test: 2026-09-15T18:54:18.697025Z END worker=pool-1 elapsed-ms=7861 task=seon.instrument-test/a-flat-error-value-at-a-contract-boundary-is-its-own-face
+bin/test: 2026-09-15T18:54:18.697209Z BEGIN worker=pool-1 task=seon.instrument-test/a-public-multi-arity-does-not-reenter-its-instrumented-var
+bin/test: 2026-09-15T18:54:19.044280Z END worker=pool-1 elapsed-ms=242 task=seon.instrument-test/a-public-multi-arity-does-not-reenter-its-instrumented-var
+bin/test: 2026-09-15T18:54:19.044395Z BEGIN worker=pool-1 task=seon.instrument-test/a-sci-only-arity-miss-names-its-program-graph-arglists
+bin/test: 2026-09-15T18:54:20.081865Z END worker=pool-1 elapsed-ms=934 task=seon.instrument-test/a-sci-only-arity-miss-names-its-program-graph-arglists
+bin/test: 2026-09-15T18:54:20.081982Z BEGIN worker=pool-1 task=seon.instrument-test/a-violation-carries-bounded-arguments-only-when-it-can
+bin/test: 2026-09-15T18:54:20.458657Z END worker=pool-1 elapsed-ms=268 task=seon.instrument-test/a-violation-carries-bounded-arguments-only-when-it-can
+bin/test: 2026-09-15T18:54:20.458788Z BEGIN worker=pool-1 task=seon.instrument-test/a-wrong-shaped-call-throws-a-flat-error-value
+bin/test: 2026-09-15T18:54:20.734906Z END worker=pool-1 elapsed-ms=176 task=seon.instrument-test/a-wrong-shaped-call-throws-a-flat-error-value
+bin/test: 2026-09-15T18:54:20.735005Z BEGIN worker=pool-1 task=seon.instrument-test/an-invalid-core-error-mode-is-an-evidence-complete-value
+bin/test: 2026-09-15T18:54:21.000874Z END worker=pool-1 elapsed-ms=167 task=seon.instrument-test/an-invalid-core-error-mode-is-an-evidence-complete-value
+bin/test: 2026-09-15T18:54:21.001005Z BEGIN worker=pool-1 task=seon.instrument-test/applying-twice-is-applying-once
+bin/test: 2026-09-15T18:54:21.352984Z END worker=pool-1 elapsed-ms=252 task=seon.instrument-test/applying-twice-is-applying-once
+bin/test: 2026-09-15T18:54:21.353124Z BEGIN worker=pool-1 task=seon.instrument-test/applying-uses-the-acquired-projection-without-publishing-it
+bin/test: 2026-09-15T18:54:21.973463Z END worker=pool-1 elapsed-ms=522 task=seon.instrument-test/applying-uses-the-acquired-projection-without-publishing-it
+bin/test: 2026-09-15T18:54:21.973575Z BEGIN worker=pool-1 task=seon.instrument-test/applying-without-a-handed-projection-refuses-before-collection
+bin/test: 2026-09-15T18:54:22.176625Z END worker=pool-1 elapsed-ms=98 task=seon.instrument-test/applying-without-a-handed-projection-refuses-before-collection
+bin/test: 2026-09-15T18:54:22.176725Z BEGIN worker=pool-1 task=seon.instrument-test/authored-contract-changes-rearm-without-reloading
+bin/test: 2026-09-15T18:54:22.888832Z END worker=pool-1 elapsed-ms=611 task=seon.instrument-test/authored-contract-changes-rearm-without-reloading
+bin/test: 2026-09-15T18:54:22.888937Z BEGIN worker=pool-1 task=seon.instrument-test/cluster-policy-and-removal-preserve-the-jvm-wrappers
+bin/test: 2026-09-15T18:54:23.245559Z END worker=pool-1 elapsed-ms=257 task=seon.instrument-test/cluster-policy-and-removal-preserve-the-jvm-wrappers
+bin/test: 2026-09-15T18:54:23.245666Z BEGIN worker=pool-1 task=seon.instrument-test/contract-problems-are-semantic-once-never-a-serialized-print-tree
+bin/test: 2026-09-15T18:54:23.552541Z END worker=pool-1 elapsed-ms=208 task=seon.instrument-test/contract-problems-are-semantic-once-never-a-serialized-print-tree
+bin/test: 2026-09-15T18:54:23.552650Z BEGIN worker=pool-1 task=seon.instrument-test/dependency-free-linters-join-production-instrumentation
+bin/test: 2026-09-15T18:54:23.847492Z END worker=pool-1 elapsed-ms=191 task=seon.instrument-test/dependency-free-linters-join-production-instrumentation
+bin/test: 2026-09-15T18:54:23.847613Z BEGIN worker=pool-1 task=seon.instrument-test/interpreted-contracts-use-the-active-registry-and-core-error-dial
+bin/test: 2026-09-15T18:54:24.420487Z END worker=pool-1 elapsed-ms=473 task=seon.instrument-test/interpreted-contracts-use-the-active-registry-and-core-error-dial
+bin/test: 2026-09-15T18:54:24.420628Z BEGIN worker=pool-1 task=seon.instrument-test/jvm-and-interpreted-functions-arm-the-declared-guard
+bin/test: 2026-09-15T18:54:24.709537Z END worker=pool-1 elapsed-ms=188 task=seon.instrument-test/jvm-and-interpreted-functions-arm-the-declared-guard
+bin/test: 2026-09-15T18:54:24.709652Z BEGIN worker=pool-1 task=seon.instrument-test/many-problem-contract-violations-have-bounded-headlines
+bin/test: 2026-09-15T18:54:25.019027Z END worker=pool-1 elapsed-ms=209 task=seon.instrument-test/many-problem-contract-violations-have-bounded-headlines
+bin/test: 2026-09-15T18:54:25.019127Z BEGIN worker=pool-1 task=seon.instrument-test/optional-positional-nil-is-valid-under-instrumentation
+bin/test: 2026-09-15T18:54:25.291272Z END worker=pool-1 elapsed-ms=171 task=seon.instrument-test/optional-positional-nil-is-valid-under-instrumentation
+bin/test: 2026-09-15T18:54:25.291379Z BEGIN worker=pool-1 task=seon.instrument-test/prefix-related-sibling-vars-keep-their-own-contracts
+bin/test: 2026-09-15T18:54:25.575586Z END worker=pool-1 elapsed-ms=185 task=seon.instrument-test/prefix-related-sibling-vars-keep-their-own-contracts
+bin/test: 2026-09-15T18:54:25.575679Z BEGIN worker=pool-1 task=seon.instrument-test/projection-gates-inspect-the-complete-candidate-population
+bin/test: 2026-09-15T18:54:26.184266Z END worker=pool-1 elapsed-ms=509 task=seon.instrument-test/projection-gates-inspect-the-complete-candidate-population
+bin/test: 2026-09-15T18:54:26.184360Z BEGIN worker=pool-1 task=seon.instrument-test/re-evaluating-a-defn-silently-strips-instrumentation
+bin/test: 2026-09-15T18:54:26.519098Z END worker=pool-1 elapsed-ms=231 task=seon.instrument-test/re-evaluating-a-defn-silently-strips-instrumentation
+bin/test: 2026-09-15T18:54:26.519212Z BEGIN worker=pool-1 task=seon.instrument-test/refusal-value-projection-obeys-the-profile-and-html-keeps-the-whole-value
+bin/test: 2026-09-15T18:54:26.747327Z END worker=pool-1 elapsed-ms=129 task=seon.instrument-test/refusal-value-projection-obeys-the-profile-and-html-keeps-the-whole-value
+bin/test: 2026-09-15T18:54:26.747437Z BEGIN worker=pool-1 task=seon.instrument-test/registration-failure-names-the-var-and-authored-contract
+bin/test: 2026-09-15T18:54:26.995629Z END worker=pool-1 elapsed-ms=147 task=seon.instrument-test/registration-failure-names-the-var-and-authored-contract
+bin/test: 2026-09-15T18:54:26.995743Z BEGIN worker=pool-1 task=seon.instrument-test/registry-sized-contract-evidence-retains-the-offending-object
+bin/test: 2026-09-15T18:54:27.326130Z END worker=pool-1 elapsed-ms=231 task=seon.instrument-test/registry-sized-contract-evidence-retains-the-offending-object
+bin/test: 2026-09-15T18:54:27.326225Z BEGIN worker=pool-1 task=seon.instrument-test/the-selection-is-declared-vars-with-schemas-and-nothing-else
+bin/test: 2026-09-15T18:54:27.615733Z END worker=pool-1 elapsed-ms=189 task=seon.instrument-test/the-selection-is-declared-vars-with-schemas-and-nothing-else
+bin/test: 2026-09-15T18:54:27.615825Z BEGIN worker=pool-1 task=seon.instrument-test/the-work-launcher-api-is-collected-without-an-allowlist
+bin/test: 2026-09-15T18:54:27.883459Z END worker=pool-1 elapsed-ms=168 task=seon.instrument-test/the-work-launcher-api-is-collected-without-an-allowlist
+bin/test: 2026-09-15T18:54:27.883556Z BEGIN worker=pool-1 task=seon.adoption-contract-freshness-test/adopted-contracts-govern-both-sci-and-host-calls
+bin/test: 2026-09-15T18:58:09.795700Z END worker=pool-1 elapsed-ms=221788 task=seon.adoption-contract-freshness-test/adopted-contracts-govern-both-sci-and-host-calls
+
+Ran 26 tests containing 124 assertions.
+0 failures, 0 errors.
+WARNING: reset! already refers to: #'clojure.core/reset! in namespace: seon.fresh-operator, being replaced by: #'seon.fresh-operator/reset!
+bin/test: PHASE coordinator-and-tests elapsed-seconds=258
+bin/test: removed successful isolated operator root /Users/sean/src/seon/tmp/test-runs/run.Wnv41k

@@ -11,6 +11,25 @@ Extracted on 2026-09-08 from the instrumentation ownership issue: stable
 JVM wrappers and projection-local contracts do not make source reload atomic.
 The following dated evidence remains a separate adoption-owner obligation.
 
+## Remaining scope after the 2026-09-15 decision
+
+The selected repair provides current authored contracts after arming and one
+immediate retry when the final source-digest check refuses. It does not quiesce
+running agent/render calls or publish all JVM/SCI state in one atomic swap.
+Concurrent callers can still observe the adoption interval. Continuous source
+changes can exhaust the one retry; the second refusal remains explicit.
+
+The historical "wait until the next edit" window is the slice being closed:
+reconciliation already compares with the last adopted source database. The
+class regression forces one source change and verifies the automatic retry
+converges JVM/database contracts. The loop permits only one retry.
+Verification: the named-path gate passed 26 tests / 124 assertions; the
+isolated platform gate passed 85 tests / 514 assertions with a documented
+foreign fixture-helper correction. The real adoption child forced a refusal
+and verified automatic convergence in 221,788 ms. See the
+[landing note](../../prds/context-generation/research/adoption-contract-freshness-2026-09-15.md)
+for exact commands, transcripts, source evidence, and the remaining gate boundary.
+
 ## 2026-09-06 development adoption has two mixed-generation races
 
 The remaining interval is broader than one missing wrapper. The generated

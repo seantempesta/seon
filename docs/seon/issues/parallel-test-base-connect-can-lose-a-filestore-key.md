@@ -143,3 +143,15 @@ parallel pool with `NoSuchFileException` under
 `konserve.filestore/migrate-file-v1` during `konserve.tiered/sync-on-connect`;
 the runner's isolated confirmation of the same task passed (`confirmation
 parallel-only`). Same class, still open.
+
+## Adoption freshness recurrence — 2026-09-15 18:47Z
+
+Three-worker gate `run.2pMe5C` lost key
+`d3ab10ba-bfd0-42cf-8c3d-9fb1d3c910f0` in published base
+`1e3ae2a280d916256cabcfec6694fab50c257c43b2684a400b7f81b88e5957b9`
+while `seon.instrument-test/projection-gates-inspect-the-complete-candidate-population`
+connected its fixture. The same Konserve migration/tiered-sync stack occurred.
+Isolated confirmation passed in 9,079 ms with no earlier worker-global drift.
+The adoption child regression passed in 206,207 ms. The deleting actor is
+unestablished; the final lane gate uses one worker. See the
+[adoption landing note](../../prds/context-generation/research/adoption-contract-freshness-2026-09-15.md).
