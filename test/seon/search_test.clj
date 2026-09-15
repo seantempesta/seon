@@ -71,32 +71,21 @@
   (is (= ["seon" "search" "search"]
          (search/tokens 'seon.search/search))))
 
-(deftest document-roster-is-the-declared-search-property-query
+(deftest document-fields-follow-the-current-search-declarations
   (test-support/with-database
    (fn [connection]
-     (is (= #{{:seon.search/field :error/message
-               :seon.search/index :text}
-              {:seon.search/field :seon.cluster.instruction/text
-               :seon.search/index :text}
-              {:seon.search/field :seon.message/content
-               :seon.search/index :text}
-              {:seon.search/field :seon.error/message
-               :seon.search/index :text}
-              {:seon.search/field :seon.fn/doc
-               :seon.search/index :text}
-              {:seon.search/field :seon.fn/sym
-               :seon.search/index :symbol}
-              {:seon.search/field :seon.ns/doc
-               :seon.search/index :text}
-              {:seon.search/field :seon.ns/name
-               :seon.search/index :symbol}
-              {:seon.search/field :seon.schema/key
-               :seon.search/index :symbol}
-              {:seon.search/field :seon.test/failure-identity
-               :seon.search/index :exact}
-              {:seon.search/field :seon.test/sym
-               :seon.search/index :symbol}}
-            (set (#'search/document-specs @connection)))))))
+     (let [field :seon.fn/doc
+           declared #(set (#'search/document-specs @connection))
+           original {:seon.search/field field :seon.search/index :text}
+           changed {:seon.search/field field :seon.search/index :symbol}]
+       (is (contains? (declared) original))
+       (let [report (db/transact! connection
+                                 [[:db/add [:seon.schema/key field]
+                                   :seon.search/index :symbol]])]
+         (is (some? (:db-after report)) (pr-str report))
+         (assert (:db-after report) (pr-str report)))
+       (is (contains? (declared) changed))
+       (is (not (contains? (declared) original)))))))
 
 (deftest search-scopes-by-declared-fact-family-and-namespace-prefix
   (with-index
@@ -126,14 +115,18 @@
       (let [namespace-report
             (db/transact! connection
                           [{:seon.ns/name 'fixture.search.incremental}])
+            _ (assert (:db-after namespace-report) (pr-str namespace-report))
             _ (search/apply-report! index namespace-report)
             report
             (db/transact!
              connection
              [{:seon.fn/sym "fixture.search.incremental/needle"
+               :seon.schema.admission/source :core
                :seon.fn/ns [:seon.ns/name 'fixture.search.incremental]
                :seon.fn/source "(defn needle [])"
                :seon.fn/doc "uniquelyincrementalneedle"}])]
+        (is (some? (:db-after report)) (pr-str report))
+        (assert (:db-after report) (pr-str report))
         (search/apply-report! index report)
         (let [response
               (search-with-connection

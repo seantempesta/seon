@@ -52,6 +52,17 @@ were reread before continuing.
    sharing the admission owner's SCI/JVM name derivation. Parity B9 retains
    its exact record-name-and-fields expectation.
 
+### Fixture gate
+
+`SEON_TEST_WORKERS=1 SEON_TEST_SLOTS=1 bin/test --paths test/seon/effect_test.clj test/seon/search_test.clj -- seon.effect-test seon.search-test`
+
+The final fixture gate completed at 19:58:43Z: **19 tests / 102 assertions,
+0 failures / 0 errors**, exit 0. Snapshot basis `caddf111b`, content digest
+`50c977272bacb7e2a67dbb9ac80edae54e4fdd1bd0f4eb8a09d4029de0211f69`.
+An earlier isolated fixture gate reported 3 failures / 0 errors in the new
+search test's incomplete schema update; the final test changes the declared
+attribute through `:db/add`. All effect tests passed both isolated runs.
+
 ### Repair probes
 
 A non-writing live `seon.db/write-error` probe of the completed turn returned
@@ -222,7 +233,7 @@ decodes `:seon.cluster.eval/result-edn`. These source-history attributions
 are distinct from the measured pre-WIP tally; neither old September 8
 commit has been tested by this assignment.
 
-## Outcome and stop boundary
+## Initial diagnosis outcome and stop boundary (19:19Z)
 
 All four requested boundary snapshots produced **identical failed/erroring
 test-name multisets**, not just equal totals. The last run completed at
@@ -243,7 +254,7 @@ this is a diagnosis landing, not a fixed or green result. No repair
 
 Recurring subjects and remaining work are recorded in:
 
-- [Fixture declaration provenance](../../../seon/issues/test-program-rows-omit-admission-provenance.md).
+- [Fixture declaration provenance](../../../seon/issues/archive/test-program-rows-omit-admission-provenance.md).
 - [Ordinary MCP value rendering](../../../seon/issues/mcp-ordinary-values-bypass-the-value-renderer.md).
 - [Missing-marker admission](../../../seon/issues/missing-artifact-marker-refuses-its-own-admission-contract.md).
 - [REPL parity observations](../../../seon/issues/repl-parity-divergences.md).

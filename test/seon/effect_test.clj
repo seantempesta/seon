@@ -97,17 +97,27 @@
   [request]
   request)
 
+(defn- transact-fixture!
+  [connection tx-data]
+  (let [report (db/transact! connection tx-data)]
+    (when-not (:db-after report)
+      (throw (ex-info "Effect fixture transaction was refused." report)))
+    report))
+
 (defn- install-arm-probe!
   [connection]
   (let [handler-meta (meta #'arm-probe-handler)]
-    (db/transact!
+    (transact-fixture!
      connection
      [{:seon.schema/key :seon.effect-test/arm-probe-request
+       :seon.schema.admission/source :core
        :seon.schema/form
        (pr-str [:map
                 [:seon.effect-test/iterations :int]
                 [:seon.effect-test/gated? {:optional true} :boolean]])}
       {:seon.fn/sym "seon.effect-test/arm-probe-owner"
+       :seon.schema.admission/source :core
+       :seon.fn/ns [:seon.ns/name 'seon.effect-test]
        :seon.fn/spec
        (pr-str [:=> [:cat :seon.effect-test/arm-probe-request]
                 [:or :map :seon.error/value]])
@@ -119,12 +129,15 @@
 (defn- install-capability!
   [connection]
   (let [handler-meta (meta #'test-handler)]
-    (db/transact!
+    (transact-fixture!
      connection
      [{:seon.schema/key :seon.effect-test/request
+       :seon.schema.admission/source :core
        :seon.schema/form
        (pr-str [:map [:seon.effect-test/value :int]])}
       {:seon.fn/sym "seon.effect-test/capability-owner"
+       :seon.schema.admission/source :core
+       :seon.fn/ns [:seon.ns/name 'seon.effect-test]
        :seon.fn/spec
        (pr-str [:=> [:cat :seon.effect-test/request]
                 [:or :map :seon.error/value]])
@@ -133,17 +146,35 @@
        (symbol (str (ns-name (:ns handler-meta)))
                (str (:name handler-meta)))}])))
 
-(defn- cluster-config
-  "A COMPLETE effective-config row, because a partial one is not readable.
+(deftest capability-fixtures-install-complete-program-declarations
+  (test-support/with-database
+    (fn [connection]
+      (doseq [[install! owner request-schema]
+              [[install-capability! "seon.effect-test/capability-owner"
+                :seon.effect-test/request]
+               [install-arm-probe! "seon.effect-test/arm-probe-owner"
+                :seon.effect-test/arm-probe-request]]]
+        (is (some? (:db-after (install! connection))))
+        (let [declaration (db/pull @connection
+                                   '[:seon.schema.admission/source
+                                     :seon.effect/capability
+                                     {:seon.fn/ns [:seon.ns/name]}]
+                                   [:seon.fn/sym owner])]
+          (is (= :core (:seon.schema.admission/source declaration)))
+          (is (= 'seon.effect-test (get-in declaration [:seon.fn/ns :seon.ns/name])))
+          (is (symbol? (:seon.effect/capability declaration))))
+        (is (= :core (:seon.schema.admission/source
+                      (db/pull @connection [:seon.schema.admission/source]
+                               [:seon.schema/key request-schema]))))))))
 
-  `config/effective` answers with its missing-facts error the moment one
-  required dial is absent, so a test that needs a real dial value — here the
-  background time limit — transacts the shipped defaults with that one dial
-  overridden rather than a two-key stub."
+(defn- cluster-config
+  "Compile the desired config row, including its declaration provenance."
   [background-limit-ms]
-  (assoc (config/defaults)
-         :seon.config/cluster "default"
-         :seon.config.effect.background/time-limit-ms background-limit-ms))
+  (:seon.config/desired-row
+   (config/compile-manifest
+    {:seon.boot/cluster-name "default"
+     :seon.config/manifest
+     {:seon.config.effect.background/time-limit-ms background-limit-ms}})))
 
 (defn- request-context
   ([connection]
@@ -163,11 +194,12 @@
 (deftest background-settlement-carries-its-connection-across-a-thread-hop
   (test-support/with-database
     (fn [connection]
-      (db/transact!
+      (transact-fixture!
        connection
        [(cluster-config 60000)
         {:seon.agent/id "effect-agent"}
         {:seon.turn/id "effect-run"
+         :seon.turn/opened-tx "datomic.tx"
          :seon.turn/agent
          [:seon.agent/id "effect-agent"]}])
       (install-capability! connection)
@@ -241,8 +273,10 @@
   ;; end it.
   (test-support/with-database
     (fn [connection]
-      (db/transact! connection [(cluster-config 600000)
-                                {:seon.turn/id "effect-run"}])
+      (transact-fixture! connection [(cluster-config 600000)
+                                {:seon.turn/id "effect-run"
+                                 :seon.turn/agent {:seon.agent/id "effect-agent"}
+                                 :seon.turn/opened-tx "datomic.tx"}])
       (install-arm-probe! connection)
       (let [ctx @probe-ctx]
         (testing "entrances made inside the handler reach the requester's arm"
@@ -291,11 +325,12 @@
   ;; entrance and the receipt would settle as a handler failure.
   (test-support/with-database
     (fn [connection]
-      (db/transact!
+      (transact-fixture!
        connection
        [(cluster-config 60000)
         {:seon.agent/id "effect-agent"}
         {:seon.turn/id "effect-run"
+         :seon.turn/opened-tx "datomic.tx"
          :seon.turn/agent [:seon.agent/id "effect-agent"]}])
       (install-arm-probe! connection)
       (let [events (async/chan 4)
@@ -380,11 +415,12 @@
   (let [captured (promise)]
     (test-support/with-database
       (fn [connection]
-        (db/transact!
+        (transact-fixture!
          connection
          [(cluster-config config-limit-ms)
           {:seon.agent/id "effect-agent"}
           {:seon.turn/id "effect-run"
+           :seon.turn/opened-tx "datomic.tx"
            :seon.turn/agent [:seon.agent/id "effect-agent"]}])
         (install-arm-probe! connection)
         (let [events (async/chan 4)
@@ -515,9 +551,10 @@
   (testing "a cluster with no background limit refuses the submission"
     (test-support/with-database
       (fn [connection]
-        (db/transact! connection [{:seon.config/cluster "default"}
-                                  {:seon.agent/id "effect-agent"}
-                                  {:seon.turn/id "effect-run"}])
+        (transact-fixture! connection [{:seon.agent/id "effect-agent"}
+                                  {:seon.turn/id "effect-run"
+                                 :seon.turn/agent {:seon.agent/id "effect-agent"}
+                                 :seon.turn/opened-tx "datomic.tx"}])
         (install-arm-probe! connection)
         (let [result
               (binding [effect/*request-context*
@@ -536,9 +573,11 @@
   (testing "a nonsense explicit limit is refused, never treated as absent"
     (test-support/with-database
       (fn [connection]
-        (db/transact! connection [(cluster-config 60000)
+        (transact-fixture! connection [(cluster-config 60000)
                                   {:seon.agent/id "effect-agent"}
-                                  {:seon.turn/id "effect-run"}])
+                                  {:seon.turn/id "effect-run"
+                                 :seon.turn/agent {:seon.agent/id "effect-agent"}
+                                 :seon.turn/opened-tx "datomic.tx"}])
         (install-arm-probe! connection)
         (let [basis (db/basis-t @connection)]
           (is (thrown? clojure.lang.ExceptionInfo
@@ -555,9 +594,11 @@
   (test-support/with-database
     (fn [connection]
       (install-capability! connection)
-      (db/transact!
+      (transact-fixture!
        connection
        [{:seon.fn/sym "seon.effect-test/pure-caller"
+         :seon.schema.admission/source :core
+         :seon.fn/ns [:seon.ns/name 'seon.effect-test]
          :seon.fn/calls
          [[:seon.fn/sym "seon.effect-test/capability-owner"]]}])
       (let [database @connection]
@@ -575,8 +616,10 @@
   (test-support/with-database
     (fn [connection]
       (reset! handler-calls [])
-      (db/transact! connection [(cluster-config 600000)
-                                {:seon.turn/id "effect-run"}])
+      (transact-fixture! connection [(cluster-config 600000)
+                                {:seon.turn/id "effect-run"
+                                 :seon.turn/agent {:seon.agent/id "effect-agent"}
+                                 :seon.turn/opened-tx "datomic.tx"}])
       (install-capability! connection)
       (let [first-result
             (binding [effect/*request-context* (request-context connection)]
@@ -629,7 +672,7 @@
   ;; nothing is a refusal naming the bound and the bytes it reached.
   (test-support/with-database
     (fn [connection]
-      (db/transact! connection [(cluster-config 600000)])
+      (transact-fixture! connection [(cluster-config 600000)])
       (install-capability! connection)
       (let [context (assoc-in (request-context connection)
                               [:seon.sci.admit/caps
@@ -655,8 +698,10 @@
 (deftest interrupted-handlers-mark-the-open-receipt-without-a-result
   (test-support/with-database
     (fn [connection]
-      (db/transact! connection [(cluster-config 600000)
-                                {:seon.turn/id "effect-run"}])
+      (transact-fixture! connection [(cluster-config 600000)
+                                {:seon.turn/id "effect-run"
+                                 :seon.turn/agent {:seon.agent/id "effect-agent"}
+                                 :seon.turn/opened-tx "datomic.tx"}])
       (install-capability! connection)
       (with-redefs-fn
         {(ns-resolve 'seon.effect 'dispatch)
@@ -678,15 +723,17 @@
 (deftest guarded-sci-evaluation-supplies-the-effect-identity-context
   (test-support/with-database
     (fn [connection]
-      (db/transact! connection [(cluster-config 600000)
-                                {:seon.turn/id "effect-run"}
-                                {:seon.cluster.eval/id
-                                 (turn/receipt-identity "effect-run" 3)
-                                 :seon.cluster.eval/run
-                                 [:seon.turn/id "effect-run"]
-                                 :seon.cluster.eval/ordinal 3
-                                 :seon.cluster.eval/at (Date.)}])
+      (transact-fixture! connection [(cluster-config 600000)
+                                {:seon.turn/id "effect-run"
+                                 :seon.turn/agent {:seon.agent/id "effect-agent"}
+                                 :seon.turn/opened-tx "datomic.tx"}])
       (install-capability! connection)
+      (transact-fixture!
+       connection
+       (turn/receipt-start-tx
+        {:seon.turn/id "effect-run"
+         :seon.cluster.eval/ordinal 3
+         :seon.cluster.eval/at (Date.)}))
       (let [ctx (test-support/fork-cluster-ctx connection)
             effective (config/defaults)
             evaluation
@@ -696,6 +743,7 @@
                    "#'seon.effect-test/capability-owner "
                    "{:seon.effect-test/value 9})")
               :seon.cluster.eval/ns [:seon.ns/name 'user]
+              :seon.db/db @connection
               :seon.sci.admit/caps (config/result-caps effective)
               :seon.sci.eval/time-limit-ms
               (:seon.config.eval/time-limit-ms effective)
@@ -717,16 +765,15 @@
 (deftest recovery-marks-open-receipts-interrupted-without-refiring
   (test-support/with-database
     (fn [connection]
-      (let [opened-at (Date. 1699999999000)
-            now (Date. 1700000000000)]
-        (db/transact! connection [{:seon.agent/id "effect-agent"}])
-        (db/transact!
+      (let [now (Date. 1700000000000)]
+        (transact-fixture! connection [{:seon.agent/id "effect-agent"}])
+        (transact-fixture!
          connection
          (turn/open-tx
           {:seon.turn/id "effect-run" :seon.turn/agent [:seon.agent/id "effect-agent"] :seon.turn/opened-tx "datomic.tx"}))
 
         (install-capability! connection)
-        (db/transact!
+        (transact-fixture!
          connection
          [{:seon.effect/id (id/digest 12 [:seon.effect/id "effect-run" 3 0])
            :seon.effect/run [:seon.turn/id "effect-run"]
@@ -735,7 +782,7 @@
            :seon.effect/ordinal 0
            :seon.effect/request-edn "{}"
            :seon.effect/opened-at now}])
-        (db/transact!
+        (transact-fixture!
          connection
          (turn/recover-tx
           {:seon.turn/id "effect-run"
