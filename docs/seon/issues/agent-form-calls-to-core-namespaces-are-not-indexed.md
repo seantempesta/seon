@@ -5,7 +5,7 @@ severity: friction
 tags: [issue, agent, sci, class/n7, wave/program-graph-indexing]
 ---
 
-# Agent run forms record no call edge to a core function they call
+# Ordinary evaluations lack persisted program call edges
 
 ## Problem
 
@@ -108,3 +108,31 @@ N7 implementation commit `5deb40e4e` changes namespace relevance indexing,
 not this unproven evaluation edge. The class remains open at this boundary;
 the green owner/platform gates do not prove ordinary evaluation persistence.
 See [the landing note](../../prds/context-generation/research/n7-query-classification-2026-09-15.md).
+
+## N7 evaluation-edge slice — 2026-09-15
+
+Commit `f402c5d3d` repairs the shared analyzer's ordinary-form contract and
+projection. A missing declaration row is now an absent optional batch member;
+the nullable positional API no longer inserts a forbidden nil. Ordinary forms
+return their resolved `:seon.fn/calls` refs in the existing first tuple member.
+Declaration edges remain solely on the declaration row.
+
+Default's armed JVM probe returned both `seon.db/q` and `my.turn/wait` refs
+in 18 ms with its ordinary database value. A mixed batch also preserved local
+shadowing and source spans. On a canonical isolated fixture, persisting its
+analyzed function and test rows made `tests-reaching` return the test and
+include it in transitive `my.turn/wait` reach.
+
+**Still open:** protected `src/seon/turn.clj` selects only declarations for
+analysis, so ordinary evaluation persistence is not repaired by this commit.
+The [residual landing](../../prds/context-generation/research/n7-eval-call-edges-2026-09-15.md)
+contains the exact proposed recorder diff and the full virtual-turn acceptance
+proof still required. No second parser, edge family, or synthetic callable
+identity was introduced.
+
+The existing declaration regression passed 5 assertions in default. The new
+canonical regression encounters an independently verified old contract in the
+cached fixture; its result is 1 pass, 0 failures, 1 error before the ordinary-form
+assertions. The fixture issue is linked from the landing. The isolated gate
+exited 75 before launching tests under the orchestrator-only policy; the
+namespace and platform gates are queued, not claimed green.
