@@ -39,3 +39,5 @@ Responsive screenshots were inspected; hash and counts are in the landing note.
 Exercise real SCI directory calls and the actual current pair, including a qualified/aliased call, an elided result, and no directory observations. Never maintain a third decoder for the column layout. Compare the observed membership through the owning data boundary; do not infer missing functions from presentation cuts.
 
 See [the audit](../../prds/context-generation/research/audit-1-2026-09-15.md) for scope, change counts, and verification limits.
+
+Resolution commit: `f9ed564ef`.

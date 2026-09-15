@@ -36,3 +36,5 @@ were captured and inspected. See the consolidate-debug landing note for hash.
 Use the real canonical virtual-turn and provider paths. A virtual reply remains authored input in the body and is never included as generated context. Aliased or nested disposition-producing forms agree with directly spelled calls; a shown value alone cannot assert completion.
 
 See [the audit](../../prds/context-generation/research/audit-1-2026-09-15.md) for scope, change counts, and verification limits.
+
+Resolution commit: `0439448cb`.

@@ -39,3 +39,5 @@ page order preserves the walk. A renamed renderer retains the declared title in
 the canonical regression. Fast 15/227 and isolated 15/231 assertions pass.
 The landing note records the commit, screenshots, and protected schema needs for
 short titles and task-first ordering; missing titles remain explicit schema keys.
+
+Resolution commit: `53a9d5db5`.

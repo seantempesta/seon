@@ -42,3 +42,5 @@ Commit: the A08 commit containing this resolution (hash recorded in the landing 
 Ordinary, subject, raw-prompt, and Datastar debug routes retain entity inspection and actions but share one history assembly. Route-level tests cover the replacement; the skill describes the observed UI. Confirm selectors are no longer emitted before removing their CSS.
 
 See [the audit](../../prds/context-generation/research/audit-1-2026-09-15.md) for scope, change counts, and verification limits.
+
+Resolution commit: `1d5edb65c`.

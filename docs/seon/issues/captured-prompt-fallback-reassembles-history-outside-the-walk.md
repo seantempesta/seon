@@ -46,3 +46,5 @@ equality only verifies. A canonical regression requires a typed mismatch when
 canonical bytes change even though repulling saved entries could repair them.
 Fast 10/162 and isolated 15/236 assertions pass. The landing note records the
 commit and the inspected default session (55 emissions, 44,187 history bytes).
+
+Resolution commit: `25bce52a0`.

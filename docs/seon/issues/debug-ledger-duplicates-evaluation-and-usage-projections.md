@@ -41,3 +41,6 @@ this note: fast 15 tests / 195 assertions; isolated gate 15 / 199, both green.
 Absent-agent diagnostics agree across callers. The same usage row has the same availability/totals everywhere. Interrupted/output-only/error evaluations have consistent summaries, and strip byte totals equal the acquired current history including generated annotations.
 
 See [the audit](../../prds/context-generation/research/audit-1-2026-09-15.md) for scope, change counts, and verification limits.
+
+Resolution commit: `209a73fd2`.
+Retained-call performance refinement: `5613bbf17` (three warm GETs: 0.704460, 0.755098, 0.741225 seconds).

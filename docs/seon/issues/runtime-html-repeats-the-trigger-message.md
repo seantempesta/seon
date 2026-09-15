@@ -42,3 +42,5 @@ the complete notification to the message pair. A canonical runtime regression
 requires the exact content once. Fast 11/188 and isolated 11/192 assertions pass.
 Both Runtime screenshots show one short label plus one complete message, at
 1440 and 700. Commit and screenshot log are recorded in the lane landing note.
+
+Resolution commit: `d5a25d704`.

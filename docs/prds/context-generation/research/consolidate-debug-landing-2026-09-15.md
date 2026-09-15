@@ -1,301 +1,188 @@
 ---
 type: research
-status: active
+status: complete
 tags: [research, render, web, wave/verification-audit]
 ---
 
 # Consolidate-debug — 2026-09-15
 
-## Scope and inherited boundary
+## Result
 
-Read AGENTS.md, audit-1, its eight assigned issue notes, the active plan
-README and working edge end to end. Applied data-oriented-clojure, repl,
-clojure-testing, and datastar-web-ui skills. A03 is last by owner correction:
-`src/seon/render.clj` and `src/seon/cluster/prompt.clj` have concurrent edits.
-No default lifecycle, reseed, provider request, or foreign session operation
-is authorized by this lane.
+Eight findings landed in the corrected order, with an additional performance
+refinement before A07. Source, tests, CSS, and skill changes total **485 lines
+added, 543 removed: net −58**. Documentation and evidence scripts are excluded
+from these counts. Every issue note records its resolving commit.
 
-At entry default PID 23729 served HTTP 7994 and PREPL 54412. MCP runtime
-status returned MapEntry-to-IPersistentMap ClassCastException at RT.java:911;
-recorded in the existing development MCP issue. Supported JVM evaluation
-`(clojure-version)` returned `1.12.5` in 1 ms. Health is unavailable; JVM
-evaluation works. Existing dirty source/tests and untracked files were preserved.
+| Finding | Commit | Added | Removed | Net |
+|---|---|---:|---:|---:|
+| A08 | `1d5edb65c` | 64 | 248 | −184 |
+| A09 | `209a73fd2` | 129 | 104 | +25 |
+| A02 | `0439448cb` | 49 | 34 | +15 |
+| A01 | `f9ed564ef` | 43 | 28 | +15 |
+| A04 | `cb967dd40` | 46 | 19 | +27 |
+| Performance | `5613bbf17` | 96 | 40 | +56 |
+| A07 | `53a9d5db5` | 30 | 46 | −16 |
+| A13 | `d5a25d704` | 10 | 4 | +6 |
+| A03 | `25bce52a0` | 18 | 20 | −2 |
 
-## Dependency ledger
+Read AGENTS.md, [audit-1](audit-1-2026-09-15.md), all eight linked issue notes,
+the active plan README and working edge end to end. Applied the
+data-oriented-clojure, repl, clojure-testing, datastar-web-ui, datahike, and
+llm-providers skills. No delegation, default stop/refork/reseed, message send,
+foreign session operation, or `--all`/`--full` run occurred.
 
-- Clojure prepl evaluates on the host JVM and returns terminal events:
-  `reference-code/clojure/src/clj/clojure/core/server.clj:228`.
-- The existing session acquires history through `seon.render/acquire-context!`;
-  `src/seon/render/transcript.clj`, `render-session`, owns its display.
-- Entity inspection is acquired by `debug-page-result`; `debug-response`
-  composes inspection with the session. No second evaluation join is needed.
-- Canonical tests use `seon.test-support/with-database` and `with-server`;
-  the path snapshot gate arms the production contracts.
+## Changes and verification
+
+- **A08:** deleted Context-now assembly, feed targets, obsolete CSS/tests and
+  the stale skill assertion. Entity inspection uses the session component.
+  The two authorized `turn_test.clj` groups migrated from deleted helpers to
+  `render-ledger-turn`: exact source/namespace, no clipping/read-evidence leak,
+  unchanged database basis, and each generated source remain asserted.
+  The commit message records before/after assertions. `bin/css` succeeded;
+  `output.css` was not committed. Initial fast 39/580 and isolated 39/584
+  runs exposed five evaluation/history failures retained for A09; the later
+  render gates below passed after the owning provenance repair landed.
+- **A09:** one `seon.eval/of-agent` membership/order/absence owner with an
+  additive selector arity; one ledger summary for emissions, outcomes, bytes,
+  and usage. Net growth is the owner contract and regressions, not a persisted
+  summary. Fast 15/195, isolated 15/199 assertions passed.
+- **A02:** one turn-kind derivation feeds cards, grouping, and strip. Completion
+  comes from disposition; source-name scanning is deleted. Virtual turns retain
+  authored replies and stop generated-context grouping. Net growth is regression
+  coverage (production +1). Fast 10/146, isolated 10/150 passed.
+- **A01:** directory observations follow saved read evidence and the directory
+  owner's declared renderer. Removed duplicate public-function query and source
+  operator recognition. Missing/elided/unrecognized observations are unknown.
+  Net growth covers qualified-directory and unavailable regressions.
+  Fast 10/151, isolated 10/155 passed.
+- **A04:** compares captured history bytes after excluding the owner's turn
+  frame. Removed billing tolerance and billing-derived stability. Totals say
+  “Billing tokens.” Regression varies captures independently of counters and
+  verifies missing observations. Fast 10/157, isolated 10/161 passed.
+- **Performance:** history now carries saved rows alongside rendered bytes;
+  the ledger's second query is deleted. History and per-attempt captured-prefix
+  projections reuse the existing render-call cache. History uses existing
+  candidate-call selection and one profile per acquisition. No new cache or
+  expiry policy. Added a regression proving reuse and invalidation of changed
+  saved bytes. The deferred-session test requires one current-history acquisition
+  and no additional selected-prompt acquisition. Fast 15/225, isolated 15/229
+  passed. Net +56 is retained-call wiring and regression evidence.
+- **A07:** deleted renderer-symbol labels, source-token classification, and
+  code-literal page ranks. Titles derive from relationship/schema declarations;
+  page order preserves the walk. A renderer rename retains its declared title.
+  Fast 15/227, isolated 15/231 passed. See the schema boundary below.
+- **A13:** trigger/history links carry only the relationship/identity label;
+  the message pair renders complete content once. Production −2; the exact-once
+  regression accounts for net growth. Fast 11/188, isolated 11/192 passed.
+- **A03:** reread shared `render.clj` immediately before its single patch; its
+  diff was clean, and the other lane's landed frame comparison was preserved.
+  Deleted the repull/reformat/rejoin retry and the session's separate row pull.
+  A real saved-history regression requires a typed mismatch even when repulling
+  the unchanged rows could repair altered canonical bytes. Corrected its missing
+  connection fixture input. Fast 10/162, isolated 15/236 passed.
+
+Counts above are tests/assertions. Iteration used `bin/test-fast --paths ... --`
+and commits used `bin/test --paths ... --` with the affected render namespaces;
+A08 additionally covered the explicitly authorized turn test migration.
+
+Final platform gate:
+
+```sh
+bin/test --platform --paths src/seon/render.clj src/seon/render/transcript.clj test/seon/render/web_debug_test.clj --
+```
+
+**84 tests, 505 assertions, zero failures or errors.** HEAD-plus-paths excludes
+foreign uncommitted edits. This is the platform tier, not a full-suite claim.
+
+## Warm GET timing
+
+Read-only default measurements, three samples each:
+
+```sh
+curl -s -o /dev/null -w '%{time_total}\n' http://127.0.0.1:7994/ns/my.agents.juniper/debug
+```
+
+| State | Sample 1 | Sample 2 | Sample 3 |
+|---|---:|---:|---:|
+| Before | 1.764572 s | 1.572908 s | 1.759266 s |
+| Accepted warm result | 0.704460 s | 0.755098 s | 0.741225 s |
+
+One warm-up GET preceded the accepted samples. The first GET after adoption
+had taken 1.162832 s; the measured feature here is warm GET latency. Acceptance
+followed convergence `6aa8de2b-2803-5019-82e6-a5c473b1bd29`, before Juniper's
+live facts changed during the later A13 screenshots.
+
+The [timing probe](consolidate_debug_timing_2026_09_15.clj) binds the same schema
+projection as HTTP. Initial corrected measurements: rows 5.04 ms, evaluation
+acquisition 1552.50 ms, summary 0.26 ms, prefix 370.33 ms, whole panel 673.89 ms,
+ledger 2162.70 ms. The panel includes prefix cost. Unbound preliminary probes
+timed out and are not representative HTTP evidence. The cache-only iteration
+was rejected at 3.186407/3.023597/3.021544 s. One history acquisition, existing
+candidate selection, and retained per-attempt prefixes produced the accepted
+result; summary reduction was not the expensive mechanism.
 
 ## Screenshot log
 
-Baseline `tmp/consolidate-debug/before-{debug,agent}-{1440,700}.png`:
-all four screenshots inspected; HTTP 200, zero horizontal overflow.
-Ledger/header wrap at 700; namespace plan remains full width. Existing
-runtime trigger duplication and billing-derived prefix check are assigned
-later in this lane. Baseline script is read-only; it creates no turns.
+The committed [Playwright script](consolidate_debug_browser_2026_09_15.cjs) uses
+`NODE_PATH=/Users/sean/.npm/_npx/e41f203b7505f1fb/node_modules`. At each label,
+both `/ns/my.agents.juniper/debug` and `/ns/my.agents.juniper` were captured at
+1440 and 700 and LOOKed at. Every route returned 200 with zero horizontal
+overflow. Inspection was also captured; A13 added dedicated Runtime captures.
+Screenshot scratch is deleted after review, per the assignment.
 
-## Findings
+| Label | Visual observation |
+|---|---|
+| before | Baseline ledger/header and full-width plan. |
+| a08-authorized | Session replaces Context-now; inspection has one navigation/header. |
+| a09 | Ledger, panel, plan intact after projection consolidation. |
+| a02 | Authorship/disposition changes preserve layout. |
+| a01 | Directory unavailable count is explicit; layout intact. |
+| a04 | Billing label and captured-prefix check preserve panel/ledger. |
+| perf | Four main/debug screenshots inspected; layout matches A04. |
+| a07 | Schema-key labels and Identity-before-Plan visibly replace literal labels/order. |
+| a13 | Four page plus two Runtime screenshots inspected: short trigger label and one complete message. |
+| a03 | Six main/debug/inspection screenshots inspected: selected turn 36 shows 55 emissions and 44,187 history bytes without a capture-mismatch error. |
 
-### A03 faithful history, no retry
+Juniper's live facts changed during A13 captures: a new opening at 00:02:45,
+progressing plan/turn counts, and later turn 36. These are not presented as an
+unchanged fixture comparison. The lane did not reseed or initiate those turns.
+A03 definitions reloaded but adoption reported “Source changed during development
+adoption” at `6aa8e1ce-5f70-56ae-99b2-56994ea7f558`; its browser observations
+prove loaded behavior, not full publication convergence.
 
-Reread shared `src/seon/render.clj` before the single patch. Its working-tree
-diff was clean at that point; the other lane's landed frame comparison is
-preserved. Deleted the repull/reformat/rejoin retry and history-field replacement.
-Capture equality remains verification. The session now consumes the saved rows
-carried by history instead of pulling them again. Source: 4 added, 20 removed;
-regression: 14 added (net −2). Fast 10/162 assertions pass after supplying the
-canonical test request's required connection. The regression deliberately
-changes canonical bytes while leaving real saved rows intact, and requires
-a mismatch rather than a reconstruction. Isolated 15/236 assertions pass.
-All six `a03-{debug,agent,inspection}-{1440,700}.png` screenshots LOOKed at:
-zero overflow, intact ledger/panel, and selected turn 36 displays 55 emissions
-and 44,187 history bytes without a capture-mismatch error. Every browser route
-returned 200. Definitions reloaded, but adoption reported “Source changed during
-development adoption” at `6aa8e1ce-5f70-56ae-99b2-56994ea7f558`; browser evidence
-proves loaded behavior, not full publication convergence. No shared prompt owner
-edit was required.
+## Ownership and remaining declaration needs
 
-### A13 one trigger message
+**A07 schema boundary:** `:seon.agent/plan`, `:seon.agent/settings`,
+`:seon.agent/runtime`, and note/inbox relationship declarations lack human
+`:title` metadata. Their owners are `resources/seon/schemas/seon.agent.edn`,
+`my.note.edn`, and `seon.message.edn`. Titles remain explicit schema keys.
+The walk places the root Identity block before the declared children. Restoring
+short prose titles and the old task-first placement requires authored title
+and root-placement metadata at the declaration seam; no renderer roster or rank
+was retained to conceal that missing fact. A07 is readable and overflow-free,
+but is not claimed pixel-identical to the old order.
 
-`runtime-message-link` now contains only the relationship/identity label.
-The existing message pair remains the sole content renderer. Source: 1 added,
-3 removed; regression: 9 added, 1 removed (net +6 justified by an exact-content
-once assertion). Fast 11/188 and isolated 11/192 assertions pass.
-Adoption converged at `6aa8dfff-3c02-5ac5-879f-4b864cbe03ac`.
-All four `a13-{debug,agent}-{1440,700}.png` plus both `a13-runtime-*.png`
-LOOKed at: short “Woke on Message from root” and one complete notification;
-zero overflow. All six browser routes returned 200. Juniper's live facts
-changed during these read-only captures (new opening at 00:02:45, progressing
-plan/turns); these counts are not compared as an unchanged fixture. This lane
-did not reseed, send a message, or operate default's lifecycle.
+Protected source owners were preserved. No edit to `cluster/prompt.clj`,
+`repl.clj`, `db.clj`, `turn.clj`, `cluster/**`, `print.cljc`, or schemas was
+required. `render.clj` received only the A03 retry deletion. Later concurrent
+CSS/source/test edits remain untouched; generated `output.css` is not committed.
 
-### A07 declaration boundary
+At entry MCP runtime status threw MapEntry-to-IPersistentMap ClassCastException;
+supported JVM evaluation worked. Recorded in the existing
+[development MCP issue](../../../seon/issues/dev-mcp-envelopes-misdirect-errors-and-sprawl-status.md).
+No raw-prepl workaround or foreign-session operation was used.
 
-The renderer-symbol map, source-token classification, and `page-order` ranks
-are deleted. Saved pull evidence identifies the declared relationship; a
-unique schema renderer declaration supplies the fallback schema identity.
-`:title` comes from that declaration, otherwise the schema key is shown
-explicitly. The walk's declared unit order is preserved by the page.
+## Dependency ledger and cleanup
 
-Protected schema need: human titles are absent on `:seon.agent/plan`,
-`:seon.agent/settings`, `:seon.agent/runtime`, and the note/inbox relationship
-declarations (`resources/seon/schemas/seon.agent.edn`, `my.note.edn`,
-`seon.message.edn`). Add their authored `:title` at that declaration seam if
-short prose labels are wanted; this lane cannot invent that metadata in a
-renderer or edit the context-renders lane's schemas. Production order now
-follows `:seon.agent/agent`'s `:seon.render/units`, rather than a second rank
-list. The root Identity block precedes declared children in the current walk;
-preserving the old task-first placement requires the declaration seam to specify
-root placement as well. No renderer rank was retained to conceal that missing fact.
-Source/tests: 30 added, 46 removed, net −16. Fast 15/227 and isolated 15/231
-assertions pass. Adoption converged at `6aa8df1e-740c-518c-9396-1488c54b4bdf`.
-All four `a07-{debug,agent}-{1440,700}.png` screenshots LOOKed at: readable,
-zero overflow; schema-key labels and Identity-before-Plan are visible changes,
-not a claim of pixel-identical order. All six browser routes returned 200.
+- Clojure prepl: `reference-code/clojure/src/clj/clojure/core/server.clj:228`.
+- Existing retained calls and shared cache: `src/seon/render.clj:1236,1408`.
+- One saved-history walk and acquisition: `src/seon/render/walk.clj:875`,
+  `src/seon/render/web.clj:2400`; canonical database fixture and armed SCI.
+- Ledger summary and captured prefix: `src/seon/render/transcript.clj:1483,1821`.
+- Capture equality verifier: `src/seon/render.clj:1422`.
 
-### Warm GET regression (owner review after A04)
-
-Read-only default baseline, three `curl -s -o /dev/null -w '%{time_total}\n'`
-requests to `/ns/my.agents.juniper/debug`: **1.764572, 1.572908,
-1.759266 seconds**. The timing script beside this note binds the same schema
-projection as the HTTP handler. Its first corrected sample measured turn
-rows 5.04 ms, evaluation acquisition 1552.50 ms, summary 0.26 ms, prefix
-comparison 370.33 ms, the complete problem panel 673.89 ms, and ledger
-2162.70 ms. The panel measurement includes the prefix comparison. The first
-unbound probes timed out; they omitted the handler's projection and are not
-representative HTTP measurements.
-
-The dominant cost is the history walk invoking `render-ai` for every saved
-evaluation, bypassing `render-call` retention. The proposed refinement uses
-the existing shared render cache's `::ai-calls`, with evaluation identities
-as call IDs and the existing code/input/read-evidence invalidation. A09's
-summary reduction itself is negligible. The first cache-only live iteration
-regressed further: 3.186407, 3.023597, 3.021544 seconds; it is not an accepted
-result. A read-only probe found current retained evidence and matching call
-inputs, but a full evaluation pull alone still cost approximately 700 ms.
-The next refinement supplies the narrow selector to history and derives its
-profile once per acquisition. The final refinement removes the ledger's
-second evaluation query: history carries each saved row with its rendered
-bytes. History uses the existing candidate-call selection to avoid refreshing
-current evidence. Captured prefixes use `render-call`, keyed by attempt ID,
-in the existing shared `::calls` cache; no separate cache or expiry policy.
-
-After convergence `6aa8de2b-2803-5019-82e6-a5c473b1bd29`, one warm-up GET
-preceded the three acceptance samples: **0.704460, 0.755098, 0.741225 seconds**.
-The first GET after adoption had taken 1.162832 seconds; the target here is
-warm GET latency. Fast: 15 tests/225 assertions; isolated: 15/229; both green.
-The retained-call regression proves unchanged bytes reuse SCI output and a
-valid changed evaluation invalidates it. The existing captured-prefix test
-still proves changed captured bytes invalidate the verdict and missing
-captures remain unknown. The deferred-session test now requires one current
-history acquisition for ledger data, with no additional acquisition for the
-deferred selected session.
-
-Production/tests: 96 lines added, 40 removed (net +56), justified by wiring
-two existing projections into retained calls and adding invalidation evidence.
-`perf-{debug,agent}-{1440,700}.png`: all four LOOKed at; ledger, panel, and
-plan match the preceding layout. All six browser routes including inspection
-returned 200 with zero horizontal overflow. No default lifecycle operation.
-
-A08 in progress: removing the separate Context-now assembly, its feed
-target, obsolete selector rules, and obsolete tests; entity inspection uses
-the same selected-session component as ordinary debug.
-
-A08 initial fast gate (HEAD `6785c980c` plus owned paths): 15 tests,
-23 assertions, 0 failures, 13 errors. Canonical SCI acquisition loads
-`seon.turn-test`, whose lines 230 and 343 still reference the deleted
-`web/debug-ai-html` and `web/system-turn-html`. This is a required test
-migration exposed by this deletion, not attributed to concurrent edits.
-The two assertions are outside the assigned paths; scope clarification
-requested. No substitute fixture or compatibility helper was added.
-
-Screenshot iteration `a08-final-{debug,agent,inspection}-{1440,700}.png`:
-all six inspected, HTTP 200 and zero horizontal overflow. Main/debug pages
-retain baseline layout. Inspection's duplicate navigation was removed;
-the session's asynchronous completion was awaited before capture. It exposes
-the existing saved-prompt capture mismatch for turn 35; this remains A03's
-shared acquisition boundary, not a successful prompt reconstruction claim.
-The reproducible read-only browser script is
-`consolidate_debug_browser_2026_09_15.cjs`. Screenshot scratch was removed
-after inspection; all owned shell processes exited.
-
-`bin/css` succeeded. Explicit development adoption reloaded web definitions
-but exited 1 with "Source changed during development adoption"; subsequent
-edit-hook publication delivered the observed header update. These screenshots
-prove loaded UI behavior, not source-publication convergence. The isolated
-commit gate and platform gate remain pending the two test migrations; no
-finding is marked resolved and no commit has been made.
-
-### A08 authorized test migration
-
-Owner authorized only the two legacy-helper assertion groups in
-`test/seon/turn_test.clj`; reread immediately before patching. The saved
-evaluation group now renders the session's ledger card and still verifies
-namespace, exact source text, absence of clipping markers/read evidence,
-and unchanged database basis. The generated-turn group now checks `:none`
-on the turn data and every generated source in the session card, retaining
-the no-clipping assertion. The commit message records both migrations.
-
-The final fast run at `6785c980c` plus owned paths ran 39 tests / 580
-assertions: 5 failures, 0 errors. Both migrated groups pass. Remaining
-failures are `saved-history-preserves-shown-text-with-numeric-lookups:315`
-and `turn-details-use-the-loop-opening-and-exact-segments:114,124,148,158`:
-the saved-history annotation and prompt/strip byte accounting (A03/A09).
-Their production functions are unchanged by A08. No expectations were
-weakened to accept those mismatches.
-
-A08 source/test/skill/CSS counts before landing: 64 added / 248 removed,
-net −184 (documentation and reproducible browser script are separate).
-
-A08 isolated gate: 39 tests, 584 assertions, five failures, zero errors.
-Failures are the two web-debug tests named above (A03/A09); the two migrated
-turn assertions and entity-inspection route assertions pass. This is not a green
-whole-namespace gate. Browser `a08-authorized`: all six captures HTTP 200,
-zero horizontal overflow; main/debug at both widths inspected, layout retained.
-
-## A09 — evaluation owner and per-render summaries
-
-A08 commit: `1d5edb65c` (215 added / 249 removed including the evidence
-script and landing note; implementation/test/skill/CSS net −184).
-
-A09 removes the ledger membership query. The evaluation owner's optional pull
-selector preserves its original two-argument contract, identity, transaction,
-order and missing-agent diagnostic. Current acquired history segments supply
-byte amounts; per-evaluation outcomes/emissions and per-turn usage/counts
-serve the card, strip and problems panel. The empty ledger acquires no prompt.
-The additional lines are justified by the additive contracted projection,
-read-evidence expansion, interrupted outcome and regression of full/narrow
-projection equivalence; there is no second census or persisted summary.
-
-Browser `a09`: six HTTP 200 captures, zero horizontal overflow. Main/debug at
-1440 and 700 inspected: retained layout. JVM metadata confirmed `of-agent`
-full/narrow arities and ledger request arity loaded in default. Development
-publication initially reported concurrent source change, then retried. No
-cluster lifecycle operations were used. During this work context-renders
-landed `bb008321d` (changed-read provenance), after which the formerly failing
-saved-history assertions pass in the latest path-isolated snapshot.
-
-A09 final: `bin/test-fast --paths` on eval/transcript and the changed
-page-review/web-debug tests, running page-review, web-debug and web-context:
-15 tests / 195 assertions, zero failures/errors. Matching `bin/test --paths`:
-15 / 199, zero failures/errors. Source/tests: 129 added / 104 removed, net +25,
-justified above. Earlier intermediate runs and failed roots are superseded
-by these results. A09 commit is the commit containing this section; its hash
-is recorded with the next finding.
-
-## A02 — turn authorship and completion
-
-A09 commit: `209a73fd2`.
-
-The ledger derives `turn-kind` once per row. Bodies and preceding-generated
-selection now consume that same provenance as headers/strip/story. A virtual
-reply shows its original authored bytes and results, and stops the preceding
-system-only group. The accepted closed turn disposition supplies completion;
-source spelling is no longer inspected. The regression uses the canonical
-virtual-turn fixture and checks exact reply bytes, grouping, and disposition
-independence for direct, aliased and nested source spellings.
-
-Source/tests: 49 added / 34 removed (net +15): source +1, strengthened regression
-+14. This replaces the duplicated authorship decision and completion scanner;
-the extra test lines justify this finding's net addition.
-
-A02 verification: fast 10 tests / 146 assertions; isolated 10 / 150, both green.
-Default adoption completed at source `6aa8d57a-ad06-50f4-9ea9-bd78ed94ddc9`.
-Browser `a02`: six HTTP 200 captures, zero horizontal overflow; main/debug
-at 1440 and 700 inspected, layout retained.
-
-## A01 — directory observations
-
-A02 commit: `0439448cb`.
-
-The directory check reads the renderer from its schema declaration and the
-namespace from saved pull evidence. It compares the saved complete value with
-`seon.sci.eval/directory-value` and `seon.repl/render-directory-ai` at the read
-basis. The duplicate public-function query, operator spellings and column
-layout decoder are gone. No observations, missing provenance, elisions and
-unrecognized output layouts are explicitly unavailable. The output layout is
-recognized by the owner's actual projected keys, with no copied column roster.
-The canonical virtual-turn fixture now evaluates `(clojure.repl/dir my.test)`;
-its real read evidence underlies the incomplete/complete/unavailable checks.
-
-Live JVM probe of the final compatibility check returned count 0 / unknown 1
-for retired `{:functions []}` shown text, confirming the new Var was loaded.
-The preceding publication reported concurrent source change; the hook queued
-the refinement. This probe proves loaded behavior, not full adoption convergence.
-
-A01 source/tests: 43 added / 28 removed (net +15): source +2, regression +13.
-The addition is justified by explicit provenance/layout absence and qualified,
-elided and legacy-shape regression coverage; it replaces the duplicate directory
-query and literal operator recognition. Browser `a01`: six HTTP 200 captures,
-zero horizontal overflow; main/debug at both widths inspected. Juniper's
-unavailable directory observations fell from six to two as four now compare
-through the owner. Final fast: 10 tests / 151 assertions, zero failures/errors.
-
-A01 final isolated gate: 10 tests / 155 assertions, zero failures/errors.
-
-## A04 — captured prefix and billing observations
-
-A01 commit: `f9ed564ef`. Loaded the llm-providers skill for this boundary.
-The live database contained 119 captures in a read-only probe. The loop's
-exact-text handoff (`src/seon/turn.clj:4120–4163`) persists the captured string
-before passing it to the provider. Prefix verdicts now compare those strings;
-the terminal frame is excluded only by equality with `seon.repl/frame` at the
-same opening basis. No source spelling, token tolerance or cache counter
-participates. Missing captures/bases remain unavailable. Token totals are
-labelled billing observations.
-
-Source/tests: 46 added / 19 removed, net +27. The new lines acquire the actual
-capture and declared frame instead of estimating byte identity from billing;
-the database regression independently varies text, frames and counters.
-Fast 10 tests / 157 assertions; isolated 10 / 161, both green.
-
-A04 browser: six HTTP 200 captures, zero overflow; main/debug at 1440 and 700
-inspected. Billing label is visible and layout retained. JVM metadata proved
-the two-argument capture check loaded. Publication reached instrumentation but
-reported concurrent source change, so full source convergence is not claimed.
+All owned commands are awaited. Failed lane roots were checked against live
+processes before removal; already-reaped roots were left alone. Only lane-named
+logs, images, patches, and scripts under `tmp/` are removed. No worktree or
+scratch cluster was created. Foreign lanes and their disposable roots are not
+swept. Reproducible browser/timing scripts and measured results remain committed.

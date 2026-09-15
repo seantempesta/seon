@@ -38,3 +38,6 @@ counts, commit and the loaded-Var versus adoption verification boundary.
 Equal prompt bytes with different cache counters have the same stability verdict. Different applicable prefix bytes with equal counters do not pass. Missing captures explicitly make byte stability unavailable.
 
 See [the audit](../../prds/context-generation/research/audit-1-2026-09-15.md) for scope, change counts, and verification limits.
+
+Resolution commit: `cb967dd40`.
+Retained-call performance refinement: `5613bbf17` (three warm GETs: 0.704460, 0.755098, 0.741225 seconds).
