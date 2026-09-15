@@ -6,11 +6,15 @@
 (schema.edn/load! {})
 
 (defn fetch
-  "Fetch one bounded HTTP(S) resource.
+  "Fetch one bounded HTTP or HTTPS resource.
 
-  Takes a URL and optional `:get` or `:head` method. Returns status, redirect
-  history, bounded body, and extraction data, or a flat web error. Use it when
-  you already know the resource URL."
+  Supply :my.web/url and optionally :my.web/method (:get or :head).
+  Returns :my.web/status, :my.web/final-url, :my.web/redirects and
+  :my.web/body, with extraction data when available. In the example,
+  example-url is the URL of the resource you want to read.
+
+  Example:
+  (my.web/fetch {:my.web/url example-url})"
   {:malli/schema
    [:=> [:cat :my.web/fetch-request]
     [:or :my.web/fetch-result :my.web/error]]
@@ -22,9 +26,12 @@
 (defn search
   "Search the configured provider for source rows.
 
-  Takes a query and optional result limit. Returns bounded result rows plus a
-  blob digest for the raw response, or a flat web error. Use it to discover
-  sources before fetching them."
+  Supply :my.web/query and optionally :my.web/max-results. Returns
+  :my.web/results and a blob digest for the provider response. The cluster
+  config selects the endpoint and credential.
+
+  Example:
+  (my.web/search {:my.web/query \"Clojure documentation\" :my.web/max-results 3})"
   {:malli/schema
    [:=> [:cat :my.web/search-request]
     [:or :my.web/search-result :my.web/error]]
