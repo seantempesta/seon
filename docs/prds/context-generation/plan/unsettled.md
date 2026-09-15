@@ -1010,3 +1010,23 @@ half-edit. Measured targets in the issue.
   fix; bare `deftest` referred; the auto-check's self-violation becomes a
   core fault; help sentences true after the changes.
 
+## 2026-09-14 20:45 — the turn ledger; help and checker fixes
+
+- debug-turns `63ac0608a`: per-turn prompts rebuilt at the turn's opening
+  basis (turn 2: 10,420 bytes vs 178,089 before; page shows rebuilt vs
+  billed). `05e9dd8ea`: the default debug body is a TURN LEDGER — one card
+  per turn with WE SENT (context added before the reply, fold notes, full
+  context on demand) / AGENT REPLIED (raw bytes, colourised) / RESULTS
+  (per form, outcome word, effects), author tags and colour bars; reviewed
+  at 1440/700 — right shape; review sent (header outcomes, block names in
+  WE SENT rows, opening folded, seconds).
+- core-functions: `cdad23ed6` plan item reads agreed with the owning plan
+  (real bug); `427cd5f5e` the defn auto-check checks generated vector
+  arguments and propagates its own faults instead of printing them to the
+  agent; `9f6ca8880` help teaches exact calls (fully qualified symbols,
+  `(dir my.note)` → copy the name with `!`, the `[:=> [:cat …] …]` contract
+  shape) and refers `deftest`/`is` into the agent namespace; `0824fa2ff`
+  every public `my.*` docstring example evaluates in canonical SCI as a test.
+- Token estimate 13 % under billed on long prompts — issue filed (derive
+  the prior from attempts).
+
