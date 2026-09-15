@@ -1234,4 +1234,20 @@ half-edit. Measured targets in the issue.
   complete with NO message to root — completion asserted, not derived.
   Blocker filed (`a-plan-step-can-be-marked-complete-without-its-done-when-being-true`);
   it is the first concrete slice of the stewards PRD §8.4 (`done-query`).
+- 15:50Z explain probe on run 7 (captured prompt): the model believed it
+  had messaged root — its `send` sat inside a `let` whose value was the
+  note write, so the returned-message effect was discarded silently
+  (blocker filed: `my-message-send-inside-a-compound-form-is-silently-lost`).
+  Its other asks: state the contract shape rule up front ("if it can fail,
+  return [:or X :seon.error/value]; bare :maybe is rejected"), define
+  "gate" in the install advisory (a deftest in the namespace that calls
+  the fn; run it), say the auto-check feeds each input collection's empty
+  value, say `testing` is not referred (deftest/is are), tag system
+  changefeed emissions with an author. Its claim that turns-left appeared
+  only at the end is false: every capture carries "turns left: N of 30".
+- Owner: "why special guards for q/pull? auto enforcement should be active
+  everywhere" — confirmed active everywhere; the schema was the hole (see
+  the 15:00 ruling); the guard IS the schema (Malli's `:=>` third child),
+  and `seon.instrument` had not been running guards — now it does for
+  every armed function.
 
