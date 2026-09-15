@@ -1260,4 +1260,15 @@ half-edit. Measured targets in the issue.
   …. Example: …") humanised from Malli explain data, applied to contract,
   transact!, and reader refusals; regressions from the run-4/5/7 bytes.
   run7-wave (send writes directly; done-query; help truth) running.
+- 16:05Z owner: the stewards PRD is too general. "Queries that return data
+  are just functions" — no separate problem declarations; show the whole
+  system as inputs → functions → outputs chained to context, tasks, and
+  success; find what data is genuinely missing and where it belongs
+  (next to related data); build inside out; MVP = stored data → detector
+  → context → session → success function → persisted to disk as program
+  files. Two research lanes (no code): data-audit-a (program side: tests,
+  faults, contracts, missing fns, examples, export-to-source),
+  data-audit-b (session side: messages, plan done-when, stalls, elisions,
+  render request keys, call ledger). Each writes chains with probe
+  results and the MVP point. PRD §9 will be rewritten from their facts.
 
