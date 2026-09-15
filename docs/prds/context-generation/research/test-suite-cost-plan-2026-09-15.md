@@ -158,6 +158,64 @@ Row 7 follow-up: canonicalize copy source/destination before setting the
 child's directory. This fixes relative snapshot requests using the existing
 copy owner. No scratch directory remains after the regression.
 
+### Regrowth and final in-process verification
+
+`resources/seon/schemas/seon.test.edn` declares
+`:seon.test/fixture-observation`. Runner selection uses the existing manifest
+reachability owner and Var/namespace marker owner. Published-root reach is
+unconditional. Static fresh-store demand combines call reach with existing
+`:seon.fn/keywords` request facts: blindly traversing `with-database`'s optional
+fresh-store dispatch would incorrectly require reasons for ordinary branches.
+Actual fresh-store and published-root acquisition always checks the reason,
+including direct calls without a running test. Direct callers can supply the
+same key in an options map. Existing fixture arities remain available.
+This metadata is checked from loaded Var/ns declarations like platform/long
+markers; no source text scanner or new metadata index was added.
+
+Live manifest probe: 5895 rows, 54 demanding tests. Legacy demanding tests
+without reasons now refuse; their owners must declare the actual observation,
+not add blanket exemptions. Only fixture entry points changed in test_support;
+the other lane's projection changes had landed before this slice's commit.
+
+The first regrowth run (22:18:42, entity 64403) recorded 0/0/1 before its body:
+canonical population at `seon.cluster/accrete-schema-population!` →
+`seon.db/transact!` refused a missing carried projection. Protected owners were
+not changed. This regression needs analyzed program facts, not a database
+fixture: the revised test invokes production `seon.fn/build-artifact` on the
+real fixture owner and synthetic reasoned/unreasoned declarations, then uses
+the ordinary runner selection. It never acquires a physical store.
+
+Exact invocation for each row is `(seon.test/run #'<test>
+(seon.operator/connection "default"))`:
+
+| Test | UTC / result entity | Pass / fail / error |
+|---|---|---|
+| `seon.test.runner-test/expensive-fixtures-require-a-declared-observation` | 22:19:54 / 64415, proposed form | 13 / 0 / 0 |
+| `seon.test.runner-test/expensive-fixtures-require-a-declared-observation` | 22:20:10 / 64417, persisted/reloaded | 13 / 0 / 0 |
+| `seon.test.runner-test/expensive-fixtures-require-a-declared-observation` | 22:31:40 / 64457 | 13 / 0 / 0 |
+| `seon.test.runner-test/assertion-report-uses-bounded-value-renderer` | 22:21:10 / 64435, proposed error reporter | 9 / 0 / 0 |
+| `seon.test-runner-test/repeated-identical-errors-have-one-whole-face` | 22:21:28 / 64437 | 7 / 0 / 0 |
+| `seon.test.runner-test/assertion-report-uses-bounded-value-renderer` | 22:21:30 / 64438, persisted/reloaded | 9 / 0 / 0 |
+| `seon.test.runner-test/default-red-does-not-launch-confirmation` | 22:31:06 / 64447, proposed diagnostic | 8 / 0 / 0 |
+| `seon.test.runner-test/default-red-does-not-launch-confirmation` | 22:31:22 / 64451, persisted/reloaded | 8 / 0 / 0 |
+| `seon.test-runner-test/unlaunchable-confirmation-worker-does-not-suppress-the-tally` | 22:31:23 / 64452 | 9 / 0 / 0 |
+
+Row 8 follow-up also renders Throwable actual values through the same profile,
+retaining signature deduplication. Row 1 follow-up uses the existing bounded
+confirmation scheduler for explicit diagnostics and records launch failure as
+one attributed error per named test. A live launch-refusal probe retained its
+task, error count 1, failure message and 64-character evidence identity.
+One proposed-form probe at 22:23:12 recorded 6/2/0 because MCP reader-time `::`
+keywords resolved in the wrong namespace. Re-evaluation with explicit runner
+keywords corrected that probe; the persisted forms use their normal ns reader.
+
+Verification is hot-reloaded JVM evidence, not proof of converged development
+adoption. The publication log observed source-change-during-adoption while
+other lanes edited; the orchestrator's batched gate remains the final proof.
+No test JVM, worktree, or background process was launched. Gate request:
+`tmp/orchestrator/gate-requests/test-runner-waste.txt` contains
+`seon.test.runner-test` and `seon.test-runner-test`.
+
 ## Landing (tests)
 
 Lane `slow-tests-merge`, 2026-09-15. Read this plan and

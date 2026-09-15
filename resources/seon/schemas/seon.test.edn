@@ -3,6 +3,9 @@
             :subject :seon.db/ref,
             :pending-subject :string,
             :usage :boolean,
+            :fixture-observation
+            [:string {:min 1
+                      :description "Nonblank explanation of the observation an ordinary database branch cannot prove; checked at selection and expensive fixture acquisition."}],
             :pass-count [:int {:min 0}],
             :fail-count [:int {:min 0}],
             :error-count [:int {:min 0}],
@@ -60,6 +63,8 @@
              [:seon.fn/calls {:optional true} :seon.fn/calls]
              [:seon.fn/keywords {:optional true} :seon.fn/keywords]
              [:seon.test/usage {:optional true} :seon.test/usage]
+             [:seon.test/fixture-observation {:optional true}
+              :seon.test/fixture-observation]
              [:seon.test/subject {:optional true} :seon.test/subject]
              [:seon.test/pending-subject {:optional true}
               :seon.test/pending-subject]

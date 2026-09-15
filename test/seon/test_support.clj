@@ -99,7 +99,10 @@
 
 (defn populate-published-root!
   "Populate `root` from the runner's immutable base, or publish standalone."
-  [root]
+  ([root] (populate-published-root! root {}))
+  ([root options]
+  ((requiring-resolve 'seon.test.runner/fixture-observation!)
+   'seon.test-support/populate-published-root! options)
   (if-let [base (System/getProperty "seon.test.published-base")]
     (let [root (clone-directory! base root)
           source-store (io/file base "data" "store")
@@ -112,11 +115,14 @@
       root)
     (do
       (cluster/refresh-source! (str root))
-      (str root))))
+      (str root)))))
 
 (defn populate-published-operator-root!
   "Populate an operator root from the runner's immutable current-src base."
-  [root]
+  ([root] (populate-published-operator-root! root {}))
+  ([root options]
+  ((requiring-resolve 'seon.test.runner/fixture-observation!)
+   'seon.test-support/populate-published-operator-root! options)
   (if-let [base (System/getProperty "seon.test.published-base")]
     (let [source-store (io/file base "data" "store")
           store (io/file root "data" "store")]
@@ -125,7 +131,7 @@
       (str root))
     (do
       (cluster/refresh-source! (str (io/file root "data" "clusters")))
-      (str root))))
+      (str root)))))
 
 (defn with-published-file-database
   "Run `body` on a private file-store branch of the published test base."
@@ -595,7 +601,11 @@
      :seon.sci.eval/projection-state projection-state})))
 
 (defn- with-fresh-database
-  [database-id extra-schema body]
+  ([database-id extra-schema body]
+   (with-fresh-database database-id extra-schema {} body))
+  ([database-id extra-schema options body]
+  ((requiring-resolve 'seon.test.runner/fixture-observation!)
+   'seon.test-support/with-fresh-database options)
   (let [configuration
         {:store {:backend :memory :id (or database-id (random-uuid))}
          :keep-history? true
@@ -613,7 +623,7 @@
             (d/release connection))))
       (finally
         (d/release provisional-connection)
-        (d/delete-database configuration)))))
+        (d/delete-database configuration))))))
 
 (defn- with-branched-database
   [extra-schema body]
@@ -663,9 +673,11 @@
    Datahike branch facts."
   ([body]
    (with-database {} body))
-  ([{:seon.test-support/keys [database-id extra-schema fresh-store?]} body]
+  ([{:seon.test-support/keys [database-id extra-schema fresh-store?] :as options} body]
    (if (or database-id fresh-store?)
-     (with-fresh-database database-id extra-schema body)
+     (if (find options :seon.test/fixture-observation)
+       (with-fresh-database database-id extra-schema options body)
+       (with-fresh-database database-id extra-schema body))
      (with-branched-database extra-schema body))))
 
 (defn seed-cluster!

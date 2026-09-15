@@ -4,12 +4,71 @@
             [clojure.string :as str]
             [clojure.test :as test :refer [deftest is]]
             [sci.core :as sci]
+            [seon.fn :as program-fn]
+            [seon.id :as id]
             [seon.instrument :as instrument]
             [seon.test.arm :as arm]
             [seon.test.cache :as cache]
             [seon.test.runner :as runner]
             [seon.test-runner-failure-fixture]
             [seon.test-support :as test-support]))
+
+(deftest ^{:seon.test/fixture-observation
+           "Verifies refusal before published-root/fresh-store acquisition and graph selection; no expensive fixture is acquired."}
+  expensive-fixtures-require-a-declared-observation
+  (let [root (doto (io/file "tmp" (str "fixture-reason-" (id/id))) .mkdirs)
+           file (io/file root "declarations.clj")
+           namespace-name (symbol (str "seon.fixture.reason-" (id/id)))
+           reason "Observes store-global blob deletion, which a branch cannot isolate."
+           support (program-fn/build-artifact
+                    {:seon.fn.file/path "test/seon/test_support.clj"
+                     :seon.fn.file/first-party-functions []})
+           known (vec (keep :seon.fn/sym (:seon.fn.file/rows support)))]
+       (try
+         (spit file
+               (str "(ns " namespace-name
+                    " (:require [clojure.test :refer [deftest]] [seon.test-support :as support]))\n"
+                    "(deftest unreasoned (support/populate-published-root! \"unused\"))\n"
+                    "(deftest ^{:seon.test/fixture-observation " (pr-str reason)
+                    "} reasoned (support/populate-published-root! \"unused\"))\n"
+                    "(deftest ordinary (support/with-database (fn [_] nil)))\n"
+                    "(deftest fresh (support/with-database {:seon.test-support/fresh-store? true} (fn [_] nil)))\n"))
+         (load-file (str file))
+         (let [manifest
+               {:seon.fn.manifest/artifacts
+                [support (program-fn/build-artifact
+                          {:seon.fn.file/path (str file)
+                           :seon.fn.file/first-party-functions known})]}
+               selected #(vector (ns-resolve namespace-name %))
+               expensive (#'runner/expensive-fixture-tests manifest)]
+           (is (contains? expensive (str namespace-name "/unreasoned")))
+           (is (contains? expensive (str namespace-name "/reasoned")))
+           (is (contains? expensive (str namespace-name "/fresh")))
+           (is (not (contains? expensive (str namespace-name "/ordinary"))))
+           (is (thrown? clojure.lang.ExceptionInfo
+                        (#'runner/verify-fixture-observations! manifest (selected 'unreasoned))))
+           (is (nil? (#'runner/verify-fixture-observations! manifest (selected 'reasoned))))
+           (is (nil? (#'runner/verify-fixture-observations! manifest (selected 'ordinary))))
+           (is (thrown? clojure.lang.ExceptionInfo
+                        (#'runner/verify-fixture-observations! manifest (selected 'fresh)))))
+         (let [unscoped (fn [f] (binding [test/*testing-vars* []] (f)))]
+           (is (thrown? clojure.lang.ExceptionInfo
+                        (unscoped #(test-support/populate-published-root!
+                                    (str (io/file root "refused"))))))
+           (is (not (.exists (io/file root "refused"))))
+           (is (thrown? clojure.lang.ExceptionInfo
+                        (unscoped #(test-support/with-database
+                                    {:seon.test-support/fresh-store? true} (fn [_] nil)))))
+           (is (= reason (unscoped #(runner/fixture-observation!
+                                     'seon.test-support/with-fresh-database
+                                     {:seon.test/fixture-observation reason}))))
+           (is (thrown? clojure.lang.ExceptionInfo
+                        (unscoped #(runner/fixture-observation!
+                                    'seon.test-support/with-fresh-database
+                                    {:seon.test/fixture-observation "   "})))))
+         (finally
+           (remove-ns namespace-name)
+           (test-support/delete-recursively! root)))))
 
 (deftest assertion-report-uses-bounded-value-renderer
   (let [ctx (sci/init {:namespaces

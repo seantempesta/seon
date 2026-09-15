@@ -202,16 +202,10 @@
   [options event signature]
   (test/with-test-out
     (test/inc-report-counter :error)
-    (print
-     (with-out-str
-       (println "\nERROR in" (test/testing-vars-str event))
-       (when (seq test/*testing-contexts*)
-         (println (test/testing-contexts-str)))
-       (when-let [message (:message event)]
-         (println message))
-       (println "expected:" (report-value options (:expected event)))
-       (print "  actual: ")
-       (println (throwable-face options (:actual event) signature))))))
+    (println "\nERROR in" (test/testing-vars-str event))
+    (println (failure-message options event))
+    (when signature
+      (println "  signature:" signature))))
 
 (defn- report-event!
   [options default-report reported-signatures event]
@@ -573,6 +567,26 @@
   [test-var]
   (marker-reason test-var :seon.test/long))
 
+(defn fixture-observation!
+  "Require the declared observation before acquiring an expensive fixture.
+  A direct caller supplies it in options; a test may declare it on its Var/ns."
+  {:malli/schema
+   [:=> [:cat :qualified-symbol
+         [:map [:seon.test/fixture-observation {:optional true}
+                :seon.test/fixture-observation]]]
+    :seon.test/fixture-observation]}
+  [fixture options]
+  (let [reason (if (find options :seon.test/fixture-observation)
+                 (:seon.test/fixture-observation options)
+                 (some #(marker-reason % :seon.test/fixture-observation)
+                       test/*testing-vars*))]
+    (when-not (and (string? reason) (not (str/blank? reason)))
+      (throw (ex-info "Expensive fixture requires a nonblank observation an ordinary branch cannot prove."
+                      {:seon.error/kind ::missing-fixture-observation
+                       ::fixture fixture
+                       :seon.test/sym (str (var-symbol (first test/*testing-vars*)))})))
+    reason))
+
 (defn- platform-reason
   [test-var]
   (marker-reason test-var :seon.test/platform))
@@ -656,6 +670,63 @@
                   ::resolved
                   ::unresolved))
               tasks)))
+
+(defn- tests-reaching-rows
+  [rows seeds]
+  (set (selection/reaching-tests
+        [{:seon.fn.file/path "fixture-selection"
+          :seon.fn.file/rows (filterv seeds rows)}
+         {:seon.fn.file/path "remaining-program"
+          :seon.fn.file/rows (filterv (complement seeds) rows)}]
+        ["fixture-selection"])))
+
+(defn- expensive-fixture-tests
+  "Derive fixture demand from program calls and declared request keywords.
+  with-database's optional fresh-store branch is not an unconditional demand."
+  [manifest]
+  (let [rows (vec (mapcat :seon.fn.file/rows
+                          (:seon.fn.manifest/artifacts manifest)))
+        owners #{"seon.test-support/populate-published-root!"
+                 "seon.test-support/populate-published-operator-root!"
+                 "seon.test-support/with-fresh-database"}
+        owner-rows (filterv #(owners (:seon.fn/sym %)) rows)
+        missing (set/difference owners (set (map :seon.fn/sym owner-rows)))]
+    (when (seq missing)
+      (throw (ex-info "Fixture selection cannot resolve its fixture owners."
+                      {::missing-fixture-owners (vec (sort missing))})))
+    (let [rows (mapv (fn [row]
+                       (if (= "seon.test-support/with-database" (:seon.fn/sym row))
+                         (update row :seon.fn/calls disj
+                                 [:seon.fn/sym "seon.test-support/with-fresh-database"])
+                         row)) rows)
+          direct (tests-reaching-rows rows (set owner-rows))
+          callers (mapv #(cond-> % (:seon.fn/sym %)
+                            (assoc :seon.test/sym (:seon.fn/sym %))) rows)
+          branch-callers (tests-reaching-rows
+                          callers
+                          (set (filter #(= "seon.test-support/with-database"
+                                           (:seon.fn/sym %)) callers)))
+          request-rows
+          (filterv #(and (not= "seon.test-support/with-database" (:seon.fn/sym %))
+                         (branch-callers (or (:seon.test/sym %) (:seon.fn/sym %)))
+                         (some #{:seon.test-support/fresh-store?
+                                 :seon.test-support/database-id}
+                               (:seon.fn/keywords %))) rows)]
+      (set/union direct
+                 (tests-reaching-rows rows (set request-rows))
+                 (set (keep :seon.test/sym request-rows))))))
+
+(defn- verify-fixture-observations!
+  [manifest selected-vars]
+  (when (seq selected-vars)
+    (let [expensive (expensive-fixture-tests manifest)]
+      (doseq [test-var selected-vars
+              :when (expensive (str (var-symbol test-var)))]
+        (when-not (marker-reason test-var :seon.test/fixture-observation)
+          (throw (ex-info "Selected test reaches an expensive fixture without a declared observation."
+                          {:seon.error/kind ::missing-fixture-observation
+                           :seon.test/sym (str (var-symbol test-var))}))))))
+  nil)
 
 (defn- run-selected-tests
   [namespaces selected-vars]
@@ -2220,9 +2291,20 @@
              (str/join "," (::task-symbols task-result))
              "worker=" (::worker-id launch)
              "kind=" failure-kind)
-    (assoc task-result
-           ::parallel-failure :unconfirmed
-           ::confirmation-failure failure-fact)))
+    (cond-> (assoc task-result ::parallel-failure :unconfirmed
+                   ::confirmation-failure failure-fact)
+      (not (::task-summary task-result))
+      (assoc ::task-summary {::test-count (count (::task-symbols task-result))
+                             ::pass-count 0 ::fail-count 0
+                             ::error-count (count (::task-symbols task-result))}
+             ::task-results
+             (mapv (fn [test-symbol]
+                     {:seon.test/sym (str test-symbol)
+                      :seon.test/pass-count 0 :seon.test/fail-count 0
+                      :seon.test/error-count 1
+                      :seon.test/failing-assertions [(id/id [test-symbol failure-fact] 64)]
+                      :seon.test/failure-message (pr-str failure-fact)})
+                   (::task-symbols task-result))))))
 
 (defn- parallel-failure-classification
   "How one pool red is classified once it has been re-run in isolation.
@@ -2277,8 +2359,9 @@
             ;; which is exactly how the re-arm class cost a day of someone
             ;; else's diagnosis. It stays red, and it stays named as an
             ;; exchange failure.
-            classification (parallel-failure-classification
-                            task-result confirmation)
+            classification (if (::task-summary task-result)
+                             (parallel-failure-classification task-result confirmation)
+                             (if (task-red? confirmation) :failed :passed))
             suspects (::prior-ambient-drift task-result)]
         (println "bin/test: confirmation" (name classification)
                  (str/join "," (::task-symbols task))
@@ -2314,7 +2397,7 @@
 (defn- confirm-task-results!
   "Confirm resolved pool failures concurrently while preserving result order."
   [parallelism progress resolved-task-ids task-results confirm!]
-  (let [failures (filterv #(and (task-red? %)
+  (let [failures (filterv #(and (or (nil? (::task-summary %)) (task-red? %))
                                 (contains? resolved-task-ids (::task-id %)))
                           task-results)]
     (if (empty? failures)
@@ -2525,7 +2608,9 @@
       (doseq [task unresolved]
         (println " -" (str/join "," (::task-symbols task)))))
     (let [results (if (seq (confirmation-symbols))
-                    (mapv #(confirm-parallel-failure! namespaces progress %) tasks)
+                    (confirm-task-results!
+                     (worker-count) progress (set (map ::task-id tasks)) tasks
+                     (partial confirm-parallel-failure! namespaces))
                     (run-task-pool! progress workers serial-worker
                                     resolved unresolved))]
       (print-task-failures! results)
@@ -2652,6 +2737,7 @@
                                 ", not reached " (count unreached))))
               platform-tasks (test-tasks all-vars platform)
               selected-tasks (test-tasks all-vars selected)
+              _ (verify-fixture-observations! manifest (concat platform selected))
               _ (announce! progress
                            (str "TIER platform " (count platform) " tests"))
               platform-outcome
