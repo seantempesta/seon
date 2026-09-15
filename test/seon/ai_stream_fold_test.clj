@@ -370,7 +370,7 @@
               (is (some? (:seon.ai.attempt/error attempt))
                   "the provider error and attempt committed together")))))))))
 
-(deftest settled-reasoning-reuses-the-eval-result-inline-blob-split
+(deftest ^{:seon.test/fixture-observation "Reasoning crosses the inline threshold into store-global blobs, whose isolation an ordinary branch cannot provide."} settled-reasoning-reuses-the-eval-result-inline-blob-split
   (support/with-database
     {::support/fresh-store? true}
     (fn [connection]

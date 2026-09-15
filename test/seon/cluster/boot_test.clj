@@ -454,7 +454,7 @@
 ;;; The live lifecycle — real sockets, real files, this JVM
 ;;; ---------------------------------------------------------------------------
 
-(deftest ^{:seon.test/long
+(deftest ^{:seon.test/fixture-observation "The test connects to the actual advertised REPL after the complete published-root boot."} ^{:seon.test/long
            "47.230 s pool: published-base clone, real ordered boot, live prepl call, and stop."}
   repl-is-live-after-ordered-boot
   (let [root (published-root)]
@@ -485,7 +485,7 @@
       (finally
         (delete-recursively! root)))))
 
-(deftest ^{:seon.test/long "Starts two real clusters to prove process-root isolation."}
+(deftest ^{:seon.test/fixture-observation "The assertions observe independently addressable booted REPLs and advertisements and isolated shutdown."} ^{:seon.test/long "Starts two real clusters to prove process-root isolation."}
   two-instances-are-isolated
   (let [root (published-root)]
     (try
@@ -519,7 +519,7 @@
       (finally
         (delete-recursively! root)))))
 
-(deftest ^{:seon.test/long "Starts and stops a real cluster before probing advertisements."}
+(deftest ^{:seon.test/fixture-observation "The test mutates a real boot advertisement and checks process identity validation against the live root."} ^{:seon.test/long "Starts and stops a real cluster before probing advertisements."}
   stale-advertisements-read-as-absent
   (let [root (published-root)]
     (try
@@ -553,7 +553,7 @@
                   #(java.util.Date. (dec (inst-ms %))))))
         "the pid still exists, but a different generation is dead")))
 
-(deftest ^{:seon.test/long "Restarts a real cluster generation to falsify stale teardown."}
+(deftest ^{:seon.test/fixture-observation "The assertion observes real replacement REPL and advertisement survival after stopping an older boot generation."} ^{:seon.test/long "Restarts a real cluster generation to falsify stale teardown."}
   a-delayed-stop-never-kills-a-replacement
   ;; stops are instance-addressed: a stale stop! of an OLD instance
   ;; value must leave a same-named replacement fully alive
@@ -578,7 +578,7 @@
       (finally
         (delete-recursively! root)))))
 
-(deftest ^{:seon.test/long
+(deftest ^{:seon.test/fixture-observation "The test observes real prepl registration release and same-name replacement after physical-root shutdown."} ^{:seon.test/long
            "49.939 s pool: real start/stop/start generation proves registered prepl release."}
   same-jvm-same-name-restart-releases-the-registered-prepl
   (let [root (published-root)
@@ -608,7 +608,7 @@
       (finally
         (delete-recursively! root)))))
 
-(deftest ^{:seon.test/long "Injects failure into real cluster teardown and retries it."}
+(deftest ^{:seon.test/fixture-observation "The assertion observes lifetime store-lock ownership and retryable release across failed shutdown and replacement boot."} ^{:seon.test/long "Injects failure into real cluster teardown and retries it."}
   a-failed-stop-remains-addressable-and-retryable
   (let [root (published-root)
         cluster-name "retry-stop"
@@ -690,7 +690,7 @@
       (finally
         (delete-recursively! root)))))
 
-(deftest ^{:seon.test/long "Stops a real cluster while one flow pass remains active."}
+(deftest ^{:seon.test/fixture-observation "The test observes an active booted loop transaction completing before shutdown releases the physical store."} ^{:seon.test/long "Stops a real cluster while one flow pass remains active."}
   orderly-stop-awaits-the-active-loop-pass
   (let [root (published-root)
         pass-entered (CountDownLatch. 1)
@@ -811,7 +811,7 @@
         (cluster/stop! instance)
         (delete-recursively! root)))))
 
-(deftest ^{:seon.test/long "Restarts a real sovereign cluster from its older program facts."}
+(deftest ^{:seon.test/fixture-observation "The subject is reopening a sovereign older physical-store branch without republishing its program."} ^{:seon.test/long "Restarts a real sovereign cluster from its older program facts."}
   start-allows-an-older-complete-program-without-indexing
   (let [root (published-root)
         cluster-name "stale-program"
@@ -859,7 +859,7 @@
       (finally
         (delete-recursively! root)))))
 
-(deftest ^{:seon.test/long
+(deftest ^{:seon.test/fixture-observation "The assertions exercise real boot admission of incomplete versus freshly published cluster branches."} ^{:seon.test/long
            "114.810 s pool: real boot, program-fact corruption/refusal, and fresh-cluster currentness proof."}
   partial-clusters-refuse-and-fresh-clusters-are-current
   (let [root (published-root)
@@ -916,7 +916,7 @@
       (finally
         (delete-recursively! root)))))
 
-(deftest ^{:seon.test/long
+(deftest ^{:seon.test/fixture-observation "The assertions compare real publication commit heads with existing and newly forked physical-store cluster branches."} ^{:seon.test/long
            "186.733 s pool: complete incremental publication dominates, followed by existing-cluster and later-fork agreement."}
   incremental-source-refresh-publishes-without-touching-existing-clusters
   (let [root (published-root)
@@ -1132,7 +1132,7 @@
         (is (= 1 @full-builds)
             "a malformed cache never reaches manifest-function-symbols")))))
 
-(deftest ^{:seon.test/long
+(deftest ^{:seon.test/fixture-observation "The test observes reopen-time configuration repair before real boot consumers acquire their settings."} ^{:seon.test/long
            "53.139 s pool: real boot, locked-state config repair, restart, and pre-arm fact proof."}
   selected-config-repairs-locked-state-before-consumers-arm
   (let [root (published-root)
@@ -1290,7 +1290,7 @@
       (finally
         (delete-recursively! root)))))
 
-(deftest ^{:seon.test/long
+(deftest ^{:seon.test/fixture-observation "The test observes ordered REPL, store, population and flow readiness during real boot and sibling-cluster acquisition."} ^{:seon.test/long
            "46.987 s pool: complete real boot plus sibling-cluster acquisition and independent config proof."}
   boot-order-completes-in-one-start
   (let [root (published-root)]
@@ -1584,7 +1584,7 @@
 ;;; Boot recovery — a dead holder's wreckage is settled before anything resumes
 ;;; ---------------------------------------------------------------------------
 
-(deftest ^{:seon.test/long
+(deftest ^{:seon.test/fixture-observation "The subject is durable state recovered after an actual JVM kill and physical-store reopen."} ^{:seon.test/long
            "Kills a child JVM mid-generation and proves same-run continuation."}
   a-generated-prefix-resumes-on-the-same-run-after-jvm-kill
   (let [root (published-root)
@@ -1696,7 +1696,7 @@
           (.join (.onExit process)))
         (future-cancel output-reader)))))
 
-(deftest ^{:seon.test/long
+(deftest ^{:seon.test/fixture-observation "Recovery must close persisted interrupted work while reopening a stopped cluster from its physical store."} ^{:seon.test/long
            "60.475 s pool: real boot, simulated dead holder, restart recovery, and custody read-back."}
   a-dead-holders-run-is-unclaimed-by-the-time-start-returns
   ;; The live crash drill found this gap: `recover-tx` existed with no

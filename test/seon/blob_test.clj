@@ -215,7 +215,7 @@
         (store/release-store! opened)
         (support/delete-recursively! (io/file root))))))
 
-(deftest utf8-content-round-trips-through-the-memory-backend
+(deftest ^{:seon.test/fixture-observation "The subject is the fresh memory backend itself, including store-global UTF-8 blob deduplication, rather than the canonical tiered branch backend."} utf8-content-round-trips-through-the-memory-backend
   (support/with-database
     {::support/fresh-store? true}
     (fn [connection]

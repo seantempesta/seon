@@ -73,7 +73,7 @@
                 :where [?fault :seon.error/id ?id]]
               @connection)))
 
-(deftest oversized-fault-evidence-is-bounded-and-retrievable
+(deftest ^{:seon.test/fixture-observation "The test measures physical store growth and blob deduplication during a repeated oversized-fault storm."} oversized-fault-evidence-is-bounded-and-retrievable
   (let [root (str "tmp/fault-storage-test/" (random-uuid))
         cluster-name (str "fault-storage-" (random-uuid))
         process (str "fault-storage-process-" (random-uuid))
@@ -154,7 +154,7 @@
         (store/release-store! opened)
         (support/delete-recursively! root)))))
 
-(deftest lossy-subthreshold-fault-evidence-is-retrievable
+(deftest ^{:seon.test/fixture-observation "Fault evidence must publish complete store-global blob content even when the displayed evidence is lossy."} lossy-subthreshold-fault-evidence-is-retrievable
   (let [root (str "tmp/fault-storage-test/" (random-uuid))
         cluster-name (str "fault-storage-lossy-" (random-uuid))
         process (str "fault-storage-process-" (random-uuid))

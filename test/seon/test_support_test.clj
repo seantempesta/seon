@@ -27,7 +27,7 @@
            (vec (.digest (java.security.MessageDigest/getInstance "SHA-256")
                          (java.nio.file.Files/readAllBytes (.toPath file))))])))
 
-(deftest simultaneous-fixture-bases-never-open-the-published-store
+(deftest ^{:seon.test/fixture-observation "The assertions compare physical store bytes and private backend paths during simultaneous fixture acquisitions."} simultaneous-fixture-bases-never-open-the-published-store
   (let [root (str "tmp/fixture-base-isolation/" (random-uuid))
         begin (java.util.concurrent.CountDownLatch. 1)
         written (java.util.concurrent.CountDownLatch. 2)

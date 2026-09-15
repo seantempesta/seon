@@ -222,7 +222,7 @@
    :seon.config/on-core-error :record
    :seon.effect/counter (atom -1)})
 
-(deftest oversized-bodies-spill-byte-exactly-through-the-blob-tier
+(deftest ^{:seon.test/fixture-observation "The response crosses the inline ceiling and must round-trip byte-exactly through physical blob storage."} oversized-bodies-spill-byte-exactly-through-the-blob-tier
   (with-file-database
     (fn [connection]
       (with-server
@@ -240,7 +240,7 @@
             (is (Arrays/equals ^bytes oversized ^bytes actual))
             (is (not (contains? body :my.web.body/octet-values)))))))))
 
-(deftest response-size-ceiling-refuses-a-chunked-body
+(deftest ^{:seon.test/fixture-observation "The response ceiling must refuse chunked input in the physical blob-staging fixture before oversized publication."} response-size-ceiling-refuses-a-chunked-body
   (with-file-database
     (fn [connection]
       (with-server
@@ -253,7 +253,7 @@
             (is (true? (:my.web/response-limit result)))
             (is (string? (:seon.error/message result)))))))))
 
-(deftest redirects-are-bounded-recorded-and-extracted-from-raw-bytes
+(deftest ^{:seon.test/fixture-observation "Redirect processing runs with the tiny inline ceiling so retained raw response bytes cross the physical blob path."} redirects-are-bounded-recorded-and-extracted-from-raw-bytes
   (with-file-database
     (fn [connection]
       (with-server
@@ -279,7 +279,7 @@
             (is (true? (:my.web/redirect-loop loop-result)))
             (is (string? (:seon.error/message loop-result)))))))))
 
-(deftest timeout-and-dead-host-fail-flat
+(deftest ^{:seon.test/fixture-observation "Transport failure must settle without leaking response staging resources in the file-backed web fixture."} timeout-and-dead-host-fail-flat
   (with-file-database
     (fn [connection]
       (with-server
@@ -302,7 +302,7 @@
             (is (true? (:my.web/transport-failed dead)))
             (is (string? (:seon.error/message dead)))))))))
 
-(deftest search-projects-the-live-serper-shape-and-blobs-the-raw-response
+(deftest ^{:seon.test/fixture-observation "The search response projection is checked against exact raw bytes retrieved from physical blob storage."} search-projects-the-live-serper-shape-and-blobs-the-raw-response
   (with-file-database
     (fn [connection]
       (with-server
@@ -341,7 +341,7 @@
                    (:my.web/results result)))
             (is (Arrays/equals ^bytes search-body ^bytes raw))))))))
 
-(deftest public-search-settles-one-receipt-with-provider-credits
+(deftest ^{:seon.test/fixture-observation "The public search effect settles a physical raw-response blob together with its provider-credit evidence."} public-search-settles-one-receipt-with-provider-credits
   (with-file-database
     (fn [connection]
       (with-server
@@ -382,7 +382,7 @@
             (is (inst? (:seon.effect/settled-at receipt)))
             (is (nil? (:seon.effect/interrupted-at receipt)))))))))
 
-(deftest public-fetch-settles-text-and-binary-body-representations
+(deftest ^{:seon.test/fixture-observation "The public fetch effect must settle inline text and blob-backed binary bodies with durable effect evidence."} public-fetch-settles-text-and-binary-body-representations
   (with-file-database
     (fn [connection]
       (with-server

@@ -447,3 +447,104 @@ Measured batch-5 worker totals (not claimed wall-time savings): problems-test
 **72,145 ms**, config-application-test 4 / **27,098 ms**. The report's complete
 55-test sum is 392,561 ms. Gate request is narrowed to only
 `seon.contracts-plan-test`; no test JVM was launched by this lane.
+
+
+### Batch 6 correction — existing fixture observations
+
+Read the named plan and AGENTS.md authority end to end; refreshed the
+clojure-testing skill. Batch 6 stopped in SELECT before any test ran and
+launched **zero confirmation JVMs**. The regrowth landing was incomplete:
+enforcement arrived without declarations for existing tests.
+
+The checker's own full-graph query found **54** expensive-fixture tests,
+**52** without reasons. Added individual `:seon.test/fixture-observation`
+declarations at those 52 deftests in 20 files. The row-6 HARNESS WASTE cases
+already use ordinary branches and are absent from this set; neither needs a
+pending exception. No checker exemption or assertion weakening was added.
+
+Before editing, evaluated the 52 proposed metadata declarations in default's
+JVM and called the checker on the 54 reaching Vars: zero refusals. Ran
+`(seon.test/run #'seon.test.runner-test/expensive-fixtures-require-a-declared-observation (seon.operator/connection "default"))`:
+**13/0/0**, entity **64561**. After editing and reloading saved namespaces,
+the same regression returned **13/0/0**, entity **64564**. Hook publication
+queued as `441bba28-b1ca-4689-bd47-5be476f23c6c`.
+
+The full-selection checker passed for **1,651** tests, then **1,652** after a
+concurrent test addition; both contained **54** expensive tests and **zero
+refusals**. A stale loaded web-context namespace initially lacked a new Var;
+reloading its current file resolved it without editing that lane.
+Reproducible query:
+[test-runner-waste-fixture-selection-2026-09-15.clj](test-runner-waste-fixture-selection-2026-09-15.clj).
+
+Every row below used exactly `(seon.test/run #'<test> (seon.operator/connection "default"))`
+through MCP JVM evaluation. Complete results were read and saved in
+[test-runner-waste-batch-6-in-process-2026-09-15.edn](test-runner-waste-batch-6-in-process-2026-09-15.edn).
+Across all four batch-6 namespaces: **50 passing tests, one bounded error**.
+Cache reuse exceeded the live API's 20-second completion bound before any
+assertion; [the issue](../../../seon/issues/cache-reuse-regression-exceeds-live-test-bound.md)
+records the boundary without claiming a cache defect.
+
+Three tests remain for the orchestrator because they launch child JVMs:
+`seon.test-runner-test/concurrent-bin-test-invocations-both-reach-their-tallies`,
+`seon.test-runner-test/fast-selected-paths-exclude-a-broken-foreign-file`, and
+`seon.test-runner-test/liveness-dump-includes-coordinator-and-worker-virtual-threads`.
+Other process regressions used existing Python/shell fixtures, including fake
+Clojure launchers. No test JVM, default restart, or foreign session operation
+occurred. Foreign `test/seon/sci/eval_test.clj` edits and untracked `build/`
+are excluded. Markdown-hook validation reports pre-existing stale gitlink
+citations in `agents-md-audit-2026-09-15.md`; that file was not edited.
+Gate request now names all four batch-6 namespaces.
+
+| In-process test | Run entity | Pass / fail / error |
+|---|---:|---|
+| `seon.test.runner-test/assertion-report-uses-bounded-value-renderer` | 64578 | 9 / 0 / 0 |
+| `seon.test.runner-test/default-red-does-not-launch-confirmation` | 64579 | 8 / 0 / 0 |
+| `seon.test.runner-test/expensive-fixtures-require-a-declared-observation` | 64580 | 13 / 0 / 0 |
+| `seon.test.runner-test/initialization-acquires-one-projection` | 64581 | 8 / 0 / 0 |
+| `seon.test.runner-test/unused-workers-own-no-checkout` | 64582 | 7 / 0 / 0 |
+| `seon.test-runner-test/a-confirmation-loads-the-pool-workers-world` | 64583 | 2 / 0 / 0 |
+| `seon.test-runner-test/a-dead-workers-task-is-never-classified-parallel-only` | 64584 | 14 / 0 / 0 |
+| `seon.test-runner-test/a-fresh-run-root-is-claimed-before-population-and-sweep` | 64585 | 14 / 0 / 0 |
+| `seon.test-runner-test/a-task-that-changes-worker-global-state-is-named-as-the-leaker` | 64586 | 9 / 0 / 0 |
+| `seon.test-runner-test/a-worker-dying-during-re-arm-names-the-re-arm` | 64587 | 7 / 0 / 0 |
+| `seon.test-runner-test/a-worker-rearms-only-when-a-task-stripped-its-contracts` | 64588 | 4 / 0 / 0 |
+| `seon.test-runner-test/arming-refuses-when-a-program-contract-carries-no-wrapper` | 64589 | 6 / 0 / 0 |
+| `seon.test-runner-test/assertionless-test-is-an-attributed-failure` | 64591 | 2 / 0 / 0 |
+| `seon.test-runner-test/boot-tests-have-no-namespace-wide-execution-shape` | 64592 | 3 / 0 / 0 |
+| `seon.test-runner-test/captures-counts-and-failure-identities-per-test` | 64593 | 4 / 0 / 0 |
+| `seon.test-runner-test/checked-write-failure-is-one-attributed-task-result` | 64594 | 5 / 0 / 0 |
+| `seon.test-runner-test/consecutive-cache-invocations-reuse-the-published-base` | 64675 | 0 / 0 / 1 |
+| `seon.test-runner-test/coordinator-uses-the-prepared-worker-count` | 64676 | 4 / 0 / 0 |
+| `seon.test-runner-test/dependency-configuration-excludes-first-party-source` | 64677 | 4 / 0 / 0 |
+| `seon.test-runner-test/dependency-source-digest-does-not-name-the-checkout` | 64678 | 3 / 0 / 0 |
+| `seon.test-runner-test/exit-before-readiness-is-one-attributed-terminal-value` | 64679 | 5 / 0 / 0 |
+| `seon.test-runner-test/explicit-result-root-directs-bare-gate-evidence` | 64680 | 2 / 0 / 0 |
+| `seon.test-runner-test/fast-and-worker-arm-the-complete-program-contract-set` | 64681 | 4 / 0 / 0 |
+| `seon.test-runner-test/interrupted-launcher-awaits-its-runner-before-retaining-the-root` | 64682 | 10 / 0 / 0 |
+| `seon.test-runner-test/isolated-confirmations-overlap-with-bounded-parallelism` | 64683 | 4 / 0 / 0 |
+| `seon.test-runner-test/kill-after-command-acceptance-is-one-attributed-task-result` | 64684 | 7 / 0 / 0 |
+| `seon.test-runner-test/live-worker-exceeding-its-bound-is-one-attributed-task-result` | 64686 | 6 / 0 / 0 |
+| `seon.test-runner-test/ordinary-worker-reply-is-one-attributed-terminal-value` | 64687 | 3 / 0 / 0 |
+| `seon.test-runner-test/persistent-recording-failure-refuses-a-successful-gate` | 64688 | 10 / 0 / 0 |
+| `seon.test-runner-test/published-base-retention-preserves-live-users-and-symlink-targets` | 64689 | 11 / 0 / 0 |
+| `seon.test-runner-test/repeated-identical-errors-have-one-whole-face` | 64690 | 7 / 0 / 0 |
+| `seon.test-runner-test/result-facts-live-on-the-test-row-and-reruns-replace-them` | 64691 | 8 / 0 / 0 |
+| `seon.test-runner-test/result-recording-is-total-under-concurrent-test-retraction` | 64692 | 3 / 0 / 0 |
+| `seon.test-runner-test/root-owning-tasks-never-co-run-inside-one-worker-group` | 64693 | 7 / 0 / 0 |
+| `seon.test-runner-test/selected-paths-overlay-head-for-preparation-and-every-worker` | 64694 | 8 / 0 / 0 |
+| `seon.test-runner-test/snapshot-digest-follows-selected-bytes` | 64695 | 2 / 0 / 0 |
+| `seon.test-runner-test/stale-dependency-cache-is-refused-or-selected-and-recorded` | 64696 | 9 / 0 / 0 |
+| `seon.test-runner-test/the-agent-fork-callable-returns-the-committed-projection` | 64699 | 1 / 0 / 0 |
+| `seon.test-runner-test/the-armed-program-derivation-refuses-absence-instead-of-answering-empty` | 64701 | 8 / 0 / 0 |
+| `seon.test-runner-test/the-effectful-sink-refuses-the-default-cluster` | 64704 | 1 / 0 / 0 |
+| `seon.test-runner-test/the-gate-runs-under-the-contracts-a-cluster-runs-under` | 64706 | 7 / 0 / 0 |
+| `seon.test-runner-test/unlaunchable-confirmation-worker-does-not-suppress-the-tally` | 64707 | 9 / 0 / 0 |
+| `seon.test-runner-test/worker-exit-backstop-names-and-fails-a-stuck-child` | 64708 | 6 / 0 / 0 |
+| `seon.test-runner-test/worker-root-cleanup-awaits-recorded-child-completion` | 64713 | 10 / 0 / 0 |
+| `seon.source-reconciliation-test/source-reconciliation-preserves-identities-and-unrelated-facts` | 64714 | 14 / 0 / 0 |
+| `seon.test-reaching-test/a-test-completion-bound-is-recorded-as-a-named-error` | 64717 | 3 / 0 / 0 |
+| `seon.test-reaching-test/check-records-provenance-and-verifies-green` | 64721 | 6 / 0 / 0 |
+| `seon.test-reaching-test/empty-check-does-not-acquire-run-provenance` | 64724 | 7 / 0 / 0 |
+| `seon.test-reaching-test/reaching-is-the-program-graph-relation` | 64726 | 4 / 0 / 0 |
+| `seon.test-reaching-test/red-check-names-failure-and-stops-escalation` | 64727 | 5 / 0 / 0 |
+| `seon.test-reaching-test/widened-hook-check-reports-and-runs-nothing` | 64728 | 6 / 0 / 0 |

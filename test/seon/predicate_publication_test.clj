@@ -13,7 +13,7 @@
             [seon.shell :as shell]
             [seon.test-support :as support]))
 
-(deftest a-published-predicate-rename-forks-and-boots-with-its-tombstone
+(deftest ^{:seon.test/fixture-observation "A new cluster must boot from a published predicate rename while preserving the old identity tombstone."} a-published-predicate-rename-forks-and-boots-with-its-tombstone
   (support/preserving-instrumentation-state
    (fn []
      (let [root (str "tmp/predicate-publication/" (random-uuid))

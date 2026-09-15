@@ -35,7 +35,7 @@
      :seon.dev.fresh-operator-export-test/output
      @output}))
 
-(deftest ^{:seon.test/long
+(deftest ^{:seon.test/fixture-observation "The exported physical store must be independently openable and queryable after the operator export command."} ^{:seon.test/long
            "200.542 s pool: real start JVM, export JVM, store copy/reidentify, reopen, and query proof."}
   export-verb-produces-an-openable-queryable-store
   (let [root (fresh-root)

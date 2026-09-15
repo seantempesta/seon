@@ -77,7 +77,7 @@
           (recur (+ offset (alength ^bytes octets))))))
     (.toByteArray output)))
 
-(deftest background-binary-results-remain-exact-across-the-inline-threshold
+(deftest ^{:seon.test/fixture-observation "Background binary results must round-trip through the physical blob backend on both sides of the inline threshold."} background-binary-results-remain-exact-across-the-inline-threshold
   (with-file-effect-store
     (fn [connection]
       (db/transact!

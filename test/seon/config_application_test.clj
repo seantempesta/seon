@@ -145,7 +145,7 @@
     (is (= #{:seon.config.orphan/dial} (unapplied-attributes rows {} attributes))
         "a dial only a test reads has no application owner and must fail")))
 
-(deftest ^{:seon.test/long "Starts a real cluster to observe applied runtime configuration."}
+(deftest ^{:seon.test/fixture-observation "Real store creation, executors and listening ports must consume the applied configuration during boot."} ^{:seon.test/long "Starts a real cluster to observe applied runtime configuration."}
   applied-values-shape-the-running-system
   (let [root (fresh-root)
         name "application-proof"]

@@ -102,7 +102,7 @@
 ;;; What boot leaves standing
 ;;; ---------------------------------------------------------------------------
 
-(deftest boot-seeds-the-root-agent-and-arms-the-loop
+(deftest ^{:seon.test/fixture-observation "The assertions observe boot-created root agents, maintenance tasks and armed graphs, absent from an ordinary branch fixture."} boot-seeds-the-root-agent-and-arms-the-loop
   (with-cluster
     "armed"
     (fn [instance]
@@ -183,7 +183,7 @@
                    :seon.ai.retry/strategy
                    (ai/retry-strategy settings))))))))))
 
-(deftest two-clusters-in-one-jvm-own-distinct-live-program-contexts
+(deftest ^{:seon.test/fixture-observation "Two real cluster boots must acquire distinct live program contexts over the same published root."} two-clusters-in-one-jvm-own-distinct-live-program-contexts
   (let [root "tmp/armed-test/live-program-boundary"]
     (test-support/delete-recursively! root)
     (test-support/populate-published-root! root)
@@ -241,7 +241,7 @@
           (cluster/stop! right)
           (cluster/stop! left))))))
 
-(deftest booting-spends-no-model-call
+(deftest ^{:seon.test/fixture-observation "The observation is that the complete boot and initial wake spend no model call, not merely that database facts exist."} booting-spends-no-model-call
   ;; The system-authored bootstrap plan evaluates locally; boot must not
   ;; spend a provider call. After that one run, an empty wake stays free.
   (let [calls (atom 0)]
@@ -278,7 +278,7 @@
             (is (zero? @calls)
                 "and nothing anywhere called the model")))))))
 
-(deftest a-message-committed-during-boot-arming-is-conserved
+(deftest ^{:seon.test/fixture-observation "The observation is listener installation during real boot arming, which an already-populated branch never executes."} a-message-committed-during-boot-arming-is-conserved
   (let [name "arming-window"
         root (str "tmp/armed-test/" name)
         primed (CountDownLatch. 1)
@@ -335,7 +335,7 @@
 ;;; THE VISIBILITY PROPERTY — an escaped Throwable becomes facts
 ;;; ---------------------------------------------------------------------------
 
-(deftest an-escaped-throwable-becomes-a-fact-and-a-message
+(deftest ^{:seon.test/fixture-observation "The observation requires the booted agent graph and fault committer to persist and route a proc fault."} an-escaped-throwable-becomes-a-fact-and-a-message
   (with-cluster
     "faulting"
     (fn [instance]
@@ -431,7 +431,7 @@
                               (errors @connection)))
               "and no overflow fact was needed on the way"))))))
 
-(deftest the-first-cluster-proc-fault-at-resume-becomes-a-fact
+(deftest ^{:seon.test/fixture-observation "The failure is injected at the first real boot resume transition, before an ordinary branch fixture has any running proc."} the-first-cluster-proc-fault-at-resume-becomes-a-fact
   (let [name "first-cluster-fault"
         root (str "tmp/armed-test/" name)
         armer-step agent/armer-step

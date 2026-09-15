@@ -89,7 +89,7 @@
     :seon.sci.eval/time-limit-ms 5000
     :seon.config/on-core-error :panic}))
 
-(deftest a-second-cluster-boots-under-the-first-cluster-s-instrumentation
+(deftest ^{:seon.test/fixture-observation "The subject is a second complete boot under the first live cluster instrumentation, not an ordinary branch transaction."} a-second-cluster-boots-under-the-first-cluster-s-instrumentation
   (let [root (published-root)
         instances (atom [])]
     (try

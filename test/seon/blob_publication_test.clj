@@ -53,7 +53,7 @@
     (catch clojure.lang.ExceptionInfo failure
       (is (= :crashed (:seon.test/root-transaction (ex-data failure)))))))
 
-(deftest publication-and-collection-are-exclusive-in-both-orderings
+(deftest ^{:seon.test/fixture-observation "Publication and collection contend over physical store-global blob keys, which an ordinary branch does not isolate."} publication-and-collection-are-exclusive-in-both-orderings
   (let [root (str "tmp/blob-publication-test/" (random-uuid))
         directory (:seon.boot/store-dir
                    (cluster/resolve-bootstrap {:seon.boot/root root}))

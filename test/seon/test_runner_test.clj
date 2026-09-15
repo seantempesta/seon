@@ -100,7 +100,7 @@
         (stop-process-tree! child)
         (test-support/delete-recursively! root)))))
 
-(deftest ^{:seon.test/platform "Consecutive launchers reuse the immutable published base."}
+(deftest ^{:seon.test/fixture-observation "Cache reuse is verified against a real published file store and its immutable manifest across launcher invocations."} ^{:seon.test/platform "Consecutive launchers reuse the immutable published base."}
   consecutive-cache-invocations-reuse-the-published-base
   (let [root (doto (io/file project-root "tmp" (str "base-reuse-" (random-uuid))) .mkdirs)
         supplied (System/getProperty "seon.test.published-base")
@@ -1630,7 +1630,7 @@
         (when (.exists fixture-root)
           (test-support/delete-recursively! fixture-root))))))
 
-(deftest concurrent-bin-test-invocations-both-reach-their-tallies
+(deftest ^{:seon.test/fixture-observation "Independent launcher processes require separate persistent result stores and locks to record both gate tallies."} concurrent-bin-test-invocations-both-reach-their-tallies
   (let [fixture-root
         (io/file project-root "tmp" "test-runner-concurrent-gates"
                  (str (random-uuid)))

@@ -25,7 +25,7 @@
   (.length (io/file (get-in @connection [:store :backing :base])
                     (defaults/key->store-key digest))))
 
-(deftest oldest-unreferenced-blobs-go-first-and-current-references-survive
+(deftest ^{:seon.test/fixture-observation "Retention measures physical blob bytes and sibling-branch references while deleting store-global keys."} oldest-unreferenced-blobs-go-first-and-current-references-survive
   (let [root (io/file "tmp" (str "blob-retention-" (random-uuid)))]
     (try
       (support/with-published-file-database

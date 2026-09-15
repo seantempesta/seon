@@ -162,7 +162,7 @@
                      [?receipt :seon.cluster.eval/result-edn ?result]]
                    db)))))
 
-(deftest an-agent-definition-survives-restart-and-another-agent-calls-it
+(deftest ^{:seon.test/fixture-observation "Agent-authored code must survive real cluster shutdown and physical-store reopen before another agent calls it."} an-agent-definition-survives-restart-and-another-agent-calls-it
   (let [root (str "tmp/program-restart-test/" (random-uuid))
         cluster-name (str "program-restart-" (random-uuid))]
     (.mkdirs (io/file root))

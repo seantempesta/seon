@@ -587,7 +587,7 @@
                  [run-id 3 :seon.cluster.eval/interrupted-at interrupted-at]}
                (receipt-failures @connection [run-id])))))))
 
-(deftest n-agents-fold-independently-on-one-live-cluster
+(deftest ^{:seon.test/fixture-observation "The observation concerns concurrent agent graphs acquired by a complete cluster boot, with real listener and shutdown ownership."} n-agents-fold-independently-on-one-live-cluster
   (let [model-calls (atom [])]
     (with-redefs [ai/complete
                   (fn [request]

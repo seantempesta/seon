@@ -96,7 +96,7 @@
            request
            (HttpResponse$BodyHandlers/ofString))))
 
-(deftest ^{:seon.test/long
+(deftest ^{:seon.test/fixture-observation "The test joins real booted flow observations to facts and verifies their delivery over the running HTTP surface."} ^{:seon.test/long
            "Boots a real cluster and fetches its root page to cover live fleet integration."}
   a-booted-cluster-tells-its-live-fleet-story
   (with-cluster

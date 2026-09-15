@@ -14,7 +14,7 @@
 
 (set! *warn-on-reflection* true)
 
-(deftest an-instrumented-dev-cluster-builds-an-attempt-ready-prompt
+(deftest ^{:seon.test/fixture-observation "The test observes prompt acquisition under instrumentation installed by a real development-cluster boot."} an-instrumented-dev-cluster-builds-an-attempt-ready-prompt
   (let [cluster-name (str "instrumented-acquire-" (random-uuid))
         root (str "tmp/instrumented-acquire-test/" cluster-name)
         message-id "instrumented-acquire-turn"
