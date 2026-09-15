@@ -16,6 +16,7 @@
             [seon.db :as db]
             [seon.id :as id]
             [seon.program :as program]
+            [seon.render.value :as value]
             [seon.schema :as schema]
             [seon.test.selection :as selection]
             [seon.test.cache :as cache])
@@ -77,6 +78,22 @@
               *print-level* (:seon.print/level options)]
       (pr-str value))))
 
+(defn- report-options
+  []
+  (let [configuration (config/defaults)]
+    (assoc (select-keys configuration
+                        [:seon.print/length :seon.print/level])
+           :seon.render/profile
+           ((requiring-resolve 'seon.render/agent-render-profile) configuration))))
+
+(defn- report-value
+  [options reported-value]
+  (value/render-ai
+   {:seon.render/value reported-value
+    :seon.render.value/root 'seon.test.runner/assertion
+    :seon.render/profile (or (:seon.render/profile options)
+                             (:seon.render/profile (report-options)))}))
+
 (defn- throwable-signature
   [^Throwable failure]
   (loop [current failure]
@@ -107,9 +124,9 @@
           (test/testing-contexts-str))
         (:message event)
         (when (contains? event :expected)
-          (str "expected: " (printable options (:expected event))))
+          (str "expected: " (report-value options (:expected event))))
         (when (contains? event :actual)
-          (str "actual: " (printable options (:actual event))))]
+          (str "actual: " (report-value options (:actual event))))]
        (remove str/blank?)
        (str/join "\n")))
 
@@ -192,7 +209,7 @@
          (println (test/testing-contexts-str)))
        (when-let [message (:message event)]
          (println message))
-       (println "expected:" (printable options (:expected event)))
+       (println "expected:" (report-value options (:expected event)))
        (print "  actual: ")
        (println (throwable-face options (:actual event) signature))))))
 
@@ -207,7 +224,13 @@
           (when signature
             (swap! reported-signatures conj signature))
           (report-error! options event signature))))
-    (default-report event)))
+    (if (#{:fail :error} (:type event))
+      (test/with-test-out
+        (test/inc-report-counter (:type event))
+        (println (str "\n" (str/upper-case (name (:type event))) " in")
+                 (test/testing-vars-str event))
+        (println (failure-message options event)))
+      (default-report event))))
 
 (defn- assertionless-failure
   [capture event]
@@ -504,11 +527,7 @@
      :seon.error/message "The supplied Var has no clojure.test function."}
     (let [test-symbol (var-symbol test-var)
           selected-namespaces #{(symbol (namespace test-symbol))}
-          options (select-keys
-                   (config/defaults)
-                   [:seon.config.eval.result/blob-threshold
-                    :seon.print/length
-                    :seon.print/level])
+          options (report-options)
           capture (atom {::order [] ::results {}})
           reported-signatures (atom #{})
           default-report test/report]
@@ -699,11 +718,7 @@
 (defn- run-request!
   [request progress tiers]
   (let [selected-namespaces (set (:seon.test.runner/namespaces request))
-        options (select-keys
-                 (config/defaults)
-                 [:seon.config.eval.result/blob-threshold
-                  :seon.print/length
-                  :seon.print/level])
+        options (report-options)
         capture (atom {::order [] ::results {}})
         reported-signatures (atom #{})
         default-report test/report
@@ -892,11 +907,7 @@
   [task]
   (let [test-vars (resolve-task-vars task)
         namespace-name (symbol (::task-namespace task))
-        options (select-keys
-                 (config/defaults)
-                 [:seon.config.eval.result/blob-threshold
-                  :seon.print/length
-                  :seon.print/level])
+        options (report-options)
         capture (atom {::order [] ::results {}})
         reported-signatures (atom #{})
         output (StringWriter.)

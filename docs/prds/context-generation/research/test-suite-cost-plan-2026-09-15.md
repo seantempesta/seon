@@ -129,6 +129,18 @@ The first probe correctly refused an unreloaded cache Var; reloading the
 changed dependency before its caller resolved it. Shell syntax and diff checks
 passed; the orchestrator gate remains pending.
 
+Row 8: failing expected/actual values enter `seon.render.value/render-ai`
+with the runner's acquired profile. Assertion failures no longer enter raw
+`clojure.test/report`; counters still increment once. Captured messages use
+the same projection. The existing normalized failure-identity calculation
+is unchanged. Regression `assertion-report-uses-bounded-value-renderer`
+uses a real SCI context with 2000 declared bindings, source/test identity,
+counter and evidence assertions, and a supplied 64-token profile. Live JVM
+probe rendered that context as 203 characters of explicit elision data;
+reporter probe counted exactly one fail and printed `probe.clj:1`.
+The first value probe identified the required root-selector key; the final
+request supplies `:seon.render.value/root`. No new clipping owner was added.
+
 ## Landing (tests)
 
 Lane `slow-tests-merge`, 2026-09-15. Read this plan and

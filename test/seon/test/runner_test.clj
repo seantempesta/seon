@@ -2,13 +2,54 @@
   (:require [clojure.set :as set]
             [clojure.java.io :as io]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is]]
+            [clojure.test :as test :refer [deftest is]]
+            [sci.core :as sci]
             [seon.instrument :as instrument]
             [seon.test.arm :as arm]
             [seon.test.cache :as cache]
             [seon.test.runner :as runner]
             [seon.test-runner-failure-fixture]
             [seon.test-support :as test-support]))
+
+(deftest assertion-report-uses-bounded-value-renderer
+  (let [ctx (sci/init {:namespaces
+                       {'large.fixture
+                        (into {} (map (fn [n] [(symbol (str "value" n)) n]))
+                              (range 2000))}})
+        options {:seon.print/length 4 :seon.print/level 3
+                 :seon.render/profile
+                 {:seon.render.profile/id ::assertion
+                  :seon.render.profile/token-budget 64
+                  :seon.render.profile/max-depth 3
+                  :seon.render.profile/max-children 3
+                  :seon.render.profile/max-string-length 40
+                  :seon.render.profile/composition :single-line}}
+        event {:type :fail :file "runner_test.clj" :line 99
+               :var #'assertion-report-uses-bounded-value-renderer
+               :expected :small :actual ctx}
+        capture (atom {::runner/order [] ::runner/results {}})
+        counters (ref test/*initial-report-counters*)
+        output
+        (with-out-str
+          (binding [test/*test-out* *out*
+                    test/*report-counters* counters
+                    test/*testing-vars* [#'assertion-report-uses-bounded-value-renderer]]
+            (#'runner/capture-and-report-event!
+             options capture #{'seon.test.runner-test}
+             (fn [_] (throw (ex-info "Raw assertion reporter bypass" {})))
+             (atom #{}) event)))
+        result (first (#'runner/captured-results @capture))]
+    (is (= 1 (:fail @counters)))
+    (is (= 1 (:seon.test/fail-count result)))
+    (is (= [(#'runner/failure-identity options
+             'seon.test.runner-test/assertion-report-uses-bounded-value-renderer event)]
+           (:seon.test/failing-assertions result)))
+    (is (str/includes? output "assertion-report-uses-bounded-value-renderer"))
+    (is (str/includes? output "runner_test.clj:99"))
+    (is (str/includes? output ":seon.print/omitted"))
+    (is (str/includes? output (#'runner/report-value options ctx)))
+    (is (< (count output) 1500) "The small supplied profile bounds the SCI world.")
+    (is (not (str/includes? output "value1999")))))
 
 (deftest unused-workers-own-no-checkout
   (let [root (doto (io/file "tmp" (str "unused-workers-" (random-uuid))) .mkdirs)
