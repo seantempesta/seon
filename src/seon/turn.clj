@@ -2072,9 +2072,10 @@
             agent-ctx (when turn-id
                         ((requiring-resolve 'seon.cluster.agent/acquire-context!)
                          handle agent-id))
-            previews (mapv
-                      (fn [ordinal source]
-                        (if turn-id
+            previews (second
+                      (reduce
+                       (fn [[ordinal previews] source]
+                         (let [preview (if turn-id
                           {:seon.turn.loop/evaluated-sources
                            ((requiring-resolve 'seon.turn/evaluate-sources)
                             {:seon.turn.loop/cluster handle
@@ -2093,8 +2094,20 @@
                             :seon.agent/id agent-id
                             :seon.ns/name (:seon.ns/name source)
                             :seon.cluster.reply/text (:seon.cluster.eval/source source)
-                            :seon.sci.admit/caps (:seon.sci.admit/caps handle)})))
-                      (range) selected)]
+                            :seon.sci.admit/caps (:seon.sci.admit/caps handle)}))
+                               previous (get latest (source-key source))
+                               evaluation (get-in preview [:seon.turn.loop/evaluated-sources 0
+                                                           :seon.sci.eval/evaluation])
+                               unchanged? (and previous evaluation
+                                               (= (:seon.repl/shown-value previous)
+                                                  (repl/shown-value (:seon.eval/shown evaluation ""))))
+                               preview (cond-> preview
+                                         evaluation
+                                         (assoc-in [:seon.turn.loop/evaluated-sources 0
+                                                    :seon.cluster.eval/ordinal] ordinal)
+                                         unchanged? (assoc :seon.turn/status :unchanged))]
+                           [(if unchanged? ordinal (inc ordinal)) (conj previews preview)]))
+                       [0 []] selected))]
         (or (some #(when (:seon.error/kind %) %) previews)
             (some identity
                   (map (fn [source preview]
@@ -2102,14 +2115,32 @@
                                                       (:seon.sci.eval/evaluation %))
                                (:seon.turn.loop/evaluated-sources preview)))
                        selected previews))
-            (let [evaluated (mapv (fn [ordinal source preview]
-                                    (cond-> (assoc (first (:seon.turn.loop/evaluated-sources preview))
-                                                   :seon.cluster.eval/ordinal ordinal)
+            (let [silent (filterv #(= :unchanged (:seon.turn/status (second %)))
+                                  (mapv vector selected previews))
+                  refresh-tx
+                  (into [] cat
+                        (map (fn [[source preview]]
+                               (let [previous (get latest (source-key source))
+                                     evaluation (get-in preview [:seon.turn.loop/evaluated-sources 0
+                                                                 :seon.sci.eval/evaluation])]
+                                 (concat
+                                  (map (fn [evidence] [:db.fn/retractEntity (:db/id evidence)])
+                                       (:seon.cluster.eval/read-evidence previous))
+                                  [[:db/add (:db/id previous) :seon.cluster.eval/read-basis-transaction
+                                    (:seon.cluster.eval/read-basis-transaction evaluation)]]
+                                  (receipt-read-evidence-tx previous evaluation))))
+                             silent))
+                  emitted (filterv #(not= :unchanged (:seon.turn/status (second %)))
+                                   (mapv vector selected previews))
+                  selected (mapv first emitted)
+                  previews (mapv second emitted)
+                  evaluated (mapv (fn [source preview]
+                                    (cond-> (first (:seon.turn.loop/evaluated-sources preview))
                                       (:seon.cluster.eval/comment source)
                                       (assoc-in [:seon.turn.loop/admitted-form
                                                  :seon.cluster.eval/comment]
                                                 (:seon.cluster.eval/comment source))))
-                                  (range) selected previews)
+                                  selected previews)
                   evaluated
                   (mapv (fn [source item]
                           (if-let [previous (get latest (source-key source))]
@@ -2138,12 +2169,14 @@
                   result {:seon.render.walk/units (:seon.render.walk/units declared)
                           :seon.turn/forms
                           (mapv #(if-let [text (get text-by-source (source-key %))]
-                                   (assoc % :seon.turn/text text) %) plan)}]
-              (if (and write? (seq evaluated))
-                (let [prepared (record-evaluated-tx
-                                {:seon.turn.loop/cluster handle :seon.db/db database :seon.turn/id turn-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/starting-ns [:seon.ns/name namespace-name] :seon.turn/reply (str/join "\n" (map :seon.cluster.eval/source selected)) :seon.turn/opened-tx "datomic.tx" :seon.turn/closed-tx "datomic.tx" :seon.turn.loop/evaluated-sources evaluated})
+                                   (assoc % :seon.turn/text text)
+                                   (assoc % :seon.turn/status :unchanged)) plan)}]
+              (if (and write? (or (seq evaluated) (seq refresh-tx)))
+                (let [prepared (when (seq evaluated)
+                                 (record-evaluated-tx
+                                  {:seon.turn.loop/cluster handle :seon.db/db database :seon.turn/id turn-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/starting-ns [:seon.ns/name namespace-name] :seon.turn/reply (str/join "\n" (map :seon.cluster.eval/source selected)) :seon.turn/opened-tx "datomic.tx" :seon.turn/closed-tx "datomic.tx" :seon.turn.loop/evaluated-sources evaluated}))
                       report (blob/with-publication!
-                              connection (:seon.blob/staged-writes prepared)
+                              connection (vec (:seon.blob/staged-writes prepared))
                               #(db/transact!
                                 connection
                                 [[:db.fn/call
@@ -2153,7 +2186,7 @@
                                     ;; The writer admits this append only against
                                     ;; the history from which it was derived.
                                     (if (= latest (latest-evaluations current agent-id))
-                                      (:seon.db/tx-data prepared)
+                                      (into refresh-tx (:seon.db/tx-data prepared))
                                       []))]]))]
                   (if (:seon.error/kind report) report
                       (if (some #(and (= :seon.turn/id (:a %))
