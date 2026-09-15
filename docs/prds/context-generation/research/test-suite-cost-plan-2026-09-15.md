@@ -211,3 +211,49 @@ MCP repeatedly reported `session-lost` although the PID and probe Vars
 survived. Reconnecting retrieved completed results; no default lifecycle
 operation was issued. This matches the already-recorded boundary in
 `p1-ambient-state-2026-09-15.md` (commit `40bdd357c`).
+
+### Row 3 — one physical artifact store
+
+Five former standalone tests are private scenario functions in the table-driven
+`artifact-lifecycle-preserves-identity-paging-and-retraction`. All **38 existing
+assertions** remain; two additional assertions require all five scenarios in
+order and exactly one fresh-store acquisition. Scenario cluster names and
+vector contents are distinct. Retraction is last. Its history query binds the
+retracted digest, preserving the no-history assertion while other scenarios'
+roots remain in the shared store. A fixture-observation metadata declaration
+explains why branch isolation cannot isolate store-global blobs, compatible
+with the concurrently implemented fixture-admission rule.
+
+The direct regression fails before its first assertion at
+`cluster/accrete-schema-population!` → `db/transact!` with
+`:seon.schema/missing-projection` during fresh physical-store population.
+The committed diagnostic temporarily attaches the canonical fixture's
+projection state to the new scratch connection before calling the unchanged
+real population owner. The real fresh-store acquisition and all scenario
+operations still run: **40 pass / 0 fail / 0 error**. Final distinct-value
+probe: **45,447 ms** (earlier same-vector probe: 55,373 ms). These are diagnostic
+worker times, not gate savings. No protected source/fixture file was changed.
+
+The required construction-time carriage is illustrated by this unapplied
+production diff; the diagnostic proves the missing input, not this complete
+boot integration. The population owner should reuse a handed bootstrap
+projection where available rather than build a second projection:
+
+```diff
+--- a/src/seon/cluster.clj
++++ b/src/seon/cluster.clj
+@@ populate-source!
+-  (let [forms (schema.edn/packaged-forms)]
+-    (schema/call-with-forms
+-     forms
++  (let [forms (schema.edn/packaged-forms)
++        projection (schema/build-projection forms)]
++    (db/carry-connection-projection-state!
++     connection (sci.eval/projection-state @connection projection))
++    (schema/call-with-projection
++     projection
+```
+
+The initial foreign MCP edits (database projection carriage and its existing
+config regression) landed independently before this lane's commit. They were
+preserved; this slice changes only the artifact cases and their fixture count.

@@ -37,3 +37,19 @@
        (fn [connection] (dissoc (found connection) :seon.problems/stale-vars))}
       #(observe! "row2-diagnostic"
                  seon.problems-test/absent-facts-produce-no-entries))))
+
+(defn row3-diagnostic! []
+  ;; Probe the missing construction-time carriage without changing production
+  ;; or the protected fixture. The real fresh-store owner still acquires once.
+  (support/with-database
+   (fn [base]
+     (let [projection (db/carried-projection (db/db base))
+           populate @#'support/populate-database!]
+       (with-redefs-fn
+         {#'support/populate-database!
+          (fn [connection]
+            (db/carry-connection-projection-state!
+             connection (sci-eval/projection-state @connection projection))
+            (populate connection))}
+         #(observe! "row3-diagnostic"
+                    seon.cluster.mcp-test/artifact-lifecycle-preserves-identity-paging-and-retraction))))))

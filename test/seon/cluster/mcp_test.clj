@@ -188,7 +188,8 @@
     (is (false? (:seon.dev.mcp/windowed? result)))
     (is (not (contains? result :seon.blob/digest)))))
 
-(deftest jvm-exceptions-retain-the-root-location-and-flat-error
+(defn- jvm-exceptions-retain-the-root-location-and-flat-error
+  [connection]
   (let [cluster-name "mcp-jvm-exception-face-test"
         effective (config/defaults)
         inline-ceiling (:seon.config.eval.result/blob-threshold effective)
@@ -209,72 +210,69 @@
                       (repeat 500 serving-frame))
          :cause small-message
          :phase :execution}]
-    (support/with-database
-      {:seon.test-support/fresh-store? true}
-      (fn [connection]
-        (config/apply! {:seon.db/connection connection
-                        :seon.boot/cluster-name cluster-name})
-        (support/seed-cluster! connection cluster-name)
-        (db/transact! connection
-                      [{:seon.ns/name 'seon.cluster.mcp-test
-                        :seon.ns/source "(ns seon.cluster.mcp-test)"}])
-        (swap! running-instances assoc cluster-name
-               (running-instance connection cluster-name))
-        (try
-          (let [result (projected cluster-name effective envelope)
-                face (:seon.dev.mcp/value result)
-                oversized-result
-                (projected cluster-name effective
-                           (assoc envelope :cause oversized-message))
-                retained-message
-                (cluster/mcp-get-value
-                 cluster-name (:seon.blob/digest oversized-result)
-                 [:seon.error/message] 0)]
-            (is (= throw-site-frame (:seon.dev.mcp/frame face))
-                "the root exception location survives instead of the serving frame")
-            (is (= {:seon.error/diagnostic-layer :development-mcp
-                    :seon.error/diagnostic-operation :evaluate-jvm
-                    :seon.error/diagnostic-member :exception
-                    :seon.error/diagnostic-expected
-                    :successful-prepl-evaluation
-                    :seon.error/diagnostic-offending
-                    "java.lang.IllegalArgumentException"
-                    :seon.error/diagnostic-cause small-message
-                    :seon.error/diagnostic-evidence-availability
-                    :seon.error/known
-                    :seon.error/diagnostic-evidence
-                    {:seon.dev.mcp/frame throw-site-frame}}
-                   (select-keys
-                    (:seon.error/data face)
-                    [:seon.error/diagnostic-layer
-                     :seon.error/diagnostic-operation
-                     :seon.error/diagnostic-member
-                     :seon.error/diagnostic-expected
-                     :seon.error/diagnostic-offending
-                     :seon.error/diagnostic-cause
-                     :seon.error/diagnostic-evidence-availability
-                     :seon.error/diagnostic-evidence])))
-            (is (not (contains? face :seon.dev.mcp/text))
-                "the same sentence is not rendered again inside the face")
-            (is (false? (:seon.dev.mcp/windowed? result)))
-            (is (not (contains? result :seon.blob/digest))
-                "a small exception does not retain its bulky prepl envelope")
-            ;; Diagnostic evidence accretes without changing the boundary:
-            ;; require the flat face to stay an order of magnitude smaller
-            ;; than the complete Throwable->map instead of freezing one byte
-            ;; count for today's declared evidence attributes.
-            (is (< (* 10 (utf8-size result)) (utf8-size envelope))
-                "the complete Throwable->map does not become the inline face")
-            (is (true? (:seon.dev.mcp/windowed? oversized-result)))
-            (is (string? (:seon.blob/digest oversized-result)))
-            (is (true? (:seon.dev.mcp/retrievable? oversized-result)))
-            (is (= (subs oversized-message 0 72)
-                   (:seon.render.value/window retained-message))
-                "a genuinely oversized message remains pageable by digest")
-            (is (= (count oversized-message)
-                   (:seon.render.value/total retained-message))))
-          (finally
-            (swap! running-instances dissoc cluster-name)))))))
+    (config/apply! {:seon.db/connection connection
+                    :seon.boot/cluster-name cluster-name})
+    (support/seed-cluster! connection cluster-name)
+    (db/transact! connection
+                  [{:seon.ns/name 'seon.cluster.mcp-test
+                    :seon.ns/source "(ns seon.cluster.mcp-test)"}])
+    (swap! running-instances assoc cluster-name
+           (running-instance connection cluster-name))
+    (try
+      (let [result (projected cluster-name effective envelope)
+            face (:seon.dev.mcp/value result)
+            oversized-result
+            (projected cluster-name effective
+                       (assoc envelope :cause oversized-message))
+            retained-message
+            (cluster/mcp-get-value
+             cluster-name (:seon.blob/digest oversized-result)
+             [:seon.error/message] 0)]
+        (is (= throw-site-frame (:seon.dev.mcp/frame face))
+            "the root exception location survives instead of the serving frame")
+        (is (= {:seon.error/diagnostic-layer :development-mcp
+                :seon.error/diagnostic-operation :evaluate-jvm
+                :seon.error/diagnostic-member :exception
+                :seon.error/diagnostic-expected
+                :successful-prepl-evaluation
+                :seon.error/diagnostic-offending
+                "java.lang.IllegalArgumentException"
+                :seon.error/diagnostic-cause small-message
+                :seon.error/diagnostic-evidence-availability
+                :seon.error/known
+                :seon.error/diagnostic-evidence
+                {:seon.dev.mcp/frame throw-site-frame}}
+               (select-keys
+                (:seon.error/data face)
+                [:seon.error/diagnostic-layer
+                 :seon.error/diagnostic-operation
+                 :seon.error/diagnostic-member
+                 :seon.error/diagnostic-expected
+                 :seon.error/diagnostic-offending
+                 :seon.error/diagnostic-cause
+                 :seon.error/diagnostic-evidence-availability
+                 :seon.error/diagnostic-evidence])))
+        (is (not (contains? face :seon.dev.mcp/text))
+            "the same sentence is not rendered again inside the face")
+        (is (false? (:seon.dev.mcp/windowed? result)))
+        (is (not (contains? result :seon.blob/digest))
+            "a small exception does not retain its bulky prepl envelope")
+        ;; Diagnostic evidence accretes without changing the boundary:
+        ;; require the flat face to stay an order of magnitude smaller
+        ;; than the complete Throwable->map instead of freezing one byte
+        ;; count for today's declared evidence attributes.
+        (is (< (* 10 (utf8-size result)) (utf8-size envelope))
+            "the complete Throwable->map does not become the inline face")
+        (is (true? (:seon.dev.mcp/windowed? oversized-result)))
+        (is (string? (:seon.blob/digest oversized-result)))
+        (is (true? (:seon.dev.mcp/retrievable? oversized-result)))
+        (is (= (subs oversized-message 0 72)
+               (:seon.render.value/window retained-message))
+            "a genuinely oversized message remains pageable by digest")
+        (is (= (count oversized-message)
+               (:seon.render.value/total retained-message))))
+      (finally
+        (swap! running-instances dissoc cluster-name)))))
 
 (deftest jvm-nil-deref-is-a-flat-error-value
   (let [cluster-name "mcp-jvm-nil-deref-test"
@@ -356,7 +354,8 @@
           (finally
             (swap! running-instances dissoc cluster-name)))))))
 
-(deftest oversized-values-share-one-digest-across-storeless-and-stored-modes
+(defn- oversized-values-share-one-digest-across-storeless-and-stored-modes
+  [connection]
   (let [cluster-name "mcp-value-test"
         value (vec (range 2000))
         effective (config/defaults)
@@ -365,153 +364,172 @@
     (is (false? (:seon.dev.mcp/retrievable? storeless)))
     (is (str/includes? (:seon.dev.mcp/remainder storeless)
                        "not retrievable"))
-    (support/with-database
-      {:seon.test-support/fresh-store? true}
-      (fn [connection]
-        (config/apply! {:seon.db/connection connection
-                        :seon.boot/cluster-name cluster-name})
-        (support/seed-cluster! connection cluster-name)
-        (swap! running-instances assoc cluster-name
-               (running-instance connection cluster-name))
-        (try
-          (let [stored (projected cluster-name effective value)
-                content-digest (:seon.blob/digest stored)
-                drilled (cluster/mcp-get-value
-                         cluster-name content-digest [] 7)
-                past-end (cluster/mcp-get-value
-                          cluster-name content-digest [] 9000)]
-            (is (= (:seon.blob/digest storeless) content-digest))
-            (is (true? (:seon.dev.mcp/retrievable? stored)))
-            (is (= [7 8 9 10 11 12 13 14]
-                   (:seon.render.value/window drilled)))
-            (is (= 9000 (:seon.render.value/offset past-end)))
-            (is (= 2000 (:seon.render.value/total past-end)))
-            (is (true? (:seon.render.value/beyond-end? past-end))))
-          (finally
-            (swap! running-instances dissoc cluster-name)))))))
+    (config/apply! {:seon.db/connection connection
+                    :seon.boot/cluster-name cluster-name})
+    (support/seed-cluster! connection cluster-name)
+    (swap! running-instances assoc cluster-name
+           (running-instance connection cluster-name))
+    (try
+      (let [stored (projected cluster-name effective value)
+            content-digest (:seon.blob/digest stored)
+            drilled (cluster/mcp-get-value
+                     cluster-name content-digest [] 7)
+            past-end (cluster/mcp-get-value
+                      cluster-name content-digest [] 9000)]
+        (is (= (:seon.blob/digest storeless) content-digest))
+        (is (true? (:seon.dev.mcp/retrievable? stored)))
+        (is (= [7 8 9 10 11 12 13 14]
+               (:seon.render.value/window drilled)))
+        (is (= 9000 (:seon.render.value/offset past-end)))
+        (is (= 2000 (:seon.render.value/total past-end)))
+        (is (true? (:seon.render.value/beyond-end? past-end))))
+      (finally
+        (swap! running-instances dissoc cluster-name)))))
 
-(deftest stored-strings-page-by-character-offset
+(defn- stored-strings-page-by-character-offset
+  [connection]
   (let [cluster-name "mcp-string-page-test"
         effective (config/defaults)
         value (apply str (take 4975 (cycle "abcdefghijklmnopqrstuvwxyz")))
         page-size (:seon.print/width (print/default-options))]
-    (support/with-database
-      {:seon.test-support/fresh-store? true}
-      (fn [connection]
-        (config/apply! {:seon.db/connection connection
-                        :seon.boot/cluster-name cluster-name})
-        (support/seed-cluster! connection cluster-name)
-        (swap! running-instances assoc cluster-name
-               (running-instance connection cluster-name))
-        (try
-          (let [stored (projected cluster-name effective value)
-                digest (:seon.blob/digest stored)
-                first-page (cluster/mcp-get-value cluster-name digest [] 0)
-                next-page
-                (cluster/mcp-get-value cluster-name digest [] page-size)
-                past-end
-                (cluster/mcp-get-value cluster-name digest [] (count value))]
-            (is (= (subs value 0 page-size)
-                   (:seon.render.value/window first-page)))
-            (is (= (subs value page-size (* 2 page-size))
-                   (:seon.render.value/window next-page)))
-            (is (= page-size (:seon.render.value/shown first-page)))
-            (is (= (count value) (:seon.render.value/total first-page)))
-            (is (seq (:seon.render.value/window first-page))
-                "a non-empty stored string has a non-empty first window")
-            (is (= (subs value (dec (count value)))
-                   (:seon.render.value/window past-end))
-                "a past-end page of a non-empty string remains non-empty")
-            (is (true? (:seon.render.value/beyond-end? past-end))))
-          (finally
-            (swap! running-instances dissoc cluster-name)))))))
+    (config/apply! {:seon.db/connection connection
+                    :seon.boot/cluster-name cluster-name})
+    (support/seed-cluster! connection cluster-name)
+    (swap! running-instances assoc cluster-name
+           (running-instance connection cluster-name))
+    (try
+      (let [stored (projected cluster-name effective value)
+            digest (:seon.blob/digest stored)
+            first-page (cluster/mcp-get-value cluster-name digest [] 0)
+            next-page
+            (cluster/mcp-get-value cluster-name digest [] page-size)
+            past-end
+            (cluster/mcp-get-value cluster-name digest [] (count value))]
+        (is (= (subs value 0 page-size)
+               (:seon.render.value/window first-page)))
+        (is (= (subs value page-size (* 2 page-size))
+               (:seon.render.value/window next-page)))
+        (is (= page-size (:seon.render.value/shown first-page)))
+        (is (= (count value) (:seon.render.value/total first-page)))
+        (is (seq (:seon.render.value/window first-page))
+            "a non-empty stored string has a non-empty first window")
+        (is (= (subs value (dec (count value)))
+               (:seon.render.value/window past-end))
+            "a past-end page of a non-empty string remains non-empty")
+        (is (true? (:seon.render.value/beyond-end? past-end))))
+      (finally
+        (swap! running-instances dissoc cluster-name)))))
 
-(deftest retrievable-artifacts-have-an-identified-no-history-root
+(defn- retrievable-artifacts-have-an-identified-no-history-root
+  [connection]
   (let [cluster-name "mcp-durable-artifact-test"
         effective (config/defaults)
-        value (vec (range 2000))]
-    (support/with-database
-      {:seon.test-support/fresh-store? true}
-      (fn [connection]
-        (config/apply! {:seon.db/connection connection
-                        :seon.boot/cluster-name cluster-name})
-        (support/seed-cluster! connection cluster-name)
-        (swap! running-instances assoc cluster-name
-               (running-instance connection cluster-name))
-        (try
-          (let [stored (projected cluster-name effective value)
-                content-digest (:seon.blob/digest stored)
-                artifact-id
-                (db/q
-                 '[:find ?id .
-                   :in $ ?digest
-                   :where
-                   [?artifact :seon.dev.mcp.artifact/id ?id]
-                   [?artifact :seon.dev.mcp.artifact/digest ?digest]]
-                 (db/db connection)
-                 content-digest)]
-            (is (true? (:seon.dev.mcp/retrievable? stored))
-                "retrievability is returned only after the root commits")
-            (let [requery (some :seon.print/requery-form
-                                (tree-seq coll? seq (:seon.dev.mcp/value stored)))]
-              (is (seq requery) "a clipped value supplies an executable requery")
-              (is (= value (eval requery))
-                  "the advertised requery reads the complete stored value"))
-            (is (= content-digest artifact-id)
-                "the content digest identifies its durable artifact root")
-            (is (true?
-                 (:db/noHistory
-                  (schema.datahike/malli->datahike-attr
-                   :seon.dev.mcp.artifact/digest)))
-                "the direct digest root derives Datahike noHistory")
-            (db/transact!
-             connection
-             [[:db.fn/retractEntity
-               [:seon.dev.mcp.artifact/id artifact-id]]])
-            (is (empty?
-                 (db/q
-                  '[:find [?digest ...]
-                    :where
-                    [_ :seon.dev.mcp.artifact/digest ?digest]]
-                  (db/history (db/db connection))))
-                "explicit root retraction does not retain the digest in history")
-            (is (= :seon.dev.mcp/value-not-found
-                   (:seon.error/kind
-                    (cluster/mcp-get-value
-                     cluster-name content-digest [] 0)))
-                "retraction ends the durable retrieval promise immediately"))
-          (finally
-            (swap! running-instances dissoc cluster-name)))))))
+        value (vec (range 3000))]
+    (config/apply! {:seon.db/connection connection
+                    :seon.boot/cluster-name cluster-name})
+    (support/seed-cluster! connection cluster-name)
+    (swap! running-instances assoc cluster-name
+           (running-instance connection cluster-name))
+    (try
+      (let [stored (projected cluster-name effective value)
+            content-digest (:seon.blob/digest stored)
+            artifact-id
+            (db/q
+             '[:find ?id .
+               :in $ ?digest
+               :where
+               [?artifact :seon.dev.mcp.artifact/id ?id]
+               [?artifact :seon.dev.mcp.artifact/digest ?digest]]
+             (db/db connection)
+             content-digest)]
+        (is (true? (:seon.dev.mcp/retrievable? stored))
+            "retrievability is returned only after the root commits")
+        (let [requery (some :seon.print/requery-form
+                            (tree-seq coll? seq (:seon.dev.mcp/value stored)))]
+          (is (seq requery) "a clipped value supplies an executable requery")
+          (is (= value (eval requery))
+              "the advertised requery reads the complete stored value"))
+        (is (= content-digest artifact-id)
+            "the content digest identifies its durable artifact root")
+        (is (true?
+             (:db/noHistory
+              (schema.datahike/malli->datahike-attr
+               :seon.dev.mcp.artifact/digest)))
+            "the direct digest root derives Datahike noHistory")
+        (db/transact!
+         connection
+         [[:db.fn/retractEntity
+           [:seon.dev.mcp.artifact/id artifact-id]]])
+        (is (empty?
+             (db/q
+              '[:find [?digest ...]
+                :in $ ?digest
+                :where
+                [_ :seon.dev.mcp.artifact/digest ?digest]]
+              (db/history (db/db connection)) content-digest))
+            "explicit root retraction does not retain the digest in history")
+        (is (= :seon.dev.mcp/value-not-found
+               (:seon.error/kind
+                (cluster/mcp-get-value
+                 cluster-name content-digest [] 0)))
+            "retraction ends the durable retrieval promise immediately"))
+      (finally
+        (swap! running-instances dissoc cluster-name)))))
 
-(deftest ordinary-value-artifacts-drill-from-the-result-root
+(defn- ordinary-value-artifacts-drill-from-the-result-root
+  [connection]
   (let [cluster-name "mcp-sci-value-test"
         effective (config/defaults)
-        value (vec (range 2000))
+        value (assoc (vec (range 2000)) 1999 2999)
         nested-value {:alpha value :omega 42}]
-    (support/with-database
-      {:seon.test-support/fresh-store? true}
-      (fn [connection]
-        (config/apply! {:seon.db/connection connection
-                        :seon.boot/cluster-name cluster-name})
-        (support/seed-cluster! connection cluster-name)
-        (swap! running-instances assoc cluster-name
-               (running-instance connection cluster-name))
-        (try
-          (let [stored (projected cluster-name effective value)
-                content-digest (:seon.blob/digest stored)
-                nested-stored (projected cluster-name effective nested-value)
-                root (cluster/mcp-get-value
-                      cluster-name content-digest [] 0)
-                nested (cluster/mcp-get-value
-                        cluster-name (:seon.blob/digest nested-stored)
-                        [:alpha] 7)
-                projected-root (projected cluster-name effective root)]
-            (is (= [0 1 2 3 4 5 6 7]
-                   (:seon.render.value/window root)))
-            (is (= [7 8 9 10 11 12 13 14]
-                   (:seon.render.value/window nested)))
-            (is (false? (:seon.dev.mcp/windowed? projected-root))
-                "reading the result root must not mint another artifact")
-            (is (not (contains? projected-root :seon.blob/digest))))
-          (finally
-            (swap! running-instances dissoc cluster-name)))))))
+    (config/apply! {:seon.db/connection connection
+                    :seon.boot/cluster-name cluster-name})
+    (support/seed-cluster! connection cluster-name)
+    (swap! running-instances assoc cluster-name
+           (running-instance connection cluster-name))
+    (try
+      (let [stored (projected cluster-name effective value)
+            content-digest (:seon.blob/digest stored)
+            nested-stored (projected cluster-name effective nested-value)
+            root (cluster/mcp-get-value
+                  cluster-name content-digest [] 0)
+            nested (cluster/mcp-get-value
+                    cluster-name (:seon.blob/digest nested-stored)
+                    [:alpha] 7)
+            projected-root (projected cluster-name effective root)]
+        (is (= [0 1 2 3 4 5 6 7]
+               (:seon.render.value/window root)))
+        (is (= [7 8 9 10 11 12 13 14]
+               (:seon.render.value/window nested)))
+        (is (false? (:seon.dev.mcp/windowed? projected-root))
+            "reading the result root must not mint another artifact")
+        (is (not (contains? projected-root :seon.blob/digest))))
+      (finally
+        (swap! running-instances dissoc cluster-name)))))
+
+(deftest ^{:seon.test/fixture-observation
+           "Artifact blobs are store-global: identity, paging and root retraction require a private physical store."}
+  artifact-lifecycle-preserves-identity-paging-and-retraction
+  (let [fresh-stores (atom 0)
+        executed (atom [])
+        acquire @#'support/with-fresh-database
+        scenarios
+        [[:exception jvm-exceptions-retain-the-root-location-and-flat-error]
+         [:identity oversized-values-share-one-digest-across-storeless-and-stored-modes]
+         [:string stored-strings-page-by-character-offset]
+         [:nested ordinary-value-artifacts-drill-from-the-result-root]
+         [:retraction retrievable-artifacts-have-an-identified-no-history-root]]]
+    (with-redefs-fn
+      {#'support/with-fresh-database
+       (fn [& args] (swap! fresh-stores inc) (apply acquire args))}
+      (fn []
+        (support/with-database
+         {:seon.test-support/fresh-store? true}
+         (fn [connection]
+           (doseq [[scenario verify!] scenarios]
+             (verify! connection)
+             (swap! executed conj scenario))))))
+    (is (= [:exception :identity :string :nested :retraction] @executed)
+        "All five artifact cases execute, with root retraction last.")
+    (is (= 1 @fresh-stores)
+        "Blob-global isolation requires exactly one fresh physical store.")))
