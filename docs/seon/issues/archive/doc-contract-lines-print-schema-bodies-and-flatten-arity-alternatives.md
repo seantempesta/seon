@@ -64,3 +64,14 @@ pulled entity as the success output. One regression over a fixture fn
 with an `:or` positional contract. This is context-generation program
 work (teaching = doc/dir renders, owner direction 2026-09-02); it lands
 with the generator's teaching wave unless pulled forward.
+
+## Re-observed 2026-09-16 00:55Z — "a value satisfying unknown error"
+
+Batch 14 cold gate: `seon.sci.eval/evaluate-for-install refused return value
+at [:seon.cluster.eval/ns]: expected the required key :seon.cluster.eval/ns
+with a value satisfying unknown error, got a map missing :seon.cluster.eval/ns`.
+The grammar's "expected <schema in words>" slot rendered the literal text
+"unknown error" for a required-key miss on a map. Same refusal-grammar
+class: the humaniser has no case for a missing required key whose value
+schema is a registered keyword, so it falls to a placeholder. Belongs with
+the refusal-grammar residuals.
