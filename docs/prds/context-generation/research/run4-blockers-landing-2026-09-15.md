@@ -55,7 +55,7 @@ excluded. The backstop owner and all other excluded paths remain untouched.
   confirmed in a fresh worker. Reader, reply, and REPL grammar passed.
 - The isolated gate used HEAD `6785c980c` plus only the owned reader paths.
   Exact foreign boundary: `seon.db/schema-database` receives `[nil]` from
-  scoring, recorded in `docs/seon/issues/help-trial-score-queries-a-nil-schema-database.md`.
+  scoring, recorded in `docs/seon/issues/archive/help-trial-score-queries-a-nil-schema-database.md`.
 - The broader diagnostic SCI namespace run had 118 tests / 717 assertions,
   59 failures and 11 errors, including the already filed retired-storage
   expectations. It is unchanged by this lane.
@@ -64,4 +64,32 @@ excluded. The backstop owner and all other excluded paths remain untouched.
   and `Your reply had no form; only comments/prose. Send a form.`
   The following `(+ 1 1)` read yielded the ordinary form.
 
-No default restart, refork, or reseed performed. Final platform gate pending.
+### Part 2 — provider stop
+
+The existing schema, per-agent projection, wire mapping and attempt settings
+storage already support stop. The production change enables the default in
+`config/default.edn`; no second mapping or attempt attribute was added.
+
+The first passing fast gate ran 61 tests / 303 assertions, zero failures
+and errors. It includes real attempt persistence for the default and an
+agent override. Seven captured replies yield 13 evaluated forms and zero
+fabricated-response errors when the provider stop is applied. The regression
+also asserts that every capture retains forms and every evaluation returns
+a value, so missing evidence cannot pass.
+
+The formerly failing help-trial score test passed after the independent
+database fix `eef44fcc3`. The strengthened combined fast gate passed 106
+tests / 699 assertions. The first isolated AI/grammar/help gate passed 61
+tests / 307 assertions. The final combined isolated gate at `d2af195bf`
+passed 106 tests / 704 assertions, including every reader regression and
+the strengthened replay. The platform gate is pending.
+
+Source adoption twice reported `Source changed during development adoption;
+the next edit must converge it.` This is a source-publication observation,
+not the cause of the missing live stop setting: development adoption and
+configuration application are separate operations. A live comparison of
+`config/compile-manifest` with `config/effective` found exactly one differing
+effective key, `:seon.config.ai/stop`. The lane then invoked the ordinary
+`bin/seon config apply default config/default.edn` operation.
+
+No default restart, refork, or reseed performed.

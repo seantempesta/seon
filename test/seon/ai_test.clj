@@ -10,6 +10,7 @@
   runs once by hand; a suite that needs a paid call to be green is a
   suite nobody runs."
   (:require [clojure.data.json :as json]
+            [clojure.edn :as edn]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [clojure.test.check :as tc]
@@ -21,6 +22,10 @@
             [malli.generator :as mg]
             [seon.ai :as ai]
             [seon.config :as config]
+            [seon.cluster.reply :as reply]
+            [seon.cluster.agent :as agent]
+            [seon.sci.eval :as sci.eval]
+            [seon.turn :as turn]
             [seon.schema :as schema]
             [seon.test-support :as test-support]))
 
@@ -84,6 +89,7 @@
             (:seon.config.ai/chars-per-token-prior @dials)
             :seon.ai/api-key-variable (:seon.config.ai/api-key-variable @dials)
             :seon.ai/thinking :disabled
+            :seon.ai/stop ["#:seon.repl"]
             :seon.ai/timeout-ms (:seon.config.ai/timeout-ms @dials)}
            (:seon.ai/primary targets))
         "the primary retains every effective AI dial without reshaping it")
@@ -248,6 +254,7 @@
                            :seon.config.ai.backup/timeout-ms 30000))]
     (is (= {:seon.ai/endpoint "https://example.invalid/v1/messages"
             :seon.ai/model "claude-probe"
+            :seon.ai/stop ["#:seon.repl"]
             :seon.ai/max-tokens (:seon.config.ai/max-tokens @dials)
             :seon.ai/prompt-token-budget
             (:seon.config.ai/prompt-token-budget @dials)
@@ -641,6 +648,71 @@
            sent))
     (is (= #{:seon.config.ai/temperature :seon.config.ai/top-p} inert))
     (is (not (contains? (ai/request-body request) "temperature")))))
+
+(deftest stop-is-effective-per-agent-and-recorded-with-the-attempt
+  (test-support/with-database
+   (fn [connection]
+     (config/apply! {:seon.db/connection connection})
+     (doseq [tx [(agent/creation-tx {:seon.agent/id "stop-agent"
+                                    :seon.ns/name 'my.agents.stop
+                                    :seon.cluster/name "default"})
+                 (turn/open-tx {:seon.turn/id "stop-run"
+                                :seon.turn/agent [:seon.agent/id "stop-agent"]
+                                :seon.turn/opened-tx "datomic.tx"})
+                 [{:seon.config/agent [:seon.agent/id "stop-agent"]
+                   :seon.config.ai/stop ["END"]}]]]
+       (let [created (db/transact! connection tx)]
+         (is (nil? (:seon.error/kind created)) (pr-str created))
+         (when (:seon.error/kind created)
+           (throw (ex-info "Stop fixture setup refused" created)))))
+     (doseq [[ordinal agent-id expected] [[0 "absent" ["#:seon.repl"]]
+                                         [1 "stop-agent" ["END"]]]]
+       (let [settings (ai/settings (config/effective @connection "default")
+                                   (ai/agent-overlay @connection agent-id))
+             target (:seon.ai/primary (ai/targets settings))
+             body (ai/request-body (assoc target :seon.ai/prompt "(+ 1 1)"))
+             recorded (#'turn/record-attempt!
+                       {:seon.db/connection connection}
+                       {:seon.ai/target target :seon.ai/settings settings
+                        :seon.turn/id "stop-run" :seon.agent/id "stop-agent"
+                        :seon.ai.attempt/ordinal ordinal}
+                       (java.util.Date.))
+             saved (db/q '[:find ?settings . :in $ ?ordinal
+                           :where [?a :seon.ai.attempt/ordinal ?ordinal]
+                           [?a :seon.ai.attempt/settings-edn ?settings]]
+                         @connection ordinal)]
+         (is (nil? recorded) (pr-str recorded))
+         (is (= expected (get body "stop")))
+         (is (= expected (:seon.config.ai/stop (edn/read-string saved)))))))))
+
+(deftest captured-run4-replies-stop-before-fabricated-responses
+  (test-support/with-database
+   (fn [connection]
+     (let [ctx (test-support/fork-cluster-ctx connection)
+           captures (:run4/turns (edn/read-string (slurp "test/seon/run4_replies.edn")))
+           stop (first (:seon.config.ai/stop @dials))
+           fabricated (filter #(str/includes? (second %) stop) captures)
+           evaluated (atom 0)]
+       (is (seq fabricated) "The replay must include actual fabricated replies.")
+       (doseq [[id text] captures]
+         (let [stopped (subs text 0 (or (str/index-of text stop) (count text)))
+               forms (reply/sources stopped 'user)]
+           (is (and (vector? forms) (seq forms))
+               (str id " must retain its preceding forms: " (pr-str forms)))
+           (when (vector? forms)
+             (doseq [form forms]
+               (let [result (sci.eval/evaluate
+                             {:seon.sci.eval/ctx ctx
+                              :seon.cluster.eval/source (:seon.cluster.eval/source form)
+                              :seon.sci.eval/time-limit-ms 2000
+                              :seon.sci.admit/caps (config/result-caps @dials)
+                              :seon.config/on-core-error :panic})]
+                 (swap! evaluated inc)
+                 (is (contains? result :seon.sci.admit/value)
+                     (str id " must return an evaluated value: " (pr-str result)))
+                 (is (not= :seon.sci.reader/fabricated-response
+                           (get-in result [:seon.sci.admit/value :seon.error/kind])) id))))))
+       (is (pos? @evaluated) "At least one preceding form must actually evaluate.")))))
 
 (deftest disabled-thinking-emits-sampling-and-omits-effort
   (let [body (ai/request-body

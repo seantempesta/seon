@@ -400,7 +400,8 @@
  :seon.config.ai/top-p :seon.config/absent
  :seon.config.ai/frequency-penalty :seon.config/absent
  :seon.config.ai/presence-penalty :seon.config/absent
- :seon.config.ai/stop :seon.config/absent
+ ; The REPL owns response text. Stop the provider reply before a fabricated response.
+ :seon.config.ai/stop ["#:seon.repl"]
  :seon.config.ai/response-format :seon.config/absent
  :seon.config.ai/extra-body-edn :seon.config/absent
 

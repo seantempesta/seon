@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, test, database, wave/agent-context]
 created: 2026-09-15
@@ -24,3 +24,7 @@ The score owner is the committed help trial script; database decoding is
 owned by `src/seon/db.clj`. Both are excluded or concurrently edited in
 run4-blockers. Acceptance: the canonical armed trial again returns its
 12 scoring decisions and its absence cases fail as intended.
+
+Resolved independently in `eef44fcc3` (relation-only Datalog queries).
+The run4-blockers isolated AI/grammar/help gate at `1d5edb65c` passed
+61 tests / 307 assertions, including both help-trial tests, on 2026-09-15.

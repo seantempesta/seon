@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [reader, prompt, grammar, provider, live-test, design]
 created: 2026-09-15
@@ -41,3 +41,22 @@ The REPL owns the response token. Two mechanisms, both general:
 Regression: the trial harness must report zero fabricated responses on the
 run-4 replies replayed through the reader with stop applied; the live
 number is measured on run 5.
+
+## Run4-blockers implementation — 2026-09-15
+
+The existing stop schema already declares a vector of strings, per-agent
+overlay and provider wire metadata. The existing target builder sends it
+as `stop`, and the attempt records the selected effective settings. The
+missing piece was the shipped default, which was explicitly absent; it is
+now `["#:seon.repl"]`.
+
+The canonical armed regression uses real agent/turn creation and
+`record-attempt!` to verify both the default and a per-agent override in
+the provider body and persisted attempt settings. Seven exact captured
+replies replay through the unchanged reader and real SCI evaluation:
+13 forms, zero fabricated-response errors after provider stop is applied.
+This is deterministic replay evidence, not a paid run-5 measurement.
+
+Final canonical fast gate: 106 tests / 699 assertions. Final isolated gate:
+106 tests / 704 assertions. Both include the reader, reply, AI, REPL grammar
+and help-trial namespaces, with zero failures and errors.
