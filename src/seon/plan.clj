@@ -326,10 +326,23 @@
        :seon.error/data {:my.plan.item/id item-id}}
 
       :else
-      (let [pulled (db/pull database step-selector entity)]
-        (if (error-value? pulled)
-          pulled
-          (first (derived-steps [pulled] nil #{} #{})))))))
+      (let [agent-id (db/q '[:find ?id . :in $ % ?step
+                             :where (owned ?agent ?step)
+                                    [?agent :seon.agent/id ?id]]
+                           database rules entity)]
+        (cond
+          (error-value? agent-id) agent-id
+          agent-id
+          (let [view (plan {:seon.db/db database :seon.agent/id agent-id})]
+            (if (error-value? view)
+              view
+              (first (filter #(= item-id (:my.plan.item/id %))
+                             (:my.plan/steps view)))))
+          :else
+          (let [pulled (db/pull database step-selector entity)]
+            (if (error-value? pulled)
+              pulled
+              (first (derived-steps [pulled] nil #{} #{})))))))))
 
 (defn items
   "Read plan steps in the exact supplied identity order."
@@ -337,11 +350,12 @@
    [:=> [:catn [:request :my.plan/items-request]]
     [:or :my.plan/render-steps :seon.error/value]]}
   [{database :seon.db/db item-ids :my.plan/item-ids}]
-  (let [pulled (db/pull-many database step-selector
-                             (mapv (fn [id] [:my.plan.item/id id]) item-ids))]
-    (if (error-value? pulled)
-      pulled
-      (into [] (map #(first (derived-steps [%] nil #{} #{}))) pulled))))
+  (reduce (fn [result item-id]
+            (let [step (item {:seon.db/db database :my.plan.item/id item-id})]
+              (if (error-value? step)
+                (reduced step)
+                (conj result step))))
+          [] item-ids))
 
 (defn- step-summary
   [step]
