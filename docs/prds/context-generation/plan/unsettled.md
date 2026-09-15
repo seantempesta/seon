@@ -1218,3 +1218,20 @@ half-edit. Measured targets in the issue.
   contract with `[:* …]` or bare `:seon.schema/value`, tightened or
   justified. Sent to run6-blockers.
 
+## 2026-09-15 15:45Z — run 7: 7/7 steps marked, done called; the report never happened
+
+- run6-blockers ended (`dda9f0366` q/pull/pull-many guards armed by
+  instrumentation, `7a996ed48` empty reply after stop = agent error,
+  `72f9afc48` stalled sessions visible); contracts-and-plan ended
+  (`d4f8a536c`). HEAD gate 56 tests / 780 assertions green; pushed
+  `72f9afc48`.
+- Run 7 (15:36Z): 43 turns = 30 provider + 13 system, 3.6 min; 65
+  evaluations; 244,933 prompt (94 % hit) / 4,453 out; max 14,025; 0
+  faults; 10 error evaluations (4 prose-only replies, 2 contract fixes,
+  3 typos, 1 doc miss). Read → define → test → save → add → again all
+  done with real facts (fn row, test 1/0/0, note, order a3); the model
+  called `(my.agent/done)` at the last turn. BUT step 7 was marked
+  complete with NO message to root — completion asserted, not derived.
+  Blocker filed (`a-plan-step-can-be-marked-complete-without-its-done-when-being-true`);
+  it is the first concrete slice of the stewards PRD §8.4 (`done-query`).
+
