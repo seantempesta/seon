@@ -107,6 +107,9 @@
                (range 10 20))
               raw-total (reduce + (map ::elapsed-nanos raw))
               wrapped-total (reduce + (map ::elapsed-nanos wrapped))]
+          (println {::stage :unhanded-query-cost
+                    ::samples 10 ::raw-nanos raw-total
+                    ::wrapped-nanos wrapped-total})
           (is (every? #(= expected (::value %)) wrapped))
           (is (<= wrapped-total (* 2 raw-total))
               (str "ten seon.db/q calls took " wrapped-total

@@ -906,9 +906,11 @@
 
 (defn- read-declarations
   [database]
-  (delay
-    (or (schema/handed-projection)
-        (schema/projection-from-database (schema-database database)))))
+  (let [origin (schema-database database)]
+    {::installed-schema (:schema origin)
+     ::read-projection
+     (delay (or (schema/handed-projection)
+                (schema/projection-from-database origin)))}))
 
 (defn- ask-declarations
   "Ask one declaration question with the population both PASSED and SUPPLIED.
@@ -922,20 +924,24 @@
    projection also supplied = 0 reads / 0.17 ms. Supplying is the same one
    value made visible for one call, never a cache."
   [declarations question]
-  (let [projection @declarations]
+  (let [projection @(::read-projection declarations)]
     (schema/call-with-forms
      (:seon.schema.projection/forms projection)
      #(question projection))))
 
 (defn- edn-encoded?
   [declarations attribute]
-  (let [projection @declarations]
-    (schema/projection-cache-value
-     projection [::edn-encoded? attribute]
-     #(ask-declarations
-       declarations
-       (fn [supplied]
-         (schema.datahike/edn-encoded-attr-in? supplied attribute))))))
+  ;; The bridge's EDN fallback is physically a string. Native storage types
+  ;; therefore need no logical schema projection merely to rule out decoding.
+  (and (= :db.type/string
+          (get-in declarations [::installed-schema attribute :db/valueType]))
+       (let [projection @(::read-projection declarations)]
+         (schema/projection-cache-value
+          projection [::edn-encoded? attribute]
+          #(ask-declarations
+            declarations
+            (fn [supplied]
+              (schema.datahike/edn-encoded-attr-in? supplied attribute)))))))
 
 (defn- decode-attribute-value
   [declarations attribute value]
@@ -1218,12 +1224,7 @@
 (defn- decode-query-result
   [declarations normalized parsed-query result]
   (let [arguments (:args normalized)
-        attributes
-        (if (every? db.utils/db? arguments)
-          (schema/projection-cache-value
-           @declarations [::query-find-attributes parsed-query]
-           #(query-find-attributes declarations parsed-query arguments))
-          (query-find-attributes declarations parsed-query arguments))
+        attributes (query-find-attributes declarations parsed-query arguments)
         find-clause (:qfind parsed-query)
         return-maps (:qreturnmaps parsed-query)
         decode-result

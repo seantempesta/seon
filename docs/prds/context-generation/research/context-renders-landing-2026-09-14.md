@@ -10,6 +10,8 @@ Work in progress. No final verification claim yet.
 
 ## Commits
 
+- `d0817d49b` — deterministic printer scalar ordering and intact map
+  coordinates; isolated gate 49 tests / 238 assertions.
 - `1f18b99fc` — change-only rereads, isolated gate 8 tests / 250 assertions.
   Three idle turns: zero appended evaluations and bytes. Plan change: 269
   emission bytes for 77 subtree bytes; message: 452 for 124.
@@ -29,6 +31,22 @@ two renders byte-for-byte, and evaluates every emitted requery in real SCI.
 Fast gate: 49 tests / 234 assertions. Isolated path gate: 49 tests / 238
 assertions, zero failures or errors. This slice changes no opening reads;
 the previous loop proof remains zero system bytes over three idle turns.
+
+## DB projection performance gate
+
+Native non-string Datahike attributes cannot use the schema bridge's EDN
+string codec. Read decoding now checks the installed physical schema before
+forcing the operation's logical projection. Query find-attribute derivation
+no longer constructs a whole projection merely to cache its answer. String
+fallbacks still consult the logical schema, including temporal-origin cases.
+There is no global cache or scenario-specific query path.
+
+The unchanged full DB fast gate passed 41 tests / 272 assertions; the
+isolated gate passed 41 tests / 276 assertions, including the unchanged
+ten-unhanded-queries ≤ twice raw cost assertion and codec/evidence tests.
+This closes the earlier DB timing verification boundary. Opening/read
+membership is unchanged; the last loop proof is zero system bytes over
+three idle turns.
 
 ## Change-only rereads (rule 2)
 
