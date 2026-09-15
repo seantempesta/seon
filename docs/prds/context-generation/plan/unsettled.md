@@ -1485,3 +1485,34 @@ half-edit. Measured targets in the issue.
   fixes in place (adoption freshness, sci mode, carried projection,
   test-slot cap, test evidence on current-src).
 - MCP bridge reconnected by the owner's second restart; `sci` mode works.
+
+## 2026-09-15 21:35Z — orchestrator-only gates; research plans; hour plan
+
+- Owner after the third restart: "give me a more focused plan for the next
+  hour … coordinate any test runs (the agents seem to be locking up the
+  entire system continually running) … run the tests in dedicated opus
+  threads and batch together work"; "1.8 s to render the debug page is not
+  acceptable … any long runtime is a hidden bug … launch research agents
+  to design plans, you personally review the plans"; "automatic and
+  focused testing via the edit hooks is great and encouraged — testing
+  the functions that were modified only, on edit".
+- `fd98bc5a5`: orchestrator-only mode in bin/_test-slot — while
+  tmp/test-slots/orchestrator-only exists, only SEON_TEST_ORCHESTRATOR=1
+  launches test JVMs; lanes commit and file
+  tmp/orchestrator/gate-requests/<lane>.txt; one batched gate per wave.
+- Debug page: 0.70 s warm after P1's adopted carriage (was 1.8 s; 130 ms
+  this morning) — still wrong. Research lanes: debug-page-cost-plan
+  (running; JFR because the page renders on virtual threads) and
+  slow-surfaces-plan (landed `65642226b`: adoption 74 s = full projection
+  rebuild on every adoption, same class as P1/N9; test JVM builds the
+  packaged projection twice; hook sleeps 5 s by design; projection rebuild
+  measured 2.64 s / 13.8 GB). Review: rows 1–3 approved; hook decision
+  option 1 (drain immediately, no idle delay); rows 4–7 deferred until
+  measured. Lane startup-and-hook-waste implements rows 2–3 now; row 1
+  waits for P1 to release cluster.clj/schema.clj/sci/eval.clj.
+- reaching-tests-tier launched: after a converged adoption the hook runs
+  exactly the tests reaching the changed identities in-process and prints
+  the result; `bin/test-check` on demand; escalation as data.
+- refusal-grammar-2 landed `1fd81b2be`/`4c8740cf0` (grammar + run-11
+  cases); fixtures-events landed `e4f8bbe07`; both filed gate requests.
+  New grammar case filed: the argument-count refusal omits the count.
