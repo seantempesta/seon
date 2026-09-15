@@ -10,6 +10,34 @@ tags: [schema, contracts, diagnostics]
 
 Work in progress. The checker intentionally reports every unjustified position; it does not exempt another lane's files. No default stop, refork, or reseed was performed. The run7-wave owned turn, message, plan, bootstrap, and accretion paths are excluded from edits, not from inspection.
 
+After the owner checkpointed the in-flight work as `6acd8818e`, work continued
+on `steward-platform`. The retained-call repair landed separately as
+`7e35df213`. A fresh read-only query after its convergence inspected 1,014
+public function specifications and still found exactly 26 unjustified
+positions, all in the explicitly excluded `seon.turn`,
+`seon.cluster.message`, and `seon.test.accretion` files. The owner's new
+request for a green Part A conflicts with retaining those explicit exclusions;
+the lane has requested permission to edit their contract metadata. The
+checker remains total and does not suppress their failures.
+
+The post-checkpoint fast gate (`seon.schema-test`, inventory, instrument,
+database, help trial, REPL grammar) ran 94 tests and 666 assertions: the
+same 26 inventory failures, zero errors. The isolated gate for the owned
+`seon.schema` justification corrections and the four required namespaces
+passed 92 tests and 636 assertions, zero failures/errors. The corrections
+change explanatory metadata only, distinguishing candidate values from
+Malli declaration syntax. Default's adopted and published heads both read
+`6aa97fa3-d0de-5926-ab01-5aa27fb8a6cd` before that commit.
+
+Remaining explicitly recorded boundaries:
+
+- [Reader token/context evidence](../../../seon/issues/reader-refusals-drop-the-invalid-token-and-enclosing-contract.md): the shared reader grammar is exercised, but the exact malformed run-7 token cannot yet receive a schema-derived correction from the evidence the reader retains. Reader logic ownership remains requested.
+- [Transparent schema wrapper coherence](../../../seon/issues/render-contract-coherence-stops-at-a-transparent-schema-wrapper.md): valid Malli wrappers are not completely dereferenced by the render-fit check.
+- [Projection-holder predicate](../../../seon/issues/schema-projection-state-contract-invokes-deref-as-a-predicate.md): replacing `deref` needs the caller's actual holder contract, not a permissive exemption.
+
+The full Part A checker is **not green**. Part B remains checkpointed work,
+not a completed/gated claim; the owner requested finishing Part A first.
+
 ## Authority and dependency ledger
 
 Read the repository AGENTS.md, run6-blockers-landing-2026-09-15.md, the archived contract-errors-lack-the-failing-path-and-vector-vs-seq-is-untaught.md issue, commits d4f8a536c and 4a559d658, and the run 4/5/7 model accounts. Inspected the instrument/error/schema.internal owners.
@@ -162,22 +190,22 @@ Every row from the live candidate query is retained, including false positives a
 | `seon.schema/call-with-projection` | `:any` | Justified on schema node: Malli declarations contain arbitrary literal values and predicates; schema inspection preserves that data, and body wrappers return the caller's result unchanged. |
 | `seon.schema/call-with-projection-state` | `:any` | Justified on schema node: Malli declarations contain arbitrary literal values and predicates; schema inspection preserves that data, and body wrappers return the caller's result unchanged. |
 | `seon.schema/call-with-registration-delta` | `:any`; `:any` | Justified on schema node: Malli declarations contain arbitrary literal values and predicates; schema inspection preserves that data, and body wrappers return the caller's result unchanged. |
-| `seon.schema/candidate-shapes` | `:seon.schema/value` | Justified on schema node: Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema. |
-| `seon.schema/candidate-shapes-in` | `:seon.schema/value` | Justified on schema node: Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema. |
-| `seon.schema/canonical-data-fingerprint` | `:seon.schema/value` | Justified on schema node: Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema. |
-| `seon.schema/canonical-data-string` | `:seon.schema/value` | Justified on schema node: Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema. |
+| `seon.schema/candidate-shapes` | `:seon.schema/value` | Justified on schema node: Schema discovery and explanation inspect arbitrary candidate values, including scalars, nil and host objects; the supplied validators decide whether they match. |
+| `seon.schema/candidate-shapes-in` | `:seon.schema/value` | Justified on schema node: Schema discovery and explanation inspect arbitrary candidate values, including scalars, nil and host objects; the supplied validators decide whether they match. |
+| `seon.schema/canonical-data-fingerprint` | `:seon.schema/value` | Justified on schema node: Canonical projection encoding handles heterogeneous EDN data, including nil, literals and nested collections; unsupported runtime objects are reported as noncanonical projection data. |
+| `seon.schema/canonical-data-string` | `:seon.schema/value` | Justified on schema node: Canonical projection encoding handles heterogeneous EDN data, including nil, literals and nested collections; unsupported runtime objects are reported as noncanonical projection data. |
 | `seon.schema/canonical-definition` | `:seon.schema/value` | Justified on schema node: Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema. |
 | `seon.schema/compilable-form` | `:seon.schema/value` | Justified on schema node: Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema. |
 | `seon.schema/direct-references` | `:any` | Justified on schema node: Malli declarations contain arbitrary literal values and predicates; schema inspection preserves that data, and body wrappers return the caller's result unchanged. |
 | `seon.schema/enum-members` | `:any` | Justified on schema node: Malli enum members are arbitrary literal values, not a homogeneous collection. |
-| `seon.schema/explain-candidate-value` | `:seon.schema/value`; `:seon.schema/value` | Justified on schema node: Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema. |
-| `seon.schema/explain-shape` | `:seon.schema/value` | Justified on schema node: Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema. |
-| `seon.schema/explain-shape-in` | `:seon.schema/value` | Justified on schema node: Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema. |
-| `seon.schema/identity-only-projection` | `:seon.schema/value` | Justified on schema node: Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema. |
-| `seon.schema/identity-only-projection-in` | `:seon.schema/value` | Justified on schema node: Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema. |
+| `seon.schema/explain-candidate-value` | `:seon.schema/value`; `:seon.schema/value` | Justified on schema node: Schema discovery and explanation inspect arbitrary candidate values, including scalars, nil and host objects; the supplied validators decide whether they match. |
+| `seon.schema/explain-shape` | `:seon.schema/value` | Justified on schema node: Schema discovery and explanation inspect arbitrary candidate values, including scalars, nil and host objects; the supplied validators decide whether they match. |
+| `seon.schema/explain-shape-in` | `:seon.schema/value` | Justified on schema node: Schema discovery and explanation inspect arbitrary candidate values, including scalars, nil and host objects; the supplied validators decide whether they match. |
+| `seon.schema/identity-only-projection` | `:seon.schema/value` | Justified on schema node: Schema discovery and explanation inspect arbitrary candidate values, including scalars, nil and host objects; the supplied validators decide whether they match. |
+| `seon.schema/identity-only-projection-in` | `:seon.schema/value` | Justified on schema node: Schema discovery and explanation inspect arbitrary candidate values, including scalars, nil and host objects; the supplied validators decide whether they match. |
 | `seon.schema/malli-form?` | `:seon.schema/value` | Justified on schema node: A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape. |
-| `seon.schema/matching-shapes` | `:seon.schema/value` | Justified on schema node: Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema. |
-| `seon.schema/matching-shapes-in` | `:seon.schema/value` | Justified on schema node: Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema. |
+| `seon.schema/matching-shapes` | `:seon.schema/value` | Justified on schema node: Schema discovery and explanation inspect arbitrary candidate values, including scalars, nil and host objects; the supplied validators decide whether they match. |
+| `seon.schema/matching-shapes-in` | `:seon.schema/value` | Justified on schema node: Schema discovery and explanation inspect arbitrary candidate values, including scalars, nil and host objects; the supplied validators decide whether they match. |
 | `seon.schema/projection-cache-value` | `:seon.schema/value` | Justified on schema node: A projection cache key is ordinary heterogeneous data chosen by its caller; cached values are the supplied thunk's arbitrary result. |
 | `seon.schema/register-all!` | `[:* :any]`; `:any` | Justified on schema node: Malli's repeated concatenation enforces complete keyword/definition pairs; there is no additional cross-pair relation. |
 | `seon.schema/schema-definition` | `:any`; `:any` | Justified on schema node: Malli declarations contain arbitrary literal values and predicates; schema inspection preserves that data, and body wrappers return the caller's result unchanged. |

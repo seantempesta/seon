@@ -489,7 +489,7 @@
 
 (defn canonical-data-fingerprint
   "Portable content fingerprint for ordinary data."
-  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema.", :gen/elements [nil false 0 "" :k [] {}]}]] :int]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Canonical projection encoding handles heterogeneous EDN data, including nil, literals and nested collections; unsupported runtime objects are reported as noncanonical projection data.", :gen/elements [nil false 0 "" :k [] {}]}]] :int]}
   [value]
   (portable-string-hash (canonical-data-string value)))
 
@@ -504,7 +504,7 @@
 
    This is the portable content oracle used by projection fingerprints and by
    the preprocessed-base composition proof. Runtime objects are rejected."
-  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema.", :gen/elements [nil false 0 "" :k [] {}]}]] :string]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Canonical projection encoding handles heterogeneous EDN data, including nil, literals and nested collections; unsupported runtime objects are reported as noncanonical projection data.", :gen/elements [nil false 0 "" :k [] {}]}]] :string]}
   [value]
   (cond
     (nil? value) "n"
@@ -2997,7 +2997,7 @@
    Uses the same explicit candidate registry as `valid-candidate-value?`; nil
    means the value is valid."
   {:malli/schema
-   [:function [:=> [:catn [:seon.schema/registry-key :seon.schema/registry-key] [:seon.schema/value [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema.", :gen/elements [nil false 0 "" :k [] {}]}]]] [:maybe :seon.schema/explanation]] [:=> [:catn [:seon.schema/forms :map] [:seon.schema/registry-key :seon.schema/registry-key] [:seon.schema/value [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema.", :gen/elements [nil false 0 "" :k [] {}]}]]] [:maybe :seon.schema/explanation]]]}
+   [:function [:=> [:catn [:seon.schema/registry-key :seon.schema/registry-key] [:seon.schema/value [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Schema discovery and explanation inspect arbitrary candidate values, including scalars, nil and host objects; the supplied validators decide whether they match.", :gen/elements [nil false 0 "" :k [] {}]}]]] [:maybe :seon.schema/explanation]] [:=> [:catn [:seon.schema/forms :map] [:seon.schema/registry-key :seon.schema/registry-key] [:seon.schema/value [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Schema discovery and explanation inspect arbitrary candidate values, including scalars, nil and host objects; the supplied validators decide whether they match.", :gen/elements [nil false 0 "" :k [] {}]}]]] [:maybe :seon.schema/explanation]]]}
   ([schema-key value]
    (m/explain schema-key value {:registry (candidate-registry)}))
   ([forms schema-key value]
@@ -3174,7 +3174,7 @@
 (defn identity-only-projection-in
   "Project a registered reference value to its declared identity data."
   {:malli/schema
-   [:=> [:catn [:seon.schema/projection :seon.schema/projection] [:seon.schema/value [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema.", :gen/elements [nil false 0 "" :k [] {}]}]]] [:maybe :map]]}
+   [:=> [:catn [:seon.schema/projection :seon.schema/projection] [:seon.schema/value [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Schema discovery and explanation inspect arbitrary candidate values, including scalars, nil and host objects; the supplied validators decide whether they match.", :gen/elements [nil false 0 "" :k [] {}]}]]] [:maybe :map]]}
   [projection value]
   (some
    (fn [{:seon.schema/keys [key identity-projection]
@@ -3186,7 +3186,7 @@
 
 (defn identity-only-projection
   "Project a registered reference value using the active schema registry."
-  {:malli/schema [:=> [:catn [:seon.schema/value [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema.", :gen/elements [nil false 0 "" :k [] {}]}]]] [:maybe :map]]}
+  {:malli/schema [:=> [:catn [:seon.schema/value [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Schema discovery and explanation inspect arbitrary candidate values, including scalars, nil and host objects; the supplied validators decide whether they match.", :gen/elements [nil false 0 "" :k [] {}]}]]] [:maybe :map]]}
   [value]
   (identity-only-projection-in (shape-projection) value))
 
@@ -3252,7 +3252,7 @@
 
 (defn candidate-shapes-in
   "Bounded diagnostic schema window from explicit `projection`."
-  {:malli/schema [:=> [:catn [:seon.schema/projection :seon.schema/projection] [:seon.schema/value [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema.", :gen/elements [nil false 0 "" :k [] {}]}]]] [:vector :map]]}
+  {:malli/schema [:=> [:catn [:seon.schema/projection :seon.schema/projection] [:seon.schema/value [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Schema discovery and explanation inspect arbitrary candidate values, including scalars, nil and host objects; the supplied validators decide whether they match.", :gen/elements [nil false 0 "" :k [] {}]}]]] [:vector :map]]}
   [projection value]
   (if-let [attrs (seq (sort-by str (diagnostic-present-attrs value)))]
     (let [rows (:seon.schema.projection/shape-rows projection)]
@@ -3269,14 +3269,14 @@
    [[shape-candidate-limit]] indexed schema references. Structural candidates
    outside either window may be omitted, so rows never assert validity.
    Candidate declarations do not affect the result after activation."
-  {:malli/schema [:=> [:catn [:seon.schema/value [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema.", :gen/elements [nil false 0 "" :k [] {}]}]]] [:vector :map]]}
+  {:malli/schema [:=> [:catn [:seon.schema/value [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Schema discovery and explanation inspect arbitrary candidate values, including scalars, nil and host objects; the supplied validators decide whether they match.", :gen/elements [nil false 0 "" :k [] {}]}]]] [:vector :map]]}
   [value]
   (let [projection (shape-projection)]
     (candidate-shapes-in projection value)))
 
 (defn matching-shapes-in
   "All schemas in explicit `projection` that validate `value`."
-  {:malli/schema [:=> [:catn [:seon.schema/projection :seon.schema/projection] [:seon.schema/value [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema.", :gen/elements [nil false 0 "" :k [] {}]}]]] [:vector :map]]}
+  {:malli/schema [:=> [:catn [:seon.schema/projection :seon.schema/projection] [:seon.schema/value [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Schema discovery and explanation inspect arbitrary candidate values, including scalars, nil and host objects; the supplied validators decide whether they match.", :gen/elements [nil false 0 "" :k [] {}]}]]] [:vector :map]]}
   [projection value]
   (if-let [attrs (seq (complete-present-attrs value))]
     (let [index (:seon.schema.projection/shape-index projection)
@@ -3301,14 +3301,14 @@
 
    Matching is deliberately independent of the capped diagnostic result: all
    structurally possible schemas validate and survive in deterministic order."
-  {:malli/schema [:=> [:catn [:seon.schema/value [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema.", :gen/elements [nil false 0 "" :k [] {}]}]]] [:vector :map]]}
+  {:malli/schema [:=> [:catn [:seon.schema/value [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Schema discovery and explanation inspect arbitrary candidate values, including scalars, nil and host objects; the supplied validators decide whether they match.", :gen/elements [nil false 0 "" :k [] {}]}]]] [:vector :map]]}
   [value]
   (let [projection (shape-projection)]
     (matching-shapes-in projection value)))
 
 (defn explain-shape-in
   "Explain `value` against `schema-key` in explicit `projection`."
-  {:malli/schema [:=> [:catn [:seon.schema/projection :seon.schema/projection] [:seon.schema/registry-key :seon.schema/registry-key] [:seon.schema/value [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema.", :gen/elements [nil false 0 "" :k [] {}]}]]] [:maybe :seon.schema/explanation]]}
+  {:malli/schema [:=> [:catn [:seon.schema/projection :seon.schema/projection] [:seon.schema/registry-key :seon.schema/registry-key] [:seon.schema/value [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Schema discovery and explanation inspect arbitrary candidate values, including scalars, nil and host objects; the supplied validators decide whether they match.", :gen/elements [nil false 0 "" :k [] {}]}]]] [:maybe :seon.schema/explanation]]}
   [projection schema-key value]
   (when-not (contains? (:seon.schema.projection/shape-rows projection)
                        schema-key)
@@ -3326,7 +3326,7 @@
    Returns nil when valid and Malli explanation data when invalid. The schema
    key must name a row returned by [[candidate-shapes]]; an unknown key is a
    caller defect and throws before compiling against any other registry."
-  {:malli/schema [:=> [:catn [:seon.schema/registry-key :seon.schema/registry-key] [:seon.schema/value [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema.", :gen/elements [nil false 0 "" :k [] {}]}]]] [:maybe :seon.schema/explanation]]}
+  {:malli/schema [:=> [:catn [:seon.schema/registry-key :seon.schema/registry-key] [:seon.schema/value [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Schema discovery and explanation inspect arbitrary candidate values, including scalars, nil and host objects; the supplied validators decide whether they match.", :gen/elements [nil false 0 "" :k [] {}]}]]] [:maybe :seon.schema/explanation]]}
   [schema-key value]
   (let [projection (shape-projection)]
     (explain-shape-in projection schema-key value)))
