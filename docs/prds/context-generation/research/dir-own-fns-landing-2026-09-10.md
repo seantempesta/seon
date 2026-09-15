@@ -123,3 +123,51 @@ docs/seon/issues/dir-omits-the-agents-own-durable-functions.md;
 docs/seon/issues/default-component-probe-times-out-after-adoption.md;
 this landing note. No production files changed. All owned test shells exited;
 no scratch cluster or worktree was created.
+
+## Repair resumed — 2026-09-14
+
+The owner authorized the actual documentation owner in eval.clj. Removed the
+acquisition-time documentation map and namespace grouping. The SCI macros now
+expand to ordinary evaluated calls carrying `(seon.db/db)`. `doc` resolves its
+symbol in the calling SCI namespace at execution time, rather than resolving
+against the context captured when the macro was created.
+
+`program-documentation` reads public function rows through their existing
+`:seon.fn/ns` relation, scoped to one namespace. `directory-value` and
+`documentation-value` share that query and the existing formatting helpers.
+The ordinary `seon.db/q` and `pull` paths record read evidence, including an
+empty namespace's future functions. Function data now includes parsed
+`:arglists`; no installation facts, schemas, or cache were added. Namespace
+documentation and declared-schema listings retain their existing shapes.
+
+The regression also records an initially empty directory's read evidence,
+checks that installation invalidates it, and reads the installed function
+through both local and qualified `doc` forms. The original four-namespace
+fast run passed 8 tests / 96 assertions; the expanded regression and isolated
+gates are recorded below when complete.
+
+Final fast regression: 3 tests / 57 assertions, zero failures or errors.
+The fixture explicitly creates the empty namespace before acquiring the
+context; a missing namespace correctly returns documentation-unavailable and
+is a different observation from an existing empty directory.
+
+Adoption initially reached JVM instrumentation but refused because source
+changed during adoption (publication 6aa88e34-a11a-57c3-a4e9-cca3b5fe6995).
+Retried the ordinary `bin/seon init --dev default --changed
+src/seon/sci/eval.clj` operation. The isolated gate overlays only the lane's
+paths on HEAD; concurrent render/CSS/test edits are excluded from that proof
+and were left untouched. No default lifecycle operation was used.
+
+Isolated gate: `bin/test --paths src/seon/sci/eval.clj
+test/seon/sci/documentation_test.clj
+docs/prds/context-generation/research/dir-own-fns-landing-2026-09-10.md --
+seon.sci.documentation-test seon.directory-test seon.repl-grammar-test
+seon.help-trial-test` passed 8 tests / 109 assertions, zero failures or errors.
+The runner's coordinator-and-tests phase took 150 seconds. Its successful
+snapshot run.OybuZu was removed by the runner. The separate platform gate
+and final live observation follow below.
+
+Platform gate with the same owned paths and `--platform`: 84 tests / 505
+assertions, zero failures or errors; coordinator-and-tests 179 seconds.
+Successful root run.aAKL47 was removed by the runner. No `--all` or `--full`
+run was requested or executed. `git diff --check` passed for the code and tests.

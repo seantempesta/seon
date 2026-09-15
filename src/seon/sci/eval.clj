@@ -234,7 +234,7 @@
         doc-var (get-in injected-namespaces ['seon.bootstrap 'doc])]
     ;; `dir` and `doc` are REPL operations, so every namespace resolves
     ;; them bare through the same clojure.core refer it already receives.
-    ;; `acquire!` replaces only `doc` with its row-derived macro.
+    ;; `acquire!` replaces both with macros that read current program facts.
     (sci/add-namespace!
      ctx 'clojure.core
      {'dir dir-var
@@ -1110,29 +1110,15 @@
      {:seon.fn.arity/output-refs [:seon.schema/key :seon.schema/form]}]}])
 
 (defn- program-documentation
-  "Public documentation as program facts; presentation belongs to the renderer."
-  [database]
-  (into {}
-        (map (fn [row]
-               [(:seon.fn/sym row)
-                (cond-> row
-                  (:seon.fn/arities row)
-                  (update :seon.fn/arities
-                          #(mapv (fn [arity]
-                                   (reduce (fn [m k]
-                                             (if (get m k)
-                                               (update m k (fn [refs]
-                                                             (vec (sort-by :seon.schema/key refs))))
-                                               m))
-                                           arity
-                                           [:seon.fn.arity/input-refs
-                                            :seon.fn.arity/output-refs]))
-                                 (sort-by :seon.fn.arity/order %))))]))
-        (db/q '[:find [(pull ?function selector) ...]
-                :in $ selector
-                :where [?function :seon.fn/sym _]
-                       [?function :seon.fn/private? false]]
-              database program-documentation-selector)))
+  "Read one namespace's public functions at the evaluation's database basis."
+  [database namespace-name]
+  (db/q '[:find [(pull ?function selector) ...]
+          :in $ selector ?name
+          :where [?namespace :seon.ns/name ?name]
+                 [?function :seon.fn/ns ?namespace]
+                 [?function :seon.fn/sym _]
+                 [?function :seon.fn/private? false]]
+        database program-documentation-selector namespace-name))
 
 (defn- documentation-unavailable
   [requested]
@@ -1172,80 +1158,89 @@
 (defn- function-doc-map
   [row]
   (merge (docstring-parts (:seon.fn/doc row))
+         {:arglists (edn/read-string (or (:seon.fn/arglists row) "()"))}
          (walk/postwalk-replace (into {} (documentation-schemas row))
                                 (documentation-contract row))))
 
+(defn directory-value
+  "Return current public function summaries and declared schemas for a namespace."
+  {:malli/schema [:=> [:cat :seon.db/db :symbol :boolean] :map]}
+  [database namespace-name present?]
+  (let [namespace-row (db/pull database
+                             '[:seon.ns/name
+                               {:seon.schema/_ns [:seon.schema/key :seon.schema/form]}]
+                             [:seon.ns/name namespace-name])
+        functions (program-documentation database namespace-name)]
+    (cond
+      (:seon.error/kind namespace-row) namespace-row
+      (:seon.error/kind functions) functions
+      (or (:seon.ns/name namespace-row) present? (seq functions))
+      (let [functions (sort-by (juxt #(get % :seon.fn/doc-order Long/MAX_VALUE)
+                                    :seon.fn/sym) functions)]
+        {:schemas (into (into (sorted-map) (mapcat documentation-schemas) functions)
+                        (map (fn [row]
+                               [(:seon.schema/key row)
+                                (edn/read-string (:seon.schema/form row))]))
+                        (:seon.schema/_ns namespace-row))
+         :functions (mapv (fn [row]
+                            (merge {:sym (symbol (:seon.fn/sym row))
+                                    :arglists (edn/read-string (or (:seon.fn/arglists row) "()"))
+                                    :doc (:summary (docstring-parts (:seon.fn/doc row)))}
+                                   (documentation-contract row)))
+                          functions)})
+      :else (documentation-unavailable namespace-name))))
+
+(defn documentation-value
+  "Return current public documentation for a resolved function or namespace."
+  {:malli/schema [:=> [:cat :seon.db/db :symbol :symbol] :map]}
+  [database requested qualified]
+  (if-let [namespace-name (namespace qualified)]
+    (let [functions (program-documentation database (symbol namespace-name))]
+      (if (:seon.error/kind functions)
+        functions
+        (if-let [row (some #(when (= (str qualified) (:seon.fn/sym %)) %) functions)]
+          (function-doc-map row)
+          (documentation-unavailable requested))))
+    (let [row (db/pull database [:seon.ns/doc] [:seon.ns/name requested])]
+      (cond
+        (:seon.error/kind row) row
+        (:seon.ns/doc row) (merge (docstring-parts (:seon.ns/doc row)) {:in [] :out []})
+        :else (documentation-unavailable requested)))))
+
 (defn- program-doc-var
-  "An SCI doc macro returning the acquired function facts without printing."
-  [ctx documentation]
+  "Resolve in the calling SCI namespace; read facts when the form executes."
+  []
   (sci/new-macro-var
    'doc
    (fn [_form _env function-symbol]
-     (let [resolved (sci/resolve ctx function-symbol)
-           qualified (when resolved
-                       (let [{:keys [ns name]} (meta resolved)]
-                         (symbol (str ns) (str name))))]
-       (if-let [row (or (get documentation (str function-symbol))
-                        (get documentation (str qualified)))]
-         (list 'quote (function-doc-map row))
-         (list 'quote (or (get documentation function-symbol)
-                         (documentation-unavailable function-symbol))))))
+     `(let [resolved# (resolve '~function-symbol)
+            metadata# (meta resolved#)]
+        (seon.sci.eval/documentation-value
+         (seon.db/db) '~function-symbol
+         (if resolved#
+           (symbol (str (:ns metadata#)) (str (:name metadata#)))
+           '~function-symbol))))
    {:ns (sci/create-ns 'clojure.repl)}))
 
 (defn- program-dir-var
-  "Return public function summaries and read the namespace's declared schemas."
-  [_ctx documentation]
-  (let [by-namespace
-        (group-by (comp symbol namespace symbol :seon.fn/sym)
-                  (sort-by (juxt #(get % :seon.fn/doc-order Long/MAX_VALUE) :seon.fn/sym)
-                           (filter :seon.fn/sym (vals documentation))))]
-    (sci/new-macro-var
-     'dir
-     (fn [_form _env namespace-name]
-       (let [functions (get by-namespace namespace-name)
-             schemas (into (sorted-map) (mapcat documentation-schemas) functions)
-             rows (mapv (fn [row]
-                          (merge {:sym (symbol (:seon.fn/sym row))
-                                  :doc (:summary (docstring-parts (:seon.fn/doc row)))}
-                                 (documentation-contract row))) functions)]
-         ;; This pull runs with the agent's form, so even an empty directory
-         ;; records the reverse edge that a later declaration will change.
-         `(let [namespace# (seon.db/pull
-                            '[:seon.ns/name
-                              {:seon.schema/_ns [:seon.schema/key :seon.schema/form]}]
-                            '~[:seon.ns/name namespace-name])]
-            (cond
-              (:seon.error/kind namespace#) namespace#
-              (or (:seon.ns/name namespace#)
-                  (clojure.core/find-ns '~namespace-name)
-                  ~(boolean (seq rows)))
-              {:schemas (into '~schemas
-                              (map (fn [row#] [(:seon.schema/key row#)
-                                               (clojure.edn/read-string (:seon.schema/form row#))]))
-                              (:seon.schema/_ns namespace#))
-               :functions '~rows}
-              :else '~(documentation-unavailable namespace-name)))))
-     {:ns (sci/create-ns 'clojure.repl)})))
+  "Read current facts through the calling evaluation's database custody."
+  []
+  (sci/new-macro-var
+   'dir
+   (fn [_form _env namespace-name]
+     `(seon.sci.eval/directory-value
+       (seon.db/db) '~namespace-name
+       (boolean (clojure.core/find-ns '~namespace-name))))
+   {:ns (sci/create-ns 'clojure.repl)}))
 
 (defn- install-program-doc!
-  "Install one acquired program-doc projection without retaining the db."
-  [ctx db projection]
-  (schema/call-with-projection
-   projection
-   (fn []
-     (let [documentation (into (program-documentation db)
-                              (map (fn [[namespace-name docstring]]
-                                     [namespace-name (merge (docstring-parts docstring) {:in [] :out []})]))
-                              (db/q '[:find ?name ?doc :where [?ns :seon.ns/name ?name]
-                                      [?ns :seon.ns/doc ?doc]] db))
-           doc-var (program-doc-var ctx documentation)
-           dir-var (program-dir-var ctx documentation)]
-       ;; Preserve qualified `clojure.repl/doc`/`dir` and expose the same
-       ;; acquired macros bare through every namespace's clojure.core refer.
-       (sci/add-namespace! ctx 'clojure.repl {'doc doc-var})
-       (sci/add-namespace! ctx 'clojure.repl {'dir dir-var})
-       (sci/add-namespace! ctx 'clojure.core {'doc doc-var 'dir dir-var})
-       ctx))))
+  "Install REPL macros without capturing program facts or a database value."
+  [ctx _db _projection]
+  (let [doc-var (program-doc-var)
+        dir-var (program-dir-var)]
+    (sci/add-namespace! ctx 'clojure.repl {'doc doc-var 'dir dir-var})
+    (sci/add-namespace! ctx 'clojure.core {'doc doc-var 'dir dir-var})
+    ctx))
 
 (defn- install-declared-classes!
   "Install every non-masked class named by acquired namespace facts."
