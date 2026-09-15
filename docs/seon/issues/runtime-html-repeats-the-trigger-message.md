@@ -2,10 +2,22 @@
 type: issue
 status: open
 severity: friction
-tags: [wave/ui-watchability, render, runtime]
+tags: [issue, render, runtime, message, wave/ui-watchability]
 ---
 
 # Runtime HTML repeats the trigger message
+
+## Audit-1 source confirmation — 2026-09-15
+
+At `0c70a1cb4`, `src/seon/render/transcript.clj:1133–1139`
+(`runtime-message-link`) includes the first content line. At
+`src/seon/render/transcript.clj:2139–2142`, the runtime block emits that
+link after “Woke on” and then calls `message/render-html` with the same
+trigger. The message pair at `src/seon/cluster/message.clj:382–431`
+renders its complete content. A single-line fault notification is thus
+duplicated in full. This confirms the source class without claiming a new
+live browser observation. Estimated deletion: 5–15 lines; retain a short
+trigger identity label and one complete message pair.
 
 Observed on default, 2026-09-14, at `/ns/my.agents.juniper`.
 The runtime block prints the complete fault notification after “Woke on”,

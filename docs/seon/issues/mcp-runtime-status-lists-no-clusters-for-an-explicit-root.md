@@ -34,6 +34,13 @@ instructions call worse than nothing.
 
 ## Owner
 
+Audit-1 observation, 2026-09-14 22:24 local: shared-root `bin/seon status`
+reported `0/0 clusters alive`; explicit-root `runtime_status` returned
+`:seon.dev.mcp/clusters []` without a refusal. `eval_clj` returned
+`repl-unavailable`, advertisement state `missing`, for `default`. This
+re-observes the empty-root diagnostic case only, not the earlier disagreement
+about a live root. No cluster was started, stopped, or reforked for the audit.
+
 `script/seon/dev/mcp.clj`, `execute-runtime-status`: its discovery must use
 the same root-scoped advertisement census `eval_clj` uses, and an explicit
 root with zero advertisements should say so as a typed value rather than an
