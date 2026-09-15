@@ -68,7 +68,13 @@
                    listed (transcript/render-session unit)
                    kinds (keep #(when (map? %) (:data-turn-kind %)) (tree-seq coll? seq listed))]
                (is (some #{"System"} kinds))
-               (is (some #{"Virtual"} kinds)))
+               (is (some #{"Virtual"} kinds))
+               (let [card (transcript/render-ledger-turn unit)
+                     reply (first (filter #(and (vector? %) (= virtual-id (:data-reply-turn (second %))))
+                                          (tree-seq coll? seq card)))]
+                 (is (= raw (element-text reply)))
+                 (is (str/includes? (element-text card) "AGENT REPLIED"))
+                 (is (not (str/includes? (element-text card) "WE GENERATED (system turn")))))
              (agent/disarm! request)
              (agent/arm! request)
              (let [provider-id (fixture/submit! handle routing ";; Check the total\n(+ 40 2)")
@@ -130,16 +136,24 @@
                  (is (str/includes? (element-text ledger) "AGENT REPLIED"))
                  (is (str/includes? (element-text ledger) "RESULTS (evaluated by seon)"))
                  (is (str/includes? (element-text ledger) "Check the total · 1 value"))
-                 (let [opening-row (first (#'transcript/turn-rows @connection "juniper"))
-                       opening-count (db/q '[:find (count ?e) . :in $ ?t
-                                             :where [?e :seon.cluster.eval/run ?t]]
-                                           @connection (:db/id opening-row))]
-                   (is (= [opening-count]
-                          (vec (keep #(when (map? %) (:data-opening-emissions %)) ledger-nodes)))))
+                 (is (empty? (keep #(when (map? %) (:data-opening-emissions %))
+                                   (tree-seq coll? seq (transcript/render-ledger-turn unit))))
+                     "A preceding virtual reply stops the generated-context group.")
                  (is (= (db/q '[:find (count ?e) . :in $ ?id
                                  :where [?t :seon.turn/id ?id] [?e :seon.cluster.eval/run ?t]]
                                @connection provider-id)
-                        (reduce + (keep #(when (map? %) (:data-evaluation-count %)) ledger-nodes))))
+                        (reduce + (keep #(when (map? %) (:data-evaluation-count %))
+                                        (tree-seq coll? seq (transcript/render-ledger-turn unit))))))
+                 (let [evaluations (#'transcript/ledger-evaluations unit)
+                       row (some #(when (= provider-id (:seon.turn/id %)) %)
+                                 (#'transcript/ledger-rows @connection
+                                   (#'transcript/turn-rows @connection "juniper") evaluations))]
+                   (doseq [source ["(my.agent/done)" "(let [finish my.agent/done] (finish))" "(do (my.agent/done))"]]
+                     (let [authored (assoc row :seon.turn/reply source)]
+                       (is (str/ends-with? (#'transcript/turn-story unit evaluations
+                                            (assoc authored :seon.turn/disposition :wait)) "done"))
+                       (is (not (str/ends-with? (#'transcript/turn-story unit evaluations
+                                                (dissoc authored :seon.turn/disposition)) "done"))))))
                  (doseq [node ledger-nodes
                          :when (and (vector? node) (= :section (first node)))]
                    (is (#{"seon" "agent"} (:data-author (second node)))))
@@ -169,7 +183,7 @@
                (is (seq (evaluation/of-agent @connection "juniper")))
                (let [snapshot #(let [database @connection
                                      evaluations (#'transcript/ledger-evaluations (assoc unit :seon.db/db database))
-                                     rows (#'transcript/ledger-rows
+                                     rows (#'transcript/ledger-rows database
                                            (#'transcript/turn-rows database "juniper") evaluations)]
                                  (#'transcript/session-problems
                                   (assoc unit :seon.db/db database) rows

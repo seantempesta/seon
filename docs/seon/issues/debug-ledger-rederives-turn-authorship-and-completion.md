@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, render, agent, wave/verification-audit]
 ---
@@ -25,6 +25,13 @@ Use one provenance derivation for headers, bodies, grouping, and strip. Derive c
 Estimated change: 25–60 lines merged. Audit classes: 1, 3. No production edits for this finding were made by the audit lane.
 
 ## Acceptance
+
+Resolved in the A02 commit containing this note: ledger rows carry the one
+derived turn kind through headers, bodies, grouping and strip. Virtual replies
+retain their exact authored bytes and results; accepted closed dispositions
+determine completion. Fast: 10 tests / 146 assertions; isolated: 10 / 150,
+zero failures/errors. Default adopted the change; both routes at 1440 and 700
+were captured and inspected. See the consolidate-debug landing note for hash.
 
 Use the real canonical virtual-turn and provider paths. A virtual reply remains authored input in the body and is never included as generated context. Aliased or nested disposition-producing forms agree with directly spelled calls; a shown value alone cannot assert completion.
 

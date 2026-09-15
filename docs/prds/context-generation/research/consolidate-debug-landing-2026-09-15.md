@@ -127,3 +127,24 @@ page-review/web-debug tests, running page-review, web-debug and web-context:
 justified above. Earlier intermediate runs and failed roots are superseded
 by these results. A09 commit is the commit containing this section; its hash
 is recorded with the next finding.
+
+## A02 — turn authorship and completion
+
+A09 commit: `209a73fd2`.
+
+The ledger derives `turn-kind` once per row. Bodies and preceding-generated
+selection now consume that same provenance as headers/strip/story. A virtual
+reply shows its original authored bytes and results, and stops the preceding
+system-only group. The accepted closed turn disposition supplies completion;
+source spelling is no longer inspected. The regression uses the canonical
+virtual-turn fixture and checks exact reply bytes, grouping, and disposition
+independence for direct, aliased and nested source spellings.
+
+Source/tests: 49 added / 34 removed (net +15): source +1, strengthened regression
++14. This replaces the duplicated authorship decision and completion scanner;
+the extra test lines justify this finding's net addition.
+
+A02 verification: fast 10 tests / 146 assertions; isolated 10 / 150, both green.
+Default adoption completed at source `6aa8d57a-ad06-50f4-9ea9-bd78ed94ddc9`.
+Browser `a02`: six HTTP 200 captures, zero horizontal overflow; main/debug
+at 1440 and 700 inspected, layout retained.

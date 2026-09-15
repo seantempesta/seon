@@ -1584,24 +1584,26 @@
 (defn- emission-byte-count [emissions]
   (reduce + 0 (map ::contributed-bytes emissions)))
 
-(defn- ledger-rows [rows evaluations]
+(defn- ledger-rows [database rows evaluations]
   (if (:seon.error/kind rows) rows
     (mapv (fn [row]
             (let [attempts (mapv #(assoc % ::usage (attempt-usage %))
                                  (sort-by :seon.ai.attempt/ordinal (:seon.turn/attempts row)))
                   own (get evaluations (:db/id row) [])]
-              (assoc row :seon.turn/attempts attempts ::attempt (last attempts)
+              (assoc row ::kind (turn-kind database row)
+                     :seon.turn/attempts attempts ::attempt (last attempts)
                      ::bytes (emission-byte-count own)
                      ::outcomes (frequencies (map ::outcome own))))) rows)))
 
 (defn- ledger-turn-body [request rows evaluations row]
   (let [database (:seon.db/db request)
         ordinal (::ordinal row)
-        provider? (seq (:seon.turn/attempts row))
+        provider? (= "Provider" (::kind row))
+        authored? (not= "System" (::kind row))
         own (get evaluations (:db/id row) [])
-        generated (if provider?
+        generated (if authored?
                     (->> rows (take ordinal) reverse
-                         (take-while #(empty? (:seon.turn/attempts %))) reverse
+                         (take-while #(= "System" (::kind %))) reverse
                          (mapcat #(get evaluations (:db/id %) []))) own)
         added-bytes (emission-byte-count generated)
         reply (or (turn-reply (:seon.db/connection request) row) "")
@@ -1614,18 +1616,19 @@
         calibration (when (:seon.ai/model attempt)
                       ((requiring-resolve 'seon.cluster.prompt/model-calibration) database (:seon.ai/model attempt)))
         opening (filter #(= (:db/id (first rows)) (get-in % [:seon.cluster.eval/run :db/id])) generated)
-        later (if provider? (remove (set opening) generated) generated)
+        later (if authored? (remove (set opening) generated) generated)
         groups (partition-by :seon.cluster.eval/source later)]
     [:div {:id (ledger-body-id turn-id) :data-ledger-loaded turn-id :class "seon-ledger-body"}
      [:section {:class "seon-ledger-sent" :data-author "seon"}
       (ledger-heading (cond provider? "WE SENT"
+                            authored? "CONTEXT BEFORE REPLY"
                             (zero? ordinal) "WE GENERATED (opening)"
                             :else (str "WE GENERATED (system turn " ordinal ")"))
                       "seon" (str (count generated) " emissions · " (format "%,d" added-bytes) " bytes"))
-      (when provider? [:p {:class "seon-ledger-note"}
+      (when authored? [:p {:class "seon-ledger-note"}
                       (if (seq opening) "Opening + since-diff before the first reply."
                         "Generated context added before this reply; earlier results remain in the full context.")])
-      (when (and provider? (seq opening))
+      (when (and authored? (seq opening))
         [:details {:class "seon-ledger-generated" :data-opening-emissions (count opening)}
          [:summary (str "opening (" (count opening) " emissions)")]
          (for [saved opening]
@@ -1646,18 +1649,18 @@
                  [:span (str " · re-read · " (reread-summary [prior (last matches)]))])]
               (ledger-emissions matches)])))
         [:p "Nothing new — no generated context was added before this turn."])
-      (when provider?
+      (when authored?
         [:details {:class "seon-ledger-full-context"
                    (keyword "data-on:toggle")
                    (str "if(el.open && !el.querySelector('[data-context-loaded]')) @get('"
                         (ledger-url (:seon.agent/id request) turn-id {:context "true"}) "')")}
          [:summary
-          (str "Full context as sent"
+          (str (if provider? "Full context as sent" "Full context before reply")
                (when capture (str ": " (format "%,d" (utf8-size capture)) " bytes · rebuilt ≈"
                                   (format "%,d" (tokens/estimate capture calibration)) " tokens"))
                (when-let [billed (::prompt usage)] (str " · billed " (format "%,d" billed))))]
          [:div {:id (ledger-context-id turn-id)}]])]
-     (when provider?
+     (when authored?
        (list
         [:section {:class "seon-ledger-reply" :data-author "agent"}
          (ledger-heading "AGENT REPLIED" "agent" (str (format "%,d" (utf8-size reply)) " bytes"))
@@ -1695,7 +1698,7 @@
     (let [evaluations (ledger-evaluations request)]
       (if (:seon.error/kind evaluations)
         [:div {:id (ledger-body-id (:seon.turn/id request))} [:p (:seon.error/message evaluations)]]
-        (let [rows (ledger-rows rows evaluations)
+        (let [rows (ledger-rows (:seon.db/db request) rows evaluations)
               row (some #(when (= (:seon.turn/id request) (:seon.turn/id %)) %) rows)]
           (ledger-turn-body request rows evaluations row))))))
 
@@ -1999,7 +2002,7 @@
                   tone (cond (pos? errors) "error"
                              (and provider? (or (empty? own) (nil? (:seon.turn/closed-tx row)))) "warning"
                              provider? "success" :else "neutral")
-                  kind (turn-kind (:seon.db/db request) row)
+                  kind (::kind row)
                   amount (get amounts turn-id)
                   attempt (::attempt row)
                   usage (::usage attempt)
@@ -2030,18 +2033,16 @@
 
 (defn- turn-story [request evaluations row]
   (let [own (get evaluations (:db/id row) [])
-        provider? (seq (:seon.turn/attempts row))
-        effects (when provider? (::summary (ledger-effects (:seon.db/db request) (:seon.agent/id request) row)))
-        done? (some #(let [form (::value (readable-shown (:seon.cluster.eval/source %)))]
-                       (and (:seon.eval/shown %) (nil? (:seon.cluster.eval/error %))
-                            (seq? form) (= 'my.agent/done (first form)))) own)]
+        authored? (not= "System" (::kind row))]
     (str/join " · "
       (remove str/blank?
-        (if provider?
+        (if authored?
           [(reply-intent (turn-reply (:seon.db/connection request) row))
-           (results-summary (::outcomes row)) effects (when done? "done")]
-          [(cond (not= "System" (turn-kind (:seon.db/db request) row)) (results-summary (::outcomes row))
-                 (zero? (::ordinal row)) (str "opening · " (count own) " emissions")
+           (results-summary (::outcomes row))
+           (::summary (ledger-effects (:seon.db/db request) (:seon.agent/id request) row))
+           (when (:seon.turn/closed-tx row)
+             (case (:seon.turn/disposition row) :wait "done" :completed "completed" nil))]
+          [(cond (zero? (::ordinal row)) (str "opening · " (count own) " emissions")
                  (empty? own) "no new emissions"
                  :else (str "re-read " (str/join ", " (distinct (map emission-label own)))))])))))
 
@@ -2056,7 +2057,7 @@
         rows (turn-rows database (:seon.agent/id request))
         selected (or (:seon.turn/id request) (:seon.turn/id (last rows)))
         evaluations (ledger-evaluations request)
-        rows (ledger-rows rows evaluations)
+        rows (ledger-rows (:seon.db/db request) rows evaluations)
         expanded (conj (set (map :seon.turn/id (take-last 3 rows))) selected)
         problems (when-not (or (:seon.error/kind rows) (:seon.error/kind evaluations))
                    (session-problems request rows evaluations))]
@@ -2074,7 +2075,7 @@
                    attempt (::attempt row)
                    usage (::usage attempt)]]
          [:details {:class "seon-ledger-turn" :open (contains? expanded turn-id)
-                    :data-turn-id turn-id :data-turn-kind (turn-kind database row)
+                    :data-turn-id turn-id :data-turn-kind (::kind row)
                     :id (block/surface-id (keyword "turn" turn-id))
                     :data-init (when (= selected turn-id)
                                  "el.style.scrollMarginTop = (el.closest('.seon-ledger').querySelector('.seon-session-sticky').offsetHeight + 8) + 'px'; el.scrollIntoView({block:'start'})")
@@ -2082,7 +2083,7 @@
                     (str "if(el.open && !el.querySelector('[data-ledger-loaded]')) @get('"
                          (ledger-url (:seon.agent/id request) turn-id {:card "true"}) "')")}
           [:summary
-           (str "Turn " (::ordinal row) " · " (str/lower-case (turn-kind database row)) " · ")
+           (str "Turn " (::ordinal row) " · " (str/lower-case (::kind row)) " · ")
            (runtime-time (get-in row [:seon.turn/opened-tx :db/txInstant]))
            (when attempt
              (str " · " (:seon.ai/model attempt)
