@@ -274,13 +274,37 @@
             projection :record caps wrapped))
         ":record removes an already-installed interpreted wrapper")))
 
+(defn guarded-result
+  "A fixture function whose pair of arguments and return must be a map."
+  {:malli/schema [:=> [:cat :int] :int
+                  [:fn {:error/message "The guard was evaluated."} clojure.core/map?]]}
+  [value]
+  value)
+
+(deftest jvm-and-interpreted-functions-arm-the-declared-guard
+  (let [projection (schema/handed-projection)
+        caps (config/result-caps (test-support/effective-config))
+        interpreted (instrument/wrap-interpreted
+                     'my.agents.guarded/result
+                     "[:=> [:cat :int] :int [:fn {:error/message \"The guard was evaluated.\"} clojure.core/map?]]"
+                     projection :panic caps identity)]
+    (instrument/apply! {:seon.config/on-core-error :panic :seon.schema/projection projection})
+    (doseq [call [#(guarded-result 1) #(interpreted 1)]]
+      (let [failure (test-support/refusal-data call)]
+        (is (= :seon.instrument/contract-violated (:seon.error/kind failure)))
+        (is (= :malli.core/invalid-guard
+               (get-in failure [:seon.error/data :seon.instrument/malli])))
+        (is (str/includes? (:seon.error/message failure) "The guard was evaluated."))))))
+
 (deftest a-sci-only-arity-miss-names-its-program-graph-arglists
   (test-support/with-database
    (fn [connection]
      (let [function-symbol 'my.agents.reporter/largest
-           _ (db/transact!
+           registration (db/transact!
               connection
               [{:seon.fn/sym (str function-symbol)
+                :seon.schema.admission/source :agent
+                :seon.fn/ns {:seon.ns/name 'my.agents.reporter}
                 :seon.fn/arglists "([rows])"}])
            projection (schema/build-projection (schema/snapshot))
            wrapped (instrument/wrap-interpreted
@@ -298,6 +322,8 @@
                              {:seon.env/environment environment}]
                      (try (wrapped)
                           (catch Exception thrown thrown)))]
+       (is (:db-after registration) (pr-str registration))
+       (is (env/environment? environment) (pr-str environment))
        (let [diagnostic (ex-data failure)]
          (is (= (str "Wrong number of args (0) passed to: " function-symbol
                      "; declared arglists: ([rows])")

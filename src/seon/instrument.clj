@@ -279,7 +279,7 @@
       :seon.error/diagnostic-member
       (if (= :malli.core/invalid-output kind) :return :arguments)
       :seon.error/diagnostic-expected
-      (if arity? ::declared-arglists (or (:output data) (:input data)))
+      (if arity? ::declared-arglists (or (:guard data) (:output data) (:input data)))
       :seon.error/diagnostic-offending
       (if arity? (:arity data) (or (:value data) (:args data)))
       :seon.error/diagnostic-cause kind
@@ -333,9 +333,10 @@
               (-> (update :seon.error/message
                           str "; declared arglists: " (pr-str arglists))
                   (update :seon.error/data assoc ::arglists arglists))))
-          (let [[offended value] (if (= :malli.core/invalid-output kind)
-                             [(:output data) (:value data)]
-                             [(:input data) (:args data)])
+          (let [[offended value] (case kind
+                                  :malli.core/invalid-output [(:output data) (:value data)]
+                                  :malli.core/invalid-guard [(:guard data) [(:args data) (:value data)]]
+                                  [(:input data) (:args data)])
           explanation (m/explain offended value)
           problems (:errors explanation)
           problem-count (count problems)
@@ -376,7 +377,8 @@
                       (offending-value bounded-caps kind first-problem))
           function-symbol (:fn-name data)
           caller (caller-frame)
-          arm (if (= :malli.core/invalid-output kind) :output :input)]
+          arm (case kind :malli.core/invalid-output :output
+                         :malli.core/invalid-guard :guard :input)]
       (error/diagnostic
        {:seon.error/kind ::contract-violated
         :seon.instrument/contract-violated (str function-symbol)
@@ -460,7 +462,11 @@
   [projection contract]
   (walk/postwalk
    (fn [value]
-     (if (and (vector? value) (= :fn (first value)))
+     (cond
+       (and (map? value) (qualified-symbol? (:error/fn value)))
+       (assoc value :error/fn (predicate-callable projection (:error/fn value)))
+
+       (and (vector? value) (= :fn (first value)))
        (let [predicate-index (if (map? (second value)) 2 1)
              predicate (get value predicate-index)
              callable (when (symbol? predicate)
@@ -477,7 +483,7 @@
                :seon.schema/unresolved-predicate predicate
                :seon.error/message "The schema predicate is unresolved."
                :seon.schema/predicate predicate}))))
-       value))
+       :else value))
    contract))
 
 (defn wrap-interpreted
@@ -512,7 +518,7 @@
             wrapped
             (m/-instrument
              {:schema contract
-              :scope #{:input :output}
+              :scope #{:input :output :guard}
               :report (fn [kind data]
                         (report kind (assoc data :fn-name function-symbol)))}
              original
@@ -571,12 +577,14 @@
    (fn []
      (let [contract (get (:seon.schema.projection/function-contracts projection)
                          function-symbol authored)
-           bound ((mi/-f->original schema/compilable-form)
-                  contract
-                  (get projection :seon.schema.projection/predicate-functions {}))
+           bound (bind-contract-predicates
+                  projection
+                  ((mi/-f->original schema/compilable-form)
+                   contract
+                   (get projection :seon.schema.projection/predicate-functions {})))
            report (throwing-report caps)]
        (m/-instrument
-        {:schema bound :scope #{:input :output}
+        {:schema bound :scope #{:input :output :guard}
          :report (fn [kind data]
                    (report kind (assoc data :fn-name function-symbol)))}
         original

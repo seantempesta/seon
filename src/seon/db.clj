@@ -1386,38 +1386,67 @@
                   argument)))))
         source-bindings))
 
-(defn- aligned-query-arguments
-  [explicit-database query-form arguments]
+(defn- query-argument-message
+  [query-form arguments]
+  (str "seon.db/q :in " (pr-str (get query-form :in '[$]))
+       " does not match supplied arguments "
+       (pr-str (mapv #(if (db.utils/db? %) 'database %) arguments))
+       ". Every source input must be a database value. "
+       "Use (seon.db/q query input ...) with the database elided, "
+       "or (seon.db/q database query input ...) with an explicit database first."))
+
+(defn- query-input-shape-error
+  [query-form arguments]
+  (diagnostic
+   {:seon.error/kind ::invalid-read
+    :seon.error/message (query-argument-message query-form arguments)
+    :seon.error/diagnostic-layer :database-read
+    :seon.error/diagnostic-operation 'seon.db/q
+    :seon.error/diagnostic-member :in
+    :seon.error/diagnostic-expected (get query-form :in '[$])
+    :seon.error/diagnostic-offending arguments
+    :seon.error/diagnostic-cause ::query-input-shape
+    :seon.error/diagnostic-evidence {::query query-form}
+    :seon.db/invalid-read true}))
+
+(defn- query-input-position
+  "Return the omitted $ position, :explicit, or :invalid from parsed bindings."
+  [explicit-database? query-form arguments]
   (let [arguments (vec arguments)
         input-count (d/query-input-count query-form)
-        source-bindings (d/query-source-bindings query-form)
-        upstream-error (source-argument-error source-bindings arguments)
-        default-sources
-        (filterv #(= '$ (:datahike.query.source/symbol %))
-                 source-bindings)]
+        sources (d/query-source-bindings query-form)
+        dollar (first (filter #(= '$ (:datahike.query.source/symbol %)) sources))
+        position (:datahike.query.source/argument-position dollar)
+        omitted? (and dollar (= input-count (inc (count arguments)))
+                      (or explicit-database?
+                          (not (db.utils/db? (get arguments position)))))
+        valid-sources?
+        (every? (fn [source]
+                  (let [index (:datahike.query.source/argument-position source)
+                        value (get arguments (if (and omitted? (> index position))
+                                               (dec index) index))]
+                    (or (and omitted? (= index position))
+                        (db.utils/db? value) (error-value? value))))
+                sources)]
     (cond
-      upstream-error
-      upstream-error
+      (not valid-sources?) :invalid
+      omitted? position
+      (= input-count (count arguments)) :explicit
+      :else :invalid)))
 
-      (= input-count (count arguments))
-      arguments
-
-      (and (= input-count (inc (count arguments)))
-           (= 1 (count default-sources)))
-      (let [position
-            (:datahike.query.source/argument-position
-             (first default-sources))
-            database (or explicit-database (current-database-value))]
-        (if (error-value? database)
-          database
-          (when (<= 0 position (count arguments))
-            (into (conj (subvec arguments 0 position) database)
-                  (subvec arguments position)))))
-
-      ;; Datahike owns every other positional shape. Passing the normalized
-      ;; arguments through is deliberately weaker than the dependency's own
-      ;; acceptance; `q-with-evidence` alone decides whether they are valid.
-      :else arguments)))
+(defn- aligned-query-arguments
+  [explicit-database query-form arguments]
+  (let [arguments (vec arguments)]
+    (or (source-argument-error (d/query-source-bindings query-form) arguments)
+        (let [position (query-input-position (some? explicit-database) query-form arguments)]
+          (case position
+            :explicit arguments
+            :invalid (query-input-shape-error query-form arguments)
+            (let [database (or explicit-database (current-database-value))]
+              (if (error-value? database)
+                database
+                (into (conj (subvec arguments 0 position) database)
+                      (subvec arguments position)))))))))
 
 (defn- missing-query-error
   [query-input]
@@ -1436,6 +1465,36 @@
       :seon.error/diagnostic-cause ::missing-required-key
       :seon.error/diagnostic-evidence query-input :seon.db/invalid-read true})))
 
+(defn- query-call-valid?
+  [[call-arguments _result]]
+  (let [[query-or-database & arguments] call-arguments]
+    (if (error-value? query-or-database)
+      true
+      (try
+        (let [explicit? (db.utils/db? query-or-database)
+              query-input (if explicit? (first arguments) query-or-database)
+              supplied (if explicit? (rest arguments) arguments)
+              normalized (query/normalize-q-input query-input supplied)]
+          (and (not (and (map? query-input) (contains? query-input :args) (seq supplied)))
+               (not= :invalid (query-input-position explicit? (:query normalized) (:args normalized)))))
+        ; Malformed query syntax has no input count; the parser supplies its
+        ; existing diagnostic at the read seam. This guard checks parsed inputs.
+        (catch Exception _ true)))))
+
+(defn- query-guard-message
+  [{value :value} _options]
+  (let [[[head & tail] result] value]
+    (or (when (error-value? result) (:seon.error/message result))
+        (try
+          (let [explicit? (db.utils/db? head)
+                query-input (if explicit? (first tail) head)
+                supplied (if explicit? (rest tail) tail)
+                normalized (query/normalize-q-input query-input supplied)]
+            (query-argument-message (:query normalized)
+                                    (into (vec (:args normalized))
+                                          (when (and (map? query-input) (:args query-input)) supplied))))
+          (catch Exception _ "The query and supplied arguments do not form a valid Datalog call.")))))
+
 (defn q
   "Run a Datalog query over explicit inputs or the current database value."
   {:malli/schema
@@ -1448,7 +1507,11 @@
        :seon.db/query
        :seon.db/query-args]]
      [::arguments [:* :seon.schema/value]]]
-    [:or :seon.schema/value :seon.error/value]]}
+    [:or :seon.schema/value :seon.error/value]
+    [:fn {:error/message
+          "The supplied arguments must match the query's :in (default [$]); every source input must be a database value. Use (seon.db/q query input ...) with $ elided, or (seon.db/q database query input ...) with the database first."
+          :error/fn seon.db/query-guard-message}
+     seon.db/query-call-valid?]]}
   [query-or-database & arguments]
   (if (error-value? query-or-database)
     query-or-database
@@ -1467,10 +1530,13 @@
       ;; before Seon decides where the ambient database belongs.
       (let [normalized (query/normalize-q-input query-input argument-inputs)
             aligned
-            (aligned-query-arguments
-             (when explicit-database? query-or-database)
-             (:query normalized)
-             (:args normalized))]
+            (if (and (map? query-input) (contains? query-input :args) (seq argument-inputs))
+              (query-input-shape-error (:query normalized)
+                                       (into (vec (:args normalized)) argument-inputs))
+              (aligned-query-arguments
+               (when explicit-database? query-or-database)
+               (:query normalized)
+               (:args normalized)))]
         (if (error-value? aligned)
           aligned
           (let [request (assoc normalized :args aligned)
@@ -1520,6 +1586,31 @@
   (if (error-value? database)
     database
     (or (missing-pull-selector-error public-operation arguments)
+        (let [many? (= :pull-many operation-key)
+              options (first arguments)
+              expected (if many? :seon.db/pull-many-options :seon.db/pull-options)
+              valid? (if (= 1 (count arguments))
+                       (and (map? options) (vector? (:selector options))
+                            (some? (get options (if many? :eids :eid))))
+                       (and (= 2 (count arguments))
+                            (vector? options) (not (map? (second arguments)))))]
+          (when-not valid?
+            (diagnostic
+             {:seon.error/kind ::invalid-read
+              :seon.error/message
+              (str public-operation " received invalid arguments " (pr-str arguments)
+                   ". Use (" public-operation " selector " (if many? "eids" "eid")
+                   ") with the database elided, or (" public-operation
+                   " database selector " (if many? "eids" "eid")
+                   "). Argument maps require :selector and " (if many? ":eids" ":eid") ".")
+              :seon.error/diagnostic-layer :database-read
+              :seon.error/diagnostic-operation public-operation
+              :seon.error/diagnostic-member :args
+              :seon.error/diagnostic-expected expected
+              :seon.error/diagnostic-offending arguments
+              :seon.error/diagnostic-cause ::pull-input-shape
+              :seon.error/diagnostic-evidence {::operation operation-key}
+              :seon.db/invalid-read true})))
         (when (#{'seon.db/pull 'seon.db/entity} public-operation)
           (lookup-ref-error public-operation database
                             (pull-entity-id arguments)))
@@ -1536,22 +1627,34 @@
         (append-database-evidence! database :all)
         (dependency-error result-key cause))))))
 
+(defn- pull-call-valid?
+  [[arguments _result]]
+  (let [[head & tail] arguments
+        inputs (if (or (db.utils/db? head) (error-value? head)) tail arguments)]
+    (or (error-value? head)
+        (and (= 1 (count inputs)) (map? (first inputs)))
+        (and (= 2 (count inputs)) (vector? (first inputs))
+             (not (map? (second inputs)))))))
+
 (defn pull
   "Pull one entity over an explicit or current database value."
   {:malli/schema
    [:function
     [:=> [:cat :seon.db/pull-options]
-     [:or :nil :map :seon.error/value]]
+     [:or :nil :map :seon.error/value]
+     [:fn {:error/message "Use (seon.db/pull selector eid), (seon.db/pull database selector eid), or one {:selector selector :eid eid} argument map."} seon.db/pull-call-valid?]]
     [:=> [:cat
           [:or :seon.db/database-value :seon.error/value
            :seon.db/pull-selector]
           [:or :seon.db/pull-options :seon.db/entity-id]]
-     [:or :nil :map :seon.error/value]]
+     [:or :nil :map :seon.error/value]
+     [:fn {:error/message "Use (seon.db/pull selector eid), (seon.db/pull database selector eid), or one {:selector selector :eid eid} argument map."} seon.db/pull-call-valid?]]
     [:=>
      [:cat [:or :seon.db/database-value :seon.error/value]
       :seon.db/pull-selector
       :seon.db/entity-id]
-     [:or :nil :map :seon.error/value]]]}
+     [:or :nil :map :seon.error/value]
+     [:fn {:error/message "Use (seon.db/pull selector eid), (seon.db/pull database selector eid), or one {:selector selector :eid eid} argument map."} seon.db/pull-call-valid?]]]}
   ([options]
    (pull-call (current-database-value)
               [options]
@@ -1587,19 +1690,22 @@
   {:malli/schema
    [:function
     [:=> [:cat :seon.db/pull-many-options]
-     [:or [:vector [:or :nil :map]] :seon.error/value]]
+     [:or [:vector [:or :nil :map]] :seon.error/value]
+     [:fn {:error/message "Use (seon.db/pull-many selector eids), (seon.db/pull-many database selector eids), or one {:selector selector :eids eids} argument map."} seon.db/pull-call-valid?]]
     [:=>
      [:cat
       [:or :seon.db/database-value :seon.error/value
        :seon.db/pull-selector]
       [:or :seon.db/pull-many-options
        [:sequential :seon.db/entity-id]]]
-     [:or [:vector [:or :nil :map]] :seon.error/value]]
+     [:or [:vector [:or :nil :map]] :seon.error/value]
+     [:fn {:error/message "Use (seon.db/pull-many selector eids), (seon.db/pull-many database selector eids), or one {:selector selector :eids eids} argument map."} seon.db/pull-call-valid?]]
     [:=>
      [:cat [:or :seon.db/database-value :seon.error/value]
       :seon.db/pull-selector
       [:sequential :seon.db/entity-id]]
-     [:or [:vector [:or :nil :map]] :seon.error/value]]]}
+     [:or [:vector [:or :nil :map]] :seon.error/value]
+     [:fn {:error/message "Use (seon.db/pull-many selector eids), (seon.db/pull-many database selector eids), or one {:selector selector :eids eids} argument map."} seon.db/pull-call-valid?]]]}
   ([options]
    (pull-call (current-database-value)
               [options]
@@ -1725,6 +1831,17 @@
         (append-database-evidence! database :all)
         (dependency-error ::datoms cause)))))
 
+(defn- datoms-call-valid?
+  [[arguments _result]]
+  (let [[head & tail] arguments
+        inputs (if (db.utils/db? head) tail arguments)
+        [index & components] inputs]
+    (or (error-value? head)
+        (if (map? index)
+          (empty? components)
+          (and (#{:eavt :aevt :avet} index)
+               (<= (count components) 4))))))
+
 (defn datoms
   "Eager ordinary datoms from an explicit or current database value."
   {:malli/schema
@@ -1733,7 +1850,9 @@
      [:or :seon.db/database-value :seon.error/value
       :seon.db/index-lookup :keyword]
      [:* :seon.schema/value]]
-    [:or :seon.db/datoms :seon.error/value]]}
+    [:or :seon.db/datoms :seon.error/value]
+    [:fn {:error/message "Use (seon.db/datoms index & components) or (seon.db/datoms database index & components); an index argument map takes no trailing arguments, and an index has at most four components."}
+     seon.db/datoms-call-valid?]]}
   [database-or-index & arguments]
   (if (or (db.utils/db? database-or-index)
           (error-value? database-or-index))

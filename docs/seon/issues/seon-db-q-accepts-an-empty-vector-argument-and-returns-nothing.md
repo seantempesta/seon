@@ -1,12 +1,28 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [seon.db, q, contracts, silent-fallback, live-test]
 created: 2026-09-15
+resolved: 2026-09-15
 ---
 
 # `seon.db/q` accepts a stray `[]` argument and returns `#{}` instead of refusing
+
+## Resolution
+
+q now declares and arms a Malli function guard over the parsed `:in` count
+and database source positions, for positional and argument-map calls. The
+read seam independently refuses the same malformed inputs before Datahike
+runs. Errors name `:in`, the supplied arguments, and both valid call shapes.
+Pull/pull-many and datoms guards reject ambiguous or ignored trailing inputs;
+entity's existing fixed arities already reject them. Both complete run-6
+source strings are retained in `test/seon/run6_db_test.clj`.
+
+The isolated DB/instrumentation/loop/help/grammar gate passed 78 tests and
+864 assertions. Live SCI returned the guard refusal instead of an empty
+result. Full evidence and the dated broad-input inventory are in
+[the landing note](../../prds/context-generation/research/run6-blockers-landing-2026-09-15.md).
 
 ## Observed (live run 6, default, 2026-09-15 14:45Z)
 
