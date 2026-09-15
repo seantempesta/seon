@@ -1913,11 +1913,29 @@
 (defn- session-problems [request rows evaluations]
   (let [database (:seon.db/db request)
         by-eid (into {} (map (juxt :db/id identity)) rows)
-        saved (mapcat #(get evaluations (:db/id %) []) rows)]
+        saved (mapcat #(get evaluations (:db/id %) []) rows)
+        saved-by-eid (into {} (map (juxt :db/id identity)) saved)
+        ;; A later read-basis assertion is a silent refresh of this evaluation.
+        ;; History preserves every refresh; the initial settlement does not count.
+        refreshes (db/q '[:find ?evaluation ?t
+                          :in $ $history [?evaluation ...]
+                          :where [$ ?evaluation :seon.eval/shown _ ?shown-t]
+                          [$history ?evaluation :seon.cluster.eval/read-basis-transaction _ ?t true]
+                          [(> ?t ?shown-t)]]
+                        database (db/history database) (vec (keys saved-by-eid)))
+        empty-emissions (filter #(and (= "System" (turn-kind database (get by-eid (get-in % [:seon.cluster.eval/run :db/id]))))
+                                      (= {:seon.repl/changes {}}
+                                         (::value (readable-shown (:seon.eval/shown %))))) saved)]
     {::budget (session-budget database (:seon.agent/id request) rows)
      ::rules (into [(fabricated-problem by-eid saved)
                     (error-problem by-eid saved)
                     (churn-problem database by-eid saved)
+                    (assoc (finding :stale-but-unchanged "stale-but-unchanged reads"
+                                    (map #(evaluation-match by-eid %)
+                                         (concat empty-emissions
+                                                 (when-not (:seon.error/kind refreshes)
+                                                   (map #(get saved-by-eid (first %)) refreshes)))))
+                           ::unknown (if (:seon.error/kind refreshes) 1 0))
                     (repeated-problem by-eid saved)
                     (empty-reply-problem rows saved)
                     (directory-problem database by-eid saved)
