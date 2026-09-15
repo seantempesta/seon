@@ -28,7 +28,7 @@
                          :example/extra :ignored)))))))
 
 (deftest public-entries-declare-the-single-io-handler
-  (doseq [entry [#'edit/form #'edit/exact #'edit/lines]]
+  (doseq [entry [#'edit/form! #'edit/exact! #'edit/lines!]]
     (is (= :io (:seon.workload (meta entry))))
     (is (= 'seon.edit.jvm/edit
            (:seon.effect/capability (meta entry))))))

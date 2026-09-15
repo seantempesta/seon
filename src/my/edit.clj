@@ -32,44 +32,73 @@
 
 (schema.edn/load! {})
 
-(defn form
-  "Edit one named top-level Clojure form under a digest fence.
+(defn form!
+  "Edit one named top-level Clojure form after checking its digest.
 
-  Takes a path, expected digest, form selector, operation, and replacement
-  source when required. Returns the changed-file summary or a flat error.
-  Use it for structural Clojure edits."
+  Returns :my.edit/path, :my.edit/changed?, before/after digests and byte
+  counts, plus :my.edit/source-window and its line bounds. A stale digest
+  or ambiguous target returns a flat error without editing.
+
+  Example:
+  (let [file (my.fs/write! {:my.fs/path \"example.clj\"
+                            :my.fs/content {:my.fs/text \"(def example 1)\"}
+                            :my.fs/precondition {:my.fs/expected-absence? true}})]
+    (my.edit/form! {:my.edit/path \"example.clj\"
+                    :my.edit/expected-digest (:my.fs/after-digest file)
+                    :my.edit/form {:my.edit.form/head 'def :my.edit.form/name 'example}
+                    :my.edit/operation :replace
+                    :my.edit/source \"(def example 2)\"}))"
   {:malli/schema
    [:=> [:cat :my.edit/form-request]
     [:or :my.edit/result :seon.error/value]]
    :seon.workload :io
    :seon.effect/capability 'seon.edit.jvm/edit}
   [request]
-  (effect/request! #'form request))
+  (effect/request! #'form! request))
 
-(defn exact
-  "Replace exact source text under a digest fence.
+(defn exact!
+  "Replace exact source text after checking the file digest.
 
-  Takes a path, expected digest, old string, new string, and optional
-  replace-all flag. Returns the changed-file summary or a flat error. Use it
-  when the literal target text is unambiguous."
+  Returns :my.edit/path, :my.edit/changed?, before/after digests and byte
+  counts, plus :my.edit/source-window and its line bounds. A stale digest
+  or ambiguous target returns a flat error without editing.
+
+  Example:
+  (let [file (my.fs/write! {:my.fs/path \"example.clj\"
+                            :my.fs/content {:my.fs/text \"(def example 1)\"}
+                            :my.fs/precondition {:my.fs/expected-absence? true}})]
+    (my.edit/exact! {:my.edit/path \"example.clj\"
+                    :my.edit/expected-digest (:my.fs/after-digest file)
+                     :my.edit/old-string \"(def example 1)\"
+                     :my.edit/new-string \"(def example 2)\"}))"
   {:malli/schema
    [:=> [:cat :my.edit/exact-request]
     [:or :my.edit/result :seon.error/value]]
    :seon.workload :io
    :seon.effect/capability 'seon.edit.jvm/edit}
   [request]
-  (effect/request! #'exact request))
+  (effect/request! #'exact! request))
 
-(defn lines
-  "Replace one verified line window under a digest fence.
+(defn lines!
+  "Replace an inclusive line window after checking its text and digest.
 
-  Takes a path, expected digest, inclusive line bounds, old window, and new
-  window. Returns the changed-file summary or a flat error. Use it when line
-  boundaries are the clearest stable target."
+  Returns :my.edit/path, :my.edit/changed?, before/after digests and byte
+  counts, plus :my.edit/source-window and its line bounds. A stale digest
+  or ambiguous target returns a flat error without editing.
+
+  Example:
+  (let [file (my.fs/write! {:my.fs/path \"example.clj\"
+                            :my.fs/content {:my.fs/text \"(def example 1)\"}
+                            :my.fs/precondition {:my.fs/expected-absence? true}})]
+    (my.edit/lines! {:my.edit/path \"example.clj\"
+                    :my.edit/expected-digest (:my.fs/after-digest file)
+                     :my.edit/from-line 1 :my.edit/to-line 1
+                     :my.edit/old-window \"(def example 1)\"
+                     :my.edit/new-window \"(def example 2)\"}))"
   {:malli/schema
    [:=> [:cat :my.edit/lines-request]
     [:or :my.edit/result :seon.error/value]]
    :seon.workload :io
    :seon.effect/capability 'seon.edit.jvm/edit}
   [request]
-  (effect/request! #'lines request))
+  (effect/request! #'lines! request))
