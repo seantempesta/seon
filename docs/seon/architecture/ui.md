@@ -66,7 +66,10 @@ The agent debug page defaults to a chronological turn ledger. Each provider
 card separates WE SENT (generated context), AGENT REPLIED (the exact raw
 reply), and RESULTS (the saved evaluations). System cards contain only WE
 GENERATED. Section labels and colours identify authorship without changing
-bytes. The selected turn and last three cards are open; other card bodies
+bytes. Collapsed headers show the agent's stated intent, result counts, and
+transaction effects, or the generated concerns for a system turn. Named
+emission disclosures retain order; the first provider card folds the opening
+separately from its since-diff re-reads. The selected turn and last three cards are open; other card bodies
 load on demand. A card's Full context as sent disclosure opens the faithful
 REPL transcript below that card. Its context comes from the provider acquisition fold at the turn's
 opening database. `render/acquire-context!` owns this temporal selection even

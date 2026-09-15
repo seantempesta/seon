@@ -70,7 +70,7 @@
                (is (some #{"Virtual"} kinds)))
              (agent/disarm! request)
              (agent/arm! request)
-             (let [provider-id (fixture/submit! handle routing "(+ 40 2)")
+             (let [provider-id (fixture/submit! handle routing ";; Check the total\n(+ 40 2)")
                    _ (agent/disarm! request)
                    opening (turn/opening-db @connection provider-id)
                    acquire-request (merge handle {:seon.db/db opening :seon.agent/id "juniper"
@@ -120,6 +120,13 @@
                  (is (str/includes? (element-text ledger) "WE SENT"))
                  (is (str/includes? (element-text ledger) "AGENT REPLIED"))
                  (is (str/includes? (element-text ledger) "RESULTS (evaluated by seon)"))
+                 (is (str/includes? (element-text ledger) "Check the total · 1 value"))
+                 (let [opening-row (first (#'transcript/turn-rows @connection "juniper"))
+                       opening-count (db/q '[:find (count ?e) . :in $ ?t
+                                             :where [?e :seon.cluster.eval/run ?t]]
+                                           @connection (:db/id opening-row))]
+                   (is (= [opening-count]
+                          (vec (keep #(when (map? %) (:data-opening-emissions %)) ledger-nodes)))))
                  (is (= (db/q '[:find (count ?e) . :in $ ?id
                                  :where [?t :seon.turn/id ?id] [?e :seon.cluster.eval/run ?t]]
                                @connection provider-id)

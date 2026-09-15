@@ -60,7 +60,7 @@
         (is (= :seon.db/not-found
                (:seon.error/kind (transcript/render-runtime-html
                                  (assoc unit :seon.agent/id "absent-runtime-owner")))))
-        (is (= "1 min" (#'transcript/runtime-duration (java.util.Date. 0) (java.util.Date. 65000))))
+        (is (= "65 s" (#'transcript/runtime-duration (java.util.Date. 0) (java.util.Date. 65000))))
         (is (= "4 d 2 h" (#'transcript/runtime-duration (java.util.Date. 0) (java.util.Date. (* 98 3600000)))))
         (is (= "Duration unavailable" (#'transcript/runtime-duration (java.util.Date. 100) (java.util.Date. 0))))
         (is (hiccup/hiccup? rendered))

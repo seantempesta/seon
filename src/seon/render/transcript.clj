@@ -1127,6 +1127,7 @@
         (neg? millis) "Duration unavailable"
         (< millis 1000) (str millis " ms")
         (< millis 60000) (format "%.1f s" (/ millis 1000.0))
+        (< millis 120000) (format "%.0f s" (/ millis 1000.0))
         (< millis 3600000) (str (quot millis 60000) " min")
         (< millis 86400000) (str (quot millis 3600000) " h " (mod (quot millis 60000) 60) " min")
         :else (str (quot millis 86400000) " d " (mod (quot millis 3600000) 24) " h")))
@@ -1505,12 +1506,48 @@
   (for [saved evaluations]
     [:pre (repl/render-emission-html (repl/entity-emission saved))]))
 
+(defn- emission-label
+  "Human block labels over saved renderer identities and the read form's declared attributes."
+  [saved]
+  (let [form (::value (readable-shown (:seon.cluster.eval/source saved)))
+        parts (set (filter #(or (keyword? %) (symbol? %)) (tree-seq coll? seq form)))]
+    (or (get {'seon.bootstrap/render-help-ai "help"
+              'seon.plan/render-plan-ai "plan"
+              'seon.cluster.message/render-inbox-ai "inbox"
+              'seon.agent/render-settings-ai "settings"
+              'seon.render.transcript/render-runtime-ai "runtime"
+              'seon.cluster.agent/render-identity-ai "identity"}
+             (:seon.eval/renderer saved))
+        (cond
+          (parts :seon.agent/plan) "plan"
+          (parts :seon.agent/runtime) "runtime"
+          (parts :seon.message/_inbox) "inbox"
+          (parts :my.note/_agent) "notes"
+          (or (parts :seon.agent/settings) (parts 'seon.agent/effective-settings)) "settings"
+          (parts :seon.agent/id) "identity"
+          :else (first (str/split-lines (:seon.cluster.eval/source saved)))))))
+
+(defn- reply-intent [reply]
+  (when-let [line (some #(let [line (str/trim %)]
+                          (when (str/starts-with? line ";")
+                            (str/trim (apply str (drop-while (fn [c] (= c \;)) line)))))
+                       (str/split-lines (or reply "")))]
+    (if (> (count line) 90) (str (subs line 0 90) "…") line)))
+
+(defn- results-summary [evaluations]
+  (let [counts (frequencies (map #(cond (:seon.cluster.eval/error %) "error"
+                                      (:seon.eval/shown %) "value" :else "out") evaluations))]
+    (if (empty? evaluations) "no forms"
+      (str/join " · " (keep #(when-let [n (get counts %)]
+                              (str n " " % (when (and (> n 1) (not= % "out")) "s")))
+                            ["value" "error" "out"])))))
+
 (defn- ledger-effects
   "Derive completed steps, sent messages and installed definitions at this turn's transactions."
   [database agent-id row]
   (let [opened (db/q '[:find ?tx . :in $ ?id :where [_ :seon.turn/id ?id ?tx]] database (:seon.turn/id row))
         closed (get-in row [:seon.turn/closed-tx :db/id])]
-    (if-not (and opened closed) "Turn is still open."
+    (if-not (and opened closed) {::details "Turn is still open."}
       (let [steps (db/q '[:find ?id :in $ ?agent ?from ?to
                           :where [?a :seon.agent/id ?agent] [?tx :seon.db/user ?a]
                                  [?s :my.plan.item/completed-tx ?tx]
@@ -1526,7 +1563,19 @@
             effects (concat (map #(str "plan step " (first %) " completed") steps)
                             (map #(str "message sent to " (first %)) messages)
                             (map #(str "definition installed during this turn: " (first %)) definitions))]
-        (if (seq effects) (str/join " · " effects) "—")))))
+        {::details (if (seq effects) (str/join " · " effects) "—")
+         ::summary (str/join " · " (cond-> []
+                                    (seq steps) (conj "step completed")
+                                    (seq messages) (conj "message sent")
+                                    (seq definitions) (conj "definition installed")))}))))
+
+(defn- emission-byte-count [rows emissions]
+  (let [first-emission (first emissions)
+        starts-opening? (and (= (get-in first-emission [:seon.cluster.eval/run :db/id])
+                                (:db/id (first rows)))
+                             (zero? (or (:seon.cluster.eval/ordinal first-emission) 0)))]
+    (+ (reduce + 0 (map #(utf8-size (repl/text (repl/entity-emission %))) emissions))
+       (* 2 (max 0 (- (count emissions) (if starts-opening? 1 0)))))))
 
 (defn- ledger-turn-body [request rows evaluations row]
   (let [database (:seon.db/db request)
@@ -1537,12 +1586,7 @@
                     (->> rows (take ordinal) reverse
                          (take-while #(empty? (:seon.turn/attempts %))) reverse
                          (mapcat #(get evaluations (:db/id %) []))) own)
-        first-generated (first generated)
-        starts-opening? (and (= (get-in first-generated [:seon.cluster.eval/run :db/id])
-                                (:db/id (first rows)))
-                             (zero? (or (:seon.cluster.eval/ordinal first-generated) 0)))
-        added-bytes (+ (reduce + 0 (map #(utf8-size (repl/text (repl/entity-emission %))) generated))
-                       (* 2 (max 0 (- (count generated) (if starts-opening? 1 0)))))
+        added-bytes (emission-byte-count rows generated)
         reply (or (turn-reply (:seon.db/connection request) row) "")
         turn-id (:seon.turn/id row)
         capture (when provider?
@@ -1552,14 +1596,24 @@
         usage (some-> (:seon.ai.attempt/usage-edn attempt) readable-shown ::value)
         calibration (when (:seon.ai/model attempt)
                       ((requiring-resolve 'seon.cluster.prompt/model-calibration) database (:seon.ai/model attempt)))
-        groups (partition-by :seon.cluster.eval/source generated)]
+        opening (filter #(= (:db/id (first rows)) (get-in % [:seon.cluster.eval/run :db/id])) generated)
+        later (if provider? (remove (set opening) generated) generated)
+        groups (partition-by :seon.cluster.eval/source later)]
     [:div {:id (ledger-body-id turn-id) :data-ledger-loaded turn-id :class "seon-ledger-body"}
      [:section {:class "seon-ledger-sent" :data-author "seon"}
       (ledger-heading (cond provider? "WE SENT"
                             (zero? ordinal) "WE GENERATED (opening)"
                             :else (str "WE GENERATED (system turn " ordinal ")"))
                       "seon" (str (count generated) " emissions · " (format "%,d" added-bytes) " bytes"))
-      (when provider? [:p {:class "seon-ledger-note"} "Generated context added before this reply; earlier results remain in the full context."])
+      (when provider? [:p {:class "seon-ledger-note"}
+                      (if (seq opening) "Opening + since-diff before the first reply."
+                        "Generated context added before this reply; earlier results remain in the full context.")])
+      (when (and provider? (seq opening))
+        [:details {:class "seon-ledger-generated" :data-opening-emissions (count opening)}
+         [:summary (str "opening (" (count opening) " emissions)")]
+         (for [saved opening]
+           [:details {:class "seon-ledger-generated"}
+            [:summary (emission-label saved)] (ledger-emissions [saved])])])
       (if (seq generated)
         (list
          (for [matches groups]
@@ -1570,7 +1624,7 @@
                                               (:seon.cluster.eval/id (first matches))))
                             (filter #(= source (:seon.cluster.eval/source %))) last)]
              [:details {:class "seon-ledger-generated"}
-              [:summary [:code (first (str/split-lines source))]
+              [:summary [:code (emission-label (first matches))]
                (when prior
                  [:span (str " · re-read · " (reread-summary [prior (last matches)]))])]
               (ledger-emissions matches)])))
@@ -1614,7 +1668,7 @@
                 [:pre rendered])])
            [:p "No evaluations recorded for this reply."])
          [:p {:class "seon-ledger-effects"}
-          (str "Effects: " (ledger-effects database (:seon.agent/id request) row))]]))]))
+          (str "Effects: " (::details (ledger-effects database (:seon.agent/id request) row)))]]))]))
 
 (defn render-ledger-turn
   "Load one card from saved reply and evaluations without executing forms."
@@ -1636,6 +1690,23 @@
            :data-signals (:data-signals (second rendered))}
      [:p "Exact saved prompt · readline, input, then response"]
      (last rendered)]))
+
+
+(defn- turn-story [request evaluations row]
+  (let [own (get evaluations (:db/id row) [])
+        provider? (seq (:seon.turn/attempts row))
+        effects (when provider? (::summary (ledger-effects (:seon.db/db request) (:seon.agent/id request) row)))
+        done? (some #(let [form (::value (readable-shown (:seon.cluster.eval/source %)))]
+                       (and (:seon.eval/shown %) (nil? (:seon.cluster.eval/error %))
+                            (seq? form) (= 'my.agent/done (first form)))) own)]
+    (str/join " · "
+      (remove str/blank?
+        (if provider?
+          [(reply-intent (turn-reply (:seon.db/connection request) row))
+           (results-summary own) effects (when done? "done")]
+          [(cond (zero? (::ordinal row)) (str "opening · " (count own) " emissions")
+                 (empty? own) "no new emissions"
+                 :else (str "re-read " (str/join ", " (distinct (map emission-label own)))))])))))
 
 (defn render-ledger
   "Turn ledger: generated context, raw model reply, evaluated results.
@@ -1675,7 +1746,9 @@
                   " · " (format "%,d" (get usage "prompt_tokens" 0)) " in / "
                   (format "%,d" (get usage "completion_tokens" 0)) " out"))
            (str " · " (runtime-duration (get-in row [:seon.turn/opened-tx :db/txInstant])
-                                       (get-in row [:seon.turn/closed-tx :db/txInstant])))]
+                                       (get-in row [:seon.turn/closed-tx :db/txInstant])))
+           [:span {:class "seon-ledger-story" :data-turn-story turn-id}
+            (str " · " (turn-story request evaluations row))]]
           (if (contains? expanded turn-id)
             (ledger-turn-body request rows evaluations row)
             [:div {:id (ledger-body-id turn-id)}])])

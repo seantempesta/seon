@@ -6,6 +6,33 @@ tags: [research, debug, web, prompt]
 
 # Debug session product — 2026-09-14
 
+## Ledger review: make the collapsed list tell the story
+
+Provider headers now include the reply's first comment line (a presentation
+summary limited to 90 characters), counts of values/errors/out, and short
+transaction effect labels. A successful evaluated `my.agent/done` adds
+“done”. System headers name the re-read concerns; the opening reports its
+actual emission count. Durations stay in seconds below two minutes.
+
+Emission labels use stored renderer identities and the structured read
+form's declared attributes, with the original first line as fallback.
+No regex or form execution is used. The first provider turn groups its
+**9 opening emissions** in one disclosure, followed by settings and runtime
+re-reads. Its **11 emissions / 10,422 bytes** still match the captured prompt.
+
+Screenshot review: `story-1-{1440,700}-top.png` shows the session's progression
+in the collapsed headers; `story-1-700-selected.png` retains all three labelled
+sections. `story-early-{1440,700}-selected.png` shows the compact opening group
+and two named re-reads. The previous first-token labels and eleven unrelated
+opening disclosures were the defects these captures resolve. Default GET
+after the change: **HTTP 200 / 0.166157 s**. Browser byte checks remain
+**177,576 bytes** at turn 60 and **10,422 bytes** at turn 2.
+Fast gate: **27 tests / 209 assertions**. Isolated gate: **87 tests / 607
+assertions**, zero failures or errors. Adopted and published source both
+`6aa8b26e-d855-56d8-a9ab-7c1483926d9c`; the subsequent
+`story-adopted-*` captures of both pages at both widths were inspected and
+retain the approved wrapping and section hierarchy.
+
 ## Turn ledger (owner replacement of author-interleaved view)
 
 The default now has 61 chronological cards for run 2. Only the selected
