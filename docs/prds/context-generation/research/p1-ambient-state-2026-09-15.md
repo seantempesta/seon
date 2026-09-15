@@ -71,7 +71,7 @@ deleted. Script: [p1-batch2c-probe-2026-09-15.clj](p1-batch2c-probe-2026-09-15.c
 
 ### Verification and exact boundaries
 
-Default remained PID **69622**. The MCP sessions were lost twice; the first reconnect
+Default remained PID **69622**. The named MCP sessions were repeatedly lost; fresh-session probes
 verified the same PID, falsifying the tool's unobserved restart attribution.
 Live source was loaded through `require :reload`, then 1056 contracts re-armed (49 ms; PID again 69622).
 Default could not load `seon.test-support` from its classpath; the already open
