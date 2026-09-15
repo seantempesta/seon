@@ -55,3 +55,54 @@ The hook also searches structured exception events independently in stdout and
 stderr. Trailing cleanup events or stderr warnings no longer hide the cause.
 `publication-diagnostics-survive-trailing-output` exercises those cases and an
 output with no structured exception, which must remain unknown.
+
+## Verified at HEAD (2026-09-16, N1 verification)
+
+**CONFIRMED — the edit-hook half stays fixed; the operator's own face is
+unchanged.**
+
+The publication result protocol improved: the init JVM now returns a
+structured result rather than raw output. `script/seon/fresh_operator.clj:2376-2382`
+emits `SEON-INIT-RESULT` carrying
+`{:seon.fresh-operator/message (ex-message failure) :seon.fresh-operator/data (ex-data failure)}`
+— message first, no trace, no event vector.
+
+But the failing path around it still dumps everything. When the init JVM
+exits non-zero or returns no result,
+`script/seon/fresh_operator.clj:2446-2452` fails with the COMPLETE captured
+output as data:
+
+```clojure
+(when-not (zero? exit)
+  (fail! "The initialization JVM exited unsuccessfully."
+         {:seon.fresh-operator/exit exit
+          :seon.fresh-operator/output output}))
+(or @result
+    (fail! "The initialization JVM returned no result."
+           {:seon.fresh-operator/output output})))
+```
+
+and `-main`'s catch prints that data with one unbounded `prn`
+(`script/seon/fresh_operator.clj:3151-3156`):
+
+```clojure
+(println (str "✗ " (ex-message error)))
+(when-let [data (not-empty (ex-data error))]
+  (prn data))
+```
+
+So the cause line is present and first — an improvement over the filed
+state — but it is still followed by the entire init JVM output on a single
+line. The note's own "the operator's direct terminal failure face is still
+outstanding" remains the accurate summary.
+
+A publication was deliberately NOT failed for this check: inducing one
+would publish to the live `default` cluster, which this verification is not
+permitted to do. Source-exact verdict.
+
+surface: operator
+
+Fix sketch: retain `output` to `logs/current-source-failure.log` (the hook
+already names that file) and let the failure data carry the log path plus a
+bounded tail, so `prn` of the data is small by construction rather than by
+the printer's discretion.

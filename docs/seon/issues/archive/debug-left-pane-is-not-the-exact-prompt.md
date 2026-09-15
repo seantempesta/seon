@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, web, render, class/n1, wave/visual-qa]
 ---
@@ -67,3 +67,30 @@ Still open in protected `src/seon/render/web.clj`. Change `debug-response` to
 select the latest committed `:seon.context.capture/prompt` for the agent and
 put those exact bytes in the left pane; retain current-walk inspection only as
 a separately labelled value. The N5 completion lane owns this file.
+
+## Verified at HEAD (2026-09-16, N1 verification)
+
+**RESOLVED — the two-pane debug layout this note describes no longer
+exists.** `/agent/{id}/debug` now serves a ledger of the agent's stored
+evaluations; a live fetch of `http://127.0.0.1:7994/agent/root/debug`
+(132,306 bytes, HTTP 200) contains zero occurrences of `debug-body-ai` and
+no left/right pane elements. The page's classes are
+`seon-ledger-turn`, `seon-ledger-story`, `seon-emission-bytes` and the
+syntax spans.
+
+The successor is byte-exact by construction. `src/seon/repl.clj:291-311`
+colourises one emission "without changing a single character of `text`":
+it slices the saved emission at computed offsets and wraps each slice in a
+span, so the rendered characters ARE the stored shown text. Both filed
+symptoms are therefore gone — there is no second walk caller whose
+`*print-namespace-maps*` could disagree, and no header line can go missing
+from a pane that no longer re-derives a walk.
+
+The third symptom, clipping, is also gone: on the live page every `pre` and
+`code` computes `white-space: pre-wrap` and
+`max(scrollWidth - clientWidth) = 0` at both desktop and 375 px.
+
+What the page shows is stored shown text per evaluation rather than one
+recorded `:seon.context.capture/prompt` blob; under AGENTS.md §2.4 that IS
+what the agent saw, and it cannot drift after the model call because it is
+saved, not re-derived. Closing on that basis.

@@ -42,3 +42,40 @@ Still open in the protected database owner. The exact edit is to classify the
 known Datahike unique-constraint refusal once at `seon.db`, return its flat
 error value without core-fault logging, and leave one structured log only for
 an unexpected fault. This lane did not touch `src/seon/db.clj`.
+
+## Verified at HEAD (2026-09-16, N1 verification)
+
+**CONFIRMED — half repaired, and the raw half is the half that was filed.**
+
+Repaired: the writer's log is now one bounded, classified face.
+`reference-code/datahike/src/datahike/writer.cljc:105-114` derives
+`expected-refusal-face` (kind, one-line cause, attribute) and `:152-157`
+logs `:datahike/write-rejected` with that face only — "never attach the
+throwable, invocation, or tx args".
+
+Still present: the FIRST entry. The refusal is raised inside
+`datahike.db.transaction` with `log/raise`, at
+`reference-code/datahike/src/datahike/db/transaction.cljc:29` and `:533`:
+
+```clojure
+(log/raise "Cannot add " datom " because of unique constraint: " found …)
+```
+
+`replikativ.logging/raise` is defined as "Logging an error and throwing an
+exception": it expands to `(trove/log! {:level :error :msg (str …) …})`
+followed by the `throw`. The `datom` argument is stringified into that
+message, so the raw `#datahike/Datom [...]` entry is emitted at error level
+before the writer's bounded face — two log entries per expected refusal,
+exactly as filed.
+
+No refused transaction was induced: this verification performs no writes.
+The verdict is therefore source-exact on both log sites, not a captured log
+pair.
+
+surface: database (the fork's transaction/writer logging seam)
+
+Fix sketch: the unique-constraint and nil-value sites are EXPECTED outcomes
+of a caller's transaction, not fork faults — replace `log/raise` with a
+plain `throw` of the same `ex-info` at those sites and let the writer's
+classified face be the one log. Gate it on our own falsifier, as the note's
+Expected section already requires.

@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, effect, render, schema, class/n1, wave/render-receipt-producer]
 ---
@@ -65,3 +65,48 @@ Still open outside this lane. Add named AI and HTML producer properties to
 `:seon.effect/receipt` in `resources/seon/schemas/seon.effect.edn`, implement
 the bounded domain projections in `seon.effect`, and prove ordinary
 `seon.render/render-call` selection from one committed receipt.
+
+## Verified at HEAD (2026-09-16, N1 verification)
+
+**RESOLVED.** `resources/seon/schemas/seon.effect.edn:22-26` now declares
+the pair on `:seon.effect/receipt`:
+
+```clojure
+:receipt
+[:map
+ {:seon.db/attributes true
+  :seon.render/ai seon.effect/render-ai
+  :seon.render/html seon.effect/render-html}
+ …]
+```
+
+Probed live on `default` (pid 69622) with a complete render request and the
+note's own representative receipt (insts where the schema declares insts).
+AI:
+
+```text
+Effect effect-1 · run unknown, form 2, effect 0 · returned in 12 ms.
+Request (~7 tokens): {:my.fs/path "README.md"}
+Result (~6 tokens): {:my.fs/content "..."}
+```
+
+HTML (extract):
+
+```clojure
+[:article {:class "seon-family-entry seon-effect-receipt-entry"}
+ [:h3 "Effect effect-1"]
+ [:dl [:div [:dt "Run"] [:dd "Unknown"]]
+      [:div [:dt "Form / effect"] [:dd "2 / 0"]]
+      [:div [:dt "Disposition"] [:dd "returned"]] …]]
+```
+
+Capability/disposition, duration and form identity lead both faces in
+domain terms; payloads are secondary and carry an estimated-token size
+(`src/seon/effect.clj:48-50`); raw `#:db{:id …}` no longer leads either
+face; `receipt-state` derives disposition from terminal attributes rather
+than a stamp (`src/seon/effect.clj:40-46`).
+
+One adjacent defect was observed while probing and is recorded on
+[my-background-poll-costs-290-tokens-per-polled-result](my-background-poll-costs-290-tokens-per-polled-result.md):
+when the payload is large the producer's whole face, identity line
+included, is replaced by a single elision value.

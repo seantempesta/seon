@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, render, web, class/n1, wave/ui-watchability]
 ---
@@ -87,3 +87,31 @@ completion lane. Its exact edit is to derive each tab's subscribed block IDs
 from the elements created by that page and filter/package deltas against that
 set before delivery; the recurring proof must assert every patch target exists
 in that tab's DOM.
+
+## Verified at HEAD (2026-09-16, N1 verification)
+
+**RESOLVED.** Live browser observation against the running `default`
+cluster (pid 69622, `http://127.0.0.1:7994`), console capture attached
+BEFORE navigation:
+
+```text
+navigate /agent/root/debug → wait 10 s → read console
+  console messages: none  (0 of any level, 0 PatchElementsNoTargetsFound)
+navigate /ns/my.agents.root → wait 10 s → read console
+  console messages: none
+```
+
+The page is genuinely fed while producing no warnings — the same load
+renders 11,757 characters of body text across 25 `pre`/`code` elements, so
+this is zero surplus patches, not zero patches.
+
+The send-then-discover condition also no longer has its old shape: the
+debug page is now the ledger layout, not the `#debug-ai-<agent>` /
+`#debug-html-<agent>` two-pane layout whose ids differed from
+`#surface-stream`. Both halves of the acceptance (debug page and ordinary
+namespace page produce zero `PatchElementsNoTargetsFound`) hold live.
+
+The recurring proof asserting that every delivered patch targets an element
+the tab owns is not established by this observation; it belongs to the
+render-delivery owner's own regression in the ui-watchability destination,
+not to this note, which records a live defect that no longer reproduces.
