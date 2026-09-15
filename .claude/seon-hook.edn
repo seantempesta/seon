@@ -3,7 +3,8 @@
 ;; bin/seon-hook runs entirely in Babashka. It does not require a running
 ;; Seon process: syntax validation happens before an edit; the canonical
 ;; Markdown and docstring linters run after it; current source publication
-;; uses the live operator JVM when one exists. The hook never queues tests.
+;; uses the live operator JVM when one exists. After convergence the same JVM
+;; checks tests reaching the recorded adoption; widened edits only name a gate.
 ;; Gemini review is one asynchronous, coalesced batch per two-minute window;
 ;; it never delays edit feedback or creates parallel review workers.
 
@@ -24,6 +25,7 @@
  {:enabled true
   :root "."
   :cluster "default"
+  :check-tests true
   :timeout-seconds 180}
 
  ;; The standing review rubric is DATA: `:skills` names skill directories

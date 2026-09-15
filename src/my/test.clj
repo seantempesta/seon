@@ -2,6 +2,21 @@
   "Run the tests declared in my namespace."
   (:require [seon.test]))
 
+(defn check
+  "Check the tests reaching my change and return results and next-tier commands.
+
+  My connection is supplied by call preparation. Failure data names the test,
+  its message, and the changed functions it reaches. Larger gates run only
+  after green; :seon.test/next-tier is :none on red.
+
+  Example:
+  (my.test/check {:seon.test/changed [\"my.note/add!\"]
+                  :seon.test/paths [\"src/my/note.clj\"]})"
+  {:malli/schema [:=> [:cat :my.test/check-request]
+                  [:or :seon.test/check-result :seon.error/value]]}
+  [request]
+  (seon.test/check request))
+
 (defmacro run
   "Run my namespace's declared tests and store their results.
 

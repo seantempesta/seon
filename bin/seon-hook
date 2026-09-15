@@ -1148,14 +1148,18 @@
 (defn- source-index-path?
   "True for first-party files admitted to the current-src publication."
   [file-path]
-  (let [lower (some-> file-path str/lower-case)]
+  (load-direct-check! 'seon.test.selection)
+  (let [lower (some-> file-path str/lower-case)
+        relative (str (.relativize (.toPath (.getCanonicalFile (root-file ".")))
+                                  (.toPath (.getCanonicalFile (io/file file-path)))))]
     (or (and (or (str/ends-with? lower ".clj")
                  (str/ends-with? lower ".cljc"))
              (or (beneath? (root-file "src") file-path)
                  (beneath? (root-file "test") file-path)))
         (= (absolute-file-path (root-file "config/default.edn"))
            (absolute-file-path file-path))
-        (schema-resource-path? file-path))))
+        (schema-resource-path? file-path)
+        ((requiring-resolve 'seon.test.selection/widening-path?) relative))))
 
 (defn- publication-exception
   [result]
@@ -1235,7 +1239,22 @@
           (if (zero? (:exit result))
             (if-let [terminal (last (remove str/blank? (str/split-lines (:out result))))]
               (str (if (get-in config [:current-source :cluster]) "converged: " "published: ")
-                   terminal)
+                   terminal
+                   (when (and (get-in config [:current-source :check-tests] true)
+                              (get-in config [:current-source :cluster]))
+                     (let [check (process/process
+                                  {:cmd [(str (root-file "bin/test-check"))
+                                         "--root" (str (root-file (get-in config [:current-source :root] ".")))
+                                         (get-in config [:current-source :cluster])]
+                                   :dir repo-root :out :string :err :string :continue true})
+                           checked (deref check
+                                          (* 1000 (get-in config [:current-source :timeout-seconds] 180))
+                                          ::timeout)]
+                       (if (= ::timeout checked)
+                         (do (process/destroy-tree check)
+                             @check
+                             "\ncheck unavailable: post-adoption feedback bound fired; adoption remains converged.")
+                         (str "\n" (:out checked) (:err checked))))))
               "refused: the operator returned no publication evidence.")
             (clip-feedback
              config

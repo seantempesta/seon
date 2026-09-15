@@ -1875,7 +1875,7 @@
     result))
 
 (defn- development-source-refresh!
-  [held-store instance before-publication published]
+  [held-store instance before-publication published changed-paths]
   (let [connection (:seon.boot/cluster-connection instance)
         cluster-name (get-in instance [:seon.boot/advertisement :seon.boot/cluster-name])
         cluster-ref [:seon.cluster/name cluster-name]
@@ -2006,7 +2006,11 @@
      (db/transact! connection
                    {:tx-data [{:db/id cluster-ref
                                :seon.source/commit-id
-                               (:seon.source/commit-id published)}]})
+                               (:seon.source/commit-id published)}
+                              {:db/id :db/current-tx
+                               :seon.test/adoption-cluster cluster-ref
+                               :seon.test/adoption-identities (set changed-identities)
+                               :seon.test/adoption-inputs (set changed-paths)}]})
      {:seon.boot/population :seon.source/commit-id})
     (when-let [channel (get-in instance
                               [:seon.render.web/view
@@ -2061,7 +2065,8 @@
                                         (full-source-refresh! root held-store))]
                         (when instance
                           (development-source-refresh! held-store instance
-                                                       before-publication published))
+                                                       before-publication published
+                                                       changed-paths))
                         (dissoc published :seon.source/upsert-rows))))
                    (catch clojure.lang.ExceptionInfo failure
                      (if (and retry?

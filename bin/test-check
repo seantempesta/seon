@@ -1,0 +1,35 @@
+#!/usr/bin/env bb
+;; Run no JVM: use the operator's existing prepl transport to the live cluster.
+(require '[clojure.java.io :as io]
+         '[seon.fresh-operator :as operator])
+
+(let [[root args] (if (= "--root" (first *command-line-args*))
+                    [(second *command-line-args*) (drop 2 *command-line-args*)]
+                    ["." *command-line-args*])
+      cluster (or (first args) "default")
+      root (.getCanonicalPath (io/file root))
+      advertisement (#'operator/advertisement root cluster)
+      eval! (fn [form timeout-ms]
+              (#'operator/prepl-value! advertisement (pr-str form) timeout-ms))
+      scoped (fn [body]
+               (list 'let ['connection (list 'seon.operator/connection cluster)
+                           'projection '(seon.schema/projection-from-database @connection)]
+                     (list 'seon.schema/call-with-projection 'projection
+                           (list 'fn [] body))))]
+  (try
+    (when-not advertisement
+      (throw (ex-info "No live cluster advertisement; test-check starts no JVM." {})))
+    (let [bound (eval! (scoped (list :seon.test/check-time-limit-ms
+                                    (list 'seon.config/effective
+                                          '(seon.db/db connection) cluster)))
+                       (#'operator/operator-silence-backstop-ms {}))
+          _ (when-not (pos-int? bound)
+              (throw (ex-info "Apply cluster configuration to supply :seon.test/check-time-limit-ms." {})))
+          result (eval! (scoped (list 'seon.test/feedback
+                                      (list 'seon.test/check-adoption 'connection cluster)))
+                        (+ bound (#'operator/operator-silence-backstop-ms {})))]
+      (println result))
+    (catch Exception failure
+      (binding [*out* *err*]
+        (println "check unavailable:" (ex-message failure)))
+      (System/exit 1))))

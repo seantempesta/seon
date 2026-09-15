@@ -82,4 +82,57 @@
               :seon.test/failing-assertions]
              [:seon.test/failure-message
               {:optional true}
-              :seon.test/failure-message]]}
+              :seon.test/failure-message]]
+:seon.test/changed
+ [:vector [:or :qualified-symbol [:string {:min 1}] :seon.program/identity]]
+ :seon.test/paths [:vector [:string {:min 1}]]
+ :seon.test/namespaces [:vector :seon.ns/name]
+ :seon.test/check-time-limit-ms
+ [:int {:min 1 :seon.config/dial true :seon.config/optional true
+        :seon.config/default 120000
+        :description "Total in-process selection, canonical fixture preparation, and test execution allowance."}]
+ :seon.test/reaching-request
+ [:map [:seon.db/db :seon.db/database-value]
+  [:seon.test/changed :seon.test/changed]]
+ :seon.test/check-request
+ [:map [:seon.db/connection :seon.db/connection]
+  [:seon.test/changed :seon.test/changed]
+  [:seon.test/paths {:optional true} :seon.test/paths]
+  [:seon.test/namespaces {:optional true} :seon.test/namespaces]
+  [:seon.boot/cluster-name {:optional true} :seon.boot/cluster-name]
+  [:seon.test/defer-widened? {:optional true} :boolean]]
+ :seon.test/run-options
+ [:map [:seon.test.run/provenance :seon.test.run/provenance]
+  [:seon.test/remaining-ms [:int {:min 1}]]]
+ :seon.test/unknown :string
+ :seon.test/unknown-error
+ [:map {:seon.error/class true :seon.render/ai seon.error/render-ai
+        :seon.render/html seon.error/render-html
+        :error/message "must name the unavailable test check input"}
+  [:seon.test/unknown :seon.test/unknown]
+  [:seon.error/message :seon.error/message]]
+ :seon.test/next-tier
+ [:or [:= :none] [:vector [:vector [:string {:min 1}]]]]
+ :seon.test/check-result
+ [:map
+  [:seon.test/tests [:vector :seon.test/sym]]
+  [:seon.test/passed [:vector :seon.test/sym]]
+  [:seon.test/failed
+   [:vector [:map [:seon.test/sym :seon.test/sym]
+             [:seon.test/failure-message :string]
+             [:seon.test/changed :seon.test/changed]]]]
+  [:seon.test/results :seon.test/results]
+  [:seon.test.run/basis-t :seon.test.run/basis-t]
+  [:seon.test.run/program-digest :seon.test.run/program-digest]
+  [:seon.test/elapsed-ms :double]
+  [:seon.test/next-tier :seon.test/next-tier]
+  [:seon.test/widened {:optional true} :string]
+  [:seon.test/pending {:optional true} [:vector :seon.test/sym]]]
+ :seon.test/adoption-identities [:set :seon.db/ref]
+ :seon.test/adoption-inputs [:set :string]
+ :seon.test/adoption-cluster :seon.db/ref
+ :seon.test/adoption
+ [:map {:seon.db/attributes true}
+  [:seon.test/adoption-cluster :seon.test/adoption-cluster]
+  [:seon.test/adoption-identities :seon.test/adoption-identities]
+  [:seon.test/adoption-inputs :seon.test/adoption-inputs]]}
