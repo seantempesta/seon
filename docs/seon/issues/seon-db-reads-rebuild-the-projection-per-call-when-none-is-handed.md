@@ -179,6 +179,8 @@ from this read path. This does not close the other entry-point findings above.
 
 ## Re-verified at HEAD (2026-09-15)
 
+OPEN, CONFIRMED. Severity: friction.
+
 surface: context-generation
 
 At HEAD `91d5547b5`, `src/seon/db.clj:907–913` creates a fresh delayed projection for an unhanded read; `:932–944` forces it for string-backed attributes. `src/seon/schema.clj:2445–2465` derives on each one-argument call and explicitly has no process-global cache. Native decoding was fixed by `6785c980c`; the residual remains. Read-only default MCP JVM probe (20,000 ms bound):
