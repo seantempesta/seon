@@ -308,12 +308,14 @@ handle))}}
 (defn- client [] (.build (HttpClient/newBuilder)))
 
 (defn- fetch
-  [server path]
+  ([server path] (fetch server path {}))
+  ([server path headers]
   (let [request (-> (HttpRequest/newBuilder
                      (URI/create (str (:seon.render.web/url server) path)))
+                    (as-> builder (reduce-kv (fn [result k v] (.header result k v)) builder headers))
                     (.GET)
                     (.build))]
-    (.send (client) request (HttpResponse$BodyHandlers/ofString))))
+    (.send (client) request (HttpResponse$BodyHandlers/ofString)))))
 
 (defn- post-form
   ([server path body]
@@ -1882,11 +1884,10 @@ handle))}}
             alice (.body (fetch server "/agent/alice/debug"))]
         (is (str/includes? agent-page "/agent/root/debug")
             "the always-available debug view is linked from the curated page")
-        (is (str/includes? root "debug=true"))
-        (is (str/includes? root "Would-be system turn")
-            "the algorithm is visible on the explicit context route")
-        (is (str/includes? root "id=\"debug-ai-root\""))
-        (is (str/includes? alice "/feed/alice"))
+        (is (str/includes? root "seon-session-page"))
+        (is (str/includes? root "No turns recorded."))
+        (is (str/includes? root "id=\"surface-debug-session_2f_root\""))
+        (is (str/includes? alice "id=\"surface-debug-session_2f_alice\""))
         (is (not= root alice) "the stable root address includes the agent"))
       (is (= 404 (.statusCode (fetch server "/agent/missing/debug")))))))
 
@@ -2225,8 +2226,8 @@ handle))}}
         (is (= before @connection) "ten preview loads write no facts")
         (is (= 200 (.statusCode response))
             "every algorithm value render receives the handle's deadline and caps")
-        (is (str/includes? body "Context now"))
-        (is (str/includes? body "Would-be system turn"))
+        (is (str/includes? body "Session"))
+        (is (str/includes? body "No turns recorded."))
         (is (str/includes? body "System turn"))
         (is (str/includes? body "Virtual turn"))
         (is (str/includes? body "Compact"))))))
@@ -2234,37 +2235,32 @@ handle))}}
 (deftest context-now-keeps-runtime-history-through-an-empty-turn-and-a-wake
   (with-server
     (fn [connection server _context]
-      (let [page-path "/ns/my.agents.root/debug?prompt=true"
-            check-page
+      (let [check-page
             (fn [entries]
               (let [basis (db/basis-t @connection)
-                    response (fetch server page-path)
+                    turns (db/q '[:find ?id ?opened :where
+                                   [?a :seon.agent/id "root"] [?a :seon.agent/runtime ?runtime]
+                                   [?runtime :seon.runtime/turns ?turn]
+                                   [?turn :seon.turn/id ?id ?opened]] @connection)
+                    selected (ffirst (sort-by second > turns))
+                    page-path (str "/ns/my.agents.root/debug?turn=" selected)
+                    response (fetch server page-path {"datastar-request" "true"})
                     body (.body response)
-                    start (str/index-of body "<h3>Context now</h3>")
-                    end (when start (str/index-of body "</section>" start))
-                    context (when end (subs body start end))
-                    inputs (mapv #(-> (repl/render-html %) (nth 2) hiccup/->string) entries)
+                    raw (.body (fetch server (str page-path "&prompt=true") {"datastar-request" "true"}))
+                    inputs (mapv #(hiccup/->string (repl/render-emission-html (repl/entity-emission %))) entries)
                     positions (reduce (fn [found input]
-                                        (conj found
-                                              (when context
-                                                (str/index-of context input
-                                                              (if-let [previous (peek found)]
-                                                                (inc previous) 0)))))
+                                        (conj found (str/index-of body input
+                                                     (if-let [previous (peek found)] (inc previous) 0))))
                                       [] inputs)]
                 (is (= 200 (.statusCode response)))
-                (is (= basis (db/basis-t @connection)) "preview writes no facts")
-                (is (str/includes? body (str (count entries) " evaluations · continuing")))
-                (is (some? context))
+                (is (= basis (db/basis-t @connection)) "selected-turn inspection writes no facts")
+                (is (seq inputs))
                 (is (and (every? some? positions) (apply <= positions))
-                    "Context now contains every saved input in query order")
-                (is (str/includes? body
+                    "The colourised reader contains every saved emission in acquisition order")
+                (is (str/includes? raw
                                    (hiccup/->string
-                                    [:pre {:class "seon-debug-source"}
-                                     (str/join "\n\n" (map repl/render-ai entries))]))
-                    "The collapsed comparison preserves the exact saved AI entries")
-                (is (str/includes? body ":unchanged"))
-                (is (not (str/includes? body "<strong>:none</strong>"))
-                    "the would-be system turn compares with runtime-owned reads")
+                                    [:code (str/join "\n\n" (map repl/render-ai entries))]))
+                    "The raw toggle preserves the exact acquired AI bytes")
                 body))
             unlink-retired-edges
             (fn []

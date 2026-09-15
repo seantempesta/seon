@@ -3,8 +3,38 @@
   (:require [clojure.main :as main]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [clojure.test.check :as check]
+            [clojure.test.check.generators :as gen]
+            [clojure.test.check.properties :as prop]
             [seon.repl :as repl]
             [seon.sci.admit :as admit]))
+
+(defn- text-nodes [node]
+  (cond
+    (string? node) node
+    (vector? node) (apply str (map text-nodes (drop (if (map? (second node)) 2 1) node)))
+    (sequential? node) (apply str (map text-nodes node))
+    :else ""))
+
+(deftest colouring-preserves-every-character-including-malformed-source
+  (let [result (check/quick-check
+                500
+                (prop/for-all [source (gen/fmap #(apply str (map char %))
+                                               (gen/vector (gen/choose 0 65535))) ]
+                  (= source (apply str (map second (repl/syntax-tokens source)))))
+                :seed 20260914)]
+    (is (:pass? result) (pr-str result)))
+  (doseq [source ["\n```clojure\n;; café <tag>\n(+ 1 2)\n```"
+                  "[\"unfinished\\\"" "\\; \\newline ; comment\n{:x -3.2}" ""]
+          response [{:seon.eval/shown "[1 :two result/e3]"}
+                    {:seon.eval/shown "Plain help.\nUse (dir my.plan)."
+                     :seon.eval/renderer 'seon.bootstrap/render-help-ai}
+                    {:seon.cluster.eval/error "Reader error"}]]
+    (let [emission (merge (cond-> {:seon.ns/name 'my.agents.juniper}
+                            (seq source) (assoc :seon.cluster.eval/source source))
+                          response)]
+      (is (= source (apply str (map second (repl/syntax-tokens source)))))
+      (is (= (repl/text emission) (text-nodes (repl/render-emission-html emission)))))))
 
 (deftest generated-source-uses-reader-syntax-without-changing-the-form
   (let [form '(seon.db/pull '[:seon.agent/id {:seon.agent/namespace [:seon.ns/name]}]

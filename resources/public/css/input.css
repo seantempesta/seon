@@ -830,6 +830,10 @@ details.tool-call-details[open] .tool-preview {
 .seon-session-gutter span { display: block; }
 .seon-session-line pre, .seon-session-raw { margin: 0; padding: 0.5rem 0.75rem; font: inherit; overflow: visible; }
 .seon-session-record { margin-top: 0.75rem; border-top: 1px solid var(--color-base-800); padding-top: 0.5rem; }
+.seon-session-rereads { border-top: 1px solid var(--color-base-800); padding: 0.4rem 0; color: var(--color-text-400); font-size: 0.625rem; }
+.seon-session-rereads label { display: flex; gap: 0.5rem; align-items: baseline; padding: 0.15rem 0; }
+.seon-session-rereads input { appearance: none; width: 0.65rem; height: 0.65rem; border: 1px solid var(--color-base-700); background: var(--color-base-900); }
+.seon-session-rereads input:checked { background: var(--color-signal); border-color: var(--color-signal); }
 .seon-syntax-prompt { color: var(--color-signal); }
 .seon-syntax-comment { color: var(--color-text-400); }
 .seon-syntax-keyword, .seon-syntax-result { color: var(--color-info); }
@@ -1893,50 +1897,6 @@ pre.seon-debug-candidate-preview,
   min-width: 0;
   min-height: 0;
   overflow: auto;
-}
-.seon-debug-turn,
-.seon-debug-turn-detail,
-.seon-debug-turn-header,
-.seon-debug-build-groups,
-.seon-runtime-turns td {
-  min-width: 0;
-  max-width: 100%;
-  overflow-wrap: anywhere;
-  word-break: normal;
-}
-.seon-debug-turn {
-  padding: 0.75rem 0;
-  border-bottom: 1px solid var(--color-base-800);
-}
-.seon-debug-turn h4 {
-  margin: 0.75rem 0 0.35rem;
-  color: var(--color-text-100);
-}
-.seon-debug-turn p,
-.seon-debug-turn li,
-.seon-debug-turn summary {
-  white-space: pre-wrap;
-}
-.seon-debug-turn details > summary {
-  cursor: pointer;
-  padding: 0.5rem 0;
-}
-.seon-debug-turn-detail {
-  display: block;
-  padding: 0.75rem;
-  background: var(--color-base-900);
-}
-.seon-debug-turn-detail pre {
-  overflow: visible;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  word-break: normal;
-}
-.seon-debug-build-groups ol {
-  padding-left: 1.25rem;
-}
-.seon-debug .seon-runtime-turns {
-  table-layout: fixed;
 }
 .seon-eval-entry {
   min-width: 0;

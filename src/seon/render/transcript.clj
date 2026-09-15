@@ -7,6 +7,7 @@
   and elided decision is derived for this call."
   (:require [clojure.edn :as edn]
             [clojure.string :as str]
+            [seon.ai.tokens :as tokens]
             [seon.db :as db]
             [seon.blob :as blob]
             [seon.bootstrap :as bootstrap]
@@ -15,6 +16,7 @@
             [seon.turn :as turn]
             [seon.config :as config]
             [seon.error :as error]
+            [seon.eval :as evaluation]
             [seon.print :as print]
             [seon.render :as render]
             [seon.render.agent :as agent]
@@ -1166,6 +1168,245 @@
                    (:seon.turn/reply-blob row) "Reply stored separately"
                    :else "—")]]))]]
      [:p "No turns recorded."])])
+
+(def ^:private debug-turn-selector
+  [:db/id :seon.turn/id :seon.turn/reply :seon.turn/reply-blob
+   :seon.turn/reply-size :seon.turn/disposition :seon.turn.work/situation
+   {:seon.turn/agent [:seon.agent/id]}
+   {:seon.turn/starting-ns [:seon.ns/name]}
+   {:seon.turn/opened-tx [:db/txInstant]}
+   {:seon.turn/closed-tx [:db/id :db/txInstant]}
+   {:seon.turn/trigger runtime-message-selector}
+   {:seon.turn/attempts [:seon.ai.attempt/id :seon.ai.attempt/ordinal
+                         :seon.ai/model :seon.ai.attempt/finish-reason
+                         :seon.ai.attempt/usage-edn]}])
+
+(defn- turn-rows [database agent-id]
+  (let [rows (db/q '[:find ?opened (pull ?t pattern) :in $ ?agent-id pattern
+                     :where [?a :seon.agent/id ?agent-id]
+                            [?a :seon.agent/runtime ?runtime]
+                            [?runtime :seon.runtime/turns ?t]
+                            [?t :seon.turn/id _ ?opened]]
+                   database agent-id debug-turn-selector)]
+    (if (:seon.error/kind rows) rows
+        (mapv (fn [ordinal [_ row]] (assoc row ::ordinal ordinal))
+              (range) (sort-by (juxt first #(get-in % [1 :seon.turn/id])) rows)))))
+
+(defn- turn-kind [database row]
+  (cond
+    (seq (:seon.turn/attempts row)) "Provider"
+    (= :generate (:seon.turn.work/situation row)) "System"
+    (= :call (:seon.turn.work/situation row))
+    (let [opening (turn/opening-db database (:seon.turn/id row))
+          agent-id (get-in row [:seon.turn/agent :seon.agent/id])
+          overlay (get-in (db/pull opening
+                                  '[{:seon.agent/settings [:seon.config.ai/no-provider]}]
+                                  [:seon.agent/id agent-id])
+                          [:seon.agent/settings])
+          no-provider (get overlay :seon.config.ai/no-provider
+                           (db/q '[:find ?v . :where [?config :seon.config/cluster _]
+                                    [?config :seon.config.ai/no-provider ?v]] opening))]
+      (if no-provider "Virtual" "No provider attempt"))
+    (or (:seon.turn/reply row) (:seon.turn/reply-blob row)) "System"
+    :else "No provider attempt"))
+
+(defn- utf8-size [text]
+  (alength (.getBytes ^String text "UTF-8")))
+
+(defn- turn-reply [connection row]
+  (or (:seon.turn/reply row)
+      (when (and connection (:seon.turn/reply-blob row))
+        (blob/get connection (:seon.turn/reply-blob row)))))
+
+(defn- attempt-html [attempt]
+  (let [usage (try (some-> (:seon.ai.attempt/usage-edn attempt) edn/read-string)
+                   (catch Exception _ nil))]
+    [:li {:class "seon-debug-attempt"}
+     (str "Attempt " (:seon.ai.attempt/ordinal attempt) " · "
+          (or (:seon.ai/model attempt) "model unavailable")
+          " · finish: " (or (:seon.ai.attempt/finish-reason attempt) "unavailable")
+          " · prompt tokens: " (get usage "prompt_tokens" "unavailable")
+          " · completion tokens: " (get usage "completion_tokens" "unavailable")
+          " · cache-hit tokens: " (or (get usage "prompt_cache_hit_tokens")
+                                      (get-in usage ["prompt_tokens_details" "cached_tokens"])
+                                      "unavailable"))]))
+
+(defn- session-id [agent-id]
+  (block/surface-id (keyword "debug-session" agent-id)))
+
+(defn- session-url [agent-id turn-id raw?]
+  (route/path ::route/agent-debug {:id agent-id}
+              (cond-> {:turn turn-id} raw? (assoc :prompt "true"))))
+
+(defn- session-origin [database row saved]
+  (cond
+    (:seon.cluster.eval/error saved) "error"
+    (= "System" (turn-kind database row)) (if (zero? (::ordinal row)) "opening" "re-read")
+    :else "agent"))
+
+(defn- readable-shown [source]
+  (try
+    (with-open [reader (PushbackReader. (StringReader. source))]
+      (let [value (edn/read {:eof ::eof} reader)]
+        (when (= ::eof (edn/read {:eof ::eof} reader))
+          {::value value})))
+    (catch Exception _ nil)))
+
+(defn- changed-paths [before after path]
+  (cond
+    (= before after) []
+    (and (map? before) (map? after))
+    (mapcat #(changed-paths (get before % ::absent) (get after % ::absent) (conj path %))
+            (distinct (concat (keys before) (keys after))))
+    (and (vector? before) (vector? after) (= (count before) (count after)))
+    (mapcat #(changed-paths (nth before %) (nth after %) (conj path %)) (range (count before)))
+    :else [{::path path ::before before ::after after}]))
+
+(defn- reread-summary [evaluations]
+  (let [first-shown (:seon.eval/shown (first evaluations))
+        last-shown (:seon.eval/shown (last evaluations))
+        before (when first-shown (readable-shown first-shown))
+        after (when last-shown (readable-shown last-shown))
+        changes (when (and before after) (vec (changed-paths (::value before) (::value after) [])))]
+    (cond
+      (= first-shown last-shown) "identical shown text"
+      (and (= 1 (count changes)) (seq (::path (first changes))))
+      (let [change (first changes)]
+        (str "only " (last (::path change)) " changed " (::before change) " → " (::after change)))
+      (and (seq changes) (seq (::path (first changes)))) (str (count changes) " changed paths")
+      :else (str (utf8-size (or first-shown "")) " → " (utf8-size (or last-shown "")) " shown bytes"))))
+
+(defn render-session-loading
+  "Select only the latest turn initially; acquire its prompt on demand."
+  {:malli/schema [:=> [:cat [:and :seon.render/unit
+                             [:map [:seon.db/db :seon.db/db] [:seon.agent/id :seon.agent/id]]]]
+                  :seon.render/hiccup]}
+  [request]
+  (let [agent-id (:seon.agent/id request)
+        rows (turn-rows (:seon.db/db request) agent-id)
+        selected (or (:seon.turn/id request) (when (vector? rows) (:seon.turn/id (last rows))))
+        url (when selected (session-url agent-id selected (::raw? request)))]
+    [:section {:id (session-id agent-id) :class "seon-session" :data-ignore-morph ""}
+     [:h2 "Session"]
+     (cond
+       (:seon.error/kind rows) [:p {:class "seon-emission-error"} (:seon.error/message rows)]
+       selected
+       [:p {:role "status" :data-init (str "@get('" url "')")}
+        "Loading the selected turn’s saved prompt…"]
+       :else [:p "No turns recorded."])]))
+
+(defn render-session
+  "The selected turn's context, in acquisition order, with byte-exact colour.
+  Metadata lives outside emission bytes; the raw toggle uses acquisition's
+  complete prompt unchanged. Historical provider turns use their opening DB."
+  {:malli/schema [:=> [:cat :seon.cluster.prompt/request] :seon.render/hiccup]}
+  [request]
+  (let [database (:seon.db/db request)
+        agent-id (:seon.agent/id request)
+        rows (turn-rows database agent-id)
+        selected (or (some #(when (= (:seon.turn/id request) (:seon.turn/id %)) %) rows)
+                     (last rows))
+        selected-id (:seon.turn/id selected)
+        opening (cond
+                  (and (= "System" (turn-kind database selected))
+                       (get-in selected [:seon.turn/closed-tx :db/id]))
+                  (db/as-of database (get-in selected [:seon.turn/closed-tx :db/id]))
+                  selected-id (turn/opening-db database selected-id)
+                  :else database)
+        acquired (render/acquire-context! (assoc request :seon.db/db opening :seon.turn/id selected-id))
+        entries (:seon.render.history/entries acquired)
+        prompt (:seon.cluster.prompt/text acquired)
+        by-eid (into {} (map (juxt :db/id identity)) rows)
+        saved (when (seq entries)
+                (db/pull-many opening '[* {:seon.cluster.eval/ns [:seon.ns/name]}]
+                              (mapv :seon.render.history/subject entries)))
+        rereads (->> saved
+                     (filter #(= "re-read" (session-origin database
+                                         (get by-eid (get-in % [:seon.cluster.eval/run :db/id])) %)))
+                     (group-by :seon.cluster.eval/source)
+                     (filter #(< 1 (count (val %))))
+                     (sort-by first))
+        source-signals (into {} (map-indexed (fn [index [source _]]
+                                               [source (str "reread" index)]) rereads))
+        turn-bytes (reduce (fn [sizes [segment evaluation-row]]
+                             (update sizes (get-in evaluation-row [:seon.cluster.eval/run :db/id])
+                                     (fnil + 0) (utf8-size segment)))
+                           {} (map vector (:seon.render.history/segments acquired) saved))
+        raw? (::raw? request)]
+    [:section {:id (session-id agent-id) :class "seon-session" :data-ignore-morph ""
+               :data-signals (str "{" (str/join "," (map #(str % ":false") (vals source-signals))) "}")
+               :data-session-loaded selected-id}
+     [:header {:class "seon-session-heading"}
+      [:div [:h2 (str "Context at turn " (::ordinal selected))]
+       [:p (str "The saved prompt before " (str/lower-case (turn-kind database selected))
+                " turn " selected-id)]
+       (when (seq (:seon.turn/attempts selected))
+         (into [:ul {:class "seon-session-meta"}] (map attempt-html) (:seon.turn/attempts selected)))]
+      [:a {:href (session-url agent-id selected-id (not raw?))
+           (keyword "data-on:click")
+           (str "evt.preventDefault(); @get('" (session-url agent-id selected-id (not raw?)) "')")}
+       (if raw? "Colourised session" "As the model saw it")]]
+     [:nav {:class "seon-session-selection" :aria-label "Select turn"}
+      (for [row rows]
+        [:a {:href (session-url agent-id (:seon.turn/id row) raw?)
+             :data-turn-id (:seon.turn/id row)
+             :data-turn-kind (turn-kind database row)
+             :aria-current (if (= selected-id (:seon.turn/id row)) "true" "false")
+             (keyword "data-on:click")
+             (str "evt.preventDefault(); @get('" (session-url agent-id (:seon.turn/id row) raw?) "')")}
+         (str (::ordinal row))])]
+     (if (:seon.error/kind acquired)
+       [:p {:class "seon-emission-error"} (:seon.error/message acquired)]
+       [:div
+        [:p {:class "seon-session-meta"}
+         (str (utf8-size prompt) " bytes · ≈" (tokens/estimate prompt)
+              " tokens · " (count entries) " emissions · oldest → newest")]
+        (when (and (not raw?) (seq rereads))
+          [:div {:class "seon-session-rereads"}
+           [:p "Repeated system reads are folded in place. Expand to see their exact positions."]
+           (for [[source matches] rereads]
+             (let [signal (get source-signals source)
+                   form (::value (readable-shown source))]
+               [:label
+                [:input {:type "checkbox" :data-bind signal}]
+                (str (if (seq? form) (first form) (first (str/split-lines source)))
+                     (when-let [attribute (first (filter qualified-keyword? (tree-seq coll? seq form)))]
+                       (str " · " attribute))
+                     " · re-read ×" (count matches) " · " (reread-summary matches))]))])
+        [:div {:class "seon-session-scroll"}
+         (if raw?
+           [:pre {:class "seon-session-raw" :data-prompt-bytes (utf8-size prompt)} [:code prompt]]
+           (into [:div {:class "seon-session-emissions"}]
+                 (map-indexed
+                  (fn [position [entry evaluation-row]]
+                    (let [row (get by-eid (get-in evaluation-row [:seon.cluster.eval/run :db/id]))
+                          origin (session-origin database row evaluation-row)
+                          emission (repl/entity-emission evaluation-row)
+                          previous (when (pos? position) (nth saved (dec position)))
+                          boundary? (not= (:seon.cluster.eval/run evaluation-row)
+                                          (:seon.cluster.eval/run previous))]
+                      [:section (cond-> {:class "seon-session-entry"}
+                                  (and (= "re-read" origin)
+                                       (get source-signals (:seon.cluster.eval/source evaluation-row)))
+                                  (assoc :data-show (str "$" (get source-signals (:seon.cluster.eval/source evaluation-row)))))
+                       (when boundary?
+                         [:header {:class "seon-session-boundary"}
+                          (str "Turn " (::ordinal row) " · " (turn-kind database row) " · ")
+                          (runtime-time (get-in row [:seon.turn/opened-tx :db/txInstant]))
+                          (str " · " (get turn-bytes (:db/id row) 0) " bytes added")
+                          (when (seq (:seon.turn/attempts row))
+                            (into [:ul] (map attempt-html) (:seon.turn/attempts row)))])
+                       [:div {:class "seon-session-line"}
+                        [:aside {:class (str "seon-session-gutter seon-origin-" origin)}
+                         [:span (str (::ordinal row))] [:span (str "● " origin)]]
+                        [:pre {:data-emission-bytes (+ (if (pos? position) 2 0)
+                                                       (utf8-size (:seon.render.history/bytes entry)))}
+                         (when (pos? position) [:span "\n\n"])
+                         (if (= (:seon.render.history/bytes entry) (repl/text emission))
+                           (repl/render-emission-html emission)
+                           [:code (:seon.render.history/bytes entry)])]]]))
+                  (map vector entries saved))))
+         [:span {:class "seon-session-end" :data-init "el.parentElement.scrollTop = el.parentElement.scrollHeight"}]]])]))
 
 (defn render-runtime-html
   "Show transaction times, message triggers, listens, and newest-first turns."

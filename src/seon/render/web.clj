@@ -203,6 +203,9 @@
       agent-id
       (assoc :seon.agent/id agent-id)
 
+      (= "true" (get query "prompt"))
+      (assoc ::prompt-preview? true)
+
       (read-query-value (get query "outgoingCursor"))
       (assoc :seon.render.data/outgoing-cursor
              (read-query-value (get query "outgoingCursor")))
@@ -235,7 +238,10 @@
 
     (:seon.render.data/incoming-cursor debug-request)
     (assoc :incomingCursor
-           (pr-str (:seon.render.data/incoming-cursor debug-request)))))
+           (pr-str (:seon.render.data/incoming-cursor debug-request)))
+
+    (::prompt-preview? debug-request)
+    (assoc :prompt "true")))
 
 (defn message-bar-html
   "`:seon.render/html` — the constant human-to-agent message bar.
@@ -288,7 +294,7 @@
   backgrounded tab."
   {:malli/schema [:=> [:cat :seon.render.web/page-request] :string]}
   [{:keys [:seon.agent/id :seon.render/page :seon.render.web/feed-url
-           :seon.render.debug/viewer-namespace]}]
+           :seon.render.debug/viewer-namespace] :as request}]
   (str
    "<!doctype html>"
    (hiccup/->string
@@ -326,10 +332,11 @@
       ;; OUTSIDE every morph target. A data-init inside one is stripped
       ;; by that element's first whole-element morph, and the tab then
       ;; looks alive while receiving nothing.
-      [:div {:style "display:none"
+      (when (and feed-url (not (::session? request)))
+       [:div {:style "display:none"
              :data-init (str "@get('" feed-url
                              "', {retryMaxCount: Infinity, "
-                             "openWhenHidden: false})")}]]])))
+                             "openWhenHidden: false})")}])]])))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Painting
@@ -703,7 +710,8 @@
   [database connection agent-id caps render-context]
   (let [request (debug-turn-request database connection agent-id caps render-context)
         evaluations (turn-function-result 'seon.eval/of-agent [database agent-id])
-        prospective (when-not (:seon.error/kind evaluations)
+        prospective (when (and (::prompt-preview? render-context)
+                               (not (:seon.error/kind evaluations)))
                       (turn-function-result 'seon.turn/system-turn
                                             [(assoc request :seon.turn/write? false)]))]
     {:seon.render.debug/request request
@@ -752,19 +760,35 @@
    [:input {:type "hidden" :name "action" :value action}]
    [:button {:type "submit" :class "seon-bar-send"} label]])
 
+(defn- debug-comparison-html [agent-id result]
+  (let [request (:seon.render.debug/request result)
+        evaluations (:seon.render.debug/evaluations result)]
+    [:div {:id (block/surface-id (keyword "debug-comparison" agent-id))
+           :data-ignore-morph "" :data-comparison-loaded ""}
+     (when-not (:seon.error/kind evaluations)
+       [:pre {:class "seon-debug-source"}
+        (str/join "\n\n" (map #(turn-function-result 'seon.repl/render-ai [%]) evaluations))])
+     (when-let [prospective (:seon.render.debug/system-turn result)]
+       [:section {:class "seon-debug-prompt-pane"}
+        [:h3 "Would-be system turn"]
+        (system-turn-html request prospective)])]))
+
 (defn- debug-ai-html
   [agent-id result]
   (let [request (:seon.render.debug/request result)
         evaluations (:seon.render.debug/evaluations result)
-        prospective (:seon.render.debug/system-turn result)]
+        loading? (::loading? result)]
     (hiccup/->string
      [:section {:id (str "debug-ai-" agent-id)
                 :class "seon-debug-body seon-debug-body-ai"}
       [:h2 "Context algorithm"]
       [:div {:class "seon-debug-state"}
        [:strong "Agent "] [:code agent-id]
-       (if (:seon.error/kind evaluations)
+       (cond
+         loading? [:span " · Loading saved evaluations through the feed…"]
+         (:seon.error/kind evaluations)
          (algorithm-value-html request evaluations)
+         :else
          [:span (str " · " (count evaluations) " evaluations · "
                      (if (empty? evaluations) "fresh" "continuing"))])]
       [:div {:class "seon-debug-context-actions"}
@@ -774,18 +798,24 @@
       (when-not (:seon.error/kind evaluations)
        [:section {:class "seon-debug-prompt-pane"}
        [:h3 "Context now"]
+       (if loading?
+         [:p {:role "status"} "Loading saved evaluations…"]
        (into [:div {:class "seon-debug-evaluations"}]
              (map #(turn-function-result 'seon.repl/render-html
-                                         [(assoc request :seon.render/value %)]) evaluations))])
-      [:details {:class "seon-debug-provider-prompt"}
+                                         [(assoc request :seon.render/value %)]) evaluations)))])
+      [:details {:class "seon-debug-provider-prompt"
+                 :id (block/surface-id (keyword "debug-comparison-disclosure" agent-id))
+                 :data-preserve-attr "open"
+                 :open (boolean (::prompt-preview? request))
+                 (keyword "data-on:toggle")
+                 (str "if (el.open && !el.querySelector('[data-comparison-loaded]')) @get('"
+                      (route/path ::route/agent-debug {:id agent-id} {:prompt "true"}) "')")}
        [:summary "Provider prompt comparison"]
-       (when-not (:seon.error/kind evaluations)
-         [:pre {:class "seon-debug-source"}
-          (str/join "\n\n" (map #(turn-function-result 'seon.repl/render-ai [%]) evaluations))])
-      (when prospective
-       [:section {:class "seon-debug-prompt-pane"}
-       [:h3 "Would-be system turn"]
-       (system-turn-html request prospective)])]])))
+       (if (::prompt-preview? request)
+         (debug-comparison-html agent-id result)
+         [:div {:id (block/surface-id (keyword "debug-comparison" agent-id))
+                :data-ignore-morph ""}
+          [:p "Open to compute the would-be system turn without writing."]])]])))
 
 (defn- debug-value-html
   [value]
@@ -1827,6 +1857,7 @@
         (when-let [agent-id (:seon.agent/id debug-request)]
             (debug-prompt db connection agent-id caps
                           (assoc handle :seon.render/profile profile
+                                        ::prompt-preview? (::prompt-preview? debug-request)
                                         :seon.turn.loop/cluster handle)))
         program-identity
         (debug-program-identity db (:seon.sci.eval/ctx handle))
@@ -2489,6 +2520,7 @@
          (if (:seon.error/kind entries)
            entries
            {:seon.cluster.prompt/text (history-text entries)
+            :seon.render.history/entries entries
             :seon.render.history/segments (history-segments entries)
             :seon.db/db (:seon.db/db request)}))))))
 
@@ -3056,10 +3088,78 @@
                    :seon.render.web/feed-url
                    (route/path ::route/feed {:id agent-id})})}))
 
+(defn- debug-turn-response
+  ([service agent-id turn-id] (debug-turn-response service agent-id turn-id false))
+  ([service agent-id turn-id raw?]
+  (let [connection (:seon.store/connection-object service)
+        database @connection
+        owner (db/q '[:find ?agent-id . :in $ ?turn-id
+                       :where [?agent :seon.agent/id ?agent-id]
+                              [?agent :seon.agent/runtime ?runtime]
+                              [?runtime :seon.runtime/turns ?turn]
+                              [?turn :seon.turn/id ?turn-id]] database turn-id)]
+    (if (not= agent-id owner)
+      (not-found nil)
+      {:status 200
+       :headers {"content-type" "text/html; charset=utf-8"
+                 "datastar-mode" "replace"}
+       :body (hiccup/->string
+              (transcript/render-session
+               (debug-turn-request database connection agent-id
+                                   (:seon.sci.admit/caps service)
+                                   (assoc service :seon.turn/id turn-id
+                                          ::transcript/raw? raw?))))}))))
+
 (defn- debug-response
   [{connection :seon.store/connection-object
     :as service}
    viewer-namespace agent-id request]
+  (cond
+    (and (get (query-params request) "turn")
+         (= "true" (get-in request [:headers "datastar-request"])))
+    (debug-turn-response service agent-id (get (query-params request) "turn")
+                         (= "true" (get (query-params request) "prompt")))
+
+    (and agent-id (not (get (query-params request) "subject")))
+    {:status 200
+     :headers {"content-type" "text/html; charset=utf-8"}
+     :body (shell
+            {:seon.agent/id agent-id
+             ::session? true
+             :seon.render.web/feed-url (route/path ::route/feed {:id agent-id})
+             :seon.render.debug/viewer-namespace viewer-namespace
+             :seon.render/page
+             [[:section {:class "seon-session-page"}
+               [:div {:class "seon-session-toolbar"}
+                (system-action-form agent-id "system-turn" "System turn")
+                (system-action-form agent-id "virtual-turn" "Virtual turn")
+                (system-action-form agent-id "compact" "Compact")]
+               (transcript/render-session-loading
+                (debug-turn-request @connection connection agent-id
+                                    (:seon.sci.admit/caps service)
+                                    (cond-> service
+                                      (get (query-params request) "turn")
+                                      (assoc :seon.turn/id (get (query-params request) "turn"))
+                                      (= "true" (get (query-params request) "prompt"))
+                                      (assoc ::transcript/raw? true))))
+               [:details {:class "seon-session-record"}
+                [:summary "Record"]
+                [:a {:href (route/path ::route/agent-debug {:id agent-id}
+                                     {:subject (pr-str [:seon.agent/id agent-id])})}
+                 "Inspect entity attributes and connections"]]] ]})}
+
+    (and agent-id (= "true" (get (query-params request) "prompt"))
+         (= "true" (get-in request [:headers "datastar-request"])))
+    {:status 200
+     :headers {"content-type" "text/html; charset=utf-8" "datastar-mode" "replace"}
+     :body (hiccup/->string
+            (debug-comparison-html
+             agent-id (debug-prompt @connection connection agent-id (:seon.sci.admit/caps service)
+                                    (assoc service ::prompt-preview? true
+                                           :seon.turn.loop/cluster
+                                           (:seon.turn.loop/cluster service service)))))}
+
+    :else
   (let [db @connection
         query (query-params request)
         default-subject (if agent-id
@@ -3075,7 +3175,20 @@
         render-context
         (assoc service :seon.render/profile
                (render/agent-render-profile effective))
-        rendered-page (current-page render-context db [::debug-tab debug-request])
+        rendered-page
+        (if (and agent-id (not (::prompt-preview? debug-request)))
+          ; The existing feed fills these same morph targets. Initial GET
+          ; reads turn headers only; full evaluation read evidence and entity
+          ; previews must not delay the first usable page.
+          {(str "debug-ai-" agent-id)
+           (debug-ai-html agent-id
+                          {::loading? true
+                           :seon.render.debug/request
+                           (debug-turn-request db connection agent-id
+                                               (:seon.sci.admit/caps service) render-context)})
+           "debug-units" "<section id=\"debug-units\"><p>Loading entity projections…</p></section>"
+           "debug-graph" "<section id=\"debug-graph\"><p>Loading reference graph…</p></section>"}
+          (current-page render-context db [::debug-tab debug-request]))
         feed-id (or agent-id (str viewer-namespace))
         prompt-section
         (when agent-id
@@ -3110,7 +3223,7 @@
                      {:id feed-id}
                      (debug-query-strings debug-request))}
         agent-id
-        (assoc :seon.agent/id agent-id)))}))
+        (assoc :seon.agent/id agent-id)))})))
 
 (defn- canonical-namespace-response
   [{connection :seon.store/connection-object :as service} debug? request]

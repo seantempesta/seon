@@ -1,16 +1,133 @@
 (ns seon.render.web-debug-test
   "Schema-authored block metadata and honest unavailable dependencies."
-  (:require [clojure.string :as str]
+  (:require [clojure.core.async :as async]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [seon.render.web :as web]
             [seon.db :as db]
             [seon.config :as config]
+            [seon.cluster :as cluster]
+            [seon.cluster.agent :as agent]
+            [seon.context-blocks-fixture :as fixture]
+            [seon.eval :as evaluation]
+            [seon.flow :as flow]
             [seon.error :as error]
             [seon.render :as render]
+            [seon.render.hiccup :as hiccup]
+            [seon.render.transcript :as transcript]
             [seon.render.walk :as walk]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.turn :as turn]))
+
+(defn- element-text [node]
+  (cond
+    (string? node) node
+    (vector? node) (apply str (map element-text (drop (if (map? (second node)) 2 1) node)))
+    (sequential? node) (apply str (map element-text node))
+    :else ""))
+
+(deftest turn-details-use-the-loop-opening-and-exact-segments
+  (support/with-database
+   (fn [connection]
+     (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "debug-turns"
+                    :seon.config/manifest {:seon.config.ai/no-provider true}})
+     (cluster/ensure-cluster-entity! connection "debug-turns" cluster/boot-process-identity)
+     (db/transact! connection
+                   [{:seon.agent/id "root" :seon.agent/namespace {:seon.ns/name 'my.agents.root}}
+                    {:seon.agent/id "juniper" :seon.agent/namespace {:seon.ns/name 'my.agents.juniper}}])
+     (let [ctx (support/fork-cluster-ctx connection)
+           environment (support/environment "debug-turns" connection)
+           routing (agent/routing)]
+       (with-open [launcher (support/closeable
+                              (flow/start-work-launcher!
+                               {:seon.env/environment environment
+                                :seon.flow/configuration (select-keys (support/effective-config) flow/flow-workload-attributes)})
+                              flow/stop-work-launcher!)
+                   faults (support/closeable (async/chan (async/sliding-buffer 16)) async/close!)]
+         (let [handle (support/cluster-handle
+                       {:seon.env/environment environment :seon.db/connection connection
+                        :seon.cluster/name "debug-turns" :seon.sci.eval/ctx ctx
+                        :seon.flow/work-launcher @launcher
+                        :seon.flow/executor (cluster/projection-executor (:seon.sci.eval/projection-state ctx))
+                        :seon.db.process/id cluster/boot-process-identity})
+               request {:seon.turn.loop/cluster handle :seon.agent/routing routing
+                        :seon.agent/id "juniper" :seon.turn/write? true}]
+           (swap! routing assoc :seon.agent/fault-channel @faults)
+           (try
+             (fixture/install! handle routing)
+             (is (string? (:seon.turn/id (turn/system-turn request))))
+             (agent/arm! request)
+             (let [raw ";; Preserve café, <tags> and spacing as received.\n(str \"café\")\n(/ 1 0)\n"
+                   virtual-id (fixture/submit! handle routing raw)
+                   unit (merge handle {:seon.db/db @connection :seon.agent/id "juniper"
+                                       :seon.turn/id virtual-id
+                                       :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms handle)})
+                   listed (transcript/render-session unit)
+                   kinds (keep #(when (map? %) (:data-turn-kind %)) (tree-seq coll? seq listed))]
+               (is (some #{"System"} kinds))
+               (is (some #{"Virtual"} kinds)))
+             (agent/disarm! request)
+             (agent/arm! request)
+             (let [provider-id (fixture/submit! handle routing "(+ 40 2)")
+                   _ (agent/disarm! request)
+                   opening (turn/opening-db @connection provider-id)
+                   acquire-request (merge handle {:seon.db/db opening :seon.agent/id "juniper"
+                                                   :seon.turn/id provider-id
+                                                   :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms handle)})
+                   acquired (render/acquire-context! acquire-request)
+                   expected (:seon.cluster.prompt/text acquired)
+                   _ (is (string? expected) (pr-str acquired))
+                   attempt (db/transact! connection
+                                         [{:db/id "debug-attempt"
+                                             :seon.ai.attempt/id "debug-attempt" :seon.ai.attempt/ordinal 0
+                                             :seon.ai.attempt/at (java.util.Date.)
+                                             :seon.ai/endpoint "http://fixture.invalid"
+                                             :seon.ai.attempt/settings-edn "{}"
+                                             :seon.ai/model "fixture-model" :seon.ai.attempt/finish-reason "stop"
+                                             :seon.ai.attempt/usage-edn
+                                             "{\"prompt_tokens\" 100, \"completion_tokens\" 12, \"prompt_cache_hit_tokens\" 80}"}
+                                          [:db/add [:seon.turn/id provider-id] :seon.turn/attempts "debug-attempt"]])
+                   _ (is (:db-after attempt) (pr-str attempt))
+                   _ (agent/arm! request)
+                   _ (fixture/submit! handle routing "(str \"later must not enter earlier prompt\")")
+                   _ (agent/disarm! request)
+                   unit (merge acquire-request {:seon.db/db @connection})
+                   detail (transcript/render-session unit)
+                   nodes (tree-seq coll? seq detail)
+                   exact (apply str (keep #(when (and (vector? %) (= :pre (first %))
+                                           (:data-emission-bytes (second %))) (element-text %)) nodes))
+                   byte-count (alength (.getBytes ^String expected "UTF-8"))
+                   service (assoc handle :seon.store/connection-object connection)
+                   response (#'web/debug-response service 'my.agents.juniper "juniper"
+                                                   {:headers {"datastar-request" "true"}
+                                                    :query-string (str "turn=" provider-id)})
+                   listed detail
+                   headers (filter #(and (map? %) (:data-turn-id %)) (tree-seq coll? seq listed))
+                   turns (db/q '[:find [?id ...] :where [?a :seon.agent/id "juniper"]
+                                 [?t :seon.turn/agent ?a] [?t :seon.turn/id ?id]] @connection)]
+               (is (seq headers))
+               (is (= (set turns) (set (map :data-turn-id headers))))
+               (is (= 1 (count (filter #(= "Provider" (:data-turn-kind %)) headers))))
+               (is (= expected exact))
+               (is (= byte-count (alength (.getBytes ^String exact "UTF-8"))))
+               (is (not (str/includes? exact "later must not enter earlier prompt")))
+               (is (str/includes? (element-text detail) "re-read"))
+               (doseq [origin ["● opening" "● agent" "● error"]]
+                 (is (str/includes? (element-text detail) origin)))
+               (is (str/includes? (element-text detail) "cache-hit tokens: 80"))
+               (is (= 200 (:status response)))
+               (is (= (hiccup/->string detail) (:body response)))
+               (is (= "replace" (get-in response [:headers "datastar-mode"])))
+               (is (= 404 (:status (#'web/debug-turn-response service "root" provider-id))))
+               (doseq [forbidden ["#inst" ":db/id"]]
+                 (is (not (str/includes? (apply str (map :data-turn-id headers)) forbidden))))
+               (is (seq (evaluation/of-agent @connection "juniper"))))
+             (finally
+               (agent/disarm! request)
+               (doseq [channel-key [:seon.cluster.wake/channel :seon.render/context-channel :seon.turn.loop/completion]]
+                 (async/close! (get handle channel-key)))))))))))
 
 (deftest saved-history-preserves-shown-text-with-numeric-lookups
   (support/with-database

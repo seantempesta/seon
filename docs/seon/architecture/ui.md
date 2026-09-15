@@ -62,10 +62,17 @@ evidence changed. The since-query algorithm covers every distinct read
 form, generated or agent-written; it never repeats writes or effects.
 Passive page rendering does not append history.
 
-The debug invocation cache holds previews in memory. Context now is always
-the primary view. A collapsed Provider prompt comparison shows stored AI
-bytes plus the would-be system turn without writing; no query flag selects
-it. Compaction wipes the agent's evaluations;
+The agent debug page is a reader for one selected turn, defaulting to the
+latest. Its context comes from the provider acquisition fold at the turn's
+opening database. `seon.repl/render-emission-html` colourises the exact
+`seon.repl/text` bytes; prompt, comment, form and response stay in their
+original order. Turn boundaries and origin gutters sit outside those bytes.
+Repeated system reads fold in place, with every exact entry available at
+its original position. The `?prompt=true` toggle shows the complete acquired
+prompt as one unchanged block. Selected-turn content loads on demand;
+the initial response never acquires all historical prompts. The Record
+section leads to the existing entity/attribute inspection surface.
+Compaction wipes the agent's evaluations;
 the next system turn regenerates the opening. There is no manual
 Add/remove/revision/proof/adoption path for editing context.
 

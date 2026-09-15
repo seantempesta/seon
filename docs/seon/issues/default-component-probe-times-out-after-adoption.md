@@ -7,6 +7,12 @@ tags: [issue, mcp, runtime]
 
 # Default component probe timed out after development adoption
 
+Debug-turns, 2026-09-14: default PID 23557 / PREPL 49971 returned
+health/Flow unknown with `Read timed out`. The subsequent MCP JVM query
+returned a live connection and 187 turn identities in 7292 ms. A selected
+Juniper turn pull also answered. No lifecycle operation occurred; this
+establishes JVM query availability, not Flow health.
+
 Dir-own-fns, 2026-09-10: default PID 23557 / PREPL 49971 again returned
 health/Flow unknown with `Read timed out`. JVM `(+ 1 1)` returned 2 in
 0 ms and `(boolean (seon.operator/connection "default"))` returned true

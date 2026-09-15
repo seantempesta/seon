@@ -176,6 +176,85 @@
     (str (input-text emission)
          (when answer (str "\n" answer)))))
 
+(defn- token-boundary? [character]
+  (or (Character/isWhitespace ^char character)
+      (some #{character} "()[]{}\";,`~@^'")))
+
+(defn syntax-tokens
+  "Lossless character lexer for displayed Clojure, including incomplete replies.
+  No reader executes here. Every iteration consumes input; unknown runs stay
+  plain text and concatenating the token texts restores the original string."
+  {:malli/schema [:=> [:cat :string] [:vector [:tuple :string :string]]]}
+  [source]
+  (let [length (count source)]
+    (loop [position 0 tokens []]
+      (if (= position length) tokens
+        (let [character (.charAt ^String source position)
+              end (cond
+                    (= character \;)
+                    (loop [cursor (inc position)]
+                      (if (or (= cursor length) (= \newline (.charAt ^String source cursor)))
+                        cursor (recur (inc cursor))))
+                    (= character \")
+                    (loop [cursor (inc position) escaped? false]
+                      (if (= cursor length) cursor
+                        (let [current (.charAt ^String source cursor)]
+                          (cond
+                            escaped? (recur (inc cursor) false)
+                            (= current \\) (recur (inc cursor) true)
+                            (= current \") (inc cursor)
+                            :else (recur (inc cursor) false)))))
+                    (token-boundary? character) (inc position)
+                    :else
+                    (loop [cursor (min length (+ position (if (= character \\) 2 1)))]
+                      (if (or (= cursor length) (token-boundary? (.charAt ^String source cursor)))
+                        cursor (recur (inc cursor)))))
+              token (subs source position end)
+              style (cond
+                      (= character \;) "comment"
+                      (= character \") "string"
+                      (= character \:) "keyword"
+                      (some #{character} "()[]{}") "delimiter"
+                      (or (Character/isDigit ^char character)
+                          (and (#{\+ \-} character) (> (count token) 1)
+                               (Character/isDigit ^char (.charAt ^String token 1)))) "number"
+                      (str/starts-with? token "result/") "result"
+                      (Character/isWhitespace ^char character) "space"
+                      (Character/isLetter ^char character) "symbol"
+                      :else "plain")]
+          (recur end (conj tokens [style token])))))))
+
+(defn- syntax-spans [source]
+  (map (fn [[style token]] [:span {:class (str "seon-syntax-" style)} token])
+       (syntax-tokens source)))
+
+(defn render-emission-ai
+  "The exact emission bytes paired with the colourised session rendition."
+  {:malli/schema [:=> [:cat :seon.repl/emission] :string]}
+  [emission]
+  (text emission))
+
+(defn render-emission-html
+  "Colourise one emission without changing a single character of `text`.
+  The prompt, input and response have separate visual roles. Declared AI
+  responses remain prose; ordinary responses use the lossless Clojure lexer."
+  {:malli/schema [:=> [:cat :seon.repl/emission] :seon.render/hiccup]}
+  [emission]
+  (let [emitted (text emission)
+        prompt (str (or (:seon.ns/name emission) 'user) "=> ")
+        input-end (count (input-text emission))
+        answer (response emission)]
+    [:code {:class "seon-emission-bytes"}
+     [:span {:class "seon-syntax-prompt"} (subs emitted 0 (count prompt))]
+     (syntax-spans (subs emitted (count prompt) input-end))
+     (when answer
+       (list "\n"
+             [:span {:class (if (:seon.cluster.eval/error emission)
+                              "seon-emission-error" "seon-emission-response")}
+              (if (:seon.eval/renderer emission)
+                (subs emitted (inc input-end))
+                (syntax-spans (subs emitted (inc input-end))))]))]))
+
 ;;; ---------------------------------------------------------------------------
 ;;; The evaluation entity's two projections
 ;;;
