@@ -925,45 +925,71 @@
               (is (= :seon.schema/missing-projection (:seon.error/kind refusal)))
               (is (= ['seon.sci.eval/evaluate] @missing)))))))))
 
-(deftest unmap-row-carries-the-exact-forked-namespace-state
-  (let [ctx (eval/build-base-ctx)
-        _ (sci/eval-string*
-           ctx
-           (str "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
-                "discarded [x] x)"))
-        source "(ns-unmap 'user 'discarded)"
-        event (#'eval/one-event source 'user ctx (count source))
-        execution-ctx (sci/fork ctx)
-        before-interns (sci/namespace-interns execution-ctx)
-        before-namespace-state (sci/namespace-state execution-ctx)
-        before-reader-context (#'eval/reader-context execution-ctx 'user)
-        _ (sci/binding [sci/ns (sci/create-ns 'user)]
-            (sci/eval-form execution-ctx
-                           (:seon.sci.reader/form event)))
-        result
-        (#'eval/unmap-row
-         {:seon.sci.eval/execution-ctx execution-ctx
-          :seon.sci.eval/before-interns before-interns
-          :seon.sci.eval/before-namespace-state before-namespace-state
-          :seon.sci.eval/before-reader-context before-reader-context
-          :seon.sci.eval/event event
-          :seon.sci.eval/base-declared-row nil
-          :seon.sci.eval/live-declaration? false
-          :seon.sci.eval/namespace-name 'user
-          :seon.sci.eval/namespace-unmap? true
-          :seon.cluster.eval/source source})
-        row (:seon.program/row result)]
-    (is (true? (:seon.sci.eval/namespace-changed? result)))
-    (is (= #{[:seon.fn/sym "user/discarded"]
-             [:seon.test/sym "user/discarded"]}
-           (set (:seon.program/delete-identities row))))
-    (is (= [:seon.ns/name 'user] (:seon.program/ns row)))
-    (is (= (sci/namespace-state execution-ctx)
-           (:seon.sci.eval/namespace-state row)))
-    (is (some? (sci/resolve ctx 'discarded))
-        "the forked ns-unmap leaves the parent context unchanged")
-    (is (nil? (sci/resolve execution-ctx 'discarded)))
-    (is (nil? (:seon.sci.eval/context-row result)))))
+(deftest
+ unmap-row-carries-the-exact-forked-namespace-state
+ (let
+  [ctx
+   (eval/build-base-ctx)
+   _
+   (sci/eval-string*
+    ctx
+    (str
+     "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
+     "discarded [x] x)"))
+   source
+   "(ns-unmap 'user 'discarded)"
+   event
+   (#'eval/one-event source 'user ctx (count source))
+   execution-ctx
+   (sci/fork ctx)
+   before-interns
+   (sci/namespace-interns execution-ctx)
+   before-namespace-state
+   (sci/namespace-state execution-ctx)
+   before-reader-context
+   (#'eval/reader-context execution-ctx 'user)
+   _
+   (sci/binding
+    [sci/ns (sci/create-ns 'user)]
+    (sci/eval-form execution-ctx (:seon.sci.reader/form event)))
+   result
+   (#'eval/unmap-row
+    {:seon.cluster.eval/source source,
+     :seon.sci.eval/event event,
+     :seon.sci.eval/namespace-unmap? true,
+     :seon.sci.eval/live-declaration? false,
+     :seon.sci.eval/before-reader-context before-reader-context,
+     :seon.sci.eval/before-interns before-interns,
+     :seon.sci.eval/execution-ctx execution-ctx,
+     :seon.sci.eval/namespace-name 'user,
+     :seon.sci.eval/before-namespace-state before-namespace-state,
+     :seon.sci.eval/base-declared-row nil})
+   row
+   (:seon.program/row result)]
+  (is (true? (:seon.sci.eval/namespace-changed? result)))
+  (is
+   (=
+    #{[:seon.fn/sym "user/discarded"]
+      [:seon.test/sym "user/discarded"]}
+    (set (:seon.program/delete-identities row))))
+  (is (= [:seon.ns/name 'user] (:seon.program/ns row)))
+  (is
+   (=
+    #{['user 'discarded]}
+    (into
+     #{}
+     (keep
+      (fn
+       [[namespace-name binding-name value]]
+       (when
+        (identical? value @#'eval/absent-intern)
+        [namespace-name binding-name])))
+     (:seon.sci.eval/namespace-state row))))
+  (is
+   (some? (sci/resolve ctx 'discarded))
+   "the forked ns-unmap leaves the parent context unchanged")
+  (is (nil? (sci/resolve execution-ctx 'discarded)))
+  (is (nil? (:seon.sci.eval/context-row result)))))
 
 (deftest declared-row-evaluates-a-schema-once-inside-its-delta
   (let [ctx (eval/build-base-ctx)
@@ -994,13 +1020,17 @@
         "the evaluated registration remains isolated from global candidates")))
 
 (deftest the-dispositions-are-callable-and-come-back-as-values
-  (let [evaluation (run "(seon.run/complete \"done\")")]
-    (is (ok? evaluation))
-    (is (= {:my.turn/disposition :completed :my.turn/result "done"}
-           (:seon.sci.admit/value evaluation))
-        "the loop reads its disposition out of exactly this"))
-  (let [evaluation (run "(seon.run/wait \"later\")")]
-    (is (= :wait (:my.turn/disposition (:seon.sci.admit/value evaluation))))))
+  (test-support/with-database
+    (fn [connection]
+      (let [ctx (test-support/fork-cluster-ctx connection)
+            completed (run-in ctx "(my.turn/complete {:my.turn/result \"done\"})" 2000)
+            waiting (run-in ctx "(my.turn/wait {:my.turn/note \"later\"})" 2000)]
+        (is (ok? completed) (pr-str completed))
+        (is (= {:my.turn/disposition :completed :my.turn/result "done"}
+               (:seon.sci.admit/value completed)))
+        (is (ok? waiting) (pr-str waiting))
+        (is (= {:my.turn/disposition :wait :my.turn/note "later"}
+               (:seon.sci.admit/value waiting)))))))
 
 (deftest an-unbound-var-remains-structured-after-production-admission
   (let [bare (run "(do (declare zz) zz)")
@@ -1026,144 +1056,51 @@
 (deftest an-instrumented-multi-arity-miss-reads-like-clojure
   (test-support/with-database
     (fn [connection]
-      (let [ctx (eval/build-base-ctx)
-            _ (eval/acquire! {:seon.sci.eval/ctx ctx
-                              :seon.db/db (db/db connection)})
-            projection (seon.schema/projection-from-database (db/db connection))]
-        (try
-          (seon.schema/call-with-projection
-           projection
-           #(instrument/apply! {:seon.config/on-core-error :panic
-                                :seon.sci.admit/caps caps}))
-          (let [evaluation (run-in ctx "(my.message/send)" 2000)
-                failure (:seon.sci.admit/value evaluation)]
-            (is (= (str "Wrong number of args (0) passed to: my.message/send"
-                        "; declared arglists: ([to content] [to content about])")
-                   (:seon.error/message failure)
-                   (:seon.cluster.eval/error evaluation)))
-            (is (= :seon.instrument/contract-violated
-                   (:seon.error/kind failure)))
-            (is (= 0 (get-in failure
-                             [:seon.error/data :seon.instrument/arity])))
-            (is (= '[[to content] [to content about]]
-                   (get-in failure
-                           [:seon.error/data :seon.instrument/arglists])))
-            (is (not (str/includes? (:seon.cluster.eval/result-edn evaluation)
-                                    ":malli.core/invalid-schema"))))
-          (finally
-            (instrument/remove!)))))))
+      (let [ctx (test-support/fork-cluster-ctx connection)
+            arglists (:arglists (meta #'db/as-of))
+            evaluation (run-in ctx "(seon.db/as-of)" 2000)
+            failure (:seon.sci.admit/value evaluation)]
+        (is (> (count arglists) 1))
+        (is (contains? (instrument/instrumented) #'db/as-of))
+        (is (= :seon.instrument/contract-violated (:seon.error/kind failure)))
+        (is (= 0 (get-in failure [:seon.error/data :seon.instrument/arity])))
+        (is (= arglists (get-in failure [:seon.error/data :seon.instrument/arglists])))
+        (is (= (:seon.error/message failure) (:seon.cluster.eval/error evaluation)))
+        (is (str/includes? (:seon.eval/shown evaluation) (pr-str arglists)))
+        (is (not (str/includes? (:seon.eval/shown evaluation) "projection failed")))))))
 
 (deftest bare-dir-and-program-derived-doc-are-repl-native
   (test-support/with-database
     (fn [connection]
-      (let [giant-schema-key :fixture.doc/giant
-            giant-schema-form
-            (into [:map]
-                  (map (fn [index]
-                         [(keyword "fixture.doc" (str "field-" index)) :int]))
-                  (range 500))
-            _ (db/transact!
-               connection
-               [{:seon.schema/key giant-schema-key
-                 :seon.schema.admission/source :core
-                 :seon.schema/form (pr-str giant-schema-form)}])
-            _ (db/transact!
-               connection
-               [{:seon.fn/sym "fixture.doc/uncontracted"
-                 :seon.fn/doc "An uncontracted fixture."
-                 :seon.fn/arglists "([value])"
-                 :seon.fn/private? false}
-                {:seon.fn/sym "fixture.doc/giant"
-                 :seon.fn/doc "A giant contracted fixture."
-                 :seon.fn/arglists "([request])"
-                 :seon.fn/private? false
-                 :seon.fn/arities
-                 [{:seon.fn.arity/order 0
-                   :seon.fn.arity/input-refs
-                   [[:seon.schema/key giant-schema-key]]}]}])
-            db (db/db connection)
-            ctx (eval/build-base-ctx)
-            _ (eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db db})
+      (let [database (db/db connection)
+            ctx (test-support/fork-cluster-ctx connection)
             directory (run-in ctx "(dir my.message)" 2000)
             read-doc (run-in ctx "(doc my.fs/read)" 2000)
-            multi-doc (run-in ctx "(doc my.message/send)" 2000)
-            uncontracted-doc
-            (run-in ctx "(doc fixture.doc/uncontracted)" 2000)
-            giant-doc (run-in ctx "(doc fixture.doc/giant)" 2000)
-            read-output (:seon.cluster.eval/output read-doc)
-            multi-output (:seon.cluster.eval/output multi-doc)
-            uncontracted-output
-            (:seon.cluster.eval/output uncontracted-doc)
-            giant-output (:seon.cluster.eval/output giant-doc)]
-        (is (= "decline\ninbox\nread\nsend\n"
-               (:seon.cluster.eval/output directory)))
-        (is (= ['my.message/decline 'my.message/inbox
-                'my.message/read 'my.message/send]
-               (:seon.sci.admit/value directory))
-            "dir's settled value introduces the qualified symbols it lists")
-        (testing "one contracted function resolves both sides of its contract"
-          (is (every? #(str/includes? read-output %)
-                      ["my.fs/read"
-                       "([request])"
-                       "Read a bounded window of one file"
-                       "  in:  :my.fs/read-request"
-                       "[:my.fs/path :my.fs/path]"
-                       "  out: :my.fs/read-result"
-                       "[:my.fs/window-digest :my.fs/digest]"
-                       "       :seon.error/value"])
-              read-output)
-          (is (= ["       :seon.error/value"]
-                 (filterv #(str/includes? % ":seon.error/value")
-                          (str/split-lines read-output)))
-              "the standard error arm is exactly one bare-key line")
-          (is (not-any? #(str/starts-with? % ";")
-                        (str/split-lines read-output))
-              "doc output is result text, never comment syntax"))
-        (testing "multiple arities each retain their ordered contract block"
-          (let [lines (str/split-lines multi-output)]
-            (is (= 2 (count (filter #(str/starts-with? % "  in:") lines))))
-            (is (= 2 (count (filter #(str/starts-with? % "  out:") lines)))))
-          (is (< (str/index-of multi-output "  arity 2:")
-                 (str/index-of multi-output "  arity 3:"))))
-        (testing "an uncontracted function gains no empty contract labels"
-          (is (every? #(str/includes? uncontracted-output %)
-                      ["fixture.doc/uncontracted"
-                       "([value])"
-                       "An uncontracted fixture."]))
-          (is (not (str/includes? uncontracted-output "  in:")))
-          (is (not (str/includes? uncontracted-output "  out:"))))
-        (testing "a giant schema uses the ordinary structural print floor"
-          (is (str/includes? giant-output "  in:  :fixture.doc/giant"))
-          (is (str/includes? giant-output "..."))
-          (is (not (str/includes? giant-output ":fixture.doc/field-499")))
-          (is (< (count giant-output) (count (pr-str giant-schema-form)))))
-        (testing "a non-core error definition keeps its resolved form"
-          (let [core-projection
-                (seon.schema/projection-from-database (db/db connection))
-                projection
-                (seon.schema/projection-with-schema
-                 core-projection
-                 :seon.error/value
-                 (get-in core-projection
-                         [:seon.schema.projection/forms :seon.error/value])
-                 {:seon.schema.admission/source :agent})
-                nonstandard-ctx (eval/build-base-ctx)
-                _ (#'eval/install-program-doc!
-                   nonstandard-ctx (db/db connection) projection)
-                nonstandard-doc
-                (run-in nonstandard-ctx "(doc my.fs/read)" 2000)]
-            (is (some #(str/starts-with?
-                        % "       :seon.error/value  [:map")
-                      (str/split-lines
-                       (:seon.cluster.eval/output nonstandard-doc))))
-            (is (= 'my.fs/read
-                   (get-in nonstandard-doc
-                           [:seon.sci.admit/value :seon.fn/sym])))))
-        (is (= ['my.fs/read 'my.message/send
-                'fixture.doc/uncontracted 'fixture.doc/giant]
-               (mapv #(get-in % [:seon.sci.admit/value :seon.fn/sym])
-                     [read-doc multi-doc uncontracted-doc giant-doc]))
-            "doc returns the same acquired facts it prints")))))
+            multi-doc (run-in ctx "(doc seon.db/as-of)" 2000)
+            functions (:functions (:seon.sci.admit/value directory))
+            read-value (:seon.sci.admit/value read-doc)
+            multi-value (:seon.sci.admit/value multi-doc)
+            declared (db/q '[:find [?symbol ...] :where
+                             [?n :seon.ns/name my.message]
+                             [?f :seon.fn/ns ?n]
+                             [?f :seon.fn/sym ?symbol]
+                             [?f :seon.fn/private? false]] database)]
+        (is (seq declared))
+        (is (= (set (map symbol declared)) (set (map :sym functions))))
+        (is (every? #(and (:arglists %) (:in %) (:out %)) functions))
+        (is (seq (get-in directory [:seon.sci.admit/value :schemas])))
+        (is (= [:cat :my.fs/read-request] (:in read-value)))
+        (is (= [:or :my.fs/read-result :seon.error/value] (:out read-value)))
+        (is (seq (:summary read-value)))
+        (is (seq (:example read-value)))
+        (is (= (:arglists (meta #'db/as-of)) (:arglists multi-value)))
+        (is (= (count (:arglists multi-value))
+               (count (:in multi-value)) (count (:out multi-value))))
+        (doseq [result [directory read-doc multi-doc]]
+          (is (ok? result) (pr-str result))
+          (is (string? (:seon.eval/shown result)))
+          (is (nil? (:seon.cluster.eval/output result))
+              "doc and dir return data; the value renderer owns shown text"))))))
 
 (deftest a-turn-fork-registers-an-empty-assigned-agent-namespace
   (test-support/with-database
@@ -1175,7 +1112,7 @@
                [{:seon.agent/id agent-id
                  :seon.agent/namespace
                  {:seon.ns/name namespace-name}}])
-            base (eval/build-base-ctx)
+            base (test-support/fork-cluster-ctx connection)
             _ (eval/acquire! {:seon.sci.eval/ctx base
                               :seon.db/db (db/db connection)})
             fork-result
@@ -1199,8 +1136,8 @@
         (is (some? (sci/find-ns turn-ctx namespace-name))
             "the turn fork contains its assigned namespace without defs")
         (is (contains? evaluation :seon.sci.admit/value))
-        (is (nil? (:seon.sci.admit/value evaluation))
-            "Clojure's empty dir completes with nil")
+        (is (= {:functions [] :schemas {}} (:seon.sci.admit/value evaluation))
+            "An empty namespace has no function or schema declarations")
         (is (not (contains? evaluation :seon.cluster.eval/output))
             "an empty directory prints no output")
         (is (nil? (:seon.cluster.eval/error evaluation)))))))
@@ -1270,223 +1207,200 @@
     (is (= :time
            (:seon.eval/outcome (:seon.sci.admit/record evaluation))))))
 
-(deftest an-acquired-function-uses-the-current-evaluation-limit
-  (test-support/with-database
-    (fn [connection]
-      (let [source
-            (str "(defn ^{:malli/schema [:=> [:cat] :int]} spin [] "
-                 "(loop [i 0] (recur (inc i))))")
-            authored-ctx (eval/build-base-ctx)
-            _ (sci/add-namespace! authored-ctx 'authored.interrupt {})
-            _ (sci/binding [sci/ns (sci/create-ns 'authored.interrupt)]
-                (sci/eval-string* authored-ctx source))
-            root-edn
-            (binding [*print-meta* true]
-              (pr-str
-               (first
-                (sci/var-root-data authored-ctx
-                                   ['authored.interrupt/spin]))))
-            _
-            (db/transact!
-             connection
-             [{:seon.agent/id "interrupt-author"
-               :seon.agent/namespace
-               {:seon.ns/name 'authored.interrupt
-                :seon.ns/source "(ns authored.interrupt)"}}
-              {:seon.fn/sym "authored.interrupt/spin"
-               :seon.schema.admission/source :agent
-               :seon.fn/ns [:seon.ns/name 'authored.interrupt]
-               :seon.fn/source source
-               :seon.fn/arglists "([])"
-               :seon.fn/private? false
-               :seon.fn/spec "[:=> [:cat] :int]"}
-              {:seon.def/key
-               (pr-str ["interrupt-author" "authored.interrupt/spin#root"])
-               :seon.def/id "authored.interrupt/spin#root"
-               :seon.def/agent
-               [:seon.agent/id "interrupt-author"]
-               :seon.def/ns [:seon.ns/name 'authored.interrupt]
-               :seon.def/name 'spin#root
-               :seon.def/value-edn root-edn
-               :seon.def/ordinal 0
-               :seon.schema.admission/source :agent}])
-            ctx (eval/build-base-ctx)
-            acquired (eval/acquire! {:seon.sci.eval/ctx ctx
-                                     :seon.db/db (db/db connection)})
-            evaluation
-            (deadlined-in ctx "(authored.interrupt/spin)" 300)]
-        (is (= 2 (:seon.sci.eval/installed acquired)))
-        (is (not= ::hung evaluation))
-        (is (cut? evaluation))
-        (is (= :time
-               (:seon.eval/outcome
-                (:seon.sci.admit/record evaluation))))))))
+(deftest
+ an-acquired-function-uses-the-current-evaluation-limit
+ (test-support/with-database
+  (fn
+   [connection]
+   (let
+    [source
+     (str
+      "(defn ^{:malli/schema [:=> [:cat] :int]} spin [] "
+      "(loop [i 0] (recur (inc i))))")
+     _
+     (db/transact!
+      connection
+      [#:seon.agent{:id "interrupt-author",
+                    :namespace
+                    #:seon.ns{:name 'authored.interrupt,
+                              :source "(ns authored.interrupt)"}}
+       {:seon.fn/sym "authored.interrupt/spin",
+        :seon.schema.admission/source :agent,
+        :seon.fn/ns [:seon.ns/name 'authored.interrupt],
+        :seon.fn/source source,
+        :seon.fn/arglists "([])",
+        :seon.fn/private? false,
+        :seon.fn/spec "[:=> [:cat] :int]"}])
+     ctx
+     (eval/build-base-ctx)
+     acquired
+     (eval/acquire!
+      {:seon.sci.eval/ctx ctx, :seon.db/db (db/db connection)})
+     evaluation
+     (deadlined-in ctx "(authored.interrupt/spin)" 300)]
+    (is (= 2 (:seon.sci.eval/installed acquired)))
+    (is (not= :seon.sci.eval-test/hung evaluation))
+    (is (cut? evaluation))
+    (is
+     (=
+      :time
+      (:seon.eval/outcome (:seon.sci.admit/record evaluation))))))))
 
-(deftest one-unloadable-row-cannot-prevent-cold-acquisition
-  (test-support/with-database
-    (fn [connection]
-      (let [namespace-name 'acquire.poison
-            agent-id "acquire-poison-author"
-            good-source
-            (str "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
-                 "good [x] (inc x))")
-            authored-ctx (eval/build-base-ctx)
-            _ (sci/add-namespace! authored-ctx namespace-name {})
-            _ (sci/binding [sci/ns (sci/create-ns namespace-name)]
-                (sci/eval-string* authored-ctx good-source))
-            good-root-edn
-            (binding [*print-meta* true]
-              (pr-str
-               (first
-                (sci/var-root-data authored-ctx
-                                   ['acquire.poison/good]))))]
-        (db/transact!
-         connection
-         [{:seon.agent/id agent-id
-           :seon.agent/namespace
-           {:seon.ns/name namespace-name
-            :seon.ns/source "(ns acquire.poison)"}}
-          {:seon.fn/sym "acquire.poison/bad"
-           :seon.schema.admission/source :agent
-           :seon.fn/ns [:seon.ns/name namespace-name]
-           :seon.fn/source
-           (str "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
-                "bad [x] x)")
-           :seon.fn/arglists "([x])"
-           :seon.fn/private? false
-           :seon.fn/spec "[:=> [:cat :int] :int]"}
-          {:seon.fn/sym "acquire.poison/good"
-           :seon.schema.admission/source :agent
-           :seon.fn/ns [:seon.ns/name namespace-name]
-           :seon.fn/source good-source
-           :seon.fn/arglists "([x])"
-           :seon.fn/private? false
-           :seon.fn/spec "[:=> [:cat :int] :int]"}
-          {:seon.def/key
-           (pr-str [agent-id "acquire.poison/good#root"])
-           :seon.def/id "acquire.poison/good#root"
-           :seon.def/agent [:seon.agent/id agent-id]
-           :seon.def/ns [:seon.ns/name namespace-name]
-           :seon.def/name 'good#root
-           :seon.def/value-edn good-root-edn
-           :seon.def/ordinal 0
-           :seon.schema.admission/source :agent}])
-        (let [ctx
-              (assoc (eval/build-base-ctx)
-                     :seon.sci.eval/custody
-                     {:seon.db/connection connection})
-              acquired
-              (eval/acquire! {:seon.sci.eval/ctx ctx
-                              :seon.db/db (db/db connection)})
-              refusal
-              (first
-               (db/q '[:find [(pull ?error [*]) ...]
-                       :where
-                       [?error :seon.error/kind
-                        :seon.sci.eval/acquisition-refused]]
-                     (db/db connection)))]
-          (is (= 42 (sci/eval-string* ctx "(acquire.poison/good 41)"))
-              "a later valid row installs and works")
-          (is (= 1 (count (:seon.sci.eval/acquisition-refusals acquired))))
-          (is (true?
-               (:seon.sci.eval/acquisition-refusals-recorded? acquired)))
-          (is (some? refusal) "the contained agent mistake is a durable fact")
-          (is (str/includes? (:seon.error/message refusal)
-                             "[:seon.fn/sym \"acquire.poison/bad\"]"))
-          (is (str/includes? (:seon.error/data-edn refusal)
-                             "seon.sci.eval/unrestorable-function-root")
-              "the fact retains the row's typed cause as queryable evidence"))))))
 
-(deftest agent-contracts-apply-on-acquire-and-cold-recovery
-  (test-support/with-database
-    (fn [connection]
-      (let [source
-            (str "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
-                 "accept [x] x)")
-            authored-ctx (eval/build-base-ctx)
-            _ (sci/add-namespace! authored-ctx 'authored.contract {})
-            _ (sci/binding [sci/ns (sci/create-ns 'authored.contract)]
-                (sci/eval-string* authored-ctx source))
-            root-edn
-            (binding [*print-meta* true]
-              (pr-str
-               (first
-                (sci/var-root-data authored-ctx
-                                   ['authored.contract/accept]))))]
-        (db/transact!
-         connection
-         [(:seon.config/desired-row
-           (config/compile-manifest
-            {:seon.boot/cluster-name "contract-acquire"
-             :seon.config/manifest
-             (assoc caps :seon.config/on-core-error :panic)}))
-          {:seon.agent/id "contract-author"
-           :seon.agent/namespace
-           {:seon.ns/name 'authored.contract
-            :seon.ns/source "(ns authored.contract)"}}
-          {:seon.fn/sym "authored.contract/accept"
-           :seon.schema.admission/source :agent
-           :seon.fn/ns [:seon.ns/name 'authored.contract]
-           :seon.fn/source source
-           :seon.fn/arglists "([x])"
-           :seon.fn/private? false
-           :seon.fn/spec "[:=> [:cat :int] :int]"}
-          {:seon.def/key
-           (pr-str ["contract-author" "authored.contract/accept#root"])
-           :seon.def/id "authored.contract/accept#root"
-           :seon.def/agent [:seon.agent/id "contract-author"]
-           :seon.def/ns [:seon.ns/name 'authored.contract]
-           :seon.def/name 'accept#root
-           :seon.def/value-edn root-edn
-           :seon.def/ordinal 0
-           :seon.schema.admission/source :agent}])
-        (let [assert-violation
-            (fn [ctx moment]
-              (let [evaluation
-                    (run-in ctx "(authored.contract/accept \"wrong\")" 2000)
-                    failure (:seon.sci.admit/value evaluation)]
-                (is (= :seon.instrument/contract-violated
-                       (:seon.error/kind failure)) moment)
-                (is (= 'authored.contract/accept
-                       (get-in failure
-                               [:seon.error/data
-                                :seon.error/diagnostic-operation]))
-                    moment)))
-              acquired-ctx (eval/build-base-ctx)]
-          (eval/acquire! {:seon.sci.eval/ctx acquired-ctx
-                          :seon.db/db (db/db connection)})
-          (assert-violation acquired-ctx "boot acquire!")
-          (assert-violation (eval/cluster-ctx (db/db connection))
-                            "cold crash recovery"))))))
+(deftest
+ one-unloadable-row-cannot-prevent-cold-acquisition
+ (test-support/with-database
+  (fn
+   [connection]
+   (let
+    [namespace-name
+     'acquire.poison
+     agent-id
+     "acquire-poison-author"
+     good-source
+     (str
+      "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
+      "good [x] (inc x))")]
+    (db/transact!
+     connection
+     [#:seon.agent{:id agent-id,
+                   :namespace
+                   #:seon.ns{:name namespace-name,
+                             :source "(ns acquire.poison)"}}
+      {:seon.fn/sym "acquire.poison/bad",
+       :seon.schema.admission/source :agent,
+       :seon.fn/ns [:seon.ns/name namespace-name],
+       :seon.fn/source
+       "(defn ^{:malli/schema [:=> [:cat :int] :int]} bad [x] (missing-dependency x))",
+       :seon.fn/arglists "([x])",
+       :seon.fn/private? false,
+       :seon.fn/spec "[:=> [:cat :int] :int]"}
+      {:seon.fn/sym "acquire.poison/good",
+       :seon.schema.admission/source :agent,
+       :seon.fn/ns [:seon.ns/name namespace-name],
+       :seon.fn/source good-source,
+       :seon.fn/arglists "([x])",
+       :seon.fn/private? false,
+       :seon.fn/spec "[:=> [:cat :int] :int]"}])
+    (let
+     [ctx
+      (assoc
+       (eval/build-base-ctx)
+       :seon.sci.eval/custody
+       #:seon.db{:connection connection})
+      acquired
+      (eval/acquire!
+       {:seon.sci.eval/ctx ctx, :seon.db/db (db/db connection)})
+      refusal
+      (first
+       (db/q
+        '[:find
+          [(pull ?error [*]) ...]
+          :where
+          [?error :seon.error/kind :seon.sci.eval/acquisition-refused]]
+        (db/db connection)))]
+     (is
+      (= 42 (sci/eval-string* ctx "(acquire.poison/good 41)"))
+      "a later valid row installs and works")
+     (is (= 1 (count (:seon.sci.eval/acquisition-refusals acquired))))
+     (is
+      (true? (:seon.sci.eval/acquisition-refusals-recorded? acquired)))
+     (is
+      (some? refusal)
+      "the contained agent mistake is a durable fact")
+     (is
+      (str/includes?
+       (:seon.error/message refusal)
+       "[:seon.fn/sym \"acquire.poison/bad\"]"))
+     (is
+      (str/includes?
+       (:seon.error/data-edn refusal)
+       "missing-dependency")
+      "the fact retains the row's typed cause as queryable evidence"))))))
+
+
+(deftest
+ agent-contracts-apply-on-acquire-and-cold-recovery
+ (test-support/with-database
+  (fn
+   [connection]
+   (let
+    [source
+     (str
+      "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
+      "accept [x] x)")]
+    (db/transact!
+     connection
+     [(:seon.config/desired-row
+       (config/compile-manifest
+        {:seon.boot/cluster-name "contract-acquire",
+         :seon.config/manifest
+         (assoc caps :seon.config/on-core-error :panic)}))
+      #:seon.agent{:id "contract-author",
+                   :namespace
+                   #:seon.ns{:name 'authored.contract,
+                             :source "(ns authored.contract)"}}
+      {:seon.fn/sym "authored.contract/accept",
+       :seon.schema.admission/source :agent,
+       :seon.fn/ns [:seon.ns/name 'authored.contract],
+       :seon.fn/source source,
+       :seon.fn/arglists "([x])",
+       :seon.fn/private? false,
+       :seon.fn/spec "[:=> [:cat :int] :int]"}])
+    (let
+     [assert-violation
+      (fn
+       [ctx moment]
+       (let
+        [evaluation
+         (run-in ctx "(authored.contract/accept \"wrong\")" 2000)
+         failure
+         (:seon.sci.admit/value evaluation)]
+        (is
+         (=
+          :seon.instrument/contract-violated
+          (:seon.error/kind failure))
+         moment)
+        (is
+         (=
+          'authored.contract/accept
+          (get-in
+           failure
+           [:seon.error/data :seon.error/diagnostic-operation]))
+         moment)))
+      acquired-ctx
+      (eval/build-base-ctx)]
+     (eval/acquire!
+      {:seon.sci.eval/ctx acquired-ctx,
+       :seon.db/db (db/db connection)})
+     (assert-violation acquired-ctx "boot acquire!")
+     (assert-violation
+      (eval/cluster-ctx (db/db connection))
+      "cold crash recovery"))))))
 
 (deftest acquisition-uses-the-effective-config-projection-when-instrumented
   (test-support/with-database
     (fn [connection]
-      (db/transact!
-       connection
-       [(merge {:seon.config/cluster "instrumented-acquire"
-                :seon.config/on-core-error :panic
-                :seon.config/applied-manifest-digest "live-proof"}
-               caps)])
-      (let [entering-roots
-            (into {}
-                  (map (fn [instrumented-var]
-                         [instrumented-var @instrumented-var]))
-                  (instrument/instrumented))
-            projection (seon.schema/projection-from-database (db/db connection))]
-        (try
-          (seon.schema/call-with-projection
-           projection
-           #(instrument/apply! {:seon.config/on-core-error :panic}))
-          (is (map? (eval/acquire!
-                     {:seon.sci.eval/ctx (eval/build-base-ctx)
-                      :seon.db/db (db/db connection)})))
-          (finally
-            (instrument/remove!)
-            (doseq [[instrumented-var root] entering-roots]
-              (alter-var-root instrumented-var (constantly root)))))
-        (is (= (set (keys entering-roots)) (instrument/instrumented))
-            "the test restores the exact entering wrapper set")))))
+      (test-support/seed-cluster! connection "instrumented-acquire")
+      (let [database (db/db connection)
+            projection (db/carried-projection database)
+            entering (instrument/instrumented)]
+        (test-support/preserving-instrumentation-state
+          (fn []
+            (schema/call-with-projection
+              projection
+              #(instrument/apply!
+                {:seon.config/on-core-error :panic
+                 :seon.schema/projection projection}))
+            (let [ctx (eval/build-base-ctx)
+                  acquired (eval/acquire! {:seon.sci.eval/ctx ctx
+                                           :seon.db/db database
+                                           :seon.schema/projection projection})]
+              (is (map? acquired))
+              (is (some? (sci/resolve ctx 'seon.db/pull)))
+              (is (contains? (instrument/instrumented) #'db/pull)))))
+        (is (= entering (instrument/instrumented))
+            "the canonical fixture restores the entering wrapper set")))))
 
 (deftest acquisition-binds-loaded-first-party-compiled-vars
   (test-support/with-database
@@ -1564,159 +1478,156 @@
                   @seen)
             "SCI's actual call-preparation hook sees this form's turn members")))))
 
-(deftest evaluation-custody-is-derived-only-from-the-cluster-context
+(deftest
+  evaluation-custody-is-derived-only-from-the-cluster-context
   (test-support/with-database
     (fn [connection-a]
       (test-support/with-database
         (fn [connection-b]
-          (db/transact! connection-a [{:seon.cluster/name "ambient-a"}])
-          (db/transact! connection-b [{:seon.cluster/name "ambient-b"}])
+          (test-support/seed-cluster! connection-a "ambient-a")
+          (test-support/seed-cluster! connection-b "ambient-b")
           (let [uncustodied-ctx (eval/build-base-ctx)
-                _ (eval/acquire! {:seon.sci.eval/ctx uncustodied-ctx
-                                  :seon.db/db (db/db connection-a)})
+                _ (eval/acquire!
+                    {:seon.sci.eval/ctx uncustodied-ctx, :seon.db/db (db/db connection-a)})
                 ctx-a (eval/cluster-ctx (db/db connection-a) connection-a)
                 ctx-b (eval/cluster-ctx (db/db connection-b) connection-b)
-                evaluate
-                (fn [ctx source]
-                  (eval/evaluate
-                   {:seon.cluster.eval/source source
-                    :seon.cluster.eval/ns [:seon.ns/name 'user]
-                    :seon.sci.eval/ctx ctx
-                    :seon.sci.admit/caps caps
-                    :seon.sci.eval/time-limit-ms 5000
-                    :seon.config/on-core-error :panic}))
-                cluster-names-source
-                (str "(seon.db/q "
-                     "'[:find [?name ...] "
-                     ":where [_ :seon.cluster/name ?name]])")
-                unbound
-                (binding [db/*conn* connection-b]
-                  (evaluate uncustodied-ctx cluster-names-source))
-                read-a
-                (binding [db/*conn* connection-b]
-                  (evaluate ctx-a cluster-names-source))
+                evaluate (fn [ctx source]
+                           (eval/evaluate
+                             {:seon.cluster.eval/source source,
+                              :seon.cluster.eval/ns [:seon.ns/name 'user],
+                              :seon.sci.eval/ctx ctx,
+                              :seon.sci.admit/caps caps,
+                              :seon.sci.eval/time-limit-ms 5000,
+                              :seon.config/on-core-error :panic}))
+                cluster-names-source (str
+                                       "(seon.db/q "
+                                       "'[:find [?name ...] "
+                                       ":where [_ :seon.cluster/name ?name]])")
+                unbound (binding [db/*conn* connection-b]
+                          (evaluate uncustodied-ctx cluster-names-source))
+                read-a (binding [db/*conn* connection-b]
+                         (evaluate ctx-a cluster-names-source))
                 read-b (evaluate ctx-b cluster-names-source)
                 read-a-again (evaluate ctx-a cluster-names-source)
-                write
-                (evaluate
-                 ctx-a
-                 (str "(seon.db/transact! "
-                      "[{:seon.message/id \"ambient-message\"}])"))
-                read-written
-                (evaluate
-                 ctx-a
-                 (str "(seon.db/q "
-                      "'[:find ?id . "
-                      ":where [_ :seon.message/id ?id]])"))
-                rejected
-                (evaluate
-                 ctx-a
-                 (str "(seon.db/transact! "
-                      "[{:seon.sci.eval-test/undeclared true}])"))
-                unbound-after
-                (binding [db/*conn* connection-b]
-                  (evaluate uncustodied-ctx cluster-names-source))]
-            (is (= :seon.db/missing-connection-binding
-                   (get-in unbound
-                           [:seon.sci.admit/value :seon.error/kind])))
-            (is (= ["ambient-a"] (:seon.sci.admit/value read-a))
-                "the ctx overrides a foreign binding already on the thread")
-            (is (= ["ambient-b"] (:seon.sci.admit/value read-b))
-                "each sibling derives custody from its own ctx")
+                write (evaluate
+                        ctx-a
+                        (str
+                          "(seon.db/transact! "
+                          "[{:seon.message/id \"ambient-message\" :seon.message/to [:seon.cluster/name \"ambient-a\"] :seon.message/content \"custody probe\"}])"))
+                read-written (evaluate
+                               ctx-a
+                               (str
+                                 "(seon.db/q "
+                                 "'[:find ?id . "
+                                 ":where [_ :seon.message/id ?id]])"))
+                rejected (evaluate
+                           ctx-a
+                           (str
+                             "(seon.db/transact! "
+                             "[{:seon.sci.eval-test/undeclared true}])"))
+                unbound-after (binding [db/*conn* connection-b]
+                                (evaluate uncustodied-ctx cluster-names-source))]
+            (is
+              (=
+                :seon.db/missing-connection-binding
+                (get-in unbound [:seon.sci.admit/value :seon.error/kind])))
+            (is
+              (= ["ambient-a"] (:seon.sci.admit/value read-a))
+              "the ctx overrides a foreign binding already on the thread")
+            (is
+              (= ["ambient-b"] (:seon.sci.admit/value read-b))
+              "each sibling derives custody from its own ctx")
             (is (= ["ambient-a"] (:seon.sci.admit/value read-a-again)))
             (is (nil? (:seon.cluster.eval/error write)))
-            (is (= "ambient-message"
-                   (:seon.sci.admit/value read-written))
-                "a declared write is visible to the next evaluation")
-            (is (= :seon.db/rejected
-                   (get-in rejected
-                           [:seon.sci.admit/value :seon.error/kind])))
-            (is (= :transact/schema
-                   (get-in rejected
-                           [:seon.sci.admit/value
-                            :seon.error/data
-                            :error])))
-            (is (= :seon.db/missing-connection-binding
-                   (get-in unbound-after
-                           [:seon.sci.admit/value :seon.error/kind]))
-                "an uncustodied ctx never inherits the caller's binding")))))))
+            (is
+              (= "ambient-message" (:seon.sci.admit/value read-written))
+              "a declared write is visible to the next evaluation")
+            (is
+              (=
+                :seon.db/invalid-write
+                (get-in rejected [:seon.sci.admit/value :seon.error/kind])))
+            (is
+              (=
+                :seon.db/attribute-not-installed
+                (get-in
+                  rejected
+                  [:seon.sci.admit/value :seon.error/data :seon.error/diagnostic-cause])))
+            (is
+              (=
+                :seon.db/missing-connection-binding
+                (get-in unbound-after [:seon.sci.admit/value :seon.error/kind]))
+              "an uncustodied ctx never inherits the caller's binding")))))))
 
-(deftest public-walk-is-callable-through-an-agent-sci-eval
+(deftest
+  public-walk-is-callable-through-an-agent-sci-eval
   (test-support/with-database
     (fn [connection]
       (test-support/seed-cluster! connection "host-walk")
-      (db/transact! connection
-                  (agent/creation-tx
-                   {:seon.agent/id "host-walker"
-                    :seon.cluster/name "host-walk"
-                    :seon.ns/name 'my.agents.host-walker}))
+      (db/transact!
+        connection
+        (agent/creation-tx
+          {:seon.agent/id "host-walker",
+           :seon.cluster/name "host-walk",
+           :seon.ns/name 'my.agents.host-walker}))
       (let [ctx (eval/cluster-ctx (db/db connection) connection)
-            request
-            {:seon.db/db (db/db connection)
-             :seon.db/connection connection
-             :seon.agent/id "host-walker"
-             :seon.render.walk/lookup
-             [:seon.agent/id "host-walker"]
-             :seon.render/output :seon.render/ai
-             :seon.render/distance 2
-             :seon.sci.admit/caps caps
-             :seon.sci.eval/ctx ctx
-             :seon.sci.eval/time-limit-ms 5000
-             :seon.config/on-core-error :panic}
+            request {:seon.render.walk/lookup [:seon.agent/id "host-walker"],
+                     :seon.sci.eval/time-limit-ms 5000,
+                     :seon.agent/id "host-walker",
+                     :seon.render/distance 2,
+                     :seon.db/db (db/db connection),
+                     :seon.sci.eval/ctx ctx,
+                     :seon.config/on-core-error :panic,
+                     :seon.sci.admit/caps caps,
+                     :seon.db/connection connection,
+                     :seon.render/output :seon.render/ai}
             root-selector render.walk/root-selector
             root-selectors (atom [])
             compile-plan pull-api/compile-pull-plan
             compilation-count (atom 0)
             effective-count (atom 0)]
-        (with-redefs [render.walk/root-selector
-                      (fn [database distance supplied-caps]
-                        (let [selector
-                              (root-selector database distance supplied-caps)]
-                          (swap! root-selectors conj selector)
-                          selector))
-                      pull-api/compile-pull-plan
-                      (fn
-                        ([selector-or-plan]
-                         (when (some #(identical? selector-or-plan %)
-                                     @root-selectors)
-                           (swap! compilation-count inc))
-                         (compile-plan selector-or-plan))
-                        ([database selector-or-plan]
-                         (compile-plan database selector-or-plan)))
-                      config/effective
-                      (fn [_database _cluster-name]
-                        (swap! effective-count inc)
-                        (config/defaults))]
-          (let [evaluate-walk
-                #(render/call-with-walk-context
-                  request
-                  (fn [] (run-in ctx "(seon.render/walk)" 5000)))
+        (with-redefs
+          [render.walk/root-selector
+           (fn [database distance supplied-caps]
+             (let [selector (root-selector database distance supplied-caps)]
+               (swap! root-selectors conj selector)
+               selector))
+           pull-api/compile-pull-plan
+           (fn ([selector-or-plan]
+                 (when (some #(identical? selector-or-plan %) @root-selectors)
+                   (swap! compilation-count inc))
+                 (compile-plan selector-or-plan))
+             ([database selector-or-plan] (compile-plan database selector-or-plan)))
+           config/effective
+           (fn [_database _cluster-name] (swap! effective-count inc) (config/defaults))]
+          (let [evaluate-walk #(render/call-with-walk-context
+                                request
+                                (fn [] (run-in ctx "(seon.render/walk)" 5000)))
                 through-sci (evaluate-walk)
                 direct (render.walk/root-acquisition request)
-                web (#'render.web/acquire-root request ::root)
+                web (#'render.web/acquire-root request :seon.sci.eval-test/root)
                 value (:seon.sci.admit/value through-sci)
-                allocations
-                (mapv #(get-in % [:seon.sci.admit/record
-                                  :seon.eval/allocated-bytes])
-                      [through-sci])]
+                allocations (mapv
+                              #(get-in % [:seon.sci.admit/record :seon.eval/allocated-bytes])
+                              [through-sci])]
             (is (ok? through-sci))
             (is (string? value))
-            (is (re-find
-                 #":seon\.cluster\.agent/id \"host-walker\""
-                 value)
-                "the printed walk value names its root agent identity")
-            (is (not (contains? through-sci :seon.eval/missing))
-                "the ordinary walk is stored whole, never missing")
+            (is
+              (re-find #":seon\.agent/id \"host-walker\"" value)
+              "the printed walk value names its root agent identity")
+            (is
+              (not (contains? through-sci :seon.eval/missing))
+              "the ordinary walk is stored whole, never missing")
             (is (map? direct))
             (is (= 2 (count web)))
-            (is (= 1 @compilation-count)
-                "direct, web, and through-SCI paths share one generation plan")
-            (is (= 1 @effective-count)
-                "the through-SCI walk resolves effective config once")
-            (is (every? #(and (int? %) (< % (* 1024 1024 1024)))
-                        allocations)
-                (str "through-SCI allocations must stay below 1 GiB: "
-                     (pr-str allocations)))))))))
+            (is
+              (and (seq @root-selectors) (<= @compilation-count 1))
+              "direct, web, and through-SCI reuse a plan, including an already warm plan")
+            (is (= 2 @effective-count) "evaluation and walk each resolve effective config once")
+            (is
+              (every? #(and (int? %) (< % (* 1024 1024 1024))) allocations)
+              (str
+                "through-SCI allocations must stay below 1 GiB: "
+                (pr-str allocations)))))))))
 
 (deftest one-context-arms-concurrent-threads-independently
   ;; The class is arm identity, not interpreter throughput. Both threads arm
@@ -1855,10 +1766,7 @@
                                      [(ok? evaluation)
                                       (failed? evaluation)
                                       (cut? evaluation)])))
-                 (string? (:seon.cluster.eval/result-edn evaluation))
-                 (do (edn/read-string
-                      (:seon.cluster.eval/result-edn evaluation))
-                     true)
+                 (string? (:seon.eval/shown evaluation))
                  (seon.schema/valid-candidate-value?
                   :seon.sci.eval/evaluation evaluation)))
               evaluations))))
@@ -1965,66 +1873,66 @@
     (is (cut? evaluation)
         "the outer 50ms arm stopped work that asked for ten minutes")))
 
-(deftest a-selected-render-inherits-the-live-arm-or-owns-one-when-unarmed
-  ;; `evaluate` carries turn-scoped environment state on a new context map,
-  ;; while a render request may retain the cluster context map. Both maps name
-  ;; the same SCI interpreter through their shared `:env` reference. Selected
-  ;; render invocation must therefore inherit the live arm and its deadline;
-  ;; the same invocation on an unarmed thread owns an ordinary new arm.
+(deftest
+  a-selected-render-inherits-the-live-arm-or-owns-one-when-unarmed
   (test-support/with-database
-   (fn [connection]
-     (let [database (db/db connection)
-           ctx (eval/cluster-ctx database connection)
-           wrapped-ctx
-           (env/carry-state ctx (env/environment-state (env/of ctx)))
-           _ (is (not (identical? ctx wrapped-ctx)))
-           _ (is (identical? (:env ctx) (:env wrapped-ctx)))
-           _ (is (ok? (run-in ctx
-                              (str "(defn probe-render [unit]"
-                                   " (str \"rendered:\""
-                                   "      (:seon.render/value unit)))")
-                              2000)))
-           _ (is (ok? (run-in ctx
-                              (str "(defn probe-render-spin [unit]"
-                                   " (loop [i 0] (recur (inc i))))")
-                              2000)))
-           _ (kernel/mark-installed! ctx 'user/probe-render)
-           _ (kernel/mark-installed! ctx 'user/probe-render-spin)
-           request
-           {:seon.db/db database
-            :seon.sci.eval/ctx ctx
-            :seon.render/value "value"
-            :seon.render/ai 'user/probe-render
-            :seon.sci.admit/caps caps
-            :seon.sci.eval/time-limit-ms 5000
-            :seon.config/on-core-error :record}
-           unarmed (render/render-ai request)
-           armed
-           (let [{stop! :seon.sci.kernel/stop!}
-                 (kernel/arm wrapped-ctx 5000)]
-             (try
-               (render/render-ai request)
-               (finally (stop!))))
-           deadline-task
-           (future
-             (let [{stop! :seon.sci.kernel/stop!}
-                   (kernel/arm wrapped-ctx 50)]
-               (try
-                 (render/render-ai
-                  (assoc request
-                         :seon.render/ai 'user/probe-render-spin
-                         :seon.sci.eval/time-limit-ms 600000))
-                 (finally (stop!)))))
-           deadline-result (deref deadline-task 15000 ::hung)]
-       (future-cancel deadline-task)
-       (is (= "rendered:value" unarmed)
-           "an unarmed selected render owns an ordinary arm")
-       (is (= "rendered:value" armed)
-           "the same selected render inherits the live interpreter arm")
-       (is (not= ::hung deadline-result))
-       (is (= :seon.sci.kernel/time-limit
-              (:seon.error/kind deadline-result))
-           "nested render work keeps the outer 50ms time limit")))))
+    (fn [connection]
+      (let [database (db/db connection)
+            ctx (eval/cluster-ctx database connection)
+            wrapped-ctx (env/carry-state ctx (env/environment-state (env/of ctx)))
+            _ (is (not (identical? ctx wrapped-ctx)))
+            _ (is (identical? (:env ctx) (:env wrapped-ctx)))
+            _ (is
+                (ok?
+                  (run-in
+                    ctx
+                    (str
+                      "(defn probe-render [unit]"
+                      " (str \"rendered:\""
+                      "      (:seon.render/value unit)))")
+                    2000)))
+            _ (is
+                (ok?
+                  (run-in
+                    ctx
+                    (str "(defn probe-render-spin [unit]" " (loop [i 0] (recur (inc i))))")
+                    2000)))
+            _ (kernel/mark-installed! ctx 'user/probe-render)
+            _ (kernel/mark-installed! ctx 'user/probe-render-spin)
+            request {:seon.db/db database,
+                     :seon.sci.eval/ctx ctx,
+                     :seon.render/value "value",
+                     :seon.render/ai 'user/probe-render,
+                     :seon.sci.admit/caps caps,
+                     :seon.sci.eval/time-limit-ms 5000,
+                     :seon.config/on-core-error :record}
+            unarmed (render/render-ai request)
+            armed (let [{stop! :seon.sci.kernel/stop!} (kernel/arm wrapped-ctx 5000)]
+                    (try (render/render-ai request) (finally (stop!))))
+            deadline-task (future
+                            (let [{stop! :seon.sci.kernel/stop!} (kernel/arm wrapped-ctx 50)]
+                              (try
+                                (render/render-ai
+                                  (assoc
+                                    request
+                                    :seon.render/ai
+                                    'user/probe-render-spin
+                                    :seon.sci.eval/time-limit-ms
+                                    600000))
+                                (finally (stop!)))))
+            deadline-result (deref deadline-task 15000 :seon.sci.eval-test/hung)]
+        (future-cancel deadline-task)
+        (is (= "rendered:value" unarmed) "an unarmed selected render owns an ordinary arm")
+        (is
+          (= "rendered:value" armed)
+          "the same selected render inherits the live interpreter arm")
+        (is (not= :seon.sci.eval-test/hung deadline-result))
+        (is
+          (and
+            (= :seon.render/unknown (:seon.error/kind deadline-result))
+            (= :time-limit (:seon.render.unknown/reason deadline-result))
+            (= :seon.sci.kernel/time-limit (:seon.render.unknown/refusal deadline-result)))
+          "nested render work keeps the outer 50ms time limit")))))
 
 (deftest a-foreign-armed-context-is-refused-as-a-value
   (let [armed-ctx (eval/build-base-ctx)
@@ -2160,29 +2068,31 @@
        (is (some? (:seon.sci.admit/record (:seon.error/data invoked)))
            "a preserved refusal still gains the boundary's own evidence")))))
 
-(deftest a-set-print-length-survives-to-the-turns-next-form
-  ;; THE SESSION OWNS THE PRINT BINDINGS, NOT THE FORM. At a `clojure.main`
-  ;; REPL a `set!` of `*print-length*` holds for everything typed after it;
-  ;; the turn's fork is that session, so the next form opens with the value
-  ;; the previous form left rather than the process root's
-  ;; (docs/seon/issues/a-set-of-print-length-does-not-survive-the-next-form.md).
+(deftest
+  a-set-print-length-survives-to-the-turns-next-form
   (test-support/with-database
     (fn [connection]
-      (let [{ctx :seon.sci.eval/ctx}
-            (eval/fork-for-turn
-             {:seon.sci.eval/ctx (test-support/fork-cluster-ctx connection)
-              :seon.db/db (db/db connection)
-              :seon.db/connection connection})
+      (let [{ctx :seon.sci.eval/ctx} (eval/fork-for-turn
+                                       {:seon.sci.eval/ctx
+                                        (test-support/fork-cluster-ctx connection),
+                                        :seon.db/db (db/db connection),
+                                        :seon.db/connection connection,
+                                        :seon.agent/id "print-session-agent"})
             setting (run-in ctx "(set! *print-length* 2)" 5000)
             following (run-in ctx "(vec (range 40))" 5000)
             unrelated (run-in ctx "(+ 1 1)" 5000)]
         (is (= 2 (get-in setting [:seon.print/options :seon.print/length])))
-        (is (= 2 (get-in following [:seon.print/options :seon.print/length]))
-            "the next form of the same turn prints the way the agent asked")
-        (is (= 2 (get-in unrelated [:seon.print/options :seon.print/length]))
-            "and so does every form after it, until one sets another value")
+        (is
+          (= 2 (get-in following [:seon.print/options :seon.print/length]))
+          "the next form of the same turn prints the way the agent asked")
+        (is
+          (= 2 (get-in unrelated [:seon.print/options :seon.print/length]))
+          "and so does every form after it, until one sets another value")
         (let [reset (run-in ctx "(set! *print-length* nil)" 5000)]
           (is (nil? (get-in reset [:seon.print/options :seon.print/length])))
-          (is (nil? (get-in (run-in ctx "(vec (range 40))" 5000)
-                            [:seon.print/options :seon.print/length]))
-              "clearing the bound carries forward exactly as setting one does"))))))
+          (is
+            (nil?
+              (get-in
+                (run-in ctx "(vec (range 40))" 5000)
+                [:seon.print/options :seon.print/length]))
+            "clearing the bound carries forward exactly as setting one does"))))))

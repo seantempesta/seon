@@ -403,50 +403,39 @@
                 :datahike.query.source/symbol '$)])
              receipt
              (fn [id read-request dependency-plan]
-               {:seon.cluster.eval/id id
-                :seon.cluster.eval/read-evidence
-                [{:seon.db/source-argument-position 0
-                  :datahike.read/dependency-plan dependency-plan
-                  :datahike.read/revision
-                  {:datahike.read/attributes :all
-                   :datahike.read/cache-eligible? false}
-                  :seon.db/read-request read-request}]})]
-         (binding [*print-namespace-maps* false]
-           (db/transact! connection [(receipt "codec-forward" request plan)]))
-         (binding [*print-namespace-maps* true]
-           (db/transact! connection
-                         [(receipt "codec-reversed"
-                                   reversed-request
-                                   reversed-plan)]))
-         (let [selector '[* {:seon.cluster.eval/read-evidence [*]}]
-               forward-raw
-               (d/pull (db/db connection) selector
-                       [:seon.cluster.eval/id "codec-forward"])
-               reversed-raw
-               (d/pull (db/db connection) selector
-                       [:seon.cluster.eval/id "codec-reversed"])
-               forward
-               (binding [*print-namespace-maps* true]
-                 (db/pull (db/db connection) selector
-                          [:seon.cluster.eval/id "codec-forward"]))
-               reversed
+               {:db/id id
+                :seon.db/source-argument-position 0
+                :datahike.read/dependency-plan dependency-plan
+                :datahike.read/revision
+                {:datahike.read/attributes :all
+                 :datahike.read/cache-eligible? false}
+                :seon.db/read-request read-request})]
+         (let [forward-tx
                (binding [*print-namespace-maps* false]
-                 (db/pull (db/db connection) selector
-                          [:seon.cluster.eval/id "codec-reversed"]))
-               forward-raw-evidence
-               (first (:seon.cluster.eval/read-evidence forward-raw))
-               reversed-raw-evidence
-               (first (:seon.cluster.eval/read-evidence reversed-raw))
+                 (db/transact! connection [(receipt "codec-forward" request plan)]))
+               reversed-tx
+               (binding [*print-namespace-maps* true]
+                 (db/transact! connection
+                               [(receipt "codec-reversed" reversed-request reversed-plan)]))
+               selector '[*]
+               forward-id (get-in forward-tx [:tempids "codec-forward"])
+               reversed-id (get-in reversed-tx [:tempids "codec-reversed"])
+               forward-raw-evidence (d/pull (db/db connection) selector forward-id)
+               reversed-raw-evidence (d/pull (db/db connection) selector reversed-id)
                forward-evidence
-               (first (:seon.cluster.eval/read-evidence forward))
+               (binding [*print-namespace-maps* true]
+                 (db/pull (db/db connection) selector forward-id))
                reversed-evidence
-               (first (:seon.cluster.eval/read-evidence reversed))]
+               (binding [*print-namespace-maps* false]
+                 (db/pull (db/db connection) selector reversed-id))]
+           (is (:db-after forward-tx) (pr-str forward-tx))
+           (is (:db-after reversed-tx) (pr-str reversed-tx))
            (testing "the transaction codec emits one canonical representation"
              (is (= (:seon.db/read-request forward-raw-evidence)
                     (:seon.db/read-request reversed-raw-evidence)))
              (is (= (:datahike.read/dependency-plan forward-raw-evidence)
                     (:datahike.read/dependency-plan reversed-raw-evidence))))
-           (testing "wildcard receipt reads restore both exact logical values"
+           (testing "wildcard reads restore both exact logical values"
              (is (= request (:seon.db/read-request forward-evidence)))
              (is (= request (:seon.db/read-request reversed-evidence)))
              (is (= plan (:datahike.read/dependency-plan forward-evidence)))

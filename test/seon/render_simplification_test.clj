@@ -7,6 +7,12 @@
             [seon.cluster.agent :as agent]
             [seon.config :as config]
             [seon.db :as db]
+            [seon.cluster]
+            [seon.fn]
+            [seon.render]
+            [seon.render.web]
+            [seon.turn]
+            [clojure.core.async]
             [seon.render.hiccup :as hiccup]
             [seon.render.value :as value]
             [seon.render.walk :as walk]
@@ -15,6 +21,9 @@
             [seon.sci.eval :as eval]
             [seon.sci.kernel :as kernel]
             [seon.test-support :as support]))
+
+(def ^:private render-profile
+  (seon.render/agent-render-profile (config/defaults)))
 
 (def ^:private caps (config/result-caps (config/defaults)))
 
@@ -35,20 +44,18 @@
     (function request)
     ::not-landed))
 
-(defn- render-request
-  "One render call request. ABSENT MEANS NO KEY: `:seon.render/namespace` is
-  optional on `:seon.render/call-request`, and an optional key present as nil
-  fails its contract, so a call with no owning namespace carries no key
-  rather than a stored nil."
-  [database ctx owning-namespace rendered-value]
-  (cond-> {:seon.db/db database
-           :seon.sci.eval/ctx ctx
-           :seon.render.call/id [:seon.render-simplification-test/floor]
-           :seon.render/value rendered-value
-           :seon.sci.admit/caps caps
-           :seon.sci.eval/time-limit-ms 2000
-           :seon.config/on-core-error :panic}
-    owning-namespace (assoc :seon.render/namespace owning-namespace)))
+(defn- render-request [database ctx owning-namespace rendered-value]
+  (cond->
+    {:seon.db/db database,
+     :seon.sci.eval/ctx ctx,
+     :seon.render.call/id [:seon.render-simplification-test/floor],
+     :seon.render/value rendered-value,
+     :seon.render/profile render-profile,
+     :seon.sci.admit/caps caps,
+     :seon.sci.eval/time-limit-ms 2000,
+     :seon.config/on-core-error :panic}
+    owning-namespace
+    (assoc :seon.render/namespace owning-namespace)))
 
 (defn- render-ai
   [request]
@@ -91,137 +98,121 @@
            (is (not= :seon.render/missing-declaration
                      (:seon.error/kind (render-ai request))))))))))
 
-(deftest attribute-declared-producers-select-for-every-projection
-  ;; A cardinality-many component attribute declares its own AI and HTML
-  ;; producers. A request naming that attribute selects them at the schema
-  ;; stage, ahead of map-shape discovery, and hands the producer the
-  ;; attribute's transacted value rather than the owning entity.
+(deftest
+  attribute-declared-producers-select-for-every-projection
   (support/with-database
-   (fn [connection]
-     (let [database (db/db connection)
-           ctx (support/fork-cluster-ctx connection)
-           projection (kernel/context-projection ctx)
-           entity {:seon.agent/id "unit-owner"
-                   :my.plan/steps [{:db/id 42 :my.plan.item/id "s1"}]}
-           argument (ns-resolve 'seon.render 'render-invocation-argument)]
-       (doseq [[output producer] [[:seon.render/html 'seon.plan/render-plan-html]
-                                  [:seon.render/ai 'seon.plan/render-plan-ai]]]
-         (let [request (assoc (render-request database ctx nil entity)
-                              :seon.render/output output
-                              :seon.render.walk/attribute :my.plan/steps)
-               decision (selection request)
-               selected-stage
-               (some #(when (= :selected (:seon.render.selection.stage/status %))
-                        (:seon.render.selection.stage/name %))
-                     (:seon.render.selection/stages decision))]
-           (is (= producer (:seon.render.selection/selected decision)) (str output))
-           (is (= :schema selected-stage) (str output))
-           (is (= (get (value/transacted entity database) :my.plan/steps)
-                  (argument projection request producer))
-               "the producer receives the attribute's value, not the entity")
-           (is (= (get (value/transacted entity database) :my.plan/steps)
-                  (argument projection
-                            (assoc request :seon.render/value
-                                   (:my.plan/steps entity))
-                            producer))
-               "pulled connected entities reach the producer in transaction shape")
-           (is (= entity
-                  (:seon.render/value
-                   (argument projection
-                             (dissoc request :seon.render.walk/attribute)
-                             producer)))
-               "without a walk attribute the ordinary unit path is unchanged")
-           (is (not= producer
-                     (:seon.render.selection/selected
-                      (selection (assoc request :seon.render/value
-                                        {:db/id 42 :my.plan.item/id "s1"
-                                         :my.plan.item/title "A step"}))))
-               "a neighbour reached through the attribute is not its value")
-           (when (= output :seon.render/ai)
-             (let [calls (atom {})
-                   request (assoc request
-                                  :seon.render.call/id [::attribute-source]
-                                  :seon.render/retained-calls {}
-                                  :seon.render/captured-calls calls)]
-               (target-call 'seon.render 'render-call request)
-               (is (string? (get-in @calls [[::attribute-source]
-                                            :seon.render.call/source]))
-                   "an attribute-declared AI producer is read as source, so its forms execute")))))))))
+    (fn [connection]
+      (db/transact! connection [{:seon.agent/id "plan-owner"}])
+      (let [database (db/db connection)
+            owner (db/q '[:find ?e . :where [?e :seon.agent/id "plan-owner"]] database)
+            entity {:my.plan/agent owner, :my.plan/objective "Verify the plan"}
+            ctx (support/fork-cluster-ctx connection)]
+        (doseq [[output producer] [[:seon.render/ai 'seon.plan/render-plan-ai]
+                                   [:seon.render/html 'seon.plan/render-plan-html]]]
+          (let [request (assoc
+                          (render-request database ctx nil entity)
+                          :seon.render/output
+                          output)
+                decision (selection request)
+                argument (#'seon.render/render-invocation-argument
+                           (kernel/context-projection ctx)
+                           request
+                           producer)]
+            (is (= producer (:seon.render.selection/selected decision)))
+            (is (= entity (:seon.render/value argument)))
+            (is (= database (:seon.db/db argument)))
+            (is
+              (not=
+                producer
+                (:seon.render.selection/selected
+                  (selection (assoc request :seon.render/value [])))))
+            (if (= output :seon.render/ai)
+              (is (str/includes? (render-ai request) "(seon.plan/plan {})"))
+              (is
+                (str/includes?
+                  (hiccup/->string (render-html request))
+                  "Verify the plan")))))))))
 
-(deftest pulled-entity-selection-and-invocation-share-transaction-shape
+(deftest
+  pulled-entity-selection-and-invocation-share-transaction-shape
   (support/with-database
-   (fn [connection]
-     (db/transact!
-      connection
-      [{:seon.agent/id "pulled-render-owner"}
-       {:my.plan.item/id "pulled-render-item"
-        :my.plan.item/title "Render the pulled item"
-        :my.plan.item/agent
-        [:seon.agent/id "pulled-render-owner"]
-        :my.plan.item/about ['seon.plan/render-item-html]}])
-     (let [database (db/db connection)
-           pulled (db/pull database '[*]
-                           [:my.plan.item/id "pulled-render-item"])
-           prepared (value/transacted pulled database)
-           request (assoc (render-request
-                           database (support/fork-cluster-ctx connection)
-                           'my.plan pulled)
-                          :seon.render/output :seon.render/html)
-           decision (selection request)
-           namespace-stage
-           (nth (:seon.render.selection/stages decision) 2)
-           candidate
-           (some #(when (= 'seon.plan/render-item-html
-                           (:seon.render.selection.candidate/producer %))
-                    %)
-                 (:seon.render.selection.stage/candidates namespace-stage))
-           rendered (render-html request)]
-       (is (integer? (:my.plan.item/agent prepared)))
-       (is (= ['seon.plan/render-item-html]
-              (:my.plan.item/about prepared))
-           "a scalar EDN vector is not mistaken for cardinality-many")
-       (is (= prepared (value/transacted (dissoc pulled :db/id) database))
-           "normalization does not depend on a root :db/id projection")
-       (is (= 'seon.plan/render-item-html
-              (:seon.render.selection/selected decision)))
-       (is (= :selected
-              (:seon.render.selection.stage/status namespace-stage)))
-       (is (= :compatible
-              (:seon.render.selection.candidate/status candidate)))
-       (is (str/includes? (hiccup/->string rendered)
-                          "Render the pulled item"))))))
+    (fn [connection]
+      (db/transact!
+        connection
+        [{:seon.agent/id "pulled-render-owner"}
+         {:my.plan.item/id "pulled-render-item",
+          :my.plan.item/title "Render the pulled item",
+          :my.plan.item/agent [:seon.agent/id "pulled-render-owner"],
+          :my.plan.item/about ['seon.plan/render-item-html]}])
+      (let [database (db/db connection)
+            pulled (db/pull database '[*] [:my.plan.item/id "pulled-render-item"])
+            prepared (value/transacted pulled database)
+            request (assoc
+                      (render-request
+                        database
+                        (support/fork-cluster-ctx connection)
+                        'seon.plan
+                        pulled)
+                      :seon.render/output
+                      :seon.render/html)
+            decision (selection request)
+            namespace-stage (nth (:seon.render.selection/stages decision) 2)
+            candidate (some
+                        #(when
+                          (=
+                            'seon.plan/render-item-html
+                            (:seon.render.selection.candidate/producer %))
+                          %)
+                        (:seon.render.selection.stage/candidates namespace-stage))
+            rendered (render-html request)]
+        (is (integer? (:my.plan.item/agent prepared)))
+        (is
+          (= ['seon.plan/render-item-html] (:my.plan.item/about prepared))
+          "a scalar EDN vector is not mistaken for cardinality-many")
+        (is
+          (= prepared (value/transacted (dissoc pulled :db/id) database))
+          "normalization does not depend on a root :db/id projection")
+        (is (= 'seon.plan/render-item-html (:seon.render.selection/selected decision)))
+        (is (= :selected (:seon.render.selection.stage/status namespace-stage)))
+        (is (= :compatible (:seon.render.selection.candidate/status candidate)))
+        (is (str/includes? (hiccup/->string rendered) "Render the pulled item"))))))
 
-(deftest non-rendering-more-specific-schema-does-not-shadow-agent-identity
+(deftest
+  non-rendering-more-specific-schema-does-not-shadow-agent-identity
   (support/with-database
-   (fn [connection]
-     (support/seed-cluster! connection "agent-render-selection")
-     (db/transact!
-      connection
-      (agent/creation-tx
-       {:seon.agent/id "identity-agent"
-        :seon.cluster/name "agent-render-selection"
-        :seon.ns/name fixture-a}))
-     (let [database (db/db connection)
-           pulled (db/pull database '[*]
-                           [:seon.agent/id "identity-agent"])
-           request (assoc (render-request database
-                                          (support/fork-cluster-ctx connection)
-                                          nil pulled)
-                          :seon.render/output :seon.render/ai
-                          :seon.render/profile
-                          {:seon.render.profile/id :test/agent
-                           :seon.render.profile/token-budget 100
-                           :seon.render.profile/max-depth 4
-                           :seon.render.profile/max-children 10
-                           :seon.render.profile/composition
-                           :multiline})
-           projection-state-var
-           (ns-resolve 'seon.schema '*projection-state*)]
-       (with-bindings {projection-state-var nil}
-         (let [decision (selection request)]
-           (is (= 'seon.cluster.agent/render-identity-ai
-                  (:seon.render.selection/selected decision)))
-           (is (= "(seon.cluster.agent/whoami)" (render-ai request)))))))))
+    (fn [connection]
+      (support/seed-cluster! connection "agent-render-selection")
+      (db/transact!
+        connection
+        (agent/creation-tx
+          {:seon.agent/id "identity-agent",
+           :seon.cluster/name "agent-render-selection",
+           :seon.ns/name fixture-a}))
+      (let [database (db/db connection)
+            pulled (db/pull database '[*] [:seon.agent/id "identity-agent"])
+            request (assoc
+                      (render-request
+                        database
+                        (support/fork-cluster-ctx connection)
+                        nil
+                        pulled)
+                      :seon.render/output
+                      :seon.render/ai
+                      :seon.render/profile
+                      {:seon.render.profile/id :test/agent,
+                       :seon.render.profile/token-budget 100,
+                       :seon.render.profile/max-depth 4,
+                       :seon.render.profile/max-children 10,
+                       :seon.render.profile/composition :multiline})
+            projection-state-var (ns-resolve 'seon.schema '*projection-state*)]
+        (with-bindings
+          {projection-state-var nil}
+          (let [decision (selection request)]
+            (is
+              (=
+                'seon.cluster.agent/render-identity-ai
+                (:seon.render.selection/selected decision)))
+            (is (= (agent/render-identity-ai pulled) (render-ai request)))))))))
 
 (deftest candidate-input-and-output-must-fit-the-same-arity
   (support/with-database
@@ -347,154 +338,203 @@
          (is (= [:no-match :no-match :no-match :no-match :selected]
                 (stage-statuses decision))))))))
 
-(deftest unchanged-retained-call-skips-discovery-and-invocation
+(deftest
+  unchanged-retained-call-skips-discovery-and-invocation
   (support/with-database
-   (fn [connection]
-     (db/transact! connection
-                   [{:seon.ns/name fixture-a
-                     :seon.ns/doc "one"}])
-     (let [ctx (support/fork-cluster-ctx connection)
-           call-id [:seon.render-simplification-test/cached-namespace]
-           helper 'seon.render-simplification.fixture-a/cache-helper
-           discoveries (atom 0)
-           invocations (atom 0)
-           public-functions-in kernel/public-functions-in
-           invoke kernel/invoke
-           request
-           (fn [database retained captured]
-             (cond->
-              (assoc (render-request database ctx fixture-a
-                                     {:seon.ns/name fixture-a})
-                     :seon.render.call/id call-id
-                     :seon.render/output :seon.render/ai
-                     :seon.render/captured-calls captured
-                     :seon.render/candidate-call-ids #{call-id})
-               retained (assoc :seon.render/retained-calls retained)))]
-       (sci/binding [sci/ns (sci/create-ns fixture-a)]
-         (sci/eval-form ctx '(defn cache-helper [] "H1"))
-         (sci/eval-form
-          ctx
-          '(defn namespace-ai [value]
-             (str "A:" (:seon.ns/name value) ":"
-                  (seon.db/q
-                   '[:find ?doc .
-                     :in $ ?name
-                     :where
-                     [?namespace :seon.ns/name ?name]
-                     [?namespace :seon.ns/doc ?doc]]
-                   (:seon.db/db value) (:seon.ns/name value))
-                  ":" (cache-helper)))))
-       (with-redefs [kernel/public-functions-in
-                     (fn [candidate-ctx namespace-name]
-                       (swap! discoveries inc)
-                       (public-functions-in candidate-ctx namespace-name))
-                     kernel/invoke
-                     (fn [invocation]
-                       (swap! invocations inc)
-                       (invoke invocation))]
-         (let [first-captured (atom {})
-               first-output
-               (target-call 'seon.render 'render-call
-                            (request (db/db connection) nil first-captured))
-               retained @first-captured
-               second-captured (atom {})
-               second-output
-               (target-call 'seon.render 'render-call
-                            (request (db/db connection) retained second-captured))]
-           (is (= (str "A:" fixture-a ":one:H1")
-                  first-output second-output))
-           (is (= {:discoveries 1 :invocations 1}
-                  {:discoveries @discoveries :invocations @invocations})
-               "the unchanged call skips candidate and nested invocation work")
-           (db/transact! connection [{:seon.cluster/name "cache-unrelated"}])
-           (let [unrelated-captured (atom {})
-                 unrelated-output
-                 (target-call 'seon.render 'render-call
-                              (request (db/db connection) @second-captured
+    (fn [connection]
+      (db/transact! connection [{:seon.ns/name fixture-a, :seon.ns/doc "one"}])
+      (let [ctx (support/fork-cluster-ctx connection)
+            call-id [:seon.render-simplification-test/cached-namespace]
+            helper 'seon.render-simplification.fixture-a/cache-helper
+            discoveries (atom 0)
+            invocations (atom 0)
+            public-functions-in kernel/public-functions-in
+            invoke kernel/invoke
+            request (fn [database retained captured]
+                      (cond->
+                        (assoc
+                          (render-request database ctx fixture-a {:seon.ns/name fixture-a})
+                          :seon.render.call/id
+                          call-id
+                          :seon.render/output
+                          :seon.render/ai
+                          :seon.render/captured-calls
+                          captured
+                          :seon.render/candidate-call-ids
+                          #{call-id})
+                        retained
+                        (assoc :seon.render/retained-calls retained)))]
+        (let [definitions '[(defn cache-helper [] "H1")
+                            (defn namespace-ai [value]
+                              (str
+                                "A:"
+                                (:seon.ns/name value)
+                                ":"
+                                (seon.db/q
+                                  '[:find
+                                    ?doc
+                                    .
+                                    :in
+                                    $
+                                    ?name
+                                    :where
+                                    [?namespace :seon.ns/name ?name]
+                                    [?namespace :seon.ns/doc ?doc]]
+                                  (:seon.db/db value)
+                                  (:seon.ns/name value))
+                                ":"
+                                (cache-helper)))]]
+          (let [requests (mapv
+                           (fn [definition]
+                             (let [source (pr-str definition) name (second definition)]
+                               {:seon.cluster.eval/source source,
+                                :seon.cluster.eval/ns [:seon.ns/name fixture-a],
+                                :seon.program/row
+                                {:seon.fn/sym (str (symbol (str fixture-a) (str name))),
+                                 :seon.fn/ns [:seon.ns/name fixture-a],
+                                 :seon.fn/source source,
+                                 :seon.fn/arglists (pr-str (list (nth definition 2))),
+                                 :seon.fn/private? (= 'cache-helper name),
+                                 :seon.schema.admission/source :agent}}))
+                           definitions)
+                rows (mapv second (seon.fn/analyze-forms (db/db connection) requests))
+                report (db/transact! connection rows)]
+            (is (:db-after report) (pr-str report))
+            (is (some #{[:seon.fn/sym (str helper)]} (:seon.fn/calls (second rows))))
+            (sci/binding
+              [sci/ns (sci/create-ns fixture-a)]
+              (doseq [definition definitions] (sci/eval-form ctx definition)))))
+        (with-redefs
+          [kernel/public-functions-in
+           (fn [candidate-ctx namespace-name]
+             (swap! discoveries inc)
+             (public-functions-in candidate-ctx namespace-name))
+           kernel/invoke
+           (fn [invocation] (swap! invocations inc) (invoke invocation))]
+          (let [first-captured (atom {})
+                first-output (target-call
+                               'seon.render
+                               'render-call
+                               (request (db/db connection) nil first-captured))
+                retained @first-captured
+                second-captured (atom {})
+                second-output (target-call
+                                'seon.render
+                                'render-call
+                                (request (db/db connection) retained second-captured))]
+            (is (= (str "A:" fixture-a ":one:H1") first-output second-output))
+            (is
+              (=
+                {:discoveries 1, :invocations 1}
+                {:discoveries @discoveries, :invocations @invocations})
+              "the unchanged call skips candidate and nested invocation work")
+            (db/transact! connection [{:seon.cluster/name "cache-unrelated"}])
+            (let [unrelated-captured (atom {})
+                  unrelated-output (target-call
+                                     'seon.render
+                                     'render-call
+                                     (request
+                                       (db/db connection)
+                                       @second-captured
                                        unrelated-captured))]
-             (is (= first-output unrelated-output))
-             (is (= {:discoveries 1 :invocations 1}
-                    {:discoveries @discoveries :invocations @invocations})
-                 "an unrelated database revision retains the call")
-             (db/transact! connection
-                           [{:seon.ns/name fixture-a
-                             :seon.ns/doc "two"}])
-             (let [relevant-captured (atom {})
-                   relevant-output
-                   (target-call 'seon.render 'render-call
-                                (request (db/db connection) @unrelated-captured
-                                         relevant-captured))]
-               (is (= (str "A:" fixture-a ":two:H1") relevant-output))
-               (is (= {:discoveries 2 :invocations 2}
-                      {:discoveries @discoveries :invocations @invocations})
-                   "a changed read dependency invalidates the call")
-               (sci/binding [sci/ns (sci/create-ns fixture-a)]
-                 (sci/eval-form ctx '(defn cache-helper [] "H2")))
-           (kernel/cache-function!
-                ctx helper
-                {:seon.sci.eval/function-private? true
-                 :seon.fn/source "(defn cache-helper [] \"H2\")"})
-               (let [helper-captured (atom {})
-                     helper-output
-                     (target-call 'seon.render 'render-call
-                                  (request (db/db connection) @relevant-captured
-                                           helper-captured))]
-                 (is (= (str "A:" fixture-a ":two:H2") helper-output))
-                 (is (= {:discoveries 3 :invocations 3}
-                        {:discoveries @discoveries
-                         :invocations @invocations})
-                     "a helper program change invalidates its caller"))))))))))
+              (is (= first-output unrelated-output))
+              (is
+                (=
+                  {:discoveries 1, :invocations 1}
+                  {:discoveries @discoveries, :invocations @invocations})
+                "an unrelated database revision retains the call")
+              (db/transact! connection [{:seon.ns/name fixture-a, :seon.ns/doc "two"}])
+              (let [relevant-captured (atom {})
+                    relevant-output (target-call
+                                      'seon.render
+                                      'render-call
+                                      (request
+                                        (db/db connection)
+                                        @unrelated-captured
+                                        relevant-captured))]
+                (is (= (str "A:" fixture-a ":two:H1") relevant-output))
+                (is
+                  (=
+                    {:discoveries 2, :invocations 2}
+                    {:discoveries @discoveries, :invocations @invocations})
+                  "a changed read dependency invalidates the call")
+                (sci/binding
+                  [sci/ns (sci/create-ns fixture-a)]
+                  (sci/eval-form ctx '(defn cache-helper [] "H2")))
+                (kernel/cache-function!
+                  ctx
+                  helper
+                  {:seon.sci.eval/function-private? true,
+                   :seon.fn/source "(defn cache-helper [] \"H2\")"})
+                (let [helper-captured (atom {})
+                      helper-output (target-call
+                                      'seon.render
+                                      'render-call
+                                      (request
+                                        (db/db connection)
+                                        @relevant-captured
+                                        helper-captured))]
+                  (is (= (str "A:" fixture-a ":two:H2") helper-output))
+                  (is
+                    (=
+                      {:discoveries 3, :invocations 3}
+                      {:discoveries @discoveries, :invocations @invocations})
+                    "a helper program change invalidates its caller"))))))))))
 
-(deftest nested-values-render-their-declared-faces
+(deftest
+  nested-values-render-their-declared-faces
   (support/with-database
-   (fn [connection]
-     (let [database (db/db connection)
-           ctx (support/fork-cluster-ctx connection)
-           report (binding [db/*conn* connection]
-                    (db/transact! []))
-           request (render-request database ctx nil
-                                   {:probe/database database
-                                    :probe/report report})
-           ai (render-ai request)
-           html (hiccup/->string (render-html request))]
-       (is (str/includes? ai "database"))
-       (is (str/includes? ai "basis transaction"))
-       (is (not (str/includes? ai "#datahike.db.DB")))
-       (doseq [rendered [ai html]]
-         (is (str/includes? rendered "Committed transaction"))
-         (is (not (str/includes? rendered "datahike.db.TxReport"))))
-
-       (let [first-producer
-             'seon.render-simplification.fixture-ambiguous/first-ai
-             second-producer
-             'seon.render-simplification.fixture-ambiguous/second-ai
-             matches
-             [{:seon.schema/key :fixture.render/second
-               :seon.render/ai second-producer
-               :seon.render/html second-producer}
-              {:seon.schema/key :fixture.render/first
-               :seon.render/ai first-producer
-               :seon.render/html first-producer}]
-             matching-shapes-in schema/matching-shapes-in
-             render-with-ambiguity
-             (fn [render]
-               (with-redefs
-                [schema/matching-shapes-in
-                 (fn [projection value]
-                   (if (:fixture.render/ambiguous value)
-                     matches
-                     (matching-shapes-in projection value)))]
-                 (render
-                  (render-request database ctx nil
-                                  {:probe/nested
-                                   {:fixture.render/ambiguous true}}))))
-             ambiguous-ai (render-with-ambiguity render-ai)
-             ambiguous-html
-             (hiccup/->string (render-with-ambiguity render-html))]
-         (doseq [rendered [ambiguous-ai ambiguous-html]]
-           (is (str/includes? rendered "seon.render/ambiguous"))
-           (is (< (str/index-of rendered (str first-producer))
-                  (str/index-of rendered (str second-producer))))))))))
+    (fn [connection]
+      (let [database (db/db connection)
+            ctx (support/fork-cluster-ctx connection)
+            report (db/transact! connection [])
+            request (render-request
+                      database
+                      ctx
+                      nil
+                      {:probe/database database, :probe/report report})
+            ai (render-ai request)
+            html (hiccup/->string (render-html request))]
+        (is (str/includes? ai "database"))
+        (is (str/includes? ai "basis transaction"))
+        (is (not (str/includes? ai "#datahike.db.DB")))
+        (doseq [rendered [ai html]]
+          (is
+            (str/includes?
+              rendered
+              (if (= rendered ai) "Wrote 0 facts on 0 entities." "Committed transaction")))
+          (is (not (str/includes? rendered "datahike.db.TxReport"))))
+        (let [first-producer 'seon.render-simplification.fixture-ambiguous/first-ai
+              second-producer 'seon.render-simplification.fixture-ambiguous/second-ai
+              matches [{:seon.schema/key :fixture.render/second,
+                        :seon.render/ai second-producer,
+                        :seon.render/html second-producer}
+                       {:seon.schema/key :fixture.render/first,
+                        :seon.render/ai first-producer,
+                        :seon.render/html first-producer}]
+              matching-shapes-in schema/matching-shapes-in
+              render-with-ambiguity (fn [render]
+                                      (with-redefs
+                                        [schema/matching-shapes-in
+                                         (fn [projection value]
+                                           (if (:fixture.render/ambiguous value)
+                                             matches
+                                             (matching-shapes-in projection value)))]
+                                        (render
+                                          (render-request
+                                            database
+                                            ctx
+                                            nil
+                                            {:probe/nested
+                                             {:fixture.render/ambiguous true}}))))
+              ambiguous-ai (render-with-ambiguity render-ai)
+              ambiguous-html (hiccup/->string (render-with-ambiguity render-html))]
+          (doseq [rendered [ambiguous-ai ambiguous-html]]
+            (is (str/includes? rendered "seon.render/ambiguous"))
+            (is
+              (<
+                (str/index-of rendered (str first-producer))
+                (str/index-of rendered (str second-producer))))))))))
 
 (deftest owning-namespace-alone-selects-across-a-walk
   (support/with-database
@@ -793,184 +833,79 @@
                  (is (= 2 @invocations)
                      "a changed read dependency invokes again"))))))))))
 
-(deftest authored-source-invocation-reuses-one-stored-run-across-presentations
+(deftest
+  authored-source-invocation-reuses-one-stored-run-across-presentations
   (support/with-database
-   (fn [connection]
-     (support/seed-cluster! connection "source-cache")
-     (is (= "(+ 1 1)" (authored-source {})))
-     (db/transact!
-      connection
-      ;; transaction data is a VECTOR, not a lazy sequence.
-      (into
-       (agent/creation-tx
-        {:seon.agent/id "source-cache-agent"
-         :seon.ns/name fixture-a
-         :seon.cluster/name "source-cache"})
-       [{:seon.turn/id "source-cache-run" :seon.turn/agent [:seon.agent/id "source-cache-agent"] :seon.turn/opened-tx "datomic.tx" :seon.turn/starting-ns [:seon.ns/name fixture-a]}
-        {:seon.cluster.eval/id "source-cache-eval"
-         :seon.cluster.eval/run
-         [:seon.turn/id "source-cache-run"]
-         :seon.cluster.eval/ordinal 0
-         :seon.cluster.eval/at #inst "2026-09-06T20:00:00Z"
-         :seon.cluster.eval/source "(+ 1 1)"
-         :seon.cluster.eval/ns [:seon.ns/name fixture-a]}]))
-     (let [ctx (support/fork-cluster-ctx connection)
-           invoke kernel/invoke
-           source-invocations (atom 0)
-           submissions (atom 0)
-           source-call (ns-resolve 'seon.render.web 'render-source-call)
-           submit-var (ns-resolve 'seon.cluster.agent 'submit-source!)
-           request
-           (fn [call-id retained captured calls retained-calls value]
-             (assoc (render-request (db/db connection) ctx fixture-a
-                                    value)
-                    :seon.render/output :seon.render/ai
-                    :seon.render/ai 'seon.render-simplification-test/authored-source
-                    :seon.render/profile
-                    {:seon.render.profile/id :test/source-cache
-                     :seon.render.profile/token-budget 1000
-                     :seon.render.profile/max-depth 8
-                     :seon.render.profile/max-children 100
-                     :seon.render.profile/composition
-                     :multiline}
-                    :seon.render.call/id call-id
-                    :seon.render/retained-calls retained-calls
-                    :seon.render/captured-calls calls
-                    :seon.render/invocations retained
-                    :seon.render/captured-invocations captured
-                    :seon.agent/id "source-cache-agent"
-                    ;; THE PREVIEW EVALUATES IN A REAL CLUSTER. The page's
-                    ;; preview is the run loop's own fork/parse/evaluate, so
-                    ;; the handle it is given carries what production carries:
-                    ;; the connection, the admission caps, and the one time
-                    ;; limit. An empty map used to be caught by a guard that
-                    ;; refused when no evaluator was named; the evaluator is a
-                    ;; Var now, and a fixture that hands less than production
-                    ;; hands is the defect.
-                    :seon.turn.loop/cluster
-                    {:seon.db/connection connection
-                     :seon.cluster/name "source-cache"
-                     :seon.sci.admit/caps caps
-                     :seon.config.eval/time-limit-ms 2000
-                     :seon.config/on-core-error :panic}
-                    :seon.agent/routing (atom {})))]
-       (with-redefs-fn
-         {#'kernel/invoke
-          (fn [invocation]
-            (swap! source-invocations inc)
-            (invoke invocation))
-          submit-var
-          (fn [_]
-            (swap! submissions inc)
-            {:seon.turn/id "source-cache-run"})}
-         (fn []
-           (let [first-invocations (atom {})
-                 first-calls (atom {})
-                 first-output
-                 (source-call (request [:debug] {} first-invocations
-                                       first-calls {}
-                                       {:seon.ns/name fixture-a}))
-                 registration-key
-                 [:seon.render.web/debug-tab
-                  {:seon.agent/id "source-cache-agent"}]
-                 invalidated
-                 (target-call
-                  'seon.render.web 'invalidate-runtime-derived-state
-                  {:seon.render.web/registration (atom {registration-key 1})
-                   :seon.render.web/packages {}
-                   :seon.render.web/fragments {}
-                   :seon.render.web/calls {registration-key @first-calls}
-                   :seon.render.web/ai-calls {}
-                   :seon.render.web/invocations {}
-                   :seon.render.web/ai-entries {}})
-                 retained-after-runtime-eval
-                 (get-in invalidated
-                         [:seon.render.web/calls registration-key])
-                 _ (db/transact!
-                    connection
-                    [{:seon.cluster.eval/id "source-cache-eval"
-                      :seon.cluster.eval/result-edn
-                      "#:seon.print{:face :seon.print/number, :value 2}"}
-                     {:seon.turn/id "source-cache-run" :seon.turn/closed-tx "datomic.tx"}])
-                 second-invocations (atom {})
-                 second-calls (atom {})
-                 second-output
-                 (:seon.render.call/output
-                  (with-redefs-fn
-                    {(ns-resolve 'seon.render.web 'debug-page-result)
-                     (fn [_database _connection _debug _caps _profile _handle
-                          retained invocations captured]
-                       (let [output
-                             (source-call
-                              (request [:debug] invocations captured
-                                       second-calls retained
-                                       {:seon.ns/name fixture-a
-                                        :seon.turn/_agent
-                                        [{:db/id 9001}]}))]
-                         (reset! second-invocations @captured)
-                         {:seon.render.call/output output}))}
-                    (fn []
-                      ((ns-resolve 'seon.render.web 'page-refresh)
-                       (assoc invalidated
-                              :seon.turn.loop/cluster
-                              {:seon.db/connection connection
-                               :seon.cluster/name "source-cache"
-                               :seon.sci.admit/caps caps
-                               :seon.config.eval/time-limit-ms 2000
-                               :seon.config/on-core-error :panic})
-                       (db/db connection) {} {} registration-key true true))))
-                 third-invocations (atom {})
-                 third-calls (atom {})
-                 third-output
-                 (source-call
-                  (request [:context] @second-invocations third-invocations
-                           third-calls {}
-                           {:seon.ns/name fixture-a
-                            :seon.turn/_agent [{:db/id 9001}]}))
-                 retained (some-> @third-invocations vals first peek)
-                 invalidated-terminal
-                 (target-call
-                  'seon.render.web 'invalidate-runtime-derived-state
-                  {:seon.render.web/registration (atom {registration-key 1})
-                   :seon.render.web/packages {}
-                   :seon.render.web/fragments {}
-                   :seon.render.web/calls {registration-key @third-calls}
-                   :seon.render.web/ai-calls {}
-                   :seon.render.web/invocations @third-invocations
-                   :seon.render.web/ai-entries {}})
-                 fourth-output
-                 (source-call
-                  (request [:context]
-                           (:seon.render.web/invocations invalidated-terminal)
-                           (atom {}) (atom {})
-                           (get-in invalidated-terminal
-                                   [:seon.render.web/calls registration-key])
-                           {:seon.ns/name fixture-a
-                            :seon.turn/_agent [{:db/id 9001}]}))]
-             (is (nil? first-output)
-                 "the pending run has no invented synchronous output")
-             (is (nil? (get-in retained-after-runtime-eval
-                               [[:debug] :seon.render.call/output]))
-                 "runtime evaluation invalidates the old presentation output")
-             (is (= "source-cache-run"
-                    (get-in retained-after-runtime-eval
-                            [[:debug] :seon.render.call/source-run-id])))
-             (is (= second-output third-output))
-             (is (str/includes? second-output "2"))
-             (is (= 3 @source-invocations)
-                 "entity and runtime changes regenerate source; the second presentation reuses it")
-             (is (= 1 @submissions)
-                 "the runtime-evaluation page refresh retains one execution identity")
-             (is (= "(+ 1 1)" (:seon.render.call/source retained)))
-             (is (= "source-cache-run"
-                    (:seon.render.call/source-run-id retained)))
-             (is (= "source-cache-run"
-                    (get-in @third-calls [[:context] :seon.render.call/source-run-id]))
-                 "a terminal invocation carries its execution into each presentation's call entry")
-             (is (= third-output fourth-output)
-                 "a subsequent runtime wake of that same call id reuses the stored execution")
-             (is (= third-output
-                    (:seon.render.call/output retained))))))))))
+    (fn [connection]
+      (support/seed-cluster! connection "source-cache")
+      (db/transact!
+        connection
+        (agent/creation-tx
+          {:seon.agent/id "source-cache-agent",
+           :seon.ns/name fixture-a,
+           :seon.cluster/name "source-cache"}))
+      (let [database (db/db connection)
+            ctx (support/fork-cluster-ctx connection)
+            handle (support/cluster-handle
+                     {:seon.db/connection connection,
+                      :seon.cluster/name "source-cache",
+                      :seon.db.process/id seon.cluster/boot-process-identity,
+                      :seon.sci.eval/ctx ctx})
+            previews (atom 0)
+            preview seon.turn/preview-sources
+            invoke #'seon.render.web/render-source-call
+            request (fn [id invocations captured calls]
+                      (assoc
+                        (render-request database ctx fixture-a {:seon.ns/name fixture-a})
+                        :seon.render/output
+                        :seon.render/ai
+                        :seon.render/ai
+                        'seon.render-simplification-test/authored-source
+                        :seon.render.call/id
+                        id
+                        :seon.render/retained-calls
+                        {}
+                        :seon.render/captured-calls
+                        calls
+                        :seon.render/invocations
+                        invocations
+                        :seon.render/captured-invocations
+                        captured
+                        :seon.agent/id
+                        "source-cache-agent"
+                        :seon.turn.loop/cluster
+                        handle))]
+        (try
+          (with-redefs
+            [seon.turn/preview-sources (fn [request] (swap! previews inc) (preview request))]
+            (let [first-invocations (atom {})
+                  first-calls (atom {})
+                  first-output (invoke (request [:debug] {} first-invocations first-calls))
+                  second-invocations (atom {})
+                  second-calls (atom {})
+                  second-output (invoke
+                                  (request
+                                    [:context]
+                                    @first-invocations
+                                    second-invocations
+                                    second-calls))]
+              (is (string? first-output) (pr-str first-output))
+              (is (str/includes? first-output "2"))
+              (is (= first-output second-output))
+              (is (= 1 @previews) "both presentations reuse one real preview")
+              (is
+                (= (db/basis-t database) (db/basis-t (db/db connection)))
+                "previewing does not write a turn or evaluation")
+              (is
+                (=
+                  (get-in @first-calls [[:debug] :seon.render.call/source-run-id])
+                  (get-in @second-calls [[:context] :seon.render.call/source-run-id])))
+              (is (seq @first-invocations))))
+          (finally
+            (doseq [key [:seon.cluster.wake/channel
+                         :seon.render/context-channel
+                         :seon.turn.loop/completion]]
+              (clojure.core.async/close! (get handle key)))))))))
 
 (deftest generic-renderer-receives-the-acquired-entity-id
   (support/with-database

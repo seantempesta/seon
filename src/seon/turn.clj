@@ -2325,20 +2325,15 @@
 ;;; Routed-problem settlement — derived, never stored
 ;;; ---------------------------------------------------------------------------
 
-(def ^:private sci-unbound-class "sci.impl.vars.SciUnbound")
-
 (defn unbound-value?
-  "True when an admitted value contains sci's structured unbound marker.
-  Admission has already bounded the ordinary value, so this walks data only;
-  no class object or stringified exception crosses this seam."
+  "True when a live result contains SCI's unbound value."
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
                          :seon.schema.admission/reason "SCI admission inspects arbitrary result values for nested unbound markers, including scalars and nil; no candidate shape can be required before this inspection."
                          :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
   [value]
   (boolean
    (some (fn [node]
-           (and (map? node)
-                (= sci-unbound-class (:seon.sci.admit/opaque node))))
+           (instance? sci.impl.vars.SciUnbound node))
          (tree-seq coll? seq value))))
 
 (defn problem-id

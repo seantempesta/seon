@@ -2201,7 +2201,10 @@
         ;; and silently omit the agent/run/form members.
         base-evaluation-ctx (or ctx (build-base-ctx))
         request
-        (if-let [database (:seon.db/db request)]
+        (if-let [database (or (:seon.db/db request)
+                              (some-> (get-in base-evaluation-ctx
+                                               [::custody :seon.db/connection])
+                                      db/db))]
           (if-let [projection (or (db/carried-projection database)
                                   (context-projection base-evaluation-ctx))]
             (assoc request :seon.db/db

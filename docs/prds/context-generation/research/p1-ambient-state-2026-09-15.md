@@ -724,3 +724,79 @@ shown-text and binding fields. They do not reinstate serialized results.
 clj-kondo found zero errors and 41 warnings across the two files (existing
 shadowed names/unused bindings, including the unused test `admit` require).
 Remaining batch-4 failures are still being probed; no gate request yet.
+
+
+### Batch-4 repair and complete in-process replay — 2026-09-15
+
+Read the named authorities and member records end to end. The platform
+regression was first: **31/0/0** on default. The final replay covers every
+batch-4 failing test, including `diff-replays-one-read-by-derived-identity`
+(the initial extracted inventory omitted that metadata-bearing deftest):
+**52 distinct tests, 359 passes, zero failures, zero errors**.
+
+Exact calls are `(seon.test/run #'<symbol> (seon.operator/connection "default"))`.
+[p1-batch4-in-process-2026-09-15.edn](p1-batch4-in-process-2026-09-15.edn)
+records every symbol, result, database run identity and timestamp; candidate
+iterations are in [p1-batch4-candidates-2026-09-15.edn](p1-batch4-candidates-2026-09-15.edn).
+These are single-deftest runs, sequentially in the existing development JVM,
+with canonical database branches and production contract arming. No test JVM,
+`bin/test`, or `bin/test-fast` was launched.
+
+The owning production changes are:
+
+- `seon.sci.eval/evaluate` obtains an omitted database from its context's
+  explicit connection through `seon.db/db`, then carries the projection into
+  the request. Error rendering therefore receives the same database world.
+  The multi-arity refusal regression passes **8/0/0** before saving and after.
+- `seon.render/walk` omits absent optional turn/cache members instead of
+  supplying nil to their contracts. The public walk regression passes
+  **9/0/0**, including direct, web and SCI entry points and its allocation bound.
+- `seon.turn/unbound-value?` recognizes SCI's actual live unbound value;
+  the deleted opaque serialization marker is no longer the runtime shape.
+  Its regression passes **5/0/0** before saving and after.
+
+Fixture corrections retain the canonical mechanisms. Render requests carry
+one fixed profile. Acquisition tests install source rows, without retired
+serialized roots. The codec test stores complete standalone read evidence
+instead of incomplete evaluation entities. The retained-call fixture derives
+its helper edge through `seon.fn/analyze-forms`; it does not hand-roster the
+edge. Its **10/0/0** result verifies unchanged reuse, changed read invalidation,
+and changed helper invalidation. The preview regression uses the real preview
+owner and canonical cluster handle: **7/0/0**, one preview across two
+presentations, unchanged database basis. Plan selection tests the current
+entity pair, and doc/dir tests current returned data. Time-limit rendering
+preserves the original kernel refusal inside its typed render-unknown value.
+The cross-thread effect regressions all pass without changes to their owners.
+
+Candidate forms were evaluated and exercised before saving. Explicit in-place
+publication converged at `6aa9d3fc-9fe2-5348-91c0-53d22e0eaadb` after a source-change
+retry and waiting for the shared lifecycle lock. Saved test forms were loaded
+on default with its carried projection before the complete replay. An omitted
+acquisition-contract test was restored from its verified candidate before the
+final inventory/replay; its four assertions pass. No default restart/refork.
+
+The reproducible current ThreadMXBean form is
+[p1-projection-allocation-probe-2026-09-15.clj](p1-projection-allocation-probe-2026-09-15.clj).
+Its additional current-context observation returned `2`, **61,260,560 bytes /
+9.786083 ms** (includes this context's first-use work). This is a separate
+observation, not a replacement for the matched before/after experiment above.
+The declaration allocation regression also passes in the final replay.
+
+HTTP probe: `curl --max-time 60 -sS -o tmp/p1-debug-final.html -w
+'%{http_code} %{time_total}' http://127.0.0.1:7994/agent/juniper/debug` returned
+**200 / 1.928104 s**. The process-record's log, starting at byte **287317**,
+appended **0 bytes**, hence **0 projection-fallback warnings** during the load.
+The 1.6 s target remains unmet; no cold-cache claim is made. Evidence:
+[p1-debug-final-2026-09-15.json](p1-debug-final-2026-09-15.json).
+
+clj-kondo over the six changed source/test paths: **0 errors, 69 warnings**;
+`git diff --check` passes. The orchestrator gate remains pending. The gate
+request lists the affected namespaces and `platform`; this replay does not
+claim that the full platform tier or namespace gate is green.
+
+Boundaries: no changes to concurrently edited `seon.fn`, `seon.cluster`,
+`seon.render.value`, their tests, or the protected refusal/report owners.
+P1's lifecycle/adoption, foreign-write fence, operator-init, source-offset and
+generator residuals remain as previously recorded; this does not close the
+whole class. All lane-owned shell invocations finished. Retained foreign gate
+roots were preserved.

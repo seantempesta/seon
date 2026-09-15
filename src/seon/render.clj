@@ -1722,12 +1722,6 @@
                      {:seon.db/db db
                       :seon.sci.eval/ctx (:seon.sci.eval/ctx *walk-context*)
                       :seon.agent/id agent-id
-                      :seon.turn/id
-                      (:seon.turn/id *walk-context*)
-                      :seon.render/retained-calls
-                      (:seon.render/retained-calls *walk-context*)
-                      :seon.render/captured-calls
-                      (:seon.render/captured-calls *walk-context*)
                       :seon.render.walk/lookup root
                       :seon.render/output :seon.render/ai
                       :seon.render/distance depth
@@ -1736,6 +1730,14 @@
                       (:seon.sci.eval/time-limit-ms *walk-context*)
                       :seon.config/on-core-error
                       (:seon.config/on-core-error *walk-context*)}
+                      (:seon.turn/id *walk-context*)
+                      (assoc :seon.turn/id (:seon.turn/id *walk-context*))
+                      (:seon.render/retained-calls *walk-context*)
+                      (assoc :seon.render/retained-calls
+                             (:seon.render/retained-calls *walk-context*))
+                      (:seon.render/captured-calls *walk-context*)
+                      (assoc :seon.render/captured-calls
+                             (:seon.render/captured-calls *walk-context*))
                       profile (assoc :seon.render/profile profile)))
                    selected (selected-walk-units units branch)]
                (if (and branch (empty? selected))
