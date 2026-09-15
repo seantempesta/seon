@@ -160,11 +160,7 @@
                                             (evaluation/of-agent @connection "juniper"))
                            entry (first entries)
                            next-prompt (:seon.ai/prompt (second @requests))
-                           message (if (= scenario :empty-then-done)
-                                     "The reply carried no Clojure forms."
-                                     (str "The reply carried no Clojure forms — its whole text read as "
-                                          "prose. Prose runs nothing and settles nothing; write the "
-                                          "Clojure you want evaluated."))]
+                           message "Your reply had no form; only comments/prose. Send a form."]
                        (is (= 1 (count entries)))
                        (is (= message (:seon.cluster.eval/error entry)))
                        (is (str/includes? (:seon.eval/shown entry)
