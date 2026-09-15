@@ -55,25 +55,33 @@
 
 (defn- with-file-database
   [root f]
-  (support/with-published-file-database root :my-shell-test f))
+  (support/with-published-file-database
+   root :my-shell-test
+   (fn [connection]
+     (let [configured (config/apply!
+                       {:seon.db/connection connection
+                        :seon.boot/cluster-name "shell-test"
+                        :seon.config/manifest
+                        {:seon.config.eval.result/blob-threshold 4096}})]
+       (when (:seon.error/kind configured)
+         (throw (ex-info "Shell fixture configuration was refused." configured))))
+     (f connection))))
 
 (defn- with-handler
   [effective-map f]
   (with-file-database
     (:seon.config.fs/working-root effective-map)
     (fn [connection]
-      (db/transact!
-       connection
-       [{:seon.config/cluster "shell-test"
-         :seon.config.eval.result/blob-threshold 4096}])
       (binding [effect/*request-context*
                 {:seon.db/connection connection}]
         (f connection
-           (fn [request effective]
-             (let [result ((handler) request effective)]
-               (blob/with-publication!
-                connection (:seon.blob/staged-writes result)
-                #(dissoc result :seon.blob/staged-writes))))
+           (fn [request effective-config]
+             (let [result ((handler) request effective-config)]
+               (if-let [staged-writes (:seon.blob/staged-writes result)]
+                 (blob/with-publication!
+                  connection staged-writes
+                  #(dissoc result :seon.blob/staged-writes))
+                 result)))
            effective-map)))))
 
 (defn- sha-256
@@ -279,34 +287,40 @@
             (is (not (Files/exists marker
                                    (make-array java.nio.file.LinkOption 0))))))))))
 
-(deftest time-limit-reaps-the-process-tree-and-marks-the-receipt-interrupted
+(deftest time-limit-reaps-the-process-tree-and-marks-the-effect-interrupted
   (with-temp-tree
     (fn [root]
       (with-file-database
         root
         (fn [connection]
-          (db/transact!
-           connection
-           [{:seon.config/cluster "default"
-             :seon.config.eval.result/blob-threshold 4096}
-            {:seon.turn/id "shell-time-limit"}])
+          (let [written (db/transact!
+                         connection
+                         [{:seon.agent/id "shell-author"}
+                          {:seon.turn/id "shell-time-limit"
+                           :seon.turn/agent [:seon.agent/id "shell-author"]
+                           :seon.turn/opened-tx "datomic.tx"}])]
+            (is (:db-after written) (pr-str written)))
           (let [effective-map
                 (effective root
                            {:seon.config.shell/time-limit-ms 750
                             :seon.config.shell/termination-grace-ms 100})
+                configured (config/apply! {:seon.db/connection connection
+                                           :seon.boot/cluster-name "shell-test"
+                                           :seon.config/manifest effective-map})
+                _ (is (not (:seon.error/kind configured)) (pr-str configured))
                 context
                 {:seon.db/connection connection
+                 :seon.env/environment (support/environment "shell-test" connection)
+                 :seon.agent/id "shell-author"
                  :seon.turn/id "shell-time-limit"
                  :seon.cluster.eval/ordinal 0
-                 :seon.boot/cluster-name "default"
+                 :seon.boot/cluster-name "shell-test"
                  :seon.sci.admit/caps (config/result-caps effective-map)
                  :seon.config/on-core-error :record
                  :seon.effect/counter (atom -1)}
                 result
-                (with-redefs [config/effective
-                              (fn [_database _cluster] effective-map)]
-                  (binding [effect/*request-context* context]
-                    (shell/run
+                (binding [effect/*request-context* context]
+                    (shell/run!
                      {:my.shell/argv
                       ["/bin/sh" "-c"
                       (str "trap '' TERM; "
@@ -314,11 +328,11 @@
                             "while :; do /bin/sleep 1; done\" & "
                             "child=$!; printf '%s' \"$child\" > child.pid; "
                             "while :; do /bin/sleep 1; done")]
-                      :my.shell/cwd "."})))
-                receipt
-                (db/pull @connection '[*]
-                         [:seon.effect/id
-                          (pr-str ["shell-time-limit" 0 0])])
+                      :my.shell/cwd "."}))
+                stored-effect
+                (db/q '[:find (pull ?effect [*]) . :where
+                         [?turn :seon.turn/id "shell-time-limit"]
+                         [?effect :seon.effect/run ?turn]] @connection)
                 child-pid
                 (parse-long
                  (slurp (.toFile (.resolve ^Path root "child.pid"))))
@@ -329,34 +343,30 @@
                                 [:seon.error/data :my.shell/stdout])))
               (is (map? (get-in result
                                 [:seon.error/data :my.shell/stderr]))))
-            (testing "the effect receipt is interrupted rather than settled"
-              (is (inst? (:seon.effect/interrupted-at receipt)))
-              (is (nil? (:seon.effect/result-edn receipt)))
-              (is (nil? (:seon.effect/settled-at receipt))))
+            (testing "the effect is interrupted rather than settled"
+              (is (inst? (:seon.effect/interrupted-at stored-effect)))
+              (is (nil? (:seon.effect/result-edn stored-effect)))
+              (is (nil? (:seon.effect/settled-at stored-effect))))
             (testing "the descendant that ignored polite termination is gone"
               (is (or (.isEmpty child-handle)
                       (not (.isAlive ^ProcessHandle (.get child-handle))))))))))))
 
 (deftest an-evaluations-deadline-reaps-the-child-it-admitted
   ;; The class: a child process outliving the evaluation that admitted it.
-  ;; Two limits govern a foreground child — the shell's own and the ARM's —
+  ;; Two limits govern a foreground child — the shell's and the evaluation's —
   ;; and only the shell's was observed. When an eval time limit fired while
   ;; the handler was parked on the child, SCI's interrupt had no interpreted
   ;; function entrance to reach, so `sleep 300` was still running 29 s after
-  ;; its 4 s limit and its receipt stayed permanently pending. The wait is
+  ;; its 4 s limit and its effect stayed permanently pending. The wait is
   ;; now bounded by whichever limit ends first, so no arm of the handler can
   ;; return while its child is alive, and the `:interrupted` disposition is
-  ;; what stamps the receipt (proven by the sibling shell-limit test, which
-  ;; drives the same disposition through the door).
+  ;; what stamps the effect (proven by the sibling shell-limit test, which
+  ;; drives the same disposition through effect/request!).
   (with-temp-tree
     (fn [root]
       (with-file-database
         root
         (fn [connection]
-          (db/transact!
-           connection
-           [{:seon.config/cluster "default"
-             :seon.config.eval.result/blob-threshold 4096}])
           (let [effective-map
                 (effective root
                            ;; the shell's own limit is far away: only the
@@ -388,7 +398,7 @@
                   "the refusal names which limit ended the child")
               (is (< elapsed-ms 30000)
                   "the handler returned at the evaluation deadline"))
-            (testing "the terminal disposition is what settles the receipt"
+            (testing "the terminal disposition is what settles the effect"
               (is (= :interrupted (:seon.effect/disposition result))))
             (testing "no orphan survives the run"
               (is (or (.isEmpty child-handle)
