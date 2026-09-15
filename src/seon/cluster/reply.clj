@@ -225,15 +225,6 @@
         ;; a reply that is ONLY prose still yields no forms and refuses.
         forms))))
 
-(defn- no-forms-message
-  "Name what the reply carried instead of forms."
-  [source]
-  (if (str/blank? (comment-source source))
-    "The reply carried no Clojure forms."
-    (str "The reply carried no Clojure forms — its whole text read as "
-         "prose. Prose runs nothing and settles nothing; write the "
-         "Clojure you want evaluated.")))
-
 (def ^:private prose-read-failure
   #"^Invalid (?:number|symbol|keyword|token)")
 
@@ -380,4 +371,5 @@
                    (if (seq forms)
                      (vec forms)
                      (refused ::no-forms {::no-forms true}
-                              (no-forms-message source) {::text text}))))))))))))
+                              "Your reply had no form; only comments/prose. Send a form."
+                              {::text text}))))))))))))

@@ -43,6 +43,17 @@
 (defn- error? [value]
   (and (map? value) (string? (:seon.error/message value))))
 
+(deftest no-form-replies-tell-the-agent-what-to-send
+  (let [captured (:run4/evaluations
+                  (edn/read-string (slurp "test/seon/run4_replies.edn")))
+        comment-only (second (first (filter #(= "9d7af271393f" (first %)) captured)))]
+    (is (string? comment-only))
+    (doseq [text [comment-only "I should inspect the orders."]]
+      (let [failure (reply/sources text)]
+        (is (= :seon.cluster.reply/no-forms (:seon.error/kind failure)))
+        (is (= "Your reply had no form; only comments/prose. Send a form."
+               (:seon.error/message failure)))))))
+
 (defn- sources
   "The plan forms' source strings, or the flat error value unchanged.
   A plan form is a source PLUS the namespace it was written under; the

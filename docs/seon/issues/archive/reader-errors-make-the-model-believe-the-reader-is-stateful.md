@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [reader, errors, prompt, live-test]
 created: 2026-09-15
@@ -29,3 +29,20 @@ invited.
 - Both are agent errors in the agent's history (they already are); the
   texts are the fix. Regression: the two exact run-4 replies produce those
   messages.
+
+## Resolution — 2026-09-15
+
+Reader delimiter diagnostics now quote the complete containing reply line
+and state that each reply is read from scratch. Both reply splitting and
+single-form evaluation report comment-only input as:
+`Your reply had no form; only comments/prose. Send a form.`
+
+The original run-4 source strings are saved in `test/seon/run4_replies.edn`.
+The canonical armed regression verifies both messages and then evaluates
+`(+ 1 1)` successfully in the same SCI context. Reader recovery and the
+fabricated-response guard are unchanged.
+
+Fast gate: 51 tests / 416 assertions; isolated gate: 51 / 420. Both have
+12 failures confined to the separately recorded help-trial scoring defect;
+reader, reply, and REPL grammar tests pass. Live JVM evaluation on default
+observed the new strings without restarting the cluster.

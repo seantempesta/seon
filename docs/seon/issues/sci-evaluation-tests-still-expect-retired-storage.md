@@ -30,3 +30,13 @@ expectation from nil to the ruled empty data value when repairing this namespace
 Acceptance: canonical fixtures, successful checked setup, instrumentation
 preserved by the standard helper, and assertions of current §14–§15 semantics.
 Do not restore retired storage mechanisms to make old assertions pass.
+
+## Re-observed by run4-blockers, 2026-09-15
+
+The HEAD-plus-owned-reader-paths fast run at `6785c980c` again failed
+`success-evaluation-assembles-every-optional-projection`,
+`unmap-row-carries-the-exact-forked-namespace-state`,
+`one-unloadable-row-cannot-prevent-cold-acquisition`, and
+`an-unbound-var-remains-structured-after-production-admission` at the same
+retired-storage/fixture boundaries above. The new reader regression is
+isolated in `test/seon/run4_reader_test.clj`; `eval_test.clj` remains unchanged.

@@ -644,7 +644,15 @@
           refused? (assoc ::tag (::tag data)))]
     (error-value
      (if refused? ::refused-tag ::unreadable)
-     (or (ex-message failure) (str failure))
+     (let [message (or (ex-message failure) (str failure))]
+       (if (= :stray-closer (::error-kind classification))
+         (let [offset (::failure-offset classification)
+               start (inc (.lastIndexOf text "\n" (dec offset)))
+               next-line (.indexOf text "\n" offset)
+               end (if (neg? next-line) (count text) next-line)]
+           (str message " in reply text " (pr-str (subs text start end))
+                ". The reader reads each reply from scratch; nothing is buffered between turns."))
+         message))
      error-data))))
 
 (defn- shift-event

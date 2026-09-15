@@ -500,6 +500,12 @@
       (= 1 (count events))
       (first events)
 
+      (empty? events)
+      (throw (ex-info "Your reply had no form; only comments/prose. Send a form."
+                      {:seon.error/kind :seon.cluster.reply/no-forms
+                       :seon.cluster.reply/no-forms true
+                       :seon.sci.reader/event-count 0}))
+
       :else
       (throw (ex-info "Evaluation requires exactly one reader event."
                       {:seon.error/kind ::reader-event-count
