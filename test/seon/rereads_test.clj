@@ -109,3 +109,48 @@
                      (repl/shown-value (:seon.eval/shown added))))
               (is (= 39 @(sci/resolve ctx (:seon.repl/handle emission))))
               (is (nil? (:seon.turn/id (turn/system-turn request)))))))))))
+
+(deftest failed-evaluations-are-not-promoted-and-documentation-follows-its-evidence
+  (with-rereads
+    (fn [connection handle routing request]
+      (let [read-source "(seon.db/q '[:find (min ?amount) . :where [?e :example/amount ?amount]])"
+            failures ["(Simplest:)"
+                      (str "(do " read-source " (/ 1 0))")
+                      "(seon.db/pull 1 2)"
+                      "(+ 1 #unknown/tag 2)"]
+            documentation "(doc my.plan/current!)"]
+        (doseq [source (conj failures documentation)]
+          (fixture/submit! handle routing source))
+        (agent/disarm! {:seon.agent/routing routing :seon.agent/id "juniper"})
+        (let [failed (mapv #(last (entries connection %)) failures)
+              doc-entry (last (entries connection documentation))]
+          (doseq [entry failed]
+            (is (some? entry))
+            (is (string? (:seon.cluster.eval/error entry)) (pr-str entry))
+            (is (not (#'turn/read-only-evaluation? @connection entry))))
+          (is (seq (:seon.cluster.eval/read-evidence (second failed)))
+              "the failed read genuinely observed database facts")
+          (is (seq (:seon.cluster.eval/read-evidence doc-entry)))
+          (is (#'turn/read-only-evaluation? @connection doc-entry))
+          (is (not (#'turn/read-only-evaluation?
+                     @connection (dissoc doc-entry :seon.cluster.eval/read-evidence))))
+          (db/transact! connection [[:db/add [:example/order "c1"] :example/amount 39]])
+          (let [plan (#'turn/system-plan @connection []
+                                        (#'turn/latest-evaluations @connection "juniper"))
+                by-source (into {} (map (juxt :seon.cluster.eval/source identity)) plan)]
+            (is (not-any? #(get by-source %) failures))
+            (is (= :unchanged (:seon.turn/status (get by-source documentation))))
+            (is (nil? (:seon.turn/id (turn/system-turn request))))
+            (is (= 1 (count (entries connection documentation)))))
+          (db/transact! connection [[:db/add [:seon.fn/sym "my.plan/current!"]
+                                    :seon.fn/doc "Select the current plan item. Reread proof."]])
+          (let [plan (#'turn/system-plan @connection []
+                                        (#'turn/latest-evaluations @connection "juniper"))]
+            (is (= :changed (:seon.turn/status
+                             (some #(when (= documentation (:seon.cluster.eval/source %)) %) plan))))
+            (is (not-any? #(some #{(:seon.cluster.eval/source %)} failures) plan)))
+          (let [result (turn/system-turn request)]
+            (is (nil? (:seon.error/kind result)) (pr-str result))
+            (is (= 2 (count (entries connection documentation))))
+            (is (= (mapv :seon.cluster.eval/id failed)
+                   (mapv #(-> (entries connection %) last :seon.cluster.eval/id) failures)))))))))

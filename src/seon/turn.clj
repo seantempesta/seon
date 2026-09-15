@@ -1945,7 +1945,8 @@
   (let [events (source-events evaluation)
         evaluation-id (:db/id evaluation)
         run-id (get-in evaluation [:seon.cluster.eval/run :db/id])]
-    (and (seq (:seon.cluster.eval/read-evidence evaluation))
+    (and (nil? (:seon.cluster.eval/error evaluation))
+         (seq (:seon.cluster.eval/read-evidence evaluation))
          (vector? events)
          (not-any? #(program/declaration-row % :all :agent) events)
          (nil? (db/q '[:find ?transaction . :in $ ?evaluation

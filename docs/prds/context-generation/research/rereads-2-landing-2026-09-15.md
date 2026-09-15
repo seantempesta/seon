@@ -40,6 +40,27 @@ its exact shown bytes and receives fresh component evidence and read basis.
 The existing writer history comparison protects both refresh and append.
 Previews make the same emission decision without transacting.
 
+## Rule 1 checkpoint
+
+Rule 1 commit: `60e4e13bb`. Its focused armed regression passed in both
+fast and isolated execution. The combined fast and isolated gates each
+passed **12 tests / 455 assertions**, with zero failures or errors.
+
+## Rule 2: successful reads only
+
+The existing read-only classifier now requires absence of the evaluation's
+error as well as retained read evidence. Existing declaration/write/effect
+and turn-dependency exclusions remain at that classifier and planner.
+No function names classify documentation or inspections. The regression
+uses unresolved input, a real database read followed by division by zero,
+a contract refusal, a reader error, and successful documentation.
+Documentation remains eligible and follows its program facts.
+Focused fast gate: **2 tests / 53 assertions**, zero failures or errors.
+The original run's bare `Simplest:` is now rejected as no-form input by
+source submission; the unresolved-form regression uses `(Simplest:)`.
+The unreadable-form regression uses `(+ 1 #unknown/tag 2)` through the
+ordinary source preparation and SCI evaluation path.
+
 ## Read-only run 5 measurement
 
 Default was alive at PID 23729, prepl 54412. The requested turn
