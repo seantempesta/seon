@@ -484,6 +484,8 @@
   (merge
    (select-keys request-context
                 [:seon.db/connection
+                 :seon.db/db :seon.sci.eval/ctx :seon.schema/projection
+                 :seon.env/environment :seon.sci.eval/projection-state
                  :seon.sci.admit/caps
                  :seon.config/on-core-error])
    {:seon.effect/id effect-id
@@ -561,8 +563,9 @@
                    {})
 
        :else
-       (let [requesting-context *request-context*
-             connection (:seon.db/connection *request-context*)
+       (let [connection (:seon.db/connection *request-context*)
+             database (db/db connection)
+             requesting-context (assoc *request-context* :seon.db/db database)
              ;; Read ONCE here, on the requesting thread. A background
              ;; request settles on whichever thread ran its work, so the
              ;; admission dials travel with that settlement as data instead
@@ -570,7 +573,6 @@
              ;; have.
              dials (admission requesting-context)
              effect-ordinal (swap! (:seon.effect/counter *request-context*) inc)
-             database (db/db connection)
              owner-row
              (db/pull database
                       [:db/id :seon.fn/sym :seon.fn/spec

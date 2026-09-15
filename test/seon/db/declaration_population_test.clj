@@ -123,15 +123,23 @@
              (is (= 'seon.db/pull (get-in failure [:seon.error/data :seon.db/operation])))
              (is (= 1 (count (str/split-lines (str warnings)))))
              (is (str/includes? (str warnings) "projection-fallback"))))
-         (testing "missing transaction-admission input uses the same seam without writing"
-           (let [write-warnings (java.io.StringWriter.)
-                 failure (binding [*err* write-warnings]
-                           (schema/call-with-projection-state
-                            (atom {}) #(db/transact! connection [])))]
-             (is (= :seon.schema/missing-projection (:seon.error/kind failure)))
-             (is (= 'seon.db/transact!
-                    (get-in failure [:seon.error/data :seon.db/operation])))
-             (is (identical? raw @connection))
-             (is (= 1 (count (str/split-lines (str write-warnings)))))))
+         (testing "fixture connection carriage survives a fresh worker thread"
+           (let [completed (promise)
+                 worker (Thread.
+                         ^Runnable
+                         (fn []
+                           (try
+                             (deliver completed
+                                      (let [report (db/transact! connection [])]
+                                        {:projection (db/carried-projection (db/db connection))
+                                         :report-projection (db/carried-projection (:db-after report))
+                                         :error (:seon.error/kind report)}))
+                             (catch Throwable failure
+                               (deliver completed failure)))))]
+             (.start worker)
+             (let [result (test-support/await-event! completed ::worker-carriage)]
+               (is (nil? (:error result)) (pr-str result))
+               (is (identical? projection (:projection result)))
+               (is (identical? projection (:report-projection result))))))
          (is (zero? @rebuilds))
          (is (zero? @resource-reads)))))))

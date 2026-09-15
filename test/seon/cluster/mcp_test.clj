@@ -45,12 +45,12 @@
 
 (defn- running-instance
   [connection cluster-name]
-  (let [projection (schema/projection-from-database @connection)
+  (let [projection (schema/projection-from-database (db/db connection))
         environment
         (env/environment
          {:seon.boot/cluster-name cluster-name
           :seon.db/connection connection
-          :seon.db/basis-t (db/basis-t @connection)
+          :seon.db/basis-t (db/basis-t (db/db connection))
           :seon.schema/projection projection})]
     {:seon.boot/cluster-connection connection
      :seon.turn.loop/cluster (env/carry-state {} (env/environment-state environment))
@@ -64,7 +64,7 @@
       (sci.eval/evaluate
        {:seon.cluster.eval/source source
         :seon.cluster.eval/ns [:seon.ns/name 'user]
-        :seon.db/db @connection
+        :seon.db/db (db/db connection)
         :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
         :seon.sci.admit/caps (config/result-caps effective)
         :seon.render/profile (render/agent-render-profile effective)
@@ -82,32 +82,28 @@
           (range 116))))
 
 (deftest mcp-config-reads-receive-the-running-cluster-projection
-  (let [cluster-name "mcp-projection-test"
-        connection (atom ::database)
-        projection (schema/build-projection (schema/snapshot))
-        projection-state
-        (env/environment-state
-         (env/environment
-          {:seon.boot/cluster-name cluster-name
-           :seon.db/basis-t 0
-           :seon.schema/projection projection}))
-        observed (atom nil)]
-    (swap! running-instances assoc cluster-name
-           {:seon.boot/cluster-connection connection
-            :seon.sci.eval/ctx
-            (env/carry-state {} projection-state)})
-    (try
-      (with-redefs [config/effective
-                    (fn [_ _]
-                      (reset! observed (some? (schema/handed-projection)))
-                      (config/defaults))]
-        (is (= 42 (get-in (projected cluster-name (config/defaults) 42)
-                          [:seon.dev.mcp/value]))
-            "the MCP projection remains an ordinary successful value")
-        (is (true? @observed)
-            "the config read receives the projection already carried by ctx"))
-      (finally
-        (swap! running-instances dissoc cluster-name)))))
+  (support/with-database
+   (fn [connection]
+     (let [cluster-name "mcp-projection-test"
+           database (db/db connection)
+           projection (db/carried-projection database)
+           projection-state (:seon.sci.eval/projection-state (meta database))
+           observed (atom nil)]
+       (swap! running-instances assoc cluster-name
+              {:seon.boot/cluster-connection connection
+               :seon.sci.eval/ctx (env/carry-state {} projection-state)})
+       (try
+         (with-redefs [config/effective
+                       (fn [value _]
+                         (reset! observed
+                                 (identical? projection (db/carried-projection value)))
+                         (config/defaults))]
+           (is (= 42 (get-in (projected cluster-name (config/defaults) 42)
+                            [:seon.dev.mcp/value])))
+           (is (true? @observed)
+               "the config read receives the projection carried by its database"))
+         (finally
+           (swap! running-instances dissoc cluster-name)))))))
 
 (deftest nested-bulk-is-bounded-by-the-shared-value-window
   (let [cluster-name "mcp-nested-window-test"

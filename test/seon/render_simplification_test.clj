@@ -74,7 +74,7 @@
 (deftest floor-totality-uses-one-prepared-value
   (support/with-database
    (fn [connection]
-     (let [database @connection
+     (let [database (db/db connection)
            ctx (support/fork-cluster-ctx connection)]
        (doseq [rendered-value [7
                                [1 2 3]
@@ -98,7 +98,7 @@
   ;; attribute's transacted value rather than the owning entity.
   (support/with-database
    (fn [connection]
-     (let [database @connection
+     (let [database (db/db connection)
            ctx (support/fork-cluster-ctx connection)
            projection (kernel/context-projection ctx)
            entity {:seon.agent/id "unit-owner"
@@ -159,7 +159,7 @@
         :my.plan.item/agent
         [:seon.agent/id "pulled-render-owner"]
         :my.plan.item/about ['seon.plan/render-item-html]}])
-     (let [database @connection
+     (let [database (db/db connection)
            pulled (db/pull database '[*]
                            [:my.plan.item/id "pulled-render-item"])
            prepared (value/transacted pulled database)
@@ -201,7 +201,7 @@
        {:seon.agent/id "identity-agent"
         :seon.cluster/name "agent-render-selection"
         :seon.ns/name fixture-a}))
-     (let [database @connection
+     (let [database (db/db connection)
            pulled (db/pull database '[*]
                            [:seon.agent/id "identity-agent"])
            request (assoc (render-request database
@@ -240,7 +240,7 @@
            request
            ;; the declared call request takes a REAL ctx even where the
            ;; projection this test wants is redefined below it.
-           (assoc (render-request @connection
+           (assoc (render-request (db/db connection)
                                   (support/fork-cluster-ctx connection)
                                   'probe.render 7)
                   :seon.render/output :seon.render/ai
@@ -292,7 +292,7 @@
      (let [ctx (support/fork-cluster-ctx connection)
            decision
            (selection
-            (assoc (render-request @connection ctx nil
+            (assoc (render-request (db/db connection) ctx nil
                                    {:seon.render/ai "already rendered"})
                    :seon.render/output :seon.render/ai))
            explicit-stage
@@ -309,7 +309,7 @@
 (deftest missing-render-profile-remains-a-flat-error
   (support/with-database
    (fn [connection]
-     (let [database @connection
+     (let [database (db/db connection)
            ctx (support/fork-cluster-ctx connection)
            missing-profile (config/effective database "missing-profile")
            result (render-html
@@ -324,7 +324,7 @@
 (deftest floor-selection-is-recorded-on-the-retained-call
   (support/with-database
    (fn [connection]
-     (let [database @connection
+     (let [database (db/db connection)
            ctx (support/fork-cluster-ctx connection)
            call-id [:seon.render-simplification-test/counted-floor]
            captured (atom {})
@@ -395,12 +395,12 @@
          (let [first-captured (atom {})
                first-output
                (target-call 'seon.render 'render-call
-                            (request @connection nil first-captured))
+                            (request (db/db connection) nil first-captured))
                retained @first-captured
                second-captured (atom {})
                second-output
                (target-call 'seon.render 'render-call
-                            (request @connection retained second-captured))]
+                            (request (db/db connection) retained second-captured))]
            (is (= (str "A:" fixture-a ":one:H1")
                   first-output second-output))
            (is (= {:discoveries 1 :invocations 1}
@@ -410,7 +410,7 @@
            (let [unrelated-captured (atom {})
                  unrelated-output
                  (target-call 'seon.render 'render-call
-                              (request @connection @second-captured
+                              (request (db/db connection) @second-captured
                                        unrelated-captured))]
              (is (= first-output unrelated-output))
              (is (= {:discoveries 1 :invocations 1}
@@ -422,7 +422,7 @@
              (let [relevant-captured (atom {})
                    relevant-output
                    (target-call 'seon.render 'render-call
-                                (request @connection @unrelated-captured
+                                (request (db/db connection) @unrelated-captured
                                          relevant-captured))]
                (is (= (str "A:" fixture-a ":two:H1") relevant-output))
                (is (= {:discoveries 2 :invocations 2}
@@ -437,7 +437,7 @@
                (let [helper-captured (atom {})
                      helper-output
                      (target-call 'seon.render 'render-call
-                                  (request @connection @relevant-captured
+                                  (request (db/db connection) @relevant-captured
                                            helper-captured))]
                  (is (= (str "A:" fixture-a ":two:H2") helper-output))
                  (is (= {:discoveries 3 :invocations 3}
@@ -448,7 +448,7 @@
 (deftest nested-values-render-their-declared-faces
   (support/with-database
    (fn [connection]
-     (let [database @connection
+     (let [database (db/db connection)
            ctx (support/fork-cluster-ctx connection)
            report (binding [db/*conn* connection]
                     (db/transact! []))
@@ -499,7 +499,7 @@
 (deftest owning-namespace-alone-selects-across-a-walk
   (support/with-database
    (fn [connection]
-     (let [database @connection
+     (let [database (db/db connection)
            ctx (support/fork-cluster-ctx connection)
            rendered-value {:seon.ns/name fixture-b}
            request (render-request database ctx fixture-b rendered-value)]
@@ -528,7 +528,7 @@
                        [:seon.fn/sym
                         "seon.render-simplification.fixture-b/namespace-ai"]]])
        (let [without-owner-function
-             (render-ai (assoc request :seon.db/db @connection))]
+             (render-ai (assoc request :seon.db/db (db/db connection)))]
          (is (not (str/starts-with? (str without-owner-function) "A:")))
          (is (not= :seon.render/missing-declaration
                    (:seon.error/kind without-owner-function))))))))
@@ -536,7 +536,7 @@
 (deftest overlapping-contracts-refuse-loudly-and-deterministically
   (support/with-database
    (fn [connection]
-     (let [database @connection
+     (let [database (db/db connection)
            ctx (support/fork-cluster-ctx connection)
            request (render-request database ctx fixture-ambiguous
                                    {:seon.ns/name fixture-ambiguous})
@@ -578,7 +578,7 @@
 (deftest renderer-invocation-is-sci-only-and-live-var-backed
   (support/with-database
    (fn [connection]
-     (let [database @connection
+     (let [database (db/db connection)
            ctx (support/fork-cluster-ctx connection)
            request (render-request database ctx fixture-b
                                    {:seon.ns/name fixture-b})]
@@ -638,14 +638,14 @@
              "the terminal install publishes a new renderer candidate")
          (is (= [:article {:class "live-html"} "live"]
                 (render-html
-                 (render-request @connection ctx fixture-a
+                 (render-request (db/db connection) ctx fixture-a
                                  {:seon.ns/name fixture-a})))
              "an ordinary durable defn auto-wires onto the next render"))))))
 
 (deftest cold-context-reacquires-the-same-row
   (support/with-database
    (fn [connection]
-     (let [database @connection
+     (let [database (db/db connection)
            request (fn [ctx]
                      (render-request database ctx fixture-b
                                      {:seon.ns/name fixture-b}))]
@@ -661,7 +661,7 @@
       connection
       [[:db/add [:seon.ns/name fixture-a]
         :seon.ns/requires [:seon.ns/name fixture-b]]])
-     (let [database @connection
+     (let [database (db/db connection)
            ctx (support/fork-cluster-ctx connection)
            request {:seon.db/db database
                     :seon.sci.eval/ctx ctx
@@ -692,7 +692,7 @@
 (deftest old-slot-and-ref-markers-are-inert-renderer-output
   (support/with-database
    (fn [connection]
-     (let [database @connection
+     (let [database (db/db connection)
            ctx (support/fork-cluster-ctx connection)
            expected [:section {:data-slot "inert"}
                      [:span {:data-ref "[:db/id 7]"} "also inert"]]
@@ -737,7 +737,7 @@
            invoke kernel/invoke
            invocations (atom 0)
            request (fn [call-id retained captured]
-                     (assoc (render-request @connection ctx fixture-a
+                     (assoc (render-request (db/db connection) ctx fixture-a
                                             {:seon.ns/name fixture-a})
                             :seon.render/output :seon.render/ai
                             :seon.render.call/id call-id
@@ -822,7 +822,7 @@
            submit-var (ns-resolve 'seon.cluster.agent 'submit-source!)
            request
            (fn [call-id retained captured calls retained-calls value]
-             (assoc (render-request @connection ctx fixture-a
+             (assoc (render-request (db/db connection) ctx fixture-a
                                     value)
                     :seon.render/output :seon.render/ai
                     :seon.render/ai 'seon.render-simplification-test/authored-source
@@ -918,7 +918,7 @@
                                :seon.sci.admit/caps caps
                                :seon.config.eval/time-limit-ms 2000
                                :seon.config/on-core-error :panic})
-                       @connection {} {} registration-key true true))))
+                       (db/db connection) {} {} registration-key true true))))
                  third-invocations (atom {})
                  third-calls (atom {})
                  third-output
@@ -977,7 +977,7 @@
    (fn [connection]
      (db/transact! connection [{:seon.ns/name fixture-a
                                 :seon.ns/doc "identity input"}])
-     (let [database @connection
+     (let [database (db/db connection)
            entity (db/pull database '[*] [:seon.ns/name fixture-a])
            ctx (support/fork-cluster-ctx connection)]
        (sci/binding [sci/ns (sci/create-ns fixture-a)]
@@ -1009,7 +1009,7 @@
            outcome
            (target-call
             'seon.render 'renderer-failure
-            {:seon.db/db @connection
+            {:seon.db/db (db/db connection)
              :seon.render/namespace fixture-b
              :seon.error/value failure})]
        (db/transact! connection (:seon.db/tx-data outcome))
@@ -1022,7 +1022,7 @@
                     [?agent :seon.agent/id ?owner]
                     [?message :seon.message/to ?agent]
                     [?message :seon.message/content ?content]]
-                  @connection "owner-b")]
+                  (db/db connection) "owner-b")]
          (is (str/includes? browser "unavailable"))
          (is (not (str/includes? browser "secret stack")))
          (is (not (str/includes? browser "holes-html")))

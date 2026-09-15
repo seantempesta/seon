@@ -5,6 +5,8 @@
             [clojure.edn :as edn]
             [seon.print :as print]
             [seon.schema.edn :as schema.edn]
+            [seon.schema :as schema]
+            [seon.env :as env]
             [seon.sci.admit :as admit]))
 
 (schema.edn/load! {})
@@ -260,7 +262,14 @@
 (defn- value-node*
   "Visit only the children the AI profile can show; HTML visits the whole value."
   [value unit profile output depth path remaining]
-  (let [ai? (= output :seon.render/ai)
+  (let [projection (or (:seon.schema/projection (meta value))
+                       (:seon.schema/projection unit)
+                       (:seon.schema/projection (meta (:seon.db/db unit)))
+                       (:seon.schema/projection (env/of (:seon.sci.eval/ctx unit))))
+        identity (when projection
+                   (schema/identity-only-projection-in projection value))
+        value (if identity (:seon.schema/identity-value identity) value)
+        ai? (= output :seon.render/ai)
         total (counted-size value)
         cut (fn [offset total measure bound prefix]
               (print/elision

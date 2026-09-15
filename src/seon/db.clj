@@ -130,7 +130,8 @@
   ;; The operator owns this table. Do not load the operator during database
   ;; bootstrap, and match the actual connection rather than a branch name
   ;; that another store could also use.
-  (when-let [instances (some-> (find-ns 'seon.operator.runtime)
+  (or (:seon.sci.eval/projection-state (meta connection))
+      (when-let [instances (some-> (find-ns 'seon.operator.runtime)
                               (ns-resolve 'running-instances)
                               deref)]
     (some (fn [instance]
@@ -138,7 +139,20 @@
               (when (and state
                          (identical? connection (:seon.db/connection @state)))
                 state)))
-          (vals @instances))))
+          (vals @instances)))))
+
+(defn carry-connection-projection-state!
+  "Attach the owning projection state to a live connection at construction.
+
+  Datahike exposes connection metadata from its wrapped atom. Keep only the
+  state pointer there; each database acquisition captures its own snapshot."
+  {:malli/schema
+   [:=> [:cat :seon.db/connection :seon.sci.eval/projection-state]
+    :seon.db/connection]}
+  [connection state]
+  (alter-meta! (:wrapped-atom connection)
+               assoc :seon.sci.eval/projection-state state)
+  connection)
 
 (defn carry-projection-state
   "Carry a cluster's state and immutable projection on a database value.

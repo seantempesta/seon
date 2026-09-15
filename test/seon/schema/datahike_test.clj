@@ -267,15 +267,15 @@
            [attribute attribute]])})
        (db/transact! connection [{attribute "plan-1"}])
        (let [raw-row
-             (d/pull @connection
+             (d/pull (db/db connection)
                      [:seon.render/ai :seon.render/html :seon.render/form]
                      [:seon.schema/key shape])
              logical-row
-             (db/pull @connection
+             (db/pull (db/db connection)
                       [:seon.render/ai :seon.render/html :seon.render/form]
                       [:seon.schema/key shape])
-             projection (schema/projection-from-database @connection)
-             entity (db/pull @connection '[*] [attribute "plan-1"])
+             projection (schema/projection-from-database (db/db connection))
+             entity (db/pull (db/db connection) '[*] [attribute "plan-1"])
              selected-row
              (some #(when (= shape (:seon.schema/key %)) %)
                    (schema/matching-shapes-in projection entity))]
@@ -420,18 +420,18 @@
                                    reversed-plan)]))
          (let [selector '[* {:seon.cluster.eval/read-evidence [*]}]
                forward-raw
-               (d/pull @connection selector
+               (d/pull (db/db connection) selector
                        [:seon.cluster.eval/id "codec-forward"])
                reversed-raw
-               (d/pull @connection selector
+               (d/pull (db/db connection) selector
                        [:seon.cluster.eval/id "codec-reversed"])
                forward
                (binding [*print-namespace-maps* true]
-                 (db/pull @connection selector
+                 (db/pull (db/db connection) selector
                           [:seon.cluster.eval/id "codec-forward"]))
                reversed
                (binding [*print-namespace-maps* false]
-                 (db/pull @connection selector
+                 (db/pull (db/db connection) selector
                           [:seon.cluster.eval/id "codec-reversed"]))
                forward-raw-evidence
                (first (:seon.cluster.eval/read-evidence forward-raw))

@@ -155,7 +155,7 @@
                [install-arm-probe! "seon.effect-test/arm-probe-owner"
                 :seon.effect-test/arm-probe-request]]]
         (is (some? (:db-after (install! connection))))
-        (let [declaration (db/pull @connection
+        (let [declaration (db/pull (db/db connection)
                                    '[:seon.schema.admission/source
                                      :seon.effect/capability
                                      {:seon.fn/ns [:seon.ns/name]}]
@@ -164,7 +164,7 @@
           (is (= 'seon.effect-test (get-in declaration [:seon.fn/ns :seon.ns/name])))
           (is (symbol? (:seon.effect/capability declaration))))
         (is (= :core (:seon.schema.admission/source
-                      (db/pull @connection [:seon.schema.admission/source]
+                      (db/pull (db/db connection) [:seon.schema.admission/source]
                                [:seon.schema/key request-schema]))))))))
 
 (defn- cluster-config
@@ -248,7 +248,7 @@
                ((juxt :before-work :before-settlement) @observation))
             "the fresh worker has no effect or database binding frame")
         (let [receipt
-              (db/pull @connection
+              (db/pull (db/db connection)
                        '[* {:seon.effect/to
                             [:seon.agent/id]}]
                        [:seon.effect/id effect-id])
@@ -373,12 +373,13 @@
           (test-support/await-event!
            events
            ::background-effect-settled
-           #(:seon.effect/result-edn
-             (db/pull (:db-after %) [:seon.effect/result-edn]
-                      [:seon.effect/id effect-id])))
+           (fn [_]
+             (:seon.effect/result-edn
+              (db/pull (db/db connection) [:seon.effect/result-edn]
+                       [:seon.effect/id effect-id]))))
           (let [result-edn
                 (:seon.effect/result-edn
-                 (db/pull @connection [:seon.effect/result-edn]
+                 (db/pull (db/db connection) [:seon.effect/result-edn]
                           [:seon.effect/id effect-id]))
                 settled (read-string result-edn)]
             (is (= :seon.effect-test/completed
@@ -446,13 +447,14 @@
             (test-support/await-event!
              events
              ::background-effect-settled
-             #(:seon.effect/result-edn
-               (db/pull (:db-after %) [:seon.effect/result-edn]
-                        [:seon.effect/id effect-id])))
+             (fn [_]
+               (:seon.effect/result-edn
+                (db/pull (db/db connection) [:seon.effect/result-edn]
+                         [:seon.effect/id effect-id]))))
             (deliver captured
                      (read-string
                       (:seon.effect/result-edn
-                       (db/pull @connection [:seon.effect/result-edn]
+                       (db/pull (db/db connection) [:seon.effect/result-edn]
                                 [:seon.effect/id effect-id]))))
             (finally
               (reset! handler-gate nil)
@@ -566,7 +568,7 @@
                  (:seon.error/kind result))
               (str "unbounded detached work must be refused loudly; got "
                    (pr-str result)))
-          (is (nil? (db/pull @connection [:seon.effect/id]
+          (is (nil? (db/pull (db/db connection) [:seon.effect/id]
                              [:seon.effect/id (id/digest 12 [:seon.effect/id "effect-run" 3 0])]))
               "and refused before any receipt is opened")))))
 
@@ -579,7 +581,7 @@
                                  :seon.turn/agent {:seon.agent/id "effect-agent"}
                                  :seon.turn/opened-tx "datomic.tx"}])
         (install-arm-probe! connection)
-        (let [basis (db/basis-t @connection)]
+        (let [basis (db/basis-t (db/db connection))]
           (is (thrown? clojure.lang.ExceptionInfo
                        (binding [effect/*request-context*
                                  (request-context connection)]
@@ -587,7 +589,7 @@
                                           {:seon.effect-test/iterations 1}
                                           {:seon.effect/background? true
                                            :seon.effect/time-limit-ms 0}))))
-          (is (= basis (db/basis-t @connection))
+          (is (= basis (db/basis-t (db/db connection)))
               "the armed input contract refuses before an effect can open"))))))
 
 (deftest capability-reachability-is-a-database-query
@@ -601,7 +603,7 @@
          :seon.fn/ns [:seon.ns/name 'seon.effect-test]
          :seon.fn/calls
          [[:seon.fn/sym "seon.effect-test/capability-owner"]]}])
-      (let [database @connection]
+      (let [database (db/db connection)]
         (is (= #{"seon.effect-test/capability-owner"}
                (effect/capabilities database
                                     'seon.effect-test/capability-owner)))
@@ -626,7 +628,7 @@
               (effect/request! #'capability-owner
                                {:seon.effect-test/value 7}))
             receipt
-            (db/pull @connection '[* {:seon.effect/owner [:seon.fn/sym]}]
+            (db/pull (db/db connection) '[* {:seon.effect/owner [:seon.fn/sym]}]
                      [:seon.effect/id (id/digest 12 [:seon.effect/id "effect-run" 3 0])])]
         (testing "the handler ran on the shared io executor with effective facts"
           (is (= 7 (:seon.effect-test/value first-result)))
@@ -659,7 +661,7 @@
               (effect/request! #'capability-owner
                                {:seon.effect-test/value "wrong"}))]
         (is (= :seon.effect/invalid-request (:seon.error/kind result)))
-        (is (nil? (db/pull @connection [:seon.effect/id]
+        (is (nil? (db/pull (db/db connection) [:seon.effect/id]
                            [:seon.effect/id
                             (id/digest 12 [:seon.effect/id "effect-run" 3 0])])))))))
 
@@ -691,7 +693,7 @@
             "and it names the declared bound it was measured against")
         (is (str/includes? (:seon.error/message result)
                            ":seon.config.eval.result/max-bytes"))
-        (is (nil? (db/pull @connection [:seon.effect/id]
+        (is (nil? (db/pull (db/db connection) [:seon.effect/id]
                            [:seon.effect/id (id/digest 12 [:seon.effect/id "effect-run" 3 0])]))
             "nothing was opened, so nothing was dispatched")))))
 
@@ -713,7 +715,7 @@
                   (effect/request! #'capability-owner
                                    {:seon.effect-test/value 7}))
                 receipt
-                (db/pull @connection '[*]
+                (db/pull (db/db connection) '[*]
                          [:seon.effect/id
                           (id/digest 12 [:seon.effect/id "effect-run" 3 0])])]
             (is (= :seon.effect/interrupted (:seon.error/kind result)))
@@ -743,7 +745,7 @@
                    "#'seon.effect-test/capability-owner "
                    "{:seon.effect-test/value 9})")
               :seon.cluster.eval/ns [:seon.ns/name 'user]
-              :seon.db/db @connection
+              :seon.db/db (db/db connection)
               :seon.sci.admit/caps (config/result-caps effective)
               :seon.sci.eval/time-limit-ms
               (:seon.config.eval/time-limit-ms effective)
@@ -754,7 +756,7 @@
               :seon.cluster.eval/ordinal 3
               :seon.boot/cluster-name "default"})
             receipt
-            (db/pull @connection '[*]
+            (db/pull (db/db connection) '[*]
                      [:seon.effect/id (id/digest 12 [:seon.effect/id "effect-run" 3 0])])]
         (is (= 9 (get-in evaluation
                          [:seon.sci.admit/value
@@ -788,11 +790,11 @@
           {:seon.turn/id "effect-run"
 
            :seon.turn/now now}))
-        (let [receipt (db/pull @connection '[*]
+        (let [receipt (db/pull (db/db connection) '[*]
                                [:seon.effect/id
                                 (id/digest 12 [:seon.effect/id "effect-run" 3 0])])]
           (is (= now (:seon.effect/interrupted-at receipt)))
           (is (nil? (:seon.effect/result-edn receipt)))
           (is (some? (:seon.turn/closed-tx
-                      (db/pull @connection '[*]
+                      (db/pull (db/db connection) '[*]
                                [:seon.turn/id "effect-run"])))))))))

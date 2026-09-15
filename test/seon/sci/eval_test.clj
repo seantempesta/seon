@@ -164,8 +164,8 @@
     (fn [connection]
       (let [ctx (eval/build-base-ctx)
             _ (eval/acquire! {:seon.sci.eval/ctx ctx
-                              :seon.db/db @connection})
-            projection (schema/projection-from-database @connection)
+                              :seon.db/db (db/db connection)})
+            projection (schema/projection-from-database (db/db connection))
             entering-roots
             (into {}
                   (map (fn [instrumented-var]
@@ -179,7 +179,7 @@
           (let [evaluation
                 (eval/evaluate
                  {:seon.sci.eval/ctx ctx
-                  :seon.db/db @connection
+                  :seon.db/db (db/db connection)
                   :seon.db/connection connection
                   :seon.agent/id "root"
                   :seon.cluster.eval/source
@@ -533,8 +533,8 @@
          candidate
          {:seon.fn/sym "user/contracted"
           :seon.fn/spec "[:=> [:cat :int] :int]"}
-         (seon.schema/projection-from-database @connection)
-         @connection)
+         (seon.schema/projection-from-database (db/db connection))
+         (db/db connection))
         (is (identical? parent-var (sci/resolve parent 'contracted)))
         (is (identical? parent-root @(sci/resolve parent 'contracted)))
         (is (not (identical? parent-var
@@ -556,7 +556,7 @@
   ;; UNKNOWN naming the first config key it wanted, never nil.
   (test-support/with-database
     (fn [connection]
-      (let [database @connection
+      (let [database (db/db connection)
             configured
             (db/q '[:find ?cluster .
                     :where
@@ -692,7 +692,7 @@
   ;; the graph's, so a namespace cannot fall off by registering no predicate.
   (test-support/with-database
     (fn [connection]
-      (let [ctx (eval/cluster-ctx @connection connection)
+      (let [ctx (eval/cluster-ctx (db/db connection) connection)
             capability-symbols
             (sort
              (db/q '[:find [?sym ...]
@@ -700,7 +700,7 @@
                      [?fn :seon.fn/sym ?sym]
                      [?fn :seon.fn/private? false]
                      [?fn :seon.effect/capability _]]
-                   @connection))
+                   (db/db connection)))
             resolved
             (:seon.sci.admit/value
              (run-in ctx
@@ -739,7 +739,7 @@
 (deftest schema-and-contract-declarations-have-bounded-allocation
   (test-support/with-database
     (fn [connection]
-      (let [ctx (eval/cluster-ctx @connection connection)]
+      (let [ctx (eval/cluster-ctx (db/db connection) connection)]
         ;; Warm the guarded evaluator so this measures declaration work on one
         ;; cluster-owned projection rather than context acquisition.
         (run-in ctx "(+ 1 1)" 2000)
@@ -778,7 +778,7 @@
   (test-support/with-database
     (fn [connection]
       (let [ctx (eval/build-base-ctx)
-        _ (eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db @connection})
+        _ (eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db (db/db connection)})
         eval-form sci/eval-form
         call-with-registration-delta
         seon.schema/call-with-registration-delta
@@ -1018,8 +1018,8 @@
     (fn [connection]
       (let [ctx (eval/build-base-ctx)
             _ (eval/acquire! {:seon.sci.eval/ctx ctx
-                              :seon.db/db @connection})
-            projection (seon.schema/projection-from-database @connection)]
+                              :seon.db/db (db/db connection)})
+            projection (seon.schema/projection-from-database (db/db connection))]
         (try
           (seon.schema/call-with-projection
            projection
@@ -1071,7 +1071,7 @@
                  [{:seon.fn.arity/order 0
                    :seon.fn.arity/input-refs
                    [[:seon.schema/key giant-schema-key]]}]}])
-            db @connection
+            db (db/db connection)
             ctx (eval/build-base-ctx)
             _ (eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db db})
             directory (run-in ctx "(dir my.message)" 2000)
@@ -1129,7 +1129,7 @@
           (is (< (count giant-output) (count (pr-str giant-schema-form)))))
         (testing "a non-core error definition keeps its resolved form"
           (let [core-projection
-                (seon.schema/projection-from-database @connection)
+                (seon.schema/projection-from-database (db/db connection))
                 projection
                 (seon.schema/projection-with-schema
                  core-projection
@@ -1139,7 +1139,7 @@
                  {:seon.schema.admission/source :agent})
                 nonstandard-ctx (eval/build-base-ctx)
                 _ (#'eval/install-program-doc!
-                   nonstandard-ctx @connection projection)
+                   nonstandard-ctx (db/db connection) projection)
                 nonstandard-doc
                 (run-in nonstandard-ctx "(doc my.fs/read)" 2000)]
             (is (some #(str/starts-with?
@@ -1167,11 +1167,11 @@
                  {:seon.ns/name namespace-name}}])
             base (eval/build-base-ctx)
             _ (eval/acquire! {:seon.sci.eval/ctx base
-                              :seon.db/db @connection})
+                              :seon.db/db (db/db connection)})
             fork-result
             (eval/fork-for-turn
              {:seon.sci.eval/ctx base
-              :seon.db/db @connection
+              :seon.db/db (db/db connection)
               :seon.db/connection connection
               :seon.agent/id agent-id})
             turn-ctx (:seon.sci.eval/ctx fork-result)
@@ -1302,7 +1302,7 @@
                :seon.schema.admission/source :agent}])
             ctx (eval/build-base-ctx)
             acquired (eval/acquire! {:seon.sci.eval/ctx ctx
-                                     :seon.db/db @connection})
+                                     :seon.db/db (db/db connection)})
             evaluation
             (deadlined-in ctx "(authored.interrupt/spin)" 300)]
         (is (= 2 (:seon.sci.eval/installed acquired)))
@@ -1367,14 +1367,14 @@
                      {:seon.db/connection connection})
               acquired
               (eval/acquire! {:seon.sci.eval/ctx ctx
-                              :seon.db/db @connection})
+                              :seon.db/db (db/db connection)})
               refusal
               (first
                (db/q '[:find [(pull ?error [*]) ...]
                        :where
                        [?error :seon.error/kind
                         :seon.sci.eval/acquisition-refused]]
-                     @connection))]
+                     (db/db connection)))]
           (is (= 42 (sci/eval-string* ctx "(acquire.poison/good 41)"))
               "a later valid row installs and works")
           (is (= 1 (count (:seon.sci.eval/acquisition-refusals acquired))))
@@ -1444,9 +1444,9 @@
                     moment)))
               acquired-ctx (eval/build-base-ctx)]
           (eval/acquire! {:seon.sci.eval/ctx acquired-ctx
-                          :seon.db/db @connection})
+                          :seon.db/db (db/db connection)})
           (assert-violation acquired-ctx "boot acquire!")
-          (assert-violation (eval/cluster-ctx @connection)
+          (assert-violation (eval/cluster-ctx (db/db connection))
                             "cold crash recovery"))))))
 
 (deftest acquisition-uses-the-effective-config-projection-when-instrumented
@@ -1463,14 +1463,14 @@
                   (map (fn [instrumented-var]
                          [instrumented-var @instrumented-var]))
                   (instrument/instrumented))
-            projection (seon.schema/projection-from-database @connection)]
+            projection (seon.schema/projection-from-database (db/db connection))]
         (try
           (seon.schema/call-with-projection
            projection
            #(instrument/apply! {:seon.config/on-core-error :panic}))
           (is (map? (eval/acquire!
                      {:seon.sci.eval/ctx (eval/build-base-ctx)
-                      :seon.db/db @connection})))
+                      :seon.db/db (db/db connection)})))
           (finally
             (instrument/remove!)
             (doseq [[instrumented-var root] entering-roots]
@@ -1491,7 +1491,7 @@
                 {:seon.agent/id agent-id
                  :seon.ns/name assigned-namespace
                  :seon.cluster/name cluster-name}))
-            ctx (eval/cluster-ctx @connection connection)
+            ctx (eval/cluster-ctx (db/db connection) connection)
             evaluation
             (run-in ctx
                     "(seon.sci.eval/agent-namespace (seon.db/db) \"probe\")"
@@ -1530,7 +1530,7 @@
                           (fn [runtime-ctx _callee arguments]
                             (swap! seen conj (env/of runtime-ctx))
                             arguments)]
-              (eval/cluster-ctx @connection connection))
+              (eval/cluster-ctx (db/db connection) connection))
             evaluation
             (eval/evaluate
              {:seon.sci.eval/ctx ctx
@@ -1563,9 +1563,9 @@
           (db/transact! connection-b [{:seon.cluster/name "ambient-b"}])
           (let [uncustodied-ctx (eval/build-base-ctx)
                 _ (eval/acquire! {:seon.sci.eval/ctx uncustodied-ctx
-                                  :seon.db/db @connection-a})
-                ctx-a (eval/cluster-ctx @connection-a connection-a)
-                ctx-b (eval/cluster-ctx @connection-b connection-b)
+                                  :seon.db/db (db/db connection-a)})
+                ctx-a (eval/cluster-ctx (db/db connection-a) connection-a)
+                ctx-b (eval/cluster-ctx (db/db connection-b) connection-b)
                 evaluate
                 (fn [ctx source]
                   (eval/evaluate
@@ -1640,9 +1640,9 @@
                    {:seon.agent/id "host-walker"
                     :seon.cluster/name "host-walk"
                     :seon.ns/name 'my.agents.host-walker}))
-      (let [ctx (eval/cluster-ctx @connection connection)
+      (let [ctx (eval/cluster-ctx (db/db connection) connection)
             request
-            {:seon.db/db @connection
+            {:seon.db/db (db/db connection)
              :seon.db/connection connection
              :seon.agent/id "host-walker"
              :seon.render.walk/lookup
@@ -1963,7 +1963,7 @@
   ;; the same invocation on an unarmed thread owns an ordinary new arm.
   (test-support/with-database
    (fn [connection]
-     (let [database @connection
+     (let [database (db/db connection)
            ctx (eval/cluster-ctx database connection)
            wrapped-ctx
            (env/carry-state ctx (env/environment-state (env/of ctx)))
@@ -2041,7 +2041,7 @@
 (deftest both-entrances-classify-one-failure-identically
   (test-support/with-database
    (fn [connection]
-     (let [database @connection
+     (let [database (db/db connection)
            ctx (eval/build-base-ctx)
            _ (is (ok? (run-in ctx (str "(defn probe-throw [x]"
                                        " (throw (ex-info \"boom\" {:a x})))")
@@ -2136,7 +2136,7 @@
            invoked (:seon.sci.admit/value
                     (kernel/invoke
                      {:seon.sci.eval/ctx (eval/build-base-ctx)
-                      :seon.db/db @connection
+                      :seon.db/db (db/db connection)
                       :seon.fn/sym "user/never-defined"
                       :seon.sci.eval/args []
                       :seon.sci.eval/time-limit-ms 1000
@@ -2161,7 +2161,7 @@
       (let [{ctx :seon.sci.eval/ctx}
             (eval/fork-for-turn
              {:seon.sci.eval/ctx (test-support/fork-cluster-ctx connection)
-              :seon.db/db @connection
+              :seon.db/db (db/db connection)
               :seon.db/connection connection})
             setting (run-in ctx "(set! *print-length* 2)" 5000)
             following (run-in ctx "(vec (range 40))" 5000)

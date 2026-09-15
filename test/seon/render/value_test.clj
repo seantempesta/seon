@@ -34,7 +34,7 @@
 (defn- registered-unit
   [connection raw]
   (assoc (unit raw)
-         :seon.db/db @connection
+         :seon.db/db (db/db connection)
          :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
          :seon.render.value/root [:seon.render.value-test/registered raw]))
 
@@ -53,7 +53,7 @@
                                   :my.plan.item/done-when "Input is available"}
                                  {:my.plan.item/id "check"
                                   :my.plan.item/title "Check output"}])
-           database @connection
+           database (db/db connection)
            directory (evaluation/directory-value database 'seon.repl true)
            step (plan/item {:seon.db/db database :my.plan.item/id "prepare"})
            _ (db/transact! connection [{:seon.agent/id "plan-reader"}])
@@ -66,9 +66,9 @@
                                         :my.plan.item/done-when "Later criterion"}
                                        {:my.plan.item/id "finished" :my.plan.item/title "Finished task"
                                         :my.plan.item/done-when "Finished criterion"}]}
-                      @connection connection "plan-reader")
+                      (db/db connection) connection "plan-reader")
            completed (plan/complete! "finished" connection "plan-reader")
-           whole-plan (plan/plan {:seon.db/db @connection :seon.agent/id "plan-reader"})
+           whole-plan (plan/plan {:seon.db/db (db/db connection) :seon.agent/id "plan-reader"})
            request (assoc (render-request connection nil)
                           :seon.render/profile
                           {:seon.render.profile/id :seon.render.profile/test
@@ -168,11 +168,11 @@
                          (edn/read-string
                           (value/render-ai
                            (assoc (unit {:my.plan/steps members})
-                                  :seon.db/db @connection))))]
+                                  :seon.db/db (db/db connection)))))]
        (is (= (vec (reverse rows)) (:my.plan/steps (render-rows rows))))
        (is (= (set rows) (:my.plan/steps (render-rows (set rows)))))
        (let [shown (value/render-ai (assoc (unit {:my.plan/steps (set rows)})
-                                          :seon.db/db @connection))]
+                                          :seon.db/db (db/db connection)))]
          (is (< (str/index-of shown "order/z") (str/index-of shown "order/a"))))
        (let [unordered [(first rows) (dissoc (second rows) :my.plan.item/position)]]
          (is (= unordered (:my.plan/steps (render-rows unordered)))))
@@ -182,7 +182,7 @@
              profile (assoc (render/agent-render-profile (support/effective-config))
                             :seon.render.profile/max-children 1)
              shown (value/render-ai (assoc (unit {:my.plan/steps uncounted})
-                                          :seon.db/db @connection
+                                          :seon.db/db (db/db connection)
                                           :seon.render/profile profile))]
          (is (string? shown))
          (is (false? @visited?) "ordering does not realize an uncounted component tail"))
@@ -190,18 +190,18 @@
               (:fixture/rows
                (edn/read-string
                 (value/render-ai
-                 (assoc (unit {:fixture/rows rows}) :seon.db/db @connection))))))))))
+                 (assoc (unit {:fixture/rows rows}) :seon.db/db (db/db connection)))))))))))
 
 (deftest plan-dependencies-show-ids-without-changing-the-pulled-value
   (support/with-database
    (fn [connection]
      (let [raw {:my.plan.item/needs #{{:my.plan.item/id "b"} {:my.plan.item/id "a"}}}
-           shown (value/render-ai (assoc (unit raw) :seon.db/db @connection))]
+           shown (value/render-ai (assoc (unit raw) :seon.db/db (db/db connection)))]
        (is (= {:my.plan.item/needs ["a" "b"]} (edn/read-string shown)))
        (is (set? (:my.plan.item/needs raw)))
        (let [detailed {:my.plan.item/needs #{{:my.plan.item/id "a" :my.plan.item/title "Keep detail"}}}]
          (is (= detailed (edn/read-string (value/render-ai
-                                          (assoc (unit detailed) :seon.db/db @connection))))))))))
+                                          (assoc (unit detailed) :seon.db/db (db/db connection)))))))))))
 
 (deftest declared-producers-still-have-absolute-precedence
   (support/with-database
@@ -479,7 +479,7 @@
 (deftest documentation-body-is-whole-or-one-executable-elision
   (support/with-database
    (fn [connection]
-     (let [documentation (evaluation/documentation-value @connection 'seon.db/read-evidence 'seon.db/read-evidence)
+     (let [documentation (evaluation/documentation-value (db/db connection) 'seon.db/read-evidence 'seon.db/read-evidence)
            body (:body documentation)
            ctx (support/fork-cluster-ctx connection)
            handle 'result/e0123456789ab
@@ -551,7 +551,7 @@
 (deftest default-entity-map-renders-refs-as-installed-identities
   (support/with-database
    (fn [connection]
-     (let [database @connection
+     (let [database (db/db connection)
            target (db/pull database '[:db/id :seon.ns/name] [:seon.ns/name 'seon.print])
            raw {:seon.ns/requires [(:db/id target)] :fixture/title "no render pair"}
            request (assoc (probe-unit raw) :seon.db/db database)
@@ -575,7 +575,7 @@
            result (evaluation/evaluate
                    {:seon.cluster.eval/source
                     "(seon.db/pull '[:seon.agent/id {:seon.agent/namespace [:seon.ns/name {:seon.ns/steward [:seon.agent/id]}]}] [:seon.agent/id \"shape\"])"
-                    :seon.sci.eval/ctx ctx :seon.db/db @connection
+                    :seon.sci.eval/ctx ctx :seon.db/db (db/db connection)
                     :seon.sci.admit/caps (config/result-caps configuration)
                     :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms configuration)
                     :seon.config/on-core-error :panic})

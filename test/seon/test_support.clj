@@ -255,7 +255,7 @@
           (when-not base (populate-database! connection))
           (cond-> {:seon.test-support/configuration configuration
                    :seon.test-support/connection connection
-                   :seon.sci.eval/ctx (sci.eval/cluster-ctx @connection)}
+                   :seon.sci.eval/ctx (sci.eval/cluster-ctx (db/db connection))}
             private-root (assoc ::private-root private-root))
           (catch Throwable failure
             (close-base! {::configuration configuration ::connection connection})
@@ -299,20 +299,21 @@
   fixture that seeded exactly one cluster gets a production-shaped
   environment; one that seeded none carries no environment, as before."
   ([connection]
-   (fork-cluster-ctx connection (seeded-cluster-name @connection)))
+   (fork-cluster-ctx connection (seeded-cluster-name (db/db connection))))
   ([connection cluster-name]
    (let [base-ctx (:seon.sci.eval/ctx @database-base)
-         projection (:seon.schema/projection base-ctx)
-         projection-state (sci.eval/projection-state @connection projection)]
+         database (db/db connection)
+         projection (db/carried-projection database)
+         projection-state (:seon.sci.eval/projection-state (meta database))]
      (when cluster-name
        (env/replace-environment!
         projection-state
         (env/refuse-incomplete-environment!
          (env/environment {:seon.boot/cluster-name cluster-name
                            :seon.db/connection connection
-                           :seon.db/basis-t (db/basis-t @connection)
+                           :seon.db/basis-t (db/basis-t (db/db connection))
                            :seon.schema/projection projection}))))
-     (sci.eval/fork-cluster-ctx base-ctx @connection connection
+     (sci.eval/fork-cluster-ctx base-ctx (db/db connection) connection
                                 projection-state))))
 
 (defn agent-value
@@ -400,7 +401,7 @@
        connection
        (assoc :seon.db/connection connection
               :seon.schema/projection
-              (schema/projection-from-database @connection)))))))
+              (schema/projection-from-database (db/db connection))))))))
 
 (defn await-event!
   "Await one channel, latch, future, or watched reference with a loud backstop."
@@ -516,7 +517,7 @@
                   :in $ ?marker-attribute
                   :where
                   [_ ?marker-attribute ?marker]]
-                @connection
+                (db/db connection)
                 marker-attribute)]
     (if (map? result)
       result
@@ -571,6 +572,7 @@
 
 (defn- run-database-body
   [connection projection-state extra-schema body]
+  (db/carry-connection-projection-state! connection projection-state)
   (schema/call-with-projection-state
    projection-state
    (fn []
