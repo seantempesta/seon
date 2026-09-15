@@ -944,4 +944,9 @@ half-edit. Measured targets in the issue.
   `prompt_cache_miss_tokens`): run 2 was prefix-stable on 30/30 attempts
   (miss − delta ≤ 111 tokens; DeepSeek caches in 64-token blocks); 93.3 %
   of prompt tokens were cache hits.
+- 18:55 owner: "have your agents iterate while taking screenshots. the top nav
+  is bad, css problems, etc. Take this seriously like it's for a funding
+  presentation." Lane debug-turns: Playwright screenshot loop at 1440/700 px
+  per part, the header/nav and CSS shell fixed first after the transcript,
+  screenshot log in the landing note; orchestrator reviews at each landing.
 
