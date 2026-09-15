@@ -1,6 +1,6 @@
 ---
 type: prd
-status: draft
+status: idea (nothing approved; not a PRD yet)
 created: 2026-09-15
 owner: orchestrator with the owner (design dialogue 2026-09-15 09:00)
 ---
