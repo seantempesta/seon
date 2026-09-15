@@ -20,6 +20,8 @@ the same namespace twice for the same HEAD.
 |---|---|---|---|---|
 | 1 | `4c8740cf0`–`1d17650a9` | refusal-grammar (10) + fixtures-events (4) + platform | 207/6191 green; platform 84/567 green; results recorded | none |
 | 2 | `f5ca25ba9`+ | p1-ambient-state (19) | ABORTED at 22:12Z by the orchestrator: the gate alone ran 9 pool workers + serial + 6 concurrent confirmation JVMs (load avg 75 on 18 cores, 26 GB compressed); runner capped, re-run as batch 2b. The killed batch-2 gate thread RELAUNCHED its run (uncapped) beside 2b; killed again at 22:45Z. Lesson: a gate thread's instruction must say "if the command is killed, do not rerun; report" | — |
+| 2b | `f5ca25ba9`+ | p1-ambient-state (19) | KILLED at 21:44Z by the superseded batch-2 thread (the two threads had swapped runs); partial log through seon.sci.eval-test, no tally | — |
+| 2c | `48605a1de` | p1-ambient-state (19), capped at 3 workers, nice 15, strict no-relaunch thread | running | — |
 | 3 | pending | debug-page-cost, reaching-tests-tier, startup-and-hook-waste | queued behind their gate requests | — |
 
 ## Lane → slice → status
