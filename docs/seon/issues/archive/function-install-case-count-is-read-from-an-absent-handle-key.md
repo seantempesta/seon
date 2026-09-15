@@ -38,3 +38,5 @@ Basis: `7e35df2131c71f476a85c6a38bfc8eb292cb36f5` (committed source).
 HEAD `src/seon/turn.clj:3123` obtains `:seon.config.test/auto-check-cases` from `(config/effective database (:seon.cluster/name cluster))`, not from the cluster handle. The exact regression remains at `test/seon/cluster/turn_test.clj:377`; it sets three database cases, removes the handle copy and drives the ordinary turn path. The nil-handle cause cannot occur through this current reader. `bin/test-fast --paths docs/seon/issues/function-install-case-count-is-read-from-an-absent-handle-key.md -- seon.cluster.turn-test` was launched; its result is recorded in the landing report rather than asserted green here.
 
 surface: turn-loop
+
+Gate boundary: the pre-correction test-fast invocation reached armed execution (981 instrumented functions; snapshot HEAD `03976706cc350f105b0d66cd78b50197c3f7642e`) but no terminal verdict was received. The process was absent when the no-JVM correction arrived. This resolution relies on the corrected source reader, not a claimed passing run.

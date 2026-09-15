@@ -92,7 +92,7 @@ second. Plain GETs still reached 1,459.968 ms while content changed, and a
 scratch page containing accumulated diagnostic faults had a 5,745.768 ms
 cold acquisition. Keep this issue open for those remaining latency defects.
 Exact positive and negative observations are in the
-[landing note](../../prds/context-generation/research/page-feed-landing-2026-09-08.md).
+[landing note](../../../prds/context-generation/research/page-feed-landing-2026-09-08.md).
 
 ## Resolution (2026-09-15 triage)
 

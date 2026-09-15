@@ -38,7 +38,7 @@ Two live clusters in one JVM; adopt changed behavior onto default; default's
 program and page advance; beta's program facts, executed behavior, and served
 page retain the prior program. Observe both, not merely distinct commit IDs.
 
-See [the partial landing evidence](../../prds/context-generation/research/multi-cluster-concurrency-landing-2026-09-08.md).
+See [the partial landing evidence](../../../prds/context-generation/research/multi-cluster-concurrency-landing-2026-09-08.md).
 
 ## Resolution (2026-09-15 triage)
 

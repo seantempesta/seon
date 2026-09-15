@@ -114,7 +114,7 @@ after initial collection, 53,263,771 after one fault, and 143,665,214 after
 growth. All 500 facts and the one shared evidence blob remained retrievable;
 the largest inline evidence was 658 characters. Two tests passed with 18
 assertions. The full measurement and reference-code grounding are in the
-[storage audit](../../prds/context-generation/research/form-evaluation-storage-audit-2026-09-05.md).
+[storage audit](../../../prds/context-generation/research/form-evaluation-storage-audit-2026-09-05.md).
 This proves bounded inline evidence and working reclamation under the tested
 policy, not flat storage growth or an adequate production collection schedule.
 

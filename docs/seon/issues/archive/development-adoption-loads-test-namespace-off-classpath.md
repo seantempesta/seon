@@ -31,6 +31,6 @@ to load an unavailable namespace; the source commit converges afterward.
 
 Basis: `7e35df2131c71f476a85c6a38bfc8eb292cb36f5` (committed source).
 
-Commit `d756a09d4` adds the classpath-aware reload predicate. HEAD `src/seon/cluster.clj:1832` (`reloadable-namespace?`) requires both an already loaded namespace and a `.clj`/`.cljc` classpath resource; the reload loop at `:1960` applies it. Thus this selection path cannot require the unavailable test namespace described here. Verified with `git log -S 'reloadable-namespace?' -- src/seon/cluster.clj` and the committed predicate/caller. No default adoption was triggered.
+Commit `d756a09d4` adds the classpath-aware reload predicate. HEAD `src/seon/cluster.clj:1839` (`reloadable-namespace?`) requires both an already loaded namespace and a `.clj`/`.cljc` classpath resource; the reload loop at `:1960` applies it. Thus this selection path cannot require the unavailable test namespace described here. Verified with `git log -S 'reloadable-namespace?' -- src/seon/cluster.clj` and the committed predicate/caller. No default adoption was triggered.
 
 surface: adoption-publication

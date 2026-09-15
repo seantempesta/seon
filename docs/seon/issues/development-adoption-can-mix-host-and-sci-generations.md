@@ -5,14 +5,6 @@ severity: blocker
 tags: [issue, runtime, schema, class/p1]
 ---
 
-## Re-verified at HEAD (2026-09-15)
-
-Basis: `7e35df2131c71f476a85c6a38bfc8eb292cb36f5` (committed source; concurrent working-tree edits excluded).
-
-OPEN, UNVERIFIABLE. HEAD `src/seon/cluster.clj:1868` still reconciles database state before `require :reload` at `:1965`, shared SCI acquisition at `:1967`, projection advance and final instrumentation/source-commit publication. `refresh-source!` at `:2027` locks publishers, while `src/seon/sci/eval.clj:957` still forwards host Vars. These establish a remaining race candidate, not a reproduced mixed generation. The old per-turn-fork description is historical. Verification needs a bounded concurrency fixture pausing adoption between reload/acquisition while an ordinary agent call runs; that would require an isolated lifecycle drill or a new test, outside this no-test-edit triage. No adoption or lifecycle mutation was attempted.
-
-surface: adoption-publication
-
 # Development adoption can mix host and SCI generations
 
 Extracted on 2026-09-08 from the instrumentation ownership issue: stable
@@ -86,3 +78,13 @@ agent facts, directly violating the owner's preservation requirement. A
 process-wide read/write lock around every callable boundary would cover JVM
 REPL calls too, but adds a pervasive second admission mechanism and is likewise
 rejected.
+
+## Re-verified at HEAD (2026-09-15)
+
+Basis: `7e35df2131c71f476a85c6a38bfc8eb292cb36f5` (committed source; concurrent working-tree edits excluded).
+
+UNVERIFIABLE-WITHOUT-GATE. HEAD `src/seon/cluster.clj:1868` still reconciles database state before `require :reload` at `:1965`, shared SCI acquisition at `:1967`, projection advance and final instrumentation/source-commit publication. `refresh-source!` at `:2027` locks publishers, while `src/seon/sci/eval.clj:957` still forwards host Vars. These establish a remaining race candidate, not a reproduced mixed generation. The old per-turn-fork description is historical. Verification needs a bounded concurrency fixture pausing adoption between reload/acquisition while an ordinary agent call runs; that would require an isolated lifecycle drill or a new test, outside this no-test-edit triage. No adoption or lifecycle mutation was attempted.
+
+surface: adoption-publication
+
+Required namespaces: `seon.cluster.source-test` and `seon.custody-stability-test`, with an adoption/ordinary-call overlap fixture. New JVM launches are prohibited by the owner correction.

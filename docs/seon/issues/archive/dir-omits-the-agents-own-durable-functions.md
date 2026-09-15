@@ -45,7 +45,7 @@ acquisition-time documentation map in `src/seon/sci/eval.clj:1105–1248`.
 The installation seam already writes the required facts.
 
 Exact rows, forms, expansions, and timings are recorded in
-[the lane landing note](../../prds/context-generation/research/dir-own-fns-landing-2026-09-10.md).
+[the lane landing note](../../../prds/context-generation/research/dir-own-fns-landing-2026-09-10.md).
 
 ## Repair (2026-09-14)
 

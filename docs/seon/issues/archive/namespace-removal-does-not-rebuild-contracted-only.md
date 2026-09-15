@@ -31,7 +31,7 @@ included the ephemeral value plus an unrestorable contracted shadow. The
 uncontracted value therefore remains eligible for cold restore too.
 
 The exact receipt and row queries are in
-[concurrency streams crossed](../../prds/sci-execution-runtime/research/concurrency-streams-crossed-2026-08-04.md).
+[concurrency streams crossed](../../../prds/sci-execution-runtime/research/concurrency-streams-crossed-2026-08-04.md).
 
 ## Owner
 
@@ -51,6 +51,6 @@ The per-run candidate-context namespace delta and durable placement gate.
 
 Committed-source verification with `git show HEAD:<path>` and `git log`; no new JVM launch.
 
-Commit `ff9507c1b` deletes durable private definitions and cold restoration. `git grep -n -E 'seon.code.def|rehydrat|restore-def' HEAD -- src resources` returns no matches. HEAD `src/seon/sci/eval.clj:1682` retains agent objects in one live context; `unmap-row` at `:1875` derives actual removed program identities and their deletion transaction instead of a session image to replay. The old acceptance requiring deleted contracted functions to resurrect while uncontracted stored values stay removed is not the current model. The cold-restore defect cannot occur without the removed restoration mechanism. This does not claim that every current namespace deletion or cross-agent publication behavior has a new gate result.
+Commit `ff9507c1b` deletes durable private definitions and cold restoration. `git grep -n -E 'seon.code.def|rehydrat|restore-def' HEAD -- src resources` returns no matches. HEAD `src/seon/sci/eval.clj:1682` retains agent objects in one live context; `unmap-row` at `:1872` derives actual removed program identities and their deletion transaction instead of a session image to replay. The old acceptance requiring deleted contracted functions to resurrect while uncontracted stored values stay removed is not the current model. The cold-restore defect cannot occur without the removed restoration mechanism. This does not claim that every current namespace deletion or cross-agent publication behavior has a new gate result.
 
 surface: other
