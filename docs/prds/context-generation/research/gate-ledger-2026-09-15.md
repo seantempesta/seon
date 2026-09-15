@@ -22,6 +22,7 @@ the same namespace twice for the same HEAD.
 | 2 | `f5ca25ba9`+ | p1-ambient-state (19) | ABORTED at 22:12Z by the orchestrator: the gate alone ran 9 pool workers + serial + 6 concurrent confirmation JVMs (load avg 75 on 18 cores, 26 GB compressed); runner capped, re-run as batch 2b. The killed batch-2 gate thread RELAUNCHED its run (uncapped) beside 2b; killed again at 22:45Z. Lesson: a gate thread's instruction must say "if the command is killed, do not rerun; report" | — |
 | 2b | `f5ca25ba9`+ | p1-ambient-state (19) | KILLED at 21:44Z by the superseded batch-2 thread (the two threads had swapped runs); partial log through seon.sci.eval-test, no tally | — |
 | 2c | `48605a1de` | p1-ambient-state (19), capped at 3 workers, nice 15 | 392/2437: 50 failures, 20 errors in 6 namespaces (sci.eval, render-simplification, schema.datahike, effect, render.value, cluster.mcp); 13 namespaces green; published-base 44 s, tests 748 s; results NOT recorded (live prepl unavailable) | p1-ambient-state: class = fixtures mint bare database values and the fallback now refuses; Datom-where-map in mcp-test; two effect events |
+| 5 | `ec52657de` | slow-tests-merge (6 ns; rows 2–6 of the test-suite plan, five commits ending `ec52657de`); no platform (red, P1) | running | — |
 | 4 | `8e19dee42` | p1-ambient-state re-gate (9 + platform) after `28e955327` | WORSE: 210/1132: 134 failures, 19 errors (7 ns); PLATFORM RED (1 error: reads-require-their-carried-projection…, test_support.clj:479); published-base 40 s, tests 182 s | p1-ambient-state: platform first; iterate in-process with seon.test/run before any re-gate |
 | 3 | `b5b5b0fb3` | startup-and-hook-waste (4) + debug-page-cost (3) + reaching-tests-tier (7, overlapping 3) + platform | 88/597: 13 failures, 2 errors; platform 84/567 green; published-base 44 s, tests 157 s | startup-and-hook-waste GREEN; debug-page-cost: retained_test 8 FAIL + web-debug 1 ERROR; reaching-tests-tier: source-reconciliation 5 FAIL + 1 ERROR |
 
@@ -55,7 +56,7 @@ the same namespace twice for the same HEAD.
 |---|---|---|
 | slow-surfaces-plan (`65642226b`) | rows 1–3 approved; hook option 1 (no idle delay); rows 4–7 deferred until measured | startup-and-hook-waste (rows 2–3, landed); row 1 (adoption rebuilds the projection) queued behind P1 |
 | debug-page-cost-plan (`5755bcd60`) | kills 1–3 approved; option A for the directory audit | debug-page-cost (landed; cold-page slice in flight) |
-| test-suite-cost-plan (`78f0d15c0`) | row 1 option 1 (no automatic confirmation; explicit `--confirm`); row 7 publication deferred, lazy checkouts approved; row 8 approved; rows 2–6 approved; regrowth check approved | test-runner-waste (rows 1, 7-lazy, 8, regrowth); slow-tests-merge (rows 2–6; row 4 landed `e3af34340`) |
+| test-suite-cost-plan (`78f0d15c0`) | row 1 option 1 (no automatic confirmation; explicit `--confirm`); row 7 publication deferred, lazy checkouts approved; row 8 approved; rows 2–6 approved; regrowth check approved | test-runner-waste (rows 1, 7-lazy, 8, regrowth; `ea5861329` landed); slow-tests-merge (rows 2–6 landed, final `ec52657de`; flow-health test still blocked by a missing projection at seon.program/base-context-injected-symbols — P1 territory) |
 
 ## 23:55Z — Codex usage limit
 
