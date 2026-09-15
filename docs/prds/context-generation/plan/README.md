@@ -28,3 +28,5 @@ In particular, deterministic twelve-hex evaluation ids are implemented by
 `src/seon/id.clj:50`; the 48-bit format cannot guarantee collision freedom.
 That limit is recorded in the PRD's §0 rather than silently changing the
 identity design.
+
+> **2026-09-15: this program is wrapping up.** The next program is the [namespace steward platform](../../steward-platform/README.md); its ideas and research live there, nothing approved yet.

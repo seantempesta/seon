@@ -1329,3 +1329,15 @@ half-edit. Measured targets in the issue.
   routing (error.clj), A06/A16 (db.clj); behind page-speed: A14
   (transcript.clj). Adoption gate for half-edits stays a platform issue.
 
+## 2026-09-15 17:05Z — this program is wrapping up
+
+- Owner: "this is a big push. wrap up the context-generation PRD and start
+  with the namespace steward platform … I haven't approved anything yet
+  and we don't have a final design so relocate the docs and research so
+  we have ideas we can put together to form a plan of attack."
+- Relocated: the stewards draft → `docs/prds/steward-platform/ideas/`
+  (status: idea), the two data audits → `docs/prds/steward-platform/research/`;
+  new README with the mandate and "nothing approved". This working edge
+  keeps the run facts and the in-flight lanes until they land; new design
+  work goes to the steward platform's `plan/unsettled.md`.
+
