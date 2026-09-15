@@ -1117,3 +1117,22 @@ half-edit. Measured targets in the issue.
   its own stray `)` and comment-only replies; error texts invited the
   belief (issue filed). Probe now prefers the captured prompt (`f0985583e`).
 
+## 2026-09-15 05:00Z — cycle 4: audit-1 findings; consolidation and blocker lanes
+
+- audit-1 `cb6a8bf39` (research/audit-1-2026-09-15.md): 16 ranked findings
+  with file:line evidence; transcript.clj +923 net lines with duplicate
+  census/summary/diff/provenance mechanisms (A01–A04, A08–A09, A13–A14);
+  old Context-now path survives beside the ledger (A08); literal rosters
+  for block order/labels (A07); second generic value renderer in
+  transaction HTML (A06); settings units inferred from names (A12); CSS
+  override layer (A10); tests discovering APIs from files (A11); the value
+  diff disables editscript's work bound (A16). One deletion made (A15).
+- Lanes: consolidate-debug (high; A08, A09, A02, A01, A04, A07, A03, A13),
+  run4-blockers (high; refused-install error value, provider stop dial,
+  reader texts), context-renders (continuing; owes A06, A14, A16 in its
+  files). Deferred: A05/A10/A11/A12 (misc), the backstop bound (turn.clj).
+- context-renders landed `0c70a1cb4` (turn-dependent agent reads stay out
+  of generated context), `1f18b99fc` (change-only re-reads as executable
+  changed-path responses), `d0817d49b` (printer: whole coordinates,
+  deterministic scalar order).
+
