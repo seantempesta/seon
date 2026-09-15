@@ -422,3 +422,43 @@ boundary. The loop-opening test again logged two agent-already-running refusals
 while all its assertions passed. No test JVM, process restart, foreign session,
 or foreign edited file was operated. Three gate namespaces were rewritten once
 each; the orchestrator's fresh-worker gate remains final proof.
+
+### Batch 9: the cluster observation depends on adoption
+
+Read the Batch 9 lane report end to end. Its one remaining 9→10 invocation
+failure reproduced with the [fresh-base probe](debug_page_cost_batch9_probe_2026_09_15.clj):
+run **64954**, 23:07:16Z, basis **536872076**, **7 pass / 1 fail / 0 error**.
+The probe clones Batch 9's canonical published base, uses its explicitly carried
+projection/environment and fixed profiles, constructs fresh SCI contexts, and
+runs the single deftest in-process through `seon.test/run` with default custody.
+
+An invocation trace (run **64957**, 23:07:31Z, same 7/1/0 result) identified
+exactly one repeat: **`seon.cluster.status/render-html`**. The other eight
+renderers were identity, plan, inbox, settings, notes, namespace, runtime and
+faults. Source confirms `seon.cluster.status/snapshot` queries
+`:seon.source/commit-id` and puts it in `:seon.cluster.status/adopted-commit`;
+`render-html` displays that observation. The test changes that very fact.
+This is correct dependency invalidation, not an extra unrelated page render.
+The earlier warm fixture's missing contracts concealed this renderer.
+
+Corrected the regression's observation seam: count by renderer, require every
+other renderer's count to remain identical, require the status renderer to run
+once initially and exactly once more after adoption, and assert that the HTML
+contains the newly adopted UUID. The unchanged SCI snapshot assertion remains.
+No production rendering behavior or retained evidence was weakened.
+
+Evaluated the corrected deftest before the file edit. The same fresh-base
+`(seon.test/run #'seon.render.web-context-test/unrelated-adoption-preserves-pages-with-an-unchanged-sci-snapshot
+(seon.operator/connection "default"))` passed **11 / 0 / 0**, run **64960**,
+23:08:05Z, basis **536872082**. The complete returned result was inspected.
+The committed probe records the exact scoped invocation and owns clone cleanup.
+
+Publication reported its declared timeout, as did the explicit existing
+`refresh-source!` MCP call. A subsequent query nevertheless verified the updated
+test source in adopted commit **6aa9d043-bf2b-5082-88ed-d346428ef9b9**.
+Reloaded the checked-in test through the test loader and repeated the same cold
+probe: **11 pass / 0 fail / 0 error**, run **64970**, 23:10:38Z, basis
+**536872095**. This is after verified adoption, not an inference from timeout.
+No test JVM, restart, refork or foreign session operation occurred; PID 69622
+remained alive. Preserved concurrent production edits. The gate request now
+contains only `seon.render.web-context-test`. Stop after this path-limited slice.

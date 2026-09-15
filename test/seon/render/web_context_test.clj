@@ -115,14 +115,14 @@
      (let [ctx (:ctx context)
            snapshot @(:seon.sci.kernel/program-snapshot ctx)
            invoke kernel/invoke
-           calls (atom 0)]
+           calls (atom {})]
        (with-redefs [kernel/invoke
-                     (fn [request] (swap! calls inc) (invoke request))]
+                     (fn [request] (swap! calls update (str (:seon.fn/sym request)) (fnil inc 0)) (invoke request))]
          (let [before (#'web-test/fetch server "/agent/root")
                initial @calls
                _ (#'web-test/fetch server "/agent/root")]
            (is (= 200 (.statusCode before)))
-           (is (pos? initial) "the real SCI renderer ran")
+           (is (seq initial) "the real SCI renderers ran")
            (is (= initial @calls) "the unchanged page reuses its calls")
            (let [report (db/transact! connection
                           [[:db/add [:seon.cluster/name "web-test"]
@@ -132,8 +132,17 @@
            (let [after (#'web-test/fetch server "/agent/root")]
              (is (identical? snapshot @(:seon.sci.kernel/program-snapshot ctx)))
              (is (= 200 (.statusCode after)))
-             (is (= initial @calls)
-                 "an adoption stamp does not invalidate unchanged rendering dependencies"))))))))
+             (let [status-renderer "seon.cluster.status/render-html"]
+               (is (= (dissoc initial status-renderer)
+                      (dissoc @calls status-renderer))
+                   "unchanged rendering dependencies retain every other renderer")
+               (is (= 1 (get initial status-renderer))
+                   "the first page renders the cluster observation")
+               (is (= 2 (get @calls status-renderer))
+                   "the adopted commit is an input to the cluster observation")
+               (is (str/includes? (.body after)
+                                  "f54229d7-54eb-472d-9ae8-917a0f97af71")
+                   "the page shows the newly adopted commit")))))))))
 
 (deftest selected-session-defers-prompt-acquisition
   (#'web-test/with-server
