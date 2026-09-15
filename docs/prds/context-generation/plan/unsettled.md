@@ -1272,3 +1272,31 @@ half-edit. Measured targets in the issue.
   render request keys, call ledger). Each writes chains with probe
   results and the MVP point. PRD §9 will be rewritten from their facts.
 
+## 2026-09-15 16:30Z — data-audit-a landed (`1e87340c7`, 951 lines, probes on default)
+
+- Census at basis 536877302: 4,621 fn identities (3,850 with source, 1,019
+  with specs/ASTs), 411 namespaces (two stewards), 1,608 tests. Seven
+  chains written with detector queries run read-only.
+- Success functions are ordinary contracted query functions, no persisted
+  flags: `seon.test/verified?` (test passed on a run whose program digest
+  equals the tested definition's), `seon.fn/tested?`, `regression-verified?`,
+  `doc-example-verified?`, `contract-complete?`, `calls-resolved?`; a
+  missing subject is false; a refusal is an error, never completion.
+- Minimum schema delta shared across chains: `:seon.test/run` ref and
+  `seon.test.run` {id, at, git-sha (exist, not committed today),
+  program-digest, basis-t, branch}; results recorded to `:current-src` by
+  default through the ONE writer seam (`commit-results!`/`record-tx`),
+  replacing the duplicate `:test-results` destination paths; recording
+  failure must gate task completion.
+- Definitions → files: durable source strings and bounded write
+  primitives exist; the reverse `.clj` writer does not. MVP restriction:
+  export a NEW explicit source namespace + test namespace to two explicit
+  new paths from selected durable fn/test rows (candidate pure
+  `seon.program/source-files` + effect `seon.cluster.export/source!`);
+  edit-in-place export is a separate scope (comments/order/cljc not
+  reconstructible from rows).
+- MVP chain: identified function + reaching test, rendered from program
+  rows, test evidence tied to the exact tested definition, exported to two
+  new files. No new problem entity family; `seon.problems` already derives
+  aggregates.
+
