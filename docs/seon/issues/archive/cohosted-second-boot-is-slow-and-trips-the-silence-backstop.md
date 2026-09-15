@@ -46,7 +46,7 @@ also costs the URL line the operator normally prints.
 
 The 2026-08-10 complete gate amplified the same regression: this test consumed
 2,616.8 seconds. A current-tree phase probe and the correction are recorded in
-[the co-hosted boot speed measurement](../../prds/sci-execution-runtime/research/cohost-boot-speed-2026-08-10.md).
+[the co-hosted boot speed measurement](../../../prds/sci-execution-runtime/research/cohost-boot-speed-2026-08-10.md).
 
 The gap sits between the `recovery` phase and the next published progress
 event, i.e. in `config`/`program`. The in-JVM regression
@@ -57,7 +57,7 @@ not the operator wrapper.
 ## Why it matters now
 
 The
-[test-infrastructure spec](../../prds/sci-execution-runtime/plan/test-infrastructure-spec-2026-08-07.md)'s
+[test-infrastructure spec](../../../prds/sci-execution-runtime/plan/test-infrastructure-spec-2026-08-07.md)'s
 four-worker target puts multiple sovereign environments in ONE JVM. A per-
 environment cost that GROWS with the number already resident is the wrong
 shape for that target, and it taxes every fix cycle that boots a scratch

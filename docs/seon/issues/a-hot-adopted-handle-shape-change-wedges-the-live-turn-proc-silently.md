@@ -42,3 +42,5 @@ handle-shape changes are the same class and need the same gate.
 OPEN, UNVERIFIABLE. HEAD 7e35df213: `src/seon/cluster/agent.clj:644` still refuses `:seon.agent/missing-context-state`. The original trigger requires adopting an incompatible handle change onto an older live graph; that mutation is outside this read-only default probe. No reproduction of that transition was performed. MCP `runtime_status` with cluster `default` returned health/Flow `unknown`, `Read timed out`; a separate JVM `(+ 1 2)` returned 3 in 2 ms. This demonstrates an observation limit, not the historical cause. The generic health timeout is already owned by `default-component-probe-times-out-after-adoption.md`. Needed: a disposable older boot plus controlled incompatible adoption and pending-work observation. Retain blocker pending that proof.
 
 surface: adoption-publication
+
+Owner correction: UNVERIFIABLE-WITHOUT-GATE (seon.cluster.source-test, seon.turn-test). No new JVM may be launched; the required canonical regression remains pending.

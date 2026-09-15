@@ -22,7 +22,7 @@ pre-filter blocks. Its log did not name a `seon.render.web` reload. This is
 negative evidence against treating the adoption marker alone as proof of loaded
 behavior; it does not establish the schema/indexing cause. The lane preserved
 the concurrently edited adoption owner. Outcomes are recorded in the
-[page-feed landing note](../../prds/context-generation/research/page-feed-landing-2026-09-08.md).
+[page-feed landing note](../../../prds/context-generation/research/page-feed-landing-2026-09-08.md).
 
 ## Resolution (2026-09-15 triage)
 

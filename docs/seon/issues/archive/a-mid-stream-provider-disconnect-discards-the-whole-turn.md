@@ -114,7 +114,7 @@ condition it would have to ride out.
 ## Recovery landed 2026-08-08 — commit `8c6c2d90c`
 
 Evidence and the refuted hypothesis:
-[provider-stream-truncation-2026-08-08.md](../../prds/sci-execution-runtime/research/provider-stream-truncation-2026-08-08.md).
+[provider-stream-truncation-2026-08-08.md](../../../prds/sci-execution-runtime/research/provider-stream-truncation-2026-08-08.md).
 
 The class is dead by construction rather than by a check. A read failure
 now ENDS the line sequence instead of throwing through the fold, so the

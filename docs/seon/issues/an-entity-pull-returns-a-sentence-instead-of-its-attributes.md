@@ -98,7 +98,7 @@ through `seon.render/project-node*` (`src/seon/render.clj:445-495`).
 
 A re-narration can also lie about WHICH entity it describes, which a data
 result structurally cannot — see
-[a-run-history-entry-can-name-a-different-run-than-its-form-pulled](a-run-history-entry-can-name-a-different-run-than-its-form-pulled.md),
+[a-run-history-entry-can-name-a-different-run-than-its-form-pulled](archive/a-run-history-entry-can-name-a-different-run-than-its-form-pulled.md),
 corroborated three more times in this capture.
 
 Full walk and counts:

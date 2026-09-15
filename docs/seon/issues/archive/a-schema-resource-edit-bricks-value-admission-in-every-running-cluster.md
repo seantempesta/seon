@@ -87,7 +87,7 @@ Declarations and their predicates acquire together at one basis, so a
 declaration whose predicate is not available cannot enter a running
 projection — the seon.env PRD already rules this direction ("the 22
 load-time registration sentinels … replaced by acquisition at a basis",
-[seon-env-prd-2026-08-07.md](../../prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md)).
+[seon-env-prd-2026-08-07.md](../../../prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md)).
 This issue is the live reproduction of why that deletion is urgent rather
 than tidy, and it should be listed as one of its acceptance cases.
 
@@ -107,6 +107,6 @@ into agent context.
 
 ## Resolution (2026-09-15 triage)
 
-At audited HEAD `7e35df213`, `src/seon/sci/admit.clj:195-197` calls `identity-only-projection-in` with the projection carried in admission state, and `:696-702` acquires that supplied/handed projection once. It no longer calls the disk-derived zero-argument `shape-projection` in the reported identity path. Commit `3f6958fc2` contains the replacement. Read-only MCP JVM `(+ 1 2)` returned 3, but that alone is not an adoption proof. The separate incompatible development-adoption class remains owned by `a-hot-adopted-handle-shape-change-wedges-the-live-turn-proc-silently.md`; this resolution is specifically the implicit classpath pickup at value admission.
+At audited HEAD `7e35df213`, `src/seon/sci/admit.clj:195-197` calls `identity-only-projection-in` with the projection carried in admission state, and `:696-702` acquires that supplied/handed projection once. It no longer calls the disk-derived zero-argument `shape-projection` in the reported identity path. Commit `9d5c986eb` moves declaration acquisition out of per-node admission. Read-only MCP JVM `(+ 1 2)` returned 3, but that alone is not an adoption proof. The separate incompatible development-adoption class remains owned by `a-hot-adopted-handle-shape-change-wedges-the-live-turn-proc-silently.md`; this resolution is specifically the implicit classpath pickup at value admission.
 
 surface: adoption-publication

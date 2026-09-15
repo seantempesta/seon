@@ -444,7 +444,7 @@ minted, and no reverse run ref is ever asserted on the acquired argument
 loads of `/ns/my.agents.juniper/debug` and its feed on the live
 `juniper-context` cluster left the basis transaction at `536871259`, unchanged
 — measured 2026-09-07, recorded in
-[the one-eval-point landing](../../prds/context-generation/research/one-eval-point-landing-2026-09-07.md).
+[the one-eval-point landing](../../../prds/context-generation/research/one-eval-point-landing-2026-09-07.md).
 
 `seon.render-simplification-test/authored-source-invocation-reuses-one-stored-run-across-presentations`
 is still red, and its six failing assertions are this note's old design: they
