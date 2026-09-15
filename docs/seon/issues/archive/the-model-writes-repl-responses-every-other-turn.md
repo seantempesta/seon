@@ -2,7 +2,7 @@
 type: issue
 status: resolved
 severity: blocker
-tags: [reader, prompt, grammar, provider, live-test, design]
+tags: [issue, reader, prompt, grammar, provider, live-test, design]
 created: 2026-09-15
 ---
 

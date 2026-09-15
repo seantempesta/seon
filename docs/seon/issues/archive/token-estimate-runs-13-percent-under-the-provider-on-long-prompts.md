@@ -2,7 +2,7 @@
 type: issue
 status: resolved
 severity: friction
-tags: [tokens, ai, config, derive-or-die]
+tags: [issue, tokens, ai, config, derive-or-die]
 created: 2026-09-14
 ---
 

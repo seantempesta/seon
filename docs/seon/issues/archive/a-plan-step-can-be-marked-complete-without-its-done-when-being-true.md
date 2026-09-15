@@ -2,7 +2,7 @@
 type: issue
 status: resolved
 severity: blocker
-tags: [my.plan, done-when, derive-or-die, live-test, design]
+tags: [issue, my.plan, done-when, derive-or-die, live-test, design]
 created: 2026-09-15
 ---
 

@@ -2,7 +2,7 @@
 type: issue
 status: resolved
 severity: blocker
-tags: [turn, loop, live-test, class/p1]
+tags: [issue, turn, loop, live-test, class/p1]
 created: 2026-09-10
 ---
 

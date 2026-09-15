@@ -2,7 +2,7 @@
 type: issue
 status: resolved
 severity: blocker
-tags: [dir, doc, program-graph, sci, live-test]
+tags: [issue, dir, doc, program-graph, sci, live-test]
 created: 2026-09-10
 ---
 

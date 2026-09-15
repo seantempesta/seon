@@ -2,7 +2,7 @@
 type: issue
 status: resolved
 severity: blocker
-tags: [turn, provider, bounds, faults, live-test]
+tags: [issue, turn, provider, bounds, faults, live-test]
 created: 2026-09-15
 ---
 

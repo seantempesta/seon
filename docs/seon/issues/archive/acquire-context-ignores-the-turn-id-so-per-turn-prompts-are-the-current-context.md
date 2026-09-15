@@ -2,7 +2,7 @@
 type: issue
 status: resolved
 severity: blocker
-tags: [render, context, debug-page, faithfulness, turn]
+tags: [issue, render, context, debug-page, faithfulness, turn]
 created: 2026-09-14
 ---
 

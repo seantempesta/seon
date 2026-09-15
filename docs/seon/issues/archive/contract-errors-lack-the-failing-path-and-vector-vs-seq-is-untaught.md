@@ -2,7 +2,7 @@
 type: issue
 status: resolved
 severity: friction
-tags: [contracts, errors, malli, help, live-test]
+tags: [issue, contracts, errors, malli, help, live-test]
 created: 2026-09-15
 ---
 

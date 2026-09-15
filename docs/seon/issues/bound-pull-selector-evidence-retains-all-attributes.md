@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [context, database, read-evidence]
+tags: [issue, context, database, read-evidence]
 ---
 
 # Bound pull selectors retain all-attribute evidence

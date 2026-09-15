@@ -2,7 +2,7 @@
 type: issue
 status: resolved
 severity: blocker
-tags: [my.message, effects, turn, core-functions, live-test]
+tags: [issue, my.message, effects, turn, core-functions, live-test]
 created: 2026-09-15
 ---
 

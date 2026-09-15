@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: blocker
-tags: [platform, adoption, turn, flow, absence-as-health, class/p1]
+tags: [issue, platform, adoption, turn, flow, absence-as-health, class/p1]
 created: 2026-09-15
 ---
 

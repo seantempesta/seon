@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [render, feed, faults, steward, turn, live-test]
+tags: [issue, render, feed, faults, steward, turn, live-test]
 created: 2026-09-10
 ---
 

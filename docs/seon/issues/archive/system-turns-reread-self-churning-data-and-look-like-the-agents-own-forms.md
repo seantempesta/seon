@@ -2,7 +2,7 @@
 type: issue
 status: resolved
 severity: blocker
-tags: [turn, since-diff, context, prompt-growth, design, owner-ruling]
+tags: [issue, turn, since-diff, context, prompt-growth, design, owner-ruling]
 created: 2026-09-10
 ---
 

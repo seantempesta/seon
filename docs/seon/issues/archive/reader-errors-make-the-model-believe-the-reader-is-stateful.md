@@ -2,7 +2,7 @@
 type: issue
 status: resolved
 severity: friction
-tags: [reader, errors, prompt, live-test]
+tags: [issue, reader, errors, prompt, live-test]
 created: 2026-09-15
 ---
 

@@ -2,7 +2,7 @@
 type: issue
 status: resolved
 severity: blocker
-tags: [provider, stop, reader, turn, faults, live-test]
+tags: [issue, provider, stop, reader, turn, faults, live-test]
 created: 2026-09-15
 resolved: 2026-09-15
 ---

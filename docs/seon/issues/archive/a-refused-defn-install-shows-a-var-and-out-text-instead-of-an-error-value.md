@@ -2,7 +2,7 @@
 type: issue
 status: resolved
 severity: blocker
-tags: [sci, contracts, auto-check, errors, repl, live-test]
+tags: [issue, sci, contracts, auto-check, errors, repl, live-test]
 created: 2026-09-15
 ---
 

@@ -2,7 +2,7 @@
 type: issue
 status: resolved
 severity: blocker
-tags: [seon.db, q, contracts, silent-fallback, live-test]
+tags: [issue, seon.db, q, contracts, silent-fallback, live-test]
 created: 2026-09-15
 resolved: 2026-09-15
 ---

@@ -2,7 +2,7 @@
 type: issue
 status: resolved
 severity: friction
-tags: [my.plan, render, help, live-test]
+tags: [issue, my.plan, render, help, live-test]
 created: 2026-09-15
 ---
 

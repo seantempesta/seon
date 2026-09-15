@@ -2,7 +2,7 @@
 type: issue
 status: resolved
 severity: blocker
-tags: [render, schema, context]
+tags: [issue, render, schema, context]
 created: 2026-09-14
 ---
 
