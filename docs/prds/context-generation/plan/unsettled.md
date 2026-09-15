@@ -929,3 +929,19 @@ half-edit. Measured targets in the issue.
   running bytes, the raw reply and its evaluations. The churn ruling waits
   on that view.
 
+## 2026-09-14 18:40 — owner: the debug view must work like a real product
+
+- Owner on the Turns list: "I still can't tell wtf is going on … improve the
+  debug view so it actually works like a real product." Decided design
+  (spec `tmp/orchestrator/debug-product-spec.txt`, lane debug-turns
+  redirected): a problems panel computed from rows (churn, repeated
+  identical reads, no-forms/fabricated/error replies, stale dir, faults
+  delivered, prefix stability from the provider's hit/miss counts, budget
+  and cost), a turn strip sized by bytes added, a selected-turn view with
+  the context as cards (HTML pair per card, "as the model saw it" toggle to
+  the exact bytes, folded re-reads), reply + effects, a growth chart.
+- Provider cache facts are stored per attempt (`prompt_cache_hit_tokens`,
+  `prompt_cache_miss_tokens`): run 2 was prefix-stable on 30/30 attempts
+  (miss − delta ≤ 111 tokens; DeepSeek caches in 64-token blocks); 93.3 %
+  of prompt tokens were cache hits.
+
