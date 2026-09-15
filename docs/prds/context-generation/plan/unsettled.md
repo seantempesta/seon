@@ -1405,3 +1405,28 @@ half-edit. Measured targets in the issue.
   accretion), test-provenance (`:seon.test/run` landed `131fa2a56`,
   `0d1f72cd0`), triage-c closing, adoption-contract-freshness,
   supplied-keys-and-refusals. `main` fast-forwarded to `503365fc9`.
+
+## 2026-09-15 18:20Z — adoption freshness decision; index rebuilt; MCP reconnected
+
+- Lane adoption-contract-freshness reproduced (710a8faaa): a refused
+  adoption leaves database program rows ahead of the JVM (cluster.clj
+  mutates facts before reload; the digest refusal at the end rolls nothing
+  back) and, independently, `seon.instrument/apply!` keeps an existing
+  wrapper even when the var's authored `:malli/schema` changed (the cache
+  key omits the authored form). Run 9's post-convergence staleness was not
+  reproduced by (a)/(b)/(c). Orchestrator decision, scope 3: wrapper
+  identity includes the contract it enforces (re-arm on authored change,
+  reload or not); refusal window closed by one bounded immediate retry —
+  no rollback, no quiescing, because `seon.fn` already reconciles from the
+  last adopted source database on the next adoption.
+- Issue index rebuilt from note state (`806659e06`): 250 open, 27
+  unscheduled rows for the owner, checker clean. Exhaust swept (980 MB run
+  roots, stale build/ and workers/, untracked virtual-turns.edn).
+- MCP bridge reconnected by the owner's restart: `default` alive, door
+  mode works. The restart killed three lanes; all resumed from their
+  sessions. schema-audit Part A landed (`be4e3fe00`); Part B (refusal
+  grammar remainder: transact! and reader errors, nearest declared key)
+  queued behind supplied-keys-and-refusals to keep one editor on
+  instrument.clj's report text.
+- Reaching-tests tier spec written (tmp/orchestrator/reaching-tests-tier-
+  spec.md); launches when test-provenance releases src/seon/test.clj.
