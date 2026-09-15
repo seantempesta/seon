@@ -19,6 +19,65 @@
 
 (def ^:private undefined-types #{:any :some :nil})
 
+(defn permissive-positions
+  "Inspect schema syntax, excluding literal enum values and property data.
+
+   Each finding retains its exact form and path. A polymorphic slot is
+   justified only by its own recorded exemption, reason and generator;
+   adding another permissive slot therefore creates another finding."
+  {:malli/schema [:=> [:cat :map] [:vector :map]]}
+  [{:seon.schema/keys [definition stored? forms]}]
+  (letfn [(visit [node path input-slot? guarded? seen]
+            (let [tag (if (vector? node) (first node) node)
+                  properties (when (and (vector? node) (map? (second node)))
+                               (second node))
+                  start (if properties 2 1)
+                  children (when (vector? node) (subvec node start))
+                  reason (:seon.schema.admission/reason properties)
+                  justified? (and (= :seon.schema.admission/polymorphic-boundary
+                                     (:seon.schema.admission/exemption properties))
+                                  (string? reason) (not (str/blank? reason))
+                                  (some #(contains? properties %)
+                                        [:gen/schema :gen/elements :gen/gen :gen/return]))
+                  problem (cond
+                            (#{:any :some} tag) :undefined
+                            (and stored? (= :maybe tag)) :stored-nil
+                            (and input-slot?
+                                 (or (= :seon.schema/value tag)
+                                     (and (= :schema tag)
+                                          (= [:seon.schema/value] children)))) :bare-value
+                            (and (= :* tag)
+                                 (some #{:seon.schema/value} children)) :value-tail
+                            (and input-slot? (#{:* :+ :repeat} tag)
+                                 (not guarded?)) :unguarded-tail)]
+              (into
+               (if problem
+                 [(cond-> {:seon.schema/path path
+                           :seon.schema/definition node
+                           :seon.schema.advisory/kind problem
+                           :seon.schema/justified? (boolean (and justified? (not= :stored-nil problem)))}
+                    (and justified? (not= :stored-nil problem))
+                    (assoc :seon.schema.admission/reason reason))]
+                 [])
+               (concat
+                (when (and stored? (keyword? node) (get forms node)
+                           (not (contains? seen node)))
+                  (visit (get forms node) (conj path node) false guarded? (conj seen node)))
+               (mapcat
+                (fn [[offset child]]
+                  (let [child-path (conj path (+ start offset))]
+                    (cond
+                      (#{:enum := :fn :ref :re} tag) []
+                      (#{:map :mapn :catn :altn :orn :multi} tag)
+                      (if (vector? child)
+                        (visit (peek child) (conj child-path (dec (count child)))
+                               (= :catn tag) guarded? seen) [])
+                      :else
+                      (visit child child-path (= :cat tag)
+                             (if (= :=> tag) (= 3 (count children)) guarded?) seen))))
+                (map-indexed vector children))))))]
+    (visit definition [] false false #{})))
+
 (defn- contract-error!
   [identity definition path error message data]
   (throw
@@ -164,7 +223,7 @@
   "The first entry key of `:map` schema `v` that is itself an identity
    attr in `schemas` (`{:seon.db/identity true}`), or nil."
   {:malli/schema
-   [:=> [:cat :map :seon.schema/value] [:maybe :keyword]]}
+   [:=> [:cat :map [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema.", :gen/elements [nil false 0 "" :k [] {}]}]] [:maybe :keyword]]}
   [schemas v]
   (when (form/map-shape? v)
     (some (fn [entry]
@@ -179,10 +238,7 @@
    This is the required-attrs index for schemas-as-queryable-data. Optional
    entries and Malli's default sentinel are excluded."
   {:malli/schema
-   [:function
-    [:=> [:cat :seon.schema/value] [:maybe [:vector :keyword]]]
-    [:=> [:cat :map :seon.schema/value]
-     [:maybe [:vector :keyword]]]]}
+   [:function [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema.", :gen/elements [nil false 0 "" :k [] {}]}]] [:maybe [:vector :keyword]]] [:=> [:cat :map [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema.", :gen/elements [nil false 0 "" :k [] {}]}]] [:maybe [:vector :keyword]]]]}
   ([v]
    (map-required-attrs {} v))
   ([schemas v]
@@ -298,7 +354,7 @@
    [[assert-compilable-schema!]] owns validity against that complete
    population."
   {:malli/schema
-   [:=> [:cat :map :keyword :seon.schema/value] :nil]}
+   [:=> [:cat :map :keyword [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema.", :gen/elements [nil false 0 "" :k [] {}]}]] :nil]}
   [_schemas k v]
   (when (form/nilable-value-schema? v)
     (let [body (rest v)
