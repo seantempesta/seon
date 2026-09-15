@@ -42,6 +42,50 @@ later in this lane. Baseline script is read-only; it creates no turns.
 
 ## Findings
 
+### Warm GET regression (owner review after A04)
+
+Read-only default baseline, three `curl -s -o /dev/null -w '%{time_total}\n'`
+requests to `/ns/my.agents.juniper/debug`: **1.764572, 1.572908,
+1.759266 seconds**. The timing script beside this note binds the same schema
+projection as the HTTP handler. Its first corrected sample measured turn
+rows 5.04 ms, evaluation acquisition 1552.50 ms, summary 0.26 ms, prefix
+comparison 370.33 ms, the complete problem panel 673.89 ms, and ledger
+2162.70 ms. The panel measurement includes the prefix comparison. The first
+unbound probes timed out; they omitted the handler's projection and are not
+representative HTTP measurements.
+
+The dominant cost is the history walk invoking `render-ai` for every saved
+evaluation, bypassing `render-call` retention. The proposed refinement uses
+the existing shared render cache's `::ai-calls`, with evaluation identities
+as call IDs and the existing code/input/read-evidence invalidation. A09's
+summary reduction itself is negligible. The first cache-only live iteration
+regressed further: 3.186407, 3.023597, 3.021544 seconds; it is not an accepted
+result. A read-only probe found current retained evidence and matching call
+inputs, but a full evaluation pull alone still cost approximately 700 ms.
+The next refinement supplies the narrow selector to history and derives its
+profile once per acquisition. The final refinement removes the ledger's
+second evaluation query: history carries each saved row with its rendered
+bytes. History uses the existing candidate-call selection to avoid refreshing
+current evidence. Captured prefixes use `render-call`, keyed by attempt ID,
+in the existing shared `::calls` cache; no separate cache or expiry policy.
+
+After convergence `6aa8de2b-2803-5019-82e6-a5c473b1bd29`, one warm-up GET
+preceded the three acceptance samples: **0.704460, 0.755098, 0.741225 seconds**.
+The first GET after adoption had taken 1.162832 seconds; the target here is
+warm GET latency. Fast: 15 tests/225 assertions; isolated: 15/229; both green.
+The retained-call regression proves unchanged bytes reuse SCI output and a
+valid changed evaluation invalidates it. The existing captured-prefix test
+still proves changed captured bytes invalidate the verdict and missing
+captures remain unknown. The deferred-session test now requires one current
+history acquisition for ledger data, with no additional acquisition for the
+deferred selected session.
+
+Production/tests: 96 lines added, 40 removed (net +56), justified by wiring
+two existing projections into retained calls and adding invalidation evidence.
+`perf-{debug,agent}-{1440,700}.png`: all four LOOKed at; ledger, panel, and
+plan match the preceding layout. All six browser routes including inspection
+returned 200 with zero horizontal overflow. No default lifecycle operation.
+
 A08 in progress: removing the separate Context-now assembly, its feed
 target, obsolete selector rules, and obsolete tests; entity inspection uses
 the same selected-session component as ordinary debug.

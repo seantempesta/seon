@@ -16,7 +16,6 @@
             [seon.turn :as turn]
             [seon.config :as config]
             [seon.error :as error]
-            [seon.eval :as evaluation]
             [seon.print :as print]
             [seon.render :as render]
             [seon.render.agent :as agent]
@@ -1472,8 +1471,7 @@
 
 (defn- ledger-evaluations [request]
   (let [database (:seon.db/db request)
-        saved (evaluation/of-agent database (:seon.agent/id request)
-               '[:seon.cluster.eval/source :seon.cluster.eval/comment
+        selector '[:seon.cluster.eval/source :seon.cluster.eval/comment
                  :seon.eval/shown :seon.eval/renderer :seon.cluster.eval/error
                  :seon.cluster.eval/output :seon.error/kind
                  :seon.cluster.eval/read-basis-transaction
@@ -1481,13 +1479,13 @@
                  :seon.eval/duration-ms :seon.sci.eval/ending-ns
                  :seon.print/length :seon.print/level
                  {:seon.cluster.eval/ns [:seon.ns/name]}
-                 {:seon.cluster.eval/read-evidence [*]}])
-        acquired (when (and (vector? saved) (seq saved))
-                   (render/acquire-context! (dissoc request :seon.turn/id)))
+                 {:seon.cluster.eval/read-evidence [*]}]
+        acquired (render/acquire-context! (assoc (dissoc request :seon.turn/id)
+                                                 :seon.db/pull-selector selector))
+        saved (map :seon.render/value (:seon.render.history/entries acquired))
         bytes (zipmap (map :seon.render.history/subject (:seon.render.history/entries acquired))
                       (map utf8-size (:seon.render.history/segments acquired)))]
-    (cond (:seon.error/kind saved) saved
-          (:seon.error/kind acquired) acquired
+    (cond (:seon.error/kind acquired) acquired
           :else
       (group-by #(get-in % [:seon.cluster.eval/run :db/id])
         (map
@@ -1829,31 +1827,50 @@
          (finding :fault-turns "Turns opened by faults"
                   (map #(hash-map ::turn % ::detail "The trigger message references a core fault.") triggered))]))))
 
+(defn render-captured-prefix
+  "The captured history bytes, excluding the turn owner's changing frame."
+  {:malli/schema [:=> [:cat :seon.render/unit] [:or :nil :string :seon.error/value]]}
+  [{database :seon.db/db turn-id :seon.turn/id agent-id :seon.agent/id}]
+  (let [text (db/q '[:find ?text . :in $ ?id
+                     :where [?t :seon.turn/id ?id] [?c :seon.context.capture/run ?t]
+                            [?c :seon.context.capture/prompt ?text]] database turn-id)
+        opening (when (string? text) (turn/opening-db database turn-id))
+        frame (when (and opening (not (:seon.error/kind opening)))
+                (repl/frame opening agent-id))
+        suffix (str "\n\n" frame)]
+    (when frame
+      (cond (= text frame) ""
+            (str/ends-with? text suffix) (subs text 0 (- (count text) (count suffix)))
+            :else text))))
+
 (defn- prefix-problem
   "Compare captured history prefixes; the owner's changing turn frame is outside history."
-  [database rows]
+  [request rows]
   (let [rows (filter #(seq (:seon.turn/attempts %)) rows)
-        captures (db/q '[:find ?id ?text :in $ [?id ...]
-                         :where [?t :seon.turn/id ?id] [?c :seon.context.capture/run ?t]
-                                [?c :seon.context.capture/prompt ?text]]
-                       database (mapv :seon.turn/id rows))
-        captures (when-not (:seon.error/kind captures) (into {} captures))
-        prefixes (map (fn [row]
-                        (let [text (get captures (:seon.turn/id row))
-                              opening (when text (turn/opening-db database (:seon.turn/id row)))
-                              frame (when (and opening (not (:seon.error/kind opening)))
-                                      (repl/frame opening (get-in row [:seon.turn/agent :seon.agent/id])))
-                              suffix (str "\n\n" frame)]
-                          {::turn row
-                           ::prefix (when frame
-                                      (cond (= text frame) ""
-                                            (str/ends-with? text suffix) (subs text 0 (- (count text) (count suffix)))
-                                            :else text))})) rows)
+        cache (render/shared-cache (:seon.sci.eval/ctx request))
+        registration [::prefix (:seon.agent/id request)]
+        retained (get-in @cache [:seon.render.web/calls registration] {})
+        captured (atom {})
+        request (assoc request :seon.render/profile (render/request-profile request)
+                               :seon.render/output :seon.render/ai
+                               :seon.render/ai 'seon.render.transcript/render-captured-prefix
+                               :seon.render/retained-calls retained
+                               :seon.render/captured-calls captured)
+        prefixes (mapv (fn [row]
+                         {::turn row
+                          ::prefix (render/render-call
+                                     (assoc request
+                                       :seon.render.call/id
+                                       [[:seon.ai.attempt/id (:seon.ai.attempt/id
+                                                              (last (sort-by :seon.ai.attempt/ordinal (:seon.turn/attempts row))))]]
+                                       :seon.render/value {:seon.turn/id (:seon.turn/id row)
+                                                           :seon.agent/id (:seon.agent/id request)}))}) rows)
         pairs (partition 2 1 prefixes)
         measured (filter #(every? (comp string? ::prefix) %) pairs)
         changed (for [[previous current] measured
                       :when (not (str/starts-with? (::prefix current) (::prefix previous)))]
                   {::turn (::turn current) ::detail "Captured history prefix bytes changed."})]
+    (swap! cache assoc-in [:seon.render.web/calls registration] @captured)
     (assoc (finding :prefix "Prefix changed" changed)
            ::stable (- (count measured) (count changed)) ::measured (count measured)
            ::unknown (+ (- (count pairs) (count measured)) (if (empty? pairs) 1 0)))))
@@ -1913,7 +1930,7 @@
                     (repeated-problem by-eid saved)
                     (empty-reply-problem rows saved)
                     (directory-problem database by-eid saved)
-                    (prefix-problem database rows)]
+                    (prefix-problem request rows)]
                    (fault-problems database (:seon.agent/id request) rows))}))
 
 (defn- problem-links [agent-id matches]

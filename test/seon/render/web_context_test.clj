@@ -55,8 +55,34 @@
                              @connection (db/basis-t (:seon.db/db request)))]
              (is (empty? costs) "saved history writes no new render costs"))
            (is (identical? (render/shared-cache ctx) (render/shared-cache ctx)))
-           (is (nil? (:seon.render.web/ai-calls @(render/shared-cache ctx))))
-           (is (seq (:seon.render.web/calls @(render/shared-cache ctx))))))))))
+           (is (seq (:seon.render.web/calls @(render/shared-cache ctx))))
+           (db/transact! connection
+             [{:seon.agent/id "root"
+               :seon.agent/runtime {:seon.runtime/agent [:seon.agent/id "root"]
+                                    :seon.runtime/turns [[:seon.turn/id "context-probe"]]}}
+              {:seon.cluster.eval/id "retained-history"
+               :seon.cluster.eval/run [:seon.turn/id "context-probe"]
+               :seon.cluster.eval/ordinal 0
+               :seon.cluster.eval/at (java.util.Date.)
+               :seon.cluster.eval/source "(+ 1 1)" :seon.eval/shown "2"}])
+           (let [request (dissoc request :seon.turn/id)
+                 invoke kernel/invoke
+                 calls (atom 0)]
+             (with-redefs [kernel/invoke (fn [input] (swap! calls inc) (invoke input))]
+               (let [first-result (render/acquire-context! (assoc request :seon.db/db @connection))
+                     first-count @calls
+                     second-result (render/acquire-context! (assoc request :seon.db/db @connection))]
+                 (is (pos? first-count))
+                 (is (= (:seon.cluster.prompt/text first-result) (:seon.cluster.prompt/text second-result)))
+                 (is (= first-count @calls) "unchanged saved evaluations reuse their retained calls")
+                 (let [changed (db/transact! connection
+                                 [(assoc (db/pull @connection '[*] [:seon.cluster.eval/id "retained-history"])
+                                         :seon.eval/shown "3")])]
+                   (is (:db-after changed) (pr-str changed)))
+                 (is (= "3" (:seon.eval/shown (db/pull @connection [:seon.eval/shown] [:seon.cluster.eval/id "retained-history"]))))
+                 (let [changed (render/acquire-context! (assoc request :seon.db/db @connection))]
+                   (is (> @calls first-count) "changed saved bytes invalidate the retained call")
+                   (is (not= (:seon.cluster.prompt/text first-result) (:seon.cluster.prompt/text changed)))))))))))))
 
 (deftest adoption-invalidates-pages-with-an-unchanged-sci-snapshot
   (#'web-test/with-server
@@ -95,12 +121,12 @@
          (fn []
            (let [ordinary (#'web-test/fetch server "/agent/root/debug")]
              (is (= 200 (.statusCode ordinary)))
-             (is (zero? @calls))
+             (is (= 1 @calls) "The ledger acquires current history once for saved rows and byte totals.")
              (is (str/includes? (.body ordinary) "Turn ledger"))
              (is (str/includes? (.body ordinary) "Record")))
            (let [explicit (#'web-test/fetch server "/agent/root/debug?prompt=true")]
              (is (= 200 (.statusCode explicit)))
-             (is (zero? @calls))
+             (is (= 1 @calls) "The explicit session defers its selected prompt; it adds no acquisition.")
              (is (str/includes? (.body explicit) "Session")))
            (let [inspection (#'web-test/fetch server "/agent/root/debug?subject=%5B%3Aseon.agent%2Fid%20%22root%22%5D")]
              (is (= 200 (.statusCode inspection)))

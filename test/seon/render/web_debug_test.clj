@@ -294,14 +294,14 @@
                                       :seon.context.capture/prompt
                                       (str text "\n\n" (repl/frame (turn/opening-db @connection (:seon.turn/id row)) "juniper"))}]))]
                    (doseq [row (take 2 rows)] (is (:db-after (capture! row "café"))))
-                   (let [same (#'transcript/prefix-problem @connection rows)]
+                   (let [same (#'transcript/prefix-problem (assoc unit :seon.db/db @connection) rows)]
                      (is (= 1 (:seon.render.transcript/stable same))
                          "Identical captured history stays stable despite different billing counters and turn frames.")
                      (is (= 1 (:seon.render.transcript/unknown same)) "The missing capture remains unavailable."))
                    (is (:db-after (capture! (second rows) "different")))
-                   (is (= 1 (:seon.render.transcript/count (#'transcript/prefix-problem @connection rows)))
+                   (is (= 1 (:seon.render.transcript/count (#'transcript/prefix-problem (assoc unit :seon.db/db @connection) rows)))
                        "Changing only captured bytes changes the verdict; counters remain identical."))
-                 (is (pos? (:seon.render.transcript/unknown (#'transcript/prefix-problem @connection [])))
+                 (is (pos? (:seon.render.transcript/unknown (#'transcript/prefix-problem (assoc unit :seon.db/db @connection) [])))
                      "No provider observations must not be reported as prefix health.")
                  (is (:db-after
                       (db/transact! connection

@@ -883,7 +883,9 @@
   [{database :seon.db/db lookup :seon.render.walk/lookup :as request}]
   (let [agent-id (:seon.agent/id
                   (db/pull database [:seon.agent/id] lookup))
-        evaluations (evaluation/of-agent database agent-id)
+        evaluations (if-let [selector (:seon.db/pull-selector request)]
+                      (evaluation/of-agent database agent-id selector)
+                      (evaluation/of-agent database agent-id))
         selected (when-let [id (:seon.turn/id request)]
                    (db/pull database [:db/id :seon.turn.work/situation]
                             [:seon.turn/id id]))]
@@ -892,12 +894,15 @@
       (reduce
        (fn [entries saved]
          (let [lookup [:seon.cluster.eval/id (:seon.cluster.eval/id saved)]
-               rendered (render/render-ai
-                         (assoc request :seon.render/value saved))]
+               rendered (render/render-call
+                         (assoc request :seon.render/value saved
+                                        :seon.render/output :seon.render/ai
+                                        :seon.render.call/id [lookup]))]
            (if (:seon.error/kind rendered)
              (reduced rendered)
              (conj entries
                    {:seon.render.history/call-id [lookup]
+                    :seon.render/value saved
                     :seon.render.history/subject lookup
                     :seon.render.history/basis-transaction (:t saved)
                     :seon.render.history/bytes (or rendered "")}))))

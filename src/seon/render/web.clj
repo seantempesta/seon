@@ -2426,10 +2426,18 @@
    (fn []
      (if (:seon.render/context-action request)
        (change-context request)
-       (let [entries (render.walk/history
-                      (assoc request :seon.render.walk/lookup
-                             [:seon.agent/id
-                              (:seon.agent/id request)]))]
+       (let [request (assoc request :seon.render/profile (render/request-profile request))
+             cache (render/shared-cache (:seon.sci.eval/ctx request))
+             key [:seon.agent/id (:seon.agent/id request)]
+             retained (get-in @cache [::ai-calls key] {})
+             calls (atom {})
+             entries (render.walk/history
+                      (assoc request :seon.render.walk/lookup key
+                                     :seon.render/retained-calls retained
+                                     :seon.render/candidate-call-ids
+                                     (candidate-call-ids retained (:seon.db/db request))
+                                     :seon.render/captured-calls calls))]
+         (swap! cache assoc-in [::ai-calls key] @calls)
          (if (:seon.error/kind entries)
            entries
            {:seon.cluster.prompt/text (history-text entries)
