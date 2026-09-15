@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, runtime, agent, wave/reply-durability]
 ---
@@ -135,3 +135,11 @@ derived obligations and bounded provider-turn contract.
   prose-only edge explicitly, with recurring byte-tail and whole-prompt
   accounting regressions. The retained flash ablation proves it elicited a
   reader-accepted form 2/2 without relying on the remote opening demonstration.
+
+## Resolution (2026-09-15 triage)
+
+Committed-source verification with `git show HEAD:<path>` and `git log`; no new JVM launch.
+
+Commit `c15d37d55` stores prose-only replies as accepted error evaluations. HEAD `src/seon/turn.clj:4077` distinguishes no-forms, writes a source row, and at `:4116` sends its reader error through the ordinary evaluator instead of `fail!`. `continuing-reply?` at `:2728` and `next-agent-work` at `:2798` derive another turn from an accepted provider reply without a completed/wait disposition, under the existing turn bound. The canonical regression in `test/seon/turn_continue_test.clj:165` covers prose/empty/comment-only replies followed by completion and asserts the next prompt contains the exact saved error. The old terminal-refusal path is removed; no provider call or new gate was run in this triage. The historical optional prose-completion design alternatives do not override the current forms protocol.
+
+surface: turn-loop

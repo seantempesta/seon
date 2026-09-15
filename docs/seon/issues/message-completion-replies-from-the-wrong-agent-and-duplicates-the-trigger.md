@@ -43,3 +43,11 @@ that derives a completion delivery from the run's triggering message.
 - No agent receives a duplicate of the triggering request from itself.
 - The committed trigger/about refs derive conversation depth 1.
 - The existing turn regression passes without changing its expected facts.
+
+## Re-verified at HEAD (2026-09-15)
+
+Committed-source verification with `git show HEAD:<path>` and `git log`; no new JVM launch.
+
+UNVERIFIABLE-WITHOUT-GATE. The named composition still exists: HEAD `src/seon/turn.clj:3246` derives a reply from the settled result, current agent and trigger; `src/seon/cluster/message.clj:129` follows the trigger sender and suppresses answers to an answer. `af278535c` changes explicit sends to immediate writes, so the old settlement timing assumptions cannot establish today's duplicate or wrong-agent behavior. The existing two-agent regression at `test/seon/cluster/turn_test.clj:2801` retains the expected two messages, but also carries old API/result-attribute assumptions. Required namespace: `seon.cluster.turn-test`, specifically `a-turn-delivers-what-a-form-asks-to-send-and-still-finishes`, on the canonical armed real-SCI fixture with current send calls. No send or completion was performed on default. Keep blocker pending that composition proof; do not infer a pass from the expected set in test source.
+
+surface: turn-loop

@@ -53,3 +53,11 @@ The class remains open. These members were held rather than edited:
 
 The program-graph census therefore records only the completed owner crossings;
 it does not misreport these protected members as resolved.
+
+## Re-verified at HEAD (2026-09-15)
+
+Committed-source verification with `git show HEAD:<path>` and `git log`; no new JVM launch.
+
+UNVERIFIABLE-WITHOUT-GATE dynamically; the unbounded joins remain visible at HEAD. `src/seon/cluster.clj:2823` uses blocking armer admission, `:2832` takes quiescence, and `:2853` joins cluster/render/search completions with `<!!`. `src/seon/flow.clj:1271` and `:1275` still take both fault-fanout completion channels without `seon.await`. The work-launcher joins at `src/seon/flow.clj:740` and `:746` are bounded, as the prior partial repair states. No stop or never-settling fixture was invoked on default. Required namespaces: `seon.cluster.boot-test` and `seon.flow-test`, with a withheld completion publisher and the declared lifecycle bound; running source grep is not a shutdown reproduction. Keep blocker for reliable lifecycle/recovery; fix the existing joins with the carried bound, not a new timeout constant.
+
+surface: store-process

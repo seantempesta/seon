@@ -1,11 +1,11 @@
 ---
 type: issue
 status: open
-severity: blocker
+severity: friction
 tags: [issue, agent, runtime, render, wave/agent-context]
 ---
 
-# Connect ordinary turns to the additive system-turn algorithm
+# Verify private-read preview and attempted-history integration
 
 ## Problem
 
@@ -65,3 +65,11 @@ read preview's use of a separate SCI context has not proven refresh of read
 forms depending on persistent private bindings. Neither is foreign lane
 breakage. The green virtual proof must not be reported as a complete model
 history or private-read custody proof.
+
+## Re-verified at HEAD (2026-09-15)
+
+Committed-source verification with `git show HEAD:<path>` and `git log`; no new JVM launch.
+
+UNVERIFIABLE-WITHOUT-GATE for the note's two remaining integration boundaries. Its headline claim is fixed: HEAD `src/seon/turn.clj:3942` invokes `system-turn` before every ordinary open, and `latest-answering-turn-t` at `:2821` accepts virtual reply facts without inventing an attempt. Commit `e81b119f2` also makes writing system turns acquire the persistent agent context (`:2077`) and evaluate changed reads there. The read-only preview branch still passes the base handle context at `:2100`; source alone does not prove private-read preview equivalence or the old attempted-history renderer contract case. Required namespaces: `seon.loop-proof-test`, `seon.turn-continue-test`, and `seon.render.web-context-test`, with a saved read using a persistent private binding plus successful provider-attempt history. No current failure was reproduced. Downgraded to friction: ordinary additive turns and writing read refresh have landed; the remaining uncertainty does not establish a blocked live run.
+
+surface: context-generation
