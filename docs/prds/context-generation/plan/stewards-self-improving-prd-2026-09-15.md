@@ -164,3 +164,70 @@ Each step lands with a regression and a live proof on default.
 3. Metric v1 set: the ten above, or fewer to start.
 4. Plan-rule thresholds are config facts (occurrences ≥ N) — confirm.
 5. Batch size N and the per-session turn budget as config facts.
+
+## 8. Inside out: the data (owner, 2026-09-15 09:30)
+
+"Describe everything as data; don't hardcode the system to do each task."
+Four questions, each answered by attributes — what exists, what to declare.
+
+### 8.1 When does a session start? (triggers)
+
+| exists | declaration |
+|---|---|
+| `:seon.wake/listen true` on a ref attribute: a datom whose value is the agent wakes it; `:seon.wake/opens-turn?` says whether it opens a paid turn | attribute-level, schema-declared |
+| `:seon.listen/pattern` (attribute + optional entity/value) on `:seon.runtime/listens` | per-agent authored index patterns |
+| `:seon.schedule.task` (owner, function, schedule) | time-driven |
+| `:seon.wake/context-inert` | what can never be a trigger |
+
+Gap: a **condition** trigger — "this query has subjects now" (a red test
+appeared, a fault signature crossed N). Declare it once on the problem
+(`:seon.problem/find`) and DERIVE its listen set from the query's own read
+evidence (the attributes/patterns it reads); the loop's since-diff already
+computes exactly that for reads. No second trigger registry.
+
+### 8.2 What is on the table? (surface)
+
+| exists | declaration |
+|---|---|
+| Pull patterns and reverse refs over any entity (`seon.db/pull`); the walk's neighbourhood by declared concerns | `:seon.problem/context` — the pull pattern from the subject that names the neighbourhood the fix needs |
+| program rows (`seon.fn`, `seon.ns`, `seon.test`), faults (`seon.error`), turns/evaluations/attempts, plans, messages, elisions, render cost | the stats bundle keys on the render request (§C of the 09:15 note): viewer session, viewer↔subject calls, subject dependents/faults/tests/contracts/pairs/cost |
+| — | **call ledger** `seon.call` {fn, agent, turn, outcome, duration}, written in the turn's settlement transaction |
+| `:seon.test/*` results | committed to `:current-src` by default, keyed by run basis + source commit; `:seon.test/turn` when run from a session |
+| `:seon.error/run` | verify it is set for faults raised in turns (the "your users" link) |
+
+### 8.3 Who renders it? (render functions)
+
+| exists | declaration |
+|---|---|
+| one AI/HTML pair per entity schema, declared on the `:map` props (`:seon.render/ai`, `:seon.render/html`) | unchanged; every pair receives `:seon.render/viewer`, `:seon.render/detail`, `:seon.render/basis`, `:seon.render/window` and the stats bundle as ordinary keys |
+| — | a pair for `:seon.problem` (the statement, the subject, the done-when as the plan step) and for `:seon.ns` (the picture, §1) |
+
+Context for a session = pull the subject with the problem's pattern,
+render each entity through its pair with the request keys, prepend the
+problem pair's output. One function; no scenario code.
+
+### 8.4 How is it proven done? (write-back)
+
+| exists | declaration |
+|---|---|
+| `:my.plan.item/done-when` is a STRING (prose) | add `:my.plan.item/done-query` (a query bound to `:my.plan.item/subject`); the loop evaluates it at every settlement and records `:my.plan.item/completed-tx` the first time it is true — completion derived from facts, never asserted by the model |
+| `:my.plan.item/about` (tokens) | `:my.plan.item/subject` (a ref to the entity the item is about) and `:my.plan.item/problem` (ref to the declaration that generated it) |
+| `:seon.problem/writes` | the fact families the fix may produce; a session that wrote outside them is a finding |
+| the model's `(my.plan/complete! …)` | remains for authored steps; generated steps complete by query |
+
+### 8.5 The one new family
+
+```clojure
+#:seon.problem{:id       [:string {:seon.db/identity true}]
+               :kind     :qualified-keyword
+               :find     :seon.db/query         ; subjects; its evidence = the trigger listens
+               :context  :seon.db/pull-selector ; the neighbourhood, from the subject
+               :done     :seon.db/query         ; bound to ?subject; true = done
+               :writes   [:set :qualified-keyword]
+               :budget   :int                   ; turns per session
+               :entity   [:map {:seon.render/ai … :seon.render/html …} …]}
+```
+
+Generated plan items reference the problem and the subject; sessions are
+ordinary turns; the ledger, the metric deltas, and the explain probe judge
+them. Adding a task class is a transaction of one `:seon.problem` row.
