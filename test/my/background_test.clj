@@ -51,20 +51,22 @@
 (deftest poll-and-await-derive-terminal-presence-without-acknowledging
   (test-support/with-database
     (fn [connection]
-      (db/transact!
-       connection
-       [{:seon.agent/id "background-agent"}
-        {:seon.turn/id "background-run"}
-        {:seon.fn/sym "my.example/call"}
-        {:seon.effect/id "background-result"
-         :seon.effect/run [:seon.turn/id "background-run"]
-         :seon.effect/owner [:seon.fn/sym "my.example/call"]
-         :seon.effect/form-ordinal 0
-         :seon.effect/ordinal 0
-         :seon.effect/request-edn "{}"
-         :seon.effect/opened-at #inst "2026-08-03T12:00:00.000-00:00"
-         :seon.effect/notify
-         [:seon.agent/id "background-agent"]}])
+      (let [written (db/transact!
+                     connection
+                     [{:seon.agent/id "background-agent"}
+                      {:seon.turn/id "background-run"
+                       :seon.turn/agent [:seon.agent/id "background-agent"]
+                       :seon.turn/opened-tx "datomic.tx"}
+                      {:seon.effect/id "background-result"
+                       :seon.effect/run [:seon.turn/id "background-run"]
+                       :seon.effect/owner [:seon.fn/sym "my.shell/run!"]
+                       :seon.effect/form-ordinal 0
+                       :seon.effect/ordinal 0
+                       :seon.effect/request-edn "{}"
+                       :seon.effect/opened-at #inst "2026-08-03T12:00:00.000-00:00"
+                       :seon.effect/notify
+                       [:seon.agent/id "background-agent"]}])]
+        (is (:db-after written) (pr-str written)))
       (binding [db/*conn* connection]
         (is (= {:seon.effect/id "background-result"
                 :seon.effect/request-edn "{}"}
