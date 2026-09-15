@@ -1041,3 +1041,17 @@ half-edit. Measured targets in the issue.
   new session; then the next wave. Run 3 triggers when context-renders'
   invariant and debug-turns' loop-proof fix have landed.
 
+## 2026-09-14 21:30 — overnight cycle 1
+
+- Landed: debug-turns `6a0781d21` (collapsed headers carry intent + results
+  + generated concerns), `4f9d8286e` (turn id = that turn's view; no id =
+  now; callers fixed), `cf7d09713` (turn strip: filled provider / hollow
+  system, width = context added, red errors, amber open; legend; wraps at
+  700 — reviewed, good). core-functions `1a0e688e5` bare `deftest`/`is`
+  referred in the SCI owner, `6d497561d` auto-check fixtures, `0c81b4246`
+  close-out; lane ended. context-renders authorized into
+  `seon.db/query-index-patterns` (collection-bound evidence bug),
+  identity/status openings; landing the invariant.
+- Run 3 waits for the invariant to land (the tree holds its half-edits and
+  the hook adopts the tree). Overnight loop armed (phrase in memory).
+
