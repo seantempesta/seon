@@ -82,7 +82,8 @@ database fix `eef44fcc3`. The strengthened combined fast gate passed 106
 tests / 699 assertions. The first isolated AI/grammar/help gate passed 61
 tests / 307 assertions. The final combined isolated gate at `d2af195bf`
 passed 106 tests / 704 assertions, including every reader regression and
-the strengthened replay. The platform gate is pending.
+the strengthened replay. The final platform gate at `276c4aeea` passed
+84 tests / 505 assertions, zero failures and errors.
 
 Source adoption twice reported `Source changed during development adoption;
 the next edit must converge it.` This is a source-publication observation,
@@ -92,4 +93,49 @@ configuration application are separate operations. A live comparison of
 effective key, `:seon.config.ai/stop`. The lane then invoked the ordinary
 `bin/seon config apply default config/default.edn` operation.
 
+The application completed with five reconciliation operations. The exact
+live read-back below returned
+`{:seon.config.ai/stop ["#:seon.repl"], :provider-stop ["#:seon.repl"]}`.
+It constructs the body without calling the provider.
+
+```clojure
+(let [database @(seon.operator/connection "default")
+      projection (seon.schema/projection-from-database database)]
+  (seon.schema/call-with-projection
+   projection
+   (fn []
+     (let [effective (seon.config/effective database "default")
+           target (:seon.ai/primary
+                   (seon.ai/targets (seon.ai/settings effective {})))
+           body (seon.ai/request-body
+                 (assoc target :seon.ai/prompt "(+ 1 1)"))]
+       {:seon.config.ai/stop (:seon.config.ai/stop effective)
+        :provider-stop (get body "stop")}))))
+```
+
+## Commits and remaining assignment
+
+- `4a559d658`: part 3, reader diagnostics and exact captured evidence.
+- `ae2c180a4`: part 2, stop default, attempt persistence and replay.
+- Part 1 remains unimplemented because its existing decision owner is in
+  the explicitly excluded `src/seon/turn.clj`. The issue records the exact
+  seam and the candidate-context option; the owner must assign that narrow
+  caller change before this lane can finish it. No backstop changes were made.
+
 No default restart, refork, or reseed performed.
+All lane-launched commands ended. Successful gate roots were removed by
+the runner; the earlier failed reader root was deleted only after checking
+that no test runner held it and its failure had been re-observed and cleared.
+Lane scratch logs were deleted after recording the results here. No scratch
+cluster or worktree was created.
+
+## Reproduction
+
+The final gates used HEAD plus only the remaining uncommitted stop paths;
+the reader implementation was already committed in HEAD.
+
+```sh
+bin/test-fast --paths config/default.edn test/seon/ai_test.clj -- seon.ai-test seon.run4-reader-test seon.sci.reader-test seon.cluster.reply-test seon.repl-grammar-test seon.help-trial-test
+bin/test --paths config/default.edn test/seon/ai_test.clj -- seon.ai-test seon.run4-reader-test seon.sci.reader-test seon.cluster.reply-test seon.repl-grammar-test seon.help-trial-test
+bin/test --platform --paths config/default.edn test/seon/ai_test.clj
+```
