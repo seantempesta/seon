@@ -122,3 +122,12 @@ at `seon.cluster$mcp_valf` (`cluster.clj:444`), escaping as a 50-frame raw
 trace under `:phase :print-eval-result`. It reproduced twice on that value
 and never on ordinary values. Whether that is the live lane's in-flight
 edit or a second bypass belongs to the lane that owns `src/seon/cluster.clj`.
+
+**Concurrency note.** While this pass ran, the lane owning
+`mcp-projection-crashes-on-non-keyword-map-keys` began editing
+`src/seon/cluster.clj` and `src/seon/render/value.clj` in the shared tree,
+and the live JVM hot-reloads. Line numbers cited for
+`src/seon/render/value.clj` were read before those edits landed; the
+behaviour each verdict rests on was observed on the running cluster and is
+pasted verbatim in each note, so a shifted line reference does not change a
+verdict. Re-anchor those two files' line citations after the lane commits.
