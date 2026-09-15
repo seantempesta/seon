@@ -38,7 +38,7 @@ See `README.md` for the convention.
 | [Attribute and bound the store's one-day 69 GB growth](store-grew-to-69-gigabytes-in-one-day-of-lanes.md) | blocker | exclusive sweep implementation wave |
 | [Carry agent routing into the virtual-turn control](virtual-turn-control-loses-agent-routing.md) | blocker | turn follow-up wave |
 
-## Friction (213)
+## Friction (202)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -53,6 +53,7 @@ See `README.md` for the convention.
 | [Acquired dir data has no read evidence](acquired-dir-data-has-no-read-evidence.md) | friction | page follow-up wave |
 | [Record the activation closure's schema keys and required attributes](activation-closure-records-no-schema-keys.md) | friction | boot velocity incident (co-hosted second boot) |
 | [Preserve Inst semantics when a value is also collection-like](admit-inst-overlap-prefers-collection-shape.md) | friction | adversarial-audit fix wave |
+| [Adoption probe emits an invalid root namespace lookup](adoption-probe-emits-an-invalid-root-namespace-lookup.md) | friction | unscheduled — owner to rank |
 | [Supply every declared render dependency in the agent-flow fixture](agent-flow-fixture-omits-render-interest.md) | friction | flow join-wedge diagnosis |
 | [Record a call edge when an agent form calls a core function](agent-form-calls-to-core-namespaces-are-not-indexed.md) | friction | program-graph indexing wave |
 | [Delete the separate agent transcript assembler](agent-html-still-uses-the-retired-transcript-assembler.md) | friction | strict dogfood transcript-deletion wave |
@@ -67,8 +68,9 @@ See `README.md` for the convention.
 | [Make bootstrap O4 wait for the causal delegation](bootstrap-o4-stops-before-causal-delegation-settles.md) | friction | projection lane — causal episode production query |
 | [Bound pull selectors retain all-attribute evidence](bound-pull-selector-evidence-retains-all-attributes.md) | friction | unscheduled — surfaced by the 2026-09-15 triage; owner to rank |
 | [Browser observation has no accessible window](browser-ui-observation-has-no-accessible-window.md) | friction | issues sweep wave |
+| [Cache reuse regression exceeds the live test bound](cache-reuse-regression-exceeds-live-test-bound.md) | friction | unscheduled — owner to rank |
 | [Keep candidate program metadata independent of its parent](candidate-context-shares-parent-program-metadata.md) | friction | agent context; coordinate with turn batching |
-| [Make the changed-test report readable at a glance](changed-test-report-is-one-enormous-line.md) | friction | dev-tooling face hygiene |
+| [Canonical fixture population refuses its schema transaction in default](canonical-fixture-population-missing-carried-projection.md) | friction | unscheduled — owner to rank |
 | [Make every durable contract predicate identifiable](class-anonymous-contracts-cannot-survive-publication.md) | friction | class-kill queue |
 | [Make classification query facts instead of text and hand lists](class-classification-is-inferred-from-hand-lists.md) | friction | class-kill queue |
 | [Translate dependency representations once at their boundary](class-dependency-representations-leak-past-boundaries.md) | friction | class-kill queue |
@@ -91,7 +93,6 @@ See `README.md` for the convention.
 | [Make the Context MVP drive prove its semantic exit](context-mvp-drive-can-false-green-after-cross-agent-delivery.md) | friction | projection lane — causal episode recurring proof |
 | [Attribute the seven-second core namespace-page derivation](core-namespace-pages-spend-seven-seconds-without-declaration-fallbacks.md) | friction | namespace-page performance wave |
 | [Return `/data` without a five-second stall](data-page-takes-five-and-a-half-seconds-for-three-kilobytes.md) | friction | seon.env Phase 3 production sweep ([PRD](../../prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md)) |
-| [Render database identities in HTML instead of opaque host objects](database-values-render-as-opaque-host-objects-in-html.md) | friction | render important-schema producer wave |
 | [Merge the 28 upstream Datahike commits our fork is missing](datahike-fork-is-28-commits-behind-upstream.md) | friction | upstream-delta sweep follow-up |
 | [Render db diffs through fit with an html producer](db-diff-render-bypasses-print-fit-and-has-no-html.md) | friction | db-diff completion gate |
 | [`seon.db-test` still expects a unique agent namespace](db-test-still-expects-a-unique-agent-namespace.md) | friction | issues sweep wave (2026-09-09) |
@@ -99,8 +100,6 @@ See `README.md` for the convention.
 | [Debug feed subject-change regression times out](debug-feed-subject-change-regression-times-out.md) | friction | unscheduled — surfaced by the 2026-09-15 triage; owner to rank |
 | [Debug feed completion waits fail only in a pooled worker](debug-feed-waits-fail-only-in-pooled-worker.md) | friction | page follow-up wave (after turn-cut lands) |
 | [The debug page's HTML render carries no agent-scoped environment](debug-html-render-carries-no-agent-scoped-environment.md) | friction | page follow-up wave (after turn-cut lands) |
-| [Make the debug left pane the exact bytes the agent received](debug-left-pane-is-not-the-exact-prompt.md) | friction | visual-QA fix wave |
-| [Stop sending debug pages patches for elements they do not have](debug-pages-receive-block-patches-for-elements-they-do-not-have.md) | friction | UI watchability wave (2026-08-10 route walk) |
 | [Default component probe timed out after development adoption](default-component-probe-times-out-after-adoption.md) | friction | adoption follow-up wave (after turn-cut lands) |
 | [Default pull refusal omits registered attribute candidates](default-pull-unknown-attribute-omits-candidates.md) | friction | wave/agent-context |
 | [Default web request times out during partial adoption](default-web-request-times-out-during-partial-adoption.md) | friction | adoption follow-up wave (after turn-cut lands) |
@@ -109,11 +108,11 @@ See `README.md` for the convention.
 | [Development adoption cannot load the canonical test support](development-adoption-cannot-load-test-support.md) | friction | adoption follow-up wave (after turn-cut lands) |
 | [Development adoption drops the web server while it reloads](development-adoption-drops-the-web-server.md) | friction | adoption follow-up wave (after turn-cut lands) |
 | [Development adoption retains old web service inputs](development-adoption-retains-old-web-service-inputs.md) | friction | adoption follow-up wave |
+| [Documentation reads Clojure arglists as EDN](documentation-arglists-with-auto-keywords-are-not-edn.md) | friction | unscheduled — owner to rank |
 | [Seed drive clusters with their required plan facts](drive-one-starts-without-required-plan-facts.md) | friction | drive-1 defect wave |
 | [Admit definitions after dynamically hidden namespace movement](dynamic-in-ns-cannot-persist-definition-namespace.md) | friction | per-run fork context wave |
 | [Fix edit-hook kondo false positives on seon.db dynamic vars](edit-hook-kondo-false-positives-on-seon-db-dynamic-vars.md) | friction | dev-tooling-face-hygiene wave |
 | [Order effect feedback by numeric facts](effect-feedback-orders-receipts-by-id.md) | friction | effect ordering follow-up |
-| [Effect receipts have no render producers](effect-receipts-have-no-render-producers.md) | friction | render receipt-producer wave |
 | [Effective settings read refreshes after a system turn](effective-settings-read-refreshes-after-system-turn.md) | friction | loop follow-up wave |
 | [Reconcile the error-class catalog with declared schemas and renderers](error-class-catalog-and-renderers-disagree.md) | friction | error class contract repair |
 | [Give eval episode backstops one declared owner](eval-drives-duplicate-a-four-minute-run-clock.md) | friction | eval-driver lifecycle wave |
@@ -128,13 +127,14 @@ See `README.md` for the convention.
 | [Re-root the foreign-write custody fence on the environment](foreign-write-fence-reads-only-the-dynamic-var.md) | friction | seon.env Phase 3 production sweep ([PRD](../../prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md)) |
 | [Make generation dependency analysis see keywords](generation-dependency-analysis-ignores-keywords.md) | friction | evolving-session phases |
 | [Give offline roster discovery a current read-only helper](give-offline-roster-discovery-a-current-read-only-helper.md) | friction | operator artifact follow-up |
+| [Guarded schema declarations still exceed their allocation regression bound](guarded-schema-declarations-still-exceed-the-allocation-regression-bound.md) | friction | unscheduled — owner to rank |
 | [The help trial copies the prompt and invents results](help-trial-copies-prompt-and-invents-results.md) | friction | context-blocks lane (running, 2026-09-09) |
 | [Make the history-policy refusal test independent of machine load](history-policy-refusal-test-is-load-flaky.md) | friction | test fixture repair wave |
 | [Bind first-party namespaces so value-position reads deref](host-bound-first-party-vars-break-in-value-position.md) | friction | SCI eval-context owner design gate |
 | [Hyperlith pin is 23 commits behind the upstream lockstep rework](hyperlith-pin-behind-lockstep-rework.md) | friction | upstream-delta sweep after seon.env Phase 0 |
 | [Inbox block renders its recipient without the message content](inbox-block-omits-message-content.md) | friction | unscheduled — surfaced by the 2026-09-15 triage; owner to rank |
+| [Incremental publication cannot select the live operator](incremental-publication-cannot-select-the-live-operator.md) | friction | unscheduled — owner to rank |
 | [Lead a failed init with its cause, not the event history](init-failure-dumps-entire-prepl-event-history.md) | friction | operator status-face hygiene |
-| [Require the general printer bound for every contract headline](instrumentation-headline-unbounded-when-caps-absent.md) | friction | adversarial-audit fix wave |
 | [Preserve the interrupted blob staging artifact until it can be observed](interrupted-blob-staging-leaves-no-observable-artifact.md) | friction | blob staging repair wave |
 | [Isolated operator init requires source files inside its root](isolated-operator-init-requires-a-source-checkout.md) | friction | wave/operator-artifact-follow-up |
 | [Juniper submission repeatedly refuses an existing turn](juniper-submission-repeats-existing-turn-refusals.md) | friction | loop follow-up wave |
@@ -146,6 +146,7 @@ See `README.md` for the convention.
 | [Project an MCP value whose map keys are not keywords](mcp-projection-crashes-on-non-keyword-map-keys.md) | friction | whole-system arc repair wave |
 | [MCP runtime_status lists no clusters for an explicit live root](mcp-runtime-status-lists-no-clusters-for-an-explicit-root.md) | friction | wave/dev-mcp |
 | [MCP SCI error projection passes a nil database](mcp-sci-error-projection-passes-a-nil-database.md) | friction | unscheduled — surfaced by the 2026-09-15 triage; owner to rank |
+| [MCP session loss claims a restart without process evidence](mcp-session-loss-claims-unobserved-restart.md) | friction | unscheduled — owner to rank |
 | [Cut `my.background/poll`'s ~290 tokens per polled result](my-background-poll-costs-290-tokens-per-polled-result.md) | friction | capability surface repair wave |
 | [Make `my.fs/write` and `my.shell/run` docstrings teach the shapes they accept](my-fs-write-docstring-hides-its-own-request-shape.md) | friction | capability surface repair wave |
 | [Connect namespace alias and refer targets with refs](namespace-binding-targets-are-symbols-not-refs.md) | friction | future program-graph binding wave |
@@ -154,13 +155,14 @@ See `README.md` for the convention.
 | [Render namespace pages without renderer-unavailable spam](namespace-page-repeats-renderer-unavailable.md) | friction | drive-1 defect wave |
 | [Render actual namespace identities in dependency summaries](namespace-require-summary-renders-nil-identities.md) | friction | render important-schema producer wave |
 | [Reject negative imports at the escape/static admission boundary](negative-import-masks-escape-static-admission.md) | friction | SCI static-admission repair wave |
+| [A nested test snapshot overwrites its fresh run claim](nested-test-snapshot-overwrites-its-fresh-run-claim.md) | friction | unscheduled — owner to rank |
 | [Publish graph transitions instead of polling them in tests](observable-graph-transitions-are-polled-in-tests.md) | friction | Core |
 | [One elision, one representation](one-elision-has-two-representations-in-one-context.md) | friction | results-as-data rip-out |
 | [Stop two identity attributes from naming one string](one-identity-string-names-two-entities.md) | friction | config/cluster identity design gate |
+| [Teach that every prose line needs a comment marker](opening-does-not-explain-per-line-comment-markers.md) | friction | unscheduled — owner to rank |
 | [Generate only action-demanded opening candidates](opening-generator-pushes-undemanded-candidates.md) | friction | prefix-drift demand-first generation design (held `bootstrap.clj`) |
 | [Stop the opening walkthrough replicating its usage test per agent](opening-walkthrough-replicates-a-usage-test.md) | friction | evolving-session implementation phases |
 | [Carry the operator root explicitly instead of guessing from names](operator-root-inference-guesses-from-directory-names.md) | friction | R3 store-path decision |
-| [Bound `bin/seon status` instead of dumping every absent test result](operator-status-dumps-every-absent-test-result.md) | friction | wave/operator-status-face |
 | [Read foreign live roots in operator status](operator-status-refuses-foreign-live-root.md) | friction | drive-1 defect wave |
 | [Operator test status still reads the retired results branch](operator-test-status-still-reads-retired-results-branch.md) | friction | unscheduled — surfaced by the 2026-09-15 triage; owner to rank |
 | [Connect ordinary turns to the additive system-turn algorithm](ordinary-turns-do-not-use-the-additive-system-turn.md) | friction | turn follow-up wave |
@@ -176,6 +178,7 @@ See `README.md` for the convention.
 | [Publication's live-JVM reload hand-lists namespaces and misses dependencies](publication-reload-hand-lists-namespaces-and-misses-dependencies.md) | friction | operator launch-concurrency wave (second occurrence 2026-08-08) |
 | [Raw identity projection hides a selected steward](raw-identity-projection-hides-selected-steward.md) | friction | page follow-up wave |
 | [Raw write validation refuses reverse refs and partial entity maps](raw-write-validation-refuses-reverse-refs-and-partial-entity-maps.md) | friction | wave/schema-admission |
+| [Remove remaining explicitly supplied thread projection compatibility](read-and-admission-producers-still-require-thread-projections.md) | friction | unscheduled — owner to rank |
 | [Report malformed root claims in the reap result](reap-dead-roots-calls-delete-recursively-with-a-nil-path.md) | friction | wave/directory-claims |
 | [Tolerate entries vanishing during recursive deletion](recursive-delete-throws-when-entries-vanish-mid-walk.md) | friction | operator velocity fixes |
 | [Render adversarial roots outlive their fault experiment](render-adversarial-roots-outlive-their-experiment.md) | friction | operator directory-claim governor wave |
@@ -194,7 +197,6 @@ See `README.md` for the convention.
 | [Fit the root maintenance context to the provider budget](root-maintenance-context-exceeds-provider-budget.md) | friction | drive-1 defect wave |
 | [Root warm requests can exceed 300 ms during read-evidence replay](root-page-warm-read-evidence-replay-exceeds-300ms.md) | friction | unscheduled — surfaced by the 2026-09-15 triage; owner to rank |
 | [Root's turns on a fresh dev cluster hit the context-acquisition backstop](root-turns-on-a-fresh-dev-cluster-hit-the-context-acquisition-backstop.md) | friction | turn-cut lane (running, 2026-09-09) |
-| [Render run forms and receipts with strict REPL fidelity](run-renderer-narrates-forms-and-receipts.md) | friction | strict REPL display wave |
 | [The runtime block's HTML is raw ids and instants](runtime-block-html-is-raw-ids-and-instants.md) | friction | unscheduled — surfaced by the 2026-09-15 triage; owner to rank |
 | [Resolve namespace aliases before selecting runtime lint stubs](runtime-lint-does-not-resolve-namespace-aliases.md) | friction | future runtime-lint wave |
 | [Include runtime listen patterns in durable turn eligibility](runtime-listens-do-not-yet-participate-in-turn-eligibility.md) | friction | loop follow-up wave |
@@ -204,6 +206,7 @@ See `README.md` for the convention.
 | [Extract Malli map entries by shape, not position](schema-map-extraction-still-depends-on-position-two.md) | friction | schema-form extraction repair |
 | [Projection-state contract invokes deref as a predicate](schema-projection-state-contract-invokes-deref-as-a-predicate.md) | friction | unscheduled — surfaced by the 2026-09-15 triage; owner to rank |
 | [SCI evaluation tests still expect retired storage](sci-evaluation-tests-still-expect-retired-storage.md) | friction | loop follow-up wave |
+| [SCI reload regression leaves worker instrumentation changed](sci-reload-test-leaves-worker-instrumentation-changed.md) | friction | unscheduled — owner to rank |
 | [Preserve explicitly declared usage metadata on runtime tests](sci-test-declarations-drop-explicit-usage-metadata.md) | friction | unscheduled — surfaced by the 2026-09-15 triage; owner to rank |
 | [Scratch debug feed and turn backstops after adoption](scratch-debug-feed-and-turn-backstops-after-adoption.md) | friction | loop follow-up wave |
 | [Scratch root has agent-authored errors without provider attempt facts](scratch-root-has-agent-errors-without-attempt-facts.md) | friction | wave/provider-context |
@@ -224,13 +227,12 @@ See `README.md` for the convention.
 | [Give storage GC the cutoff that makes it actually reclaim](storage-gc-runs-without-a-cutoff-so-it-reclaims-almost-nothing.md) | friction | store/perf fix lane |
 | [Give system-generated messages arrival ordinals](system-generated-messages-omit-arrival-ordinals.md) | friction | message transaction-data repair |
 | [Make the oversized terminal-refusal settle as one schema-valid error fact](terminal-refusal-error-fact-fails-on-oversized-data.md) | friction | settlement fix wave |
-| [Wrap the debug AI pane](the-debug-ai-pane-never-wraps.md) | friction | session-view lane |
-| [Make the value floor map face readable EDN](the-value-floors-map-face-is-not-readable-edn.md) | friction | results-as-data rip-out |
+| [Test launcher fixtures omit required helper files](test-launcher-fixtures-omit-required-helpers.md) | friction | unscheduled — owner to rank |
+| [Successful isolated test results can fail to persist in the shared operator](test-results-persistence-can-time-out-during-development-adoption.md) | friction | unscheduled — owner to rank |
+| [The first debug page after an adoption takes eighteen seconds](the-first-debug-page-after-an-adoption-takes-eighteen-seconds.md) | friction | unscheduled — owner to rank |
 | [Give thinking tool continuations one faithful request shape](thinking-tool-continuations-have-no-faithful-request-shape.md) | friction | future model-continuation wave |
-| [Keep interpreter-private markers out of the time-limit face](time-limit-face-exposes-interpreter-interrupt-marker.md) | friction | SCI failure-face repair wave |
 | [Transaction HTML adds a second generic value renderer and erases distinctions](transaction-html-has-a-second-generic-value-renderer.md) | friction | unscheduled — surfaced by the 2026-09-15 triage; owner to rank |
 | [Order transcript receipt and comment candidates by numeric facts](transcript-candidate-window-orders-receipts-and-comments-by-id.md) | friction | transcript ordering follow-up |
-| [Render transcript entries as forms and actual values](transcript-renderer-encodes-entries-as-comment-forms.md) | friction | strict REPL display wave |
 | [Turn consumers retain obsolete fixture and observation contracts](turn-consumer-fixtures-read-retired-result-storage.md) | friction | turn-rename lane (running, 2026-09-09) |
 | [Dynamically resolved turn evaluation calls are absent from the program graph](turn-dynamic-evaluation-calls-are-missing-from-the-program-graph.md) | friction | unscheduled — surfaced by the 2026-09-15 triage; owner to rank |
 | [Turn evaluations bypass work submission](turn-evaluations-bypass-work-submission.md) | friction | turn follow-up wave |
@@ -241,27 +243,13 @@ See `README.md` for the convention.
 | [Clear the floor's residue, duplicate cursors, and marker hand list](value-floor-residue-duplicate-cursors-and-marker-hand-lists.md) | friction | context wave fix lane |
 | [Virtual-loop fixture submission can meet an already-open turn](virtual-loop-fixture-submission-can-race-an-armed-turn.md) | friction | unscheduled — surfaced by the 2026-09-15 triage; owner to rank |
 | [May a run refine a schema key nothing depends on?](within-run-schema-key-refinement-needs-an-owner-ruling.md) | friction | owner design ruling (schema-key immutability vs the usage guard) |
-| [Adoption probe emits an invalid root namespace lookup](adoption-probe-emits-an-invalid-root-namespace-lookup.md) | friction | unscheduled — owner to rank |
-| [Cache reuse regression exceeds the live test bound](cache-reuse-regression-exceeds-live-test-bound.md) | friction | unscheduled — owner to rank |
-| [Canonical fixture population refuses its schema transaction in default](canonical-fixture-population-missing-carried-projection.md) | friction | unscheduled — owner to rank |
-| [Documentation reads Clojure arglists as EDN](documentation-arglists-with-auto-keywords-are-not-edn.md) | friction | unscheduled — owner to rank |
-| [Guarded schema declarations still exceed their allocation regression bound](guarded-schema-declarations-still-exceed-the-allocation-regression-bound.md) | friction | unscheduled — owner to rank |
-| [Incremental publication cannot select the live operator](incremental-publication-cannot-select-the-live-operator.md) | friction | unscheduled — owner to rank |
-| [MCP session loss claims a restart without process evidence](mcp-session-loss-claims-unobserved-restart.md) | friction | unscheduled — owner to rank |
-| [A nested test snapshot overwrites its fresh run claim](nested-test-snapshot-overwrites-its-fresh-run-claim.md) | friction | unscheduled — owner to rank |
-| [Teach that every prose line needs a comment marker](opening-does-not-explain-per-line-comment-markers.md) | friction | unscheduled — owner to rank |
-| [Remove remaining explicitly supplied thread projection compatibility](read-and-admission-producers-still-require-thread-projections.md) | friction | unscheduled — owner to rank |
-| [SCI reload regression leaves worker instrumentation changed](sci-reload-test-leaves-worker-instrumentation-changed.md) | friction | unscheduled — owner to rank |
-| [Test launcher fixtures omit required helper files](test-launcher-fixtures-omit-required-helpers.md) | friction | unscheduled — owner to rank |
-| [Successful isolated test results can fail to persist in the shared operator](test-results-persistence-can-time-out-during-development-adoption.md) | friction | unscheduled — owner to rank |
-| [The first debug page after an adoption takes eighteen seconds](the-first-debug-page-after-an-adoption-takes-eighteen-seconds.md) | friction | unscheduled — owner to rank |
+| [Refresh canonical fixture contracts after development adoption](canonical-fixture-retains-old-function-contracts-after-adoption.md) | friction | unscheduled — owner to rank |
 
-## Cleanup (19)
+## Cleanup (18)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
 | [Five tests leave their worker stripped of contracts they did not restore](a-platform-test-leaves-its-worker-stripped-of-every-contract.md) | cleanup | wave/contract-gate |
-| [Keep the page body from scrolling sideways on a phone](agent-pages-overflow-a-phone-viewport.md) | cleanup | visual-QA fix wave |
 | [Update chart plan examples to the section 17 fixture](chart-plan-examples-retain-old-juniper-step-ids.md) | cleanup | unscheduled — surfaced by the 2026-09-15 triage; owner to rank |
 | [Derive callable shape documentation from executable contracts](class-documentation-restates-executable-contracts.md) | cleanup | class-kill queue |
 | [Reject readerless rows and duplicate mechanisms at publication](class-readerless-duplicate-mechanisms-survive-cuts.md) | cleanup | class-kill queue |
@@ -270,6 +258,7 @@ See `README.md` for the convention.
 | [Changed-read summaries now have two EDN readers and two value-diff mechanisms](debug-reread-summary-duplicates-shown-value-and-diff-owners.md) | cleanup | unscheduled — surfaced by the 2026-09-15 triage; owner to rank |
 | [Select duplicate-identity refusal evidence deterministically](duplicate-identity-refusal-evidence-is-unordered.md) | cleanup | reconcile evidence cleanup wave |
 | [Make fresh CLJC namespaces portable or name them CLJ](fresh-cljc-files-are-jvm-only.md) | cleanup | fresh portability cleanup wave |
+| [Retire the quiet-window claim in AGENTS.md](hook-quiet-window-assumptions-survive-immediate-drain.md) | cleanup | unscheduled — owner to rank |
 | [Stop opaque contract generators from sharing live process objects](opaque-contract-generators-share-live-process-objects.md) | cleanup | contract-generator cleanup wave |
 | [The retired form projection is still declared and selected at HEAD](retired-form-projection-still-declared-and-selected.md) | cleanup | page follow-up wave (after turn-cut lands) |
 | [Delete five readerless schema rows left by completed cuts](schema-population-retains-five-readerless-rows.md) | cleanup | schema population deletion wave |
@@ -278,5 +267,4 @@ See `README.md` for the convention.
 | [Vendor parinferish under reference-code](vendor-parinferish-under-reference-code.md) | cleanup | wave/upstream-delta |
 | [Commit the babashka-process AOT patch to a fork](vendored-babashka-process-carries-a-local-aot-patch.md) | cleanup | vendoring hygiene |
 | [Close the remaining vendored-versus-pinned dependency drift](vendored-transit-clj-drifts-from-the-pinned-artifact.md) | cleanup | upstream-delta sweep follow-up |
-| [Retire the quiet-window claim in AGENTS.md](hook-quiet-window-assumptions-survive-immediate-drain.md) | cleanup | unscheduled — owner to rank |
 
