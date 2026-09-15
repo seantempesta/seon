@@ -21,7 +21,7 @@ Every agent turn that inspects a namespace pays a query storm. Measured on
 | `seon.schema/projection-from-database db` | 506 ms | 1,770 MB | 22 forms |
 | `program-documentation db 'my.message` (second call, same db value) | 531 ms | 1,774 MB | 4 |
 
-Through the SCI door on the same cluster: `(doc my.message/send)` recorded
+Through SCI evaluation mode on the same cluster: `(doc my.message/send)` recorded
 `:seon.eval/allocated-bytes 2,572,248,464` in 683 ms; two calls in one form
 1,250 MB / 280 ms; `(dir my.note)` 686 MB / 187 ms. Run 9's agent called
 `dir`/`doc` five times in thirty turns.
@@ -43,3 +43,20 @@ Through the SCI door on the same cluster: `(doc my.message/send)` recorded
 A `doc`/`dir` call in an agent turn costs milliseconds and megabytes; the
 projection rides the database value it derives from (law 2.1); one
 regression asserting an allocation bound on the same harness.
+
+## Cause established (2026-09-15 19:10Z, orchestrator probes on `default`)
+
+Datahike answers the same reads in 0–10 ms. The cost is `seon.db`'s
+`read-declarations` (`src/seon/db.clj:907`): when no projection is handed
+through the dynamic var it rebuilds the projection from the database on
+every read — 1,774 MB / ~500 ms floor for any selector, and `'[*]` adds a
+per-attribute `edn-encoded?` recomputation keyed on the fresh projection
+instance (46 GB). The same `seon.db/pull-many` inside
+`schema/call-with-projection` with the cluster's projection state: 0 ms,
+1 MB, including `'[*]`. Agent evaluations run where that binding is absent
+(run 9's `dir`/`doc` took 294–976 ms each), so every agent read pays it.
+Fix direction (lane doc-dir-cost): the database value carries its
+projection state as metadata, attached where `seon.db` mints values (the
+call-preparation supplier and `seon.db/db`); the rebuild fallback becomes
+loud. The "reusable projection" fingerprint path is itself 8.8 s / 35 GB
+because it re-queries every function's source text.
