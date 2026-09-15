@@ -42,6 +42,25 @@ later in this lane. Baseline script is read-only; it creates no turns.
 
 ## Findings
 
+### A03 faithful history, no retry
+
+Reread shared `src/seon/render.clj` before the single patch. Its working-tree
+diff was clean at that point; the other lane's landed frame comparison is
+preserved. Deleted the repull/reformat/rejoin retry and history-field replacement.
+Capture equality remains verification. The session now consumes the saved rows
+carried by history instead of pulling them again. Source: 4 added, 20 removed;
+regression: 14 added (net −2). Fast 10/162 assertions pass after supplying the
+canonical test request's required connection. The regression deliberately
+changes canonical bytes while leaving real saved rows intact, and requires
+a mismatch rather than a reconstruction. Isolated 15/236 assertions pass.
+All six `a03-{debug,agent,inspection}-{1440,700}.png` screenshots LOOKed at:
+zero overflow, intact ledger/panel, and selected turn 36 displays 55 emissions
+and 44,187 history bytes without a capture-mismatch error. Every browser route
+returned 200. Definitions reloaded, but adoption reported “Source changed during
+development adoption” at `6aa8e1ce-5f70-56ae-99b2-56994ea7f558`; browser evidence
+proves loaded behavior, not full publication convergence. No shared prompt owner
+edit was required.
+
 ### A13 one trigger message
 
 `runtime-message-link` now contains only the relationship/identity label.

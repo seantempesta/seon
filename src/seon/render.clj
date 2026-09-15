@@ -1429,22 +1429,9 @@
                             ((requiring-resolve 'seon.repl/frame)
                              (:seon.db/db acquired) (:seon.agent/id request)))))
       acquired
-      (let [entries (:seon.render.history/entries acquired)
-            saved (db/pull-many (:seon.db/db acquired)
-                               '[* {:seon.cluster.eval/ns [:seon.ns/name]}]
-                               (mapv :seon.render.history/subject entries))
-            emitted (mapv #((requiring-resolve 'seon.repl/text)
-                             ((requiring-resolve 'seon.repl/entity-emission)
-                              (assoc % :seon.db/db (:seon.db/db acquired)))) saved)
-            segments (mapv #(str (when (pos? %1) "\n\n") %2) (range) emitted)]
-        (if (= capture (apply str segments))
-          (assoc acquired :seon.cluster.prompt/text capture
-                          :seon.render.history/segments segments
-                          :seon.render.history/entries
-                          (mapv #(assoc %1 :seon.render.history/bytes %2) entries emitted))
-          {:seon.error/kind ::capture-mismatch
-           :seon.error/message "Saved evaluations do not reconstruct the captured provider prompt."
-           :seon.turn/id (:seon.turn/id request)})))))
+      {:seon.error/kind ::capture-mismatch
+       :seon.error/message "Saved evaluations do not reconstruct the captured provider prompt."
+       :seon.turn/id (:seon.turn/id request)})))
 
 (defn acquire-context!
   "Fold saved shown text into the agent's context.

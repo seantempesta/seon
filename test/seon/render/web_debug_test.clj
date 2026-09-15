@@ -363,6 +363,20 @@
        (is (= history
               (walk/history (assoc request :seon.render.walk/lookup
                                    [:seon.agent/id "history-probe"]))))
+       (let [request (assoc request :seon.agent/id "history-probe" :seon.db/connection connection)
+             acquired (web/derive-context! request)
+             captured (db/transact! connection
+                        [{:seon.context.capture/id "history-verification"
+                          :seon.context.capture/run [:seon.turn/id "history-probe-turn"]
+                          :seon.context.capture/basis-t (db/basis-t database)
+                          :seon.context.capture/prompt (:seon.cluster.prompt/text acquired)}])
+             request (assoc request :seon.db/db @connection :seon.turn/id "history-probe-turn")]
+         (is (:db-after captured) (pr-str captured))
+         (is (= acquired (#'render/captured-history request acquired)))
+         (is (= :seon.render/capture-mismatch
+                (:seon.error/kind (#'render/captured-history request
+                                   (assoc acquired :seon.cluster.prompt/text "Changed canonical bytes"))))
+             "Capture verification refuses a mismatch instead of repulling entries to repair it."))
        (let [changed (db/transact! connection
                                   [[:db/add component-eid :my.plan/objective
                                     "The current component changed"]])]

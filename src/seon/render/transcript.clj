@@ -1372,13 +1372,10 @@
                      (last rows))
         selected-id (:seon.turn/id selected)
         acquired (render/acquire-context! (assoc request :seon.turn/id selected-id))
-        opening (:seon.db/db acquired)
         entries (:seon.render.history/entries acquired)
         prompt (:seon.cluster.prompt/text acquired)
         by-eid (into {} (map (juxt :db/id identity)) rows)
-        saved (when (seq entries)
-                (db/pull-many opening '[* {:seon.cluster.eval/ns [:seon.ns/name]}]
-                              (mapv :seon.render.history/subject entries)))
+        saved (map :seon.render/value entries)
         rereads (->> saved
                      (filter #(= "re-read" (session-origin database
                                          (get by-eid (get-in % [:seon.cluster.eval/run :db/id])) %)))

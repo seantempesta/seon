@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, render, agent, wave/verification-audit]
 ---
@@ -37,3 +37,12 @@ as a current defect after that commit.
 At immutable named-turn bases, current history, HTML text, and capture comparisons consume the same acquired entries. Include saved generated rereads, old saved text, and newly annotated evaluations. Missing evidence remains a typed unavailable result, never a successful empty comparison.
 
 See [the audit](../../prds/context-generation/research/audit-1-2026-09-15.md) for scope, change counts, and verification limits.
+
+## Resolution
+
+The resolving commit deletes the repull/reformat/rejoin retry and the session's
+separate saved-row pull. Both consume history's acquired rows and bytes; capture
+equality only verifies. A canonical regression requires a typed mismatch when
+canonical bytes change even though repulling saved entries could repair them.
+Fast 10/162 and isolated 15/236 assertions pass. The landing note records the
+commit and the inspected default session (55 emissions, 44,187 history bytes).
