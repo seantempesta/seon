@@ -1055,3 +1055,17 @@ half-edit. Measured targets in the issue.
 - Run 3 waits for the invariant to land (the tree holds its half-edits and
   the hook adopts the tree). Overnight loop armed (phrase in memory).
 
+## 2026-09-14 22:05 — overnight cycle 2: problems panel; run 3 starts
+
+- debug-turns `21c7364cf`: the problems panel above the ledger, from rows —
+  run 2 reads "30/30 turns · 4/7 steps · 21 evaluation errors · 8 faults
+  delivered · 71 repeated system reads"; fabricated responses 9, replies
+  with zero evaluations 1, incomplete directory results 1, turns opened by
+  faults 2, tokens 954,877 in / 890,752 hit / 7,259 out · $0.0135; checks
+  passed 1. Lane ended. context-renders `0dca8534e` invariant (0 re-reads /
+  0 bytes over three virtual turns), `8df86358b` compact pairs + whole-item
+  printer slice; continuing on change-only re-reads and the printer.
+- Adoption converged with `bin/seon init --dev default` (digest 062ea0ad…);
+  loop proof + continuation green on HEAD. Run 3 reseeded with the provider
+  on.
+
