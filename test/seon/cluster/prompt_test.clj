@@ -243,6 +243,39 @@
                "completion_tokens" 1
                "total_tokens" (inc provider-tokens)})}]))
 
+(deftest calibration-uses-the-agents-recent-attempts-and-config-prior
+  (planted
+   (fn [connection ctx]
+     (let [model (db/q '[:find ?model . :where [_ :seon.config.ai/model ?model]] @connection)
+           foreign (assoc-in (recorded-usage-tx model 99 9000 1000)
+                             [0 :seon.turn/agent] [:seon.agent/id "other"])]
+       (db/transact! connection
+                     (agent/creation-tx {:seon.agent/id "other"
+                                         :seon.cluster/name "prompt-walk"
+                                         :seon.ns/name 'my.agents.other}))
+       (db/transact! connection
+                     [{:seon.agent/id "walker"
+                       :seon.agent/settings {:seon.config.ai/chars-per-token-prior 4.5}}])
+       (db/transact! connection foreign)
+       (is (= 9.0 (:seon.ai.tokens/chars-per-token
+                    (prompt/agent-calibration @connection "other" model))))
+       (is (= 4.5 (:seon.ai.tokens/chars-per-token
+                    (prompt/agent-calibration @connection "walker" model)))
+           "another agent's usage cannot replace this agent's configured prior")
+       (doseq [ordinal (reverse (range 12))]
+         (db/transact! connection
+                       (recorded-usage-tx model ordinal
+                                          (if (< ordinal 2) 6400 2800) 1000)))
+       (db/transact! connection (recorded-usage-tx model 100 10000 0))
+       (let [calibration (prompt/agent-calibration @connection "walker" model)
+             rendered (prompt/prompt @connection (dissoc (request connection ctx) :seon.turn/id))]
+         (is (= :seon.ai.tokens/observed (:seon.ai.tokens/basis calibration)))
+         (is (= 10 (:seon.ai.tokens/sample-count calibration)))
+         (is (= 2.8 (:seon.ai.tokens/chars-per-token calibration))
+             "timestamps order the window; old and unbilled attempts do not distort it")
+         (is (= 2.8 (get-in rendered [:seon.ai.tokens/budget-report :seon.ai.tokens/chars-per-token]))
+             "the prompt budget uses the same agent-scoped measurement"))))))
+
 (deftest provider-calibration-reports-over-budget-without-refusing
   ;; THE CLASS: the guard was correct against a measurement that was
   ;; not. `chars/4` ran ~23% low against DeepSeek, so prompts left the

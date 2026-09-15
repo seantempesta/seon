@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [tokens, ai, config, derive-or-die]
 created: 2026-09-14
@@ -30,3 +30,25 @@ effective chars-per-token from its own recent attempts when they exist and
 fall back to the config prior only before the first attempt; show
 "rebuilt ≈N tokens · billed N" on the debug page so drift is visible.
 The prompt-token budget check should use the derived figure.
+
+## Owner and resolution — 2026-09-15
+
+The token-estimate slice containing this note adds `recent-calibration` to
+`seon.ai.tokens` and scopes the prompt owner's existing capture/usage join
+to the agent, model, and latest ten billed attempts. The prompt budget and
+debug ledger use that fit. Before the first billed observation, the agent's
+effective config prior applies. No stored calibration or new cache is needed.
+
+## Acceptance
+
+Recovered all 30 original run-7 captures from immutable commit
+`6aa966c2-14ef-5256-b705-84912d5451f3`, totaling 244,933 billed prompt tokens.
+Each of the last ten attempts is predicted using only preceding observations;
+the largest relative error is **2.222%**, below the requested 5%.
+The committed fixture fails loudly if the captures are absent. Canonical
+database tests verify agent isolation, recent ordering, and config fallback.
+
+Live Chrome observation on default also showed the derived ledger label,
+including **rebuilt ≈12,737 tokens · billed 12,523** on the newer current run.
+Exact evidence, gates, and boundaries are in the
+[landing note](../../../prds/context-generation/research/page-speed-and-estimate-landing-2026-09-15.md).

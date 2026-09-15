@@ -1,6 +1,6 @@
 ---
 type: research
-status: active
+status: complete
 tags: [render, performance, ai]
 ---
 
@@ -151,3 +151,14 @@ The broader simplification namespace remains red at clean HEAD as recorded
 above; these green scoped gates do not claim that pre-existing suite is fixed.
 Default remained pid **23729** throughout; no stop, restart, refork, reseed,
 provider request, or agent message was performed by this lane.
+
+## Landing and cleanup
+
+Page-speed commit: **a2bca009c**. The token-estimate commit contains this
+final update, its fixture/probe, and the archived resolved token issue.
+Both slices are path-limited on `steward-platform`.
+All lane shell sessions finished. Successful test roots were removed by the
+runner; the failed broad-gate root was removed after exit and an operator
+status check reported no live clusters or orphan JVMs there. Lane scratch
+logs and the thread-sample file were deleted. No scratch cluster or worktree
+was created; unrelated shared-tree files were preserved.

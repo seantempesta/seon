@@ -1635,7 +1635,8 @@
         attempt (::attempt row)
         usage (::usage attempt)
         calibration (when (:seon.ai/model attempt)
-                      ((requiring-resolve 'seon.cluster.prompt/model-calibration) database (:seon.ai/model attempt)))
+                      ((requiring-resolve 'seon.cluster.prompt/agent-calibration)
+                       database (:seon.agent/id request) (:seon.ai/model attempt)))
         opening (filter #(= (:db/id (first rows)) (get-in % [:seon.cluster.eval/run :db/id])) generated)
         later (if authored? (remove (set opening) generated) generated)
         groups (partition-by :seon.cluster.eval/source later)]
@@ -1677,8 +1678,11 @@
                         (ledger-url (:seon.agent/id request) turn-id {:context "true"}) "')")}
          [:summary
           (str (if provider? "Full context as sent" "Full context before reply")
-               (when capture (str ": " (format "%,d" (utf8-size capture)) " bytes · rebuilt ≈"
-                                  (format "%,d" (tokens/estimate capture calibration)) " tokens"))
+               (when capture
+                 (str ": " (format "%,d" (utf8-size capture)) " bytes · "
+                      (if (:seon.error/kind calibration)
+                        "estimate unavailable"
+                        (str "rebuilt ≈" (format "%,d" (tokens/estimate capture calibration)) " tokens"))))
                (when-let [billed (::prompt usage)] (str " · billed " (format "%,d" billed))))]
          [:div {:id (ledger-context-id turn-id)}]])]
      (when authored?

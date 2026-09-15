@@ -56,6 +56,32 @@
                  ::missing-config agent-id)
           (ai/settings effective (ai/agent-overlay database agent-id)))))))
 
+(defn- calibration-for
+  [database model fallback-calibration agent-id]
+  (let [query (cond->
+               '{:find [?attempt ?at ?characters ?usage-edn]
+                 :in [$ ?model]
+                 :where [[?attempt :seon.ai/model ?model]
+                         [?attempt :seon.ai.attempt/at ?at]
+                         [?attempt :seon.ai.attempt/usage-edn ?usage-edn]
+                         [?run :seon.turn/attempts ?attempt]
+                         [?capture :seon.context.capture/run ?run]
+                         [?capture :seon.ai.tokens/characters ?characters]]}
+                agent-id (update :in conj '?agent-id)
+                agent-id (update :where into
+                                 '[[?run :seon.turn/agent ?agent]
+                                   [?agent :seon.agent/id ?agent-id]]))
+        rows (if agent-id (db/q query database model agent-id)
+                 (db/q query database model))]
+    (tokens/recent-calibration
+     (keep (fn [[_attempt _at characters usage-edn]]
+             (let [provider-tokens (get (edn/read-string usage-edn) "prompt_tokens")]
+               (when (and (int? provider-tokens) (pos? provider-tokens))
+                 {:seon.ai.tokens/characters characters
+                  :seon.ai.usage/prompt-tokens provider-tokens})))
+           (sort-by (juxt second first) (if (:seon.error/kind rows) [] rows)))
+     10 fallback-calibration)))
+
 (defn model-calibration
   "Fit this model's characters-per-token ratio to its own recorded usage.
 
@@ -67,6 +93,8 @@
   already commit — no new writing, no tokenizer, and per model because
   tokenizers differ.
 
+  The four-argument arity scopes the latest ten billed attempts to the agent.
+  The shorter arities retain model-wide inspection for existing callers.
   A model with no recorded usage yet — a fresh cluster's first turns —
   uses the supplied measured prior without inventing an error band.
   Recorded drift stays queryable: this function IS the query."
@@ -76,33 +104,28 @@
      :seon.ai.tokens/calibration]
     [:=> [:cat :seon.db/database-value :seon.ai/model
           :seon.ai.tokens/calibration]
+     :seon.ai.tokens/calibration]
+    [:=> [:cat :seon.db/database-value :seon.ai/model
+          :seon.ai.tokens/calibration :seon.agent/id]
      :seon.ai.tokens/calibration]]}
   ([database model]
    (model-calibration database model tokens/shipped-calibration))
   ([database model fallback-calibration]
-  (let [;; `?attempt` IS IN THE FIND ON PURPOSE: a Datalog result is a
-        ;; SET, so two attempts that recorded the same characters and
-        ;; the same count would collapse into one sample and quietly
-        ;; reweight the fit. Projecting the attempt keeps one row per
-        ;; recorded attempt, which is what a sample count means.
-        rows (db/q '[:find ?attempt ?characters ?usage-edn
-                     :in $ ?model
-                     :where
-                     [?attempt :seon.ai/model ?model]
-                     [?attempt :seon.ai.attempt/usage-edn ?usage-edn]
-                     [?run :seon.turn/attempts ?attempt]
-                     [?capture :seon.context.capture/run ?run]
-                     [?capture :seon.ai.tokens/characters ?characters]]
-                   database model)]
-    (tokens/calibrate
-     (keep (fn [[_attempt characters usage-edn]]
-             (let [provider-tokens (get (edn/read-string usage-edn)
-                                        "prompt_tokens")]
-               (when (int? provider-tokens)
-                 {:seon.ai.tokens/characters characters
-                  :seon.ai.usage/prompt-tokens provider-tokens})))
-           (if (:seon.error/kind rows) [] rows))
-     fallback-calibration))))
+   (calibration-for database model fallback-calibration nil))
+  ([database model fallback-calibration agent-id]
+   (calibration-for database model fallback-calibration agent-id)))
+
+(defn agent-calibration
+  "Fit an agent's recent model attempts, falling back to its config prior."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id :seon.ai/model]
+                  [:or :seon.ai.tokens/calibration :seon.error/value]]}
+  [database agent-id model]
+  (let [settings (effective-ai-settings database agent-id)]
+    (if (:seon.error/kind settings)
+      settings
+      (model-calibration database model
+                         (tokens/prior-calibration (:seon.config.ai/chars-per-token-prior settings))
+                         agent-id))))
 
 (defn- refuse!
   [rule message]
@@ -213,4 +236,5 @@
         database
         (:seon.config.ai/model settings)
         (tokens/prior-calibration
-         (:seon.config.ai/chars-per-token-prior settings)))))))
+         (:seon.config.ai/chars-per-token-prior settings))
+        agent-id)))))

@@ -1,6 +1,7 @@
 (ns seon.ai.tokens-test
   "Recurring acceptance for the one token sizer and its calibration."
-  (:require [clojure.string :as str]
+  (:require [clojure.edn :as edn]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [seon.ai.tokens :as tokens]))
 
@@ -24,6 +25,24 @@
         pairs))
 
 (defn- text-of [characters] (str/join (repeat characters "x")))
+
+(deftest run7-late-prompts-are-predicted-from-prior-attempts
+  (let [evidence (edn/read-string (slurp "test/seon/fixtures/run7_token_observations.edn"))
+        observations (:seon.ai.tokens/observations evidence)]
+    (is (= 30 (count observations)) "missing captures cannot pass")
+    (is (= 244933 (reduce + (map :seon.ai.usage/prompt-tokens observations))))
+    (doseq [position (range (- (count observations) 10) (count observations))]
+      (let [observation (nth observations position)
+            calibration (tokens/recent-calibration (subvec observations 0 position)
+                                                   10 tokens/shipped-calibration)
+            billed (:seon.ai.usage/prompt-tokens observation)
+            estimated (tokens/estimate-of-characters (:seon.ai.tokens/characters observation)
+                                                     calibration)
+            relative-error (/ (abs (- estimated billed)) (double billed))]
+        (is (= 10 (:seon.ai.tokens/sample-count calibration)))
+        (is (< relative-error 0.05)
+            (str (:seon.ai.attempt/id observation) ": estimated " estimated
+                 ", billed " billed ", relative error " relative-error))))))
 
 (deftest token-budget-derivations-share-one-character-ratio
   (is (= 9 (tokens/estimate-chars 3)))

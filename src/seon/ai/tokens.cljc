@@ -113,6 +113,18 @@
          :seon.ai.tokens/sample-count (count usable)
          :seon.ai.tokens/relative-error band})))))
 
+(defn recent-calibration
+  "Fit the most recent usable observations, supplied oldest first.
+
+  A bounded recent window lets the ratio follow changes in prompt composition.
+  Unbilled attempts do not displace billed observations from the window."
+  {:malli/schema [:=> [:cat :seon.ai.tokens/observations
+                       [:int {:min 1}] :seon.ai.tokens/calibration]
+                  :seon.ai.tokens/calibration]}
+  [observations window-size fallback-calibration]
+  (calibrate (vec (take-last window-size (filter observation-usable? observations)))
+             fallback-calibration))
+
 (defn estimate-of-characters
   "Estimate the token count of `character-count` characters.
 
