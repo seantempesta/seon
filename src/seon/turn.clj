@@ -3948,6 +3948,19 @@
         :else
         (report :released 0)))))
 
+(defn- provider-wait-ms
+  "The admitted attempt timeouts plus the already chosen finite retry delays."
+  [{:seon.ai/keys [primary backup] schedule :seon.turn.loop/schedule}]
+  (+ (* (inc (count schedule)) (:seon.ai/timeout-ms primary))
+     (reduce + 0 schedule)
+     (if backup (:seon.ai/timeout-ms backup) 0)))
+
+(defn- await-turn-part!
+  "Hand the existing completion observer the work admitted by this owner."
+  [cluster expected work-ms]
+  (when-let [await-part (:seon.turn.loop/await-part cluster)]
+    (await-part expected work-ms)))
+
 (defn- call-turn
   "Call the provider and freeze the returned plan."
   [{cluster :seon.turn.loop/cluster work :seon.turn.loop/work now :seon.turn.loop/now report :seon.turn.loop/report}]
@@ -3993,6 +4006,10 @@
           primary (:seon.ai/primary providers)
           backup (:seon.ai/backup providers)
           schedule (:seon.turn.loop/schedule providers)
+          _ (when-not (:seon.config.ai/no-provider settings)
+              (await-turn-part!
+               cluster :seon.ai/completion
+               (provider-wait-ms providers)))
           ;; STREAMING IS ON BY CONSTRUCTION (F2 §2.1): the sink is
           ;; one `offer!` of the run id plus the complete
           ;; `:seon.ai/partial` snapshot
@@ -4292,6 +4309,8 @@
                           [:seon.ns/name namespace-name])
               database (or snapshot @connection)
               captured (atom [])
+              _ (await-turn-part! cluster :seon.sci.eval/evaluation
+                                  (:seon.config.eval/time-limit-ms cluster))
               at (java.util.Date.)
               entity-id (when run-id
                           (evaluation-entity-id
@@ -4726,7 +4745,14 @@
                 (if run-id
                   (str " run " (pr-str run-id))
                   " with no observable open turn")
-                " did not publish turn completion within " timeout-ms " ms.")
+                " did not publish "
+                (case expected
+                  :seon.ai/completion "provider response"
+                  :seon.sci.eval/evaluation "evaluation completion"
+                  :seon.agent/turn-permit "turn permit"
+                  :seon.agent/turn-completed "proc stop acknowledgement"
+                  "turn completion")
+                " within " timeout-ms " ms.")
            :seon.agent/id agent-id
            :seon.agent/turn-completion-backstop agent-id
            :seon.config.agent/turn-completion-backstop-ms timeout-ms
@@ -4762,12 +4788,10 @@
         run-id (open-for-agent database [:seon.agent/id agent-id])
         settings (ai/agent-overlay database agent-id)
         timeout-ms
-        (min (or (:seon.config.eval/time-limit-ms settings)
-                 (:seon.config.eval/time-limit-ms (:seon.turn.loop/cluster state)))
-             (or (:seon.config.agent/turn-completion-backstop-ms settings)
-                 carried-timeout-ms
-                 (:seon.config.agent/turn-completion-backstop-ms
-                  (config/effective database cluster-name))))
+        (or (:seon.config.agent/turn-completion-backstop-ms settings)
+            carried-timeout-ms
+            (:seon.config.agent/turn-completion-backstop-ms
+             (config/effective database cluster-name)))
         [value selected]
         (async/alts!! [completion (async/timeout timeout-ms)] :priority true)]
     (if (= selected completion)
@@ -4793,11 +4817,12 @@
         [:seon.turn.loop/completion])))))
 
 (defn- offer-turn-backstop-fault!
-  [{:seon.agent/keys [fault-channel agent-id timeout-ms] armed-run :seon.agent/run-id}]
+  [{:seon.agent/keys [fault-channel agent-id timeout-ms expected] armed-run :seon.agent/run-id}]
   (let [run-id @armed-run
         failure
         (turn-completion-backstop-failure
-         agent-id run-id timeout-ms :seon.agent/turn-transform :seon.agent/turn-terminal
+         agent-id run-id timeout-ms :seon.agent/turn-transform
+         (or expected :seon.agent/turn-terminal)
          [:seon.turn.loop/completion])
         fault
         (cond->
@@ -4829,24 +4854,31 @@
                :seon.agent/turn-completion-backstop
                (:seon.agent/agent-id turn-bound)})))
   (let [cancel (async/chan 1)
-        timeout (async/timeout timeout-ms)
+        parts (async/chan (async/sliding-buffer 1))
         failure-channel (async/promise-chan)
         backstop {:seon.agent/cancel cancel
-                  :seon.agent/failure-channel failure-channel}]
+                  :seon.agent/failure-channel failure-channel
+                  :seon.turn.loop/await-part
+                  (fn [expected work-ms]
+                    (async/offer! parts
+                                  (assoc turn-bound
+                                         :seon.agent/expected expected
+                                         :seon.agent/timeout-ms (+ timeout-ms work-ms))))}]
     (when backstop-state
       (reset! backstop-state backstop))
     (.execute
      ^Executor executor
      ^Runnable
      (fn []
-       (let [[_ selected] (async/alts!! [cancel timeout] :priority true)]
-         (if (= selected timeout)
-           ;; Retain the fired bound in `backstop-state`: disarm joins this
-           ;; same failure instead of racing it with a second timer/fault.
-           (async/put! failure-channel
-                       (offer-turn-backstop-fault! turn-bound))
-           (when backstop-state
-             (compare-and-set! backstop-state backstop nil))))))
+       (loop [bound turn-bound]
+         (let [timeout (async/timeout (:seon.agent/timeout-ms bound))
+               [part selected] (async/alts!! [cancel parts timeout] :priority true)]
+           (cond
+             (= selected parts) (recur part)
+             (= selected timeout)
+             ;; Disarm joins this same failure, including its admitted part.
+             (async/put! failure-channel (offer-turn-backstop-fault! bound))
+             backstop-state (compare-and-set! backstop-state backstop nil))))))
     backstop))
 
 (defn step
@@ -4862,8 +4894,8 @@
   core fault and rides this graph's error channel into the cluster's
   fault committer, tagged with the agent. The completion channel is an
   armed-ready permit: arm publishes it before Flow scheduling, an active
-  transform holds it under the lesser of its evaluation limit and completion
-  backstop, and
+  transform holds it under the completion allowance plus the admitted provider
+  schedule or each form's evaluation limit, and
   `finally` republishes it without an interruptible park. A successful pass
   then cancels the bound; an escaped pass leaves it armed. Disarm awaits the
   stop transition or joins that same active bound; a ready permit never
@@ -4894,6 +4926,8 @@
          completion (:seon.turn.loop/completion cluster)]
      (if-some [turn-bound (await-turn-permit! state)]
        (let [backstop (arm-turn-completion-backstop! turn-bound)
+             cluster (assoc cluster :seon.turn.loop/await-part
+                            (:seon.turn.loop/await-part backstop))
              succeeded? (volatile! false)]
         (try
           (let [result

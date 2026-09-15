@@ -703,8 +703,7 @@
             settings (merge (config/effective @connection (:seon.cluster/name handle))
                             (ai/agent-overlay @connection agent-id))
             turn-completion-backstop-ms
-            (min (:seon.config.agent/turn-completion-backstop-ms settings)
-                 (:seon.config.eval/time-limit-ms settings))
+            (:seon.config.agent/turn-completion-backstop-ms settings)
             _ (async/>!! completion :seon.agent/ready)
             agent-handle (assoc handle
                                 :seon.sci.eval/agent-ctx

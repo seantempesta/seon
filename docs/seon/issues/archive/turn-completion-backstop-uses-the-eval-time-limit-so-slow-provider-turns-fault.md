@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [turn, provider, bounds, faults, live-test]
 created: 2026-09-15
@@ -28,3 +28,15 @@ interrupted turns lost their replies.
 - A bound firing names what never arrived (provider response vs evaluation).
 - Regression: a fixture with a 10 s eval limit and a 20 s simulated provider
   latency completes the turn.
+
+## Resolution — 2026-09-15
+
+The accompanying backstop commit removes both evaluation-limit minima. The
+existing observer follows resolved provider attempts/retry delays and each
+admitted evaluation, with the lifecycle allowance for completion. Its fault
+names the missing provider response or evaluation completion; orderly disarm
+joins that same observation. A real canonical turn with 10-second evaluation
+limit and 20-second simulated provider latency completes without a fault.
+
+Exact gates and live verification are in the
+[landing note](../../../prds/context-generation/research/backstop-and-misc-landing-2026-09-15.md).

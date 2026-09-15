@@ -26,6 +26,7 @@
              [:empty-then-done ["" done] 3 2 :wait]
              [:comments-then-done [";; I will inspect the orders next." done] 3 2 :wait]
              [:done [done] 3 1 :wait]
+             [:slow-provider [done] 3 1 :wait]
              [:completed ["(seon.run/complete \"Verified.\")"] 3 1 :completed]
              [:refusal [refusal] 3 1 nil]
              [:bound [read-source read-source] 2 2 nil]]]
@@ -42,7 +43,8 @@
                  environment (support/environment "loop-continue" connection)
                  routing (agent/routing)
                  requests (atom [])]
-             (with-open [events (support/closeable (async/chan (async/sliding-buffer 1)) async/close!)
+             (with-open [provider-progress (support/closeable (async/chan 1) async/close!)
+                         events (support/closeable (async/chan (async/sliding-buffer 1)) async/close!)
                          faults (support/closeable (async/chan (async/sliding-buffer 16)) async/close!)
                          launcher (support/closeable
                                    (flow/start-work-launcher!
@@ -84,7 +86,10 @@
                    (is (nil? (:seon.error/kind
                               (db/transact! connection
                                             [[:db/retract settings :seon.config.ai/no-provider true]
-                                             [:db/add settings :seon.config.run/max-episode-runs limit]])))))
+                                             [:db/add settings :seon.config.run/max-episode-runs limit]
+                                             [:db/add settings :seon.config.eval/time-limit-ms 10000]
+                                             [:db/add settings :seon.config.ai/timeout-ms 30000]
+                                             [:db/add settings :seon.config.ai.retry/maximum-retries 0]])))))
                  (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "loop-continue"
                                 :seon.config/manifest {:seon.config.ai/no-provider :seon.config/absent}})
                  (d/listen connection ::continuation (fn [_] (async/offer! @events true)))
@@ -93,6 +98,10 @@
                    ; The proc, attempt writer, SCI, prompt and work derivation stay real.
                    (with-redefs [ai/complete
                                  (fn [request]
+                                   (when (= scenario :slow-provider)
+                                     (Thread/sleep 10000)
+                                     (async/offer! @provider-progress true)
+                                     (Thread/sleep 10000))
                                    (let [index (count (swap! requests conj request))
                                          reply (get replies (dec index) refusal)]
                                      (if (string? reply)
@@ -101,6 +110,8 @@
                      (try
                        (agent/arm! {:seon.turn.loop/cluster handle
                                     :seon.agent/routing routing :seon.agent/id "juniper"})
+                       (when (= scenario :slow-provider)
+                         (support/await-event! @provider-progress ::provider-still-pending-at-eval-limit))
                        (support/await-event!
                         @events ::session-ended
                         (fn [_]

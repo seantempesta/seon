@@ -139,14 +139,14 @@
                (is (= 29 (turn/turns-left @connection "juniper")))
                (is (some #(> (:t %) basis) (evaluation/of-agent @connection "juniper"))))
              (is (not (some? (async/poll! faults))) "the installer and both wakes are fault-free")
-             (testing "a lost turn permit faults at the agent evaluation limit"
+             (testing "a lost turn permit faults at the declared completion allowance"
                (let [entry (agent/armed routing "juniper")
                      completion (:seon.turn.loop/completion entry)
                      settings (:db/id (:seon.agent/settings
                                        (db/pull @connection '[{:seon.agent/settings [:db/id]}]
                                                 [:seon.agent/id "juniper"])))]
                  (support/await-event! completion ::idle-permit)
-                 (db/transact! connection [[:db/add settings :seon.config.eval/time-limit-ms 100]])
+                 (db/transact! connection [[:db/add settings :seon.config.agent/turn-completion-backstop-ms 100]])
                  (is (nil? (:seon.error/kind
                             (db/transact! connection
                                           (turn/open-tx
@@ -164,7 +164,7 @@
                        (is (= 100 (:seon.config.agent/turn-completion-backstop-ms data)))
                        (is (< (/ (- (System/nanoTime) start) 1e6) 2000))))
                    (finally
-                     (db/transact! connection [[:db/add settings :seon.config.eval/time-limit-ms 10000]])
+                     (db/transact! connection [[:db/add settings :seon.config.agent/turn-completion-backstop-ms 600000]])
                      (async/offer! completion :seon.agent/ready)))))
              (finally
                (wake/unlisten! {:seon.cluster.wake/connection connection :seon.cluster.wake/key ::running-route})

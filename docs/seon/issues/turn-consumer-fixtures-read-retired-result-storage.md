@@ -191,3 +191,13 @@ constructs a preparation without its now-required basis, contract transaction,
 and arity facts. No production call-preparation code changed in that slice.
 The required request-map behavior is separately exercised through the real
 SCI evaluation and canonical fixture in `seon.sci.shown-text-test`.
+
+## Backstop lane HEAD-only probe — 2026-09-15
+
+At `dabd311d0`, the canonical armed single-agent parallel trial still returns
+`:ledger-equals-runs? false` and `:per-agent-serial? false` while settlement,
+answering, unique evaluations, and quiet fences are true: 1 test, 3 assertions,
+1 failure, 0 errors. The backstop overlay's expanded run also reproduced the
+missing fixture process `8111-1700000000000`. No consumer-suite changes were
+retained. The [landing note](../../prds/context-generation/research/backstop-and-misc-landing-2026-09-15.md)
+contains the exact probe and separate passing real-loop evidence.
