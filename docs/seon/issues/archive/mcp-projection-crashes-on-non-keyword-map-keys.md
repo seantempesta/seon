@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, mcp, render, class/n1, wave/whole-system-arc]
 ---
@@ -81,3 +81,34 @@ unqualified keyword keys reach the render floor, but this member requires the
 MCP recognition/projection code to stop assuming every map key is a keyword.
 Project `(sorted-map "a" 1)` as an ordinary map and return a flat shape error
 for genuine projection failures; do not stringify a stack trace.
+
+## Resolution — 2026-09-15
+
+Implemented in `c3a8d0f01`. The MCP caller carries evaluation recognition;
+the real PREPL event carries exception status. Neither is inferred by
+looking up keywords on an arbitrary result map. The preparation and
+serialization boundaries use one minimal semantic failure constructor.
+Root identity is validated before value traversal or emission.
+
+Live default PID 69622, MCP JVM mode, exact form:
+
+```clojure
+(let [c (seon.operator/connection "default")]
+  (sorted-map "a" 1 "b" 2))
+```
+
+Before: one exceptional terminal, `ClassCastException` at
+`mcp-project:337`, `:phase :print-eval-result`, raw stack frames.
+After: exactly one successful terminal whose value is
+`{:seon.dev.mcp/value {"a" 1 "b" 2} :seon.dev.mcp/windowed? false}`;
+zero escaped projection exceptions and zero raw stack frames.
+The lane did not restart or refork default.
+
+`seon.mcp-test/outward-values-use-total-projection` passed 25 assertions
+in-process. The final post-adoption attempt was refused before assertions
+by the separately recorded cached-fixture old-contract defect; the
+orchestrator's isolated gate and platform tier remain pending.
+This closure rests on the implemented seam and live before/after, not a
+claim that those pending gates passed. Full runs, exact boundaries, and the
+zero-visit/zero-emission probe:
+[N1 MCP landing](../../../prds/context-generation/research/n1-mcp-bypass-2026-09-15.md).

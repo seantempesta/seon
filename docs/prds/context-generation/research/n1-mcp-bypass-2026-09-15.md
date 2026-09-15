@@ -8,6 +8,8 @@ tags: [research, render, mcp, class/n1]
 
 ## Result and boundaries
 
+Implementation commit: `c3a8d0f01`.
+
 Option A is implemented. **MCP decides evaluation/exception handling from caller
 data, never arbitrary result keys; preparation rejects a missing root before
 visiting or emitting a value.** Failed preparation and serialization produce
@@ -231,6 +233,9 @@ this lane did not override it.
 
 `git diff --check` passed. Hook lint reported existing shadowed bindings
 and an unrelated `process-identity` docstring warning, no blocking finding.
+The landing-note Markdown hook also reported 12 repository-wide dependency-pin
+findings, including `agents-md-audit-2026-09-15.md`; those foreign documents
+were not modified by this lane.
 `bin/issues-index --check` reported concurrent archive/schedule drift and
 the new fixture issue's missing schedule row; the index is owner-maintained.
 
