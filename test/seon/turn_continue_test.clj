@@ -18,8 +18,10 @@
 (deftest accepted-provider-replies-continue-until-done-refusal-or-bound
   (let [read-source "(seon.db/q '[:find (sum ?amount) . :where [?order :example/customer \"Ada\"] [?order :example/amount ?amount]])"
         done "(my.agent/done)\n(seon.db/transact! [{:example/order \"after-done\" :example/customer \"Ada\" :example/amount 999}])"
-        refusal {:seon.error/kind :seon.ai/no-credential
-                 :seon.error/message "Fixture provider refused the request."}]
+        refusal (with-open [body (java.io.ByteArrayInputStream.
+                                  (.getBytes "data: {malformed json\n\n" "UTF-8"))]
+                  (#'ai/streamed-completion body nil))]
+    (is (= :seon.ai/unparseable-body (:seon.error/kind refusal)))
     (doseq [[scenario replies limit expected disposition]
             [[:read-then-done [read-source done] 3 2 :wait]
              [:prose-then-done ["I will inspect the orders next." done] 3 2 :wait]
@@ -105,7 +107,9 @@
                                    (let [index (count (swap! requests conj request))
                                          reply (get replies (dec index) refusal)]
                                      (if (string? reply)
-                                       {:seon.ai/text reply :seon.ai/finish-reason "stop"}
+                                       (ai/completion-text
+                                        {"choices" [{"message" {"content" reply}
+                                                     "finish_reason" "stop"}]})
                                        reply)))]
                      (try
                        (agent/arm! {:seon.turn.loop/cluster handle
@@ -171,7 +175,9 @@
                                             (evaluation/of-agent @connection "juniper"))
                            entry (first entries)
                            next-prompt (:seon.ai/prompt (second @requests))
-                           message "Your reply had no form; only comments/prose. Send a form."]
+                           message (if (= scenario :empty-then-done)
+                                     "Your reply began with a response; send a form."
+                                     "Your reply had no form; only comments/prose. Send a form.")]
                        (is (= 1 (count entries)))
                        (is (= message (:seon.cluster.eval/error entry)))
                        (is (str/includes? (:seon.eval/shown entry)

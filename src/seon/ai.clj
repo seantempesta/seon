@@ -901,6 +901,7 @@
 
       (and (string? reasoning-content)
            (seq reasoning-content)
+           (not= "stop" finish-reason)
            (str/blank? content))
       {:seon.error/kind ::reasoning-without-answer
        :seon.ai/reasoning-without-answer true
@@ -920,8 +921,9 @@
        :seon.error/data evidence
        :seon.ai/token-starvation true}
 
-      (and (string? content) (seq content))
-      (cond-> {:seon.ai/text content}
+      (or (and (string? content) (seq content))
+          (and (= "stop" finish-reason) (or (nil? content) (string? content))))
+      (cond-> {:seon.ai/text (or content "")}
         (and (string? reasoning-content) (seq reasoning-content))
         (assoc :seon.ai/reasoning-content reasoning-content)
         (map? usage) (assoc :seon.ai/usage usage)
@@ -941,7 +943,8 @@
   Pure, and the one `:any` in this namespace: the response is a foreign
   document. A body that does not carry the expected shape returns
   `::unparseable-body` with what was actually there — never nil, which
-  would read downstream as an empty reply."
+  would read downstream as an empty reply. A normal stop with empty content
+  is an ordinary completion; the reply reader diagnoses the missing form."
   {:malli/schema [:=> [:cat :any] :seon.ai/completion]}
   [body]
   (let [body-shape (cond
@@ -1264,8 +1267,8 @@
 
   A reasoning-only choice ends at its provider finish reason rather than
   waiting for EOF or the HTTP time limit: that finish signal proves no
-  assistant text will follow for the finished choice. Empty text is an
-  error, not an empty reply, exactly as `completion-text` treats it."
+  assistant text will follow for the finished choice. A normal stop with
+  empty text reaches the reply reader, just as `completion-text` does."
   [body sink]
   (with-open [reader (BufferedReader. (InputStreamReader. body "UTF-8"))]
     (let [failure (atom nil)

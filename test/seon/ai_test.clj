@@ -791,6 +791,25 @@
         (is (error? outcome) (str "must classify: " (pr-str body)))
         (is (= :seon.ai/unparseable-body (:seon.error/kind outcome)))))))
 
+(deftest an-empty-normal-stop-is-a-reply-but-malformed-json-is-a-provider-refusal
+  (doseq [content ["" nil]]
+    (let [completion (ai/completion-text
+                      {"choices" [{"message" {"content" content}
+                                   "finish_reason" "stop"}]})]
+      (is (= "" (:seon.ai/text completion)))
+      (is (= "stop" (:seon.ai/finish-reason completion)))
+      (is (= :seon.cluster.reply/no-forms
+             (:seon.error/kind (reply/sources (:seon.ai/text completion)))))))
+  (doseq [[body expected]
+          [["data: {\"choices\":[{\"delta\":{\"content\":\"\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n" nil]
+           ["data: {malformed json\n\n" :seon.ai/unparseable-body]]]
+    (let [completion (#'ai/streamed-completion
+                      (java.io.ByteArrayInputStream. (.getBytes ^String body "UTF-8")) nil)]
+      (is (= expected (:seon.error/kind completion)))
+      (if expected
+        (is (= :fail (ai/disposition {:seon.error/value completion :seon.ai/backup? false})))
+        (is (= "" (:seon.ai/text completion)))))))
+
 (def ^:private thinking-usage
   {"prompt_tokens" 91
    "completion_tokens" 42
@@ -1291,13 +1310,9 @@
         (let [settled (deref outcome 2000 ::did-not-settle)]
           (is (not= ::did-not-settle settled)
               "finish evidence settles without waiting for EOF or timeout")
-          (is (= :seon.ai/reasoning-without-answer
-                 (:seon.error/kind settled)))
-          (is (= 8 (get-in settled
-                           [:seon.error/data
-                            :seon.ai/reasoning-received])))
-          (is (zero? (get-in settled
-                             [:seon.error/data :seon.ai/text-received])))))
+          (is (= "" (:seon.ai/text settled)))
+          (is (= "stop" (:seon.ai/finish-reason settled)))
+          (is (= 8 (count (:seon.ai/reasoning-content settled))))))
       (finally (stop-custody-stub! stub)))))
 
 (deftest closing-one-attempts-body-cannot-close-its-concurrent-peer
@@ -1314,9 +1329,9 @@
         (let [reasoning (future (complete! "/reasoning"))]
           (is (.await ^java.util.concurrent.CountDownLatch reasoning-finished
                       15 java.util.concurrent.TimeUnit/SECONDS))
-          (is (= :seon.ai/reasoning-without-answer
-                 (:seon.error/kind (deref reasoning 2000
-                                          {::timed-out true})))
+          (is (= ""
+                 (:seon.ai/text (deref reasoning 2000
+                                      {::timed-out true})))
               "the finished attempt closes its own body")
           (.countDown ^java.util.concurrent.CountDownLatch release-peer)
           (let [peer-outcome (deref peer 2000 {::timed-out true})]

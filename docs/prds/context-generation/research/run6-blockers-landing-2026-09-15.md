@@ -173,6 +173,12 @@ to `seon.error`, `seon.turn`, the default session, or foreign source/CSS.
 
 ## Broad input contracts — dated inventory, 2026-09-15
 
+Landing slice 1: `dda9f0366`, database shape guards, both instrumentation
+wrappers, exact run-6 regressions, and the completed callable-input inventory.
+Slice 2 changes completion parsing/schema and the existing reader only;
+the attempt→reply seam in `seon.turn` already supplies the required accepted
+error-evaluation behavior and needs no duplicate transition.
+
 Reproduction command (ordinary working-tool search, not production parsing):
 
 ```sh

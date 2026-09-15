@@ -447,7 +447,7 @@
             "must identify the elapsed provider request limit"}
            [:seon.ai/timeout :seon.ai/timeout]
            [:seon.error/message :seon.error/message]],
-          :text [:string {:min 1}],
+          :text :string,
           :disposition-request
           [:map
            [:seon.error/value :seon.error/value]

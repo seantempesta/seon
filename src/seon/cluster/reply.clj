@@ -327,9 +327,9 @@
     [:=> [:cat :seon.cluster.reply/text :seon.ns/name
           :seon.config.eval.result/max-source]
      [:or :seon.cluster.reply/sources :seon.error/value]]]}
-  ([text] (sources text 'user (count text)))
+  ([text] (sources text 'user (max 1 (count text))))
   ([text namespace-name]
-   (sources text namespace-name (count text)))
+   (sources text namespace-name (max 1 (count text))))
   ([text namespace-name max-source]
    (let [admission-events (parsed-events text namespace-name max-source)]
      (if (= :seon.sci.reader/oversize
@@ -371,5 +371,7 @@
                    (if (seq forms)
                      (vec forms)
                      (refused ::no-forms {::no-forms true}
-                              "Your reply had no form; only comments/prose. Send a form."
+                              (if (empty? text)
+                                "Your reply began with a response; send a form."
+                                "Your reply had no form; only comments/prose. Send a form.")
                               {::text text}))))))))))))
