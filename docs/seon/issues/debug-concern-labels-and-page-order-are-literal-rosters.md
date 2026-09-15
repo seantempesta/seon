@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, render, schema, web, wave/verification-audit]
 ---
@@ -30,3 +30,12 @@ Estimated change: 35–55 lines merged into declarations. Audit classes: 3. No p
 A newly declared concern obtains its title and order without changes to web/transcript code. Renaming a renderer while retaining the declaration does not change its label. No source-token search is needed to identify a block.
 
 See [the audit](../../prds/context-generation/research/audit-1-2026-09-15.md) for scope, change counts, and verification limits.
+
+## Resolution
+
+The resolving commit deletes both literal rosters and source-token classification.
+Titles derive from saved read relationships or a unique schema renderer declaration;
+page order preserves the walk. A renamed renderer retains the declared title in
+the canonical regression. Fast 15/227 and isolated 15/231 assertions pass.
+The landing note records the commit, screenshots, and protected schema needs for
+short titles and task-first ordering; missing titles remain explicit schema keys.

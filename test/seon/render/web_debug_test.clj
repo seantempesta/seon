@@ -373,7 +373,7 @@
 (deftest blocks-use-the-values-schema-documentation
   (support/with-database
     {::support/extra-schema
-     [{:seon.schema/key ::title :seon.schema.admission/source :core :seon.schema/form ":string"}
+     [{:seon.schema/key ::title :seon.schema.admission/source :core :seon.schema/form (pr-str [:string {:title "Notebook title"}])}
       {:seon.schema/key ::notebook
        :seon.schema.admission/source :core
        :seon.schema/form
@@ -386,6 +386,12 @@
             projection (schema/projection-from-database database)
             metadata (#'web/block-metadata projection database
                                             {::title "Example"} ::unlabelled nil)]
+        (doseq [renderer ['example/before 'example/renamed]]
+          (is (= "Notebook title"
+                 (#'transcript/emission-label projection
+                   {:seon.eval/renderer renderer :seon.cluster.eval/source "unrelated source"
+                    :seon.cluster.eval/read-evidence
+                    [{:seon.db/read-request {:seon.db/pull-arguments [[::title] 1]}}]}))))
         (is (= ::notebook (:seon.schema/key metadata)))
         (is (= "Notebook" (:seon.render.web/block-title metadata)))
         (is (= "Notes for this concern."

@@ -42,6 +42,30 @@ later in this lane. Baseline script is read-only; it creates no turns.
 
 ## Findings
 
+### A07 declaration boundary
+
+The renderer-symbol map, source-token classification, and `page-order` ranks
+are deleted. Saved pull evidence identifies the declared relationship; a
+unique schema renderer declaration supplies the fallback schema identity.
+`:title` comes from that declaration, otherwise the schema key is shown
+explicitly. The walk's declared unit order is preserved by the page.
+
+Protected schema need: human titles are absent on `:seon.agent/plan`,
+`:seon.agent/settings`, `:seon.agent/runtime`, and the note/inbox relationship
+declarations (`resources/seon/schemas/seon.agent.edn`, `my.note.edn`,
+`seon.message.edn`). Add their authored `:title` at that declaration seam if
+short prose labels are wanted; this lane cannot invent that metadata in a
+renderer or edit the context-renders lane's schemas. Production order now
+follows `:seon.agent/agent`'s `:seon.render/units`, rather than a second rank
+list. The root Identity block precedes declared children in the current walk;
+preserving the old task-first placement requires the declaration seam to specify
+root placement as well. No renderer rank was retained to conceal that missing fact.
+Source/tests: 30 added, 46 removed, net −16. Fast 15/227 and isolated 15/231
+assertions pass. Adoption converged at `6aa8df1e-740c-518c-9396-1488c54b4bdf`.
+All four `a07-{debug,agent}-{1440,700}.png` screenshots LOOKed at: readable,
+zero overflow; schema-key labels and Identity-before-Plan are visible changes,
+not a claim of pixel-identical order. All six browser routes returned 200.
+
 ### Warm GET regression (owner review after A04)
 
 Read-only default baseline, three `curl -s -o /dev/null -w '%{time_total}\n'`

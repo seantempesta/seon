@@ -1469,8 +1469,25 @@
                   (map vector entries saved))))
          [:span {:class "seon-session-end" :data-init "el.scrollIntoView({block:'end'})"}]]])]))
 
+(defn- emission-label [projection saved]
+  (let [attributes (distinct
+                     (for [evidence (:seon.cluster.eval/read-evidence saved)
+                           entry (first (get-in evidence [:seon.db/read-request :seon.db/pull-arguments]))
+                           attribute (if (map? entry) (keys entry) [entry])
+                           :when (keyword? attribute)] attribute))
+        matches (when-let [renderer (:seon.eval/renderer saved)]
+                  (filter #(= renderer (:seon.render/ai %))
+                          (vals (:seon.schema.projection/shape-rows projection))))
+        schema-key (or (when (= 1 (count attributes)) (first attributes))
+                       (when (= 1 (count matches)) (:seon.schema/key (first matches))))]
+    (or (:title (schema.form/attr-form-properties
+                  (get-in projection [:seon.schema.projection/forms schema-key])))
+        (some-> schema-key str)
+        (str "Evaluation " (inc (or (:seon.cluster.eval/ordinal saved) 0))))))
+
 (defn- ledger-evaluations [request]
   (let [database (:seon.db/db request)
+        projection ((requiring-resolve 'seon.sci.kernel/context-projection) (:seon.sci.eval/ctx request))
         selector '[:seon.cluster.eval/source :seon.cluster.eval/comment
                  :seon.eval/shown :seon.eval/renderer :seon.cluster.eval/error
                  :seon.cluster.eval/output :seon.error/kind
@@ -1491,7 +1508,7 @@
         (map
           (fn [row]
             (let [emission (repl/entity-emission (assoc row :seon.db/db database))]
-              (assoc row ::emission emission
+              (assoc row ::emission emission ::label (emission-label projection row)
                      ::outcome (cond (:seon.cluster.eval/interrupted-at row) "interrupted"
                                      (:seon.cluster.eval/error row) "error"
                                      (:seon.eval/shown row) "value" :else "out")
@@ -1518,27 +1535,6 @@
 (defn- ledger-emissions [evaluations]
   (for [saved evaluations]
     [:pre (repl/render-emission-html (::emission saved))]))
-
-(defn- emission-label
-  "Human block labels over saved renderer identities and the read form's declared attributes."
-  [saved]
-  (let [form (::value (readable-shown (:seon.cluster.eval/source saved)))
-        parts (set (filter #(or (keyword? %) (symbol? %)) (tree-seq coll? seq form)))]
-    (or (get {'seon.bootstrap/render-help-ai "help"
-              'seon.plan/render-plan-ai "plan"
-              'seon.cluster.message/render-inbox-ai "inbox"
-              'seon.agent/render-settings-ai "settings"
-              'seon.render.transcript/render-runtime-ai "runtime"
-              'seon.cluster.agent/render-identity-ai "identity"}
-             (:seon.eval/renderer saved))
-        (cond
-          (parts :seon.agent/plan) "plan"
-          (parts :seon.agent/runtime) "runtime"
-          (parts :seon.message/_inbox) "inbox"
-          (parts :my.note/_agent) "notes"
-          (or (parts :seon.agent/settings) (parts 'seon.agent/effective-settings)) "settings"
-          (parts :seon.agent/id) "identity"
-          :else (first (str/split-lines (:seon.cluster.eval/source saved)))))))
 
 (defn- reply-intent [reply]
   (when-let [line (some #(let [line (str/trim %)]
@@ -1632,7 +1628,7 @@
          [:summary (str "opening (" (count opening) " emissions)")]
          (for [saved opening]
            [:details {:class "seon-ledger-generated"}
-            [:summary (emission-label saved)] (ledger-emissions [saved])])])
+            [:summary (::label saved)] (ledger-emissions [saved])])])
       (if (seq generated)
         (list
          (for [matches groups]
@@ -1643,7 +1639,7 @@
                                               (:seon.cluster.eval/id (first matches))))
                             (filter #(= source (:seon.cluster.eval/source %))) last)]
              [:details {:class "seon-ledger-generated"}
-              [:summary [:code (emission-label (first matches))]
+              [:summary [:code (::label (first matches))]
                (when prior
                  [:span (str " · re-read · " (reread-summary [prior (last matches)]))])]
               (ledger-emissions matches)])))
@@ -1769,7 +1765,7 @@
                     (mapcat (fn [[_ matches]] (map #(evaluation-match by-eid %) matches)) groups))
            ::groups
            (mapv (fn [[_ matches]]
-                   {::detail (str (emission-label (first matches)) " · ×" (count matches)
+                   {::detail (str (::label (first matches)) " · ×" (count matches)
                                   " · " (reread-summary matches))
                     ::bytes (reduce + (map ::contributed-bytes matches))
                     ::matches (mapv #(evaluation-match by-eid %) matches)}) groups))))
@@ -2073,7 +2069,7 @@
              (case (:seon.turn/disposition row) :wait "done" :completed "completed" nil))]
           [(cond (zero? (::ordinal row)) (str "opening · " (count own) " emissions")
                  (empty? own) "no new emissions"
-                 :else (str "re-read " (str/join ", " (distinct (map emission-label own)))))])))))
+                 :else (str "re-read " (str/join ", " (distinct (map ::label own)))))])))))
 
 (defn render-ledger
   "Turn ledger: generated context, raw model reply, evaluated results.

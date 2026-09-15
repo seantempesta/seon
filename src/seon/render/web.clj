@@ -352,24 +352,6 @@
           :seon.render.value/root [:seon.agent/id agent-id])
    (:seon.render.walk/path unit)))
 
-(defn- page-order
-  "Keep the agent's task and runtime ahead of supporting record blocks.
-  This is presentation order over declared relationships and identities."
-  [unit]
-  (let [path (:seon.render.walk/path unit)
-        lookup (:seon.render.walk/lookup unit)
-        identity-attribute (when (vector? lookup) (first lookup))]
-    (cond
-      (= :seon.agent/plan (first path)) 0
-      (= :seon.runtime/agent identity-attribute) 1
-      (= :seon.message/_inbox (first path)) 2
-      (= :my.note/_agent (first path)) 3
-      (= :seon.agent/settings (first path)) 4
-      (empty? path) 5
-      (= :seon.error/_steward (first path)) 6
-      (= :seon.ns/name identity-attribute) 7
-      :else 8)))
-
 (defn surface-html
   "Serialize one walked HTML unit into its stable morph wrapper."
   {:malli/schema [:=> [:cat :seon.agent/id
@@ -504,7 +486,7 @@
 
             (not (:seon.error/kind fleet-output))
             (assoc :seon.render/output fleet-output)))
-        units (sort-by page-order (cond-> walked-units fleet-unit (conj fleet-unit)))
+        units (cond-> walked-units fleet-unit (conj fleet-unit))
         ranks (into {}
                     (map-indexed (fn [rank unit]
                                    [(:seon.render.walk/path unit) rank]))
