@@ -648,6 +648,14 @@ if ! [[ "$logical_processors" =~ ^[1-9][0-9]*$ ]]; then
   logical_processors=2
 fi
 worker_count=$((logical_processors / 2))
+# Never more than three worker JVMs per gate: each loads the whole program
+# (about a gigabyte, 100%+ CPU while running), the confirmation phase reruns
+# failures in fresh JVMs up to this same count in parallel, and the owner's
+# cluster shares the machine (2026-09-15: one gate at cores/2 reached load
+# average 75 on 18 cores). Set SEON_TEST_WORKERS to override deliberately.
+if [ "$worker_count" -gt 3 ]; then
+  worker_count=3
+fi
 if [ "$worker_count" -lt 1 ]; then
   worker_count=1
 fi
