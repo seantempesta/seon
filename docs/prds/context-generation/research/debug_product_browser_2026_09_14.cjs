@@ -35,6 +35,15 @@ const assert = require('node:assert/strict');
       await raw.waitFor();
       assert.equal(await raw.textContent(), coloured.join(''));
       assert.equal(Number(await raw.getAttribute('data-prompt-bytes')), Buffer.byteLength(coloured.join('')));
+      assert.equal(await page.locator('.seon-agent-routes').count(), 0);
+      assert.equal(await page.locator('.seon-session-message').getAttribute('open'), null);
+      assert.match(await page.locator('.seon-session-state').textContent(), /default/);
+      await page.locator('.seon-session-message summary').click();
+      await page.getByPlaceholder('message agent juniper …').fill('unsent browser verification');
+      assert.equal(await page.getByPlaceholder('message agent juniper …').inputValue(), 'unsent browser verification');
+      await page.locator('.seon-session-message summary').click();
+      await page.locator('.seon-session-record summary').click();
+      await page.locator('.seon-session-record .seon-walk-unit').first().waitFor({ state: 'attached' });
       assert.deepEqual(errors, []);
       console.log(JSON.stringify({ selected, emissions: coloured.length,
         bytes: Buffer.byteLength(coloured.join('')), ...layout }));

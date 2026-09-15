@@ -94,7 +94,7 @@
                    _ (fixture/submit! handle routing "(str \"later must not enter earlier prompt\")")
                    _ (agent/disarm! request)
                    unit (merge acquire-request {:seon.db/db @connection})
-                   detail (transcript/render-session unit)
+                   detail (transcript/render-session (#'web/session-controls unit))
                    nodes (tree-seq coll? seq detail)
                    exact (apply str (keep #(when (and (vector? %) (= :pre (first %))
                                            (:data-emission-bytes (second %))) (element-text %)) nodes))

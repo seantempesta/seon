@@ -1244,6 +1244,45 @@
     (= "System" (turn-kind database row)) (if (zero? (::ordinal row)) "opening" "re-read")
     :else "agent"))
 
+(defn- session-header [request rows]
+  (let [agent-id (:seon.agent/id request)
+        agent-row (db/pull (:seon.db/db request)
+                           '[{:seon.agent/namespace [:seon.ns/name]}
+                             {:seon.agent/plan [:my.plan/objective]}]
+                           [:seon.agent/id agent-id])
+        active (last (remove :seon.turn/closed-tx rows))
+        latest (or active (last rows))
+        selected (or (:seon.turn/id request) (:seon.turn/id latest))
+        raw? (::raw? request)]
+    [:header {:class "seon-session-header"}
+     [:div {:class "seon-session-identity"}
+      [:h1 agent-id
+       [:span {:class "seon-session-namespace"}
+        (str (get-in agent-row [:seon.agent/namespace :seon.ns/name]))]]
+      [:p {:class "seon-session-state"}
+       [:span {:class (if active "seon-status-running" "seon-status-idle")}
+        (if active "● running" "● idle")]
+       (when latest
+         (list " since " (runtime-time (get-in latest [(if active :seon.turn/opened-tx :seon.turn/closed-tx) :db/txInstant]))))
+       " · " (:seon.cluster/name request)]]
+     (when-let [objective (get-in agent-row [:seon.agent/plan :my.plan/objective])]
+       [:p {:class "seon-session-objective"} objective])
+     [:div {:class "seon-session-toolbar"}
+      (::toolbar request)
+      (when selected
+        [:a {:class "seon-session-toggle" :href (session-url agent-id selected (not raw?))
+             (keyword "data-on:click")
+             (str "evt.preventDefault(); history.replaceState(null, '', '"
+                  (session-url agent-id selected (not raw?)) "'); @get('"
+                  (session-url agent-id selected (not raw?)) "')")}
+         (if raw? "Colourised session" "As the model saw it")])
+      [:a {:href (route/path ::route/agent-debug {:id agent-id})} "Latest"]
+      (when (::message-form request)
+        [:details {:class "seon-session-message" :id (block/surface-id (keyword "session-message" agent-id))
+                   :data-preserve-attr "open"}
+         [:summary "Message"]
+         (::message-form request)])]]))
+
 (defn- readable-shown [source]
   (try
     (with-open [reader (PushbackReader. (StringReader. source))]
@@ -1287,6 +1326,7 @@
         selected (or (:seon.turn/id request) (when (vector? rows) (:seon.turn/id (last rows))))
         url (when selected (session-url agent-id selected (::raw? request)))]
     [:section {:id (session-id agent-id) :class "seon-session" :data-ignore-morph ""}
+     (session-header request (if (vector? rows) rows []))
      [:h2 "Session"]
      (cond
        (:seon.error/kind rows) [:p {:class "seon-emission-error"} (:seon.error/message rows)]
@@ -1336,16 +1376,13 @@
     [:section {:id (session-id agent-id) :class "seon-session" :data-ignore-morph ""
                :data-signals (str "{" (str/join "," (map #(str % ":false") (vals source-signals))) "}")
                :data-session-loaded selected-id}
+     (session-header request rows)
      [:header {:class "seon-session-heading"}
       [:div [:h2 (str "Context at turn " (::ordinal selected))]
-       [:p (str "The saved prompt before " (str/lower-case (turn-kind database selected))
+       [:p (str "The saved prompt " (if (= "System" (turn-kind database selected)) "after " "before ") (str/lower-case (turn-kind database selected))
                 " turn " selected-id)]
        (when (seq (:seon.turn/attempts selected))
-         (into [:ul {:class "seon-session-meta"}] (map attempt-html) (:seon.turn/attempts selected)))]
-      [:a {:href (session-url agent-id selected-id (not raw?))
-           (keyword "data-on:click")
-           (str "evt.preventDefault(); @get('" (session-url agent-id selected-id (not raw?)) "')")}
-       (if raw? "Colourised session" "As the model saw it")]]
+         (into [:ul {:class "seon-session-meta"}] (map attempt-html) (:seon.turn/attempts selected)))]]
      [:nav {:class "seon-session-selection" :aria-label "Select turn"}
       (for [row rows]
         [:a {:href (session-url agent-id (:seon.turn/id row) raw?)

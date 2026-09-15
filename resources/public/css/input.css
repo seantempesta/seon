@@ -806,6 +806,17 @@ details.tool-call-details[open] .tool-preview {
   word-break: normal;
 }
 .seon-session-page h2 { font-size: 0.75rem; font-weight: 600; color: var(--color-text-100); }
+.seon-session-header { border-bottom: 1px solid var(--color-base-800); padding-bottom: 0.75rem; }
+.seon-session-identity { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 0.25rem 1rem; }
+.seon-session-identity h1 { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.75rem; font-size: 1rem; font-weight: 600; color: var(--color-text-100); }
+.seon-session-namespace, .seon-session-state { font-size: 0.625rem; font-weight: 400; color: var(--color-text-400); }
+.seon-status-running { color: var(--color-signal); }
+.seon-status-idle { color: var(--color-text-200); }
+.seon-session-objective { margin: 0.5rem 0; max-width: 90ch; }
+.seon-session-actions { display: contents; }
+.seon-session-message summary { cursor: pointer; }
+.seon-session-message[open] { flex-basis: 100%; }
+.seon-session-message .seon-bar { margin: 0.5rem 0 0; padding: 0.5rem; border: 1px solid var(--color-base-800); }
 .seon-session-toolbar, .seon-session-heading, .seon-session-selection {
   display: flex;
   flex-wrap: wrap;
@@ -814,11 +825,14 @@ details.tool-call-details[open] .tool-preview {
 }
 .seon-session-heading { justify-content: space-between; padding: 0.75rem 0; }
 .seon-session-heading p, .seon-session-meta { color: var(--color-text-400); font-size: 0.625rem; }
-.seon-session-toolbar button, .seon-session-heading a {
+.seon-session-toolbar button, .seon-session-toolbar > a, .seon-session-message summary {
   border: 1px solid var(--color-base-700);
   padding: 0.25rem 0.5rem;
   color: var(--color-text-200);
   background: var(--color-base-900);
+  font: inherit;
+  font-size: 0.625rem;
+  border-radius: 0;
 }
 .seon-session-selection { gap: 0.2rem; padding: 0.5rem 0; }
 .seon-session-selection a { color: var(--color-text-400); padding: 0 0.35rem; }

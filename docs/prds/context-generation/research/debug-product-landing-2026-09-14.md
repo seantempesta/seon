@@ -6,6 +6,35 @@ tags: [research, debug, web, prompt]
 
 # Debug session product — 2026-09-14
 
+## Header and shell checkpoint
+
+Replaced the duplicated agent/debug links and always-open message bar with
+one compact agent header: identity, namespace, stored objective, idle/running
+state with local time, and cluster. The toolbar includes the existing three
+actions, raw prompt toggle, Latest, and a collapsed Message disclosure.
+Record now loads the existing agent blocks below the session on demand.
+
+| Images in `tmp/debug-product/` | Observed defect | Change |
+|---|---|---|
+| `shell-1-1440.png`, `shell-1-700.png` | Header hierarchy and wrapping correct; cluster label absent with a dangling separator. | Carry the cluster name from the scoped service into the render request. |
+| `shell-2-1440.png`, `shell-2-700.png` | Cluster now visible; controls aligned at both widths. Numeric turn navigation and missing problem summary remain the next specified parts. | Accepted shell layout; Record changed to an in-page disclosure. |
+| `shell-final-1440.png`, `shell-final-700.png` | No horizontal overflow; objective immediately visible; message closed at rest. | Verified both PNGs, raw/colourised byte identity, typing an unsent message, and loading Record in the browser. |
+
+Initial GET: **200 / 0.010458 s / 3,597 bytes**. Record fragment:
+**200 / 0.345467 s / 33,686 bytes**. Selected turn remains
+`1fb7c9d46552`, with 136 emissions and 177,576 exact UTF-8 bytes at both
+widths. The first disclosure probe used an incorrect `.seon-unit` selector;
+the actual existing wrapper is `.seon-walk-unit`. The corrected browser
+probe passed without JavaScript errors. No message was submitted.
+
+Fast gate: **27 tests / 184 assertions, zero failures or errors**.
+Isolated gate: **87 tests / 583 assertions, zero failures or errors**;
+successful root `tmp/test-runs/run.KDC2xs` removed by the gate.
+Live proof used explicit hot reload and contract re-arming; adoption had
+advanced to `6aa89a64-5417-5429-bb8b-37673e3d0bf6`, while publication was
+`6aa89c04-03d8-5bb8-a9f2-b6ebf608888e`. These were not converged, so the
+screenshots prove loaded behavior, not completed development adoption.
+
 ## Grounding and scope
 
 Read end to end: AGENTS.md; datastar-web-ui SKILL.md and its

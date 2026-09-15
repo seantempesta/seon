@@ -272,7 +272,7 @@
               :data-bind "text"
               :required true
               :autocomplete "off"
-              :autofocus true
+              :autofocus (not= false (::message-autofocus? unit))
               :placeholder (str "message agent " agent-id " …")}]
      [:button {:class "seon-bar-send" :type "submit"} "send"]
      [:span {:class "seon-bar-refusal"
@@ -323,11 +323,11 @@
       ;; refuses it, correctly, and the first live page came back empty
       ;; until this said `seq`. A seq is a fragment and splices.
       [:main {:class "seon-main"}
-       (when id
+       (when (and id (not (::session? request)))
          [:nav {:class "seon-agent-routes"}
           [:a {:href (route/path ::route/agent {:id id})} "agent"]
           [:a {:href (route/path ::route/agent-debug {:id id})} "debug"]])
-       (when id (message-bar-html {:seon.agent/id id}))
+       (when (and id (not (::session? request))) (message-bar-html {:seon.agent/id id}))
        (seq page)]
       ;; OUTSIDE every morph target. A data-init inside one is stripped
       ;; by that element's first whole-element morph, and the tab then
@@ -699,6 +699,8 @@
   [database connection agent-id caps render-context]
   (merge render-context
          {:seon.db/db database
+          :seon.cluster/name (or (:seon.cluster/name render-context)
+                                 (get-in render-context [:seon.turn.loop/cluster :seon.cluster/name]))
           :seon.db/connection connection
           :seon.agent/id agent-id
           :seon.sci.eval/time-limit-ms
@@ -759,6 +761,17 @@
                "', {contentType:'form'})")}
    [:input {:type "hidden" :name "action" :value action}]
    [:button {:type "submit" :class "seon-bar-send"} label]])
+
+(defn- session-controls [request]
+  (let [agent-id (:seon.agent/id request)]
+    (assoc request
+           ::transcript/toolbar
+           [:div {:class "seon-session-actions"}
+            (system-action-form agent-id "system-turn" "System turn")
+            (system-action-form agent-id "virtual-turn" "Virtual turn")
+            (system-action-form agent-id "compact" "Compact")]
+           ::transcript/message-form
+           (message-bar-html {:seon.agent/id agent-id ::message-autofocus? false}))))
 
 (defn- debug-comparison-html [agent-id result]
   (let [request (:seon.render.debug/request result)
@@ -3105,16 +3118,27 @@
                  "datastar-mode" "replace"}
        :body (hiccup/->string
               (transcript/render-session
-               (debug-turn-request database connection agent-id
+               (session-controls (debug-turn-request database connection agent-id
                                    (:seon.sci.admit/caps service)
                                    (assoc service :seon.turn/id turn-id
-                                          ::transcript/raw? raw?))))}))))
+                                          ::transcript/raw? raw?)))))}))))
 
 (defn- debug-response
   [{connection :seon.store/connection-object
     :as service}
    viewer-namespace agent-id request]
   (cond
+    (and agent-id (= "true" (get (query-params request) "record"))
+         (= "true" (get-in request [:headers "datastar-request"])))
+    (let [page (current-page service @connection agent-id)]
+      {:status 200
+       :headers {"content-type" "text/html; charset=utf-8" "datastar-mode" "replace"}
+       :body (hiccup/->string
+              (into [:div {:id (block/surface-id (keyword "session-record" agent-id))
+                           :data-signals__ifmissing "{showEverything:true}"}]
+                    (map hiccup/raw)
+                    (vals (dissoc page stream-strip-id))))})
+
     (and (get (query-params request) "turn")
          (= "true" (get-in request [:headers "datastar-request"])))
     (debug-turn-response service agent-id (get (query-params request) "turn")
@@ -3130,23 +3154,20 @@
              :seon.render.debug/viewer-namespace viewer-namespace
              :seon.render/page
              [[:section {:class "seon-session-page"}
-               [:div {:class "seon-session-toolbar"}
-                (system-action-form agent-id "system-turn" "System turn")
-                (system-action-form agent-id "virtual-turn" "Virtual turn")
-                (system-action-form agent-id "compact" "Compact")]
                (transcript/render-session-loading
-                (debug-turn-request @connection connection agent-id
+                (session-controls (debug-turn-request @connection connection agent-id
                                     (:seon.sci.admit/caps service)
                                     (cond-> service
                                       (get (query-params request) "turn")
                                       (assoc :seon.turn/id (get (query-params request) "turn"))
                                       (= "true" (get (query-params request) "prompt"))
-                                      (assoc ::transcript/raw? true))))
-               [:details {:class "seon-session-record"}
+                                      (assoc ::transcript/raw? true)))))
+               [:details {:class "seon-session-record"
+                          (keyword "data-on:toggle")
+                          (str "el.open && @get('" (route/path ::route/agent-debug {:id agent-id} {:record "true"}) "')")}
                 [:summary "Record"]
-                [:a {:href (route/path ::route/agent-debug {:id agent-id}
-                                     {:subject (pr-str [:seon.agent/id agent-id])})}
-                 "Inspect entity attributes and connections"]]] ]})}
+                [:div {:id (block/surface-id (keyword "session-record" agent-id))}
+                 "Loading the agent’s current record…"]]] ]})}
 
     (and agent-id (= "true" (get (query-params request) "prompt"))
          (= "true" (get-in request [:headers "datastar-request"])))

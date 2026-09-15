@@ -71,7 +71,10 @@ Repeated system reads fold in place, with every exact entry available at
 its original position. The `?prompt=true` toggle shows the complete acquired
 prompt as one unchanged block. Selected-turn content loads on demand;
 the initial response never acquires all historical prompts. The Record
-section leads to the existing entity/attribute inspection surface.
+section loads the existing agent record blocks on demand below the session.
+A compact header shows the agent, namespace, objective, local state time,
+and cluster. System/virtual/compact actions and the raw toggle share its
+toolbar; the message form is collapsed until requested.
 Compaction wipes the agent's evaluations;
 the next system turn regenerates the opening. There is no manual
 Add/remove/revision/proof/adoption path for editing context.
