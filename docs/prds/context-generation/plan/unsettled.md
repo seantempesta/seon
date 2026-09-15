@@ -960,4 +960,14 @@ half-edit. Measured targets in the issue.
   namespace page, screenshot-driven). CSS rule for both: `input.css` imports
   `blocks.css` (html-views owns it); `output.css` is a build artifact —
   lanes rebuild, the orchestrator commits it at checkpoints.
+- 19:25 html-views landed every pair (plan `…`, inbox `322def5d8`, notes
+  `e5c08fecb`, help `09fb21ae3`, identity `6fb5039af`, faults `597ef8b68`,
+  transactions `78df20669`, maintenance `7a4d3923d`, ns bindings `4dc8a1831`;
+  evidence `8d1203638`, screenshots under `tmp/html-views/`): plan = title,
+  progress bar, dot+word step states with the current step's done-when;
+  settings = overrides first, defaults collapsed, units formatted. Its
+  boundary: the namespace page SHELL still squeezes blocks into a 261-px
+  scrolling rail (issue `namespace-layout-confines-most-content-to-scroll-boxes`);
+  debug-turns owns that layout fix plus the shared header (review sent).
+  debug-turns Part A `d1faf13ae`: colourised faithful session, folds, gutter.
 
