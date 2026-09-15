@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [sci, contracts, auto-check, errors, live-test]
+tags: [issue, sci, test, wave/contract-generator]
 created: 2026-09-14
 ---
 
@@ -11,10 +11,16 @@ created: 2026-09-14
 ## Observed (run 2, turn 14; the model's account in `research/explain_probe_turn40_2026_09_14.edn`)
 
 After `(defn largest-customer {:malli/schema [:=> [:cat [:vector :example/order-row]] [:map …]]} …)`
-the evaluation's `:out` read: "No example test gates
+the evaluation's `:out` read:
+
+```text
+No example test gates
 my.agents.juniper/largest-customer; add one to teach intended behavior.
 Auto-check skipped: seon.sci.kernel/invoke violated its contract
-(invalid-input): invalid type at [[:seon.sci.eval/args]]". The function was
+(invalid-input): invalid type at [[:seon.sci.eval/args]]
+```
+
+The function was
 installed and worked; the checker's own call into `seon.sci.kernel/invoke`
 failed its input contract. The model read this as "my defn did NOT persist"
 and spent roughly five turns re-verifying.
@@ -43,3 +49,27 @@ requires the original injected checker exception to leave that boundary, rather
 than become skipped text. This is not yet a separate end-to-end observation of
 the fault committer's stored transaction. Exact proof and gate boundaries are in
 `docs/prds/context-generation/research/core-functions-landing-2026-09-14.md`.
+
+## Existing regression boundary
+
+The isolated broad gate also ran `seon.test.accretion-test`; three older tests
+fail before they prove their subjects. This is independently reproduced with
+`bin/test-fast --paths test/seon/test/accretion_test.clj -- seon.test.accretion-test`
+in a checkout at `d71ec0852`, excluding every core-functions change:
+**8 tests, 24 assertions, 2 failures, 2 errors**.
+
+- `one-gate-set-query-includes-edges-subjects-and-pending-tests` gets empty
+  gate sets after unchecked synthetic program transactions. Its redundant
+  `extra-schema` entry is already in the canonical population.
+- `candidate-tests-run-on-a-copy-on-write-turn-fork` reaches
+  `seon.sci.eval/evaluate` with missing test source/namespace after setup.
+- `auto-check-is-seeded-shrunk-and-derived-pure` reaches
+  `seon.sci.eval/auto-check-candidate` with a refused program-row shape;
+  the diagnostic includes `[:seon.program/row :seon.fn/calls]`.
+
+These tests must assert admission and retain their original semantic subjects.
+The ordinary test-row admission failure is also reproduced independently in
+[the test usage issue](incremental-publication-refuses-test-usage.md). Do not
+manufacture usage metadata or call edges to turn these tests green. The new
+exact run-2 regression passes on the same armed canonical harness; it does not
+claim the older failures repaired or fault-committer delivery observed.

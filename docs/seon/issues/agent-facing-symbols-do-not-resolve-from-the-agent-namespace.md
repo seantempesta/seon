@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: blocker
-tags: [sci, help, dir, my.note, deftest, live-test]
+tags: [issue, sci, agent, wave/agent-context]
 created: 2026-09-14
 ---
 

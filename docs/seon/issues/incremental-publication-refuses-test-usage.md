@@ -28,3 +28,16 @@ shape on the real source fixture. A normal test wording change must publish
 without inventing a usage declaration or weakening database admission.
 Related, previously resolved function-row case:
 [missing function provenance](archive/incremental-publication-refuses-missing-function-provenance.md).
+
+## Canonical SCI reproduction — 2026-09-14
+
+The core-functions lane also reproduced this without incremental publication:
+evaluate `(clojure.test/deftest example-arithmetic
+(clojure.test/is (= 2 (+ 1 1))))` in the canonical agent context, then transact
+`(seon.program/canonical-row (:seon.program/row evaluation))`. Admission
+refuses the normal test row at `[0 :seon.test/usage]` with the same diagnostic.
+This is therefore also an agent declaration admission defect. Adding explicit
+usage metadata to that runtime source still produced a row without the fact.
+The doc-example fixture therefore uses a statically indexed test to exercise
+`my.test/run`; it does not claim runtime `deftest` admission repaired. The
+schema/admission owner is outside the core-functions assignment.
