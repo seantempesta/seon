@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, sci, agent, wave/agent-context]
 created: 2026-09-14
@@ -47,3 +47,15 @@ The universal core referral still belongs to `src/seon/sci/eval.clj`, explicitly
 excluded from this lane. The retained context reports both bare symbols absent.
 The requested narrow scope extension has not yet been approved; this issue
 remains open and the bootstrap-only change is not claimed as the full repair.
+
+## Authorized resolution — 2026-09-14
+
+The owner authorized the SCI acquisition file. Both initial construction and
+`install-program-doc!` now refer the existing test macro Vars through core.
+The canonical tests prove bare declaration without namespace-specific referrals
+and separately prove receipt of new referrals by the identical retained context.
+The final read-only default probe returned in 3 ms:
+`{:retained? true, :deftest? true, :is? true}`. Normal publication encountered the
+tracked source-offset race; the live proof used a hot-reloaded owner followed
+by its existing `fork-for-turn` base update, with instrumentation re-armed.
+The context identity and database basis were unchanged.

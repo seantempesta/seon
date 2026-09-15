@@ -232,14 +232,15 @@
         help-var (get-in injected-namespaces ['seon.bootstrap 'help])
         dir-var (get-in injected-namespaces ['seon.bootstrap 'dir])
         doc-var (get-in injected-namespaces ['seon.bootstrap 'doc])]
-    ;; `dir` and `doc` are REPL operations, so every namespace resolves
-    ;; them bare through the same clojure.core refer it already receives.
-    ;; `acquire!` replaces both with macros that read current program facts.
+    ;; REPL documentation and test macros resolve through the core refer
+    ;; every namespace receives. Acquisition refreshes the same bindings.
     (sci/add-namespace!
      ctx 'clojure.core
      {'dir dir-var
       'doc doc-var
-      'help help-var})
+      'help help-var
+      'deftest (sci/resolve ctx 'clojure.test/deftest)
+      'is (sci/resolve ctx 'clojure.test/is)})
     (sci/add-namespace!
      ctx 'seon.bootstrap
      {'dir dir-var
@@ -1239,7 +1240,10 @@
   (let [doc-var (program-doc-var)
         dir-var (program-dir-var)]
     (sci/add-namespace! ctx 'clojure.repl {'doc doc-var 'dir dir-var})
-    (sci/add-namespace! ctx 'clojure.core {'doc doc-var 'dir dir-var})
+    (sci/add-namespace! ctx 'clojure.core
+                        {'doc doc-var 'dir dir-var
+                         'deftest (sci/resolve ctx 'clojure.test/deftest)
+                         'is (sci/resolve ctx 'clojure.test/is)})
     ctx))
 
 (defn- install-declared-classes!

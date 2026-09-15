@@ -132,6 +132,68 @@
                              @(sci/resolve updated qualified))
                  (str qualified " receives its current macro root")))))))))
 
+(deftest bare-test-macros-resolve-without-namespace-referrals
+  (support/with-database
+   (fn [connection]
+     (is (:db-after (db/transact! connection
+                                 [{:seon.agent/id "bare-tests"
+                                   :seon.agent/namespace
+                                   {:seon.ns/name 'fixture.bare-tests}}])))
+     (doseq [ctx [(evaluation/build-base-ctx)
+                 (support/fork-cluster-ctx connection)]]
+       (sci/add-namespace! ctx 'fixture.bare-tests {})
+       (sci/binding [sci/ns (sci/create-ns 'fixture.bare-tests)]
+         (doseq [test-symbol ['deftest 'is]]
+           (is (some? (sci/resolve ctx test-symbol)) (str test-symbol)))
+         (sci/eval-string* ctx "(deftest bare-arithmetic (is (= 2 (+ 1 1))))")
+         (is (fn? (:test (meta (sci/resolve ctx 'bare-arithmetic)))))))
+     (let [ctx (support/fork-cluster-ctx connection)
+           result (evaluation/evaluate
+                   {:seon.sci.eval/ctx ctx
+                    :seon.db/db @connection :seon.db/connection connection
+                    :seon.agent/id "bare-tests"
+                    :seon.cluster.eval/ns [:seon.ns/name 'fixture.bare-tests]
+                    :seon.cluster.eval/source "(deftest durable-arithmetic (is (= 2 (+ 1 1))))"
+                    :seon.sci.admit/caps (config/result-caps (support/effective-config))
+                    :seon.sci.eval/time-limit-ms 10000
+                    :seon.config/on-core-error :panic})
+           row (:seon.program/row result)]
+       (is (nil? (:seon.cluster.eval/error result)) (pr-str result))
+       (is (= "fixture.bare-tests/durable-arithmetic" (:seon.test/sym row)))
+       (let [written (db/transact! connection [(program/canonical-row row)])]
+         (is (:db-after written) (pr-str written))
+         (is (= (:seon.test/source row)
+                (:seon.test/source
+                 (db/pull @connection [:seon.test/source]
+                          [:seon.test/sym "fixture.bare-tests/durable-arithmetic"])))))))))
+
+(deftest retained-context-receives-new-bare-test-referrals
+  (support/with-database
+   (fn [connection]
+     (is (:db-after (db/transact! connection
+                                 [{:seon.agent/id "retained-tests"
+                                   :seon.agent/namespace
+                                   {:seon.ns/name 'fixture.retained-tests}}])))
+     (let [base (support/fork-cluster-ctx connection)
+           _ (sci/eval-string* base
+                              "(do (ns-unmap 'clojure.core 'deftest) (ns-unmap 'clojure.core 'is))")
+           request {:seon.sci.eval/ctx base :seon.db/db @connection
+                    :seon.agent/id "retained-tests"}
+           retained (:seon.sci.eval/ctx (evaluation/fork-for-turn request))]
+       (sci/binding [sci/ns (sci/create-ns 'fixture.retained-tests)]
+         (is (nil? (sci/resolve retained 'deftest)))
+         (is (nil? (sci/resolve retained 'is))))
+       (#'evaluation/install-program-doc! base @connection (schema/handed-projection))
+       (let [updated (:seon.sci.eval/ctx
+                      (evaluation/fork-for-turn
+                       (assoc request :seon.sci.eval/agent-ctx retained)))]
+         (is (identical? retained updated))
+         (sci/binding [sci/ns (sci/create-ns 'fixture.retained-tests)]
+           (doseq [test-symbol ['deftest 'is]]
+             (is (some? (sci/resolve updated test-symbol)) (str test-symbol)))
+           (sci/eval-string* updated "(deftest retained-arithmetic (is (= 4 (* 2 2))))")
+           (is (fn? (:test (meta (sci/resolve updated 'retained-arithmetic)))))))))))
+
 (deftest a-contract-mistake-carries-the-same-documentation-as-doc
   (support/with-database
    (fn [connection]

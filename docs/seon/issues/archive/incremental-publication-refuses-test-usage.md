@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, operator, tooling, wave/publication-velocity]
 ---
@@ -41,3 +41,16 @@ usage metadata to that runtime source still produced a row without the fact.
 The doc-example fixture therefore uses a statically indexed test to exercise
 `my.test/run`; it does not claim runtime `deftest` admission repaired. The
 schema/admission owner is outside the core-functions assignment.
+
+## Resolution — 2026-09-14
+
+The authorized follow-up found `:my.turn/usage-unit` incorrectly marked as a
+database entity schema. It is a render request requiring usage=true, not a
+constraint on every test entity. Removing its `:seon.db/attributes` marker
+preserves that render contract and admits normal tests through the existing
+test schema. The canonical regression evaluates a bare `deftest`, transacts
+its unmodified canonical row, and verifies the stored source. Both older
+auto-check fixtures that store ordinary tests also pass with admission asserted.
+
+The separate metadata-loss observation is tracked in
+[runtime test usage metadata](../sci-test-declarations-drop-explicit-usage-metadata.md).

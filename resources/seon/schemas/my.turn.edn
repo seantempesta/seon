@@ -17,7 +17,7 @@
           [:seon.ns/doc {:optional true} :seon.ns/doc]],
          :usage-unit
          [:map
-          {:seon.db/attributes true,
+          {:description "A usage-test render request, not an additional entity constraint on every test."
            :seon.render/form my.turn/usage-form}
           [:seon.test/sym :seon.test/sym]
           [:seon.test/usage [:= true]]],
