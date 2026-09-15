@@ -554,4 +554,39 @@
                                    [?run :seon.test.run/program-digest ?digest]]
                           changed-db test-symbol)))
           (is (empty? (scratch-branches opened)))
-          (is (= #{:db :current-src} (set (registry/roster opened)))))))))
+          (is (= #{:db :current-src} (set (registry/roster opened))))
+          (let [run (runner/provenance changed-db)
+                completion (assoc completion
+                                  :seon.test.run/provenance run
+                                  :seon.test/run-basis-t (:seon.test.run/basis-t run)
+                                  :seon.test/run-at (:seon.test.run/at run))
+                commit-results! runner/commit-results!
+                advanced (atom nil)
+                refused
+                (with-redefs [runner/commit-results!
+                              (fn [connection completed]
+                                (let [result (commit-results! connection completed)]
+                                  (reset! advanced
+                                          (upsert opened (:seon.source/commit-id changed)
+                                                  digest-c []))
+                                  result))]
+                  (refusal #(source/record-results! opened completion)))
+                current-db (source/database opened (:seon.source/commit-id @advanced))]
+            (is (= :stale-branch-head (:type refused)))
+            (is (= (:seon.source/commit-id changed) (:expected-current-commit refused)))
+            (is (= (:seon.source/commit-id @advanced) (:current-commit refused)))
+            (is (= (:seon.source/commit-id @advanced)
+                   (:seon.source/commit-id (source/current opened))))
+            (is (nil? (db/q '[:find ?run . :in $ ?id
+                              :where [?run :seon.test.run/id ?id]]
+                            current-db (:seon.test.run/id run))))
+            (is (empty? (scratch-branches opened)))
+            (is (= 1 (:seon.test/pass-count
+                       (first (source/record-results! opened completion)))))
+            (let [recorded-db (source/database opened
+                                               (:seon.source/commit-id (source/current opened)))]
+              (is (= digest-c (db/q '[:find ?digest .
+                                      :where [_ :seon.source/digest ?digest]]
+                                    recorded-db)))
+              (is (= run (dissoc (db/pull recorded-db '[*]
+                                         [:seon.test.run/id (:seon.test.run/id run)]) :db/id))))))))))

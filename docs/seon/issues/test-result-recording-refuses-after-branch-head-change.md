@@ -46,7 +46,7 @@ results were published.
 ## Owner
 
 `seon.test.runner` result recording and the publication operation it invokes.
-These files are protected by the concurrent test-provenance lane.
+The test-provenance slice owns this boundary.
 
 ## Acceptance
 
@@ -54,3 +54,24 @@ Reproduce against the canonical published fixture with controlled concurrent
 head advancement; preserve the expected-head check and commit successful
 test evidence through the existing writer mechanism. A recording failure
 must remain a failed gate, never successful absence of result facts.
+
+## Test-provenance investigation, 2026-09-15
+
+The controlled interleaving now lives in
+`test/seon/cluster/source_test.clj`,
+`latest-test-evidence-survives-rebuilding-from-an-older-base`: it runs the real
+result transaction, advances current-src with a real incremental publication,
+then lets the result publisher attempt its expected-head operation. The
+dependency reports the exact old/new commits, the newer source survives, the
+unpublished run is absent, and its scratch branch is retired. Recording the
+same completion again succeeds without changing its tested fingerprint or
+overwriting the newer program.
+
+This establishes the race interval at `seon.cluster.source/record-results!`;
+it does not identify which operation advanced the head in the reported gates.
+Automatic contention recovery remains open. Removing the expected-head guard
+would lose source or evidence; any repair must reapply the transaction to the
+new head under a declared bound or coordinate at the existing branch authority.
+The test-provenance exit change makes recording refusal nonzero and prevents
+advancement of the green selection basis. See the
+[landing evidence](../../prds/steward-platform/research/test-provenance-landing-2026-09-15.md).

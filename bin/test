@@ -682,6 +682,15 @@ record_phase worker-checkouts
 
 if [ -z "$result_root" ]; then
   result_root="$run_root/data/clusters"
+elif [[ "$result_root" != /* ]]; then
+  result_root="$source_root/$result_root"
+fi
+coordinator_operator_root=$run_root
+if [ -n "$result_cluster" ]; then
+  coordinator_operator_root=${result_root%/}
+  case "$coordinator_operator_root" in
+    */data/clusters) coordinator_operator_root=${coordinator_operator_root%/data/clusters} ;;
+  esac
 fi
 
 echo "bin/test: isolated operator root $run_root pid=$$ selection=$selection"
@@ -720,7 +729,7 @@ fi
 record_phase published-base
 
 coordinator_jvm_arguments=(
-  "-J-Dseon.operator.root=$run_root"
+  "-J-Dseon.operator.root=$coordinator_operator_root"
   "-J-Dseon.test.root=$run_root"
   "-J-Dseon.test.source-root=$source_root"
   "-J-Dseon.test.changed-paths-file=$changed_paths_file"

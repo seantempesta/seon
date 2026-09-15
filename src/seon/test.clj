@@ -44,3 +44,26 @@
                             [?test :seon.test/sym ?symbol]]
                    database agent-id))))
 
+(defn verified?
+  "True when a source-bearing test passed on the specified tested program.
+  Missing subjects, results, runs, or assertions return false. A database
+  refusal remains an error value; callers must require true, not truthiness."
+  {:malli/schema
+   [:=> [:cat :seon.db/database-value :seon.test/sym :seon.test.run/program-digest]
+    [:or :boolean :seon.error/value]]}
+  [database test-symbol program-digest]
+  (let [result (db/q
+                '[:find ?test .
+                  :in $ ?symbol ?digest
+                  :where
+                  [?test :seon.test/sym ?symbol]
+                  [?test :seon.test/source]
+                  [?test :seon.test/pass-count ?passes]
+                  [(pos? ?passes)]
+                  [?test :seon.test/fail-count 0]
+                  [?test :seon.test/error-count 0]
+                  [?test :seon.test/run ?run]
+                  [?run :seon.test.run/id]
+                  [?run :seon.test.run/program-digest ?digest]]
+                database test-symbol program-digest)]
+    (if (:seon.error/kind result) result (boolean result))))

@@ -804,13 +804,13 @@
       (is (= 1 (occurrences repeated-message
                             "the same refusal reached the reporter again"))))))
 
-(deftest persistent-recording-failure-cannot-mask-the-test-verdict
+(deftest persistent-recording-failure-refuses-a-successful-gate
   (doseq [[summary expected-exit]
           [[#:seon.test.runner{:test-count 1
                                :pass-count 1
                                :fail-count 0
                                :error-count 0}
-            0]
+            1]
            [#:seon.test.runner{:test-count 1
                                :pass-count 0
                                :fail-count 1
@@ -838,7 +838,7 @@
                    ::runner/injected-persistent-recording-failure}))
                ::runner/recording-label "persistent results"})))]
       (is (= expected-exit @exit*)
-          "only test failures and errors decide the process exit")
+          "a gate requires durable evidence as well as passing tests")
       (is (str/includes? output "Ran 1 tests containing 1 assertions."))
       (is (= 1 (occurrences output
                             "bin/test: persistent results NOT recorded:")))
@@ -1119,7 +1119,7 @@
                     "origin=$1\ncheckout=$2\n"
                     "mkdir -p \"$checkout/docs\" \"$checkout/bin\" \"$checkout/src/seon/test\" \"$checkout/test\" \"$checkout/.agents/skills\" \"$checkout/.claude\" \"$checkout/.clj-kondo\"\n"
                     "cd \"$checkout\"\n"
-                    "cp \"$origin/bin/test\" \"$origin/bin/_java-home-resolver\" bin/\n"
+                    "cp -R \"$origin/bin/.\" bin/\n"
                     "cp \"$origin/src/seon/fs.clj\" src/seon/fs.clj\n"
                     "cp \"$origin/src/seon/test/cache.clj\" src/seon/test/cache.clj\n"
                     "printf '{:paths [\"src\"]}\\n' > bb.edn\n"
@@ -1637,7 +1637,8 @@
         fake-bin (io/file fixture-root "bin")
         run-parent (io/file fixture-root "runs")
         old-at (- (System/currentTimeMillis) (* 2 24 60 60 1000))
-        processes (atom [])]
+        processes (atom [])
+        result-roots (mapv #(io/file fixture-root (str "result-" %)) (range 2))]
     (try
       (.mkdirs fake-bin)
       (.mkdirs run-parent)
@@ -1651,17 +1652,21 @@
               (.mkdirs directory)
               (spit (io/file directory "evidence") "retained")))
           (is (.setLastModified root old-at))))
+      (doseq [result-root result-roots]
+        (test-support/populate-published-operator-root! (str result-root)))
       (let [start!
-            (fn []
+            (fn [result-root]
               (let [builder
                     (doto
                      (ProcessBuilder.
                       ^java.util.List
                       [(str (io/file project-root "bin" "test"))
-                       "--result-cluster" "evidence" "seon.fs-test"])
+                       "--result-cluster" "evidence"
+                       "--result-root" (str result-root) "seon.fs-test"])
                       (.directory project-root)
                       (.redirectErrorStream true))
                     environment (.environment builder)]
+                (.put environment "SEON_TEST_WORKERS" "1")
                 (.put environment "SEON_TEST_RUN_PARENT"
                       (.getCanonicalPath run-parent))
                 (.put environment "PATH"
@@ -1669,7 +1674,7 @@
                            java.io.File/pathSeparator
                            (System/getenv "PATH")))
                 (.start builder)))
-            launched [(start!) (start!)]
+            launched (mapv start! result-roots)
             _ (reset! processes launched)
             outputs (mapv #(future (slurp (.getInputStream ^Process %)))
                           launched)
@@ -2013,8 +2018,7 @@
              "fixture=$2\n"
              "mkdir -p \"$fixture/bin\" \"$fixture/src/seon\" \"$fixture/test\" \"$fixture/.agents/skills\" \"$fixture/.claude\" \"$fixture/.clj-kondo\" \"$fixture/tmp/fake-bin\"\n"
              "cd \"$fixture\"\n"
-             "cp \"$origin/bin/test\" bin/test\n"
-             "cp \"$origin/bin/_java-home-resolver\" bin/_java-home-resolver\n"
+             "cp -R \"$origin/bin/.\" bin/\n"
              "cp \"$origin/src/seon/fs.clj\" src/seon/fs.clj\n"
              "mkdir -p src/seon/test\n"
              "cp \"$origin/src/seon/test/cache.clj\" src/seon/test/cache.clj\n"

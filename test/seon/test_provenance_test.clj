@@ -1,6 +1,7 @@
 (ns seon.test-provenance-test
   (:require [clojure.test :refer [deftest is]]
             [seon.db :as db]
+            [seon.test :as seon-test]
             [seon.test.runner :as runner]
             [seon.test-support :as support]))
 
@@ -68,3 +69,30 @@
         (is (= before (:seon.test.run/program-digest
                        (:seon.test.run/provenance captured))))))))
 
+(deftest verified-requires-the-subject-positive-assertions-and-exact-program
+  (support/with-database
+    (fn [connection]
+      (let [symbol "provenance.example/check"
+            digest (runner/program-digest @connection)]
+        (is (false? (seon-test/verified? @connection symbol digest)))
+        (db/transact! connection
+                      [{:seon.test/sym symbol
+                        :seon.schema.admission/source :core
+                        :seon.test/source "(deftest check (is true))"}])
+        (let [captured (completion @connection 1)
+              digest (get-in captured [:seon.test.run/provenance :seon.test.run/program-digest])]
+          (is (false? (seon-test/verified? @connection symbol digest)))
+          (runner/commit-results! connection captured)
+          (is (true? (seon-test/verified? @connection symbol digest)))
+          (is (false? (seon-test/verified? @connection symbol (apply str (repeat 64 "c")))))
+          (is (:db-after (db/transact! connection
+                                      [[:db/add [:seon.test/sym symbol] :seon.test/pass-count 0]])))
+          (is (false? (seon-test/verified? @connection symbol digest)))
+          (is (:db-after (db/transact! connection
+                                      [[:db/add [:seon.test/sym symbol] :seon.test/pass-count 1]
+                                       [:db/add [:seon.test/sym symbol] :seon.test/error-count 1]])))
+          (is (false? (seon-test/verified? @connection symbol digest))))
+        (let [refused {:seon.error/kind :seon.db/invalid-query
+                       :seon.error/message "injected query refusal"}]
+          (with-redefs [db/q (fn [& _] refused)]
+            (is (= refused (seon-test/verified? @connection symbol digest)))))))))

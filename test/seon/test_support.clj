@@ -112,7 +112,7 @@
     (let [source-store (io/file base "data" "store")
           store (io/file root "data" "store")]
       (replace-directory! root source-store store)
-      (cluster.export/reidentify! store)
+      (cluster.export/reidentify! (str store))
       (str root))
     (do
       (cluster/refresh-source! (str (io/file root "data" "clusters")))

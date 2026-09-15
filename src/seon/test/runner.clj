@@ -1563,8 +1563,12 @@
   [record-fn]
   (try
     (let [result (record-fn)]
-      (when (:seon.error/kind result)
-        result))
+      (cond
+        (:seon.error/kind result) result
+        (and (vector? result) (every? :seon.test/run result)) nil
+        :else {:seon.error/kind ::persistent-results-recording-failed
+               :seon.error/message
+               "The recorder returned no committed result references."}))
     (catch Throwable failure
       {:seon.error/kind
        (or (:seon.error/kind (ex-data failure))
@@ -2507,16 +2511,16 @@
       (doseq [test-symbol failures]
         (println " -" test-symbol)))
     (print-skipped! skipped)
-    (when (and green? (::digests bulk))
-      (record-green-basis! selection-mode git-sha (::digests bulk)))
     (flush)
-    (when record-results!
-      (when-let [failure (recording-failure record-results!)]
+    (let [failure (when record-results! (recording-failure record-results!))]
+      (when failure
         (println (str "bin/test: " recording-label " NOT recorded:")
                  (:seon.error/kind failure)
-                 (:seon.error/message failure))))
-    (flush)
-    (if green? 0 1)))
+                 (:seon.error/message failure)))
+      (when (and green? (nil? failure) (::digests bulk))
+        (record-green-basis! selection-mode git-sha (::digests bulk)))
+      (flush)
+      (if (and green? (nil? failure)) 0 1))))
 
 (defn- run-parallel-stage!
   [namespaces progress manifest workers serial-worker tasks]
@@ -2547,7 +2551,7 @@
   changed since the last recorded GREEN basis under the bare `changed`
   default. Record results in either the explicitly named non-default cluster
   or the persistent operator-owned branch selected by the launcher, then exit
-  zero exactly when no test failed or errored."
+  zero exactly when no test failed or errored and its evidence was recorded."
   {:malli/schema
    [:=> [:cat :seon.boot/cluster-name :seon.boot/root :string :string
          [:sequential :string]]
