@@ -159,3 +159,12 @@ order-installation observers assert one and zero respectively.
 Both tests were loaded and invoked through MCP JVM on default: **52 passed,
 0 failed, 0 errors, 2 tests**. The corrected Ada/115 output remains asserted.
 Syntax lint: zero errors and warnings in these two files.
+
+### Row 5 — controlled disarm schedule
+
+The retained disarm regression acquires exactly one scenario instead of 100
+identical schedules. It asserts one admitted runnable, no premature stop
+acknowledgement, pending disarm before execution, and completed disarm after
+running the actual queued runnable. The original bounded wait remains in
+`finally`, so failure still releases the proc. MCP JVM scratch-fixture probe:
+**5 passed, 0 failed, 0 errors, 1 test**. Syntax lint: zero errors/warnings.

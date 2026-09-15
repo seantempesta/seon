@@ -821,41 +821,43 @@
             stopped
             (future
               (agent/disarm! {:seon.agent/id agent-id
-                              :seon.agent/routing routing}))]
-        (try
-          {:seon.cluster.agent-test/runnable-count (count @tasks)
-           :seon.cluster.agent-test/stop-ready?
-           (test-support/await-event!
-            take-result ::parked-turn-stop)}
-          (finally
-            (doseq [^Runnable task @tasks]
-              (.run task))
-            (test-support/await-event! stopped ::withheld-turn-disarmed)))))))
+                              :seon.agent/routing routing}))
+            observation
+              (try
+                {:seon.cluster.agent-test/runnable-count (count @tasks)
+                 :seon.cluster.agent-test/stop-ready?
+                 (test-support/await-event! take-result ::parked-turn-stop)
+                 :seon.cluster.agent-test/disarm-pending? (not (realized? stopped))}
+                (finally
+                  (doseq [^Runnable task @tasks]
+                    (.run task))
+                  (test-support/await-event! stopped ::withheld-turn-disarmed)))]
+          (assoc observation :seon.cluster.agent-test/disarm-completed?
+                 (realized? stopped))))))
 
 (deftest disarm-waits-for-the-turn-proc-stop-transition
-  (with-connection
-    (fn [connection ctx]
-      (let [routing (armory)
-            agent-ids (mapv #(str "withheld-turn-" %) (range 100))
-            original-definition agent/graph-definition]
-        (db/transact! connection
-                    (into [(config-row "withheld-turn" {})]
-                          (map (fn [agent-id]
-                                 {:seon.agent/id agent-id}))
-                          agent-ids))
-        (let [results
-              (mapv #(withheld-turn-trial
-                      connection ctx routing original-definition %)
-                    agent-ids)
-              ready-count
-              (count (filter :seon.cluster.agent-test/stop-ready?
-                             results))]
-          (is (every? #(= 1 (:seon.cluster.agent-test/runnable-count %))
-                      results)
-              "Flow accepted every turn runnable without starting it")
-          (is (zero? ready-count)
-              (str "no queued proc acknowledged stop before running; observed " ready-count
-                   "/100 premature acknowledgements")))))))
+  (let [acquisitions (atom 0)
+        trial withheld-turn-trial]
+    (with-redefs [withheld-turn-trial
+                  (fn [& args] (swap! acquisitions inc) (apply trial args))]
+      (with-connection
+        (fn [connection ctx]
+          (let [routing (armory)
+                agent-id "withheld-turn-0"
+                original-definition agent/graph-definition]
+            (db/transact! connection
+                          [(config-row "withheld-turn" {})
+                           {:seon.agent/id agent-id}])
+            (let [result (withheld-turn-trial
+                          connection ctx routing original-definition agent-id)]
+              (is (= 1 (:seon.cluster.agent-test/runnable-count result))
+                  "Flow admits exactly one turn runnable without starting it.")
+              (is (false? (:seon.cluster.agent-test/stop-ready? result))
+                  "The queued proc has not acknowledged stop before running.")
+              (is (true? (:seon.cluster.agent-test/disarm-pending? result)))
+              (is (true? (:seon.cluster.agent-test/disarm-completed? result))
+                  "Executing the admitted runnable completes disarm."))))))
+    (is (= 1 @acquisitions))))
 
 (deftest disarm-has-a-declared-loud-turn-completion-backstop
   (with-connection
