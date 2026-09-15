@@ -10,9 +10,25 @@ Work in progress. No final verification claim yet.
 
 ## Commits
 
+- `1f18b99fc` — change-only rereads, isolated gate 8 tests / 250 assertions.
+  Three idle turns: zero appended evaluations and bytes. Plan change: 269
+  emission bytes for 77 subtree bytes; message: 452 for 124.
 - `0c70a1cb4` — do not promote turn-dependent agent queries into generated
   reads. Isolated gate 4/216 tests/assertions; three turns including the
   production wildcard query add zero generated evaluations and system bytes.
+
+## Printer: coordinates and scalar ordering
+
+The printer now orders mixed numeric representations without cross-type
+numeric comparison. Map keys remain coordinates: when a key exceeds the
+profile, the printer omits whole entries with one explicit count rather
+than changing the key. String elisions name the bound that actually cut.
+The generated-value regression includes ratios, decimals, finite doubles,
+symbols, characters, and scalar map keys. It parses every output, compares
+two renders byte-for-byte, and evaluates every emitted requery in real SCI.
+Fast gate: 49 tests / 234 assertions. Isolated path gate: 49 tests / 238
+assertions, zero failures or errors. This slice changes no opening reads;
+the previous loop proof remains zero system bytes over three idle turns.
 
 ## Change-only rereads (rule 2)
 

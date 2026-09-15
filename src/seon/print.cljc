@@ -419,7 +419,6 @@
                   (set? value) "set"
                   (vector? value) "vector"
                   (sequential? value) "list"
-                  (number? value) "number"
                   :else (str (type value))))
           (items [left right]
             (loop [left (seq left) right (seq right)]
@@ -1140,12 +1139,29 @@
                   (when-some [omitted (::omitted carried-elision)]
                     (+ admitted-total omitted))
                   admitted-total)
-        retained (min child-limit admitted-total)
+        limit (min child-limit admitted-total)
+        ;; Keys are coordinates, so a key cannot be replaced by a different
+        ;; value. If a key needs elision, omit the whole remaining entries.
+        key-cut (when (= child-fit fit-entry)
+                  (first
+                   (keep-indexed
+                    (fn [index entry]
+                      (when (vector? entry)
+                        (when-let [cut
+                                   (some #(when (= ::elided (::face %)) %)
+                                         (tree-seq coll? seq
+                                                   (fit-node (first entry) profile
+                                                             (inc depth) path
+                                                             child-limit string-limit)))]
+                          [index (::bound-by cut)])))
+                    (subvec children 0 limit))))
+        retained (or (first key-cut) limit)
         fitted-elision
         (when (< retained total)
           (preserve-requery
            (elision-node (assoc profile
-                                ::bound-by (or (when (= retained admitted-total)
+                                ::bound-by (or (second key-cut)
+                                               (when (= retained admitted-total)
                                                  (::bound-by carried-elision))
                                                (::bound-by profile)
                                                :seon.render.profile/max-children))
@@ -1177,6 +1193,9 @@
       (elision-node (assoc profile
                            ::bound-by
                            (or (::bound-by node)
+                               (::bound-by profile)
+                               (when (:seon.render.profile/max-string-length profile)
+                                 :seon.render.profile/max-string-length)
                                :seon.render.profile/token-budget))
                     path 0 original original :characters nil)
       node)))

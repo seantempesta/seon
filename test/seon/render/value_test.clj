@@ -428,7 +428,10 @@
      (let [ctx (support/fork-cluster-ctx connection)
            handle 'result/e0123456789ab
            observed-cuts (atom 0)
-           scalar (gen/one-of [gen/small-integer gen/boolean
+           scalar (gen/one-of [gen/small-integer gen/boolean gen/ratio
+                              (gen/fmap bigdec gen/small-integer)
+                              (gen/double* {:infinite? false :NaN? false})
+                              gen/keyword gen/symbol gen/char
                               (gen/fmap #(apply str (repeat % "whole word "))
                                         (gen/choose 0 12))])
            values (gen/recursive-gen
@@ -436,8 +439,9 @@
                      (gen/one-of [(gen/vector child 0 8)
                                   (gen/fmap #(apply list %) (gen/vector child 0 8))
                                   (gen/set child {:max-elements 8})
-                                  (gen/map (gen/elements [:sample/a :sample/b :sample/c
-                                                         :seon.print/elision])
+                                  (gen/map (gen/one-of [scalar
+                                                       (gen/elements [:sample/a :sample/b :sample/c
+                                                                      :seon.print/elision])])
                                            child {:max-elements 4})])) scalar)
            result
            (tc/quick-check
