@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, runtime, config, wave/context-fixes]
 ---
@@ -30,3 +30,11 @@ the ordinary proc probe pass.
 
 Acceptance: a contracted source definition installs and closes through the
 ordinary proc using the current configured case count, with no handle copy.
+
+## Resolution (2026-09-15 triage)
+
+Basis: `7e35df2131c71f476a85c6a38bfc8eb292cb36f5` (committed source).
+
+HEAD `src/seon/turn.clj:3123` obtains `:seon.config.test/auto-check-cases` from `(config/effective database (:seon.cluster/name cluster))`, not from the cluster handle. The exact regression remains at `test/seon/cluster/turn_test.clj:377`; it sets three database cases, removes the handle copy and drives the ordinary turn path. The nil-handle cause cannot occur through this current reader. `bin/test-fast --paths docs/seon/issues/function-install-case-count-is-read-from-an-absent-handle-key.md -- seon.cluster.turn-test` was launched; its result is recorded in the landing report rather than asserted green here.
+
+surface: turn-loop

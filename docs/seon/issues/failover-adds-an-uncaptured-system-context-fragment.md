@@ -56,3 +56,11 @@ provider request document. The render proc owns the only context history.
 - A regression compares the capture with the complete context-bearing portion
   of both primary and backup sent bodies and proves there is no uncaptured
   system fragment.
+
+## Re-verified at HEAD (2026-09-15)
+
+Basis: `7e35df2131c71f476a85c6a38bfc8eb292cb36f5` (committed source).
+
+OPEN, UNVERIFIABLE dynamically in this triage so far. The mechanism remains at HEAD: `src/seon/turn.clj:4161` captures once, `:4204` adds `:seon.ai/system`, and `:4247` derives the backup fragment after recording the primary failure. `src/seon/ai.clj:687` emits it as a separate system-role message. Existing `test/seon/cluster/turn_test.clj:2531` deliberately asserts that split; the selected namespace is being checked separately. A supported pure request-body probe without a handed projection refused `seon.schema/missing-projection`; repeating it inside `schema/call-with-projection` using `projection-from-database` timed out at 10,000 ms. Neither is a failover reproduction. A completed canonical virtual-primary-failure run comparing capture and both requests is required; no paid call was made. This remains a blocker for truthful generated context.
+
+surface: context-generation

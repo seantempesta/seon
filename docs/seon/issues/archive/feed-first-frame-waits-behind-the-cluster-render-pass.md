@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: blocker
 tags: [issue, web, render, feed, class/availability, class/bounded-execution]
 ---
@@ -93,3 +93,11 @@ scratch page containing accumulated diagnostic faults had a 5,745.768 ms
 cold acquisition. Keep this issue open for those remaining latency defects.
 Exact positive and negative observations are in the
 [landing note](../../prds/context-generation/research/page-feed-landing-2026-09-08.md).
+
+## Resolution (2026-09-15 triage)
+
+Basis: `7e35df2131c71f476a85c6a38bfc8eb292cb36f5` (committed source).
+
+Commit `985a830b5` removes the proc queue from initial acquisition. HEAD `src/seon/render/web.clj:2116` derives `current-page` on the caller; feed first paint calls it at `:2685`; the subsequent tap wait at `:2628` uses the declared backstop. Thus the named first-frame queue/unbounded-tap mechanism no longer describes HEAD. Residual initial-page latency belongs to [namespace-page-first-byte-exceeds-ten-seconds](../namespace-page-first-byte-exceeds-ten-seconds.md), with root warm replay separately owned by [root-page-warm-read-evidence-replay-exceeds-300ms](../root-page-warm-read-evidence-replay-exceeds-300ms.md). Today's root HTTP sample was 200 / 49,291 bytes / 1.806230 s, not an SSE contention benchmark; the historical exact SSE latency criterion was not rerun.
+
+surface: render-debug-page

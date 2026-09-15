@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: blocker
 tags: [issue, runtime, store, error-model, class/bounded-output]
 ---
@@ -128,3 +128,11 @@ and `seon.schedule/settlement-refused`, message
 These are actual remaining errors; recurrence rate and their underlying causes
 were not established by this single observation. The historical core-fault
 storm must not be declared gone merely because the process is alive.
+
+## Resolution (2026-09-15 triage)
+
+Basis: `7e35df2131c71f476a85c6a38bfc8eb292cb36f5` (committed source).
+
+The inline megabyte mechanism is repaired: HEAD `src/seon/error.clj:513` prepares the bounded fact and full admitted evidence; `src/seon/cluster.clj:2451` calls it and stages evidence whenever it exceeds the threshold OR differs from fitted inline text, retaining `:seon.error/data-blob`. The note's later 500-fault experiment already establishes the repaired behavior and remaining retained-snapshot growth. That residual is owned by [storage-gc-runs-without-a-cutoff-so-it-reclaims-almost-nothing](../storage-gc-runs-without-a-cutoff-so-it-reclaims-almost-nothing.md): HEAD `src/seon/cluster/registry.clj:534` defaults collection to epoch zero while its explicit cutoff arity preserves blob reachability. No fault storm or destructive reset was run. The historical 191 GiB is not today's measured footprint, and kilobyte growth for 500 retained facts is not established.
+
+surface: store-process

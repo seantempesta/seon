@@ -1,7 +1,7 @@
 ---
 type: issue
 status: open
-severity: blocker
+severity: friction
 tags: [issue, database, runtime, class/p1, wave/seon-env-p3]
 ---
 
@@ -76,3 +76,11 @@ seon.env Phase 3 sweep that deletes `*conn*`.
   makes it fail.
 - The surviving `transact!` docstring states the two settled properties:
   foreign writes refused, foreign reads open.
+
+## Re-verified at HEAD (2026-09-15)
+
+Basis: `7e35df2131c71f476a85c6a38bfc8eb292cb36f5` (committed source).
+
+HEAD `src/seon/db.clj:220` still defines `foreign-connection-error` with `(when (some? *conn*) ...)`; `transact!` at `:2945` invokes that fence. Supported JVM probe `(binding [seon.db/*conn* nil] (#'seon.db/foreign-connection-error nil))` returned nil in 3 ms, confirming that absent dynamic custody skips the check before inspecting the explicit connection. This is a read-only probe of the guard, not a foreign transaction or an agent exploit. `*conn*` has NOT been deleted (definition at `:80`); existing ordinary SCI custody tests exercise bound rejection. Downgraded to friction: the proposed future deletion would be unsafe, but no ordinary agent run losing its bound custody was demonstrated. Fix sketch: move the comparison operand to the carried execution environment while preserving explicit system database operations and foreign reads.
+
+surface: other
