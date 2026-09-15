@@ -33,7 +33,7 @@ the same namespace twice for the same HEAD.
 | bisect-today-reds | `6dc70f30a`, `ee8d54dca` | gated by lane before the rule (103/248, platform 86/542) | none |
 | debug-page-cost | `cfb35a22b` (retained renders reuse across carried values), `671108b60` (passive directory audit off) | batch 3 pending | kill 3 (derive once) in flight |
 | reaching-tests-tier | in flight | — | automatic on-edit check |
-| startup-and-hook-waste | `c395610db` (arm builds one projection, 994/994 armed; hook drains immediately, one successor batch) | batch 3 pending | runner initializer still builds twice (extension granted); edit-feedback test assumes the quiet window (extension granted); issues filed for both |
+| startup-and-hook-waste | `c395610db`, `db7e653ca`, `f75c85402` (both initializers build one projection, 998/998 armed; hook drains immediately, exactly one successor batch; edit-feedback test updated) | batch 3 pending: seon.test.runner-test seon.test-runner-test seon.dev.hook-test seon.dev.edit-feedback-test | hook issue narrowed to AGENTS.md wording |
 
 ## Live checks (default)
 
