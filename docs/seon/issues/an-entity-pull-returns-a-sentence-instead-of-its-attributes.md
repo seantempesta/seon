@@ -126,3 +126,55 @@ English template.
 UNVERIFIABLE-WITHOUT-GATE (`seon.render-simplification-test`, `seon.sci.eval-test`). Audited HEAD `7e35df213:src/seon/sci/eval.clj:1930-1953` passes results to value/prepare; `src/seon/render/value.clj:271-289` still allows a declared renderer to replace a map. Before the no-JVM correction, disposable SCI probe `(seon.db/pull [:seon.fn/sym :seon.fn/private?] [:seon.fn/sym "seon.db/q"])` returned MCP text beginning `#object[clojure.lang.ExceptionInfo "projection failed: seon.sci.kernel/invoke refused argument 0 (0-based) at [:seon.db/db]`, saying expected immutable Datahike database, got nil. It did not reach the historical sentence substitution. This is an outward projection failure, also recorded in `class-outward-values-bypass-total-render-contract.md`, not confirmation of the original cause. Need the armed result-selection tests with explicit database and SCI custody; retain blocker pending proof.
 
 surface: context-generation
+
+## Verified at HEAD (2026-09-16, N1 verification)
+
+**CONFIRMED — still open, still a blocker.** The earlier re-verification could
+not reach the substitution because its probe omitted
+`:seon.render.value/root` and the invocation inputs. With a complete render
+request (connection, database, projection, agent profile, SCI ctx, caps,
+`:seon.config/on-core-error`, `:seon.sci.eval/time-limit-ms`,
+`:seon.render.value/root`) the substitution reproduces on the live `default`
+cluster (pid 69622), read-only, three pulled entities:
+
+```text
+(seon.db/pull database '[*] [:seon.fn/sym "seon.db/q"])
+  ;; 13 attributes, 9,655 characters of real data
+  => "Restart the JVM to remove stale loaded Var seon.db/q; it is absent from
+      the published program graph."          ; 100 characters, and false
+
+(seon.db/pull database '[*] [:seon.config/cluster "default"])
+  ;; 80 attributes, 3,460 characters
+  => "Configuration default · manifest e93ac823e733.
+      Model deepseek-flash (thinking disabled, max 65536 output tokens);
+      evaluation 30000 ms; Flow 18 compute / 64 I/O; core faults panic."
+                                             ; 179 characters
+
+(seon.db/q '[:find [(pull ?e [*]) ...] :where [?e :seon.turn/id]] database)
+  ;; 11 attributes, real turn 45587
+  => ""                                      ; the EMPTY STRING
+```
+
+The third result is new and worse than the filed symptom: a pulled turn
+entity renders to nothing at all. The same value with
+`:seon.render.value/structural? true` renders correctly as EDN
+(`{:db/id 45587, :seon.turn.work/situation :call, :seon.turn/agent #:db{:id
+42034}, …}`), so the loss is entirely in producer selection, not in the
+value.
+
+The `:seon.fn` case is also a correctness lie, not only a presentation one:
+`seon.problems/stale-var-ai` (`src/seon/problems.clj:424-430`) is declared as
+the render pair for `:seon.problems/stale-var` (`src/seon/problems.clj:355`),
+whose shape is satisfied by ANY map carrying `:seon.fn/sym` — so every
+function row in the program graph is presented as a stale Var.
+
+surface: render-selection (`src/seon/render.clj` project-node selection;
+`src/seon/render/value.clj:271-289` allows a declared renderer to replace a
+map).
+
+Fix sketch: a declared `:seon.render/ai` pair is a CONTEXT BLOCK projection,
+not a result projection — carry the caller's intent as explicit request data
+(`:seon.render.call/source-output?` already exists) and select a family
+producer only for block rendering; a value in result position always renders
+structurally. That also removes the accidental `:seon.problems/stale-var`
+match on every `:seon.fn` row without needing a shape tweak.

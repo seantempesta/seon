@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, test, render, class/n1, wave/dev-tooling-face-hygiene]
 ---
@@ -35,3 +35,28 @@ Still open outside this lane. The changed-test report constructor must retain
 its EDN report by identity and send its summary through a declared render
 producer/profile; the CLI leaf should print that bounded face rather than the
 one-line `pr-str` of the complete report.
+
+## Verified at HEAD (2026-09-16, N1 verification)
+
+**RESOLVED.** `script/seon/dev/changed_test.clj` no longer `prn`s the
+complete report. The report face at `:329-378` is built line by line —
+per-boundary status and failure lines, a `report:` line naming the retained
+EDN file, a dependency-analysis line, and a `widening:` line — and its
+findings section is bounded by construction:
+
+```clojure
+(when (seq findings)
+  (str "\nclj-kondo findings:"
+       (apply str
+              (for [finding (take 20 findings)]
+                (str "\n  " (:filename finding) ":" (:row finding) ":"
+                     (:col finding) " [" (name (:level finding)) "/"
+                     (name (:type finding)) "] " (:message finding))))
+       (when (< 20 (count findings)) "\n  …")))
+```
+
+`(take 20 findings)` with an explicit `…` continuation is the bounded
+summary this note asked for, and the complete findings remain in the
+retained report named by the `report:` line. No test JVM was run for this
+verification; the face is read from its one constructor, which is where the
+defect lived.

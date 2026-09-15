@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: cleanup
 tags: [issue, web, render, class/n1, wave/visual-qa]
 ---
@@ -56,3 +56,26 @@ adjacent layout facts for the same owner:
 
 Full walk:
 [ui-verification-2026-08-14](../../prds/context-generation/research/ui-verification-2026-08-14.md).
+
+## Verified at HEAD (2026-09-16, N1 verification)
+
+**RESOLVED.** Live measurement on the running `default` cluster
+(`http://127.0.0.1:7994`, pid 69622), viewport emulated at 375x812, three
+pages, each read after the feed had painted:
+
+```text
+/agent/root         innerWidth 375  body.scrollWidth 375  overflowing elements 0
+/agent/root/debug   innerWidth 375  body.scrollWidth 375  overflowing elements 0
+                    max(pre.scrollWidth - pre.clientWidth) = 0
+/ns/my.agents.root  innerWidth 375  body.scrollWidth 375  overflowing elements 0
+```
+
+`overflowing` counts every element whose bounding rectangle extends past
+`innerWidth`. The body no longer scrolls sideways at 375 px and no wide
+container escapes its own box, which is this note's acceptance. The value
+surfaces now wrap: every `pre`/`code` on the debug page computes
+`white-space: pre-wrap` (`resources/public/css/input.css:874`).
+
+The separate VERTICAL loss recorded in the 2026-08-14 section belongs to
+[walk-units-hide-their-overflow-instead-of-eliding-it](walk-units-hide-their-overflow-instead-of-eliding-it.md)
+and is unaffected by this closure.

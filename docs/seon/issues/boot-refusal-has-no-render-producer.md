@@ -73,3 +73,42 @@ refusal schema, implement them in the `seon.cluster` owner, and make
 `script/seon/fresh_operator.clj` print that projection instead of exception or
 prepl-event internals. The nested `:seon.instrument/problems` value must enter
 the ordinary render call, not be stringified as print-node data.
+
+## Verified at HEAD (2026-09-16, N1 verification)
+
+**CONFIRMED — partially repaired; the operator face is the open half.**
+
+Repaired: the boot refusal now HAS a declared render pair.
+`resources/seon/schemas/seon.boot.edn:156` declares
+`:seon.boot/refused-error` with `:seon.render/ai seon.error/render-ai` and
+`:seon.render/html seon.error/render-html`. A representative refusal rendered
+through the live value renderer on `default` (pid 69622) is one readable
+value with no instance, no sent form and no host trace:
+
+```text
+{:seon.boot/refused :seon.boot/store,
+ :seon.error/diagnostic-layer :store,
+ :seon.error/diagnostic-operation seon.cluster/require-activation!,
+ :seon.error/kind :seon.boot/refused,
+ :seon.error/message "seon.cluster/require-activation! violated its contract."}
+```
+
+Still open: the operator never renders that value. `bin/seon`'s terminal
+failure face is still exception-derived —
+`script/seon/fresh_operator.clj:3151-3156` catches the throwable and prints
+`✗ <ex-message>` followed by one `(prn data)` line of the raw `ex-data`, and
+the boot path rethrows the original failure unchanged
+(`script/seon/fresh_operator.clj:1683`). Whatever the failure carries —
+`:seon.boot/instance`, the sent form, `:seon.instrument/problems` as
+`pr-str`'d print-node data — still reaches the terminal on one line.
+
+A live boot refusal was deliberately NOT induced: that needs starting or
+failing a cluster, which this verification is not permitted to do. The
+verdict above is source-exact plus the rendered-refusal probe.
+
+surface: operator
+
+Fix sketch: in `-main`'s catch, when the ex-data carries a declared error
+class, print `seon.error/render-ai` of that value (layer, cluster, reason on
+their own lines) and put the instance/form/trace behind `--verbose` or the
+retained cluster log.
