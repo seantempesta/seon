@@ -56,3 +56,24 @@ were renamed, but both prohibited mechanisms remain:
   attribute of every cluster entity, and
   `test/seon/cluster/instruction_test.clj:115-142` still proves convergence by
   corrupting and reconciling the stored copy.
+
+## N7 implementation boundary — 2026-09-15
+
+Namespace metadata declares `:seon.ns/context-relevant?`; the existing namespace
+indexer records it and `toolkit-namespaces` queries it. The `my.` classifier is
+deleted. Eleven agent-facing namespace declarations carry the explicit fact.
+The new canonical regression adds `sample.relevant` and an unrelated
+`my.impostor`, and observes only the declared namespace entering the result.
+
+Still open: `src/seon/cluster.clj` is protected by the owner's latest instruction
+and continues to reconcile a stored copy. Exact writer and renderer diffs and
+the dependent schema/test changes are in the N7 landing note. No protected
+file was edited.
+
+Implemented slice: `5deb40e4e`; the live default query returned all eleven
+declared namespace facts and the same eleven context namespaces in 24 ms.
+Owner gate 82 tests / 418 assertions and platform gate 86 tests / 542
+assertions passed. Closure still requires deleting the protected stored copy
+and verifying its ordinary reconciliation; the new relevance query does not
+establish that deletion. See
+[the exact patches and probes](../../prds/context-generation/research/n7-query-classification-2026-09-15.md).

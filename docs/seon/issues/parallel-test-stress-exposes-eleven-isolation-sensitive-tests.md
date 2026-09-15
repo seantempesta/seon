@@ -260,6 +260,20 @@ run `park-wake-test` took 7,003 ms,
 also survived concurrent work. This proves the former timing sensitivity is
 dead without changing production wake or settlement semantics.
 
+## N7 gate observation, 2026-09-15
+
+The path-isolated N7 gate at `8574992e43ebd6e435a89629175b8d61bcbe4d19`
+plus the lane's owned paths reproduced worker-exchange expiry at 270 seconds
+for `init-owns-current-source-and-dormant-cluster-lifecycle` and
+`live-init-reloads-schema-runtime-and-moved-predicate-owners-before-admission`,
+including isolated confirmation. Thus this sample is not classified as
+parallel-only. The pool workers exited but left their launched JVMs alive.
+After the gate exited, N7 used the operator from the main checkout to discover
+and stop both exact claims (PIDs 95143 and 96133), exit 0 for each. No cause is
+inferred from these durations. The root/generation facts, commands, and full
+gate counts are recorded in
+[the N7 landing note](../../prds/context-generation/research/n7-query-classification-2026-09-15.md).
+
 ## Owner
 
 The test and production owner of each resource named during triage: clj-kondo

@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: friction
 tags: [issue, render, database, class/n7, wave/render-connection-model]
 ---
@@ -37,3 +37,10 @@ The two relationships are represented by attributes/connections at their
 transaction owners or discovered from a declaration already present in the
 database. Adding another relationship does not require editing a private
 function roster.
+
+## N7 closure — 2026-09-15
+
+`bc3dfe3fd` deleted `derived-edge-functions`. HEAD now derives declared concerns through schema properties (`src/seon/render/walk.clj`, `declared-acquisition`). No replacement roster was introduced. Residual proof: current derived-relationship coverage belongs to `seon.render.root-pull-test` and the walk tests; this closure does not claim a new live relationship test. The removed private-registry mechanism is no longer a repair target.
+
+Owner decision explicitly permits closing dissolved members with the residual
+proof named. See the N7 landing note for the bounded verification record.

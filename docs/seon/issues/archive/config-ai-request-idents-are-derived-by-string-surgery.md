@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: cleanup
 tags: [issue, config, schema, class/n7, wave/config-application-contract]
 ---
@@ -52,3 +52,17 @@ the program graph cannot see the edge.
   tightens `unapplied-families` to per-attribute grain and stays green, so a
   genuinely dead AI dial fails the gate.
 - No literal `"seon.config.ai"` namespace-string comparison remains in `src/`.
+
+## N7 implementation — 2026-09-15
+
+`seon.ai/request-attributes` queries `:seon.ai/request-attribute` properties. Every existing AI dial records its exact request key; `no-auth` explicitly retains its original key. The name-building helper and namespace classifier are deleted. Wire settings use the same routes, and per-dial `:seon.ai/inert-when-thinking` replaces the executable inert-settings set without changing the shipped policy. The canonical regression proves a non-family dial routes to a request field and a similarly spelled nonmember is excluded. The config application census is now per attribute. Gate and live results are recorded in the landing note before closure.
+
+## Resolved — 2026-09-15
+
+Commit `5deb40e4e`. The isolated owner gate passed 82 tests / 418 assertions;
+the separate platform gate passed 86 tests / 542 assertions. The default JVM
+query returned 18 declared routes; a synthetic non-family dial routed to
+temperature while the spelled-alike nonmember was excluded. A live wire
+projection marked temperature inert in high thinking mode and omitted its
+wire field. No provider call was made. Exact probes and the broader baseline
+failures are in [the landing note](../../../prds/context-generation/research/n7-query-classification-2026-09-15.md).

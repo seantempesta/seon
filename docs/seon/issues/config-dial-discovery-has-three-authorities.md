@@ -62,3 +62,22 @@ their actual consumers.
   roster.
 - The application test first proves a nonempty admitted subject set, then
   exercises every derived consumer boundary.
+
+## N7 implementation boundary — 2026-09-15
+
+`seon.config/dial-attributes` now queries explicit leaf properties; existing
+config-family leaf declarations explicitly record membership. The test-only
+`application-modes` copy is deleted, and the application census checks individual
+attributes using literal readers and declared request/environment routes. The
+`applied` map is a bounded input example, not a membership census.
+
+Still open: the composite builder's spelling fallback in protected
+`src/seon/schema/edn.clj`. The landing note contains its exact removal diff.
+The new owner regression admits `:sample/heat` and excludes
+`:seon.config.ai/impostor` without classifier changes.
+
+Implemented slice: `5deb40e4e`; owner gate 82 tests / 418 assertions and
+platform gate 86 tests / 542 assertions, both green. Default's live query
+returned 92 explicitly declared dials. This note remains open solely for the
+protected composite-builder fallback; see
+[the exact patch and probes](../../prds/context-generation/research/n7-query-classification-2026-09-15.md).

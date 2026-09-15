@@ -88,3 +88,23 @@ OPEN, UNVERIFIABLE. Audited HEAD `7e35df213` still has `seon.fn/analyze-form` (`
 surface: other
 
 Owner correction: UNVERIFIABLE-WITHOUT-GATE (seon.fn-test, seon.cluster.turn-test). No new JVM may be launched; the required canonical regression remains pending.
+
+## N7 narrowed verification — 2026-09-15
+
+Still open for **persisted edges on ordinary non-defining evaluation forms**.
+The corrected read-only default JVM probe uses a valid program declaration row
+and a symbol-valued namespace identity. `seon.fn/analyze-form` returned both
+`[:seon.fn/sym "seon.db/q"]` and `[:seon.fn/sym "my.turn/wait"]` in the
+definition row in 1,156 ms. That refutes a blanket namespace-based declaration
+analysis defect; it does not prove ordinary evaluation persistence.
+
+Current `analyzed-form` returns `[{} merged-row]`; nil program rows refuse in
+`analyze-forms`. The remaining proof must run an ordinary non-defining form
+through the real turn harness and inspect its persisted call edges. No nil-row
+contract was weakened, and no duplicate edge family was added. Exact successful
+probe is in the N7 landing note.
+
+N7 implementation commit `5deb40e4e` changes namespace relevance indexing,
+not this unproven evaluation edge. The class remains open at this boundary;
+the green owner/platform gates do not prove ordinary evaluation persistence.
+See [the landing note](../../prds/context-generation/research/n7-query-classification-2026-09-15.md).

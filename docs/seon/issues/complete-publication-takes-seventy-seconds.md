@@ -188,6 +188,19 @@ directory once, then publishes and forces the mutable head last. Implementing
 that causal barrier inside Seon would duplicate the storage authority, so it
 is not part of this repair.
 
+## N7 adoption observation, 2026-09-15
+
+The N7 lane's second `bin/seon init --dev default --changed <owned paths>`
+waited 152,686 ms for the lifecycle lock, then reported publication started
+and request accepted without completing during more than ten minutes of
+observation. `logs/current-source-failure.log` reported "Publication did not
+finish within its declared bound." This observation does not identify the
+cause or establish that the shared hook failure belongs to this request.
+The lane terminated only its verified client CLI (PID 86505, exit 143);
+default was neither stopped nor restarted. Partial adopted schema/Var probes
+and the missing namespace relevance facts are recorded in
+[the N7 landing note](../../prds/context-generation/research/n7-query-classification-2026-09-15.md).
+
 Integration note before confirmation: `test/seon/cluster/store_test.clj:85`
 mirrored the former exact `{:diff-buf-size 256}` creation map. A direct
 `bin/test seon.cluster.store-test` confirmed this one stale expectation: 17

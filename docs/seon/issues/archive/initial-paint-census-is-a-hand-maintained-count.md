@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: friction
 tags: [issue, render, test, class/n7, wave/render-test]
 ---
@@ -66,3 +66,10 @@ from instead.
 
 Hit by the guarded-kernel-merge lane, which contributed one of the six new
 schema resources and none of the behavior under test.
+
+## N7 closure — 2026-09-15
+
+`9eca070ed` removed `the-initial-paint-sends-every-walk-surface-once` with the retired delivery machinery. HEAD `test/seon/render/web_test.clj` records that deletion at the former wire section; no literal census was reinstated. Residual proof: exactly-once current block delivery belongs to the current web/walk acceptance tests. This closure removes the obsolete count defect and does not claim current browser paint was observed.
+
+Owner decision explicitly permits closing dissolved members with the residual
+proof named. See the N7 landing note for the bounded verification record.

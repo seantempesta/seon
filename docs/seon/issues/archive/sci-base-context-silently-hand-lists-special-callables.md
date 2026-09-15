@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, sci, agent, class/n7, wave/sci-base-context-derivation]
 ---
@@ -68,3 +68,18 @@ OPEN, CONFIRMED. Severity: friction.
 surface: context-generation
 
 The duplicate membership source is fixed by `750ed404d`: `src/seon/sci/eval.clj:183–201` and `src/seon/fn.clj:1663–1678` consume the same `seon.program/base-context-injected-symbols`. However, `src/seon/program.cljc:15–25` still explicitly chooses schema, test, turn, background, message and help bindings; the remaining criterion is explaining or eliminating their exceptional bootstrap status. Read-only default MCP JVM probe `seon.program/base-context-injections` returned in 1 ms: `{seon.schema [register! unregister!], clojure.test :publics, my.turn [wait complete], my.background [background poll await], my.message [send decline], seon.bootstrap [help dir doc]}`. HEAD `91d5547b5` has the same declaration. Current help at `src/seon/bootstrap.clj:45–61` teaches messages, test macros and documentation, but does not explain schema/background bootstrap exceptions. Downgraded to friction: this is an explanation/derivation gap, not evidence of blocked callability or a failed agent run. Fix sketch: derive ordinary callable installation through acquisition, and document the interpreter-only exceptions beside their single declaration.
+
+## N7 implementation — 2026-09-15
+
+The executable base roster is removed. `seon.program/base-context-injected-symbols` queries the schema population for explained interpreter-binding declarations in `seon.sci.binding.edn`; the existing SCI constructor and program indexer consume that same query. Ordinary schema, turn, background, and message Vars are left to program acquisition. The new canonical regression adds a binding outside the family and excludes a spelled-alike nonmember; another acquires the real program and invokes `my.turn/complete`. Gate and live results are recorded in the landing note before closure.
+
+## Resolved — 2026-09-15
+
+Commit `5deb40e4e`. Default's database-derived query returned 42 interpreter
+bindings from four explained declarations and excluded ordinary
+`my.turn/complete`. The armed canonical acquisition regression invokes that
+ordinary function successfully after acquisition. The isolated owner gate
+passed 82 tests / 418 assertions and the platform gate passed 86 tests / 542
+assertions. The broader SCI suite remains red on failures also observed at
+clean HEAD; no general SCI health claim is made. Exact live forms and counts
+are in [the landing note](../../../prds/context-generation/research/n7-query-classification-2026-09-15.md).

@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, operator, class/n7, wave/operator-process-identity]
 ---
@@ -36,3 +36,10 @@ root-scoped advertisements.
 Current Seon process discovery derives from recorded identity and explicit JVM
 properties/advertisements. The legacy role classifier and its tests are
 deleted; arbitrary command strings cannot be misclassified as Seon.
+
+## N7 closure — 2026-09-15
+
+`5342b2b4d` replaced role inference with exact process records and explicit JVM properties. Current `observed-property-processes` in `resources/seon/operator/state.clj` reads declared root/generation and OS identity; arbitrary command substrings are not role evidence. Residual proof: cross-checkout claim custody is the separate still-open `operator-down-misses-a-live-scratch-jvm-from-another-checkout` member, and is being repaired in N7. `seon.classification-test/process-claim-installations-follow-the-exact-root-fact` tests root membership independently of command spelling.
+
+Owner decision explicitly permits closing dissolved members with the residual
+proof named. See the N7 landing note for the bounded verification record.
