@@ -1104,4 +1104,16 @@ half-edit. Measured targets in the issue.
   with `:seon.render/capture-mismatch` (saved evaluations do not reconstruct
   the captured prompt) — rendering changed under hot adoption mid-run, so
   the rebuild ≠ the bytes sent; the probe should use the captured bytes.
+- 04:50Z explain probe on run 4 (captured prompt, turn 5f52e29e4493): the
+  model names (a) "defined in the namespace" vs "admitted durably" as its
+  biggest confusion — nothing said how admission works or that the install
+  was refused (issue filed); (b) it cannot tell its own prose slips from
+  REPL responses and asks for `[me]/[repl]` wrappers — supports the stop
+  sequence + a visible response marker; (c) the "changed since your last
+  turn" diffs firing on its own reads and the backstop message overwriting
+  the runtime trigger read as confusing (context-renders' change-only slice
+  was hot-adopted mid-run; fault routing issue stands); (d) elided results
+  read as empty; (e) it believed the reader kept a stuck buffer — actually
+  its own stray `)` and comment-only replies; error texts invited the
+  belief (issue filed). Probe now prefers the captured prompt (`f0985583e`).
 
