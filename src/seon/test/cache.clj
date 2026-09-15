@@ -39,14 +39,16 @@
             (.waitFor ^Process (:proc child) 10 TimeUnit/SECONDS)))))))
 
 (defn- copy-checkout! [snapshot checkout]
-  (.mkdirs (io/file checkout))
-  (doseq [entry (.listFiles (io/file snapshot))
+  (let [snapshot (.getCanonicalFile (io/file snapshot))
+        checkout (.getCanonicalFile (io/file checkout))]
+  (.mkdirs checkout)
+  (doseq [entry (.listFiles snapshot)
           :when (not (#{"data" "logs" "target" "tmp" "workers" ".cpcache"
                         "test-run.txt" "changed-paths.txt"} (.getName entry)))]
     (child! snapshot
             (if (= "Mac OS X" (System/getProperty "os.name"))
               ["/bin/cp" "-cRP" (str entry) (str checkout)]
-              ["cp" "-a" "--reflink=auto" (str entry) (str checkout)]))))
+              ["cp" "-a" "--reflink=auto" (str entry) (str checkout)])))))
 
 (defn- alive? [{::keys [pid started]}]
   (when (and pid started)

@@ -141,6 +141,23 @@ reporter probe counted exactly one fail and printed `probe.clj:1`.
 The first value probe identified the required root-selector key; the final
 request supplies `:seon.render.value/root`. No new clipping owner was added.
 
+In-process verification after the owner's REPL-loop instruction:
+all calls below use `(seon.test/run #'<qualified-test>
+(seon.operator/connection "default"))`, with the existing
+`seon.test/with-test-loader` loading test source. No test JVM was launched.
+
+| Exact test | UTC / result entity | Pass / fail / error | Boundary |
+|---|---|---|---|
+| `seon.test.runner-test/default-red-does-not-launch-confirmation` | 22:17:24 / 64392 | 8 / 0 / 0 | Hot-reloaded runner |
+| `seon.test.runner-test/unused-workers-own-no-checkout` | 22:17:42 / 64395 | 5 / 0 / 2 | Relative copy paths failed after changing child directory |
+| `seon.test.runner-test/unused-workers-own-no-checkout` | 22:18:16 / 64399 | 7 / 0 / 0 | New canonical-path copy form evaluated before editing |
+| `seon.test.runner-test/unused-workers-own-no-checkout` | 22:18:28 / 64402 | 7 / 0 / 0 | Persisted cache definition reloaded |
+| `seon.test.runner-test/assertion-report-uses-bounded-value-renderer` | 22:17:44 / 64397 | 9 / 0 / 0 | Hot-reloaded runner |
+
+Row 7 follow-up: canonicalize copy source/destination before setting the
+child's directory. This fixes relative snapshot requests using the existing
+copy owner. No scratch directory remains after the regression.
+
 ## Landing (tests)
 
 Lane `slow-tests-merge`, 2026-09-15. Read this plan and
