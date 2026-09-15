@@ -10,6 +10,14 @@ created: 2026-09-14
 
 ## Resolution — 2026-09-14
 
+Follow-up: the initial fix made “context now” callers accidentally request
+the last turn's opening. The request now permits an absent `:seon.turn/id`:
+absence folds every current evaluation, including the latest results;
+presence selects the named opening and excludes that reply's source rows.
+The loop proof and both live research helpers now use the explicit current
+semantics. The loop regression compares the next turn's historical prompt
+with current context captured before submitting its reply.
+
 The acquisition owner now folds stored shown text at the provider turn's
 opening transaction, the same basis used by the loop. All 30 run-2 provider
 attempts match their stored captures byte for byte. Turn 2 is 10,422 bytes;

@@ -73,8 +73,10 @@ separately from its since-diff re-reads. The selected turn and last three cards 
 load on demand. A card's Full context as sent disclosure opens the faithful
 REPL transcript below that card. Its context comes from the provider acquisition fold at the turn's
 opening database. `render/acquire-context!` owns this temporal selection even
-when passed the current database; completed generated system turns use their
-close transaction. Rebuilt estimates and provider-billed tokens are shown
+when passed the current database. A request without a turn id folds all
+current evaluations, including the latest reply's results; a named reply
+turn excludes even its source rows admitted in the opening transaction.
+Rebuilt estimates and provider-billed tokens are shown
 separately, since the estimator does not prove byte identity.
 `seon.repl/render-emission-html` colourises the exact
 `seon.repl/text` bytes; prompt, comment, form and response stay in their

@@ -300,11 +300,6 @@
                prompt #(render/acquire-context!
                         (merge handle
                                {:seon.db/db @connection
-                                :seon.turn/id
-                                (:seon.turn/id
-                                 (db/pull @connection [:seon.turn/id]
-                                          (get-in (last (evaluation/of-agent @connection "juniper"))
-                                                  [:seon.cluster.eval/run :db/id])))
                                 :seon.agent/id "juniper"
                                 :seon.sci.eval/time-limit-ms
                                 (:seon.config.eval/time-limit-ms handle)}))
@@ -517,6 +512,7 @@
                           :seon.agent/id "juniper"})
              (testing "three-form reply, actual handles, and additive history"
                (let [prefix (stored-text @connection)
+                     before-reply (:seon.cluster.prompt/text (prompt))
                      _ (reset! transactions [])
                      id (submit "(+ 1 1)\n(+ 2 2)\n(+ 3 3)")
                      reports @transactions
@@ -524,6 +520,15 @@
                      agent-ctx (get-in (agent/armed routing "juniper")
                                        [:seon.turn.loop/cluster :seon.sci.eval/agent-ctx])]
                  (is (= 3 (count saved)))
+                 (is (= before-reply
+                        (:seon.cluster.prompt/text
+                         (render/acquire-context!
+                          (merge handle
+                                 {:seon.db/db @connection :seon.turn/id id
+                                  :seon.agent/id "juniper"
+                                  :seon.sci.eval/time-limit-ms
+                                  (:seon.config.eval/time-limit-ms handle)}))))
+                     "The next turn's opening prompt equals current context before its reply.")
                  (is (= ["2" "4" "6"] (mapv :seon.eval/shown saved)))
                  (doseq [[entry expected] (map vector saved [2 4 6])]
                    (let [handle-symbol (:seon.repl/handle (repl/entity-emission entry))]

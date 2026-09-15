@@ -195,15 +195,12 @@
      (fn []
        (let [database (db/db (:seon.db/connection handle))
              initial (preflight handle database)
-             evaluations (:seon.trial/evaluations initial)
              shown-turns-left (:seon.trial/turns-left initial)]
-         (let [turn-id (:seon.turn/id
-                        (db/pull database [:seon.turn/id]
-                                 (get-in (last evaluations) [:seon.cluster.eval/run :db/id])))
-               prompt (:seon.cluster.prompt/text
+         (let [prompt (:seon.cluster.prompt/text
                        (checked (render/acquire-context!
                                  (merge handle {:seon.db/db database :seon.agent/id "juniper"
-                                                :seon.turn/id turn-id
+                                                :seon.schema/projection
+                                                (:seon.schema/projection @(:seon.sci.eval/projection-state handle))
                                                 :seon.sci.eval/time-limit-ms
                                                 (:seon.config.eval/time-limit-ms handle)}))))
                _ (when-not (string? prompt)

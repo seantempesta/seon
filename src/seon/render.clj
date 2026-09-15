@@ -1440,12 +1440,12 @@
            :seon.turn/id (:seon.turn/id request)})))))
 
 (defn acquire-context!
-  "Fold saved shown text at the named turn's immutable prompt basis.
+  "Fold saved shown text into the agent's context.
 
-  Provider and virtual turns use their opening transaction, exactly as the
-  loop does before calling the provider. A completed generated system turn
-  includes its own evaluations at close. Later replies cannot enter an
-  earlier prompt merely because the caller supplies today's database."
+  With :seon.turn/id, return context as of that turn's opening: what its
+  attempt saw. Without it, return current context from every stored
+  evaluation, including the latest turn's results. Later replies cannot
+  enter an earlier prompt merely because the caller supplies today's db."
   {:malli/schema [:=> [:cat :seon.render/context-request]
                   [:or :seon.render/acquired-context
                    :seon.render/context-change-result :seon.error/value]]}
@@ -1454,19 +1454,13 @@
     ((requiring-resolve 'seon.render.web/derive-context!) request)
     (let [database (:seon.db/db request)
           turn-id (:seon.turn/id request)
-          row (db/pull database
-                       '[:seon.turn.work/situation :seon.turn/attempts
-                         {:seon.turn/closed-tx [:db/id]}]
-                       [:seon.turn/id turn-id])
-          basis (if (and (= :generate (:seon.turn.work/situation row))
-                         (empty? (:seon.turn/attempts row))
-                         (get-in row [:seon.turn/closed-tx :db/id]))
-                  (db/as-of database (get-in row [:seon.turn/closed-tx :db/id]))
-                  ((requiring-resolve 'seon.turn/opening-db) database turn-id))]
+          basis (if turn-id
+                  ((requiring-resolve 'seon.turn/opening-db) database turn-id)
+                  database)]
       (if (:seon.error/kind basis) basis
-        (captured-history request
-          ((requiring-resolve 'seon.render.web/derive-context!)
-           (assoc request :seon.db/db basis)))))))
+        (let [acquired ((requiring-resolve 'seon.render.web/derive-context!)
+                        (assoc request :seon.db/db basis))]
+          (if turn-id (captured-history request acquired) acquired))))))
 
 
 (defn- namespace-owner

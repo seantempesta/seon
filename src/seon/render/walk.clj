@@ -873,13 +873,20 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn history
-  "Render saved evaluations in chronological order through their schema pair."
+  "Render saved evaluations in chronological order through their schema pair.
+
+  A named reply turn excludes its own evaluations, including source rows
+  admitted with its opening transaction. Generated system evaluations remain
+  visible. Without a turn id, every stored evaluation participates."
   {:malli/schema [:=> [:cat :seon.render.walk/history-request]
                   [:or [:vector :map] :seon.error/value]]}
   [{database :seon.db/db lookup :seon.render.walk/lookup :as request}]
   (let [agent-id (:seon.agent/id
                   (db/pull database [:seon.agent/id] lookup))
-        evaluations (evaluation/of-agent database agent-id)]
+        evaluations (evaluation/of-agent database agent-id)
+        selected (when-let [id (:seon.turn/id request)]
+                   (db/pull database [:db/id :seon.turn.work/situation]
+                            [:seon.turn/id id]))]
     (if (:seon.error/kind evaluations)
       evaluations
       (reduce
@@ -894,4 +901,7 @@
                     :seon.render.history/subject lookup
                     :seon.render.history/basis-transaction (:t saved)
                     :seon.render.history/bytes (or rendered "")}))))
-       [] evaluations))))
+       [] (if (and selected (not= :generate (:seon.turn.work/situation selected)))
+            (remove #(= (:db/id selected)
+                        (get-in % [:seon.cluster.eval/run :db/id])) evaluations)
+            evaluations)))))

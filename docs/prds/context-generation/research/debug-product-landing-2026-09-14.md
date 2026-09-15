@@ -6,6 +6,49 @@ tags: [research, debug, web, prompt]
 
 # Debug session product — 2026-09-14
 
+## Context now versus a named turn's opening
+
+The `63ac0608a` regression was mine: the loop proof and two research helpers
+used the latest turn id to request current context. Acquisition now documents
+and enforces two meanings: no id folds all stored evaluations; an id folds
+that turn's opening and excludes its own reply evaluations, including source
+rows admitted with a virtual turn's opening transaction. The same history
+walk still owns rendering; no second prompt formatter was added.
+
+Default read-only proof: current context is **178,089 bytes**, ending with
+`my.agent/done` and its saved “Session complete.” result. The last provider
+attempt still saw **177,576 bytes**. All **30/30** run-2 provider prompts
+remain byte-identical to their captures; estimator tolerance remains **13/30**
+with maximum residual **957 tokens**. The existing committed
+`debug_prompt_proof_2026_09_14.clj` reproduces those comparisons.
+
+Fast gate: **15 tests / 278 assertions**, zero failures/errors. The added
+assertion compares the next virtual turn's historical prompt with current
+context captured before that reply. An initial version checking every
+submission passed the prompt assertions but encountered two wake-refresh
+failures; the final regression adds the requested single boundary assertion.
+Concurrent context-renders hunks in the loop proof and help-trial helper
+were excluded using a HEAD-plus-owned-hunks worktree.
+Isolated gate: **15 tests / 282 assertions**, zero failures/errors. The
+updated Juniper helper was loaded and called read-only on default and returned
+**178,089 bytes**, including the latest result.
+
+Default GET: **HTTP 200 / 0.218008 s**. `context-now-{1440,700}-selected.png`
+was inspected: the three labelled ledger sections and exact raw reply remain
+clear, with the selected heading visible below the sticky strip. Browser
+checks verify **61 cards**, **375 reply bytes**, and **177,576 prompt bytes**
+at both widths. The pending strip is visible in these shared-tree captures
+and belongs to its separate slice. No layout was changed by this fix.
+The main-page captures `context-now-agent-{1440,700}.png` were also inspected:
+full-width blocks remain readable without inner scrolling. Adopted and
+published source converged at `6aa8b667-340d-5504-8a30-53684ef05b5d`.
+
+Live verification also exposed a stale environment projection in the
+long-lived cluster handle, despite the database's updated schema. Supplying
+the current projection made the no-id call succeed; both research helpers
+now carry it explicitly. The remaining adoption boundary is recorded in
+[the issue](../../../seon/issues/cluster-handle-retains-old-environment-projection-after-adoption.md).
+
 ## Ledger review: make the collapsed list tell the story
 
 Provider headers now include the reply's first comment line (a presentation

@@ -11,7 +11,7 @@
                        :seon.error/value],
                       :request
                       [:map
-                       [:seon.turn/id :seon.turn/id]
+                       [:seon.turn/id {:optional true} :seon.turn/id]
                        [:seon.agent/id :seon.agent/id]
                        [:seon.db/connection :seon.db/connection]
                        [:seon.sci.admit/caps :seon.sci.admit/caps]

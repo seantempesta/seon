@@ -29,21 +29,18 @@
          handle (:seon.agent/routing instance) settings-fn))))))
 
 (defn prompt
-  "Acquire the exact provider prompt for Juniper in the selected live cluster."
+  "Acquire Juniper's current context, including its latest evaluation results."
   [cluster-name]
   (let [handle (:seon.turn.loop/cluster
                 (get @seon.operator.runtime/running-instances cluster-name))
-        database (seon.db/db (:seon.db/connection handle))
-        last-evaluation (last (seon.eval/of-agent database "juniper"))
-        turn-id (:seon.turn/id
-                 (seon.db/pull database [:seon.turn/id]
-                               (get-in last-evaluation [:seon.cluster.eval/run :db/id])))]
+        database (seon.db/db (:seon.db/connection handle))]
     (seon.schema/call-with-projection-state
      (:seon.sci.eval/projection-state handle)
      (fn []
        (let [result (seon.render/acquire-context!
                      (merge handle {:seon.db/db database :seon.agent/id "juniper"
-                                    :seon.turn/id turn-id
+                                    :seon.schema/projection
+                                    (:seon.schema/projection @(:seon.sci.eval/projection-state handle))
                                     :seon.sci.eval/time-limit-ms
                                     (:seon.config.eval/time-limit-ms handle)}))]
          (or (:seon.cluster.prompt/text result)
