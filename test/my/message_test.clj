@@ -69,7 +69,9 @@
               :my.message/content "repair this"
               :my.message/about "failure-17"}
              (dissoc value :seon.message/id)))
-      (is (= 8 (count (:seon.message/id value))))))
+      (is (seq (:seon.message/id value)))
+      (is (not= (:seon.message/id value)
+                (:seon.message/id (message/send "bob" "repair this" "failure-17"))))))
   (testing "one send and a vector of sends both validate as the union"
     (is (seon.schema/valid-candidate-value?
          :my.message/value (message/send "bob" "hello")))
@@ -83,13 +85,33 @@
     (is (= {:my.message/to "planner"
             :my.message/about "failure-17"
             :my.message/reason "The dependency contract is missing."}
-           value))
+           (dissoc value :seon.message/id)))
+    (is (seq (:seon.message/id value)))
     (is (seon.schema/valid-candidate-value? :my.message/declination value))
     (is (seon.schema/valid-candidate-value? :my.message/value value))
     (is (seon.schema/valid-candidate-value?
          :my.message/value
          [(message/send "bob" "repair this" "failure-17") value])
         "one form may return messages and declinations together")))
+
+(deftest delivery-preserves-the-returned-message-identity
+  (with-messages
+    (fn [connection _]
+      (doseq [value [(message/send "bob" "The check passed.")
+                     (message/decline "bob" "m-1" "The input is missing.")]]
+        (let [delivery (message/delivery @connection
+                                         {:my.message/value value
+                                          :seon.agent/id "alice"
+                                          :seon.turn/id "message-examples"
+                                          :seon.cluster.eval/ordinal 0
+                                          :seon.config.message/max-chain 10})
+              written (db/transact! connection (:seon.message/rows delivery))]
+          (is (empty? (:seon.error/values delivery)) (pr-str delivery))
+          (is (:db-after written) (pr-str written))
+          (is (= (:seon.message/id value)
+                 (:seon.message/id
+                  (db/pull (:db-after written) [:seon.message/id]
+                           [:seon.message/id (:seon.message/id value)])))))))))
 
 (deftest a-bad-argument-is-an-error-value-never-a-throw
   ;; `:my.message/to`, `/content`, `/about` and `/reason` all admit any
@@ -137,25 +159,25 @@
   ;; and the kernel still hands the agent a flat value. A direct call here
   ;; would assert a branch the contract makes unreachable.
   (support/with-database
-   (fn [connection]
-     (let [ctx (support/fork-cluster-ctx connection)]
-       (doseq [bad ["nil" "\"\"" "123" ":bob" "{:a 1}" "[\"bob\"]"]
-               source [(str "(seon.cluster.message/send " bad " \"content\")")
-                       (str "(seon.cluster.message/send \"bob\" " bad ")")
-                       (str "(seon.cluster.message/send \"bob\" \"content\" " bad ")")
-                       (str "(seon.cluster.message/decline " bad
-                            " \"failure-17\" \"Cannot repair.\")")
-                       (str "(seon.cluster.message/decline \"planner\" " bad
-                            " \"Cannot repair.\")")
-                       (str "(seon.cluster.message/decline \"planner\" \"failure-17\" "
-                            bad ")")]]
-         (let [value (support/agent-value ctx source)]
-           (is (map? value) source)
-           (is (keyword? (:seon.error/kind value)) source)
-           (is (string? (:seon.error/message value)) source)
-           (is (not (seon.schema/valid-candidate-value?
-                     :my.message/value value))
-               "and the loop cannot mistake it for a delivery")))))))
+    (fn [connection]
+      (let [ctx (support/fork-cluster-ctx connection)]
+        (doseq [bad ["nil" "\"\"" "123" ":bob" "{:a 1}" "[\"bob\"]"]
+                source [(str "(seon.cluster.message/send " bad " \"content\")")
+                        (str "(seon.cluster.message/send \"bob\" " bad ")")
+                        (str "(seon.cluster.message/send \"bob\" \"content\" " bad ")")
+                        (str "(seon.cluster.message/decline " bad
+                             " \"failure-17\" \"Cannot repair.\")")
+                        (str "(seon.cluster.message/decline \"planner\" " bad
+                             " \"Cannot repair.\")")
+                        (str "(seon.cluster.message/decline \"planner\" \"failure-17\" "
+                             bad ")")]]
+          (let [value (support/agent-value ctx source)]
+            (is (map? value) source)
+            (is (keyword? (:seon.error/kind value)) source)
+            (is (string? (:seon.error/message value)) source)
+            (is (not (seon.schema/valid-candidate-value?
+                      :my.message/value value))
+                "and the loop cannot mistake it for a delivery")))))))
 
 (deftest the-error-value-is-the-registered-one
   ;; `:seon.error/value` REQUIRES a kind. A function whose declared

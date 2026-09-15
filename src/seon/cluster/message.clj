@@ -256,7 +256,7 @@
                                       '[:db/id :seon.message/id
                                         {:seon.message/inbox [:seon.agent/id]}] subject))
                    row (cond-> {:seon.message/id (or (:seon.message/id candidate)
-                                                      (id/id (random-uuid) 8))
+                                                      (id/id))
                                 :seon.message/to [:seon.agent/id recipient]
                                 :seon.message/inbox [:seon.agent/id recipient]
                                 :seon.message/from [:seon.agent/id sender]
@@ -681,7 +681,7 @@
      "send's about argument must be a non-blank identity string."}
 
     :else
-    (cond-> {:seon.message/id (id/id (random-uuid) 8)
+    (cond-> {:seon.message/id (id/id)
              :my.message/to to
              :my.message/content content}
       about? (assoc :my.message/about about))))
@@ -735,6 +735,7 @@
      "decline needs a reader-facing reason, as a string."}
 
     :else
-    {:my.message/to to
+    {:seon.message/id (id/id)
+     :my.message/to to
      :my.message/about about
      :my.message/reason reason}))
