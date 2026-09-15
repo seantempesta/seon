@@ -38,7 +38,7 @@
 (deftest public-entries-declare-one-io-capability
   (doseq [[entry handler]
           [[#'fs/read 'seon.fs.jvm/read]
-           [#'fs/write 'seon.fs.jvm/write]
+           [#'fs/write! 'seon.fs.jvm/write]
            [#'fs/glob 'seon.fs.jvm/glob]
            [#'fs/stat 'seon.fs.jvm/stat]]]
     (is (= :io (:seon.workload (meta entry))))

@@ -5,9 +5,6 @@
             [clojure.test.check.generators :as gen]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]))
-
-
-
 (def ^:private digest-generator
   (gen/fmap #(apply str %)
             (gen/vector (gen/elements (seq "0123456789abcdef")) 64)))
@@ -40,15 +37,15 @@
 (schema.edn/load! {})
 
 (defn read
-  "Read a bounded window of one file, whatever the file's size.
+  "Read a bounded window of one file.
 
-  Takes `:my.fs/path` plus optional `:my.fs/byte-offset`, `:my.fs/max-bytes`,
-  and `:my.fs/encoding` (`:utf-8` or `:bytes`). Returns `:my.fs/text` or
-  `:my.fs/bytes` with `:my.fs/window-digest`, `:my.fs/file-bytes`,
-  `:my.fs/bytes-read`, and `:my.fs/eof?`, or a flat error. The whole-file
-  `:my.fs/digest` is present only when the window WAS the whole file. The
-  window is what is read, so the cost and the bound are the window: use it
-  before editing, or to page through a file too large to take whole."
+  Returns :my.fs/text (or :my.fs/bytes), :my.fs/window-digest,
+  :my.fs/file-bytes, :my.fs/bytes-read and :my.fs/eof?. The whole-file
+  :my.fs/digest appears only for a complete read. Page with
+  :my.fs/byte-offset and :my.fs/max-bytes.
+
+  Example:
+  (my.fs/read {:my.fs/path \"AGENTS.md\" :my.fs/max-bytes 1024})"
   {:malli/schema
    [:=> [:cat :my.fs/read-request]
     [:or :my.fs/read-result :seon.error/value]]
@@ -57,26 +54,35 @@
   [request]
   (effect/request! #'read request))
 
-(defn write
+(defn write!
   "Write one file only if its content precondition holds.
 
-  Takes a path, one text/bytes/blob content source, and an expected absence or
-  digest. Returns the write summary or a flat error. Use it for atomic,
-  stale-safe file replacement."
+  Supply :my.fs/path, :my.fs/content containing one text/bytes/blob source,
+  and :my.fs/precondition containing expected absence or the prior digest.
+  Returns :my.fs/path, :my.fs/after-digest, :my.fs/bytes-written and
+  :my.fs/changed?.
+
+  Example:
+  (my.fs/write! {:my.fs/path \"example.txt\"
+                 :my.fs/content {:my.fs/text \"Verified.\"}
+                 :my.fs/precondition {:my.fs/expected-absence? true}})"
   {:malli/schema
    [:=> [:cat :my.fs/write-request]
     [:or :my.fs/write-result :seon.error/value]]
    :seon.workload :io
    :seon.effect/capability 'seon.fs.jvm/write}
   [request]
-  (effect/request! #'write request))
+  (effect/request! #'write! request))
 
 (defn glob
   "Find paths beneath one root without following symbolic links.
 
-  Takes a root, pattern, and optional depth/result bounds. Returns matching
-  paths with examined/returned counts, or a flat error. Use it to discover
-  files before reading them."
+  Returns :my.fs/paths, :my.fs/examined, :my.fs/returned and :my.fs/complete?.
+  Supply :my.fs/max-depth and :my.fs/max-results to bound the search.
+
+  Example:
+  (my.fs/glob {:my.fs/root \".\" :my.fs/pattern \"*.md\"
+               :my.fs/max-depth 1 :my.fs/max-results 10})"
   {:malli/schema
    [:=> [:cat :my.fs/glob-request]
     [:or :my.fs/glob-result :seon.error/value]]
@@ -86,10 +92,14 @@
   (effect/request! #'glob request))
 
 (defn stat
-  "Inspect one path without following a symbolic link.
+  "Inspect one path without following symbolic links.
 
-  Takes a path and returns its file, directory, link, size, and modification
-  facts or a flat error. Use it to identify a path before another operation."
+  Returns :my.fs/path, :my.fs/regular-file?, :my.fs/directory? and
+  :my.fs/symbolic-link?, with :my.fs/byte-size and :my.fs/modified-at
+  when available.
+
+  Example:
+  (my.fs/stat {:my.fs/path \"AGENTS.md\"})"
   {:malli/schema
    [:=> [:cat :my.fs/stat-request]
     [:or :my.fs/stat-result :seon.error/value]]
