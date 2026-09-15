@@ -1269,9 +1269,15 @@
             (when (or (= :seon.schema/key identity)
                       (and (= :seon.fn/sym identity)
                            (:seon.fn/spec row)))
-              (or (db/carried-projection db)
-                  (throw (ex-info "Declaration database has no carried projection"
-                                  (db/projection-fallback 'seon.turn/row-tx)))))
+              ;; Earlier declarations in this same transaction are already
+              ;; facts in db, but are absent from its entering projection.
+              ;; Validate against the writer's current value, reusing compiled
+              ;; declarations through the schema owner's existing derivation.
+              (schema/projection-from-database
+               db
+               (or (db/carried-projection db)
+                   (throw (ex-info "Declaration database has no carried projection"
+                                   (db/projection-fallback 'seon.turn/row-tx))))))
             schema-redefinition?
             (and (= identity :seon.schema/key)
                  existing

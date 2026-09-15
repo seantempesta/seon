@@ -276,3 +276,82 @@ The remaining cold acquisition cost stays open in the
 which owns the full evidence, hook test failures/corrections, and foreign
 verification boundary. No test JVM launched; the three namespaces were
 appended for the orchestrator gate. Default remained pid 69622.
+
+### Batch 3 repair: in-process verification
+
+Read the Batch 3 lane report and named log. The retained fixture's transaction
+was refused: its evaluation lacked required run and timestamp facts. Its
+database **did carry its projection**, falsifying the proposed carriage cause
+for that regression. The fixture now seeds the canonical agent/turn/evaluation
+relationship and asserts transaction success. Program-change checks update the
+durable function source, acquire that evidence, and install the same authored
+form in the private SCI fork. Equal committed wrappers still require zero
+second-call read checks; changed shown text, program and connection invalidate.
+
+`raw-output` now diagnoses nil from nonoptional renderers. Explicit optional
+source/observation contracts still permit absence; prohibiting all nils removed
+the real system opening. This distinction is exercised by the two regressions.
+
+The web-debug error was `:malli.core/invalid-schema :example/order`: earlier
+declarations in one settlement transaction were present in its database but
+absent from its entering carried projection. `seon.turn/row-tx` now uses the
+existing `schema/projection-from-database` owner with that projection as reusable
+input for declaration validation. This expands the repair to `src/seon/turn.clj`,
+which was clean before editing. Dependency evidence: Datahike transaction
+function results are spliced before following operations
+(`reference-code/datahike/src/datahike/db/transaction.cljc:1152`); the codec
+carries entering projection state (`src/seon/schema/datahike.clj:478`); the
+existing exact-database derivation is `src/seon/schema.clj:2452`. Passive GET
+does not enter this declaration path. No new cache or schema was introduced.
+
+Each changed definition was evaluated in default before its file edit, called
+through the canonical fixture with real SCI/database values, and its returned
+test result inspected. Exact in-process commands throughout were:
+
+```clojure
+(seon.test/run #'seon.render.retained-test/equal-committed-database-skips-read-replay
+               (seon.operator/connection "default"))
+(seon.test/run #'seon.render.web-debug-test/turn-details-use-the-loop-opening-and-exact-segments
+               (seon.operator/connection "default"))
+```
+
+| UTC / run entity | Regression | pass / fail / error | Probe result |
+|---|---|---|---|
+| 22:17:21 / 64375 | retained | 11 / 10 / 0 | Missing evaluation timestamp exposed |
+| 22:18:13 / 64398 | web-debug | 0 / 0 / 1 | Cold canonical bootstrap refused projection |
+| 22:19:37 / 64412 | retained | 0 / 0 / 1 | Same bootstrap boundary |
+| 22:21:24 / 64436 | retained | 0 / 0 / 1 | Same bootstrap boundary |
+| 22:31:14 / 64450 | retained | 17 / 8 / 0 | Compiled fixture callable still original |
+| 22:31:36 / 64455 | retained | 25 / 0 / 0 | Corrected program evidence and callable |
+| 22:31:45 / 64459 | web-debug | 89 / 3 / 0 | Optional absence rejected |
+| 22:32 / 64461 | web-debug | 89 / 3 / 0 | Observed system opening result |
+| 22:33 / 64463 | web-debug | 89 / 3 / 0 | Identified optional render contracts |
+| 22:34:03 / 64469 | web-debug | 95 / 0 / 0 | Declared absence preserved |
+| 22:34:35 / 64472 | retained | 24 / 1 / 0 | REPL reader resolved diagnostic in user ns |
+| 22:34:55 / 64474 | retained | 25 / 0 / 0 | Namespace-correct evaluated form |
+| **22:39:36 / 64559** | **retained, adopted** | **25 / 0 / 0** | Basis 536871895 |
+| **22:39:43 / 64560** | **web-debug, adopted** | **95 / 0 / 0** | Basis 536871896 |
+
+Verification boundary: cold canonical bootstrap also exposed the separately
+recorded [missing carried projection issue](../../../seon/issues/canonical-fixture-population-missing-carried-projection.md).
+Temporary JVM bootstrap probes were restored from disk and instrumentation
+re-armed (1057 registered/instrumented) before final adoption. No bootstrap or
+foreign fixture file is included in this repair. Final runs used the warm
+canonical fixture base; they do not prove that separate cold bootstrap fixed.
+Web-debug emitted two `agent-already-running` writer refusals while its complete
+95 assertions passed; these are not silently omitted from the evidence.
+
+The hook first encountered a stale `current-src` branch head; an operator CLI
+attempt also reported no running operator despite PID 69622 remaining alive.
+The existing hook owner was then invoked through MCP:
+`(seon.cluster/refresh-source! "." ["src/seon/render.clj" "src/seon/turn.clj"
+"test/seon/render/retained_test.clj"] "default")`. It completed in 59.507 s.
+Default's adopted source commit is **6aa9c904-ca29-5942-b132-e234c779ed89**;
+stored program sources contain both repaired definitions. The final two runs
+above occurred after that adoption. No process was stopped/reforked/restarted,
+no test JVM was launched, and no foreign session was operated.
+
+Gate request rewritten with the three render namespaces once each. The
+orchestrator's batched gate remains the final proof. This repair changes only
+`src/seon/render.clj`, `src/seon/turn.clj`,
+`test/seon/render/retained_test.clj`, and this landing note.

@@ -12,6 +12,7 @@
   lane. A redefinition therefore changes the next call and a cold context
   re-derives the same symbol from its database program row."
   (:require [datahike.db :as datahike.db]
+            [malli.core :as m]
             [sci.core :as sci]
             [seon.ai.tokens :as tokens]
             [seon.config :as config]
@@ -1167,10 +1168,18 @@
   [request output selected]
   (let [projection (sci.kernel/context-projection
                     (:seon.sci.eval/ctx request))
-        rendered (invoked request output selected)]
+        rendered (invoked request output selected)
+        ;; Optional source/observation contracts declare absence explicitly.
+        ;; An ordinary text renderer returning nil has violated its contract.
+        declared-absence?
+        (and (nil? rendered)
+             (some #(m/validate % nil {:registry (:seon.schema.projection/registry projection)})
+                   (schema/function-matching-outputs-in
+                    projection selected
+                    [(render-invocation-argument projection request selected)])))]
     (case output
       :seon.render/ai
-      (if (or (nil? rendered) (string? rendered) (:seon.error/kind rendered))
+      (if (or declared-absence? (string? rendered) (:seon.error/kind rendered))
         rendered
         {:seon.error/kind ::invalid-ai-output
          :seon.render/invalid-output :ai
@@ -1178,8 +1187,7 @@
          :seon.error/data {:seon.render/output rendered}})
 
       :seon.render/html
-      (if (or (nil? rendered)
-              (:seon.error/kind rendered)
+      (if (or declared-absence? (:seon.error/kind rendered)
               (hiccup/hiccup? rendered))
         rendered
         {:seon.error/kind ::invalid-html-output

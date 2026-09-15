@@ -10,14 +10,35 @@
             [seon.sci.kernel :as kernel]
             [seon.test-support :as support]))
 
+(defn- seed-shown! [connection namespace-name shown]
+  (let [report (db/transact! connection
+                 [{:seon.ns/name namespace-name :seon.ns/doc "Retained renderer fixture"}
+                  {:seon.agent/id "retained" :seon.agent/namespace [:seon.ns/name namespace-name]}
+                  {:seon.turn/id "retained-turn" :seon.turn/agent [:seon.agent/id "retained"]
+                   :seon.turn/opened-tx "datomic.tx"}
+                  {:seon.cluster.eval/id "retained-shown"
+                   :seon.cluster.eval/run [:seon.turn/id "retained-turn"]
+                   :seon.cluster.eval/ordinal 0 :seon.cluster.eval/at (java.util.Date.)
+                   :seon.eval/shown shown}])]
+    (is (:db-after report) (pr-str (select-keys report [:seon.error/kind :seon.error/message])))))
+
+(defn- replace-renderer! [connection ctx form]
+  (let [report (db/transact! connection
+                 [[:db/add [:seon.fn/sym "seon.render-simplification.fixture-a/namespace-ai"]
+                   :seon.fn/source (pr-str form)]])]
+    (is (:db-after report) (pr-str (select-keys report [:seon.error/kind :seon.error/message]))))
+  (sci.eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db (db/db connection)
+                     :seon.schema/projection (kernel/context-projection ctx)})
+  ;; The indexed fixture is compiled core; install the same authored form in
+  ;; this private SCI fork as well as carrying its acquired program evidence.
+  (sci/binding [sci/ns (sci/create-ns 'seon.render-simplification.fixture-a)]
+    (sci/eval-form ctx form)))
+
 (deftest equal-committed-database-skips-read-replay
   (support/with-database
    (fn [connection]
      (let [namespace-name 'seon.render-simplification.fixture-a
-           _ (db/transact! connection [{:seon.ns/name namespace-name
-                                       :seon.ns/doc "Retained renderer fixture"}
-                                      {:seon.cluster.eval/id "retained-shown"
-                                       :seon.eval/shown "one"}])
+           _ (seed-shown! connection namespace-name "one")
            ctx (support/fork-cluster-ctx connection)
            profile (render/agent-render-profile (config/defaults))
            caps (config/result-caps (config/defaults))
@@ -40,14 +61,15 @@
                       :seon.sci.eval/time-limit-ms 2000
                       :seon.config/on-core-error :panic})]
        (sci/binding [sci/ns (sci/create-ns namespace-name)]
-         (sci/eval-form
-          ctx
+         (replace-renderer!
+          connection ctx
           '(defn namespace-ai [value]
              (seon.db/q '[:find ?shown .
                           :where [?evaluation :seon.cluster.eval/id "retained-shown"]
                                  [?evaluation :seon.eval/shown ?shown]]
                         (:seon.db/db value)))))
        (let [a (:seon.db/db (request)) b (:seon.db/db (request))]
+         (is (some? (db/carried-projection a)))
          (is (not (identical? a b)))
          (is (= a b))
          (is (render/same-committed-database? a b))
@@ -61,7 +83,9 @@
                        (read-current? database evidence))]
          (is (= "one" (render/render-call (request))))
          (is (zero? @checks) "equal committed wrappers must not replay reads")
-         (db/transact! connection [{:seon.cluster.eval/id "retained-shown" :seon.eval/shown "two"}])
+         (let [report (db/transact! connection [[:db/add [:seon.cluster.eval/id "retained-shown"]
+                                                :seon.eval/shown "two"]])]
+           (is (:db-after report) (pr-str (select-keys report [:seon.error/kind :seon.error/message]))))
          (is (= "two" (render/render-call (request))))
          (is (pos? @checks) "a changed database still validates dependencies")
          (let [invoke kernel/invoke
@@ -72,19 +96,22 @@
              (is (= "two" (render/render-call (request))))
              (is (zero? @invocations) "an unrelated fact is not a renderer input")))
          (sci/binding [sci/ns (sci/create-ns namespace-name)]
-           (sci/eval-form ctx '(defn namespace-ai [_] "changed renderer")))
+           (replace-renderer! connection ctx '(defn namespace-ai [_] "changed renderer")))
          (is (= "changed renderer" (render/render-call (request)))
-             "redefining the selected private renderer invalidates its callable identity")
+             "redefining the selected renderer invalidates its program identity")
          (sci/binding [sci/ns (sci/create-ns namespace-name)]
-           (sci/eval-form ctx '(defn namespace-ai [value]
+           (replace-renderer! connection ctx '(defn namespace-ai [_] nil)))
+         (is (= :seon.render/invalid-ai-output (:seon.error/kind (render/render-call (request))))
+             "a renderer returning nil reports its invalid output")
+         (sci/binding [sci/ns (sci/create-ns namespace-name)]
+           (replace-renderer! connection ctx '(defn namespace-ai [value]
                                 (seon.db/q '[:find ?shown .
                                              :where [?e :seon.cluster.eval/id "retained-shown"]
                                                     [?e :seon.eval/shown ?shown]]
                                            (:seon.db/db value)))))
          (support/with-database
           (fn [other]
-            (db/transact! other [{:seon.ns/name namespace-name}
-                                {:seon.cluster.eval/id "retained-shown" :seon.eval/shown "other connection"}])
+            (seed-shown! other namespace-name "other connection")
             (is (not (render/same-committed-database? (db/db connection) (db/db other))))
             (is (= "other connection"
                    (render/render-call (assoc (request) :seon.db/db (db/db other))))))))))))
