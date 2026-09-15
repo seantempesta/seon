@@ -6,6 +6,99 @@ tags: [test, schema, runtime]
 
 # September 15 four-namespace failure investigation
 
+## Authorized repair, September 15
+
+The owner released the cluster, instrumentation, database, and SCI evaluation
+paths after the initial investigation. The repair preserves the still-protected
+test runner and test-support files. `git pull --ff-only` reported up to date;
+the orchestrator's database-carry change subsequently landed as `f68b79e01`.
+The app restart interrupted the agent, not a test verdict; the working edits
+were reread before continuing.
+
+### Classes and owning seams
+
+1. **Authored fixtures omitted required declaration facts and ignored setup
+   refusals.** Effect/search declarations now supply admission provenance and
+   namespace refs. Effect turns supply their agent and opening transaction;
+   config rows come from `config/compile-manifest`, including the manifest
+   digest. Fixture transactions refuse immediately on unsuccessful setup.
+   `capability-fixtures-install-complete-program-declarations` verifies both
+   installers' stored provenance and callable owner facts; the existing real
+   dispatch, settlement, and incremental-index tests remain the behavioral
+   checks. Search's literal field roster is replaced by a declaration-change
+   regression, proving both addition of the new mode and removal of the old.
+2. **Observation fixtures read retired result serialization and stdout APIs.**
+   The parity fixture reads exact `:seon.eval/shown` and carries its database;
+   MCP fixtures evaluate real SCI forms. Documentation checks inspect public
+   program documentation data and typed unavailable values. They no longer
+   treat empty stdout as proof. The MCP shown-text regression checks exact
+   byte equality and absence of a duplicated live result; scalar SCI results
+   must not produce result blobs.
+3. **MCP ordinary values bypassed the shared presentation authority, and
+   semantic decoding erased elision coordinates.** `mcp-project` calls
+   `seon.render.value/prepare` with its explicit MCP profile. The renderer
+   retains supplied requery identities; semantic decoding preserves complete
+   elision values and map-member elisions. The requery reads the artifact
+   through its selected cluster connection, not an invalid entity lookup on
+   a blob digest. The artifact regression evaluates the advertised requery
+   and compares it with the complete original value.
+4. **The admission contract refused its producer's explicit unbounded mode.**
+   The one request schema permits an empty caps map only when unbounded mode
+   is explicitly true; bounded admission still requires its declared limits.
+   `missing-artifacts-have-a-real-marker-under-armed-admission` checks a real
+   reason/byte marker and independently checks bounded refusal.
+5. **The structural renderer erased record identity by treating every map as
+   an ordinary map.** Record nodes now keep their face and declared name,
+   sharing the admission owner's SCI/JVM name derivation. Parity B9 retains
+   its exact record-name-and-fields expectation.
+
+### Repair probes
+
+A non-writing live `seon.db/write-error` probe of the completed turn returned
+nil (valid). Adding the old config fixture returned `:seon.db/invalid-write`
+at `[0 :seon.config/applied-manifest-digest]`. This isolates the remaining
+effect setup refusal from executor behavior. The desired config row is now
+derived by its existing compiler rather than inventing a digest.
+
+Serial iteration results so far:
+
+| Snapshot | Namespaces | Tests / assertions | Failures / errors |
+|---|---|---|---|
+| First repair | effect, parity, search | 87 / 139 | 30 / 3 |
+| Second repair | all four | 102 / 211 | 28 / 4 |
+| Third repair | all four | 103 / 242 | 6 / 0 |
+
+The second run passed record rendering and real SCI MCP shown-text cases.
+It exposed the incomplete config row, semantic elision loss, and the test's
+incorrect assumption that a panic-mode admission refusal returns normally.
+These are iteration evidence, not the final isolated gate.
+
+The third run passed MCP and parity completely. Three effect assertions
+identified a missing evaluation identity row still required by the live
+read-evidence path; the fixture now creates it through
+`turn/receipt-start-tx`. Three search assertions identified an invalid test
+mode (`:exact`); the declaration-change test now uses the admitted `:symbol`
+mode. Neither fix weakens the production contract.
+
+At 19:45Z, default PID 69622 still answered MCP, but its value projector
+returned `:seon.config/missing-effective` for `default` instead of the
+missing-marker probe's value. This live-verification limitation is recorded
+in [the existing reload issue](../../../seon/issues/partial-hot-reload-produces-mixed-code-with-no-warning.md).
+It is not attributed to a particular concurrent edit. The isolated test
+snapshot excludes the concurrent config changes; the lane did not restart
+or refork default.
+
+An explicit stdout observation through the same live MCP connection returned
+`#:probe{:value #:seon.sci.admit{:reason :over-bound, :bytes 123}, :node? true}`
+in 3 ms. Thus the adopted missing-marker producer works in that JVM; the
+final MCP value face remains unavailable because of its config observation.
+This is not a claim that default's complete publication has converged.
+
+The first fixture gate was stopped before test execution after discovering
+the default multiworker pool. Its processes exited. Subsequent isolated
+gates explicitly set `SEON_TEST_WORKERS=1 SEON_TEST_SLOTS=1`; only one test
+invocation is active at a time.
+
 ## Assignment and verification boundary
 
 Investigate `seon.cluster.mcp-test`, `seon.effect-test`,

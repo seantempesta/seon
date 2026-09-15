@@ -7,6 +7,17 @@ tags: [issue, runtime, operator, class/n3, wave/general]
 
 # Partial hot reload leaves a live JVM running mixed old and new code
 
+## September 15 live verification boundary, 19:45Z
+
+During the four-namespace repair, default PID 69622 answered an MCP JVM
+probe, but its value projector returned `:seon.config/missing-effective`
+for `default` instead of the probe result (69 required config members were
+absent according to that observation). Concurrent config declaration edits
+were present in the shared tree. This records an unavailable live proof;
+it does not establish which edit or loaded generation caused the refusal.
+No restart, refork, or foreign-file repair was performed by this lane.
+The HEAD-plus-owned-paths test snapshot continued independently.
+
 ## Current scope
 
 The 2026-07-30 source-publication replacement removed this risk from database
