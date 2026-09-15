@@ -6,8 +6,7 @@ tags: [research, render, context, test]
 
 # Context render rules — 2026-09-14
 
-Implementation is complete through the printer and DB performance slices.
-Final frame/provenance gates and commits are being recorded below. The
+Implementation, frame/provenance and their targeted gates are complete. The
 stored-run-2 explain rerun remains unavailable: default no longer contains
 turn `a51f8821e5be` after the owner's reset. No substitute session was used.
 
@@ -57,6 +56,7 @@ turns**: opening plus one plan reread, with zero churn.
 | `eef44fcc3` | Preserve database-free relation queries | Fast DB/help 44/293; isolated 44/297; no read-membership change. |
 | `549ab70b5` | Derived prompt frame and trial parity | Fast frame 8/45; combined isolated 19/369; 0 idle system bytes. |
 | `bb008321d` | Correct initial-versus-changed provenance and refresh the help concurrency regression | Fast 9/302; isolated 19/369; plan 269, inbox 452, idle 0 bytes. |
+| `d2af195bf` | Evaluate every elision hint from an actually stored result | Fast loop 4/233; combined isolated 19/369; 0 idle system bytes. |
 
 The prompt-frame and provenance follow-ups pass their combined isolated
 gate: **19 tests / 369 assertions**, covering prompt, loop proof, REPL
@@ -208,5 +208,6 @@ re-armed in the disposable scratch JVM.
 A plain final platform run hit concurrent deletion of `web/debug-ai-html`
 while `test/seon/turn_test.clj:230` still referenced it. Those files were
 left to debug-turns. The HEAD-plus-owned-paths platform gate passed
-**84 tests / 505 assertions**. Final frame/provenance gate results and
-cleanup are appended below once complete.
+**84 tests / 505 assertions**. A final platform rerun at the latest commits
+and the additional turn-continuation check are still running. Cleanup and
+their results are recorded below when complete.

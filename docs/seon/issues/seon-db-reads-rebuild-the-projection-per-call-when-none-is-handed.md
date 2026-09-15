@@ -7,6 +7,20 @@ tags: [issue, database, performance, class/p1, context]
 
 # `seon.db` reads rebuild the schema projection on every call when none is handed
 
+## Native decoding gate repaired — 2026-09-14
+
+`6785c980c` avoids logical projection construction for native non-string
+storage types and removes the query-find cache's unconditional projection
+lookup. `eef44fcc3` preserves database-free relation queries. The unchanged
+full DB plus help-trial isolated gate passes 44 tests / 297 assertions.
+Ten uncached queries measured 32,135,210 ns raw / 27,681,375 ns wrapped in
+the fast harness. No timing bound was relaxed and no global cache was added.
+
+This resolves the named native-query performance gate. The broader issue
+remains open: an unhanded caller decoding a string-backed logical value
+still needs the schema projection. Entry points should carry their acquired
+projection; this slice does not claim to repair every such caller.
+
 ## Context-renders verification, 2026-09-14
 
 The unchanged HEAD database owner at `4f9d8286e` reproduces the canonical
