@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, render, agent, class/n1, wave/strict-repl-display, wave/live-drive-render]
 ---
@@ -71,7 +71,7 @@ The mechanism is two seams meeting:
 ```
 
 Full walk and counts:
-[results-as-data audit](../../prds/context-generation/research/results-as-data-audit-2026-08-14.md).
+[results-as-data audit](../../../prds/context-generation/research/results-as-data-audit-2026-08-14.md).
 
 ## Owner
 
@@ -86,3 +86,9 @@ the `:seon.render/form` projection, the identity ref, or `pr-str` — prose that
 is genuinely the value is a QUOTED STRING. One regression prints a value whose
 nested ref carries a declared `/ai` producer and asserts the complete output
 reads back through the reader as one form with nothing left over.
+
+## Resolution (2026-09-15 triage)
+
+surface: context-generation
+
+At triage HEAD `131fa2a56`, `src/seon/print.cljc:743–747` emits a nested AI projected value through the string token and `literal`, quoting and escaping it whenever depth is positive. Root AI text still renders directly. `test/seon/render/value_test.clj:47–105` contains `declared-pairs-render-inside-response-values`, which reads the enclosing result as EDN and checks the nested string against the selected pair. Commit `8df86358b` added that regression. Verified the current emitter and test with `git show HEAD:<path>`; the former raw nested splice is no longer the emitter behavior.

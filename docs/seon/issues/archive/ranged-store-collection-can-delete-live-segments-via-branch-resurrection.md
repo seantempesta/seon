@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, database, class/n14, wave/exclusive-sweep]
 ---
@@ -119,10 +119,16 @@ values-then-pointer writes).
 ## Related
 
 Design, full source analysis, and the falsifier specification:
-[gc-correctness-cas-opus-2026-08-05.md](../../prds/sci-execution-runtime/research/gc-correctness-cas-opus-2026-08-05.md).
+[gc-correctness-cas-opus-2026-08-05.md](../../../prds/sci-execution-runtime/research/gc-correctness-cas-opus-2026-08-05.md).
 The owner-ruled exclusive-sweep design that supersedes the report's
 preemptible/two-sided-latch recommendation is
-[exclusive-sweep-design-2026-08-05.md](../../prds/sci-execution-runtime/plan/exclusive-sweep-design-2026-08-05.md).
+[exclusive-sweep-design-2026-08-05.md](../../../prds/sci-execution-runtime/plan/exclusive-sweep-design-2026-08-05.md).
 The cutoff itself is owned by
-[storage-gc-runs-without-a-cutoff-so-it-reclaims-almost-nothing.md](storage-gc-runs-without-a-cutoff-so-it-reclaims-almost-nothing.md),
+[storage-gc-runs-without-a-cutoff-so-it-reclaims-almost-nothing.md](../storage-gc-runs-without-a-cutoff-so-it-reclaims-almost-nothing.md),
 whose 2026-08-02 disposition ("no cutoff should land by guess") this answers.
+
+## Resolution (2026-09-15 triage)
+
+surface: store-process
+
+HEAD pins Datahike `cdcb5792db8bd599487f099437265d18a31164a5`; dependency fix `56f1c621` adds the reachability gate. In that pinned tree, `src/datahike/versioning.cljc:221–277` acquires the roster permit before source/roster reads and releases after publication; `src/datahike/gc.cljc:125–169` holds the exclusive sweep permit across root extension, marking and deletion. First-party `src/seon/cluster/registry.clj:543–550` derives blob roots through that held extension. `src/seon/blob.clj:271–290` holds a publisher permit across existence/reuse, physical writes and root commit (fix `5019f5406`). Verified via `git ls-tree HEAD reference-code/datahike`, `git -C reference-code/datahike show cdcb5792:<path>`, and first-party `git show HEAD:<path>`. These orderings exclude the stated branch and blob interleavings. No GC or destructive probe was run on default.

@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, wave/contract-gate]
 ---
@@ -29,4 +29,10 @@ Bare `bin/test` also refused during shared published base preparation in
 are the same two-argument calls at lines 73, 196, 230, and 440; the renderer
 accepts one argument. No tests ran. The lane stopped under its explicit
 protected-boundary instruction. See the
-[landing evidence](../../prds/context-generation/research/issues-sweep-landing-2026-09-08.md).
+[landing evidence](../../../prds/context-generation/research/issues-sweep-landing-2026-09-08.md).
+
+## Resolution (2026-09-15 triage)
+
+surface: adoption-publication
+
+Commit `080628130` corrected the callers. At triage HEAD `131fa2a562b1d81b800329cc9b785c42cf4e9167`, `test/my/plan_test.clj:77,228,262,469` each passes one `render-view` argument. The owner is now `src/seon/plan.clj:1254–1258`, with one `unit` argument; `my.plan` is the thin public API. Verified with `git show HEAD:test/my/plan_test.clj` and `git show HEAD:src/seon/plan.clj`. The four invalid-arity calls described here cannot occur in this source. This is source/caller proof, not a claim that every development publication succeeds.

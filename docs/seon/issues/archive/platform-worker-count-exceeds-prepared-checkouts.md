@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, test, wave/contract-gate]
 ---
@@ -24,7 +24,7 @@ lane did not modify them. Its retry uses test-process-only
 Acceptance: one configured worker count governs preparation and JVM launch;
 the platform gate runs with the requested count on a machine with more
 processors. Evidence is also recorded in
-[the adoption landing note](../../prds/context-generation/research/adoption-rows-landing-2026-09-08.md).
+[the adoption landing note](../../../prds/context-generation/research/adoption-rows-landing-2026-09-08.md).
 
 Components reproduced this at snapshot `run.fv5GcQ` on 2026-09-08:
 `pool-4` exited 1 before readiness; its stderr could not locate
@@ -51,3 +51,9 @@ checkouts, but `pool-4` launched and exited 1 with the missing-runner
 classpath error. The retry sets `SEON_TEST_WORKERS=3` and
 `JAVA_TOOL_OPTIONS='-XX:ActiveProcessorCount=6 -Dseon.test.worker-count=3'`.
 No launcher or runner edits were included.
+
+## Resolution (2026-09-15 triage)
+
+surface: runner-gate
+
+Fix `b1cb47f14` passes the prepared count into the coordinator. At triage HEAD `131fa2a56`, `bin/test:665–666` reads `SEON_TEST_WORKERS`, and `bin/test:733` passes that same count as `-J-Dseon.test.worker-count=$worker_count`. `src/seon/test/runner.clj:1711–1722` consumes the property before considering processor count. Verified with `git show HEAD:bin/test` and `git show HEAD:src/seon/test/runner.clj`; the stated preparation/launch mismatch is removed.
