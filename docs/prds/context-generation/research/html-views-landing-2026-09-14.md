@@ -86,3 +86,11 @@ Screenshot log: `fixture-seon-message-entry-before → fixture-seon-message-entr
 
 Observed defects → change: Raw recipient refs, ISO timestamps and reply teaching crowded the original output. New cards distinguish unread from handled; unresolved identities use readable text.
 
+## Notes
+
+Plain note title, wrapped content, plan-item title links, and time from the content transaction. Pulled refs are accepted through the existing render-unit contract.
+
+Screenshot log: `plan-before → notes-final; fixture-my-note-entry-verified and fixture-my-notes-verified`.
+
+Observed defects → change: The live note originally exposed {:db/id …}. Its actual about target is a transaction, so it now says the recorded transaction. The canonical fixture proves a plan-item about link labelled Prepare. No invented note title or timestamp attribute.
+

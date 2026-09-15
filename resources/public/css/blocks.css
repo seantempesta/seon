@@ -57,3 +57,11 @@
 .my-plan > progress::-webkit-progress-bar { background: var(--color-base-800); }
 .my-plan > progress::-webkit-progress-value { background: var(--color-success); }
 
+.seon-family-entry.my-notes, .seon-family-entry.my-note-entry { font: 0.75rem/1.55 var(--font-mono); overflow-wrap: anywhere; }
+.my-note-entry { padding: 0.5rem 0; border-bottom: 1px solid var(--color-base-800); }
+.my-note-entry header { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0.3rem 0.75rem; }
+.my-note-entry h3 { color: var(--color-text-100); font-size: 0.75rem; font-weight: 600; }
+.my-note-entry time, .my-note-entry .my-note-about { color: var(--color-text-400); font-size: 0.625rem; }
+.my-note-entry .my-note-content { margin: 0.35rem 0; white-space: pre-wrap; }
+.my-note-entry a { color: var(--color-info); text-decoration: underline; text-underline-offset: 0.2em; }
+

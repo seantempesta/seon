@@ -7,6 +7,7 @@
   (:require [clojure.string :as str]
             [seon.db :as db]
             [seon.repl :as repl]
+            [seon.render.route :as route]
             [seon.render.value :as render.value]
             [seon.schema.edn :as schema.edn]))
 
@@ -76,26 +77,50 @@
     "No current notes.")))
 
 (defn- note-html
-  [note]
-  (cond-> [:article {:class "seon-family-entry my-note-entry"}
-           [:h3 (str "Note " (pr-str (:my.note/id note)))]
-           [:p (:my.note/content note)]]
-    (:my.note/about note)
-    (conj [:p {:class "my-note-about"}
-           (str "About " (pr-str (:my.note/about note)))])))
+  [note database]
+  (let [reference (:my.note/about note)
+        about (if (and database reference)
+                (db/pull database [:my.plan.item/id :my.plan.item/title :db/txInstant]
+                         (if (map? reference)
+                           (or (:db/id reference)
+                               (when-let [id (:my.plan.item/id reference)] [:my.plan.item/id id]))
+                           reference))
+                reference)
+        at (when database
+             (db/q '[:find ?at . :in $ ?id
+                     :where [?note :my.note/id ?id]
+                            [?note :my.note/content _ ?tx]
+                            [?tx :db/txInstant ?at]] database (:my.note/id note)))]
+    [:article {:class "seon-family-entry my-note-entry"}
+     [:header [:h3 (:my.note/id note)]
+      (when at
+        (let [instant (.toInstant ^java.util.Date at)
+              local (.atZone instant (java.time.ZoneId/systemDefault))]
+          [:time {:datetime (str instant) :title (str local)
+                  :data-attr:title (str "new Date('" instant "').toLocaleString()")}
+           (.format local (java.time.format.DateTimeFormatter/ofPattern "MMM d, HH:mm"))]))]
+     [:p {:class "my-note-content"} (:my.note/content note)]
+     (when reference
+       [:p {:class "my-note-about"} "About "
+        (if-let [id (:my.plan.item/id about)]
+          [:a {:href (route/path :seon.render.route/data {}
+                                {:entity (pr-str [:my.plan.item/id id])})}
+           (get about :my.plan.item/title id)]
+          (if (:db/txInstant about) "the recorded transaction" "a related record"))])]))
 
 (defn render-note-html
   "Render one current note as Hiccup."
-  {:malli/schema [:=> [:cat :my.note/note] :seon.render/hiccup]}
+  {:malli/schema [:=> [:cat [:or :my.note/note :seon.render/unit]] :seon.render/hiccup]}
   [note]
-  (note-html (note-value note)))
+  (note-html (note-value note) (:seon.db/db note)))
 
 (defn render-notes-html
   "Render the bounded current note collection as Hiccup."
   {:malli/schema [:=> [:cat [:or :my.note/notes :seon.render/unit]]
                   [:or :seon.render/hiccup :seon.error/value]]}
   [notes]
-  (let [pulled (when (map? notes)
+  (let [database (when (map? notes) (:seon.db/db notes))
+        pulled (when (map? notes)
                  (db/pull (:seon.db/db notes)
                           '[{:my.note/_agent [*]}]
                           [:seon.agent/id (:seon.agent/id notes)]))
@@ -104,7 +129,7 @@
       pulled
       (into [:section {:class "seon-family-entry my-notes"}
          [:h3 (str "Current notes (" (count notes) ")")]]
-        (map note-html)
+        (map #(note-html % database))
         notes))))
 
 (defn render-note-form

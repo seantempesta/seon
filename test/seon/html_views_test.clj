@@ -89,3 +89,20 @@
         (readable! (message/render-html (assoc (db/pull @connection '[*] [:seon.message/id "hello"])
                                               :seon.db/db @connection)) ["handled"])))))
 
+(deftest note-pairs-link-titles-and-preserve-ai
+  (support/with-database
+    (fn [connection]
+      (db/transact! connection [{:seon.agent/id "alice"}
+                                 {:my.plan.item/id "first" :my.plan.item/title "Prepare"}])
+      (db/transact! connection [{:my.note/id "observation" :my.note/content "Verified"
+                                 :my.note/agent [:seon.agent/id "alice"]
+                                 :my.note/about [:my.plan.item/id "first"]}])
+      (let [row (assoc (db/pull @connection '[*] [:my.note/id "observation"]) :seon.db/db @connection)
+            unit {:seon.agent/id "alice" :seon.db/db @connection}]
+        (readable! (note/render-note-html row) ["observation" "Verified" "Prepare" "datetime="])
+        (readable! (note/render-notes-html unit) ["Current notes (1)" "Prepare"])
+        (is (= (golden :note) (note/render-note-ai {:my.note/id (:my.note/id row)
+                                                   :my.note/content (:my.note/content row)
+                                                   :my.note/agent [:seon.agent/id "alice"]})))
+        (is (= (golden :notes) (note/render-notes-ai unit)))))))
+
