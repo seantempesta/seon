@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, render, agent, class/n1, wave/strict-repl-display]
 ---
@@ -69,3 +69,27 @@ A map renders as readable EDN with its qualified attributes intact, through the
 one `seon.print/fit` owner, and the second map face is deleted rather than
 kept beside it. One regression renders a map of qualified attributes and
 asserts the output reads back as an equal value.
+
+## Verified at HEAD (2026-09-16, N1 verification)
+
+**RESOLVED.** The second map face is gone. A live pull of the same entity
+family this note recorded, rendered on `default` (pid 69622) through a
+complete render request (root identity supplied), comes back as ordinary
+EDN with braces and fully qualified attributes:
+
+```text
+(seon.db/q '[:find [(pull ?e [*]) ...] :where [?e :seon.schedule.fire/id]] database)
+=> {:db/id 45807,
+    :seon.schedule.fire/agent #:db{:id 38778},
+    :seon.schedule.fire/id "398de6173a5e",
+    :seon.schedule.fire/nominal-at #inst "2026-09-15T19:43:00.000-00:00",
+    :seon.schedule.fire/observed-at #inst "2026-09-15T19:43:00.002-00:00",
+    :seon.schedule.fire/task #:db{:id 38800}}
+```
+
+All three filed defects are absent: `nominal-at` is spelled
+`:seon.schedule.fire/nominal-at` and can be queried back, `:db/id` carries
+one colon, and the whole thing is one value that reads back equal. The same
+holds for every other shape probed in this pass — qualified maps, nested
+maps, effect receipts on the floor — so this is the one map face, not a
+lucky path.

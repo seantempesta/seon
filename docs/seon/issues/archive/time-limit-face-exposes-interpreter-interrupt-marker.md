@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, sci, class/n1, wave/sci-failure-face]
 ---
@@ -77,3 +77,38 @@ copies the throwable's complete `ex-data` into
 `:sci.impl/symbol` key at lines 527-528. There is still no structural removal
 of `:sci.impl/interrupt`, so a SCI time-limit throwable continues to expose
 the private marker through the outward value.
+
+## Verified at HEAD (2026-09-16, N1 verification)
+
+**RESOLVED.** The marker is now removed structurally, at the one place the
+outward value is built. `src/seon/sci/kernel.clj:481`:
+
+```clojure
+throwable-data (not-empty (dissoc (ex-data throwable) :sci.impl/interrupt))
+```
+
+Every later use of the throwable's data — `:seon.sci.eval/data`,
+`:seon.error/diagnostic-offending`, `:seon.sci.eval/symbol` — reads that
+already-stripped map, so the private marker cannot reach the agent face
+through any branch. Deleting change: `b5665971d`.
+
+Proved on the live `default` JVM (pid 69622) by handing
+`#'seon.sci.kernel/failure-value` a throwable carrying the marker plus the
+note's own diagnostic record; no SCI evaluation was run and no time limit
+was burned:
+
+```text
+:seon.error/kind      :seon.sci.eval/time-limit
+:seon.error/message   "Ran out of time after 30004ms."
+:seon.sci.admit/record {:seon.eval/allocated-bytes 14760632016,
+                        :seon.eval/duration-ms 30004,
+                        :seon.eval/fn-entries 613144508,
+                        :seon.eval/host-interop-count 0,
+                        :seon.eval/outcome :time}
+:seon.sci.eval/data   {:sci.impl/symbol foo}
+(re-find #"sci\.impl/interrupt" (pr-str value)) => nil
+```
+
+Kind, message and the complete admission record including
+`:seon.eval/fn-entries` are present; `:sci.impl/interrupt` and its opaque
+host object appear nowhere in the value. That is the acceptance verbatim.

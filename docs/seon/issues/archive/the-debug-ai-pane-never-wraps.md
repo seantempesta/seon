@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, render, web, class/n1, wave/visual-qa]
 ---
@@ -60,3 +60,30 @@ The debug AI pane's lines wrap within the pane at desktop width; the pane's
 `scrollWidth` does not exceed its `clientWidth` by more than a token. The
 displayed characters remain byte-identical to the prompt — only their visual
 wrapping changes — and no line is cut mid-token at rest.
+
+## Verified at HEAD (2026-09-16, N1 verification)
+
+**RESOLVED.** `.seon-debug-body-ai` no longer exists — neither in
+`resources/public/css/input.css` nor in the served page, which is now the
+ledger layout rather than the AI/HTML two-pane. Live on `default`
+(pid 69622), `http://127.0.0.1:7994/agent/root/debug`, with the page fully
+painted (11,757 characters of body text across 25 `pre`/`code` elements):
+
+```javascript
+[...document.querySelectorAll('pre,code')].every(p =>
+  getComputedStyle(p).whiteSpace === 'pre-wrap')        // true
+Math.max(...pres.map(p => p.scrollWidth - p.clientWidth)) // 0
+```
+
+Zero overflow on every text element, at desktop width and again at 375x812.
+The rule that owns it is `resources/public/css/input.css:874`:
+
+```css
+.seon-ledger *, .seon-ledger pre, .seon-ledger code {
+  white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; }
+```
+
+The displayed characters remain the stored bytes — `src/seon/repl.clj:291-311`
+colourises "without changing a single character of `text`" — so the wrap is
+presentation only, which is exactly what the acceptance required. The filed
+23,552 px line cannot occur.

@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, render, class/n1, wave/strict-repl-display]
 ---
@@ -72,3 +72,37 @@ The note remains open for its required live failed-form proof. The complete
 `same-instant-bootstrap-prefix-and-newest-tail-preserve-plan-order` because the
 generated bootstrap task is absent from the prefix; that ordering defect is
 not a comment-render regression and was not edited here.
+
+## Verified at HEAD (2026-09-16, N1 verification)
+
+**RESOLVED — the outstanding live failed-form proof is now in hand.**
+
+The `default` cluster's database holds 28 stored evaluations carrying
+`:seon.cluster.eval/error`. Rendering one of them through the current
+grammar on the live JVM (pid 69622), read-only:
+
+```text
+user=> [:find ?note :in $ ?subject :where [?note :my.note/agent ?subject]
+        [?note :my.note/content ?content]
+        [(clojure.string/includes? ?content "Ada")]
+        [(clojure.string/includes? ?content "155")]]
+#:seon.repl{:error "Execution error (ExceptionInfo) at sci.impl.utils/throw-error-with-location (utils.cljc:67).\nUnable to resolve symbol: ?note", :ns my.agents.juniper, :ms 3}
+```
+
+The entry is the evaluation's own submitted source followed by an
+execution-error face derived from the receipt's structured attributes — not
+a bare sentence that could pass for a value, and not a comment form. The
+face comes from `seon.repl/error-text` (`src/seon/repl.clj:122-140`), which
+reads the recorded `ex-triage` data as the authority and falls back to the
+stored message "only what it knows: NO invented `(REPL:1)` location and no
+empty class parens".
+
+Error entries are identifiable structurally in both projections (the error
+rides its own `:seon.repl/error` key rather than being classified out of a
+string), and no `;;` framing, annotation or comment-only pseudo-entry
+appears anywhere in the corpus. This closes the subclass that
+`c6a81988c` fixed and the live proof it was waiting for.
+
+The unrelated `seon.render.transcript-test` ordering red noted in the
+2026-08-12 disposition is a separate defect and is not evidence about this
+face.
