@@ -258,3 +258,19 @@ instrumentation facade, whose owner and falsifier are
 surface: context-generation
 
 The final outstanding mechanism in this note was removed by `16c6c7bc5`: `seon-registry` no longer exists at HEAD `859c9258c`. `src/seon/instrument.clj:475–493` caches contract compilation on the calling projection and supplies its registry; `:521–522` reads declarations without Malli's global registry. `src/seon/schema.clj:904–913` refuses an unhanded declaration population instead of silently selecting packaged declarations; `:942–976` asserts predicate Var identity without a mutable predicate map. Earlier projection-owned validator fixes remain in place. Verified `git show HEAD:<path>` and `git log -S seon-registry -- src/seon/schema.clj`. Dynamic carrier bindings still exist; this closes the three demonstrated shared-state defects, not a claim that every API has been rewritten to positional projection arguments. The former residual owner is already archived at `archive/instrumentation-compiles-under-one-clusters-projection.md`.
+
+## P1 class boundary — 2026-09-15
+
+The original three mechanisms remain resolved under the commits above.
+This archive is not closure of the complete P1 tag population. The new
+read/transaction repair and per-member measurements are recorded in the
+[P1 landing](../../../prds/context-generation/research/p1-ambient-state-2026-09-15.md).
+Strict input-only carriage still has protected producer work in
+[read-and-admission-producers-still-require-thread-projections.md](../read-and-admission-producers-still-require-thread-projections.md).
+Adoption, foreign-write custody, source provenance, operator initialization,
+source offsets, and generator lifecycle notes retain their recorded open
+boundaries and priced options. The class is not declared closed.
+
+## Final P1 carriage handoff — 2026-09-15
+
+Implementation: `b80f78a7c`. The [P1 landing note](../../../prds/context-generation/research/p1-ambient-state-2026-09-15.md) records the live probes, measured allocations, exact remaining boundaries and pending orchestrator gate. Database metadata now participates in instrumentation and admission; no running read/admission fallback reconstructs the projection. This closes only the member's read/admission carriage defect, not adoption/lifecycle or the remaining explicitly supplied thread compatibility input.

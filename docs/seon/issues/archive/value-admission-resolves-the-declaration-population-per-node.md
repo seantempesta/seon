@@ -489,3 +489,22 @@ per-node admission-resolution class.
 surface: context-generation
 
 At HEAD `a5f3d7565`, `src/seon/sci/admit.clj:697–708` places the supplied/handed projection in walk state once; `:194–197` asks `identity-only-projection-in` with that value, without resolving declarations. `src/seon/schema.clj:3158–3172` retains descriptors on that projection, not a process-global generation atom. `src/seon/cluster.clj:351–366` supplies the instance environment's projection through MCP admission. `src/seon/render/walk.clj:674–678` binds the acquired projection across the walk. `test/seon/sci/admit/declaration_population_test.clj:74–100` counts resource reads with runner carriers explicitly cleared. Verified current owners and the existing regression; the per-node resource-resolution mechanism and its named cache/MCP remainders are removed. The separate unhanded DB decoding cost remains in [seon-db-reads-rebuild-the-projection-per-call-when-none-is-handed.md](../seon-db-reads-rebuild-the-projection-per-call-when-none-is-handed.md).
+
+## P1 verification — 2026-09-15
+
+The archived per-node reconstruction remains dissolved; no admission source
+was re-fixed by this lane. On default, supplied-projection admission of 20
+maps measured 1,850,520 bytes / 0.926666 ms, then 1,850,088 / 0.728750 ms;
+100 maps measured 8,680,280 / 3.171833 ms. The original nested-20 historical
+observation was 374.68–382.31 ms; those historical probes recorded resource
+reads and time, not thread-allocated bytes. No historical allocation number
+is invented.
+
+The remaining optional thread selection in `admit-walk` is tracked in
+[read-and-admission-producers-still-require-thread-projections.md](../read-and-admission-producers-still-require-thread-projections.md), with its exact proposed edit in the
+[P1 landing](../../../prds/context-generation/research/p1-ambient-state-2026-09-15.md).
+The concurrent admission owner's edits were preserved.
+
+## Final P1 carriage handoff — 2026-09-15
+
+Implementation: `b80f78a7c`. The [P1 landing note](../../../prds/context-generation/research/p1-ambient-state-2026-09-15.md) records the live probes, measured allocations, exact remaining boundaries and pending orchestrator gate. Database metadata now participates in instrumentation and admission; no running read/admission fallback reconstructs the projection. This closes only the member's read/admission carriage defect, not adoption/lifecycle or the remaining explicitly supplied thread compatibility input.

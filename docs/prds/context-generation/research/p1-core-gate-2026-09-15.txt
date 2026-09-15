@@ -1,0 +1,225 @@
+bin/test: reaped retained isolated operator root /Users/sean/src/seon/tmp/p1-carriage-wt/tmp/test-runs/run.P0Fc4p
+bin/test: snapshot differences from HEAD 6dc70f30a9f52b977b19353cacc874a7b429ec7c:
+bin/test:   M	src/seon/db.clj
+bin/test:   M	src/seon/instrument.clj
+bin/test:   M	src/seon/schema.clj
+bin/test:   M	src/seon/test/runner.clj
+bin/test:   M	test/seon/db/declaration_population_test.clj
+bin/test:   M	test/seon/db_test.clj
+bin/test: end snapshot differences
+bin/test: PHASE snapshot elapsed-seconds=4
+bin/test: PHASE test-slot elapsed-seconds=0
+seon cache: lock wait-ms= 1 held-ms= 1159
+#:seon.dev-cache{:digest "a24f5f5098b3885802b5f6246a73851e5c3ce9955ea6dc619701e57661c2e945", :source-digest "d914176e36327115a08856828c09059e47d3160cdbd03ab2bf6fe95029bb981f", :namespaces 372, :status :current, :path "/Users/sean/src/seon/tmp/p1-carriage-wt/target/dev-dependency-classes/a24f5f5098b3885802b5f6246a73851e5c3ce9955ea6dc619701e57661c2e945", :test-digest "56c22ef48ea75dd46a880222fcf05509970ea48896561564eb7edea77322ef60", :test-classpath-file "/Users/sean/src/seon/tmp/p1-carriage-wt/target/test-classpaths/56c22ef48ea75dd46a880222fcf05509970ea48896561564eb7edea77322ef60.edn"}
+bin/test: PHASE dependency-cache-and-classpath elapsed-seconds=4
+bin/test: PHASE worker-checkouts elapsed-seconds=8
+bin/test: isolated operator root /Users/sean/src/seon/tmp/p1-carriage-wt/tmp/test-runs/run.PwEgG3 pid=97158 selection=seon.db-test seon.db.declaration-population-test seon.schema-test seon.instrument-test
+bin/test: preparing or reusing published test base 56c22ef48ea75dd46a880222fcf05509970ea48896561564eb7edea77322ef60
+bin/test: CACHE LOCK acquired wait-ms= 0
+bin/test: PUBLISH cached base 56c22ef48ea75dd46a880222fcf05509970ea48896561564eb7edea77322ef60
+WARNING: Using incubator modules: jdk.incubator.vector
+bin/test: shared published test base ready at /Users/sean/src/seon/tmp/p1-carriage-wt/target/test-published-bases/56c22ef48ea75dd46a880222fcf05509970ea48896561564eb7edea77322ef60/base
+bin/test: PREPARED cached base 56c22ef48ea75dd46a880222fcf05509970ea48896561564eb7edea77322ef60 elapsed-ms= 66702 work-ms= 66702
+bin/test: PHASE published-base elapsed-seconds=67
+WARNING: Using incubator modules: jdk.incubator.vector
+bin/test: PACKAGED TEST PROJECTION ACQUIRED pid= 97889 role= coordinator
+bin/test: 2026-09-15T20:21:58.661971Z START pid=97889 git=6dc70f30a9f52b977b19353cacc874a7b429ec7c namespaces=4 workers=3 silence-backstop=300s
+bin/test: 2026-09-15T20:21:58.662640Z LOAD 1/4 seon.db-test
+bin/test: 2026-09-15T20:22:00.923829Z LOADED 1/4 seon.db-test
+bin/test: 2026-09-15T20:22:00.924012Z LOAD 2/4 seon.db.declaration-population-test
+bin/test: 2026-09-15T20:22:00.938891Z LOADED 2/4 seon.db.declaration-population-test
+bin/test: 2026-09-15T20:22:00.939047Z LOAD 3/4 seon.schema-test
+bin/test: 2026-09-15T20:22:01.063072Z LOADED 3/4 seon.schema-test
+bin/test: 2026-09-15T20:22:01.063244Z LOAD 4/4 seon.instrument-test
+bin/test: 2026-09-15T20:22:01.299204Z LOADED 4/4 seon.instrument-test
+bin/test: 2026-09-15T20:22:01.299367Z SELECT building the program graph
+bin/test: 2026-09-15T20:22:23.044083Z TIER platform 0 tests
+bin/test: 2026-09-15T20:22:23.047289Z TIER bulk 91 tests
+bin/test: 2026-09-15T20:22:23.049007Z BEGIN worker=pool-3 task=seon.db-test/an-as-of-view-is-keyed-on-its-own-fixed-point
+bin/test: 2026-09-15T20:22:23.049034Z BEGIN worker=pool-2 task=seon.db-test/an-agent-namespace-is-shared-and-is-not-an-identity
+bin/test: 2026-09-15T20:22:23.049066Z BEGIN worker=pool-1 task=seon.db-test/a-write-naming-another-clusters-branch-is-refused-naming-both
+bin/test: 2026-09-15T20:22:49.905850Z END worker=pool-2 elapsed-ms=26338 task=seon.db-test/an-agent-namespace-is-shared-and-is-not-an-identity
+bin/test: 2026-09-15T20:22:49.906296Z BEGIN worker=pool-2 task=seon.db-test/collection-bound-query-evidence-covers-every-input-attribute
+bin/test: 2026-09-15T20:22:50.257173Z END worker=pool-3 elapsed-ms=26610 task=seon.db-test/an-as-of-view-is-keyed-on-its-own-fixed-point
+bin/test: 2026-09-15T20:22:50.257376Z BEGIN worker=pool-3 task=seon.db-test/component-expanded-pull-evidence-detects-a-child-only-change
+bin/test: 2026-09-15T20:22:50.364694Z END worker=pool-1 elapsed-ms=26808 task=seon.db-test/a-write-naming-another-clusters-branch-is-refused-naming-both
+bin/test: 2026-09-15T20:22:50.364939Z BEGIN worker=pool-1 task=seon.db-test/current-database-resolves-once-per-call
+bin/test: 2026-09-15T20:22:50.762335Z END worker=pool-2 elapsed-ms=482 task=seon.db-test/collection-bound-query-evidence-covers-every-input-attribute
+bin/test: 2026-09-15T20:22:50.762495Z BEGIN worker=pool-2 task=seon.db-test/database-identities-support-explicit-and-current-custody
+bin/test: 2026-09-15T20:22:50.951795Z END worker=pool-1 elapsed-ms=174 task=seon.db-test/current-database-resolves-once-per-call
+bin/test: 2026-09-15T20:22:50.951965Z BEGIN worker=pool-1 task=seon.db-test/diff-no-change-is-empty
+bin/test: 2026-09-15T20:22:51.094367Z END worker=pool-3 elapsed-ms=433 task=seon.db-test/component-expanded-pull-evidence-detects-a-child-only-change
+bin/test: 2026-09-15T20:22:51.094538Z BEGIN worker=pool-3 task=seon.db-test/diff-refuses-missing-identity-and-external-sinks
+bin/test: 2026-09-15T20:22:51.261021Z END worker=pool-2 elapsed-ms=114 task=seon.db-test/database-identities-support-explicit-and-current-custody
+bin/test: 2026-09-15T20:22:51.261229Z BEGIN worker=pool-2 task=seon.db-test/diff-replays-one-read-by-derived-identity
+bin/test: 2026-09-15T20:22:52.070501Z END worker=pool-1 elapsed-ms=730 task=seon.db-test/diff-no-change-is-empty
+bin/test: 2026-09-15T20:22:52.070685Z BEGIN worker=pool-1 task=seon.db-test/durable-pull-digests-replay-without-retaining-read-results
+bin/test: 2026-09-15T20:22:52.458675Z END worker=pool-3 elapsed-ms=971 task=seon.db-test/diff-refuses-missing-identity-and-external-sinks
+bin/test: 2026-09-15T20:22:52.458921Z BEGIN worker=pool-3 task=seon.db-test/edn-backed-reads-return-distinguishable-logical-values
+bin/test: 2026-09-15T20:22:52.519851Z END worker=pool-2 elapsed-ms=796 task=seon.db-test/diff-replays-one-read-by-derived-identity
+bin/test: 2026-09-15T20:22:52.520233Z BEGIN worker=pool-2 task=seon.db-test/entity-and-datoms-return-eager-ordinary-data
+bin/test: 2026-09-15T20:22:52.681826Z END worker=pool-1 elapsed-ms=179 task=seon.db-test/durable-pull-digests-replay-without-retaining-read-results
+bin/test: 2026-09-15T20:22:52.681997Z BEGIN worker=pool-1 task=seon.db-test/every-database-value-reader-answers-for-all-four-view-shapes
+bin/test: 2026-09-15T20:22:53.063510Z END worker=pool-3 elapsed-ms=201 task=seon.db-test/edn-backed-reads-return-distinguishable-logical-values
+bin/test: 2026-09-15T20:22:53.063677Z BEGIN worker=pool-3 task=seon.db-test/every-public-read-preserves-an-upstream-database-error
+bin/test: 2026-09-15T20:22:53.081788Z END worker=pool-2 elapsed-ms=149 task=seon.db-test/entity-and-datoms-return-eager-ordinary-data
+bin/test: 2026-09-15T20:22:53.081987Z BEGIN worker=pool-2 task=seon.db-test/explicit-and-current-database-forms-are-equivalent
+bin/test: 2026-09-15T20:22:53.235893Z END worker=pool-1 elapsed-ms=158 task=seon.db-test/every-database-value-reader-answers-for-all-four-view-shapes
+bin/test: 2026-09-15T20:22:53.236080Z BEGIN worker=pool-1 task=seon.db-test/handed-family-query-stays-below-five-milliseconds
+bin/test: 2026-09-15T20:22:53.496914Z END worker=pool-3 elapsed-ms=5 task=seon.db-test/every-public-read-preserves-an-upstream-database-error
+bin/test: 2026-09-15T20:22:53.497079Z BEGIN worker=pool-3 task=seon.db-test/instrumented-wildcard-pull-keeps-unparsed-database-fields-ordinary
+bin/test: 2026-09-15T20:22:53.701059Z END worker=pool-2 elapsed-ms=201 task=seon.db-test/explicit-and-current-database-forms-are-equivalent
+bin/test: 2026-09-15T20:22:53.701226Z BEGIN worker=pool-2 task=seon.db-test/invalid-edn-backed-storage-is-a-flat-read-error
+bin/test: 2026-09-15T20:22:53.792660Z END worker=pool-1 elapsed-ms=134 task=seon.db-test/handed-family-query-stays-below-five-milliseconds
+bin/test: 2026-09-15T20:22:53.792808Z BEGIN worker=pool-1 task=seon.db-test/invalid-read-identities-are-diagnostics-never-absence
+bin/test: 2026-09-15T20:22:54.245344Z END worker=pool-3 elapsed-ms=364 task=seon.db-test/instrumented-wildcard-pull-keeps-unparsed-database-fields-ordinary
+bin/test: 2026-09-15T20:22:54.245545Z BEGIN worker=pool-3 task=seon.db-test/malformed-public-database-requests-name-the-public-operation
+bin/test: 2026-09-15T20:22:54.343258Z END worker=pool-1 elapsed-ms=167 task=seon.db-test/invalid-read-identities-are-diagnostics-never-absence
+bin/test: 2026-09-15T20:22:54.343429Z BEGIN worker=pool-1 task=seon.db-test/malformed-reads-return-flat-errors
+bin/test: 2026-09-15T20:22:54.433813Z END worker=pool-2 elapsed-ms=314 task=seon.db-test/invalid-edn-backed-storage-is-a-flat-read-error
+bin/test: 2026-09-15T20:22:54.433968Z BEGIN worker=pool-2 task=seon.db-test/nested-native-reports-admit-bounded-reference-identities
+bin/test: 2026-09-15T20:22:54.754492Z END worker=pool-3 elapsed-ms=116 task=seon.db-test/malformed-public-database-requests-name-the-public-operation
+bin/test: 2026-09-15T20:22:54.754648Z BEGIN worker=pool-3 task=seon.db-test/non-temporal-reads-return-one-flat-error-before-datahike
+bin/test: 2026-09-15T20:22:54.844529Z END worker=pool-1 elapsed-ms=112 task=seon.db-test/malformed-reads-return-flat-errors
+bin/test: 2026-09-15T20:22:54.844737Z BEGIN worker=pool-1 task=seon.db-test/non-unique-writer-rejections-retain-their-datahike-data
+bin/test: 2026-09-15T20:22:55.184583Z END worker=pool-3 elapsed-ms=40 task=seon.db-test/non-temporal-reads-return-one-flat-error-before-datahike
+bin/test: 2026-09-15T20:22:55.184794Z BEGIN worker=pool-3 task=seon.db-test/positional-query-acceptance-remains-datahikes-contract
+bin/test: 2026-09-15T20:22:55.328878Z END worker=pool-2 elapsed-ms=521 task=seon.db-test/nested-native-reports-admit-bounded-reference-identities
+bin/test: 2026-09-15T20:22:55.329072Z BEGIN worker=pool-2 task=seon.db-test/process-local-replay-declines-unbounded-and-opaque-read-results
+bin/test: 2026-09-15T20:22:55.358323Z END worker=pool-1 elapsed-ms=131 task=seon.db-test/non-unique-writer-rejections-retain-their-datahike-data
+bin/test: 2026-09-15T20:22:55.358487Z BEGIN worker=pool-1 task=seon.db-test/pull-many-preserves-input-alignment-with-one-shared-plan
+bin/test: 2026-09-15T20:22:55.654929Z END worker=pool-3 elapsed-ms=104 task=seon.db-test/positional-query-acceptance-remains-datahikes-contract
+bin/test: 2026-09-15T20:22:55.655075Z BEGIN worker=pool-3 task=seon.db-test/query-and-pull-append-evidence-only-when-captured
+bin/test: 2026-09-15T20:22:55.826637Z END worker=pool-2 elapsed-ms=129 task=seon.db-test/process-local-replay-declines-unbounded-and-opaque-read-results
+bin/test: 2026-09-15T20:22:55.826798Z BEGIN worker=pool-2 task=seon.db-test/relation-only-queries-need-no-database-schema
+bin/test: 2026-09-15T20:22:55.843561Z END worker=pool-1 elapsed-ms=120 task=seon.db-test/pull-many-preserves-input-alignment-with-one-shared-plan
+bin/test: 2026-09-15T20:22:55.843718Z BEGIN worker=pool-1 task=seon.db-test/retained-read-evidence-invalidates-only-on-a-depended-attribute
+bin/test: 2026-09-15T20:22:56.181882Z END worker=pool-2 elapsed-ms=6 task=seon.db-test/relation-only-queries-need-no-database-schema
+bin/test: 2026-09-15T20:22:56.182072Z BEGIN worker=pool-2 task=seon.db-test/return-map-queries-preserve-ordering-and-limit
+bin/test: 2026-09-15T20:22:56.343731Z END worker=pool-1 elapsed-ms=141 task=seon.db-test/retained-read-evidence-invalidates-only-on-a-depended-attribute
+bin/test: 2026-09-15T20:22:56.343874Z BEGIN worker=pool-1 task=seon.db-test/semantic-replay-declines-opaque-and-lazy-values-without-realizing
+bin/test: 2026-09-15T20:22:56.711788Z END worker=pool-1 elapsed-ms=1 task=seon.db-test/semantic-replay-declines-opaque-and-lazy-values-without-realizing
+bin/test: 2026-09-15T20:22:56.712011Z BEGIN worker=pool-1 task=seon.db-test/supplied-database-pulls-carry-the-projection-across-unbound-reads
+bin/test: 2026-09-15T20:22:56.822517Z END worker=pool-2 elapsed-ms=289 task=seon.db-test/return-map-queries-preserve-ordering-and-limit
+bin/test: 2026-09-15T20:22:56.822696Z BEGIN worker=pool-2 task=seon.db-test/temporal-database-identities-use-the-origin-schema
+bin/test: 2026-09-15T20:22:57.252868Z END worker=pool-1 elapsed-ms=160 task=seon.db-test/supplied-database-pulls-carry-the-projection-across-unbound-reads
+bin/test: 2026-09-15T20:22:57.253044Z BEGIN worker=pool-1 task=seon.db-test/temporal-reads-use-explicit-and-ambient-database-values
+bin/test: 2026-09-15T20:22:57.327796Z END worker=pool-2 elapsed-ms=124 task=seon.db-test/temporal-database-identities-use-the-origin-schema
+bin/test: 2026-09-15T20:22:57.327953Z BEGIN worker=pool-2 task=seon.db-test/temporal-reads-use-the-carried-origins-projection
+bin/test: 2026-09-15T20:22:57.808891Z END worker=pool-1 elapsed-ms=174 task=seon.db-test/temporal-reads-use-explicit-and-ambient-database-values
+bin/test: 2026-09-15T20:22:57.809053Z BEGIN worker=pool-1 task=seon.db-test/ten-carried-queries-stay-within-twice-raw-query-cost
+bin/test: 2026-09-15T20:22:57.829921Z END worker=pool-2 elapsed-ms=122 task=seon.db-test/temporal-reads-use-the-carried-origins-projection
+bin/test: 2026-09-15T20:22:57.830099Z BEGIN worker=pool-2 task=seon.db-test/the-exam-query-returns-the-fixtures-true-count
+bin/test: 2026-09-15T20:22:58.342630Z END worker=pool-2 elapsed-ms=128 task=seon.db-test/the-exam-query-returns-the-fixtures-true-count
+bin/test: 2026-09-15T20:22:58.342786Z BEGIN worker=pool-2 task=seon.db-test/transaction-wrappers-cannot-hide-a-classified-refusal
+bin/test: 2026-09-15T20:22:58.443855Z END worker=pool-1 elapsed-ms=256 task=seon.db-test/ten-carried-queries-stay-within-twice-raw-query-cost
+bin/test: 2026-09-15T20:22:58.444002Z BEGIN worker=pool-1 task=seon.db-test/unbound-current-database-is-a-flat-error
+bin/test: 2026-09-15T20:22:58.807002Z END worker=pool-1 elapsed-ms=1 task=seon.db-test/unbound-current-database-is-a-flat-error
+bin/test: 2026-09-15T20:22:58.807183Z BEGIN worker=pool-1 task=seon.db-test/uncarried-read-reports-one-projection-fallback-per-call
+bin/test: 2026-09-15T20:22:58.892480Z END worker=pool-2 elapsed-ms=173 task=seon.db-test/transaction-wrappers-cannot-hide-a-classified-refusal
+bin/test: 2026-09-15T20:22:58.892632Z BEGIN worker=pool-2 task=seon.db-test/uninstalled-pull-attributes-refuse-without-writing
+bin/test: 2026-09-15T20:22:59.313595Z END worker=pool-1 elapsed-ms=113 task=seon.db-test/uncarried-read-reports-one-projection-fallback-per-call
+bin/test: 2026-09-15T20:22:59.313766Z BEGIN worker=pool-1 task=seon.db-test/unique-rejection-names-the-existing-owner-as-data
+bin/test: 2026-09-15T20:22:59.398895Z END worker=pool-3 elapsed-ms=3391 task=seon.db-test/query-and-pull-append-evidence-only-when-captured
+bin/test: 2026-09-15T20:22:59.399021Z BEGIN worker=pool-3 task=seon.db-test/wildcard-pull-digests-cover-empty-large-and-canonical-results
+bin/test: 2026-09-15T20:22:59.422673Z END worker=pool-2 elapsed-ms=135 task=seon.db-test/uninstalled-pull-attributes-refuse-without-writing
+bin/test: 2026-09-15T20:22:59.422996Z BEGIN worker=pool-2 task=seon.db.declaration-population-test/reads-require-their-carried-projection-including-transaction-results
+bin/test: 2026-09-15T20:22:59.974026Z END worker=pool-2 elapsed-ms=165 task=seon.db.declaration-population-test/reads-require-their-carried-projection-including-transaction-results
+bin/test: 2026-09-15T20:22:59.974181Z BEGIN worker=pool-2 task=seon.schema-test/a-component-bearing-row-validates-its-own-declared-shape
+bin/test: 2026-09-15T20:22:59.978431Z END worker=pool-3 elapsed-ms=190 task=seon.db-test/wildcard-pull-digests-cover-empty-large-and-canonical-results
+bin/test: 2026-09-15T20:22:59.978565Z BEGIN worker=pool-3 task=seon.schema-test/acquired-projection-owns-schema-introspection
+bin/test: 2026-09-15T20:23:00.700476Z END worker=pool-3 elapsed-ms=0 task=seon.schema-test/acquired-projection-owns-schema-introspection
+bin/test: 2026-09-15T20:23:00.700630Z BEGIN worker=pool-3 task=seon.schema-test/agent-authored-function-input-maps-accrete
+bin/test: 2026-09-15T20:23:01.135845Z END worker=pool-3 elapsed-ms=1 task=seon.schema-test/agent-authored-function-input-maps-accrete
+bin/test: 2026-09-15T20:23:01.136022Z BEGIN worker=pool-3 task=seon.schema-test/an-incremental-build-resolves-against-the-projection-in-hand
+bin/test: 2026-09-15T20:23:01.567125Z END worker=pool-3 elapsed-ms=11 task=seon.schema-test/an-incremental-build-resolves-against-the-projection-in-hand
+bin/test: 2026-09-15T20:23:01.567287Z BEGIN worker=pool-3 task=seon.schema-test/canonical-definition-keeps-admitted-predicate-symbols
+bin/test: 2026-09-15T20:23:01.862067Z END worker=pool-1 elapsed-ms=2156 task=seon.db-test/unique-rejection-names-the-existing-owner-as-data
+bin/test: 2026-09-15T20:23:01.862218Z BEGIN worker=pool-1 task=seon.schema-test/canonical-mutual-recursion-refuses-but-local-recursion-is-supported
+bin/test: 2026-09-15T20:23:02.203260Z END worker=pool-2 elapsed-ms=1840 task=seon.schema-test/a-component-bearing-row-validates-its-own-declared-shape
+bin/test: 2026-09-15T20:23:02.203404Z BEGIN worker=pool-2 task=seon.schema-test/canonical-rows-carry-arbitrary-namespaced-properties
+bin/test: 2026-09-15T20:23:02.273088Z END worker=pool-3 elapsed-ms=70 task=seon.schema-test/canonical-definition-keeps-admitted-predicate-symbols
+bin/test: 2026-09-15T20:23:02.273238Z BEGIN worker=pool-3 task=seon.schema-test/canonical-self-references-refuse-at-registration
+bin/test: 2026-09-15T20:23:02.594050Z END worker=pool-2 elapsed-ms=7 task=seon.schema-test/canonical-rows-carry-arbitrary-namespaced-properties
+bin/test: 2026-09-15T20:23:02.594184Z BEGIN worker=pool-2 task=seon.schema-test/database-projections-reuse-only-the-handed-value
+bin/test: 2026-09-15T20:23:03.800372Z END worker=pool-1 elapsed-ms=1540 task=seon.schema-test/canonical-mutual-recursion-refuses-but-local-recursion-is-supported
+bin/test: 2026-09-15T20:23:03.800516Z BEGIN worker=pool-1 task=seon.schema-test/equal-packaged-populations-reuse-the-shape-projection
+bin/test: 2026-09-15T20:23:04.209209Z END worker=pool-1 elapsed-ms=50 task=seon.schema-test/equal-packaged-populations-reuse-the-shape-projection
+bin/test: 2026-09-15T20:23:04.209385Z BEGIN worker=pool-1 task=seon.schema-test/every-predicate-schema-declares-what-it-accepts
+bin/test: 2026-09-15T20:23:04.570248Z END worker=pool-1 elapsed-ms=7 task=seon.schema-test/every-predicate-schema-declares-what-it-accepts
+bin/test: 2026-09-15T20:23:04.570420Z BEGIN worker=pool-1 task=seon.schema-test/function-input-and-output-fit-belong-to-one-arity
+bin/test: 2026-09-15T20:23:06.064274Z END worker=pool-3 elapsed-ms=3391 task=seon.schema-test/canonical-self-references-refuse-at-registration
+bin/test: 2026-09-15T20:23:06.064458Z BEGIN worker=pool-3 task=seon.schema-test/function-input-fit-is-total-for-an-absent-contract
+bin/test: 2026-09-15T20:23:06.492171Z END worker=pool-1 elapsed-ms=1567 task=seon.schema-test/function-input-and-output-fit-belong-to-one-arity
+bin/test: 2026-09-15T20:23:06.492393Z BEGIN worker=pool-1 task=seon.schema-test/map-shapes-accrete-additional-top-level-attributes
+bin/test: 2026-09-15T20:23:08.387205Z END worker=pool-1 elapsed-ms=1526 task=seon.schema-test/map-shapes-accrete-additional-top-level-attributes
+bin/test: 2026-09-15T20:23:08.387401Z BEGIN worker=pool-1 task=seon.schema-test/matching-shapes-derive-required-attributes-through-and-refs
+bin/test: 2026-09-15T20:23:08.445447Z END worker=pool-3 elapsed-ms=1821 task=seon.schema-test/function-input-fit-is-total-for-an-absent-contract
+bin/test: 2026-09-15T20:23:08.445615Z BEGIN worker=pool-3 task=seon.schema-test/named-predicate-violations-humanize-to-the-declared-requirement
+bin/test: 2026-09-15T20:23:08.779821Z END worker=pool-1 elapsed-ms=3 task=seon.schema-test/matching-shapes-derive-required-attributes-through-and-refs
+bin/test: 2026-09-15T20:23:08.780007Z BEGIN worker=pool-1 task=seon.schema-test/one-declaration-validates-only-its-dependency-closure
+bin/test: 2026-09-15T20:23:08.884427Z END worker=pool-3 elapsed-ms=2 task=seon.schema-test/named-predicate-violations-humanize-to-the-declared-requirement
+bin/test: 2026-09-15T20:23:08.884585Z BEGIN worker=pool-3 task=seon.schema-test/one-predicate-symbol-cannot-name-two-environments-callables
+bin/test: 2026-09-15T20:23:09.394336Z END worker=pool-1 elapsed-ms=243 task=seon.schema-test/one-declaration-validates-only-its-dependency-closure
+bin/test: 2026-09-15T20:23:09.394479Z BEGIN worker=pool-1 task=seon.schema-test/render-declarations-require-a-contract-that-accepts-their-shape
+bin/test: 2026-09-15T20:23:09.789817Z END worker=pool-1 elapsed-ms=32 task=seon.schema-test/render-declarations-require-a-contract-that-accepts-their-shape
+bin/test: 2026-09-15T20:23:09.789986Z BEGIN worker=pool-1 task=seon.schema-test/two-projections-never-exchange-a-compiled-validator
+bin/test: 2026-09-15T20:23:11.738908Z END worker=pool-2 elapsed-ms=8773 task=seon.schema-test/database-projections-reuse-only-the-handed-value
+bin/test: 2026-09-15T20:23:11.739245Z BEGIN worker=pool-2 task=seon.instrument-test/a-flat-error-value-at-a-contract-boundary-is-its-own-face
+bin/test: 2026-09-15T20:23:12.332302Z END worker=pool-2 elapsed-ms=206 task=seon.instrument-test/a-flat-error-value-at-a-contract-boundary-is-its-own-face
+bin/test: 2026-09-15T20:23:12.332450Z BEGIN worker=pool-2 task=seon.instrument-test/a-public-multi-arity-does-not-reenter-its-instrumented-var
+bin/test: 2026-09-15T20:23:13.145849Z END worker=pool-2 elapsed-ms=427 task=seon.instrument-test/a-public-multi-arity-does-not-reenter-its-instrumented-var
+bin/test: 2026-09-15T20:23:13.145979Z BEGIN worker=pool-2 task=seon.instrument-test/a-sci-only-arity-miss-names-its-program-graph-arglists
+bin/test: 2026-09-15T20:23:13.496809Z END worker=pool-1 elapsed-ms=3320 task=seon.schema-test/two-projections-never-exchange-a-compiled-validator
+bin/test: 2026-09-15T20:23:13.497001Z BEGIN worker=pool-1 task=seon.instrument-test/a-violation-carries-bounded-arguments-only-when-it-can
+bin/test: 2026-09-15T20:23:14.692344Z END worker=pool-1 elapsed-ms=805 task=seon.instrument-test/a-violation-carries-bounded-arguments-only-when-it-can
+bin/test: 2026-09-15T20:23:14.692499Z BEGIN worker=pool-1 task=seon.instrument-test/a-wrong-shaped-call-throws-a-flat-error-value
+bin/test: 2026-09-15T20:23:15.382195Z END worker=pool-1 elapsed-ms=320 task=seon.instrument-test/a-wrong-shaped-call-throws-a-flat-error-value
+bin/test: 2026-09-15T20:23:15.382321Z BEGIN worker=pool-1 task=seon.instrument-test/an-invalid-core-error-mode-is-an-evidence-complete-value
+bin/test: 2026-09-15T20:23:15.774180Z END worker=pool-3 elapsed-ms=6431 task=seon.schema-test/one-predicate-symbol-cannot-name-two-environments-callables
+bin/test: 2026-09-15T20:23:15.774301Z BEGIN worker=pool-3 task=seon.instrument-test/applying-twice-is-applying-once
+bin/test: 2026-09-15T20:23:16.072010Z END worker=pool-1 elapsed-ms=327 task=seon.instrument-test/an-invalid-core-error-mode-is-an-evidence-complete-value
+bin/test: 2026-09-15T20:23:16.072199Z BEGIN worker=pool-1 task=seon.instrument-test/applying-uses-the-acquired-projection-without-publishing-it
+bin/test: 2026-09-15T20:23:16.617004Z END worker=pool-3 elapsed-ms=448 task=seon.instrument-test/applying-twice-is-applying-once
+bin/test: 2026-09-15T20:23:16.617122Z BEGIN worker=pool-3 task=seon.instrument-test/applying-without-a-handed-projection-refuses-before-collection
+bin/test: 2026-09-15T20:23:17.108781Z END worker=pool-3 elapsed-ms=157 task=seon.instrument-test/applying-without-a-handed-projection-refuses-before-collection
+bin/test: 2026-09-15T20:23:17.108895Z BEGIN worker=pool-3 task=seon.instrument-test/authored-contract-changes-rearm-without-reloading
+bin/test: 2026-09-15T20:23:17.229375Z END worker=pool-2 elapsed-ms=3660 task=seon.instrument-test/a-sci-only-arity-miss-names-its-program-graph-arglists
+bin/test: 2026-09-15T20:23:17.229503Z BEGIN worker=pool-2 task=seon.instrument-test/cluster-policy-and-removal-preserve-the-jvm-wrappers
+bin/test: 2026-09-15T20:23:18.000308Z END worker=pool-2 elapsed-ms=440 task=seon.instrument-test/cluster-policy-and-removal-preserve-the-jvm-wrappers
+bin/test: 2026-09-15T20:23:18.000444Z BEGIN worker=pool-2 task=seon.instrument-test/contract-problems-are-semantic-once-never-a-serialized-print-tree
+bin/test: 2026-09-15T20:23:18.059326Z END worker=pool-1 elapsed-ms=1639 task=seon.instrument-test/applying-uses-the-acquired-projection-without-publishing-it
+bin/test: 2026-09-15T20:23:18.059509Z BEGIN worker=pool-1 task=seon.instrument-test/dependency-free-linters-join-production-instrumentation
+bin/test: 2026-09-15T20:23:18.763419Z END worker=pool-1 elapsed-ms=361 task=seon.instrument-test/dependency-free-linters-join-production-instrumentation
+bin/test: 2026-09-15T20:23:18.763558Z BEGIN worker=pool-1 task=seon.instrument-test/interpreted-contracts-use-the-active-registry-and-core-error-dial
+bin/test: 2026-09-15T20:23:18.890194Z END worker=pool-2 elapsed-ms=555 task=seon.instrument-test/contract-problems-are-semantic-once-never-a-serialized-print-tree
+bin/test: 2026-09-15T20:23:18.890351Z BEGIN worker=pool-2 task=seon.instrument-test/jvm-and-interpreted-functions-arm-the-declared-guard
+bin/test: 2026-09-15T20:23:19.285428Z END worker=pool-3 elapsed-ms=1833 task=seon.instrument-test/authored-contract-changes-rearm-without-reloading
+bin/test: 2026-09-15T20:23:19.285573Z BEGIN worker=pool-3 task=seon.instrument-test/many-problem-contract-violations-have-bounded-headlines
+bin/test: 2026-09-15T20:23:19.733404Z END worker=pool-2 elapsed-ms=511 task=seon.instrument-test/jvm-and-interpreted-functions-arm-the-declared-guard
+bin/test: 2026-09-15T20:23:19.733652Z BEGIN worker=pool-2 task=seon.instrument-test/optional-positional-nil-is-valid-under-instrumentation
+bin/test: 2026-09-15T20:23:20.197970Z END worker=pool-3 elapsed-ms=577 task=seon.instrument-test/many-problem-contract-violations-have-bounded-headlines
+bin/test: 2026-09-15T20:23:20.200231Z BEGIN worker=pool-3 task=seon.instrument-test/prefix-related-sibling-vars-keep-their-own-contracts
+bin/test: 2026-09-15T20:23:20.407317Z END worker=pool-2 elapsed-ms=331 task=seon.instrument-test/optional-positional-nil-is-valid-under-instrumentation
+bin/test: 2026-09-15T20:23:20.407445Z BEGIN worker=pool-2 task=seon.instrument-test/projection-gates-inspect-the-complete-candidate-population
+bin/test: 2026-09-15T20:23:20.845448Z END worker=pool-1 elapsed-ms=1749 task=seon.instrument-test/interpreted-contracts-use-the-active-registry-and-core-error-dial
+bin/test: 2026-09-15T20:23:20.845600Z BEGIN worker=pool-1 task=seon.instrument-test/re-evaluating-a-defn-silently-strips-instrumentation
+bin/test: 2026-09-15T20:23:20.965045Z END worker=pool-3 elapsed-ms=373 task=seon.instrument-test/prefix-related-sibling-vars-keep-their-own-contracts
+bin/test: 2026-09-15T20:23:20.965166Z BEGIN worker=pool-3 task=seon.instrument-test/refusal-value-projection-obeys-the-profile-and-html-keeps-the-whole-value
+bin/test: 2026-09-15T20:23:21.637512Z END worker=pool-1 elapsed-ms=447 task=seon.instrument-test/re-evaluating-a-defn-silently-strips-instrumentation
+bin/test: 2026-09-15T20:23:21.637636Z BEGIN worker=pool-1 task=seon.instrument-test/registration-failure-names-the-var-and-authored-contract
+bin/test: 2026-09-15T20:23:21.858894Z END worker=pool-3 elapsed-ms=551 task=seon.instrument-test/refusal-value-projection-obeys-the-profile-and-html-keeps-the-whole-value
+bin/test: 2026-09-15T20:23:21.859021Z BEGIN worker=pool-3 task=seon.instrument-test/registry-sized-contract-evidence-retains-the-offending-object
+bin/test: 2026-09-15T20:23:22.262278Z END worker=pool-1 elapsed-ms=277 task=seon.instrument-test/registration-failure-names-the-var-and-authored-contract
+bin/test: 2026-09-15T20:23:22.262442Z BEGIN worker=pool-1 task=seon.instrument-test/the-selection-is-declared-vars-with-schemas-and-nothing-else
+bin/test: 2026-09-15T20:23:22.431261Z END worker=pool-2 elapsed-ms=1683 task=seon.instrument-test/projection-gates-inspect-the-complete-candidate-population
+bin/test: 2026-09-15T20:23:22.431405Z BEGIN worker=pool-2 task=seon.instrument-test/the-work-launcher-api-is-collected-without-an-allowlist
+bin/test: 2026-09-15T20:23:22.841101Z END worker=pool-3 elapsed-ms=635 task=seon.instrument-test/registry-sized-contract-evidence-retains-the-offending-object
+bin/test: 2026-09-15T20:23:22.974361Z END worker=pool-1 elapsed-ms=359 task=seon.instrument-test/the-selection-is-declared-vars-with-schemas-and-nothing-else
+bin/test: 2026-09-15T20:23:23.120435Z END worker=pool-2 elapsed-ms=338 task=seon.instrument-test/the-work-launcher-api-is-collected-without-an-allowlist
+
+Ran 91 tests containing 680 assertions.
+0 failures, 0 errors.
+WARNING: reset! already refers to: #'clojure.core/reset! in namespace: seon.fresh-operator, being replaced by: #'seon.fresh-operator/reset!
+bin/test: PHASE coordinator-and-tests elapsed-seconds=99
+bin/test: removed successful isolated operator root /Users/sean/src/seon/tmp/p1-carriage-wt/tmp/test-runs/run.PwEgG3

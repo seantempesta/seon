@@ -7,6 +7,16 @@ tags: [issue, mcp, runtime]
 
 # Default component probe timed out after development adoption
 
+P1, 2026-09-15: a later repeat of the empty-domain-transaction report probe
+in JVM session `p1-ambient-state` timed out at 20,000 ms on default PID 69622 /
+PREPL 55914. Its outcome is unknown and it was not retried. The earlier
+completed report probe verified both carried values and successful root-id
+reads. Runtime status afterward returned `ClassCastException` from
+`clojure.lang.RT/dissoc`: MapEntry cannot be cast to IPersistentMap. This
+establishes unavailable health observation, not an adoption cause. No default
+lifecycle operation or alternate transport was used. See
+[the P1 landing](../../prds/context-generation/research/p1-ambient-state-2026-09-15.md).
+
 Refusal-grammar, 2026-09-15: default PID 69622 / PREPL 55914 initially
 answered runtime status with all three plumbing procs replying. The read-only
 JVM reader/cause-chain probe returned in 1,016 ms. Loading the saved expanded
@@ -167,3 +177,7 @@ Doc/dir cost verification, 2026-09-15: runtime_status again returned unknown
 health and Flow with Read timed out for PID 23729. Read-only MCP JVM allocation
 probes completed successfully. This re-observes the health endpoint boundary;
 it does not identify its cause. No lifecycle operation was performed.
+
+## P1 final observation — 2026-09-15
+
+`b80f78a7c` fixes the raw database producer that made error-signatures iterate a missing-projection error into MapEntries. Default runtime observation now returns `observed`, two agents and three error-signature groups (41 ms combined read probe). The separate explicit publication attempt ended with `lock-hold-timeout`, 900000 ms, and did not establish complete source adoption. Default was not restarted. Final HTTP probes were 1.526276 and 1.806096 seconds, both with zero new projection-fallback warnings.

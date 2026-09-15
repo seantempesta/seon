@@ -4,9 +4,268 @@ status: active
 tags: [research, schema, database, architecture]
 ---
 
-# P1: verified residuals and the owner design gate
+# P1: projection carriage and remaining producer boundaries
 
-## Outcome
+## Outcome — final handoff, 2026-09-15
+
+Implementation and canonical regressions: **`b80f78a7c`**. Read all named
+authorities and every class member end to end before this work. Option 1 is
+implemented at the existing projection seam: **a read or admission consumes
+its carried/supplied projection, and missing projection never rebuilds from
+the database; it returns the one counted `seon.db/projection-fallback` error.**
+Database values capture immutable projection metadata, including both values
+in transaction reports and the database passed into transaction callbacks.
+The existing explicitly supplied thread projection remains a compatibility
+input to database reads/config/transaction construction; this slice does not
+claim to remove every ambient input or close all of P1.
+
+Final default JVM probe, PID 69622: supplied versus carried pull-in-find,
+scalar find, and tuple find all compare equal (`[true true true]`). Raw
+`problems` with no projection returns `:seon.schema/missing-projection` and
+exactly one warning. Runtime observation reports `observed`, two agents and
+three error-signature groups. No MapEntry exception. Reloaded turn Vars and
+re-armed 993 contracts; default was never stopped, restarted, or reforked.
+
+Final HTTP probe: **200, 1.526276 seconds, zero new projection-fallback
+warnings**, counting only log bytes appended during the request. Earlier
+baseline was 21.406758 seconds; the owner's incident measurements were
+28.5/20.6/22.7 seconds. A second probe after contract re-arming returned **200, 1.806096 seconds,
+zero warnings**. Therefore the 1.6-second target is not consistently verified;
+no independent cold-cache or latency-distribution claim is made.
+Exact HTTP evidence: [p1-page-final-2026-09-15.json](p1-page-final-2026-09-15.json).
+
+`turn.clj` became clean at HEAD before the final edit. Its database births
+now use `db/db`; declaration and terminal admission use the carried projection.
+Previously protected kernel, config, SCI acquisition and documentation changes
+also landed before this lane edited them. The runner diff is only the two
+owned cold-publication constructor lines. No foreign report, reader, fixture,
+operator, or schema-resource edits are included.
+
+### Verification boundary and gate request
+
+At the owner's 21:05Z rule, lane testing stopped. **No new tests were run
+after that instruction.** The earlier expanded gate was red (197 tests,
+1309 assertions, 25 failures, 13 errors); its evidence is retained below.
+Subsequent fixes include the partial-registry instrumentation candidate,
+raw documentation fixtures, admission world propagation, transaction callback
+carriage, and warming the shipped print grammar before the class probe's
+resource counters. These corrected regressions await the orchestrator's gate.
+
+Exact namespace request: `tmp/orchestrator/gate-requests/p1-ambient-state.txt`
+(one namespace per line, plus `platform`). Do not infer a platform pass.
+Clj-kondo: one existing unresolved generated constructor
+`datalog.parser.type/->Variable` at db.clj:473, 130 warnings. Both publication
+classpath and direct dependency cache refreshes were attempted. HEAD already
+contains this call; `reference-code/datalog-parser/src/datalog/parser/type.cljc:40`
+defines `Variable` through `deftrecord`. The final lint output is retained.
+
+The explicit publication attempt ended with lock-hold-timeout after 900000ms;
+there is no successful adoption claim for this complete slice. Live evidence
+exercised hot-loaded Vars in the existing default JVM. The orchestrator must
+verify complete source adoption along with the batched gate. All lane-owned
+shells are ended; the disposable worktree is removed at handoff.
+
+### Latest allocation observations
+
+ThreadMXBean carried Juniper id read: **672,048 bytes / 0.947250 ms**.
+Raw fallback before repair: **4,506,504,040 bytes / 982.175166 ms**.
+Transaction-report after-value reads: **1,866,504 bytes / 2.787583 ms**, then
+**596,000 / 0.919166 ms**, both with zero fallback warnings. The owner's
+previous report-derived read rebuilt for 1086 ms.
+
+Admission with explicit world: 20-map result **1,793,912 bytes / 3.468875 ms**,
+repeat **1,793,200 / 2.417959 ms**; 100 maps **8,387,288 / 9.613041 ms**.
+All returned the same value. Historical 20-map admission was 374.68–382.31 ms;
+no historical allocation count was recorded, so none is invented here.
+Real guarded schema candidates fell from about 4.65 GB / 907–919 ms to
+107.85–108.69 MB / 44–45 ms; the independent 64 MiB whole-evaluation budget
+remains open in its named residual issue.
+
+The dated sections below preserve the investigation, member verdicts,
+three priced out-of-scope options, and earlier verification boundaries.
+Later observations above supersede temporary protected-file claims below.
+
+### Implementation and measurements after the decision
+
+The database read fallback no longer constructs declarations. Its single
+`projection-fallback` seam emits one counted warning and returns a flat
+`:seon.schema/missing-projection`. Missing input preserves that exact error at
+the public read boundary. `schema/handed-projection` no longer constructs a
+projection from packaged forms. Transaction admission no longer silently
+builds either a database or a packaged projection.
+
+`carry-projection-state` now also captures the immutable projection in
+database metadata; an already carried snapshot wins over later environment
+state. Transaction reports carry projection state and the projection on both
+`:db-before` and `:db-after`. JVM instrumentation checks database argument
+metadata before selecting its existing request/thread/host projections.
+
+**Temporary compatibility boundary:** `read-declarations` still accepts an
+already supplied projection binding. Removing that branch exposed raw inputs
+in protected SCI acquisition and MCP configuration. The edit hook loaded the
+strict reader and MCP reported missing configuration despite the facts being
+present. Restoring this existing binding path and hot-reloading db restored
+MCP. The rebuild fallback stays deleted. The subsequent explicit re-arm
+reported 990 instrumented Vars. Do not describe the shared tree as having
+eliminated all dynamic projection selection yet.
+
+The strict candidate was tested separately in a disposable HEAD worktree with
+the exact proposed acquisition edits, without touching the protected shared
+file. Its canonical armed regression passed **1 test / 21 assertions / zero
+failures or errors**, including a usable competing thread projection that
+could not rescue an uncarried database. That proves the candidate read seam;
+it does not prove complete producer migration or live adoption.
+The exact producer patch is
+[p1-protected-acquisition-2026-09-15.patch](p1-protected-acquisition-2026-09-15.patch).
+Cold cluster construction remains the explicit projection constructor;
+`acquire!` takes the result from its request, database or ctx and refuses
+absence. It no longer implicitly rebuilds inside acquisition.
+
+Live JVM proof after db hot reload and contract re-arming, default:
+`(seon.db/transact! connection [])` committed an empty domain transaction.
+Both returned database values had carried projections; db-after also had
+projection state. Two root-id pulls from db-after measured **1,866,504 bytes /
+2.787583 ms** and **596,000 bytes / 0.919166 ms**, with no warnings. The raw
+uncarried comparison returned one missing-projection error and one warning
+in **677,544 bytes / 1.422125 ms**. Before this lane, the same raw read cost
+**4,506,504,040 bytes / 982.175166 ms**; the owner's transaction-report probe
+had logged a **1,086 ms** rebuild. The operation and outcome changed for
+missing input: this is refusal cost, not a faster successful read.
+
+The initial strict fast run against unmodified producers failed **45 tests /
+76 assertions / 40 errors** at SCI acquisition after missing-projection
+reads. This is the measured migration dependency. The original hand-rostered
+database declaration test is replaced in place with the canonical
+fixture regression; no alternate fixture path is retained.
+
+### Further live measurements and verification
+
+The original two SCI registration forms were evaluated in a private context
+acquired from default's carried database. The context received explicit read
+custody for lazy program installation, created no listener, and returned
+candidate rows; it did not mutate default's shared context or transact either
+schema. A follow-up database query returned no rows for either schema key.
+The warm arithmetic form returned 2.
+
+| Guarded SCI declaration | Historical allocation / duration | September 15 allocation / duration |
+|---|---:|---:|
+| `:my.dogfood/score`, bounded integer | 4,652,159,248 bytes / 919 ms | 108,685,472 bytes / 45 ms |
+| `:my.dogfood/label`, nonempty string | 4,652,146,872 bytes / 907 ms | 107,849,320 bytes / 44 ms |
+
+The kernel record uses ThreadMXBean allocated bytes on the executing thread.
+These are complete guarded evaluations, not the pure constructor numbers.
+The pure candidate calls measured 819,984 bytes / 1.415750 ms (score) and
+806,288 bytes / 0.980542 ms (label). `fba6bc4c1` had already removed the
+full-population declaration compilation; this lane does not claim that
+historical repair as new code. Full evaluation remains above the existing
+64 MiB allocation assertion; its residual is recorded in
+[guarded-schema-declarations-still-exceed-the-allocation-regression-bound.md](../../../seon/issues/guarded-schema-declarations-still-exceed-the-allocation-regression-bound.md).
+
+The first connectionless probe lacked the custody lazy installation requires:
+its warm form returned 2, but declarations returned a null-connection failure.
+That failed probe is not included as a successful allocation result. Supplying
+read custody made both declarations succeed. Config acquisition also required
+its existing explicit binding; the protected config producer is named in the
+remaining-carriage issue.
+
+Reproducible after forms:
+[p1-carriage-after-probes-2026-09-15.clj](p1-carriage-after-probes-2026-09-15.clj).
+
+### Gate iterations
+
+- Initial compatible fast run: 46 tests / 341 assertions, zero failures/errors.
+  Ten carried queries: 27,440,626 ns versus raw 27,562,041 ns.
+- First isolated gate stopped before tests: the runner's cold sealed-source
+  constructor omitted its projection before provenance reads. The owned
+  `src/seon/test/runner.clj` change attaches its once-acquired projection there.
+- Second gate, `ff60a3cf7` plus the six owned paths: 112 tests / 781 assertions,
+  13 failures / 3 errors. Temporal-carriage hit `NoSuchFileException` in the
+  shared published fixture store and passed isolated confirmation. The landed
+  fixture repair `bc3746037` is now included in the checkout. Seven render
+  tests failed with missing proc input, stale face expectations, a resolver
+  fixture trap, and a nested database Datom/Map.Entry exception. Those are
+  exact protected render/test boundaries, not evidence that the direct
+  database-identity producer still violates its contract.
+- Third gate, `6dc70f30a` plus the owned paths: 91 tests / 673 assertions,
+  12 failures / 3 errors, all in this lane's expanded class regression. The
+  test had selected a retired attribute from its former fixture. It now uses
+  the canonical namespace identity attribute; no synthetic schema roster.
+  Existing database, schema, and instrumentation tests passed.
+
+The fourth gate passed **91 tests / 676 assertions / zero failures or errors**,
+but exited 1 because durable result recording requires a published current-src
+at the launcher root. The disposable worktree had none. This was a test-root
+setup omission, not a branch-head race or an assertion failure. The worktree's
+own source publication is being initialized before rerunning the gate; no
+cluster or default lifecycle operation is required.
+
+### Latest live boundary
+
+A later repeat of the empty-domain-transaction report probe timed out at
+20,000 ms. Its transaction outcome is unknown; it was not retried. The
+subsequent runtime-status tool selected the same default PID 69622 / PREPL
+55914 but returned `ClassCastException` at `clojure.lang.RT/dissoc`: MapEntry
+cannot be cast to IPersistentMap. This is an unavailable health observation,
+not a proven cause of the preceding timeout or a contradiction of the earlier
+completed report measurements. No alternate transport or default lifecycle
+operation was used. The publication shell for the test edit was terminated
+while still waiting for another publication's lifecycle lock; the edit hook
+has the test change queued. No foreign publication was interrupted.
+
+### Remaining integration boundary
+
+The strict-carriage continuation is recorded in
+[read-and-admission-producers-still-require-thread-projections.md](../../../seon/issues/read-and-admission-producers-still-require-thread-projections.md).
+The separate nested-render residual is
+[nested-database-rendering-treats-datoms-as-map-entries.md](../../../seon/issues/nested-database-rendering-treats-datoms-as-map-entries.md).
+No protected admission, acquisition, config, render, report, or fixture source
+was edited in the shared tree. Only the instrumentation argument-projection
+selection hunk belongs to this lane; report-function edits are excluded from
+its isolated checkout and commit.
+
+### Exact admission edit for the protected owner
+
+Apply after bisect releases the relevant admission section; its other changes
+must be preserved. This patch uses the existing missing-result shape plus
+the shared flat error, so no second diagnostic or schema family is needed.
+The caller migration must hand projections in requests that currently rely on
+thread state (notably error normalization) before enabling this refusal.
+
+```diff
+--- a/src/seon/sci/admit.clj
++++ b/src/seon/sci/admit.clj
+@@
+             [seon.id :as id]
++            [seon.db :as db]
++            [seon.env :as env]
+@@
+     supplied-projection :seon.schema/projection
+-    on-core-error :seon.config/on-core-error}]
++    on-core-error :seon.config/on-core-error
++    :as request}]
+@@
+-    (admit-walk value interrupt-fn caps record unbounded?
+-                supplied-projection on-core-error)))
++    (if-let [projection
++             (or supplied-projection
++                 (:seon.schema/projection (env/of request))
++                 (some-> (:seon.sci.eval/ctx request)
++                         env/of :seon.schema/projection)
++                 (when (db/database-value? value)
++                   (db/carried-projection value)))]
++      (admit-walk value interrupt-fn caps record unbounded?
++                  projection on-core-error)
++      (cond-> (assoc (db/projection-fallback 'seon.sci.admit/admit)
++                     :seon.sci.admit/reason :unserializable)
++        record (assoc ::record record)))))
+@@
+-  (let [projection (or supplied-projection (schema/handed-projection))
++  (let [projection supplied-projection
+```
+
+This is an unexecuted proposed diff, not a claimed tested admission repair.
+
+### Original design boundary (before owner approval)
 
 Design stop before production edits, as explicitly required by the assignment
 and AGENTS.md §2.5. This is not a class closure or a failed test gate.
@@ -62,7 +321,7 @@ explicitly assigned member note end to end, including the archived admission
 and instrumentation records. Read the complete issue-class-mining report;
 its P1 structural-kill column says the immutable environment/projection rides
 the work or database value and APIs expose no dynamic/process fallback.
-Skills used: data-oriented-clojure, repl, datahike.
+Skills used: data-oriented-clojure, repl, datahike, clojure-testing.
 
 Source basis: `22893b71383cec23c8763df7da841524259a1774`, branch
 `steward-platform`. `bin/seon status`: default PID 69622 alive, prepl 55914,
@@ -82,7 +341,7 @@ src/seon/cluster.clj, src/seon/render/value.clj, and the four named bisect
 test files. During this audit src/seon/sci/admit.clj also acquired an unrelated
 8-line diff. All were preserved. No other lane was contacted or operated.
 
-## Dependency ledger and current owning seams
+## Dependency ledger and owning seams at the initial audit
 
 - Datahike gitlink `cdcb5792db8bd599487f099437265d18a31164a5`:
   reference-code/datahike/src/datahike/versioning.cljc:75 derives cache
@@ -110,7 +369,7 @@ test files. During this audit src/seon/sci/admit.clj also acquired an unrelated
   the packaged population again to find refusal provenance. This is a
   remaining sideways read, not the historical accumulating atom.
 
-## Per-member verdicts at this boundary
+## Per-member verdicts at the initial audit
 
 These are dated verification verdicts, not new lifecycle statuses. No member
 is falsely closed on source existence or a missing signal.
@@ -133,7 +392,7 @@ is falsely closed on source existence or a missing signal.
 | flow-work-launcher-graph-omits-its-root-io-executor.md | Extra current tagged member: HEAD flow.clj:602–640 still ends graph definition with only compute-exec. No placement proof or flow edit. |
 | seon-db-reads-rebuild-the-projection-per-call-when-none-is-handed.md | Confirmed live after the earlier carriage repair; exact measured raw/carried comparison below. This is the first narrow implementation target in option 1. |
 
-## Measured numbers
+## Initial read-only measurements
 
 Read-only MCP JVM session `p1-ambient-state`, default, timeout 20,000 ms.
 Thread allocation uses `com.sun.management.ThreadMXBean` on the evaluating
@@ -167,12 +426,10 @@ The direct identity producer returned:
 database :cluster-default at basis transaction 536871456 commit 6aa99da3-a457-5bce-8013-22d448397f75
 ```
 
-Historical measurements in member notes are not newly reproduced before/after
-results. There is no new implementation whose allocation improvement can be
-claimed. Exact executed forms are retained as data in
+These measurements preceded this lane's implementation. Exact executed forms are retained as data in
 [p1-ambient-state-probes-2026-09-15.edn](p1-ambient-state-probes-2026-09-15.edn).
 
-## Gates and exact boundary
+## Historical design-stop boundary
 
 No test invocation: the assignment's design stop fired before implementation
 or test edits. Neither the named-path gate nor --platform is claimed green.
@@ -186,3 +443,112 @@ schema advancement at the producer seam.
 No default lifecycle change, no source reload/adoption, no test JVM, background
 shell, scratch root, or worktree was created. The index's missing schedule
 rows are a recorded documentation boundary, not the reason for this stop.
+
+## Live regressions, resumed after owner interruption
+
+The JVM probe verifies that a projection-less `seon.db/q` returns the flat
+`:seon.schema/missing-projection` error, not malformed decoded rows.
+`seon.problems/error-signatures` iterated that error map, creating MapEntry
+values. The same query on `(seon.db/db (seon.operator/connection "default"))`
+returned three proper maps. `readiness` now acquires through `seon.db/db`, and
+`problems` refuses missing input before iterating query results. A hot-reloaded
+Var probe of `mcp-runtime-observation` returned health `observed`, three error
+signature groups, and two agents in 90 ms. Default was never restarted.
+
+The canonical class regression now probes collection pull-in-find, scalar find,
+and tuple find with seed 20260915, comparing explicitly supplied projection to
+immutable database metadata. Truly missing projection remains a flat refusal;
+identical successful decoding there would violate the approved no-rebuild law.
+
+Page measurements (`curl --max-time 60 -w '%{time_total}'`): before 21.406758 s;
+after database producer carriage 39.036521 and 32.794528 s; after supplying the
+whole projection at the decoder boundary 22.590403 s; after metadata-only
+instrumentation selection 15.081215 s. These measurements DO NOT meet 1.6 s.
+
+A JVM thread dump during the final page load verifies an independent remaining
+rebuild: `seon.sci.eval/documentation-contract` at line 1155 calls
+`schema/projection-from-database` per documented function, through
+`directory-value`, on the debug-page thread. This function is inside a foreign
+uncommitted documentation hunk. Exact required replacement in that hunk:
+
+```diff
+-    (let [projection (schema/projection-from-database database)
++    (let [projection (or (db/carried-projection database)
++                         (let [failure (db/projection-fallback
++                                        'seon.sci.eval/documentation-contract)]
++                           (throw (ex-info (:seon.error/message failure) failure))))
+```
+
+The proposed change must land at that read consumer, not as a hidden cache or
+fallback in the projection constructor. The foreign hunk is preserved. This
+verified boundary prevents claiming the requested complete page performance
+proof. Read producers in `render.web` now use `db/db`; render request/profile
+and walk acquisition prefer the request or database's projection.
+
+Latest read-only ThreadMXBean probe on default, after decoder/instrumentation
+changes: pulling Juniper's identity returned the proper map, allocated 672,048
+bytes, and took 0.947250 ms. No projection-fallback event was emitted.
+
+Additional exact protected admission producer edits: both `admit/admit-value`
+request maps in `src/seon/sci/kernel.clj:589,609` need
+`:seon.schema/projection (context-projection ctx)`. The existing ctx already
+owns that projection; no new mechanism is needed. `src/seon/turn.clj:3345`
+needs `(db/carried-projection database)` after its read constructor becomes
+`(db/db (:seon.db/connection cluster))`. Both files have concurrent edits.
+The now-free admission consumer cannot safely drop its thread input before
+these request producers carry it; the residual issue remains open.
+
+The bounded page/log observation returned HTTP 200 in **35.829011 s** with
+**zero projection-fallback warnings** in the log bytes appended during the
+request. This proves producer carriage for that request, not the latency goal.
+Evidence: [page observation](p1-page-observation-2026-09-15.json) and
+[page-thread stack](p1-page-stack-2026-09-15.txt). The stack was captured with
+`jcmd 69622 Thread.dump_to_file -format=json tmp/p1-page-threads.json` during
+a page request; only the request thread's stack is retained.
+
+## Subsequent landing and continued carriage work
+
+The documentation/kernel owner landed `a65985098`, freeing those files.
+The exact documentation replacement above is now applied, and its compiled
+contract description rides the existing projection-owned cache keyed by the
+source spec. The first page after removing reconstruction took 4.103555 s;
+repeats took 3.066094 and 3.265483 s. This narrows the cost but does not meet
+1.6 s. A later compiled-contract-cache probe took 4.579336 s; no stronger
+performance claim is made. A selection-input reduction experiment failed to
+improve its measurement (5.133967 s) and was removed.
+
+`acquire!` now takes its projection from its request/database/ctx and refuses
+absence at the common seam. Both guarded-invocation admission requests now
+carry their ctx projection. Admission no longer reads `handed-projection`;
+it takes a projection from its request/environment or value metadata. The
+context-free EDN codec still accepts ordinary scalars and collections without
+a schema projection; identity projection uses the supplied value only. Each
+nested value's own metadata wins over an enclosing operation's projection.
+A read-only default probe admitted the real carried database with an empty
+thread carrier and returned exactly `database-value-identity` (true).
+
+The existing transaction-function codec wrapper now attaches its supplied
+projection to the callback's database value. Dependency evidence:
+`reference-code/datahike/src/datahike/db/transaction.cljc:1152` invokes the
+function with its actual transaction database; the existing first-party
+wrapper is `src/seon/schema/datahike.clj:478`. The canonical class regression
+now includes a real transaction-function read with an empty thread carrier,
+and admission of a carried database with no thread projection.
+
+The effect admission check also rebuilt from the database at
+`src/seon/effect.clj:179`. It now takes the carried/request projection, with
+absence reported at `seon.db/projection-fallback`. Its one ordinary read
+constructor uses `db/db`, and its codec request retains the supplied world.
+
+Expanded gate on `a65985098`: **197 tests / 1309 assertions / 25 failures /
+13 errors**, exit 1. Full attributed evidence is
+[p1-expanded-gate-2026-09-15.txt](p1-expanded-gate-2026-09-15.txt).
+One new instrumentation experiment incorrectly selected partial standalone
+projections for host contract compilation; it caused the schema test errors
+and was removed. The incremental schema live probe then returned true.
+Documentation tests passed raw database values and now acquire them through
+`db/db`. Other failures include the already recorded nested Datom rendering,
+old scalar-plan rendering expectations, missing preview process input, stale
+elision wording, a compiled-resolver trap, and the protected web tests'
+completion/count assertions. This gate is not represented as green.
+The new snapshot uses landed `f000669b0` plus only this lane's paths.

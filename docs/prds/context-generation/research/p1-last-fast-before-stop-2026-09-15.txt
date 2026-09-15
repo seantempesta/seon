@@ -1,0 +1,1285 @@
+bin/test: reaped retained isolated operator root /Users/sean/src/seon/tmp/p1-carriage-wt/tmp/test-runs/run.8tcWSY
+bin/test: snapshot differences from HEAD f000669b0fb35ac586c1087883cdf661e2cadcaa:
+bin/test:   M	src/seon/cluster.clj
+bin/test:   M	src/seon/db.clj
+bin/test:   M	src/seon/effect.clj
+bin/test:   M	src/seon/instrument.clj
+bin/test:   M	src/seon/problems.clj
+bin/test:   M	src/seon/render.clj
+bin/test:   M	src/seon/render/value.clj
+bin/test:   M	src/seon/render/walk.clj
+bin/test:   M	src/seon/render/web.clj
+bin/test:   M	src/seon/schema.clj
+bin/test:   M	src/seon/schema/datahike.clj
+bin/test:   M	src/seon/sci/admit.clj
+bin/test:   M	src/seon/sci/eval.clj
+bin/test:   M	src/seon/sci/kernel.clj
+bin/test:   M	src/seon/test/runner.clj
+bin/test:   M	test/seon/db/declaration_population_test.clj
+bin/test:   M	test/seon/db_test.clj
+bin/test:   M	test/seon/problems_test.clj
+bin/test:   M	test/seon/sci/documentation_test.clj
+bin/test: end snapshot differences
+bin/test: PHASE snapshot elapsed-seconds=6
+bin/test: PHASE test-slot elapsed-seconds=0
+bin/test-fast: selected snapshot /Users/sean/src/seon/tmp/p1-carriage-wt/tmp/test-runs/run.zp4mAi
+WARNING: Using incubator modules: jdk.incubator.vector
+bin/test: PACKAGED TEST PROJECTION ACQUIRED pid= 15880 role= test-fast
+bin/test: PACKAGED TEST PROJECTION ACQUIRED pid= 15880 role= test-fast
+bin/test: CONTRACTS ARMED worker= test-fast mode= :panic namespaces= 6 program-namespaces= 103 registered= 999 instrumented= 999 program-armable= 991
+bin/test: 2026-09-15T20:58:41.552497Z BEGIN namespace seon.db.declaration-population-test
+
+Testing seon.db.declaration-population-test
+bin/test: 2026-09-15T20:58:41.595087Z BEGIN test seon.db.declaration-population-test/reads-require-their-carried-projection-including-transaction-results
+WARNING: reset! already refers to: #'clojure.core/reset! in namespace: seon.fresh-operator, being replaced by: #'seon.fresh-operator/reset!
+clojure.test/report is not a multimethod, some reporting functions have been disabled.
+
+ERROR in (reads-require-their-carried-projection-including-transaction-results) (instrument.clj:413)
+all read values retain the supplied projection without a thread carrier
+expected: (= (db/database-value-identity database) (:seon.sci.admit/value (admit/admit-value {:seon.sci.admit/value database, :seon.sci.admit/caps {}, :seon.sci.admit/unbounded? true, :seon.sci.admit/interrupt-fn (fn []), :seon.config/on-core-error :record})))
+  actual: clojure.lang.ExceptionInfo: seon.sci.admit/semantic-value violated its contract (:malli.core/invalid-input).
+    at [seon.instrument$throwing_report$fn__107148 invoke instrument.clj 413]
+    at [seon.instrument$compiled_wrapper$fn__107182$fn__107183 invoke instrument.clj 563]
+    at [malli.core$__EQ__GT$reify$reify__3936$fn__3968 doInvoke core.cljc 2215]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$arm_var_BANG_$fn__107189$fn__107192 doInvoke instrument.clj 598]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.lang.AFunction$1 doInvoke AFunction.java 33]
+    at [clojure.lang.RestFn invoke RestFn.java 411]
+    at [seon.sci.admit$admit_walk$fn__82945 invoke admit.clj 728]
+    at [seon.sci.admit$admit_walk invokeStatic admit.clj 723]
+    at [seon.sci.admit$admit_walk invoke admit.clj 706]
+    at [seon.sci.admit$admit_STAR_ invokeStatic admit.clj 703]
+    at [seon.sci.admit$admit_STAR_ invoke admit.clj 689]
+    at [seon.sci.admit$admit_value invokeStatic admit.clj 750]
+    at [seon.sci.admit$admit_value invoke admit.clj 739]
+    at [clojure.lang.AFn applyToHelper AFn.java 154]
+    at [clojure.lang.AFn applyTo AFn.java 144]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [malli.core$__EQ__GT$reify$reify__3936$fn__3968 doInvoke core.cljc 2216]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$arm_var_BANG_$fn__107189$fn__107192 doInvoke instrument.clj 598]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.lang.AFunction$1 doInvoke AFunction.java 33]
+    at [clojure.lang.RestFn invoke RestFn.java 411]
+    at [seon.db.declaration_population_test$fn__120411$fn__120412$fn__120451$fn__120452$fn__120453$fn__120454 invoke declaration_population_test.clj 86]
+    at [seon.db.declaration_population_test$fn__120411$fn__120412$fn__120451$fn__120452$fn__120453 invoke declaration_population_test.clj 84]
+    at [seon.schema$call_with_projection_state invokeStatic schema.clj 937]
+
+
+FAIL in (reads-require-their-carried-projection-including-transaction-results) (declaration_population_test.clj:127)
+expected: (zero? (clojure.core/deref resource-reads))
+  actual: (not (zero? 1))
+bin/test: 2026-09-15T20:59:55.092542Z END test seon.db.declaration-population-test/reads-require-their-carried-projection-including-transaction-results
+bin/test: 2026-09-15T20:59:55.092726Z END namespace seon.db.declaration-population-test
+bin/test: 2026-09-15T20:59:55.092793Z BEGIN namespace seon.schema-test
+
+Testing seon.schema-test
+bin/test: 2026-09-15T20:59:55.128543Z BEGIN test seon.schema-test/agent-authored-function-input-maps-accrete
+bin/test: 2026-09-15T20:59:55.129341Z END test seon.schema-test/agent-authored-function-input-maps-accrete
+bin/test: 2026-09-15T20:59:55.129447Z BEGIN test seon.schema-test/every-predicate-schema-declares-what-it-accepts
+bin/test: 2026-09-15T20:59:55.135772Z END test seon.schema-test/every-predicate-schema-declares-what-it-accepts
+bin/test: 2026-09-15T20:59:55.135923Z BEGIN test seon.schema-test/two-projections-never-exchange-a-compiled-validator
+bin/test: 2026-09-15T20:59:56.989894Z END test seon.schema-test/two-projections-never-exchange-a-compiled-validator
+bin/test: 2026-09-15T20:59:56.990031Z BEGIN test seon.schema-test/one-declaration-validates-only-its-dependency-closure
+bin/test: 2026-09-15T20:59:57.116882Z END test seon.schema-test/one-declaration-validates-only-its-dependency-closure
+bin/test: 2026-09-15T20:59:57.117036Z BEGIN test seon.schema-test/canonical-rows-carry-arbitrary-namespaced-properties
+bin/test: 2026-09-15T20:59:57.129333Z END test seon.schema-test/canonical-rows-carry-arbitrary-namespaced-properties
+bin/test: 2026-09-15T20:59:57.129480Z BEGIN test seon.schema-test/an-incremental-build-resolves-against-the-projection-in-hand
+bin/test: 2026-09-15T20:59:57.133274Z END test seon.schema-test/an-incremental-build-resolves-against-the-projection-in-hand
+bin/test: 2026-09-15T20:59:57.133429Z BEGIN test seon.schema-test/canonical-mutual-recursion-refuses-but-local-recursion-is-supported
+bin/test: 2026-09-15T20:59:57.934773Z END test seon.schema-test/canonical-mutual-recursion-refuses-but-local-recursion-is-supported
+bin/test: 2026-09-15T20:59:57.934913Z BEGIN test seon.schema-test/acquired-projection-owns-schema-introspection
+bin/test: 2026-09-15T20:59:57.935120Z END test seon.schema-test/acquired-projection-owns-schema-introspection
+bin/test: 2026-09-15T20:59:57.935174Z BEGIN test seon.schema-test/a-component-bearing-row-validates-its-own-declared-shape
+bin/test: 2026-09-15T20:59:58.904722Z END test seon.schema-test/a-component-bearing-row-validates-its-own-declared-shape
+bin/test: 2026-09-15T20:59:58.904868Z BEGIN test seon.schema-test/one-predicate-symbol-cannot-name-two-environments-callables
+bin/test: 2026-09-15T21:00:02.073737Z END test seon.schema-test/one-predicate-symbol-cannot-name-two-environments-callables
+bin/test: 2026-09-15T21:00:02.073893Z BEGIN test seon.schema-test/canonical-self-references-refuse-at-registration
+bin/test: 2026-09-15T21:00:03.548567Z END test seon.schema-test/canonical-self-references-refuse-at-registration
+bin/test: 2026-09-15T21:00:03.548704Z BEGIN test seon.schema-test/equal-packaged-populations-reuse-the-shape-projection
+bin/test: 2026-09-15T21:00:03.556090Z END test seon.schema-test/equal-packaged-populations-reuse-the-shape-projection
+bin/test: 2026-09-15T21:00:03.556239Z BEGIN test seon.schema-test/canonical-definition-keeps-admitted-predicate-symbols
+bin/test: 2026-09-15T21:00:03.593298Z END test seon.schema-test/canonical-definition-keeps-admitted-predicate-symbols
+bin/test: 2026-09-15T21:00:03.593431Z BEGIN test seon.schema-test/database-projections-reuse-only-the-handed-value
+bin/test: 2026-09-15T21:00:06.828139Z END test seon.schema-test/database-projections-reuse-only-the-handed-value
+bin/test: 2026-09-15T21:00:06.831237Z BEGIN test seon.schema-test/matching-shapes-derive-required-attributes-through-and-refs
+bin/test: 2026-09-15T21:00:06.833754Z END test seon.schema-test/matching-shapes-derive-required-attributes-through-and-refs
+bin/test: 2026-09-15T21:00:06.833866Z BEGIN test seon.schema-test/render-declarations-require-a-contract-that-accepts-their-shape
+bin/test: 2026-09-15T21:00:06.849375Z END test seon.schema-test/render-declarations-require-a-contract-that-accepts-their-shape
+bin/test: 2026-09-15T21:00:06.850538Z BEGIN test seon.schema-test/named-predicate-violations-humanize-to-the-declared-requirement
+bin/test: 2026-09-15T21:00:06.858296Z END test seon.schema-test/named-predicate-violations-humanize-to-the-declared-requirement
+bin/test: 2026-09-15T21:00:06.858866Z BEGIN test seon.schema-test/function-input-fit-is-total-for-an-absent-contract
+bin/test: 2026-09-15T21:00:07.561421Z END test seon.schema-test/function-input-fit-is-total-for-an-absent-contract
+bin/test: 2026-09-15T21:00:07.564109Z BEGIN test seon.schema-test/map-shapes-accrete-additional-top-level-attributes
+bin/test: 2026-09-15T21:00:08.233016Z END test seon.schema-test/map-shapes-accrete-additional-top-level-attributes
+bin/test: 2026-09-15T21:00:08.233195Z BEGIN test seon.schema-test/function-input-and-output-fit-belong-to-one-arity
+bin/test: 2026-09-15T21:00:08.941808Z END test seon.schema-test/function-input-and-output-fit-belong-to-one-arity
+bin/test: 2026-09-15T21:00:08.942425Z END namespace seon.schema-test
+bin/test: 2026-09-15T21:00:08.942909Z BEGIN namespace seon.sci.documentation-test
+
+Testing seon.sci.documentation-test
+bin/test: 2026-09-15T21:00:08.975093Z BEGIN test seon.sci.documentation-test/retained-context-receives-new-bare-test-referrals
+bin/test: 2026-09-15T21:00:09.069988Z END test seon.sci.documentation-test/retained-context-receives-new-bare-test-referrals
+bin/test: 2026-09-15T21:00:09.070116Z BEGIN test seon.sci.documentation-test/documentation-is-returned-data-without-a-second-printed-copy
+WARN seon.db/projection-fallback caller= seon.sci.eval/documentation-contract missing-projection count=1; supply the operation's projection.
+
+ERROR in (documentation-is-returned-data-without-a-second-printed-copy) (eval.clj:1158)
+Uncaught exception, not in assertion.
+expected: nil
+  actual: clojure.lang.ExceptionInfo: This operation requires a carried schema projection.
+    at [seon.sci.eval$documentation_contract invokeStatic eval.clj 1158]
+    at [seon.sci.eval$documentation_contract invoke eval.clj 1152]
+    at [seon.sci.eval$agent_documentation_contract invokeStatic eval.clj 1174]
+    at [seon.sci.eval$agent_documentation_contract invoke eval.clj 1171]
+    at [seon.sci.eval$function_doc_map invokeStatic eval.clj 1203]
+    at [seon.sci.eval$function_doc_map invoke eval.clj 1199]
+    at [seon.sci.eval$shown_result invokeStatic eval.clj 1988]
+    at [seon.sci.eval$shown_result invoke eval.clj 1977]
+    at [seon.sci.eval$evaluate$fn__107876$fn__107879 invoke eval.clj 2469]
+    at [clojure.lang.AFn applyToHelper AFn.java 152]
+    at [clojure.lang.AFn applyTo AFn.java 144]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$with_bindings_STAR_ invokeStatic core.clj 1994]
+    at [clojure.core$with_bindings_STAR_ doInvoke core.clj 1994]
+    at [clojure.lang.RestFn invoke RestFn.java 428]
+    at [seon.sci.eval$evaluate$fn__107876 invoke eval.clj 2265]
+    at [seon.schema$call_with_projection_state invokeStatic schema.clj 937]
+    at [seon.schema$call_with_projection_state invoke schema.clj 930]
+    at [clojure.lang.AFn applyToHelper AFn.java 156]
+    at [clojure.lang.AFn applyTo AFn.java 144]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [malli.core$__EQ__GT$reify$reify__3936$fn__3968 doInvoke core.cljc 2216]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$arm_var_BANG_$fn__107189$fn__107192 doInvoke instrument.clj 598]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.lang.AFunction$1 doInvoke AFunction.java 33]
+    at [clojure.lang.RestFn invoke RestFn.java 424]
+    at [seon.sci.eval$evaluate invokeStatic eval.clj 2262]
+    at [seon.sci.eval$evaluate invoke eval.clj 2148]
+
+bin/test: 2026-09-15T21:00:09.364841Z END test seon.sci.documentation-test/documentation-is-returned-data-without-a-second-printed-copy
+bin/test: 2026-09-15T21:00:09.367763Z BEGIN test seon.sci.documentation-test/bare-test-macros-resolve-without-namespace-referrals
+
+ERROR in (bare-test-macros-resolve-without-namespace-referrals) (instrument.clj:413)
+Uncaught exception, not in assertion.
+expected: nil
+  actual: clojure.lang.ExceptionInfo: seon.print/fit violated its contract (:malli.core/invalid-input).
+    at [seon.instrument$throwing_report$fn__107148 invoke instrument.clj 413]
+    at [seon.instrument$compiled_wrapper$fn__107182$fn__107183 invoke instrument.clj 563]
+    at [malli.core$__EQ__GT$reify$reify__3936$fn__3968 doInvoke core.cljc 2215]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$arm_var_BANG_$fn__107189$fn__107192 doInvoke instrument.clj 598]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.lang.AFunction$1 doInvoke AFunction.java 33]
+    at [clojure.lang.RestFn invoke RestFn.java 424]
+    at [seon.render.value$prepare invokeStatic value.clj 419]
+    at [seon.render.value$prepare invoke value.clj 402]
+    at [clojure.lang.AFn applyToHelper AFn.java 156]
+    at [clojure.lang.AFn applyTo AFn.java 144]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [malli.core$__EQ__GT$reify$reify__3936$fn__3968 doInvoke core.cljc 2216]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [malli.core$_function_schema$reify$reify__3992$fn__4006 doInvoke core.cljc 2293]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$arm_var_BANG_$fn__107189$fn__107192 doInvoke instrument.clj 598]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.lang.AFunction$1 doInvoke AFunction.java 33]
+    at [clojure.lang.RestFn invoke RestFn.java 424]
+    at [seon.render.value$prepare invokeStatic value.clj 411]
+    at [seon.render.value$prepare invoke value.clj 402]
+    at [clojure.lang.AFn applyToHelper AFn.java 154]
+    at [clojure.lang.AFn applyTo AFn.java 144]
+
+bin/test: 2026-09-15T21:00:09.544186Z END test seon.sci.documentation-test/bare-test-macros-resolve-without-namespace-referrals
+bin/test: 2026-09-15T21:00:09.544296Z BEGIN test seon.sci.documentation-test/retained-context-receives-the-current-repl-macro-through-its-core-alias
+bin/test: 2026-09-15T21:00:09.572832Z END test seon.sci.documentation-test/retained-context-receives-the-current-repl-macro-through-its-core-alias
+bin/test: 2026-09-15T21:00:09.574392Z BEGIN test seon.sci.documentation-test/directory-observes-a-function-installed-after-context-acquisition
+
+ERROR in (directory-observes-a-function-installed-after-context-acquisition) (instrument.clj:413)
+Uncaught exception, not in assertion.
+expected: nil
+  actual: clojure.lang.ExceptionInfo: seon.print/fit violated its contract (:malli.core/invalid-input).
+    at [seon.instrument$throwing_report$fn__107148 invoke instrument.clj 413]
+    at [seon.instrument$compiled_wrapper$fn__107182$fn__107183 invoke instrument.clj 563]
+    at [malli.core$__EQ__GT$reify$reify__3936$fn__3968 doInvoke core.cljc 2215]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$arm_var_BANG_$fn__107189$fn__107192 doInvoke instrument.clj 598]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.lang.AFunction$1 doInvoke AFunction.java 33]
+    at [clojure.lang.RestFn invoke RestFn.java 424]
+    at [seon.render.value$prepare invokeStatic value.clj 419]
+    at [seon.render.value$prepare invoke value.clj 402]
+    at [clojure.lang.AFn applyToHelper AFn.java 156]
+    at [clojure.lang.AFn applyTo AFn.java 144]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [malli.core$__EQ__GT$reify$reify__3936$fn__3968 doInvoke core.cljc 2216]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [malli.core$_function_schema$reify$reify__3992$fn__4006 doInvoke core.cljc 2293]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$arm_var_BANG_$fn__107189$fn__107192 doInvoke instrument.clj 598]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.lang.AFunction$1 doInvoke AFunction.java 33]
+    at [clojure.lang.RestFn invoke RestFn.java 424]
+    at [seon.render.value$prepare invokeStatic value.clj 411]
+    at [seon.render.value$prepare invoke value.clj 402]
+    at [clojure.lang.AFn applyToHelper AFn.java 154]
+    at [clojure.lang.AFn applyTo AFn.java 144]
+
+bin/test: 2026-09-15T21:00:09.751601Z END test seon.sci.documentation-test/directory-observes-a-function-installed-after-context-acquisition
+bin/test: 2026-09-15T21:00:09.755437Z BEGIN test seon.sci.documentation-test/documentation-keeps-named-contracts-and-guarded-result-shapes
+bin/test: 2026-09-15T21:00:09.790719Z END test seon.sci.documentation-test/documentation-keeps-named-contracts-and-guarded-result-shapes
+bin/test: 2026-09-15T21:00:09.792280Z BEGIN test seon.sci.documentation-test/a-contract-mistake-carries-the-same-documentation-as-doc
+
+ERROR in (a-contract-mistake-carries-the-same-documentation-as-doc) (instrument.clj:413)
+Uncaught exception, not in assertion.
+expected: nil
+  actual: clojure.lang.ExceptionInfo: seon.print/fit violated its contract (:malli.core/invalid-input).
+    at [seon.instrument$throwing_report$fn__107148 invoke instrument.clj 413]
+    at [seon.instrument$compiled_wrapper$fn__107182$fn__107183 invoke instrument.clj 563]
+    at [malli.core$__EQ__GT$reify$reify__3936$fn__3968 doInvoke core.cljc 2215]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$arm_var_BANG_$fn__107189$fn__107192 doInvoke instrument.clj 598]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.lang.AFunction$1 doInvoke AFunction.java 33]
+    at [clojure.lang.RestFn invoke RestFn.java 424]
+    at [seon.render.value$prepare invokeStatic value.clj 419]
+    at [seon.render.value$prepare invoke value.clj 402]
+    at [clojure.lang.AFn applyToHelper AFn.java 156]
+    at [clojure.lang.AFn applyTo AFn.java 144]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [malli.core$__EQ__GT$reify$reify__3936$fn__3968 doInvoke core.cljc 2216]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [malli.core$_function_schema$reify$reify__3992$fn__4006 doInvoke core.cljc 2293]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$arm_var_BANG_$fn__107189$fn__107192 doInvoke instrument.clj 598]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.lang.AFunction$1 doInvoke AFunction.java 33]
+    at [clojure.lang.RestFn invoke RestFn.java 424]
+    at [seon.render.value$prepare invokeStatic value.clj 411]
+    at [seon.render.value$prepare invoke value.clj 402]
+    at [clojure.lang.AFn applyToHelper AFn.java 154]
+    at [clojure.lang.AFn applyTo AFn.java 144]
+
+bin/test: 2026-09-15T21:00:09.947281Z END test seon.sci.documentation-test/a-contract-mistake-carries-the-same-documentation-as-doc
+bin/test: 2026-09-15T21:00:09.947404Z END namespace seon.sci.documentation-test
+bin/test: 2026-09-15T21:00:09.947461Z BEGIN namespace seon.sci.admit-test
+
+Testing seon.sci.admit-test
+bin/test: 2026-09-15T21:00:09.978180Z BEGIN test seon.sci.admit-test/inst-projection-keeps-common-and-exotic-inst-values-readable
+
+ERROR in (inst-projection-keeps-common-and-exotic-inst-values-readable) (instrument.clj:413)
+expected: (= date (:seon.sci.admit/value (admit/admit (request date))))
+  actual: clojure.lang.ExceptionInfo: seon.sci.admit/semantic-value violated its contract (:malli.core/invalid-input).
+    at [seon.instrument$throwing_report$fn__107148 invoke instrument.clj 413]
+    at [seon.instrument$compiled_wrapper$fn__107182$fn__107183 invoke instrument.clj 563]
+    at [malli.core$__EQ__GT$reify$reify__3936$fn__3968 doInvoke core.cljc 2215]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$arm_var_BANG_$fn__107189$fn__107192 doInvoke instrument.clj 598]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.lang.AFunction$1 doInvoke AFunction.java 33]
+    at [clojure.lang.RestFn invoke RestFn.java 411]
+    at [seon.sci.admit$admit_walk$fn__82945 invoke admit.clj 728]
+    at [seon.sci.admit$admit_walk invokeStatic admit.clj 723]
+    at [seon.sci.admit$admit_walk invoke admit.clj 706]
+    at [seon.sci.admit$admit_STAR_ invokeStatic admit.clj 703]
+    at [seon.sci.admit$admit_STAR_ invoke admit.clj 689]
+    at [seon.sci.admit$admit invokeStatic admit.clj 793]
+    at [seon.sci.admit$admit invoke admit.clj 752]
+    at [clojure.lang.AFn applyToHelper AFn.java 154]
+    at [clojure.lang.AFn applyTo AFn.java 144]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [malli.core$__EQ__GT$reify$reify__3936$fn__3968 doInvoke core.cljc 2216]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$arm_var_BANG_$fn__107189$fn__107192 doInvoke instrument.clj 598]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.lang.AFunction$1 doInvoke AFunction.java 33]
+    at [clojure.lang.RestFn invoke RestFn.java 411]
+    at [seon.sci.admit_test$fn__121727$fn__121730 invoke admit_test.clj 325]
+    at [seon.sci.admit_test$fn__121727 invokeStatic admit_test.clj 324]
+    at [seon.sci.admit_test$fn__121727 invoke admit_test.clj 319]
+
+
+ERROR in (inst-projection-keeps-common-and-exotic-inst-values-readable) (instrument.clj:413)
+expected: (= (java.util.Date. 42) (:seon.sci.admit/value (admit/admit (request instant))))
+  actual: clojure.lang.ExceptionInfo: seon.sci.admit/semantic-value violated its contract (:malli.core/invalid-input).
+    at [seon.instrument$throwing_report$fn__107148 invoke instrument.clj 413]
+    at [seon.instrument$compiled_wrapper$fn__107182$fn__107183 invoke instrument.clj 563]
+    at [malli.core$__EQ__GT$reify$reify__3936$fn__3968 doInvoke core.cljc 2215]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$arm_var_BANG_$fn__107189$fn__107192 doInvoke instrument.clj 598]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.lang.AFunction$1 doInvoke AFunction.java 33]
+    at [clojure.lang.RestFn invoke RestFn.java 411]
+    at [seon.sci.admit$admit_walk$fn__82945 invoke admit.clj 728]
+    at [seon.sci.admit$admit_walk invokeStatic admit.clj 723]
+    at [seon.sci.admit$admit_walk invoke admit.clj 706]
+    at [seon.sci.admit$admit_STAR_ invokeStatic admit.clj 703]
+    at [seon.sci.admit$admit_STAR_ invoke admit.clj 689]
+    at [seon.sci.admit$admit invokeStatic admit.clj 793]
+    at [seon.sci.admit$admit invoke admit.clj 752]
+    at [clojure.lang.AFn applyToHelper AFn.java 154]
+    at [clojure.lang.AFn applyTo AFn.java 144]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [malli.core$__EQ__GT$reify$reify__3936$fn__3968 doInvoke core.cljc 2216]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$arm_var_BANG_$fn__107189$fn__107192 doInvoke instrument.clj 598]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.lang.AFunction$1 doInvoke AFunction.java 33]
+    at [clojure.lang.RestFn invoke RestFn.java 411]
+    at [seon.sci.admit_test$fn__121727$fn__121734 invoke admit_test.clj 327]
+    at [seon.sci.admit_test$fn__121727 invokeStatic admit_test.clj 326]
+    at [seon.sci.admit_test$fn__121727 invoke admit_test.clj 319]
+
+
+ERROR in (inst-projection-keeps-common-and-exotic-inst-values-readable) (instrument.clj:413)
+expected: (= (java.util.Date. 43) (:seon.sci.admit/value (admit/admit (request exotic))))
+  actual: clojure.lang.ExceptionInfo: seon.sci.admit/semantic-value violated its contract (:malli.core/invalid-input).
+    at [seon.instrument$throwing_report$fn__107148 invoke instrument.clj 413]
+    at [seon.instrument$compiled_wrapper$fn__107182$fn__107183 invoke instrument.clj 563]
+    at [malli.core$__EQ__GT$reify$reify__3936$fn__3968 doInvoke core.cljc 2215]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$arm_var_BANG_$fn__107189$fn__107192 doInvoke instrument.clj 598]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.lang.AFunction$1 doInvoke AFunction.java 33]
+    at [clojure.lang.RestFn invoke RestFn.java 411]
+    at [seon.sci.admit$admit_walk$fn__82945 invoke admit.clj 728]
+    at [seon.sci.admit$admit_walk invokeStatic admit.clj 723]
+    at [seon.sci.admit$admit_walk invoke admit.clj 706]
+    at [seon.sci.admit$admit_STAR_ invokeStatic admit.clj 703]
+    at [seon.sci.admit$admit_STAR_ invoke admit.clj 689]
+    at [seon.sci.admit$admit invokeStatic admit.clj 793]
+    at [seon.sci.admit$admit invoke admit.clj 752]
+    at [clojure.lang.AFn applyToHelper AFn.java 154]
+    at [clojure.lang.AFn applyTo AFn.java 144]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [malli.core$__EQ__GT$reify$reify__3936$fn__3968 doInvoke core.cljc 2216]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$arm_var_BANG_$fn__107189$fn__107192 doInvoke instrument.clj 598]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.lang.AFunction$1 doInvoke AFunction.java 33]
+    at [clojure.lang.RestFn invoke RestFn.java 411]
+    at [seon.sci.admit_test$fn__121727 invokeStatic admit_test.clj 329]
+    at [seon.sci.admit_test$fn__121727 invoke admit_test.clj 319]
+    at [clojure.test$test_var$fn__9898 invoke test.clj 717]
+
+bin/test: 2026-09-15T21:00:10.026580Z END test seon.sci.admit-test/inst-projection-keeps-common-and-exotic-inst-values-readable
+bin/test: 2026-09-15T21:00:10.026704Z BEGIN test seon.sci.admit-test/every-value-projects-bounded-and-reads-back
+
+FAIL in (every-value-projects-bounded-and-reads-back) (test_support.clj:550)
+Admission totality failed. {:shrunk {:total-nodes-visited 9, :depth 4, :pass? false, :result #error {
+ :cause "seon.sci.admit/semantic-value violated its contract (:malli.core/invalid-input)."
+ :data {:seon.error/message "seon.sci.admit/semantic-value violated its contract (:malli.core/invalid-input).", :seon.instrument/contract-violated "seon.sci.admit/semantic-value", :seon.error/data {:seon.error/diagnostic-evidence :seon.error/unknown, :seon.error/diagnostic-expected [:cat :seon.print/node], :seon.instrument/fn "seon.sci.admit/semantic-value", :seon.error/diagnostic-member :arguments, :seon.error/diagnostic-evidence-availability :seon.error/unknown, :seon.instrument/malli :malli.core/invalid-input, :seon.error/diagnostic-layer :instrumentation, :seon.error/diagnostic-offending [#:seon.print{:face :seon.print/boolean, :value false}], :seon.error/diagnostic-operation seon.sci.admit/semantic-value, :seon.error/diagnostic-cause :malli.core/invalid-input, :seon.instrument/arm :input}, :seon.error/kind :seon.instrument/contract-violated}
+ :via
+ [{:type clojure.lang.ExceptionInfo
+   :message "seon.sci.admit/semantic-value violated its contract (:malli.core/invalid-input)."
+   :data {:seon.error/message "seon.sci.admit/semantic-value violated its contract (:malli.core/invalid-input).", :seon.instrument/contract-violated "seon.sci.admit/semantic-value", :seon.error/data {:seon.error/diagnostic-evidence :seon.error/unknown, :seon.error/diagnostic-expected [:cat :seon.print/node], :seon.instrument/fn "seon.sci.admit/semantic-value", :seon.error/diagnostic-member :arguments, :seon.error/diagnostic-evidence-availability :seon.error/unknown, :seon.instrument/malli :malli.core/invalid-input, :seon.error/diagnostic-layer :instrumentation, :seon.error/diagnostic-offending [#:seon.print{:face :seon.print/boolean, :value false}], :seon.error/diagnostic-operation seon.sci.admit/semantic-value, :seon.error/diagnostic-cause :malli.core/invalid-input, :seon.instrument/arm :input}, :seon.error/kind :seon.instrument/contract-violated}
+   :at [seon.instrument$throwing_report$fn__107148 invoke "instrument.clj" 413]}]
+ :trace
+ [[seon.instrument$throwing_report$fn__107148 invoke "instrument.clj" 413]
+  [seon.instrument$compiled_wrapper$fn__107182$fn__107183 invoke "instrument.clj" 563]
+  [malli.core$__EQ__GT$reify$reify__3936$fn__3968 doInvoke "core.cljc" 2215]
+  [clojure.lang.RestFn applyTo "RestFn.java" 140]
+  [clojure.core$apply invokeStatic "core.clj" 667]
+  [clojure.core$apply invoke "core.clj" 662]
+  [seon.instrument$arm_var_BANG_$fn__107189$fn__107192 doInvoke "instrument.clj" 598]
+  [clojure.lang.RestFn applyTo "RestFn.java" 140]
+  [clojure.lang.AFunction$1 doInvoke "AFunction.java" 33]
+  [clojure.lang.RestFn invoke "RestFn.java" 411]
+  [seon.sci.admit$admit_walk$fn__82945 invoke "admit.clj" 728]
+  [seon.sci.admit$admit_walk invokeStatic "admit.clj" 723]
+  [seon.sci.admit$admit_walk invoke "admit.clj" 706]
+  [seon.sci.admit$admit_STAR_ invokeStatic "admit.clj" 703]
+  [seon.sci.admit$admit_STAR_ invoke "admit.clj" 689]
+  [seon.sci.admit$admit invokeStatic "admit.clj" 793]
+  [seon.sci.admit$admit invoke "admit.clj" 752]
+  [clojure.lang.AFn applyToHelper "AFn.java" 154]
+  [clojure.lang.AFn applyTo "AFn.java" 144]
+  [clojure.core$apply invokeStatic "core.clj" 667]
+  [clojure.core$apply invoke "core.clj" 662]
+  [malli.core$__EQ__GT$reify$reify__3936$fn__3968 doInvoke "core.cljc" 2216]
+  [clojure.lang.RestFn applyTo "RestFn.java" 140]
+  [clojure.core$apply invokeStatic "core.clj" 667]
+  [clojure.core$apply invoke "core.clj" 662]
+  [seon.instrument$arm_var_BANG_$fn__107189$fn__107192 doInvoke "instrument.clj" 598]
+  [clojure.lang.RestFn applyTo "RestFn.java" 140]
+  [clojure.lang.AFunction$1 doInvoke "AFunction.java" 33]
+  [clojure.lang.RestFn invoke "RestFn.java" 411]
+  [seon.sci.admit_test$admitted_value_valid_QMARK_ invokeStatic "admit_test.clj" 248]
+  [seon.sci.admit_test$admitted_value_valid_QMARK_ invoke "admit_test.clj" 244]
+  [clojure.core$every_QMARK_ invokeStatic "core.clj" 2702]
+  [clojure.core$every_QMARK_ invoke "core.clj" 2693]
+  [seon.sci.admit_test$fn__121683$fn__121684 invoke "admit_test.clj" 290]
+  [clojure.lang.AFn applyToHelper "AFn.java" 154]
+  [clojure.lang.AFn applyTo "AFn.java" 144]
+  [clojure.core$apply invokeStatic "core.clj" 667]
+  [clojure.core$apply invoke "core.clj" 662]
+  [clojure.test.check.properties$apply_gen$fn__100364$fn__100365 invoke "properties.cljc" 31]
+  [clojure.test.check.properties$apply_gen$fn__100364 invoke "properties.cljc" 30]
+  [clojure.test.check.rose_tree$fmap invokeStatic "rose_tree.cljc" 77]
+  [clojure.test.check.rose_tree$fmap invoke "rose_tree.cljc" 73]
+  [clojure.test.check.rose_tree$fmap$fn__76085 invoke "rose_tree.cljc" 77]
+  [clojure.core$map$fn__5956 invoke "core.clj" 2776]
+  [clojure.lang.LazySeq force "LazySeq.java" 50]
+  [clojure.lang.LazySeq realize "LazySeq.java" 87]
+  [clojure.lang.LazySeq seq "LazySeq.java" 104]
+  [clojure.lang.RT seq "RT.java" 555]
+  [clojure.core$seq__5488 invokeStatic "core.clj" 139]
+  [clojure.core$empty_QMARK_ invokeStatic "core.clj" 6335]
+  [clojure.core$empty_QMARK_ invoke "core.clj" 6328]
+  [clojure.test.check$shrink_loop invokeStatic "check.cljc" 263]
+  [clojure.test.check$shrink_loop invoke "check.cljc" 242]
+  [clojure.test.check$failure invokeStatic "check.cljc" 314]
+  [clojure.test.check$failure invoke "check.cljc" 297]
+  [clojure.test.check$quick_check invokeStatic "check.cljc" 228]
+  [clojure.test.check$quick_check doInvoke "check.cljc" 59]
+  [clojure.lang.RestFn invoke "RestFn.java" 467]
+  [seon.sci.admit_test$fn__121683 invokeStatic "admit_test.clj" 283]
+  [seon.sci.admit_test$fn__121683 invoke "admit_test.clj" 281]
+  [clojure.test$test_var$fn__9898 invoke "test.clj" 717]
+  [clojure.test$test_var invokeStatic "test.clj" 717]
+  [clojure.test$test_var invoke "test.clj" 708]
+  [clojure.test$test_vars$fn__9924$fn__9929 invoke "test.clj" 735]
+  [clojure.test$default_fixture invokeStatic "test.clj" 687]
+  [clojure.test$default_fixture invoke "test.clj" 683]
+  [clojure.test$test_vars$fn__9924 invoke "test.clj" 735]
+  [clojure.test$default_fixture invokeStatic "test.clj" 687]
+  [clojure.test$default_fixture invoke "test.clj" 683]
+  [clojure.test$test_vars invokeStatic "test.clj" 731]
+  [clojure.test$test_all_vars invokeStatic "test.clj" 737]
+  [clojure.test$test_ns invokeStatic "test.clj" 758]
+  [clojure.test$test_ns invoke "test.clj" 743]
+  [clojure.core$map$fn__5956 invoke "core.clj" 2774]
+  [clojure.lang.LazySeq force "LazySeq.java" 50]
+  [clojure.lang.LazySeq realize "LazySeq.java" 87]
+  [clojure.lang.LazySeq seq "LazySeq.java" 104]
+  [clojure.lang.Cons next "Cons.java" 41]
+  [clojure.lang.RT boundedLength "RT.java" 1810]
+  [clojure.lang.RestFn applyTo "RestFn.java" 133]
+  [clojure.core$apply invokeStatic "core.clj" 669]
+  [clojure.test$run_tests invokeStatic "test.clj" 768]
+  [clojure.test$run_tests doInvoke "test.clj" 768]
+  [clojure.lang.RestFn applyTo "RestFn.java" 140]
+  [clojure.core$apply invokeStatic "core.clj" 667]
+  [clojure.core$apply invoke "core.clj" 662]
+  [seon.test.runner$run_request_BANG_$fn__102255 invoke "runner.clj" 724]
+  [seon.test.runner$run_request_BANG_ invokeStatic "runner.clj" 711]
+  [seon.test.runner$run_request_BANG_ invoke "runner.clj" 699]
+  [clojure.lang.Var invoke "Var.java" 395]
+  [seon.test.fast$_main$fn__102841$fn__102846$fn__102849 invoke "fast.clj" 44]
+  [seon.test.fast$_main$fn__102841$fn__102846 invoke "fast.clj" 39]
+  [seon.schema$call_with_projection invokeStatic "schema.clj" 928]
+  [seon.schema$call_with_projection invoke "schema.clj" 922]
+  [clojure.lang.AFn applyToHelper "AFn.java" 156]
+  [clojure.lang.AFn applyTo "AFn.java" 144]
+  [clojure.core$apply invokeStatic "core.clj" 667]
+  [clojure.core$apply invoke "core.clj" 662]
+  [malli.core$__EQ__GT$reify$reify__3936$fn__3968 doInvoke "core.cljc" 2216]
+  [clojure.lang.RestFn applyTo "RestFn.java" 140]
+  [clojure.core$apply invokeStatic "core.clj" 667]
+  [clojure.core$apply invoke "core.clj" 662]
+  [seon.instrument$arm_var_BANG_$fn__107189$fn__107192 doInvoke "instrument.clj" 598]
+  [clojure.lang.RestFn applyTo "RestFn.java" 140]
+  [clojure.lang.AFunction$1 doInvoke "AFunction.java" 33]
+  [clojure.lang.RestFn invoke "RestFn.java" 424]
+  [seon.test.fast$_main$fn__102841 invoke "fast.clj" 34]
+  [seon.test.fast$_main invokeStatic "fast.clj" 25]
+  [seon.test.fast$_main doInvoke "fast.clj" 13]
+  [clojure.lang.RestFn applyTo "RestFn.java" 140]
+  [clojure.lang.Var applyTo "Var.java" 707]
+  [clojure.core$apply invokeStatic "core.clj" 667]
+  [clojure.main$main_opt invokeStatic "main.clj" 515]
+  [clojure.main$main_opt invoke "main.clj" 511]
+  [clojure.main$main invokeStatic "main.clj" 665]
+  [clojure.main$main doInvoke "main.clj" 617]
+  [clojure.lang.RestFn applyTo "RestFn.java" 140]
+  [clojure.lang.Var applyTo "Var.java" 707]
+  [clojure.main main "main.java" 40]]}, :time-shrinking-ms 9, :smallest [false]}, :failed-after-ms 15, :num-tests 1, :seed 202607280801, :fail [(:_ 0)], :result false, :failing-size 0, :pass? false}
+expected: passed?
+  actual: false
+bin/test: 2026-09-15T21:00:10.112337Z END test seon.sci.admit-test/every-value-projects-bounded-and-reads-back
+bin/test: 2026-09-15T21:00:10.112402Z BEGIN test seon.sci.admit-test/render-admission-can-preserve-a-complete-value-under-the-same-guard
+
+ERROR in (render-admission-can-preserve-a-complete-value-under-the-same-guard) (instrument.clj:413)
+Uncaught exception, not in assertion.
+expected: nil
+  actual: clojure.lang.ExceptionInfo: seon.sci.admit/semantic-value violated its contract (:malli.core/invalid-input).
+    at [seon.instrument$throwing_report$fn__107148 invoke instrument.clj 413]
+    at [seon.instrument$compiled_wrapper$fn__107182$fn__107183 invoke instrument.clj 563]
+    at [malli.core$__EQ__GT$reify$reify__3936$fn__3968 doInvoke core.cljc 2215]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$arm_var_BANG_$fn__107189$fn__107192 doInvoke instrument.clj 598]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.lang.AFunction$1 doInvoke AFunction.java 33]
+    at [clojure.lang.RestFn invoke RestFn.java 411]
+    at [seon.sci.admit$admit_walk$fn__82945 invoke admit.clj 728]
+    at [seon.sci.admit$admit_walk invokeStatic admit.clj 723]
+    at [seon.sci.admit$admit_walk invoke admit.clj 706]
+    at [seon.sci.admit$admit_STAR_ invokeStatic admit.clj 703]
+    at [seon.sci.admit$admit_STAR_ invoke admit.clj 689]
+    at [seon.sci.admit$admit_value invokeStatic admit.clj 750]
+    at [seon.sci.admit$admit_value invoke admit.clj 739]
+    at [clojure.lang.AFn applyToHelper AFn.java 154]
+    at [clojure.lang.AFn applyTo AFn.java 144]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [malli.core$__EQ__GT$reify$reify__3936$fn__3968 doInvoke core.cljc 2216]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$arm_var_BANG_$fn__107189$fn__107192 doInvoke instrument.clj 598]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.lang.AFunction$1 doInvoke AFunction.java 33]
+    at [clojure.lang.RestFn invoke RestFn.java 411]
+    at [seon.sci.admit_test$fn__121789 invokeStatic admit_test.clj 396]
+    at [seon.sci.admit_test$fn__121789 invoke admit_test.clj 393]
+    at [clojure.test$test_var$fn__9898 invoke test.clj 717]
+
+bin/test: 2026-09-15T21:00:10.113910Z END test seon.sci.admit-test/render-admission-can-preserve-a-complete-value-under-the-same-guard
+bin/test: 2026-09-15T21:00:10.114056Z BEGIN test seon.sci.admit-test/a-projection-failure-obeys-the-one-dial
+
+ERROR in (a-projection-failure-obeys-the-one-dial) (instrument.clj:413)
+Uncaught exception, not in assertion.
+expected: nil
+  actual: clojure.lang.ExceptionInfo: seon.sci.admit/semantic-value violated its contract (:malli.core/invalid-input).
+    at [seon.instrument$throwing_report$fn__107148 invoke instrument.clj 413]
+    at [seon.instrument$compiled_wrapper$fn__107182$fn__107183 invoke instrument.clj 563]
+    at [malli.core$__EQ__GT$reify$reify__3936$fn__3968 doInvoke core.cljc 2215]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$arm_var_BANG_$fn__107189$fn__107192 doInvoke instrument.clj 598]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.lang.AFunction$1 doInvoke AFunction.java 33]
+    at [clojure.lang.RestFn invoke RestFn.java 411]
+    at [seon.sci.admit$admit_walk$fn__82945 invoke admit.clj 728]
+    at [seon.sci.admit$admit_walk invokeStatic admit.clj 723]
+    at [seon.sci.admit$admit_walk invoke admit.clj 706]
+    at [seon.sci.admit$admit_STAR_ invokeStatic admit.clj 703]
+    at [seon.sci.admit$admit_STAR_ invoke admit.clj 689]
+    at [seon.sci.admit$admit invokeStatic admit.clj 793]
+    at [seon.sci.admit$admit invoke admit.clj 752]
+    at [clojure.lang.AFn applyToHelper AFn.java 154]
+    at [clojure.lang.AFn applyTo AFn.java 144]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [malli.core$__EQ__GT$reify$reify__3936$fn__3968 doInvoke core.cljc 2216]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$arm_var_BANG_$fn__107189$fn__107192 doInvoke instrument.clj 598]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.lang.AFunction$1 doInvoke AFunction.java 33]
+    at [clojure.lang.RestFn invoke RestFn.java 411]
+    at [seon.sci.admit_test$fn__121756$fn__121759 invoke admit_test.clj 370]
+    at [seon.sci.admit_test$fn__121756 invokeStatic admit_test.clj 369]
+    at [seon.sci.admit_test$fn__121756 invoke admit_test.clj 356]
+
+bin/test: 2026-09-15T21:00:10.116544Z END test seon.sci.admit-test/a-projection-failure-obeys-the-one-dial
+bin/test: 2026-09-15T21:00:10.116649Z BEGIN test seon.sci.admit-test/a-cyclic-value-projects-where-pr-str-dies
+
+ERROR in (a-cyclic-value-projects-where-pr-str-dies) (instrument.clj:413)
+Uncaught exception, not in assertion.
+expected: nil
+  actual: clojure.lang.ExceptionInfo: seon.sci.admit/semantic-value violated its contract (:malli.core/invalid-input).
+    at [seon.instrument$throwing_report$fn__107148 invoke instrument.clj 413]
+    at [seon.instrument$compiled_wrapper$fn__107182$fn__107183 invoke instrument.clj 563]
+    at [malli.core$__EQ__GT$reify$reify__3936$fn__3968 doInvoke core.cljc 2215]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$arm_var_BANG_$fn__107189$fn__107192 doInvoke instrument.clj 598]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.lang.AFunction$1 doInvoke AFunction.java 33]
+    at [clojure.lang.RestFn invoke RestFn.java 411]
+    at [seon.sci.admit$admit_walk$fn__82945 invoke admit.clj 728]
+    at [seon.sci.admit$admit_walk invokeStatic admit.clj 723]
+    at [seon.sci.admit$admit_walk invoke admit.clj 706]
+    at [seon.sci.admit$admit_STAR_ invokeStatic admit.clj 703]
+    at [seon.sci.admit$admit_STAR_ invoke admit.clj 689]
+    at [seon.sci.admit$admit invokeStatic admit.clj 793]
+    at [seon.sci.admit$admit invoke admit.clj 752]
+    at [clojure.lang.AFn applyToHelper AFn.java 154]
+    at [clojure.lang.AFn applyTo AFn.java 144]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [malli.core$__EQ__GT$reify$reify__3936$fn__3968 doInvoke core.cljc 2216]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$arm_var_BANG_$fn__107189$fn__107192 doInvoke instrument.clj 598]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.lang.AFunction$1 doInvoke AFunction.java 33]
+    at [clojure.lang.RestFn invoke RestFn.java 411]
+    at [seon.sci.admit_test$fn__121690$fn__121697 invoke admit_test.clj 311]
+    at [seon.sci.admit_test$fn__121690 invokeStatic admit_test.clj 306]
+    at [seon.sci.admit_test$fn__121690 invoke admit_test.clj 297]
+
+bin/test: 2026-09-15T21:00:10.124908Z END test seon.sci.admit-test/a-cyclic-value-projects-where-pr-str-dies
+bin/test: 2026-09-15T21:00:10.125023Z BEGIN test seon.sci.admit-test/an-infinite-sequence-dies-inside-the-armed-boundary
+bin/test: 2026-09-15T21:00:10.129382Z END test seon.sci.admit-test/an-infinite-sequence-dies-inside-the-armed-boundary
+bin/test: 2026-09-15T21:00:10.129477Z BEGIN test seon.sci.admit-test/every-identity-only-record-admits-as-identity-at-depth
+
+ERROR in (every-identity-only-record-admits-as-identity-at-depth) (instrument.clj:413)
+Uncaught exception, not in assertion.
+expected: nil
+  actual: clojure.lang.ExceptionInfo: seon.sci.admit/semantic-value violated its contract (:malli.core/invalid-input).
+    at [seon.instrument$throwing_report$fn__107148 invoke instrument.clj 413]
+    at [seon.instrument$compiled_wrapper$fn__107182$fn__107183 invoke instrument.clj 563]
+    at [malli.core$__EQ__GT$reify$reify__3936$fn__3968 doInvoke core.cljc 2215]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$arm_var_BANG_$fn__107189$fn__107192 doInvoke instrument.clj 598]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.lang.AFunction$1 doInvoke AFunction.java 33]
+    at [clojure.lang.RestFn invoke RestFn.java 411]
+    at [seon.sci.admit$admit_walk$fn__82945 invoke admit.clj 728]
+    at [seon.sci.admit$admit_walk invokeStatic admit.clj 723]
+    at [seon.sci.admit$admit_walk invoke admit.clj 706]
+    at [seon.sci.admit$admit_STAR_ invokeStatic admit.clj 703]
+    at [seon.sci.admit$admit_STAR_ invoke admit.clj 689]
+    at [seon.sci.admit$admit invokeStatic admit.clj 793]
+    at [seon.sci.admit$admit invoke admit.clj 752]
+    at [clojure.lang.AFn applyToHelper AFn.java 154]
+    at [clojure.lang.AFn applyTo AFn.java 144]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [malli.core$__EQ__GT$reify$reify__3936$fn__3968 doInvoke core.cljc 2216]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$arm_var_BANG_$fn__107189$fn__107192 doInvoke instrument.clj 598]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.lang.AFunction$1 doInvoke AFunction.java 33]
+    at [clojure.lang.RestFn invoke RestFn.java 411]
+    at [seon.sci.admit_test$fn__121638 invokeStatic admit_test.clj 162]
+    at [seon.sci.admit_test$fn__121638 invoke admit_test.clj 157]
+    at [clojure.test$test_var$fn__9898 invoke test.clj 717]
+
+bin/test: 2026-09-15T21:00:10.832310Z END test seon.sci.admit-test/every-identity-only-record-admits-as-identity-at-depth
+bin/test: 2026-09-15T21:00:10.832428Z BEGIN test seon.sci.admit-test/admission-is-total-in-depth-and-never-throws-a-stack-overflow
+
+ERROR in (admission-is-total-in-depth-and-never-throws-a-stack-overflow) (instrument.clj:413)
+Uncaught exception, not in assertion.
+expected: nil
+  actual: clojure.lang.ExceptionInfo: seon.sci.admit/semantic-value violated its contract (:malli.core/invalid-input).
+    at [seon.instrument$throwing_report$fn__107148 invoke instrument.clj 413]
+    at [seon.instrument$compiled_wrapper$fn__107182$fn__107183 invoke instrument.clj 563]
+    at [malli.core$__EQ__GT$reify$reify__3936$fn__3968 doInvoke core.cljc 2215]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$arm_var_BANG_$fn__107189$fn__107192 doInvoke instrument.clj 598]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.lang.AFunction$1 doInvoke AFunction.java 33]
+    at [clojure.lang.RestFn invoke RestFn.java 411]
+    at [seon.sci.admit$admit_walk$fn__82945 invoke admit.clj 728]
+    at [seon.sci.admit$admit_walk invokeStatic admit.clj 723]
+    at [seon.sci.admit$admit_walk invoke admit.clj 706]
+    at [seon.sci.admit$admit_STAR_ invokeStatic admit.clj 703]
+    at [seon.sci.admit$admit_STAR_ invoke admit.clj 689]
+    at [seon.sci.admit$admit invokeStatic admit.clj 793]
+    at [seon.sci.admit$admit invoke admit.clj 752]
+    at [clojure.lang.AFn applyToHelper AFn.java 154]
+    at [clojure.lang.AFn applyTo AFn.java 144]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [malli.core$__EQ__GT$reify$reify__3936$fn__3968 doInvoke core.cljc 2216]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$arm_var_BANG_$fn__107189$fn__107192 doInvoke instrument.clj 598]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.lang.AFunction$1 doInvoke AFunction.java 33]
+    at [clojure.lang.RestFn invoke RestFn.java 411]
+    at [seon.sci.admit_test$fn__121864$fn__121869 invoke admit_test.clj 474]
+    at [seon.sci.admit_test$fn__121864 invokeStatic admit_test.clj 466]
+    at [seon.sci.admit_test$fn__121864 invoke admit_test.clj 459]
+
+bin/test: 2026-09-15T21:00:10.897688Z END test seon.sci.admit-test/admission-is-total-in-depth-and-never-throws-a-stack-overflow
+bin/test: 2026-09-15T21:00:10.897835Z BEGIN test seon.sci.admit-test/a-value-under-the-bound-is-stored-whole-however-wide-or-deep
+
+ERROR in (a-value-under-the-bound-is-stored-whole-however-wide-or-deep) (instrument.clj:413)
+Uncaught exception, not in assertion.
+expected: nil
+  actual: clojure.lang.ExceptionInfo: seon.sci.admit/semantic-value violated its contract (:malli.core/invalid-input).
+    at [seon.instrument$throwing_report$fn__107148 invoke instrument.clj 413]
+    at [seon.instrument$compiled_wrapper$fn__107182$fn__107183 invoke instrument.clj 563]
+    at [malli.core$__EQ__GT$reify$reify__3936$fn__3968 doInvoke core.cljc 2215]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$arm_var_BANG_$fn__107189$fn__107192 doInvoke instrument.clj 598]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.lang.AFunction$1 doInvoke AFunction.java 33]
+    at [clojure.lang.RestFn invoke RestFn.java 411]
+    at [seon.sci.admit$admit_walk$fn__82945 invoke admit.clj 728]
+    at [seon.sci.admit$admit_walk invokeStatic admit.clj 723]
+    at [seon.sci.admit$admit_walk invoke admit.clj 706]
+    at [seon.sci.admit$admit_STAR_ invokeStatic admit.clj 703]
+    at [seon.sci.admit$admit_STAR_ invoke admit.clj 689]
+    at [seon.sci.admit$admit invokeStatic admit.clj 793]
+    at [seon.sci.admit$admit invoke admit.clj 752]
+    at [clojure.lang.AFn applyToHelper AFn.java 154]
+    at [clojure.lang.AFn applyTo AFn.java 144]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [malli.core$__EQ__GT$reify$reify__3936$fn__3968 doInvoke core.cljc 2216]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$arm_var_BANG_$fn__107189$fn__107192 doInvoke instrument.clj 598]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.lang.AFunction$1 doInvoke AFunction.java 33]
+    at [clojure.lang.RestFn invoke RestFn.java 411]
+    at [seon.sci.admit_test$fn__121829$fn__121839 invoke admit_test.clj 438]
+    at [seon.sci.admit_test$fn__121829 invokeStatic admit_test.clj 437]
+    at [seon.sci.admit_test$fn__121829 invoke admit_test.clj 429]
+
+bin/test: 2026-09-15T21:00:10.941377Z END test seon.sci.admit-test/a-value-under-the-bound-is-stored-whole-however-wide-or-deep
+bin/test: 2026-09-15T21:00:10.944200Z BEGIN test seon.sci.admit-test/a-host-reference-the-walk-cannot-enter-is-missing-not-described
+bin/test: 2026-09-15T21:00:10.946051Z END test seon.sci.admit-test/a-host-reference-the-walk-cannot-enter-is-missing-not-described
+bin/test: 2026-09-15T21:00:10.948200Z BEGIN test seon.sci.admit-test/an-absent-storage-bound-refuses-and-names-the-key-it-wanted
+WARN seon.db/projection-fallback caller= seon.sci.eval/documentation-contract missing-projection count=1; supply the operation's projection.
+
+ERROR in (an-absent-storage-bound-refuses-and-names-the-key-it-wanted) (eval.clj:1158)
+Uncaught exception, not in assertion.
+expected: nil
+  actual: clojure.lang.ExceptionInfo: This operation requires a carried schema projection.
+    at [seon.sci.eval$documentation_contract invokeStatic eval.clj 1158]
+    at [seon.sci.eval$documentation_contract invoke eval.clj 1152]
+    at [seon.sci.eval$agent_documentation_contract invokeStatic eval.clj 1174]
+    at [seon.sci.eval$agent_documentation_contract invoke eval.clj 1171]
+    at [seon.sci.eval$function_doc_map invokeStatic eval.clj 1203]
+    at [seon.sci.eval$function_doc_map invoke eval.clj 1199]
+    at [seon.sci.eval$shown_result invokeStatic eval.clj 1988]
+    at [seon.sci.eval$shown_result invoke eval.clj 1977]
+    at [seon.sci.eval$evaluate$fn__107876$fn__107879 invoke eval.clj 2469]
+    at [clojure.lang.AFn applyToHelper AFn.java 152]
+    at [clojure.lang.AFn applyTo AFn.java 144]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$with_bindings_STAR_ invokeStatic core.clj 1994]
+    at [clojure.core$with_bindings_STAR_ doInvoke core.clj 1994]
+    at [clojure.lang.RestFn invoke RestFn.java 428]
+    at [seon.sci.eval$evaluate$fn__107876 invoke eval.clj 2265]
+    at [seon.schema$call_with_projection_state invokeStatic schema.clj 937]
+    at [seon.schema$call_with_projection_state invoke schema.clj 930]
+    at [clojure.lang.AFn applyToHelper AFn.java 156]
+    at [clojure.lang.AFn applyTo AFn.java 144]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [malli.core$__EQ__GT$reify$reify__3936$fn__3968 doInvoke core.cljc 2216]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$arm_var_BANG_$fn__107189$fn__107192 doInvoke instrument.clj 598]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.lang.AFunction$1 doInvoke AFunction.java 33]
+    at [clojure.lang.RestFn invoke RestFn.java 424]
+    at [seon.sci.eval$evaluate invokeStatic eval.clj 2262]
+    at [seon.sci.eval$evaluate invoke eval.clj 2148]
+
+bin/test: 2026-09-15T21:00:11.108180Z END test seon.sci.admit-test/an-absent-storage-bound-refuses-and-names-the-key-it-wanted
+bin/test: 2026-09-15T21:00:11.108301Z BEGIN test seon.sci.admit-test/one-print-node-owns-semantic-value-and-result-edn
+
+ERROR in (one-print-node-owns-semantic-value-and-result-edn) (instrument.clj:413)
+Uncaught exception, not in assertion.
+expected: nil
+  actual: clojure.lang.ExceptionInfo: seon.sci.admit/semantic-value violated its contract (:malli.core/invalid-input).
+    at [seon.instrument$throwing_report$fn__107148 invoke instrument.clj 413]
+    at [seon.instrument$compiled_wrapper$fn__107182$fn__107183 invoke instrument.clj 563]
+    at [malli.core$__EQ__GT$reify$reify__3936$fn__3968 doInvoke core.cljc 2215]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$arm_var_BANG_$fn__107189$fn__107192 doInvoke instrument.clj 598]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.lang.AFunction$1 doInvoke AFunction.java 33]
+    at [clojure.lang.RestFn invoke RestFn.java 411]
+    at [seon.sci.admit$admit_walk$fn__82945 invoke admit.clj 728]
+    at [seon.sci.admit$admit_walk invokeStatic admit.clj 723]
+    at [seon.sci.admit$admit_walk invoke admit.clj 706]
+    at [seon.sci.admit$admit_STAR_ invokeStatic admit.clj 703]
+    at [seon.sci.admit$admit_STAR_ invoke admit.clj 689]
+    at [seon.sci.admit$admit invokeStatic admit.clj 793]
+    at [seon.sci.admit$admit invoke admit.clj 752]
+    at [clojure.lang.AFn applyToHelper AFn.java 154]
+    at [clojure.lang.AFn applyTo AFn.java 144]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [malli.core$__EQ__GT$reify$reify__3936$fn__3968 doInvoke core.cljc 2216]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$arm_var_BANG_$fn__107189$fn__107192 doInvoke instrument.clj 598]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.lang.AFunction$1 doInvoke AFunction.java 33]
+    at [clojure.lang.RestFn invoke RestFn.java 411]
+    at [seon.sci.admit_test$fn__121624 invokeStatic admit_test.clj 147]
+    at [seon.sci.admit_test$fn__121624 invoke admit_test.clj 140]
+    at [clojure.test$test_var$fn__9898 invoke test.clj 717]
+
+bin/test: 2026-09-15T21:00:11.111355Z END test seon.sci.admit-test/one-print-node-owns-semantic-value-and-result-edn
+bin/test: 2026-09-15T21:00:11.111468Z BEGIN test seon.sci.admit-test/the-storage-bound-stops-an-unbounded-source-while-it-emits
+bin/test: 2026-09-15T21:00:11.118440Z END test seon.sci.admit-test/the-storage-bound-stops-an-unbounded-source-while-it-emits
+bin/test: 2026-09-15T21:00:11.119320Z END namespace seon.sci.admit-test
+bin/test: 2026-09-15T21:00:11.124898Z BEGIN namespace seon.schema.datahike-test
+
+Testing seon.schema.datahike-test
+bin/test: 2026-09-15T21:00:11.162367Z BEGIN test seon.schema.datahike-test/edn-backed-attributes-have-one-canonical-datahike-round-trip
+
+FAIL in (edn-backed-attributes-have-one-canonical-datahike-round-trip) (datahike_test.clj:450)
+wildcard receipt reads restore both exact logical values
+expected: (= request (:seon.db/read-request forward-evidence))
+  actual: (not (= #:seon.db{:read-operation :q, :query-request {:query {:find [?key ?schema-key ?fingerprint ?supplier], :in [$], :where [[?row :seon.call-preparation/key ?key] [?row :seon.call-preparation/schema ?schema] [?schema :seon.schema/key ?schema-key] [?schema :seon.schema/shape ?shape] [?shape :seon.schema.shape/fingerprint ?fingerprint] [?row :seon.call-preparation/supplier ?function] [?function :seon.fn/sym ?supplier]]}, :args [:seon.db/database]}} nil))
+
+FAIL in (edn-backed-attributes-have-one-canonical-datahike-round-trip) (datahike_test.clj:451)
+wildcard receipt reads restore both exact logical values
+expected: (= request (:seon.db/read-request reversed-evidence))
+  actual: (not (= #:seon.db{:read-operation :q, :query-request {:query {:find [?key ?schema-key ?fingerprint ?supplier], :in [$], :where [[?row :seon.call-preparation/key ?key] [?row :seon.call-preparation/schema ?schema] [?schema :seon.schema/key ?schema-key] [?schema :seon.schema/shape ?shape] [?shape :seon.schema.shape/fingerprint ?fingerprint] [?row :seon.call-preparation/supplier ?function] [?function :seon.fn/sym ?supplier]]}, :args [:seon.db/database]}} nil))
+
+FAIL in (edn-backed-attributes-have-one-canonical-datahike-round-trip) (datahike_test.clj:452)
+wildcard receipt reads restore both exact logical values
+expected: (= plan (:datahike.read/dependency-plan forward-evidence))
+  actual: (not (= #:datahike.query.dependency{:sources [#:datahike.query.source{:symbol $, :argument-position 0, :attributes #{:seon.call-preparation/key :seon.call-preparation/schema :seon.call-preparation/supplier :seon.fn/sym :seon.schema/key :seon.schema/shape :seon.schema.shape/fingerprint}}]} nil))
+
+FAIL in (edn-backed-attributes-have-one-canonical-datahike-round-trip) (datahike_test.clj:453)
+wildcard receipt reads restore both exact logical values
+expected: (= plan (:datahike.read/dependency-plan reversed-evidence))
+  actual: (not (= #:datahike.query.dependency{:sources [#:datahike.query.source{:symbol $, :argument-position 0, :attributes #{:seon.call-preparation/key :seon.call-preparation/schema :seon.call-preparation/supplier :seon.fn/sym :seon.schema/key :seon.schema/shape :seon.schema.shape/fingerprint}}]} nil))
+bin/test: 2026-09-15T21:00:11.198149Z END test seon.schema.datahike-test/edn-backed-attributes-have-one-canonical-datahike-round-trip
+bin/test: 2026-09-15T21:00:11.198563Z BEGIN test seon.schema.datahike-test/encode-transaction-resolves-the-declaration-population-once
+bin/test: 2026-09-15T21:00:11.201943Z END test seon.schema.datahike-test/encode-transaction-resolves-the-declaration-population-once
+bin/test: 2026-09-15T21:00:11.202116Z BEGIN test seon.schema.datahike-test/literal-schemas-derive-their-native-datahike-value-type
+bin/test: 2026-09-15T21:00:11.502702Z END test seon.schema.datahike-test/literal-schemas-derive-their-native-datahike-value-type
+bin/test: 2026-09-15T21:00:11.502878Z BEGIN test seon.schema.datahike-test/agent-authored-render-symbols-cross-the-transaction-function-codec
+bin/test: 2026-09-15T21:00:19.472132Z END test seon.schema.datahike-test/agent-authored-render-symbols-cross-the-transaction-function-codec
+bin/test: 2026-09-15T21:00:19.472388Z BEGIN test seon.schema.datahike-test/registered-shape-round-trips-through-datahike
+bin/test: 2026-09-15T21:00:19.501787Z END test seon.schema.datahike-test/registered-shape-round-trips-through-datahike
+bin/test: 2026-09-15T21:00:19.502009Z BEGIN test seon.schema.datahike-test/supported-ast-wrappers-and-aliases-have-one-declaration
+bin/test: 2026-09-15T21:00:39.744963Z END test seon.schema.datahike-test/supported-ast-wrappers-and-aliases-have-one-declaration
+bin/test: 2026-09-15T21:00:39.745131Z BEGIN test seon.schema.datahike-test/database-attribute-derivation-resolves-the-population-once
+bin/test: 2026-09-15T21:00:39.785678Z END test seon.schema.datahike-test/database-attribute-derivation-resolves-the-population-once
+bin/test: 2026-09-15T21:00:39.785885Z BEGIN test seon.schema.datahike-test/schema-row-properties-lift-only-when-their-declarations-are-storable
+bin/test: 2026-09-15T21:00:39.787045Z END test seon.schema.datahike-test/schema-row-properties-lift-only-when-their-declarations-are-storable
+bin/test: 2026-09-15T21:00:39.787240Z BEGIN test seon.schema.datahike-test/unsupported-database-attributes-refuse-at-one-rule
+bin/test: 2026-09-15T21:00:41.199482Z END test seon.schema.datahike-test/unsupported-database-attributes-refuse-at-one-rule
+bin/test: 2026-09-15T21:00:41.199658Z END namespace seon.schema.datahike-test
+bin/test: 2026-09-15T21:00:41.199713Z BEGIN namespace seon.effect-test
+
+Testing seon.effect-test
+bin/test: 2026-09-15T21:00:41.230545Z BEGIN test seon.effect-test/the-effect-boundary-runs-its-handler-under-the-requesting-evaluations-arm
+
+ERROR in (the-effect-boundary-runs-its-handler-under-the-requesting-evaluations-arm) (instrument.clj:413)
+Uncaught exception, not in assertion.
+expected: nil
+  actual: clojure.lang.ExceptionInfo: seon.sci.admit/semantic-value violated its contract (:malli.core/invalid-input).
+    at [seon.instrument$throwing_report$fn__107148 invoke instrument.clj 413]
+    at [seon.instrument$compiled_wrapper$fn__107182$fn__107183 invoke instrument.clj 563]
+    at [malli.core$__EQ__GT$reify$reify__3936$fn__3968 doInvoke core.cljc 2215]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$arm_var_BANG_$fn__107189$fn__107192 doInvoke instrument.clj 598]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.lang.AFunction$1 doInvoke AFunction.java 33]
+    at [clojure.lang.RestFn invoke RestFn.java 411]
+    at [seon.sci.admit$admit_walk$fn__82945 invoke admit.clj 728]
+    at [seon.sci.admit$admit_walk invokeStatic admit.clj 723]
+    at [seon.sci.admit$admit_walk invoke admit.clj 706]
+    at [seon.sci.admit$admit_STAR_ invokeStatic admit.clj 703]
+    at [seon.sci.admit$admit_STAR_ invoke admit.clj 689]
+    at [seon.sci.admit$admit_value invokeStatic admit.clj 750]
+    at [seon.sci.admit$admit_value invoke admit.clj 739]
+    at [clojure.lang.AFn applyToHelper AFn.java 154]
+    at [clojure.lang.AFn applyTo AFn.java 144]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [malli.core$__EQ__GT$reify$reify__3936$fn__3968 doInvoke core.cljc 2216]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$arm_var_BANG_$fn__107189$fn__107192 doInvoke instrument.clj 598]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.lang.AFunction$1 doInvoke AFunction.java 33]
+    at [clojure.lang.RestFn invoke RestFn.java 411]
+    at [seon.effect$admitted_value invokeStatic effect.clj 197]
+    at [seon.effect$admitted_value invoke effect.clj 195]
+    at [seon.effect$request_STAR_ invokeStatic effect.clj 613]
+
+bin/test: 2026-09-15T21:00:41.415408Z END test seon.effect-test/the-effect-boundary-runs-its-handler-under-the-requesting-evaluations-arm
+bin/test: 2026-09-15T21:00:41.415527Z BEGIN test seon.effect-test/invalid-requests-never-open-a-receipt
+bin/test: 2026-09-15T21:00:41.506372Z END test seon.effect-test/invalid-requests-never-open-a-receipt
+bin/test: 2026-09-15T21:00:41.506486Z BEGIN test seon.effect-test/recovery-marks-open-receipts-interrupted-without-refiring
+bin/test: 2026-09-15T21:00:41.572516Z END test seon.effect-test/recovery-marks-open-receipts-interrupted-without-refiring
+bin/test: 2026-09-15T21:00:41.572632Z BEGIN test seon.effect-test/guarded-sci-evaluation-supplies-the-effect-identity-context
+
+ERROR in (guarded-sci-evaluation-supplies-the-effect-identity-context) (instrument.clj:413)
+Uncaught exception, not in assertion.
+expected: nil
+  actual: clojure.lang.ExceptionInfo: seon.print/fit violated its contract (:malli.core/invalid-input).
+    at [seon.instrument$throwing_report$fn__107148 invoke instrument.clj 413]
+    at [seon.instrument$compiled_wrapper$fn__107182$fn__107183 invoke instrument.clj 563]
+    at [malli.core$__EQ__GT$reify$reify__3936$fn__3968 doInvoke core.cljc 2215]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$arm_var_BANG_$fn__107189$fn__107192 doInvoke instrument.clj 598]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.lang.AFunction$1 doInvoke AFunction.java 33]
+    at [clojure.lang.RestFn invoke RestFn.java 424]
+    at [seon.render.value$prepare invokeStatic value.clj 419]
+    at [seon.render.value$prepare invoke value.clj 402]
+    at [clojure.lang.AFn applyToHelper AFn.java 156]
+    at [clojure.lang.AFn applyTo AFn.java 144]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [malli.core$__EQ__GT$reify$reify__3936$fn__3968 doInvoke core.cljc 2216]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [malli.core$_function_schema$reify$reify__3992$fn__4006 doInvoke core.cljc 2293]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$arm_var_BANG_$fn__107189$fn__107192 doInvoke instrument.clj 598]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.lang.AFunction$1 doInvoke AFunction.java 33]
+    at [clojure.lang.RestFn invoke RestFn.java 424]
+    at [seon.render.value$prepare invokeStatic value.clj 411]
+    at [seon.render.value$prepare invoke value.clj 402]
+    at [clojure.lang.AFn applyToHelper AFn.java 154]
+    at [clojure.lang.AFn applyTo AFn.java 144]
+
+bin/test: 2026-09-15T21:00:41.741370Z END test seon.effect-test/guarded-sci-evaluation-supplies-the-effect-identity-context
+bin/test: 2026-09-15T21:00:41.741500Z BEGIN test seon.effect-test/interrupted-handlers-mark-the-open-receipt-without-a-result
+
+ERROR in (interrupted-handlers-mark-the-open-receipt-without-a-result) (instrument.clj:413)
+Uncaught exception, not in assertion.
+expected: nil
+  actual: clojure.lang.ExceptionInfo: seon.sci.admit/semantic-value violated its contract (:malli.core/invalid-input).
+    at [seon.instrument$throwing_report$fn__107148 invoke instrument.clj 413]
+    at [seon.instrument$compiled_wrapper$fn__107182$fn__107183 invoke instrument.clj 563]
+    at [malli.core$__EQ__GT$reify$reify__3936$fn__3968 doInvoke core.cljc 2215]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$arm_var_BANG_$fn__107189$fn__107192 doInvoke instrument.clj 598]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.lang.AFunction$1 doInvoke AFunction.java 33]
+    at [clojure.lang.RestFn invoke RestFn.java 411]
+    at [seon.sci.admit$admit_walk$fn__82945 invoke admit.clj 728]
+    at [seon.sci.admit$admit_walk invokeStatic admit.clj 723]
+    at [seon.sci.admit$admit_walk invoke admit.clj 706]
+    at [seon.sci.admit$admit_STAR_ invokeStatic admit.clj 703]
+    at [seon.sci.admit$admit_STAR_ invoke admit.clj 689]
+    at [seon.sci.admit$admit_value invokeStatic admit.clj 750]
+    at [seon.sci.admit$admit_value invoke admit.clj 739]
+    at [clojure.lang.AFn applyToHelper AFn.java 154]
+    at [clojure.lang.AFn applyTo AFn.java 144]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [malli.core$__EQ__GT$reify$reify__3936$fn__3968 doInvoke core.cljc 2216]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$arm_var_BANG_$fn__107189$fn__107192 doInvoke instrument.clj 598]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.lang.AFunction$1 doInvoke AFunction.java 33]
+    at [clojure.lang.RestFn invoke RestFn.java 411]
+    at [seon.effect$admitted_value invokeStatic effect.clj 197]
+    at [seon.effect$admitted_value invoke effect.clj 195]
+    at [seon.effect$request_STAR_ invokeStatic effect.clj 613]
+
+bin/test: 2026-09-15T21:00:41.915795Z END test seon.effect-test/interrupted-handlers-mark-the-open-receipt-without-a-result
+bin/test: 2026-09-15T21:00:41.915907Z BEGIN test seon.effect-test/an-oversized-request-is-refused-and-never-dispatched
+bin/test: 2026-09-15T21:00:42.079572Z END test seon.effect-test/an-oversized-request-is-refused-and-never-dispatched
+bin/test: 2026-09-15T21:00:42.079673Z BEGIN test seon.effect-test/capability-reachability-is-a-database-query
+bin/test: 2026-09-15T21:00:42.152811Z END test seon.effect-test/capability-reachability-is-a-database-query
+bin/test: 2026-09-15T21:00:42.152953Z BEGIN test seon.effect-test/background-settlement-carries-its-connection-across-a-thread-hop
+
+ERROR in (background-settlement-carries-its-connection-across-a-thread-hop) (instrument.clj:413)
+expected: (= result-ref (binding [effect/*request-context* (request-context connection launcher)] (effect/request! (var capability-owner) #:seon.effect-test{:value 7} #:seon.effect{:background? true})))
+  actual: clojure.lang.ExceptionInfo: seon.sci.admit/semantic-value violated its contract (:malli.core/invalid-input).
+    at [seon.instrument$throwing_report$fn__107148 invoke instrument.clj 413]
+    at [seon.instrument$compiled_wrapper$fn__107182$fn__107183 invoke instrument.clj 563]
+    at [malli.core$__EQ__GT$reify$reify__3936$fn__3968 doInvoke core.cljc 2215]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$arm_var_BANG_$fn__107189$fn__107192 doInvoke instrument.clj 598]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.lang.AFunction$1 doInvoke AFunction.java 33]
+    at [clojure.lang.RestFn invoke RestFn.java 411]
+    at [seon.sci.admit$admit_walk$fn__82945 invoke admit.clj 728]
+    at [seon.sci.admit$admit_walk invokeStatic admit.clj 723]
+    at [seon.sci.admit$admit_walk invoke admit.clj 706]
+    at [seon.sci.admit$admit_STAR_ invokeStatic admit.clj 703]
+    at [seon.sci.admit$admit_STAR_ invoke admit.clj 689]
+    at [seon.sci.admit$admit_value invokeStatic admit.clj 750]
+    at [seon.sci.admit$admit_value invoke admit.clj 739]
+    at [clojure.lang.AFn applyToHelper AFn.java 154]
+    at [clojure.lang.AFn applyTo AFn.java 144]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [malli.core$__EQ__GT$reify$reify__3936$fn__3968 doInvoke core.cljc 2216]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$arm_var_BANG_$fn__107189$fn__107192 doInvoke instrument.clj 598]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.lang.AFunction$1 doInvoke AFunction.java 33]
+    at [clojure.lang.RestFn invoke RestFn.java 411]
+    at [seon.effect$admitted_value invokeStatic effect.clj 197]
+    at [seon.effect$admitted_value invoke effect.clj 195]
+    at [seon.effect$request_STAR_ invokeStatic effect.clj 613]
+
+
+ERROR in (background-settlement-carries-its-connection-across-a-thread-hop) (test_support.clj:417)
+Uncaught exception, not in assertion.
+expected: nil
+  actual: clojure.lang.ExceptionInfo: The test did not observe its required latch event.
+    at [seon.test_support$await_event_BANG_ invokeStatic test_support.clj 417]
+    at [seon.test_support$await_event_BANG_ invoke test_support.clj 405]
+    at [seon.test_support$await_event_BANG_ invokeStatic test_support.clj 408]
+    at [seon.test_support$await_event_BANG_ invoke test_support.clj 405]
+    at [seon.effect_test$fn__122297$fn__122298 invoke effect_test.clj 245]
+    at [seon.test_support$run_database_body$fn__120363 invoke test_support.clj 561]
+    at [seon.schema$call_with_projection_state invokeStatic schema.clj 937]
+    at [seon.schema$call_with_projection_state invoke schema.clj 930]
+    at [clojure.lang.AFn applyToHelper AFn.java 156]
+    at [clojure.lang.AFn applyTo AFn.java 144]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [malli.core$__EQ__GT$reify$reify__3936$fn__3968 doInvoke core.cljc 2216]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$arm_var_BANG_$fn__107189$fn__107192 doInvoke instrument.clj 598]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.lang.AFunction$1 doInvoke AFunction.java 33]
+    at [clojure.lang.RestFn invoke RestFn.java 424]
+    at [seon.test_support$run_database_body invokeStatic test_support.clj 556]
+    at [seon.test_support$run_database_body invoke test_support.clj 554]
+    at [seon.test_support$with_branched_database invokeStatic test_support.clj 618]
+    at [seon.test_support$with_branched_database invoke test_support.clj 598]
+    at [seon.test_support$with_database invokeStatic test_support.clj 649]
+    at [seon.test_support$with_database invoke test_support.clj 631]
+    at [seon.test_support$with_database invokeStatic test_support.clj 645]
+    at [seon.test_support$with_database invoke test_support.clj 631]
+    at [seon.effect_test$fn__122297 invokeStatic effect_test.clj 195]
+    at [seon.effect_test$fn__122297 invoke effect_test.clj 194]
+    at [clojure.test$test_var$fn__9898 invoke test.clj 717]
+    at [clojure.test$test_var invokeStatic test.clj 717]
+
+bin/test: 2026-09-15T21:01:02.320399Z END test seon.effect-test/background-settlement-carries-its-connection-across-a-thread-hop
+bin/test: 2026-09-15T21:01:02.320507Z BEGIN test seon.effect-test/capability-fixtures-install-complete-program-declarations
+bin/test: 2026-09-15T21:01:02.340060Z END test seon.effect-test/capability-fixtures-install-complete-program-declarations
+bin/test: 2026-09-15T21:01:02.340186Z BEGIN test seon.effect-test/request-commits-before-io-dispatch-and-settles-once
+
+ERROR in (request-commits-before-io-dispatch-and-settles-once) (instrument.clj:413)
+Uncaught exception, not in assertion.
+expected: nil
+  actual: clojure.lang.ExceptionInfo: seon.sci.admit/semantic-value violated its contract (:malli.core/invalid-input).
+    at [seon.instrument$throwing_report$fn__107148 invoke instrument.clj 413]
+    at [seon.instrument$compiled_wrapper$fn__107182$fn__107183 invoke instrument.clj 563]
+    at [malli.core$__EQ__GT$reify$reify__3936$fn__3968 doInvoke core.cljc 2215]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$arm_var_BANG_$fn__107189$fn__107192 doInvoke instrument.clj 598]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.lang.AFunction$1 doInvoke AFunction.java 33]
+    at [clojure.lang.RestFn invoke RestFn.java 411]
+    at [seon.sci.admit$admit_walk$fn__82945 invoke admit.clj 728]
+    at [seon.sci.admit$admit_walk invokeStatic admit.clj 723]
+    at [seon.sci.admit$admit_walk invoke admit.clj 706]
+    at [seon.sci.admit$admit_STAR_ invokeStatic admit.clj 703]
+    at [seon.sci.admit$admit_STAR_ invoke admit.clj 689]
+    at [seon.sci.admit$admit_value invokeStatic admit.clj 750]
+    at [seon.sci.admit$admit_value invoke admit.clj 739]
+    at [clojure.lang.AFn applyToHelper AFn.java 154]
+    at [clojure.lang.AFn applyTo AFn.java 144]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [malli.core$__EQ__GT$reify$reify__3936$fn__3968 doInvoke core.cljc 2216]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$arm_var_BANG_$fn__107189$fn__107192 doInvoke instrument.clj 598]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.lang.AFunction$1 doInvoke AFunction.java 33]
+    at [clojure.lang.RestFn invoke RestFn.java 411]
+    at [seon.effect$admitted_value invokeStatic effect.clj 197]
+    at [seon.effect$admitted_value invoke effect.clj 195]
+    at [seon.effect$request_STAR_ invokeStatic effect.clj 613]
+
+bin/test: 2026-09-15T21:01:02.520418Z END test seon.effect-test/request-commits-before-io-dispatch-and-settles-once
+bin/test: 2026-09-15T21:01:02.520513Z BEGIN test seon.effect-test/detached-work-is-bounded-by-its-own-limit-config-then-the-form
+
+ERROR in (detached-work-is-bounded-by-its-own-limit-config-then-the-form) (instrument.clj:413)
+Uncaught exception, not in assertion.
+expected: nil
+  actual: clojure.lang.ExceptionInfo: seon.sci.admit/semantic-value violated its contract (:malli.core/invalid-input).
+    at [seon.instrument$throwing_report$fn__107148 invoke instrument.clj 413]
+    at [seon.instrument$compiled_wrapper$fn__107182$fn__107183 invoke instrument.clj 563]
+    at [malli.core$__EQ__GT$reify$reify__3936$fn__3968 doInvoke core.cljc 2215]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$arm_var_BANG_$fn__107189$fn__107192 doInvoke instrument.clj 598]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.lang.AFunction$1 doInvoke AFunction.java 33]
+    at [clojure.lang.RestFn invoke RestFn.java 411]
+    at [seon.sci.admit$admit_walk$fn__82945 invoke admit.clj 728]
+    at [seon.sci.admit$admit_walk invokeStatic admit.clj 723]
+    at [seon.sci.admit$admit_walk invoke admit.clj 706]
+    at [seon.sci.admit$admit_STAR_ invokeStatic admit.clj 703]
+    at [seon.sci.admit$admit_STAR_ invoke admit.clj 689]
+    at [seon.sci.admit$admit_value invokeStatic admit.clj 750]
+    at [seon.sci.admit$admit_value invoke admit.clj 739]
+    at [clojure.lang.AFn applyToHelper AFn.java 154]
+    at [clojure.lang.AFn applyTo AFn.java 144]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [malli.core$__EQ__GT$reify$reify__3936$fn__3968 doInvoke core.cljc 2216]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$arm_var_BANG_$fn__107189$fn__107192 doInvoke instrument.clj 598]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.lang.AFunction$1 doInvoke AFunction.java 33]
+    at [clojure.lang.RestFn invoke RestFn.java 411]
+    at [seon.effect$admitted_value invokeStatic effect.clj 197]
+    at [seon.effect$admitted_value invoke effect.clj 195]
+    at [seon.effect$request_STAR_ invokeStatic effect.clj 613]
+
+bin/test: 2026-09-15T21:01:02.705149Z END test seon.effect-test/detached-work-is-bounded-by-its-own-limit-config-then-the-form
+bin/test: 2026-09-15T21:01:02.705254Z BEGIN test seon.effect-test/background-work-outlives-the-deadline-of-the-turn-that-started-it
+
+ERROR in (background-work-outlives-the-deadline-of-the-turn-that-started-it) (instrument.clj:413)
+expected: (= [:seon.effect/id effect-id] (binding [effect/*request-context* (request-context connection launcher)] (effect/request! (var arm-probe-owner) #:seon.effect-test{:iterations 20000, :gated? true} #:seon.effect{:background? true})))
+  actual: clojure.lang.ExceptionInfo: seon.sci.admit/semantic-value violated its contract (:malli.core/invalid-input).
+    at [seon.instrument$throwing_report$fn__107148 invoke instrument.clj 413]
+    at [seon.instrument$compiled_wrapper$fn__107182$fn__107183 invoke instrument.clj 563]
+    at [malli.core$__EQ__GT$reify$reify__3936$fn__3968 doInvoke core.cljc 2215]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$arm_var_BANG_$fn__107189$fn__107192 doInvoke instrument.clj 598]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.lang.AFunction$1 doInvoke AFunction.java 33]
+    at [clojure.lang.RestFn invoke RestFn.java 411]
+    at [seon.sci.admit$admit_walk$fn__82945 invoke admit.clj 728]
+    at [seon.sci.admit$admit_walk invokeStatic admit.clj 723]
+    at [seon.sci.admit$admit_walk invoke admit.clj 706]
+    at [seon.sci.admit$admit_STAR_ invokeStatic admit.clj 703]
+    at [seon.sci.admit$admit_STAR_ invoke admit.clj 689]
+    at [seon.sci.admit$admit_value invokeStatic admit.clj 750]
+    at [seon.sci.admit$admit_value invoke admit.clj 739]
+    at [clojure.lang.AFn applyToHelper AFn.java 154]
+    at [clojure.lang.AFn applyTo AFn.java 144]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [malli.core$__EQ__GT$reify$reify__3936$fn__3968 doInvoke core.cljc 2216]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$arm_var_BANG_$fn__107189$fn__107192 doInvoke instrument.clj 598]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.lang.AFunction$1 doInvoke AFunction.java 33]
+    at [clojure.lang.RestFn invoke RestFn.java 411]
+    at [seon.effect$admitted_value invokeStatic effect.clj 197]
+    at [seon.effect$admitted_value invoke effect.clj 195]
+    at [seon.effect$request_STAR_ invokeStatic effect.clj 613]
+
+
+ERROR in (background-work-outlives-the-deadline-of-the-turn-that-started-it) (test_support.clj:428)
+Uncaught exception, not in assertion.
+expected: nil
+  actual: clojure.lang.ExceptionInfo: The test future did not publish its required completion.
+    at [seon.test_support$await_event_BANG_ invokeStatic test_support.clj 428]
+    at [seon.test_support$await_event_BANG_ invoke test_support.clj 405]
+    at [seon.test_support$await_event_BANG_ invokeStatic test_support.clj 408]
+    at [seon.test_support$await_event_BANG_ invoke test_support.clj 405]
+    at [seon.effect_test$fn__122369$fn__122370 invoke effect_test.clj 365]
+    at [seon.test_support$run_database_body$fn__120363 invoke test_support.clj 561]
+    at [seon.schema$call_with_projection_state invokeStatic schema.clj 937]
+    at [seon.schema$call_with_projection_state invoke schema.clj 930]
+    at [clojure.lang.AFn applyToHelper AFn.java 156]
+    at [clojure.lang.AFn applyTo AFn.java 144]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [malli.core$__EQ__GT$reify$reify__3936$fn__3968 doInvoke core.cljc 2216]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$arm_var_BANG_$fn__107189$fn__107192 doInvoke instrument.clj 598]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.lang.AFunction$1 doInvoke AFunction.java 33]
+    at [clojure.lang.RestFn invoke RestFn.java 424]
+    at [seon.test_support$run_database_body invokeStatic test_support.clj 556]
+    at [seon.test_support$run_database_body invoke test_support.clj 554]
+    at [seon.test_support$with_branched_database invokeStatic test_support.clj 618]
+    at [seon.test_support$with_branched_database invoke test_support.clj 598]
+    at [seon.test_support$with_database invokeStatic test_support.clj 649]
+    at [seon.test_support$with_database invoke test_support.clj 631]
+    at [seon.test_support$with_database invokeStatic test_support.clj 645]
+    at [seon.test_support$with_database invoke test_support.clj 631]
+    at [seon.effect_test$fn__122369 invokeStatic effect_test.clj 326]
+    at [seon.effect_test$fn__122369 invoke effect_test.clj 318]
+    at [clojure.test$test_var$fn__9898 invoke test.clj 717]
+    at [clojure.test$test_var invokeStatic test.clj 717]
+
+bin/test: 2026-09-15T21:01:22.893100Z END test seon.effect-test/background-work-outlives-the-deadline-of-the-turn-that-started-it
+bin/test: 2026-09-15T21:01:22.893193Z END namespace seon.effect-test
+
+Ran 62 tests containing 358 assertions.
+6 failures, 25 errors.

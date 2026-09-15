@@ -301,3 +301,22 @@ That snapshot's finally explicitly calls `instrument/remove!`. The current
 working tree has another lane's uncommitted preservation-fixture correction;
 this lane did not change or verify it. This measured test-teardown defect is
 separate from the production cross-cluster contract ownership defect above.
+
+## P1 verification — 2026-09-15
+
+The archived shared-host-program ruling still applies. The P1 arming change
+selects a database argument's immutable carried projection before existing
+request/thread/host inputs; wrapper compilation remains cached on that
+projection. Report functions are outside this lane's change. The isolated
+armed `seon.instrument-test` namespace passed with the database/schema tests;
+the core aggregate was 91 tests / 676 assertions, zero assertion failures or
+errors, before the test-root result-publication setup was completed.
+
+Default hot reload and explicit re-arming reported 990 instrumented Vars.
+The separate shared-host bootstrap policy is preserved, and no complete
+cohost lifecycle claim is made. Exact gates and remaining explicit-carriage
+work are in the [P1 landing](../../../prds/context-generation/research/p1-ambient-state-2026-09-15.md).
+
+## Final P1 carriage handoff — 2026-09-15
+
+Implementation: `b80f78a7c`. The [P1 landing note](../../../prds/context-generation/research/p1-ambient-state-2026-09-15.md) records the live probes, measured allocations, exact remaining boundaries and pending orchestrator gate. Database metadata now participates in instrumentation and admission; no running read/admission fallback reconstructs the projection. This closes only the member's read/admission carriage defect, not adoption/lifecycle or the remaining explicitly supplied thread compatibility input.

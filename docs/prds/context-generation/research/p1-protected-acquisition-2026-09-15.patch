@@ -1,0 +1,31 @@
+diff --git a/src/seon/sci/eval.clj b/src/seon/sci/eval.clj
+index 60506a3b7..ef6bfd178 100644
+--- a/src/seon/sci/eval.clj
++++ b/src/seon/sci/eval.clj
+@@ -1394,7 +1394,14 @@
+     supplied-projection :seon.schema/projection
+     commit-fault! :seon.flow/commit-fault!}]
+   (let [projection (or supplied-projection
+-                       (schema/projection-from-database db))]
++                       (db/carried-projection db)
++                       (:seon.schema/projection (env/of ctx)))
++        db (if projection
++             (vary-meta db assoc :seon.schema/projection projection)
++             db)]
++    (when-not projection
++      (let [failure (db/projection-fallback 'seon.sci.eval/acquire!)]
++        (throw (ex-info (:seon.error/message failure) failure))))
+     (schema/call-with-projection
+      projection
+      (fn []
+@@ -1766,7 +1773,9 @@
+                     ::kernel/install-function!
+                     install-function-from-database!)
+          supplied-projection
+-         (:seon.schema/projection (some-> supplied-projection-state deref))
++         (or (:seon.schema/projection (some-> supplied-projection-state deref))
++             (db/carried-projection db)
++             (schema/projection-from-database db))
+          ;; ABSENT MEANS NO KEY: `:seon.sci.eval/acquire-request` marks the
+          ;; projection optional, and an optional key present as nil is a
+          ;; contract violation on every instrumented JVM.

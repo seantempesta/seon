@@ -1,0 +1,26 @@
+bin/test: snapshot differences from HEAD 6dc70f30a9f52b977b19353cacc874a7b429ec7c:
+bin/test:   M	src/seon/db.clj
+bin/test:   M	src/seon/instrument.clj
+bin/test:   M	src/seon/schema.clj
+bin/test:   M	src/seon/test/runner.clj
+bin/test:   M	test/seon/db/declaration_population_test.clj
+bin/test:   M	test/seon/db_test.clj
+bin/test: end snapshot differences
+bin/test: PHASE snapshot elapsed-seconds=3
+bin/test: PHASE test-slot elapsed-seconds=0
+bin/test-fast: selected snapshot /Users/sean/src/seon/tmp/p1-carriage-wt/tmp/test-runs/run.CnaYpr
+WARNING: Using incubator modules: jdk.incubator.vector
+bin/test: PACKAGED TEST PROJECTION ACQUIRED pid= 92503 role= test-fast
+bin/test: PACKAGED TEST PROJECTION ACQUIRED pid= 92503 role= test-fast
+bin/test: CONTRACTS ARMED worker= test-fast mode= :panic namespaces= 1 program-namespaces= 103 registered= 990 instrumented= 990 program-armable= 987
+bin/test: 2026-09-15T20:09:53.789553Z BEGIN namespace seon.db.declaration-population-test
+
+Testing seon.db.declaration-population-test
+bin/test: 2026-09-15T20:09:53.819964Z BEGIN test seon.db.declaration-population-test/reads-require-their-carried-projection-including-transaction-results
+WARNING: reset! already refers to: #'clojure.core/reset! in namespace: seon.fresh-operator, being replaced by: #'seon.fresh-operator/reset!
+clojure.test/report is not a multimethod, some reporting functions have been disabled.
+bin/test: 2026-09-15T20:12:27.758709Z END test seon.db.declaration-population-test/reads-require-their-carried-projection-including-transaction-results
+bin/test: 2026-09-15T20:12:27.758892Z END namespace seon.db.declaration-population-test
+
+Ran 1 tests containing 26 assertions.
+0 failures, 0 errors.
