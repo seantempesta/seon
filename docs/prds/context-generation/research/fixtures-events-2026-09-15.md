@@ -197,3 +197,10 @@ in `ad3d13e9b`. None establishes complete class closure.
 - Deliverables in this checkpoint: this note and its retained read-only form.
 - Next step requires selecting the scope above. Class notes cannot honestly
   be closed on this evidence.
+- Checkpoint commit: `6960ee37a`. Probe lint passed with zero errors and zero
+  warnings; path-limited whitespace check passed. The Markdown hook reported
+  an unrelated current-gitlink citation in
+  `docs/prds/context-generation/research/refusal-grammar-2026-09-15.md:70`
+  (recorded SCI hash `38e627467daa3f6f1e5a8eb6421f702d2a940b7f`, checked-out
+  gitlink `fcbd8862800e638dc0f8f5521111f999279cbcd2`). That foreign document
+  was left untouched; this is not a claim of a green repository Markdown gate.
