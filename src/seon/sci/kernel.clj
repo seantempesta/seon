@@ -589,7 +589,8 @@
               (admit/admit-value
                (cond->
                 {:seon.sci.admit/value value
-                 :seon.schema/projection (context-projection ctx)
+                 :seon.schema/projection (or (:seon.schema/projection (meta database))
+                                             (context-projection ctx))
                  :seon.sci.admit/interrupt-fn interrupt-fn
                  :seon.sci.admit/caps caps
                  :seon.config/on-core-error on-core-error
@@ -609,7 +610,8 @@
           (try
             (admit/admit-value
              {:seon.sci.admit/value failure
-              :seon.schema/projection (context-projection ctx)
+              :seon.schema/projection (or (:seon.schema/projection (meta database))
+                                             (context-projection ctx))
               :seon.sci.admit/interrupt-fn (constantly nil)
               :seon.sci.admit/caps caps
               :seon.config/on-core-error :record

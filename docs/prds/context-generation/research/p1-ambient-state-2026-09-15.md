@@ -6,6 +6,27 @@ tags: [research, schema, database, architecture]
 
 # P1: projection carriage and remaining producer boundaries
 
+## Batch 4 in-process iteration — ongoing
+
+The platform test passed 31 assertions / 0 failures / 0 errors after its
+promise was replaced with the existing watched-reference await contract
+(`atom` plus `some?`). Candidate run: `tmp/p1-resume-platform.edn`; source-loaded
+run: `tmp/p1-platform-source.edn`. These are `seon.test/run` on default, no test
+JVM. Cold fixture construction first failed because source population handed
+forms instead of a projection; REPL-only constructor candidates remain under
+investigation. A canonical in-memory base constructed with an explicit
+projection allowed the platform test to run. No cold-boot or adoption pass is
+claimed by this checkpoint.
+
+`kernel/invoke` failure admission received a nil projection from a bare ctx
+despite a carried database in its request. The candidate selects that database
+metadata first. Direct representative invocation preserved missing-function-installer.
+Re-evaluating the unchanged test form was necessary to observe the new function
+rather than its previously captured callable. The in-process test
+`seon.sci.eval-test/a-refusal-keeps-its-own-kind-at-both-entrances` then passed
+3 / 0 / 0 (`tmp/p1-kernel-rebound.edn`). Other batch-4 failures remain pending;
+no new gate request is authorized or submitted at this checkpoint.
+
 ## Batch 2c repair handoff — 2026-09-15
 
 Code and regressions: **`28e955327`**. No test JVM was started. Re-gate request

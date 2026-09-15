@@ -124,20 +124,20 @@
              (is (= 1 (count (str/split-lines (str warnings)))))
              (is (str/includes? (str warnings) "projection-fallback"))))
          (testing "fixture connection carriage survives a fresh worker thread"
-           (let [completed (promise)
+           (let [completed (atom nil)
                  worker (Thread.
                          ^Runnable
                          (fn []
                            (try
-                             (deliver completed
+                             (reset! completed
                                       (let [report (db/transact! connection [])]
                                         {:projection (db/carried-projection (db/db connection))
                                          :report-projection (db/carried-projection (:db-after report))
                                          :error (:seon.error/kind report)}))
                              (catch Throwable failure
-                               (deliver completed failure)))))]
+                               (reset! completed failure)))))]
              (.start worker)
-             (let [result (test-support/await-event! completed ::worker-carriage)]
+             (let [result (test-support/await-event! completed ::worker-carriage some?)]
                (is (nil? (:error result)) (pr-str result))
                (is (identical? projection (:projection result)))
                (is (identical? projection (:report-projection result))))))

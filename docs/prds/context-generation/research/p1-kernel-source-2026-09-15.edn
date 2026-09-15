@@ -1,0 +1,1 @@
+#:seon.test{:fail-count 0, :pass-count 3, :run-at #inst "2026-09-15T22:33:59.404-00:00", :run #:db{:id 64466}, :run-basis-t 536871860, :error-count 0, :sym "seon.sci.eval-test/a-refusal-keeps-its-own-kind-at-both-entrances"}
