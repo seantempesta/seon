@@ -741,6 +741,9 @@
                    :double "a double" :boolean "a boolean" :keyword "a keyword"
                    :qualified-keyword "a namespaced keyword" :symbol "a symbol"
                    :qualified-symbol "a namespaced symbol" :nil "nil"
+                   :enum (str "either "
+                              (str/join " or "
+                                        (map pr-str (m/children (m/deref-all (:schema problem))))))
                    :fn message
                    :or (or (:error/message (m/properties (:schema problem)))
                            (str "a value satisfying " message))
