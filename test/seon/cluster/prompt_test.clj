@@ -11,6 +11,7 @@
             [seon.cluster.agent :as agent]
             [seon.cluster.prompt :as prompt]
             [seon.render :as render]
+            [seon.repl :as repl]
             [seon.turn :as turn]
 
             [seon.blob :as blob]
@@ -94,6 +95,8 @@
            contributions (:seon.context/contributions rendered)]
        (is (seq text))
        (is (str/includes? text "inspect this walk"))
+       (is (str/ends-with? text "turns left: 99 of 100"))
+       (is (= :frame (:seon.render.block/name (last contributions))))
        (is (= text (apply str (map :seon.context.contribution/text contributions))))
        (is (= (range (count contributions))
               (map :seon.context.contribution/position contributions)))
@@ -133,13 +136,14 @@
    (fn [connection ctx]
      (let [before (:seon.cluster.prompt/text
                    (prompt/prompt @connection (request connection ctx)))]
-       (db/transact! connection [{:seon.turn/id "walk-run" :seon.turn/closed-tx "datomic.tx"}])
+       (let [result (db/transact! connection [[:db/add [:seon.turn/id "walk-run"] :seon.turn/closed-tx "datomic.tx"]])]
+         (is (not (:seon.error/kind result)) (pr-str result)))
        (record-evaluation! connection ctx "second-history" "(str \"SECOND-EVALUATION\")")
        (let [after (:seon.cluster.prompt/text
                     (prompt/prompt @connection (request connection ctx)))]
-         (is (str/starts-with? after before))
+         (is (= after before))
          (is (str/includes? after "inspect this walk"))
-         (is (str/includes? after "SECOND-EVALUATION")))))))
+         (is (not (str/includes? after "SECOND-EVALUATION"))))))))
 
 (deftest basis-only-transactions-do-not-append-history
   (planted
@@ -156,24 +160,22 @@
          (is (not (str/includes? after ";; REPL state"))
              "the deleted volatile suffix is not reconstructed"))))))
 
-(deftest a-held-run-without-a-trigger-refuses
-  (support/with-database
-    (fn [connection]
-      (support/seed-cluster! connection "no-trigger")
-      (db/transact! connection
-                  (agent/creation-tx
-                   {:seon.agent/id "walker"
-                    :seon.cluster/name "no-trigger"
-                    :seon.ns/name 'my.agents.walker}))
-      (db/transact! connection
-                  [{:seon.turn/id "walk-run" :seon.turn/agent [:seon.agent/id "walker"] :seon.turn/opened-tx "datomic.tx"}])
-      (testing "the custody invariant remains independent of presentation"
-        (is (= :seon.cluster.prompt/no-trigger
-               (:seon.cluster.prompt/rule
-                (support/refusal-data
-                 #(prompt/prompt @connection
-                                 (request connection
-                                          (support/fork-cluster-ctx connection)))))))))))
+(deftest a-held-turn-can-render-without-a-message-trigger
+  (planted
+   (fn [connection ctx]
+     (let [result (db/transact!
+                   connection
+                   [[:db/add [:seon.turn/id "walk-run"] :seon.turn/closed-tx "datomic.tx"]
+                    {:seon.turn/id "plan-wake"
+                     :seon.turn/agent [:seon.agent/id "walker"]
+                     :seon.turn/opened-tx "datomic.tx"}])
+           rendered (prompt/prompt @connection
+                                   (assoc (request connection ctx)
+                                          :seon.turn/id "plan-wake"))]
+       (is (not (:seon.error/kind result)) (pr-str result))
+       (is (not (:seon.error/kind rendered)) (pr-str rendered))
+       (is (str/includes? (:seon.cluster.prompt/text rendered)
+                          "inspect this walk"))))))
 
 (deftest prompt-budget-is-informational-and-does-not-compact
   (planted
@@ -196,7 +198,7 @@
          (let [compacted (prompt/prompt @connection
                                         (request connection ctx))]
            (is (= [2] @distances))
-           (is (= (apply str (repeat 40 "x"))
+           (is (= (str (apply str (repeat 40 "x")) "\n\n" (repl/frame @connection "walker"))
                   (:seon.cluster.prompt/text compacted)))
            (is (= :seon.ai.tokens/over
                   (get-in compacted [:seon.ai.tokens/budget-report
@@ -212,7 +214,7 @@
          (let [complete (prompt/prompt @connection
                                        (request connection ctx))]
            (is (= [2] @distances))
-           (is (= (apply str (repeat 40 "x"))
+           (is (= (str (apply str (repeat 40 "x")) "\n\n" (repl/frame @connection "walker"))
                   (:seon.cluster.prompt/text complete)))
            (is (= 3 (get-in complete [:seon.ai.tokens/budget-report
                                       :seon.config.ai/prompt-token-budget])))))))))
@@ -222,14 +224,16 @@
   on the run's capture, and the provider's own count on the attempt."
   [model ordinal characters provider-tokens]
   (let [run-id (str "usage-run-" ordinal)]
-    [{:seon.turn/id run-id :seon.turn/agent [:seon.agent/id "walker"] :seon.turn/opened-tx "datomic.tx"}
+    [{:seon.turn/id run-id :seon.turn/agent [:seon.agent/id "walker"] :seon.turn/opened-tx "datomic.tx"
+      :seon.turn/attempts [(str run-id "-attempt")]} 
      {:seon.context.capture/id (str run-id "-context-1")
       :seon.context.capture/run [:seon.turn/id run-id]
       :seon.context.capture/basis-t 1
       :seon.context.capture/prompt (apply str (repeat characters "x"))
       :seon.ai.tokens/characters characters}
-     {:seon.ai.attempt/id (str run-id "-0")
-      :seon.turn/_attempts [:seon.turn/id run-id]
+     {:db/id (str run-id "-attempt")
+      :seon.ai.attempt/id (str run-id "-0")
+      :seon.ai.attempt/settings-edn "{}"
       :seon.ai.attempt/ordinal 0
       :seon.ai.attempt/at (Date. (+ 1700000100000 (* 1000 ordinal)))
       :seon.ai/endpoint "https://example.invalid/v1/chat/completions"
@@ -263,8 +267,9 @@
                               :seon.ai.tokens/relative-error)))))
        ;; three settled attempts at a real 3.2 characters per token
        (doseq [ordinal [1 2 3]]
-         (db/transact! connection
-                       (recorded-usage-tx model ordinal 32000 10000)))
+         (let [result (db/transact! connection
+                                    (recorded-usage-tx model ordinal 32000 10000))]
+           (is (not (:seon.error/kind result)) (pr-str result))))
        (testing "the calibration is fitted to those committed facts"
          (let [calibration (prompt/model-calibration @connection model)]
            (is (= :seon.ai.tokens/observed
@@ -282,12 +287,14 @@
                                        (request connection ctx))]
              (is (= 106 (tokens/estimate text))
                  "the measured prior catches the first turn too")
-             (is (= text (:seon.cluster.prompt/text result)))
+             (is (= (str text "\n\n" (repl/frame @connection "walker"))
+                    (:seon.cluster.prompt/text result)))
              (is (= :seon.ai.tokens/over
                     (get-in result [:seon.ai.tokens/budget-report
                                     :seon.ai.tokens/verdict])))
-             (is (= 106 (get-in result [:seon.ai.tokens/budget-report
-                                        :seon.ai.tokens/estimated])))
+             (is (= (tokens/estimate (:seon.cluster.prompt/text result))
+                    (get-in result [:seon.ai.tokens/budget-report
+                                    :seon.ai.tokens/estimated])))
              (is (= :seon.ai.tokens/observed
                     (get-in result [:seon.ai.tokens/budget-report
                                     :seon.ai.tokens/basis]))

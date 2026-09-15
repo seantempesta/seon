@@ -13,6 +13,7 @@
             [seon.eval :as evaluation]
             [seon.operator.runtime :as runtime]
             [seon.render :as render]
+            [seon.repl :as repl]
             [seon.schema :as schema]
             [seon.sci.eval :as sci-eval]
             [seon.turn :as turn]))
@@ -195,13 +196,16 @@
        (let [database (db/db (:seon.db/connection handle))
              initial (preflight handle database)
              shown-turns-left (:seon.trial/turns-left initial)]
-         (let [prompt (:seon.cluster.prompt/text
+         (let [history (:seon.cluster.prompt/text
                        (checked (render/acquire-context!
                                  (merge handle {:seon.db/db database :seon.agent/id "juniper"
                                                 :seon.schema/projection
                                                 (:seon.schema/projection @(:seon.sci.eval/projection-state handle))
                                                 :seon.sci.eval/time-limit-ms
                                                 (:seon.config.eval/time-limit-ms handle)}))))
+               prompt (when (string? history)
+                        (str history (when (seq history) "\n\n")
+                             (repl/frame database "juniper")))
                _ (when-not (string? prompt)
                    (throw (ex-info "Prompt acquisition returned no text; no model was called." {})))
                full-prompt (str prompt questions)

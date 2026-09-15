@@ -1423,8 +1423,12 @@
   (let [capture (db/q '[:find ?text . :in $ ?id :where [?t :seon.turn/id ?id]
                         [?c :seon.context.capture/run ?t] [?c :seon.context.capture/prompt ?text]]
                       (:seon.db/db request) (:seon.turn/id request))]
-    (if (or (not (string? capture)) (= capture (:seon.cluster.prompt/text acquired))
-            (:seon.error/kind acquired)) acquired
+    (if (or (:seon.error/kind acquired)
+            (not (string? capture)) (= capture (:seon.cluster.prompt/text acquired))
+            (= capture (str (:seon.cluster.prompt/text acquired) "\n\n"
+                            ((requiring-resolve 'seon.repl/frame)
+                             (:seon.db/db acquired) (:seon.agent/id request)))))
+      acquired
       (let [entries (:seon.render.history/entries acquired)
             saved (db/pull-many (:seon.db/db acquired)
                                '[* {:seon.cluster.eval/ns [:seon.ns/name]}]

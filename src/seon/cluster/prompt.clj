@@ -7,11 +7,11 @@
   (:require [clojure.edn :as edn]
             [seon.ai :as ai]
             [seon.ai.tokens :as tokens]
-            [seon.cluster.message :as message]
             [seon.config :as config]
             [seon.context :as context]
             [seon.db :as db]
             [seon.render :as render]
+            [seon.repl :as repl]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]))
 
@@ -173,21 +173,26 @@
                          :seon.render/distance distance))]
     (if (:seon.error/kind acquired)
       acquired
-      (let [text (:seon.cluster.prompt/text acquired)
-            segments (:seon.render.history/segments acquired)
+      (let [history (:seon.cluster.prompt/text acquired)
+            frame (str (when (seq history) "\n\n")
+                       (repl/frame (:seon.db/db acquired) (:seon.agent/id request)))
+            text (str history frame)
+            segments (conj (vec (or (:seon.render.history/segments acquired) [history])) frame)
+            contributions (history-contributions segments calibration)
             report (tokens/budget-report text budget calibration)]
         {:seon.cluster.prompt/text text
          :seon.context/contributions
-         (history-contributions segments calibration)
+         (update contributions (dec (count contributions))
+                 assoc :seon.render.block/name :frame)
          :seon.ai.tokens/budget-report report
          :seon.db/db (:seon.db/db acquired)}))))
 
 (defn prompt
   "Acquire one retained walk for the agent holding the request's run.
 
-  The held run must still have a recorded trigger; that custody invariant is
-  independent of presentation. The returned contribution is forensic
-  metadata for the exact one-walk text, not block membership.
+  A turn may wake on changed facts without a message trigger. Acquisition
+  selects history at its opening basis and appends the derived turn-budget
+  frame. Contributions measure the exact resulting prompt.
 
   The returned value carries its `:seon.ai.tokens/budget-report`, so the
   size that was checked, the basis that produced it, and the margin it
@@ -197,8 +202,7 @@
                   :seon.cluster.prompt/result]}
   [database request]
   (validate-request! request)
-  (let [run-id (:seon.turn/id request)
-        agent-id (:seon.agent/id request)
+  (let [agent-id (:seon.agent/id request)
         settings (effective-ai-settings database agent-id)]
     (if (:seon.error/kind settings)
       settings
