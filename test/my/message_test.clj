@@ -1,5 +1,5 @@
 (ns my.message-test
-  "The agent-facing message value: one function, and it is pure.
+  "Message transaction inputs and durable agent-facing writes.
 
   Short by construction, exactly like the disposition suite: the whole
   contract is that both shapes validate, that they are the ONLY
@@ -113,6 +113,28 @@
                   (db/pull (:db-after written) [:seon.message/id]
                            [:seon.message/id (:seon.message/id value)])))))))))
 
+(deftest send-writes-and-handles-the-inbox-in-one-transaction
+  (with-messages
+    (fn [connection _]
+      (support/seed-cluster! connection "message-write")
+      (let [sent (my.message/send {:my.message/to "alice"
+                                   :my.message/content "Verified."
+                                   :my.message/about "m-1"}
+                                  connection "bob")
+            stored (message/read (:seon.message/id sent) @connection)
+            original (db/pull @connection '[*] [:seon.message/id "m-1"])]
+        (is (string? (:seon.message/id sent)) (pr-str sent))
+        (is (= sent stored))
+        (is (= [:seon.agent/id "alice"] (:seon.message/inbox stored)))
+        (is (= [:seon.agent/id "bob"] (:seon.message/from stored)))
+        (is (nil? (:seon.message/inbox original)))
+        (is (some? (:seon.message/read-tx original)))
+        (let [missing (my.message/send {:my.message/to "absent"
+                                        :my.message/content "No recipient."}
+                                       connection "bob")]
+          (is (= :seon.message/unknown-recipient (:seon.error/kind missing)))
+          (is (= 3 (db/q '[:find (count ?m) . :where [?m :seon.message/id _]] @connection))))))))
+
 (deftest a-bad-argument-is-an-error-value-never-a-throw
   ;; `:my.message/to`, `/content`, `/about` and `/reason` all admit any
   ;; non-empty string, so a BLANK one reaches the function and its own typed
@@ -197,12 +219,10 @@
         "the error path keeps the output schema too")))
 
 (deftest the-surface-is-exactly-four-functions
-  ;; Countable, like the disposition ruling: fan-out is the vector, so
-  ;; there is no send-many or decline-many, and delivery is the
-  ;; driver's, so neither function has a `!`.
+  ;; The established names remain; send and decline write immediately.
   (is (= #{'decline 'inbox 'read 'send}
          (set (keys (ns-publics 'my.message)))))
   (is (.contains ^String (:doc (meta (the-ns 'my.message)))
                  "inter-agent message protocol"))
   (is (.contains ^String (:doc (meta #'message/send))
-                 "Use `send` when")))
+                 "Use `my.message/send`")))

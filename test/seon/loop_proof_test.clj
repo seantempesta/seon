@@ -808,7 +808,7 @@
                (submit "(seon.db/transact! [{:example/order \"a3\" :example/customer \"Ada\" :example/amount 40}])")
                (submit "(seon.db/q '[:find (sum ?amount) . :where [?order :example/customer \"Ada\"] [?order :example/amount ?amount]])")
                (is (= "155" (:seon.eval/shown (last (evaluation/of-agent @connection "juniper")))))
-               (submit "(my.message/send {:my.message/to \"root\" :my.message/content \"Ada had the largest total, 115. I added an order of 40 and verified the new total is 155.\"})")
+               (submit "(let [sent (my.message/send {:my.message/to \"root\" :my.message/content \"Ada had the largest total, 115. I added an order of 40 and verified the new total is 155.\"})] :sent)")
                (is (= 1 (db/q '[:find (count ?message) . :where
                                 [?agent :seon.agent/id "juniper"]
                                 [?message :seon.message/from ?agent]
@@ -838,8 +838,13 @@
                               (pr-str (select-keys (first saved)
                                                   [:seon.cluster.eval/source :seon.eval/shown
                                                    :seon.cluster.eval/error]))))))
-               (submit "(my.agent/done)\n(seon.db/transact! [{:example/order \"after-done\" :example/customer \"Ada\" :example/amount 999}])")
-               (is (nil? (db/q '[:find ?order . :where [?order :example/order "after-done"]] @connection)))
+               (doseq [source ["(let [] (my.agent/done))"
+                               "(let [] (my.agent/done) :discarded)"]]
+                 (submit source)
+                 (is (str/includes?
+                      (:seon.cluster.eval/error (last (evaluation/of-agent @connection "juniper")))
+                      "must be the last form of your reply")))
+               (submit "(my.agent/done)")
                (is (nil? (turn/next-agent-work @connection {:seon.agent/id "juniper"}))))
              (is (empty? (db/q '[:find [?attempt ...]
                                  :where [?attempt :seon.ai.attempt/id]] @connection)))

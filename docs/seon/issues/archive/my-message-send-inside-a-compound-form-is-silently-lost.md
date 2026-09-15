@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [my.message, effects, turn, core-functions, live-test]
 created: 2026-09-15
@@ -36,3 +36,14 @@ behave differently for the same call shape.
 - Regression on the canonical harness: `send` inside a `let` delivers;
   `done` inside a `let` returns a flat error naming the rule.
 - Help says which calls must be a reply's last form (only `done`).
+
+## Resolution — 2026-09-15
+
+`my.message/send` and `decline` now write through the message owner's
+transaction function with call-prepared connection and sender identity.
+The loop no longer interprets message-shaped return values. The loop proof
+delivers a send discarded inside `let` and records a flat rule error for
+nested `done`, including a discarded nested result. The message test checks
+the stored identity, inbox edge, answered message, and refused recipient.
+Evidence and the exact gate boundary:
+[run7-wave landing](../../../prds/context-generation/research/run7-wave-landing-2026-09-15.md).

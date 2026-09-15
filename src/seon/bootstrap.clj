@@ -57,7 +57,7 @@
      (str "A mistake returns :error data. Read the expected schema, offending value, and attribute candidates before retrying. Time is the transaction: a ref value \"datomic.tx\" names this write, for example (seon.db/transact! [{:my.note/id \"observation\" :my.note/agent [:seon.agent/id "
           (pr-str agent-id)
           "] :my.note/content \"Verified\" :my.note/about \"datomic.tx\"}]); pull :db/txInstant through that ref.")
-     "Each reply is one turn. (seon.turn/turns-left) reads your remaining turns; settings contain the configured limit. (my.agent/done) ends your session early."
+     "Each reply is one turn. (seon.turn/turns-left) reads your remaining turns; settings contain the configured limit. (my.agent/done) must be the last form of your reply; it ends your session early."
      (str "Tools: "
           (str/join ", " (sort tools)) ". Inspect one with dir.")]}))
 

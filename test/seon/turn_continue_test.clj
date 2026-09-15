@@ -17,7 +17,7 @@
 
 (deftest accepted-provider-replies-continue-until-done-refusal-or-bound
   (let [read-source "(seon.db/q '[:find (sum ?amount) . :where [?order :example/customer \"Ada\"] [?order :example/amount ?amount]])"
-        done "(my.agent/done)\n(seon.db/transact! [{:example/order \"after-done\" :example/customer \"Ada\" :example/amount 999}])"
+        done "(my.agent/done)"
         refusal (with-open [body (java.io.ByteArrayInputStream.
                                   (.getBytes "data: {malformed json\n\n" "UTF-8"))]
                   (#'ai/streamed-completion body nil))]

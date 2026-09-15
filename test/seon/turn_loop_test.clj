@@ -250,15 +250,12 @@
              :seon.turn/id "run-1"
              :seon.cluster.eval/ordinal 3})))))
 
-(deftest asked-value-preserves-explicit-reply-and-problem-precedence
+(deftest asked-value-preserves-reply-and-problem-precedence
   (let [db {:immutable :database-value}
-        explicit {:my.message/to "agent-2" :my.message/content "explicit"}
         reply {:my.message/to "agent-3" :my.message/content "reply"}
         assignment {:my.message/to "agent-4" :my.message/content "repair"}
         completed (seon.run/complete "done")]
-    (with-redefs [turn/messages (fn [value]
-                                         (when (= :explicit value) explicit))
-                  message/reply (fn [actual-db request]
+    (with-redefs [message/reply (fn [actual-db request]
                                   (is (= db actual-db))
                                   (is (= {:my.turn/result "done"
                                           :seon.agent/id "agent-1"
@@ -266,7 +263,7 @@
                                          request))
                                   reply)
                   problems/assignment-value (constantly assignment)]
-      (is (= explicit
+      (is (= reply
              ((private-loop-fn 'asked-value)
               {:seon.db/db db
                :seon.sci.eval/evaluation {:seon.sci.admit/value :explicit}

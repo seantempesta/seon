@@ -1,5 +1,5 @@
 (ns seon.cluster.message
-  "Durable messages and inbox edges, committed by the turn's transaction.
+  "Durable messages and inbox edges, committed together by the writer.
   Sending records the recipient permanently and adds its inbox edge.
   Answering retracts that edge and records the handling transaction."
   (:refer-clojure :exclude [read send])
@@ -87,7 +87,7 @@
 
 (defn reply
   "The message a completed run owes the agent that asked for it, or nil.
-  A `my.message/send` VALUE, deliberately — so the reply goes through
+  Delivery transaction input, so the reply goes through
   `delivery` like any other message and inherits the recipient check,
   the conversation bound and the derived id, rather than becoming a
   second way to make a message.
@@ -220,7 +220,12 @@
 
 (defn delivery
   "Resolve messages and their handled inbox edges into one transaction's data."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.message/delivery-request]
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       [:map
+                        [:my.message/value :my.message/value]
+                        [:seon.agent/id :seon.agent/id]
+                        [:seon.config.message/max-chain :seon.config.message/max-chain]
+                        [:seon.message/trigger {:optional true} :seon.message/id]]]
                   :seon.message/delivery]}
   [database {:keys [:my.message/value :seon.message/trigger
                     :seon.config.message/max-chain] :as request}]
@@ -687,13 +692,11 @@
       about? (assoc :my.message/about about))))
 
 (defn send
-  "Address a message to another agent.
+  "Construct input for the system's delivery transaction.
 
   Takes the recipient id, message text, and optional identity of the related
-  fact. Returns a message value for the run loop to deliver, or a flat error.
-  Use `send` when another agent needs a question, an answer, or a bounded
-  assignment; use it as a form result and return a vector to send several
-  messages."
+  fact. This is transaction input, not a write. Use `my.message/send` to
+  write from an agent, or `send!` with an explicit connection and sender."
   {:malli/schema
    [:function
     [:=> [:cat :my.message/to :my.message/content]
@@ -705,12 +708,58 @@
   ([to content about]
    (send-value to content true about)))
 
+(defn- send-call
+  [database candidate agent-id]
+  (let [limits (db/q '[:find [?limit ...]
+                       :where [?cluster :seon.cluster/config ?config]
+                              [?config :seon.config.message/max-chain ?limit]] database)
+        limit (when (= 1 (count limits)) (first limits))
+        _ (when-not (pos-int? limit)
+            (throw (ex-info "Messaging requires one configured chain bound."
+                            {:seon.error/kind :seon.message/no-limit
+                             :seon.message/no-limit true
+                             :seon.error/message "Messaging requires one configured chain bound."
+                             :seon.error/data {:seon.config.message/max-chain limits}})))
+        run-id (db/q '[:find ?id . :in $ ?agent-id
+                       :where [?agent :seon.agent/id ?agent-id]
+                              [?turn :seon.turn/agent ?agent]
+                              [?turn :seon.turn/id ?id]
+                              (not [?turn :seon.turn/closed-tx _])]
+                     database agent-id)
+        cause (when run-id (trigger database run-id))
+        result (delivery database
+                         (cond-> {:my.message/value candidate
+                                  :seon.agent/id agent-id
+                                  :seon.config.message/max-chain limit}
+                           cause (assoc :seon.message/trigger cause)))]
+    (if-let [failure (first (:seon.error/values result))]
+      (throw (ex-info (:seon.error/message failure) failure))
+      (:seon.message/rows result))))
+
+(defn send!
+  "Write a message and its inbox edge atomically; return the stored message.
+
+  The writer resolves recipients, the active turn's cause, and the configured
+  conversation bound against its current database, just as it resolves about."
+  {:malli/schema [:=> [:cat :my.message/message :seon.db/connection :seon.agent/id]
+                  [:or :seon.message/message :seon.error/value]]}
+  [request connection agent-id]
+  (let [candidate (send-value (:my.message/to request) (:my.message/content request)
+                              (some? (:my.message/about request)) (:my.message/about request))]
+    (if (error-value? candidate)
+      candidate
+      (let [result (db/transact!
+                    connection
+                    {:tx-data [[:db.fn/call #'send-call candidate agent-id]]
+                     :tx-meta {:seon.db/user [:seon.agent/id agent-id]}})]
+        (if (error-value? result) result
+            (read (:seon.message/id candidate) (:db-after result)))))))
+
 (defn decline
   "Decline an assignment and explain why to its sender.
 
   Takes the sender id, assignment identity, and reader-facing reason. Returns
-  a declination value for the run loop to deliver, or a flat error. Use it when
-  you cannot complete delegated work."
+  transaction input or a flat error; `my.message/decline` writes it directly."
   {:malli/schema
    [:=> [:cat :my.message/to :my.message/about :my.message/reason]
     [:or :my.message/declination :seon.error/value]]}

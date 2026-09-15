@@ -3079,21 +3079,6 @@
   (when (schema/valid-candidate-value? :my.turn/value value)
     value))
 
-(defn messages
-  "The messages an admitted eval value asks to send, or nil.
-  The exact counterpart of `disposition`, over the second agent-facing
-  value: one `my.message/send` result, or a vector of them. Anything
-  else is not a delivery, and a form that returns an ordinary value
-  simply sends nothing.
-
-  Disposition and delivery schemas are open for accretion and are interpreted
-  independently. A turn that intentionally sends and finishes uses two forms,
-  which makes their order visible to a reader."
-  {:malli/schema [:=> [:cat :any] [:maybe :my.message/value]]}
-  [value]
-  (when (schema/valid-candidate-value? :my.message/value value)
-    value))
-
 (defn- append-output
   [evaluation lines]
   (if (seq lines)
@@ -3259,13 +3244,11 @@
 (defn- asked-value
   "The message-family value one completed evaluation asks to deliver."
   [{db :seon.db/db
-    evaluation :seon.sci.eval/evaluation
     settled :seon.turn.loop/settled
     problem :seon.problems/form-problem
     agent-id :seon.agent/id
     trigger :seon.message/trigger}]
-  (or (messages (:seon.sci.admit/value evaluation))
-      (when (= :completed (:my.turn/disposition settled))
+  (or (when (= :completed (:my.turn/disposition settled))
         (message/reply
          db
          (cond-> {:my.turn/result (:my.turn/result settled)
@@ -4315,6 +4298,23 @@
           :where [?evaluation :seon.cluster.eval/id ?evaluation-id]]
         database evaluation-id))
 
+(defn- disposition-rule-error
+  [source namespace-name last? evaluation]
+  (let [form (:seon.sci.reader/form
+              (first (read-source source namespace-name (count source))))
+        calls (tree-seq
+               #(and (coll? %)
+                     (not (and (seq? %)
+                               (contains? #{'quote 'fn 'fn* 'defn 'defn-} (first %)))))
+               seq form)
+        done-calls (filter #(and (seq? %) (= 'my.agent/done (first %))) calls)]
+    (when (or (and (seq done-calls)
+                   (not (and last? (= form (first done-calls)) (= 1 (count done-calls)))))
+              (and (disposition (:seon.sci.admit/value evaluation)) (not last?)))
+      {:seon.error/kind :seon.turn/invalid-disposition
+       :seon.error/message "(my.agent/done) must be the last form of your reply; a disposition cannot precede another reply form."
+       :seon.error/data {:seon.cluster.eval/source source}})))
+
 (defn evaluate-sources
   "Evaluate ordered sources in one fork without settling or staging them.
 
@@ -4383,6 +4383,10 @@
                        (id/id [agent-id form]))
                    request
                    ((requiring-resolve 'seon.sci.eval/evaluate-for-install) request))))
+              evaluation (or (disposition-rule-error
+                               (:seon.cluster.eval/source form) namespace-name
+                               (nil? (next remaining)) evaluation)
+                              evaluation)
               evaluation
               (if (:seon.error/kind evaluation)
                 {:seon.sci.admit/value evaluation
