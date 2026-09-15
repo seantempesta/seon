@@ -27,12 +27,21 @@
      (:seon.sci.eval/projection-state handle)
      (fn []
        (let [database (db/db (:seon.db/connection handle))
-             prompt (:seon.cluster.prompt/text
-                     (checked (render/acquire-context!
-                               (merge handle {:seon.db/db database :seon.agent/id "juniper"
-                                              :seon.turn/id turn-id
-                                              :seon.sci.eval/time-limit-ms
-                                              (:seon.config.eval/time-limit-ms handle)}))))
+             ; The captured prompt is the exact bytes the provider received for
+             ; this turn; it is the honest input for "what did you see". The
+             ; rebuild from saved evaluations is the fallback for turns with no
+             ; capture (virtual turns).
+             captured (db/q '[:find ?text . :in $ ?id :where [?t :seon.turn/id ?id]
+                              [?c :seon.context.capture/run ?t]
+                              [?c :seon.context.capture/prompt ?text]]
+                            database turn-id)
+             prompt (or captured
+                        (:seon.cluster.prompt/text
+                         (checked (render/acquire-context!
+                                   (merge handle {:seon.db/db database :seon.agent/id "juniper"
+                                                  :seon.turn/id turn-id
+                                                  :seon.sci.eval/time-limit-ms
+                                                  (:seon.config.eval/time-limit-ms handle)})))))
              full (str prompt "\n\n;; OPERATOR QUESTION (answer in plain prose, not in forms; this is out of band):\n;; " question "\n")
              dials (checked (config/effective database cluster-name))
              target (:seon.ai/primary
@@ -42,7 +51,7 @@
                                                  :seon.config.ai/max-tokens 4096
                                                  :seon.config.ai/timeout-ms 180000))))
              completion (ai/complete (assoc target :seon.ai/prompt full))]
-         (spit path (pr-str {:turn turn-id :question question
+         (spit path (pr-str {:turn turn-id :question question :source (if captured :captured :rebuilt)
                              :prompt-bytes (alength (.getBytes ^String prompt "UTF-8"))
                              :usage (:seon.ai/usage completion)
                              :text (:seon.ai/text completion)
