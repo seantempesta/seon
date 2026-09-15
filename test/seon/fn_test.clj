@@ -108,6 +108,65 @@
                             "seon.fn/tests-reaching"))
             "analysis facts stay inside their defining source span")))))
 
+(deftest ordinary-form-analysis-keeps-call-edges-without-a-declaration
+  (test-support/with-database
+    (fn [connection]
+      (let [namespace-ref [:seon.ns/name 'sample.evaluation-edges]
+            function-symbol "sample.evaluation-edges/observed"
+            test-symbol "sample.evaluation-edges/observed-test"
+            source "(do (seon.db/q '[:find ?e :where [?e :seon.agent/id]]) (my.turn/wait))"
+            definition (str "(defn observed [] " source ")")
+            test-source "(clojure.test/deftest observed-test (observed))"
+            function-row {:seon.fn/sym function-symbol
+                          :seon.fn/ns namespace-ref
+                          :seon.fn/source definition
+                          :seon.fn/arglists "([])"
+                          :seon.fn/private? false
+                          :seon.schema.admission/source :agent}
+            test-row {:seon.test/sym test-symbol
+                      :seon.test/ns namespace-ref
+                      :seon.test/source test-source
+                      :seon.schema.admission/source :agent}]
+        (transact-fixture! connection [{:seon.ns/name (second namespace-ref)}])
+        (let [database (db/db connection)
+              results
+              (seon.fn/analyze-forms
+               database
+               [{:seon.cluster.eval/source definition
+                 :seon.cluster.eval/ns namespace-ref
+                 :seon.program/row function-row}
+                {:seon.cluster.eval/source test-source
+                 :seon.cluster.eval/ns namespace-ref
+                 :seon.program/row test-row}
+                {:seon.cluster.eval/source source
+                 :seon.cluster.eval/ns namespace-ref}
+                {:seon.cluster.eval/source
+                 "(let [map identity] (map :sample/value))"
+                 :seon.cluster.eval/ns namespace-ref}])
+              [definition-facts analyzed-function] (nth results 0)
+              [_ analyzed-test] (nth results 1)
+              [facts row] (nth results 2)
+              calls (into #{} (map second) (:seon.fn/calls facts))]
+          (is (contains? calls "seon.db/q"))
+          (is (contains? calls "my.turn/wait"))
+          (is (nil? row) "an ordinary evaluation does not invent a declaration")
+          (is (empty? definition-facts) "declaration edges have one owner")
+          (is (= [facts nil]
+                 (seon.fn/analyze-form database source namespace-ref nil)))
+          (is (not (contains? (into #{} (map second)
+                                   (:seon.fn/calls (first (nth results 3))))
+                              "clojure.core/map"))
+              "local calls do not acquire a program edge")
+          (is (not (contains? calls function-symbol))
+              "a neighboring test's call stays in its source span")
+          (transact-fixture! connection [analyzed-function])
+          (transact-fixture! connection [analyzed-test])
+          (is (= [test-symbol]
+                 (seon.fn/tests-reaching (db/db connection) function-symbol)))
+          (is (contains? (set (seon.fn/tests-reaching (db/db connection) "my.turn/wait"))
+                         test-symbol)
+              "the same analyzed rows supply transitive reachability"))))))
+
 (deftest progress-observation-cannot-change-index-transaction-shapes
   (let [commit-phase! (deref (ns-resolve 'seon.fn 'commit-index-phase!))
         transactions-with

@@ -587,10 +587,21 @@
                      (keyword-values used-keywords qualified))
               subject (assoc :seon.test/subject subject))))
         merged-row (when program-row (merge program-row program-facts))]
-    [{} merged-row]))
+    [(if program-row
+       {}
+       (let [calls (into #{}
+                         (comp (keep call-target)
+                               (filter first-party-functions)
+                               (map (fn [target] [:seon.fn/sym target])))
+                         (::analyzer/var-usages analysis))]
+         (cond-> {} (seq calls) (assoc :seon.fn/calls calls))))
+     merged-row]))
 
 (defn analyze-forms
-  "Analyze defining forms as one kondo batch, returning form-local facts."
+  "Analyze submitted forms in one kondo batch, returning form-local facts.
+
+  A declaration row owns its edges. Without a declaration, the evaluation
+  owns the edges in the first tuple member; no synthetic function is minted."
   {:malli/schema
    [:=> [:cat :seon.db/database-value
          [:vector [:map
@@ -598,8 +609,8 @@
                     :seon.cluster.eval/source]
                    [:seon.cluster.eval/ns
                     :seon.cluster.eval/ns]
-                   [:seon.program/row :seon.program/row]]]]
-    [:or [:vector [:tuple :map :seon.program/row]] :seon.error/value]]}
+                   [:seon.program/row {:optional true} :seon.program/row]]]]
+    [:or [:vector [:tuple :map [:maybe :seon.program/row]]] :seon.error/value]]}
   [database requests]
   (let [resolved
         (mapv
@@ -660,9 +671,9 @@
   [database source namespace-ref program-row]
   (let [result (analyze-forms
                 database
-                [{:seon.cluster.eval/source source
-                  :seon.cluster.eval/ns namespace-ref
-                  :seon.program/row program-row}])]
+                [(cond-> {:seon.cluster.eval/source source
+                          :seon.cluster.eval/ns namespace-ref}
+                   program-row (assoc :seon.program/row program-row))])]
     (if (:seon.error/kind result) result (first result))))
 
 (def ^:private load-refusal-finding-types
