@@ -1136,3 +1136,19 @@ half-edit. Measured targets in the issue.
   changed-path responses), `d0817d49b` (printer: whole coordinates,
   deterministic scalar order).
 
+## 2026-09-15 05:15Z — cycle 5: the render wave lands
+
+- context-renders ended (`e9285d9c5`): opening **7,111 bytes** with the
+  derived frame "turns left: 30 of 30" (`549ab70b5`), change-only re-reads
+  as executable changed-path responses (`1f18b99fc`), agent reads with turn
+  evidence never promoted (`0c70a1cb4`), printer whole-item elisions with
+  proven requery handles (`d0817d49b`, `d2af195bf`), DB decoding without
+  the logical projection (`6785c980c`), relation-only queries (`eef44fcc3`);
+  help trial on the corrected opening **12/12**, fabricated responses 0,
+  $0.00046. Its explain rerun on run 2 could not run (run 2's turns left
+  with the refork).
+- consolidate-debug: A08 landed (`1d5edb65c`, old Context-now path gone;
+  page 76 ms), A02 (`bb008321d`). run4-blockers: reader texts
+  (`4a559d658`); stop dial and refused-install value in progress.
+- Run 5 waits for the stop dial + refused-install value; HEAD gate running.
+
