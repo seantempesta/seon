@@ -71,3 +71,21 @@
         (is (not (str/includes? printed "settings!")))
         (is (= (golden :settings) (agent/render-settings-ai unit)))))))
 
+(deftest message-pairs-derive-unread-and-preserve-ai
+  (support/with-database
+    (fn [connection]
+      (db/transact! connection [{:seon.agent/id "alice"} {:seon.agent/id "bob"}])
+      (db/transact! connection [{:seon.message/id "hello" :seon.message/content "Hello\nagain"
+                                 :seon.message/from [:seon.agent/id "bob"]
+                                 :seon.message/to [:seon.agent/id "alice"]
+                                 :seon.message/inbox [:seon.agent/id "alice"]}])
+      (let [row (db/pull @connection '[*] [:seon.message/id "hello"])
+            unit (assoc row :seon.db/db @connection)]
+        (readable! (message/render-html unit) ["Hello\nagain" "unread" "alice" "bob" "title="])
+        (readable! (message/render-inbox-html [row] @connection) ["Messages (1)" "unread"])
+        (is (= (golden :message) (message/render-ai unit)))
+        (is (= (golden :inbox) (message/render-inbox-ai [row])))
+        (db/transact! connection [[:db/retract [:seon.message/id "hello"] :seon.message/inbox]])
+        (readable! (message/render-html (assoc (db/pull @connection '[*] [:seon.message/id "hello"])
+                                              :seon.db/db @connection)) ["handled"])))))
+

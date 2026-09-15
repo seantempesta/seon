@@ -47,3 +47,13 @@
 .seon-agent-settings .seon-settings-defaults :is(dt, dd) { margin: 0; font-weight: 400; font-size: 0.75rem; }
 .seon-agent-settings .seon-settings-absent { color: var(--color-text-400); font-size: 0.625rem; }
 
+.seon-family-entry.seon-message-entry { border: 1px solid var(--color-base-800); padding: 0.6rem; margin: 0.4rem 0; font: 0.75rem/1.55 var(--font-mono); overflow-wrap: anywhere; }
+.seon-message-entry .seon-message-meta { flex-wrap: wrap; font-size: 0.625rem; color: var(--color-text-300); }
+.seon-message-entry .seon-message-direction { white-space: normal; flex-wrap: wrap; min-width: 0; }
+.seon-message-entry .seon-message-content { font: inherit; }
+.seon-message-entry .seon-message-state { font-size: 0.625rem; margin-top: 0.4rem; color: var(--color-text-400); }
+.seon-message-entry .is-unread { color: var(--color-signal); }
+.seon-message-entry .seon-message-links { margin-top: 0.4rem; font-size: 0.625rem; color: var(--color-info); }
+.my-plan > progress::-webkit-progress-bar { background: var(--color-base-800); }
+.my-plan > progress::-webkit-progress-value { background: var(--color-success); }
+

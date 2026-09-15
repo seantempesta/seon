@@ -403,31 +403,43 @@
             [:span {:class "seon-message-direction"}
              [:span {:class "seon-message-from"}
               (cond
-                from (str "Agent " from)
-                from-ref (str "Unresolved sender " (pr-str from-ref))
+                from from
+                from-ref "Unresolved sender"
                 :else "Outside this cluster")]
              [:span {:class "seon-message-arrow" :aria-hidden "true"} "→"]
              [:span {:class "seon-message-to"}
               (cond
-                to (str "Agent " to)
-                to-ref (str "Unresolved recipient " (pr-str to-ref))
+                to to
+                to-ref "Unresolved recipient"
                 :else "No recipient")]]]
             at
-            (conj (let [instant (.toString (.toInstant ^java.util.Date at))]
-                    [:time {:class "seon-message-at" :datetime instant}
-                     instant])))
+            (conj (let [instant (.toInstant ^java.util.Date at)
+                        local (.atZone instant (java.time.ZoneId/systemDefault))
+                        minutes (max 0 (quot (- (System/currentTimeMillis) (.getTime ^java.util.Date at)) 60000))]
+                    [:time {:class "seon-message-at" :datetime (str instant)
+                            :title (str local)
+                            :data-attr:title (str "new Date('" instant "').toLocaleString()")}
+                     (cond (< minutes 1) "just now"
+                           (< minutes 60) (str minutes " min ago")
+                           (< minutes 1440) (str (quot minutes 60) " hr ago")
+                           :else (str (quot minutes 1440) " days ago"))])))
           [:p {:class "seon-message-content" :style {:white-space "pre-wrap"}} content]
-          [:p {:class "seon-message-reply"}
-           (if (and from (get unit :seon.message/id))
-             [:code (pr-str (list 'my.message/send {:my.message/to from :my.message/content "Your reply" :my.message/about (get unit :seon.message/id)}))]
-             "This message has no agent sender to address a reply to.")]]
+          (let [stored (when (and database (:seon.message/id unit))
+                         (db/pull database [:seon.message/id :seon.message/inbox]
+                                  [:seon.message/id (:seon.message/id unit)]))
+                unread? (or (:seon.message/inbox unit) (:seon.message/inbox stored))]
+            [:p {:class (str "seon-message-state " (if unread? "is-unread" "is-handled"))}
+             "● " (cond unread? "unread"
+                        (:seon.message/id stored) "handled"
+                        (:seon.message/read-tx unit) "handled"
+                        :else "status unavailable")])]
           (or about caused-by-ref)
           (conj
            (cond->
             [:p {:class "seon-message-links"}]
              about
              (conj [:span {:class "seon-message-about"}
-                    (data-link (str "about " (pr-str about)) about)])
+                    (data-link (str "About " (second about)) about)])
              (and about caused-by-ref) (conj " · ")
              caused-by-ref
              (conj [:span {:class "seon-message-caused-by"}
@@ -514,12 +526,9 @@
       [:section {:class "seon-family-entry seon-message-inbox"}
        [:p {:class "seon-kicker"} "Addressed to"]
        (if recipient
-         [:p (or (data-link (pr-str recipient) recipient)
-                 [:code (pr-str recipient)])]
+         [:p (data-link (str (second recipient)) recipient)]
          [:p {:class "seon-message-inbox-empty"}
-          (str "The recipient reference "
-               (pr-str recipient-or-inbox)
-               " does not resolve to an entity with an identity attribute.")])])))
+          "The recipient could not be resolved."])])))
 
 (def ^:private message-selector
   '[:seon.message/id

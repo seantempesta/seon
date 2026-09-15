@@ -208,8 +208,8 @@
         (is (= (str/join "\n\n"
                              (map message/render-ai (sort-by :seon.message/id messages)))
                (message/render-inbox-ai messages)))
-        (is (str/includes? (pr-str rendered)
-                           "my.message/send"))
+        (is (not (str/includes? (pr-str rendered)
+                                "my.message/send")))
         (is (= [:section {:class "seon-family-entry seon-message-inbox"}
                 [:h2 "Messages (2)"]]
                (subvec rendered 0 3)))
@@ -229,7 +229,7 @@
                                  ::route/data {}
                                  {:entity (pr-str
                                            [:seon.agent/id "bob"])})}
-                      "[:seon.agent/id \"bob\"]"]]
+                      "bob"]]
                  (nth rendered 3)))))))
 
   (testing "an agent with no messages renders an empty state, not an error"
@@ -252,43 +252,10 @@
             rendered
             (message/render-html
              {:seon.db/db database :seon.message/id "message-1" :seon.message/content "first line\nsecond line" :seon.message/from [:seon.agent/id "alice"] :seon.message/to [:seon.agent/id "bob"] :seon.message/about [:seon.agent/id "alice"] :seon.message/caused-by {:seon.message/id "message-0"} :seon.message/inbox [:seon.agent/id "bob"]})]
-        (is (= [:article {:class "seon-family-entry seon-message-entry"}
-                [:header {:class "seon-message-meta"}
-                 [:span {:class "seon-message-direction"}
-                  [:span {:class "seon-message-from"} "Agent alice"]
-                  [:span {:class "seon-message-arrow" :aria-hidden "true"}
-                   "→"]
-                  [:span {:class "seon-message-to"} "Agent bob"]]
-                 [:time {:class "seon-message-at"
-                         :datetime "2023-11-14T22:13:20Z"}
-                  "2023-11-14T22:13:20Z"]]
-                [:p {:class "seon-message-content" :style {:white-space "pre-wrap"}}
-                 "first line\nsecond line"]
-                [:p {:class "seon-message-reply"}
-                 [:code (pr-str '(my.message/send {:my.message/to "alice"
-                                                   :my.message/content "Your reply"
-                                                   :my.message/about "message-1"}))]]
-                [:p {:class "seon-message-links"}
-                 [:span {:class "seon-message-about"}
-                  [:a {:href
-                       (route/path
-                        ::route/data
-                        {}
-                        {:entity
-                         (pr-str [:seon.agent/id "alice"])})}
-                   "about [:seon.agent/id \"alice\"]"]]
-                 " · "
-                 [:span {:class "seon-message-caused-by"}
-                  [:a {:href
-                       (route/path
-                        ::route/data
-                        {}
-                        {:entity
-                         (pr-str
-                          [:seon.message/id "message-0"])})}
-                   "caused-by message-0"]]]]
-               rendered)
-            "metadata and the authored content occupy distinct elements")
+        (is (str/includes? (pr-str rendered) "first line\\nsecond line"))
+        (is (str/includes? (pr-str rendered) "unread"))
+        (is (str/includes? (pr-str rendered) "2023-11-14T22:13:20Z"))
+        (is (not (str/includes? (pr-str rendered) "my.message/send")))
         (is (= "From outside this cluster to bob: first line\nsecond line"
                (message/format-ai
                 {:seon.db/db database
@@ -299,8 +266,8 @@
              (pr-str
               (message/render-html
                {:seon.db/db database :seon.message/content "hello" :seon.message/from [:seon.agent/id "nobody"] :seon.message/to [:seon.agent/id "bob"]}))
-             "Unresolved sender [:seon.agent/id \\\"nobody\\\"]")
-            "the HTML metadata preserves unresolved-sender evidence")))))
+             "Unresolved sender")
+            "unresolved attribution is explicit without raw reference data")))))
 
 (defn- ask!
   "Commit one message from OUTSIDE the agent population — a human's.

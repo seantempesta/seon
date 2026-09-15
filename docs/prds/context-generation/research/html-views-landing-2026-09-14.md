@@ -78,3 +78,11 @@ Screenshot log: `fixture-seon-agent-settings-before → fixture-seon-agent-setti
 
 Observed defects → change: The original long table repeated Not set and buried overrides. A second inspection caught the misleading ms label beside a seconds value; the label now follows the displayed unit. Defaults expose native details with preserved open state.
 
+## Inbox and messages
+
+Message cards show sender → recipient, relative time with exact local hover text, wrapped content, and unread/handled state from the inbox edge. Reply forms remain solely on the AI side.
+
+Screenshot log: `fixture-seon-message-entry-before → fixture-seon-message-entry-verified; fixture-seon-message-inbox-before → fixture-seon-message-inbox-verified; messages-2 and inbox-2`.
+
+Observed defects → change: Raw recipient refs, ISO timestamps and reply teaching crowded the original output. New cards distinguish unread from handled; unresolved identities use readable text.
+
