@@ -40,7 +40,21 @@ this note: fast 15 tests / 195 assertions; isolated gate 15 / 199, both green.
 
 Absent-agent diagnostics agree across callers. The same usage row has the same availability/totals everywhere. Interrupted/output-only/error evaluations have consistent summaries, and strip byte totals equal the acquired current history including generated annotations.
 
-See [the audit](../../prds/context-generation/research/audit-1-2026-09-15.md) for scope, change counts, and verification limits.
+See [the audit](../../../prds/context-generation/research/audit-1-2026-09-15.md) for scope, change counts, and verification limits.
 
 Resolution commit: `209a73fd2`.
 Retained-call performance refinement: `5613bbf17` (three warm GETs: 0.704460, 0.755098, 0.741225 seconds).
+
+### Warm acquisition regression — 2026-09-15
+
+The page-speed slice containing this update retains the history root by
+agent/turn/selector identity and skips dependency replay for the identical
+immutable database. Current retained history no longer rebuilds all entries,
+text, and segments. Code/input changes and changed read dependencies still
+invalidate it. No new cache was introduced.
+
+Default three-sample GETs before: **1.981722, 1.544124, 1.729826 s**;
+after: **0.496181, 0.107413, 0.098992 s**. The live fixture changed between
+these sequences; this is not a same-fixture speedup ratio. Exact basis, byte
+counts, probes, tests, and verification boundaries are in the
+[landing note](../../../prds/context-generation/research/page-speed-and-estimate-landing-2026-09-15.md).

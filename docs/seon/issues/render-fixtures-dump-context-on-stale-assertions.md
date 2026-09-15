@@ -26,3 +26,16 @@ the relevant argument fields without printing the context. Acceptance: the
 complete namespace passes and a deliberately failed fixture assertion produces
 a useful bounded diagnostic. The exact reproduction command above is retained;
 the gigabyte scratch log is disposable after extracting these observations.
+
+## Re-observation — 2026-09-15, page-speed-and-estimate
+
+Clean HEAD `131fa2a56`, `bin/test-fast --paths AGENTS.md --
+seon.render-simplification-test`: **21 tests / 122 assertions, 13 failures /
+2 errors**. The same failures occur with the retained-call performance slice.
+They include the retired plan-attribute argument, nested projections, cap
+expectation, compiled resolver trap, and stored-source-run oracle described
+above. Whole SCI contexts still appear in failed argument equalities.
+This lane leaves the existing suite unchanged; the new immutable-database
+reuse regression lives in `seon.render.retained-test` with the canonical
+database and real SCI context. See the
+[landing note](../../prds/context-generation/research/page-speed-and-estimate-landing-2026-09-15.md).

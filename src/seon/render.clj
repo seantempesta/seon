@@ -631,11 +631,14 @@
           :where [?cluster :seon.cluster/name _]
                  [?cluster :seon.source/commit-id ?commit]] database))
 
-(defn- call-cache-evidence
+(defn call-cache-evidence
+  "Describe a retained call's code, projection, and supplied input."
+  {:malli/schema [:=> [:cat :map :qualified-symbol] :map]}
   [request selected]
   (let [ctx (:seon.sci.eval/ctx request)
         projection (sci.kernel/context-projection ctx)]
-    {::source-generation (source-generation (:seon.db/db request))
+    {:seon.db/db (:seon.db/db request)
+     ::source-generation (source-generation (:seon.db/db request))
      ::program-snapshot
      (some-> (:seon.sci.kernel/program-snapshot ctx) deref)
      ::projection projection
@@ -1250,9 +1253,11 @@
       (let [request (assoc request :seon.render/profile profile)
             previous (when (and call-id retained-calls)
                        (get retained-calls call-id))
+            same-database? (identical? database (:seon.db/db previous))
             check-read-evidence?
-            (or (nil? candidate-call-ids)
-                (contains? candidate-call-ids call-id))
+            (and (not same-database?)
+                 (or (nil? candidate-call-ids)
+                     (contains? candidate-call-ids call-id)))
             previous-selected
             (get-in previous [:seon.render.call/static-evidence
                               :seon.render.call/producer])
@@ -1265,9 +1270,10 @@
                      (db/read-evidence-current?
                       database (:seon.render.call/read-evidence previous))))]
         (if fast-reusable?
-          (let [entry (if check-read-evidence?
-                        (refresh-read-evidence database previous)
-                        previous)]
+          (let [entry (assoc (if check-read-evidence?
+                               (refresh-read-evidence database previous)
+                               previous)
+                             :seon.db/db database)]
             (when (and call-id captured-calls)
               (swap! captured-calls assoc call-id entry))
             (:seon.render.call/output previous))

@@ -2410,22 +2410,50 @@
        (change-context request)
        (let [request (assoc request :seon.render/profile (render/request-profile request))
              cache (render/shared-cache (:seon.sci.eval/ctx request))
-             key [:seon.agent/id (:seon.agent/id request)]
+             lookup [:seon.agent/id (:seon.agent/id request)]
+             key [lookup (:seon.turn/id request) (:seon.db/pull-selector request)]
              retained (get-in @cache [::ai-calls key] {})
+             previous (get retained root-call)
+             evidence (render/call-cache-evidence
+                       (assoc request :seon.render/value
+                              (dissoc request :seon.db/db :seon.db/connection :seon.sci.eval/ctx))
+                       'seon.render.walk/history)
+             reusable? (and previous
+                            (render/same-invocation-evidence? previous evidence)
+                            (or (identical? (:seon.db/db request) (:seon.db/db previous))
+                                (every? #(db/read-evidence-current? (:seon.db/db request)
+                                          (:seon.render.call/read-evidence %))
+                                        (vals retained))))
              calls (atom {})
-             entries (render.walk/history
-                      (assoc request :seon.render.walk/lookup key
-                                     :seon.render/retained-calls retained
-                                     :seon.render/candidate-call-ids
-                                     (candidate-call-ids retained (:seon.db/db request))
-                                     :seon.render/captured-calls calls))]
-         (swap! cache assoc-in [::ai-calls key] @calls)
-         (if (:seon.error/kind entries)
+             reads (atom [])
+             entries (when-not reusable?
+                       (binding [db/*read-evidence-sink* reads]
+                         (render.walk/history
+                          (assoc request
+                                 :seon.render.walk/lookup lookup
+                                 :seon.render/retained-calls (dissoc retained root-call)
+                                 :seon.render/candidate-call-ids
+                                 (candidate-call-ids (dissoc retained root-call)
+                                                     (:seon.db/db request))
+                                 :seon.render/captured-calls calls))))]
+         (cond
+           reusable? (assoc (:seon.render.call/output previous) :seon.db/db (:seon.db/db request))
+           (:seon.error/kind entries)
            entries
-           {:seon.cluster.prompt/text (history-text entries)
-            :seon.render.history/entries entries
-            :seon.render.history/segments (history-segments entries)
-            :seon.db/db (:seon.db/db request)}))))))
+           :else
+           (let [result {:seon.cluster.prompt/text (history-text entries)
+                         :seon.render.history/entries entries
+                         :seon.render.history/segments (history-segments entries)
+                         :seon.db/db (:seon.db/db request)}]
+             (swap! cache assoc-in [::ai-calls key]
+                    (assoc @calls root-call
+                           (merge evidence
+                                  {:seon.render.call/static-evidence
+                                   {:seon.render.call/producer 'seon.render.walk/history}
+                                   :seon.render.call/read-evidence
+                                   (db/read-evidence @reads {:seon.db/retain-read-results? true})
+                                   :seon.render.call/output result})))
+             result)))))))
 
 (defn render-step
   "The render proc's transform, in Flow's four arities (F2 §1.1).

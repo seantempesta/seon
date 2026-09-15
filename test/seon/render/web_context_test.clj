@@ -6,6 +6,7 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.render :as render]
+            [seon.render.walk :as walk]
             [seon.render.web-test :as web-test]
             [seon.sci.kernel :as kernel]
             [seon.test-support :as support])
@@ -67,14 +68,26 @@
                :seon.cluster.eval/source "(+ 1 1)" :seon.eval/shown "2"}])
            (let [request (dissoc request :seon.turn/id)
                  invoke kernel/invoke
-                 calls (atom 0)]
-             (with-redefs [kernel/invoke (fn [input] (swap! calls inc) (invoke input))]
+                 calls (atom 0)
+                 history walk/history
+                 walks (atom 0)]
+             (with-redefs [kernel/invoke (fn [input] (swap! calls inc) (invoke input))
+                           walk/history (fn [input] (swap! walks inc) (history input))]
                (let [first-result (render/acquire-context! (assoc request :seon.db/db @connection))
                      first-count @calls
                      second-result (render/acquire-context! (assoc request :seon.db/db @connection))]
                  (is (pos? first-count))
                  (is (= (:seon.cluster.prompt/text first-result) (:seon.cluster.prompt/text second-result)))
                  (is (= first-count @calls) "unchanged saved evaluations reuse their retained calls")
+                 (is (= 1 @walks) "current retained history is not queried and folded again")
+                 (is (identical? (:seon.render.history/entries first-result)
+                                 (:seon.render.history/entries second-result)))
+                 (db/transact! connection
+                   [{:seon.message/id "context-probe-message"
+                     :seon.message/content "Does not change saved evaluations."}])
+                 (let [unrelated (render/acquire-context! (assoc request :seon.db/db @connection))]
+                   (is (= 1 @walks) "an unrelated transaction preserves the acquired history")
+                   (is (identical? @connection (:seon.db/db unrelated))))
                  (let [changed (db/transact! connection
                                  [(assoc (db/pull @connection '[*] [:seon.cluster.eval/id "retained-history"])
                                          :seon.eval/shown "3")])]
@@ -82,6 +95,7 @@
                  (is (= "3" (:seon.eval/shown (db/pull @connection [:seon.eval/shown] [:seon.cluster.eval/id "retained-history"]))))
                  (let [changed (render/acquire-context! (assoc request :seon.db/db @connection))]
                    (is (> @calls first-count) "changed saved bytes invalidate the retained call")
+                   (is (= 2 @walks) "a changed evaluation invalidates the retained history root")
                    (is (not= (:seon.cluster.prompt/text first-result) (:seon.cluster.prompt/text changed)))))))))))))
 
 (deftest adoption-invalidates-pages-with-an-unchanged-sci-snapshot
