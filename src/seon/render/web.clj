@@ -2420,7 +2420,7 @@
                        'seon.render.walk/history)
              reusable? (and previous
                             (render/same-invocation-evidence? previous evidence)
-                            (or (identical? (:seon.db/db request) (:seon.db/db previous))
+                            (or (render/same-committed-database? (:seon.db/db request) (:seon.db/db previous))
                                 (every? #(db/read-evidence-current? (:seon.db/db request)
                                           (:seon.render.call/read-evidence %))
                                         (vals retained))))

@@ -20,6 +20,8 @@ The HEAD-plus-owned-paths test snapshot continued independently.
 
 ## Current scope
 
+Debug-page-cost lane, 2026-09-15: default PID 69622 MCP health and result projection report missing `:seon.test/check-time-limit-ms`; JVM `println` output still exposes bounded probe evidence. No foreign configuration or process was changed.
+
 The 2026-07-30 source-publication replacement removed this risk from database
 program indexing: clj-kondo analyzes files without evaluating application
 source, and `current-src` publication refuses if the running JVM lacks a newly

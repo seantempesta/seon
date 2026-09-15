@@ -11,7 +11,8 @@
   context and executes through `seon.sci.kernel`; there is no compiled renderer
   lane. A redefinition therefore changes the next call and a cold context
   re-derives the same symbol from its database program row."
-  (:require [seon.ai.tokens :as tokens]
+  (:require [datahike.db :as datahike.db]
+            [seon.ai.tokens :as tokens]
             [seon.config :as config]
             [seon.db :as db]
             [seon.id :as id]
@@ -658,6 +659,15 @@
 
 (declare same-call-cache-evidence?)
 
+(defn same-committed-database?
+  "True for committed values of the same connection generation and commit.
+  Temporal and speculative values have no committed identity."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value] :boolean]}
+  [previous current]
+  (let [committed (datahike.db/committed-value-identity current)]
+    (and (some? committed)
+         (= committed (datahike.db/committed-value-identity previous)))))
+
 (defn- invocation-cache-key
   [request selected evidence]
   [selected
@@ -1259,7 +1269,8 @@
       (let [request (assoc request :seon.render/profile profile)
             previous (when (and call-id retained-calls)
                        (get retained-calls call-id))
-            same-database? (identical? database (:seon.db/db previous))
+            same-database? (and previous
+                                (same-committed-database? database (:seon.db/db previous)))
             check-read-evidence?
             (and (not same-database?)
                  (or (nil? candidate-call-ids)

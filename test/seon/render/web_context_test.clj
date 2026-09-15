@@ -70,12 +70,19 @@
                  invoke kernel/invoke
                  calls (atom 0)
                  history walk/history
-                 walks (atom 0)]
+                 walks (atom 0)
+                 checks (atom 0)
+                 read-current? db/read-evidence-current?]
              (with-redefs [kernel/invoke (fn [input] (swap! calls inc) (invoke input))
-                           walk/history (fn [input] (swap! walks inc) (history input))]
-               (let [first-result (render/acquire-context! (assoc request :seon.db/db @connection))
+                           walk/history (fn [input] (swap! walks inc) (history input))
+                           db/read-evidence-current? (fn [database evidence]
+                                                       (swap! checks inc)
+                                                       (read-current? database evidence))]
+               (let [first-result (render/acquire-context! (assoc request :seon.db/db (db/db connection)))
                      first-count @calls
-                     second-result (render/acquire-context! (assoc request :seon.db/db @connection))]
+                     _ (reset! checks 0)
+                     second-result (render/acquire-context! (assoc request :seon.db/db (db/db connection)))]
+                 (is (zero? @checks) "carried wrappers of one commit skip all read replay")
                  (is (pos? first-count))
                  (is (= (:seon.cluster.prompt/text first-result) (:seon.cluster.prompt/text second-result)))
                  (is (= first-count @calls) "unchanged saved evaluations reuse their retained calls")

@@ -6,7 +6,7 @@
             [seon.render :as render]
             [seon.test-support :as support]))
 
-(deftest identical-database-retains-reads-without-replaying-them
+(deftest equal-committed-database-skips-read-replay
   (support/with-database
    (fn [connection]
      (let [namespace-name 'seon.render-simplification.fixture-a
@@ -20,7 +20,7 @@
            read-current? db/read-evidence-current?
            call-id [::namespace]
            request (fn []
-                     {:seon.db/db @connection
+                     {:seon.db/db (db/db connection)
                       :seon.sci.eval/ctx ctx
                       :seon.render/namespace namespace-name
                       :seon.render/value {:seon.ns/name namespace-name}
@@ -41,6 +41,12 @@
                           :where [?namespace :seon.ns/name ?name]
                                  [?namespace :seon.ns/doc ?doc]]
                         (:seon.db/db value) (:seon.ns/name value)))))
+       (let [a (:seon.db/db (request)) b (:seon.db/db (request))]
+         (is (not (identical? a b)))
+         (is (= a b))
+         (is (render/same-committed-database? a b))
+         (is (not (render/same-committed-database? a (db/history b))))
+         (is (not (render/same-committed-database? a (db/since b (:max-tx b))))))
        (is (= "one" (render/render-call (request))))
        (is (seq (:seon.render.call/read-evidence (get @calls call-id))))
        (with-redefs [db/read-evidence-current?
@@ -48,7 +54,20 @@
                        (swap! checks inc)
                        (read-current? database evidence))]
          (is (= "one" (render/render-call (request))))
-         (is (zero? @checks) "an identical immutable database cannot change a read")
+         (is (zero? @checks) "equal committed wrappers must not replay reads")
          (db/transact! connection [{:seon.ns/name namespace-name :seon.ns/doc "two"}])
          (is (= "two" (render/render-call (request))))
-         (is (pos? @checks) "a changed database still validates dependencies"))))))
+         (is (pos? @checks) "a changed database still validates dependencies")
+         (let [previous (get @calls call-id)]
+           (db/transact! connection [{:seon.cluster/name "retained-program"
+                                      :seon.source/commit-id #uuid "f54229d7-54eb-472d-9ae8-917a0f97af71"}])
+           (is (= "two" (render/render-call (request))))
+           (is (not= (:seon.render/source-generation previous)
+                     (:seon.render/source-generation (get @calls call-id)))
+               "a changed adopted program invalidates the retained evidence"))
+         (support/with-database
+          (fn [other]
+            (db/transact! other [{:seon.ns/name namespace-name :seon.ns/doc "other connection"}])
+            (is (not (render/same-committed-database? (db/db connection) (db/db other))))
+            (is (= "other connection"
+                   (render/render-call (assoc (request) :seon.db/db (db/db other))))))))))))
