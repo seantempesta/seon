@@ -53,6 +53,8 @@
                   :seon.render/profile
                   profile)))))
 
+(declare await-event!)
+
 (defn- clone-directory!
   "Copy one immutable test base into a private mutable root."
   [source target]
@@ -67,18 +69,25 @@
            (str source java.io.File/separator ".") (.getPath target)])
         process (.start (doto (ProcessBuilder. ^java.util.List command)
                           (.redirectErrorStream true)))
-        output (future (slurp (.getInputStream process)))
-        exit (.waitFor process)]
-    (when-not (zero? exit)
-      (throw
-       (ex-info "The shared published test base could not be cloned."
-                {:seon.error/kind ::published-base-clone-failed
-                 ::source (.getPath source)
-                 ::target (.getPath target)
-                 ::exit exit
-                 ::output @output})))
-    @output
-    (.getPath target)))
+        output (future (slurp (.getInputStream process)))]
+    (try
+      (await-event! (.onExit process) ::published-base-cloned)
+      (let [exit (.exitValue process)
+            output (await-event! output ::published-base-clone-output)]
+        (when-not (zero? exit)
+          (throw
+           (ex-info "The shared published test base could not be cloned."
+                    {:seon.error/kind ::published-base-clone-failed
+                     ::source (.getPath source)
+                     ::target (.getPath target)
+                     ::exit exit
+                     ::output output})))
+        (.getPath target))
+      (finally
+        (when (.isAlive process)
+          (.destroyForcibly process)
+          (await-event! (.onExit process) ::published-base-clone-stopped))
+        (await-event! output ::published-base-clone-output)))))
 
 (declare delete-recursively!)
 
@@ -199,55 +208,71 @@
   nil)
 
 (defn- close-base!
-  [configuration connection]
-  (d/release connection)
-  (d/delete-database configuration)
+  [{::keys [configuration connection private-root]}]
+  (try
+    (try
+      (d/release connection)
+      (finally (d/delete-database configuration)))
+    (finally
+      (when private-root (delete-recursively! private-root))))
   nil)
 
 (defn- create-base
-  []
-  (let [configuration
-        {:store {:backend :memory :id (random-uuid)}
-         ;; Without commit records, reusing a bounded branch-name pool also
-         ;; bounds the memory store's retained keys. Tests needing commit-graph
-         ;; semantics own a production-shaped store instead of this fixture.
-         :commit-graph? false
-         :keep-history? true
-         :schema-flexibility :write}
-        base (System/getProperty "seon.test.published-base")
-        configuration
-        (if base
-          (let [source (store/datahike-configuration (str (io/file base "data" "store")))
-                backend (:store source)
-                id (:id backend)]
-            (-> source
-                (dissoc :fuse-index-roots? :index-config)
-                (assoc :branch source/current-branch
-                       :store {:backend :tiered :id id
-                               :frontend-config {:backend :memory :id id}
-                               :backend-config backend
-                               :write-policy :frontend-only
-                               :read-policy :frontend-first})))
-          configuration)
-        _ (when-not base (d/create-database configuration))
-        connection (d/connect configuration)]
+  [base]
+  (let [private-root (when base
+                       (let [parent (doto (io/file "tmp" "fixture-bases") .mkdirs)]
+                         (str (java.nio.file.Files/createTempDirectory
+                               (.toPath parent) "base-"
+                               (make-array java.nio.file.attribute.FileAttribute 0)))))]
     (try
-      (when-not base (populate-database! connection))
-      (.addShutdownHook
-       (Runtime/getRuntime)
-       (Thread. ^Runnable #(close-base! configuration connection)
-                "seon-test-database-base-cleanup"))
-      {:seon.test-support/configuration configuration
-       :seon.test-support/connection connection
-       :seon.sci.eval/ctx (sci.eval/cluster-ctx @connection)}
+      (let [configuration
+            (if base
+              (let [private-store (clone-directory! (io/file base "data" "store")
+                                                    (io/file private-root "store"))
+                    _ (cluster.export/reidentify! private-store)
+                    source (store/datahike-configuration private-store)
+                    backend (:store source)
+                    id (:id backend)]
+                ;; Connect-time migration can mutate even a frontend-only
+                ;; backend. Every JVM therefore owns the copy it connects.
+                (-> source
+                    (dissoc :fuse-index-roots? :index-config)
+                    (assoc :branch source/current-branch
+                           :store {:backend :tiered :id id
+                                   :frontend-config {:backend :memory :id id}
+                                   :backend-config backend
+                                   :write-policy :frontend-only
+                                   :read-policy :frontend-first})))
+              ;; Without commit records, the leased branch-name pool also
+              ;; bounds retained keys. Commit-graph tests own file stores.
+              {:store {:backend :memory :id (random-uuid)}
+               :commit-graph? false
+               :keep-history? true
+               :schema-flexibility :write})
+            _ (when-not base (d/create-database configuration))
+            connection (d/connect configuration)]
+        (try
+          (when-not base (populate-database! connection))
+          (cond-> {:seon.test-support/configuration configuration
+                   :seon.test-support/connection connection
+                   :seon.sci.eval/ctx (sci.eval/cluster-ctx @connection)}
+            private-root (assoc ::private-root private-root))
+          (catch Throwable failure
+            (close-base! {::configuration configuration ::connection connection})
+            (throw failure))))
       (catch Throwable failure
-        (close-base! configuration connection)
+        (when private-root (delete-recursively! private-root))
         (throw failure)))))
 
 (def ^:private database-base
   ;; One new test JVM gets one newly populated base. Nothing survives process
   ;; exit, and bin/test never reuses this delay across invocations.
-  (delay (create-base)))
+  (delay
+    (let [base (create-base (System/getProperty "seon.test.published-base"))]
+      (.addShutdownHook
+       (Runtime/getRuntime)
+       (Thread. ^Runnable #(close-base! base) "seon-test-database-base-cleanup"))
+      base)))
 
 (defn- seeded-cluster-name
   "The one cluster this fixture stood up, DERIVED, or nil when it seeded none."
@@ -496,7 +521,7 @@
           (or found unknown-refusal))))))
 
 (defn assert-check!
-  "Assert one test.check result while retaining its complete shrink data."
+  "Assert a nonempty test.check result while retaining its complete shrink data."
   ([check]
    (assert-check! check "Generative check failed."))
   ([check message]
@@ -520,7 +545,8 @@
 
                  (map? (:shrunk result))
                  (update :shrunk without-duplicate-error))))]
-     (let [passed? (true? (:result check))]
+     (let [passed? (and (pos-int? (:num-tests check))
+                        (true? (:result check)))]
        (test/is passed?
               (str message " "
                    (pr-str (without-duplicate-error check))))))))

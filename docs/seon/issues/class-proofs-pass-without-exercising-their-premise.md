@@ -31,6 +31,20 @@ production-derived subject sets, honest generator reachability, or live-drive
 semantic exits; those surviving members are still returned by the class
 query.
 
+## Shared property boundary — 2026-09-15
+
+The fixtures-events slice makes `seon.test-support/assert-check!` require a
+positive `:num-tests` as well as a true `:result`. The recurring test runs real
+test.check properties, observes one pass and two failures (zero trials and a
+falsified property), and retains seed `20260728` plus smallest failing input
+`[3]`. The three-worker owned-path gate passed 36 tests / 327 assertions.
+See [the landing note](../../prds/context-generation/research/fixtures-events-2026-09-15.md)
+for the implementation and final platform boundary.
+
+This closes successful-zero-trial reporting at the shared assertion seam.
+It does not prove that every property covers its production subject; the
+remaining class members below stay open.
+
 ## Owner
 
 `bin/test`, fixture constructors, and the program-graph subject discovery used

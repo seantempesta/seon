@@ -3,7 +3,8 @@
     seon.test-support-test
   (:require [clojure.core.async :as async]
             [clojure.java.io :as io]
-            [clojure.test :refer [deftest is]]
+            [clojure.string :as str]
+            [clojure.test :as test :refer [deftest is]]
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
@@ -17,6 +18,76 @@
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.test-support :as test-support]))
+
+(defn- file-digests
+  [root]
+  (into (sorted-map)
+        (for [file (file-seq (io/file root)) :when (.isFile file)]
+          [(str (.relativize (.toPath (io/file root)) (.toPath file)))
+           (vec (.digest (java.security.MessageDigest/getInstance "SHA-256")
+                         (java.nio.file.Files/readAllBytes (.toPath file))))])))
+
+(deftest simultaneous-fixture-bases-never-open-the-published-store
+  (let [root (str "tmp/fixture-base-isolation/" (random-uuid))
+        begin (java.util.concurrent.CountDownLatch. 1)
+        written (java.util.concurrent.CountDownLatch. 2)
+        closed (java.util.concurrent.CountDownLatch. 2)]
+    (try
+      (test-support/populate-published-operator-root! root)
+      (let [before (file-digests (str root "/data/store"))
+            acquire
+            (fn [own other]
+              (future
+                (try
+                (test-support/await-event! begin ::begin-acquisition)
+                (with-open [resource
+                            (test-support/closeable
+                             (#'test-support/create-base root)
+                             #'test-support/close-base!)]
+                  (let [base @resource
+                        connection (::test-support/connection base)
+                        configuration (::test-support/configuration base)
+                        projection (schema/projection-from-database @connection)]
+                    (schema/call-with-projection
+                     projection
+                     (fn []
+                       (let [result (db/transact! connection [{:seon.ns/name own}])]
+                         (.countDown written)
+                         (test-support/await-event! written ::both-private-writes)
+                         {::path (get-in configuration [:store :backend-config :path])
+                          ::id (get-in configuration [:store :id])
+                          ::private-root (::test-support/private-root base)
+                          ::result-error (:seon.error/kind result)
+                          ::subjects (db/q '[:find (count ?f) . :where [?f :seon.fn/sym]]
+                                           @connection)
+                          ::own (db/q '[:find ?n . :in $ ?n :where [_ :seon.ns/name ?n]]
+                                      @connection own)
+                          ::other (db/q '[:find ?n . :in $ ?n :where [_ :seon.ns/name ?n]]
+                                        @connection other)})))))
+                  (finally (.countDown closed)))))
+            left (acquire 'fixture-base.left 'fixture-base.right)
+            right (acquire 'fixture-base.right 'fixture-base.left)]
+        (.countDown begin)
+        (let [results (mapv (fn [task]
+                              (try
+                                (test-support/await-event! task ::private-base-closed)
+                                (catch Throwable failure failure)))
+                            [left right])]
+          (test-support/await-event! closed ::both-private-bases-closed)
+          (doseq [result results]
+            (when (instance? Throwable result) (throw result)))
+          (is (seq before) "the source is an actual published store")
+          (is (= before (file-digests (str root "/data/store")))
+              "concurrent connect, write and release preserve every published byte")
+          (is (= 2 (count (set (map ::path results)))))
+          (is (= 2 (count (set (map ::id results)))))
+          (doseq [result results]
+            (is (pos? (::subjects result)) "the complete production constructor supplied subjects")
+            (is (nil? (::result-error result)))
+            (is (some? (::own result)))
+            (is (nil? (::other result)))
+            (is (not (.exists (io/file (::private-root result))))))))
+      (finally (test-support/delete-recursively! root)))))
 
 (deftest a-canonical-database-is-the-production-source-population
   (test-support/with-database
@@ -148,12 +219,26 @@
     (is (not (.exists (java.io.File. path))))))
 
 (deftest shared-property-reporting-is-a-clojure-test-assertion
-  (test-support/assert-check!
-   (tc/quick-check
-    10
-    (prop/for-all [value gen/int]
-      (= value value))
-    :seed 20260728)))
+  (let [property (prop/for-all [value gen/small-integer]
+                   (> (inc value) value))
+        passed (tc/quick-check 10 property :seed 20260728)
+        empty-check (tc/quick-check 0 property :seed 20260728)
+        failed (tc/quick-check 10
+                              (prop/for-all [value (gen/choose 3 10)]
+                                (< value 3))
+                              :seed 20260728)
+        reports (atom [])]
+    (binding [test/report #(swap! reports conj %)]
+      (doseq [check [passed empty-check failed]]
+        (test-support/assert-check! check)))
+    (is (= [:pass :fail :fail] (mapv :type @reports))
+        "zero trials and a falsified property both fail the shared proof boundary")
+    (is (= [3] (get-in failed [:shrunk :smallest])))
+    (is (str/includes? (:message (last @reports))
+                       ":smallest [3]")
+        "the reported failure retains the smallest failing input")
+    (is (str/includes? (:message (last @reports)) ":seed 20260728")
+        "the report retains the seed needed to replay the counterexample")))
 
 (deftest recursive-cleanup-never-follows-a-symlink-out-of-tmp
   ;; The 2026-07-29 data-loss incident: a scratch root under tmp/ linked the

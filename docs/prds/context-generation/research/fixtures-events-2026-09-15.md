@@ -4,11 +4,82 @@ status: active
 tags: [research, test, flow, database]
 ---
 
-# Fixtures and events: required design decision — 2026-09-15
+# Fixtures and events — 2026-09-15
 
-## Result and stop boundary
+## Authorized continuation: runner fixes first
 
-No production edits or issue closures. This is an investigation checkpoint,
+The owner selected option 1 and authorized continuing into inexpensive
+fixture/event members without another design stop. Implementation now changes
+the existing owners:
+
+- `test-support/create-base` clones and reidentifies the published store before
+  any worker connects its tiered backend. The worker's memory frontend and
+  private file backend share the new store identity. Its cleanup releases the
+  connection and removes the copy. The existing clone helper now awaits child
+  exit and output under `event-backstop-seconds`.
+- `source/record-results!` retains expected-head publication and permits one
+  immediate reapplication of the exact same completion after a
+  `:stale-branch-head` refusal. A second conflict still refuses. Every attempt
+  retires its scratch branch. No source fingerprint is recomputed on retry.
+- `test-support/assert-check!` now requires a positive trial count as well as
+  a true result; the shared regression retains seed `20260728` and smallest
+  failing input `[3]`, and rejects a successful zero-trial check.
+
+The canonical concurrent-base regression checks two distinct store paths and
+identities, nonempty installed program subjects, isolated writes, completed
+cleanup, and SHA-256 equality for every published file before and after.
+The existing real source-publication regression now controls both one conflict
+(successful recording descended from the competing head) and repeated
+conflicts (two attempts, no unpublished result, latest source preserved).
+
+### Verification
+
+- First armed fast run, snapshot `run.fKf8uo` at `ff60a3cf7`: **23 tests /
+  191 assertions / 0 failures / 0 errors**. This predates the added
+  repeated-conflict and zero-trial assertions.
+- First three-worker gate, `run.51bnuS`, snapshot `ff60a3cf7`: **36 tests /
+  326 assertions / 1 failure / 0 errors**. Both runner regressions passed;
+  concurrent-base proof took **5,783 ms**, source evidence proof **87,008 ms**.
+  The sole failure was the new counterexample test comparing an intentionally
+  omitted nil `:result-data` entry. The assertion now verifies retained seed
+  and smallest failing input. Oversight and schedule namespaces passed.
+- Corrected three-worker gate, `run.0j9ayQ`, snapshot `caddf111b` plus owned
+  paths: **36 tests / 327 assertions / 0 failures / 0 errors**, exit 0 with
+  successful persistent result recording. Slot wait **75 s**. Concurrent-base
+  proof **7,663 ms**; source evidence proof **71,054 ms**; coordinator/tests
+  **143 s**. The successful isolated root was removed by the runner.
+- The required platform gate is running with the final source simplification
+  (the second attempt is directly in the catch body, so it cannot retry
+  recursively). No platform-green claim is made until it finishes.
+
+### Default live boundary
+
+Default remains PID 69622. An MCP JVM probe returned
+`:seon.config/missing-effective` with 69 missing config members while shared
+config edits were in flight. This is already recorded by the other lane in
+`docs/seon/issues/partial-hot-reload-produces-mixed-code-with-no-warning.md`.
+The source-publication log independently reported `IndexOutOfBoundsException`
+at `seon.fn/exact-source`, `fn.clj:142`, during analysis. No causal attribution
+to a particular concurrent edit is made.
+
+A later 1 ms MCP JVM probe printed the following before returning nil:
+
+```clojure
+{:probe/record-results-at-head-loaded? false
+ :probe/record-results-doc
+ "Publish test evidence through the result writer on a private source branch.\n  A changed expected head refuses publication; no current-src connection can\n  outlive a force-branch operation and later overwrite a newer program."
+ :probe/missing-ping
+ {:seon.oversight/proc :probe/absent :seon.oversight/ping :unknown}}
+```
+
+This proves the new retry is not yet adopted on default and independently
+reconfirms the current oversight absence behavior. No restart/refork or
+unverified manual reload was performed.
+
+## Initial investigation and satisfied design boundary
+
+At the initial checkpoint there were no production edits or issue closures.
+That was an investigation checkpoint,
 not a completed class repair. The assignment explicitly says: "if the kill
 would take hours of cross-owner work or its guarantee cannot be stated in one
 sentence, STOP and write three priced options in your landing note and report."

@@ -294,13 +294,7 @@
                              (get-in row [:seon.test/run :seon.test.run/id])]))))
             results))))
 
-(defn record-results!
-  "Publish test evidence through the result writer on a private source branch.
-  A changed expected head refuses publication; no current-src connection can
-  outlive a force-branch operation and later overwrite a newer program."
-  {:malli/schema
-   [:=> [:cat :seon.store/store :seon.test.run/completion]
-    [:or :seon.test/results :seon.error/value]]}
+(defn- record-results-at-head!
   [held-store completion]
   (let [expected (:seon.source/commit-id (current held-store))
         scratch (scratch-branch)]
@@ -324,6 +318,22 @@
                   result)))
           (finally (store/release-branch! connection))))
       (finally (retire-scratch! held-store scratch)))))
+
+(defn record-results!
+  "Publish test evidence through the result writer on a private source branch.
+  One stale-head conflict rebases the same completion onto the new head once.
+  A second conflict refuses: the expected-head guard and original tested
+  fingerprint are preserved, and every attempt retires its scratch branch."
+  {:malli/schema
+   [:=> [:cat :seon.store/store :seon.test.run/completion]
+    [:or :seon.test/results :seon.error/value]]}
+  [held-store completion]
+  (try
+    (record-results-at-head! held-store completion)
+    (catch clojure.lang.ExceptionInfo failure
+      (if (= :stale-branch-head (:type (ex-data failure)))
+        (record-results-at-head! held-store completion)
+        (throw failure)))))
 
 (defn publish!
   "Build and atomically publish one complete source database value."
