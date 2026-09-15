@@ -64,6 +64,8 @@ of the historical test tallies still being collected.
 |---|---|---|---|---|---|---|
 | `38c49a1db` (`6acd8818e^`) | 101 / 200 | 10 / 4 | 29 / 4 | 13 / 0 | 1 / 1 | 53 / 9 |
 | `6acd8818e` | 101 / 200 | 10 / 4 | 29 / 4 | 13 / 0 | 1 / 1 | 53 / 9 |
+| `806659e06` (`be4e3fe00^`) | 101 / 200 | 10 / 4 | 29 / 4 | 13 / 0 | 1 / 1 | 53 / 9 |
+| `be4e3fe00` | 101 / 200 | 10 / 4 | 29 / 4 | 13 / 0 | 1 / 1 | 53 / 9 |
 
 The pre-WIP run began reporting tests at 18:56:40Z and finished at
 19:01:53Z. Each reported namespace total in the assignment (14, 33, 13,
@@ -116,11 +118,47 @@ pre-WIP nested-bulk test emits 551,392 bytes versus the 8,192-byte
 expectation. Any production repair must respect the one value-renderer
 projection authority; restoring the deleted clipping seam is not a fix.
 
-`ff9507c1b` (September 8) moved evaluation output to shown text and changed
-the MCP SCI branch to recognize `:seon.eval/shown` plus the record.
+`ff9507c1b` (September 8) moved evaluation output to saved text and changed
+the MCP SCI branch to recognize that text plus the record. The original
+text key was `:seon.eval/value`; `ae0e54841` (September 9) renamed it to
+`:seon.eval/shown`.
 The MCP fixture still synthesizes an admission envelope without shown
 text, so it takes the ordinary-value branch and stores the entire
 envelope. `test/seon/repl_parity_test.clj:48-74` likewise still reads and
 decodes `:seon.cluster.eval/result-edn`. These source-history attributions
 are distinct from the measured pre-WIP tally; neither old September 8
 commit has been tested by this assignment.
+
+## Outcome and stop boundary
+
+All four requested boundary snapshots produced **identical failed/erroring
+test-name multisets**, not just equal totals. The last run completed at
+19:19Z. Neither the WIP checkpoint nor Part A introduced this failure set.
+No separate run of `7e35df213` or `a2bca009c` was necessary: the requested
+endpoints surrounding them show no change. This does not claim an exhaustive
+earliest-introduction bisect of every September 15 commit. The older
+September 7–9 attributions above are source-history evidence, and are
+explicitly not measured before/after test results.
+
+The production MCP root cause reaches protected `src/seon/cluster.clj`,
+`mcp-project`, specifically the unchanged full print node at line 384 and
+its direct semantic decode at line 411. Followed the assignment's explicit
+stop boundary: **no production or test implementation was changed**.
+The fixture repairs and admission fallback remain open in the issue notes;
+this is a diagnosis landing, not a fixed or green result. No repair
+`bin/test --paths` or `--platform` gate is claimed.
+
+Recurring subjects and remaining work are recorded in:
+
+- [Fixture declaration provenance](../../../seon/issues/test-program-rows-omit-admission-provenance.md).
+- [Ordinary MCP value rendering](../../../seon/issues/mcp-ordinary-values-bypass-the-value-renderer.md).
+- [Missing-marker admission](../../../seon/issues/missing-artifact-marker-refuses-its-own-admission-contract.md).
+- [REPL parity observations](../../../seon/issues/repl-parity-divergences.md).
+
+[Machine-readable evidence](bisect-today-reds-2026-09-15.json) preserves
+the four summaries, per-namespace counts, each failing test's occurrence
+count, and SHA-256 of each full log. The committed
+[summarizer](bisect_today_reds_2026_09_15.py) reproduces that extraction.
+The unchanged canonical invocation is recorded above. All test subprocesses
+exited before cleanup; the worktree and this assignment's scratch logs were
+removed. No other lane's files, sessions, or scratch roots were operated.

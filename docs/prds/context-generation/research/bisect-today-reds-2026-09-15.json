@@ -1,0 +1,254 @@
+[
+  {
+    "commit": "38c49a1db",
+    "log_sha256": "0ca8852c5cc960443e720ca97133fa74accf374739219716a046f87a5378d8eb",
+    "summary": [
+      "Ran 101 tests containing 200 assertions.",
+      "53 failures, 9 errors."
+    ],
+    "namespaces": {
+      "seon.cluster.mcp-test": {
+        "failures": 10,
+        "errors": 4
+      },
+      "seon.effect-test": {
+        "failures": 29,
+        "errors": 4
+      },
+      "seon.repl-parity-test": {
+        "failures": 13,
+        "errors": 0
+      },
+      "seon.search-test": {
+        "failures": 1,
+        "errors": 1
+      }
+    },
+    "failure_occurrences": {
+      "seon.cluster.mcp-test/door-artifact-size-ignores-evaluation-envelope-bulk:failures": 3,
+      "seon.cluster.mcp-test/door-evaluations-project-the-repl-text-face:errors": 1,
+      "seon.cluster.mcp-test/door-evaluations-project-the-repl-text-face:failures": 2,
+      "seon.cluster.mcp-test/door-top-level-strings-use-the-shared-value-window:errors": 1,
+      "seon.cluster.mcp-test/door-value-artifacts-drill-from-the-result-root:failures": 4,
+      "seon.cluster.mcp-test/nested-bulk-is-bounded-by-the-shared-value-window:failures": 1,
+      "seon.cluster.mcp-test/ordinary-mcp-results-always-use-the-explicit-mcp-profile:errors": 2,
+      "seon.effect-test/an-oversized-request-is-refused-and-never-dispatched:failures": 4,
+      "seon.effect-test/background-settlement-carries-its-connection-across-a-thread-hop:errors": 1,
+      "seon.effect-test/background-settlement-carries-its-connection-across-a-thread-hop:failures": 1,
+      "seon.effect-test/background-work-outlives-the-deadline-of-the-turn-that-started-it:errors": 1,
+      "seon.effect-test/background-work-outlives-the-deadline-of-the-turn-that-started-it:failures": 1,
+      "seon.effect-test/capability-reachability-is-a-database-query:errors": 1,
+      "seon.effect-test/capability-reachability-is-a-database-query:failures": 1,
+      "seon.effect-test/detached-work-is-bounded-by-its-own-limit-config-then-the-form:errors": 1,
+      "seon.effect-test/guarded-sci-evaluation-supplies-the-effect-identity-context:failures": 3,
+      "seon.effect-test/interrupted-handlers-mark-the-open-receipt-without-a-result:failures": 2,
+      "seon.effect-test/invalid-requests-never-open-a-receipt:failures": 1,
+      "seon.effect-test/request-commits-before-io-dispatch-and-settles-once:failures": 12,
+      "seon.effect-test/the-door-runs-its-handler-under-the-requesting-evaluations-arm:failures": 4,
+      "seon.repl-parity-test/parity-a1:failures": 1,
+      "seon.repl-parity-test/parity-a9:failures": 1,
+      "seon.repl-parity-test/parity-b1:failures": 1,
+      "seon.repl-parity-test/parity-b4:failures": 1,
+      "seon.repl-parity-test/parity-b9:failures": 1,
+      "seon.repl-parity-test/parity-d1:failures": 1,
+      "seon.repl-parity-test/parity-d2:failures": 1,
+      "seon.repl-parity-test/parity-d7:failures": 1,
+      "seon.repl-parity-test/parity-d8:failures": 1,
+      "seon.repl-parity-test/parity-e4:failures": 1,
+      "seon.repl-parity-test/parity-h1:failures": 1,
+      "seon.repl-parity-test/parity-h4:failures": 1,
+      "seon.repl-parity-test/parity-h6:failures": 1,
+      "seon.search-test/an-exact-transaction-report-advances-the-index-basis:errors": 1,
+      "seon.search-test/document-roster-is-the-declared-search-property-query:failures": 1
+    }
+  },
+  {
+    "commit": "6acd8818e",
+    "log_sha256": "a24f8dc5f9119de318e9c21fc3fddcce1687ccafae30bb84fa0910c7f9821207",
+    "summary": [
+      "Ran 101 tests containing 200 assertions.",
+      "53 failures, 9 errors."
+    ],
+    "namespaces": {
+      "seon.cluster.mcp-test": {
+        "failures": 10,
+        "errors": 4
+      },
+      "seon.effect-test": {
+        "failures": 29,
+        "errors": 4
+      },
+      "seon.repl-parity-test": {
+        "failures": 13,
+        "errors": 0
+      },
+      "seon.search-test": {
+        "failures": 1,
+        "errors": 1
+      }
+    },
+    "failure_occurrences": {
+      "seon.cluster.mcp-test/door-artifact-size-ignores-evaluation-envelope-bulk:failures": 3,
+      "seon.cluster.mcp-test/door-evaluations-project-the-repl-text-face:errors": 1,
+      "seon.cluster.mcp-test/door-evaluations-project-the-repl-text-face:failures": 2,
+      "seon.cluster.mcp-test/door-top-level-strings-use-the-shared-value-window:errors": 1,
+      "seon.cluster.mcp-test/door-value-artifacts-drill-from-the-result-root:failures": 4,
+      "seon.cluster.mcp-test/nested-bulk-is-bounded-by-the-shared-value-window:failures": 1,
+      "seon.cluster.mcp-test/ordinary-mcp-results-always-use-the-explicit-mcp-profile:errors": 2,
+      "seon.effect-test/an-oversized-request-is-refused-and-never-dispatched:failures": 4,
+      "seon.effect-test/background-settlement-carries-its-connection-across-a-thread-hop:errors": 1,
+      "seon.effect-test/background-settlement-carries-its-connection-across-a-thread-hop:failures": 1,
+      "seon.effect-test/background-work-outlives-the-deadline-of-the-turn-that-started-it:errors": 1,
+      "seon.effect-test/background-work-outlives-the-deadline-of-the-turn-that-started-it:failures": 1,
+      "seon.effect-test/capability-reachability-is-a-database-query:errors": 1,
+      "seon.effect-test/capability-reachability-is-a-database-query:failures": 1,
+      "seon.effect-test/detached-work-is-bounded-by-its-own-limit-config-then-the-form:errors": 1,
+      "seon.effect-test/guarded-sci-evaluation-supplies-the-effect-identity-context:failures": 3,
+      "seon.effect-test/interrupted-handlers-mark-the-open-receipt-without-a-result:failures": 2,
+      "seon.effect-test/invalid-requests-never-open-a-receipt:failures": 1,
+      "seon.effect-test/request-commits-before-io-dispatch-and-settles-once:failures": 12,
+      "seon.effect-test/the-door-runs-its-handler-under-the-requesting-evaluations-arm:failures": 4,
+      "seon.repl-parity-test/parity-a1:failures": 1,
+      "seon.repl-parity-test/parity-a9:failures": 1,
+      "seon.repl-parity-test/parity-b1:failures": 1,
+      "seon.repl-parity-test/parity-b4:failures": 1,
+      "seon.repl-parity-test/parity-b9:failures": 1,
+      "seon.repl-parity-test/parity-d1:failures": 1,
+      "seon.repl-parity-test/parity-d2:failures": 1,
+      "seon.repl-parity-test/parity-d7:failures": 1,
+      "seon.repl-parity-test/parity-d8:failures": 1,
+      "seon.repl-parity-test/parity-e4:failures": 1,
+      "seon.repl-parity-test/parity-h1:failures": 1,
+      "seon.repl-parity-test/parity-h4:failures": 1,
+      "seon.repl-parity-test/parity-h6:failures": 1,
+      "seon.search-test/an-exact-transaction-report-advances-the-index-basis:errors": 1,
+      "seon.search-test/document-roster-is-the-declared-search-property-query:failures": 1
+    }
+  },
+  {
+    "commit": "806659e06",
+    "log_sha256": "a9ee4f6a845cafb404c6b9deb0c6198fc619ced71ebc344f08331153bb47a225",
+    "summary": [
+      "Ran 101 tests containing 200 assertions.",
+      "53 failures, 9 errors."
+    ],
+    "namespaces": {
+      "seon.cluster.mcp-test": {
+        "failures": 10,
+        "errors": 4
+      },
+      "seon.effect-test": {
+        "failures": 29,
+        "errors": 4
+      },
+      "seon.repl-parity-test": {
+        "failures": 13,
+        "errors": 0
+      },
+      "seon.search-test": {
+        "failures": 1,
+        "errors": 1
+      }
+    },
+    "failure_occurrences": {
+      "seon.cluster.mcp-test/door-artifact-size-ignores-evaluation-envelope-bulk:failures": 3,
+      "seon.cluster.mcp-test/door-evaluations-project-the-repl-text-face:errors": 1,
+      "seon.cluster.mcp-test/door-evaluations-project-the-repl-text-face:failures": 2,
+      "seon.cluster.mcp-test/door-top-level-strings-use-the-shared-value-window:errors": 1,
+      "seon.cluster.mcp-test/door-value-artifacts-drill-from-the-result-root:failures": 4,
+      "seon.cluster.mcp-test/nested-bulk-is-bounded-by-the-shared-value-window:failures": 1,
+      "seon.cluster.mcp-test/ordinary-mcp-results-always-use-the-explicit-mcp-profile:errors": 2,
+      "seon.effect-test/an-oversized-request-is-refused-and-never-dispatched:failures": 4,
+      "seon.effect-test/background-settlement-carries-its-connection-across-a-thread-hop:errors": 1,
+      "seon.effect-test/background-settlement-carries-its-connection-across-a-thread-hop:failures": 1,
+      "seon.effect-test/background-work-outlives-the-deadline-of-the-turn-that-started-it:errors": 1,
+      "seon.effect-test/background-work-outlives-the-deadline-of-the-turn-that-started-it:failures": 1,
+      "seon.effect-test/capability-reachability-is-a-database-query:errors": 1,
+      "seon.effect-test/capability-reachability-is-a-database-query:failures": 1,
+      "seon.effect-test/detached-work-is-bounded-by-its-own-limit-config-then-the-form:errors": 1,
+      "seon.effect-test/guarded-sci-evaluation-supplies-the-effect-identity-context:failures": 3,
+      "seon.effect-test/interrupted-handlers-mark-the-open-receipt-without-a-result:failures": 2,
+      "seon.effect-test/invalid-requests-never-open-a-receipt:failures": 1,
+      "seon.effect-test/request-commits-before-io-dispatch-and-settles-once:failures": 12,
+      "seon.effect-test/the-door-runs-its-handler-under-the-requesting-evaluations-arm:failures": 4,
+      "seon.repl-parity-test/parity-a1:failures": 1,
+      "seon.repl-parity-test/parity-a9:failures": 1,
+      "seon.repl-parity-test/parity-b1:failures": 1,
+      "seon.repl-parity-test/parity-b4:failures": 1,
+      "seon.repl-parity-test/parity-b9:failures": 1,
+      "seon.repl-parity-test/parity-d1:failures": 1,
+      "seon.repl-parity-test/parity-d2:failures": 1,
+      "seon.repl-parity-test/parity-d7:failures": 1,
+      "seon.repl-parity-test/parity-d8:failures": 1,
+      "seon.repl-parity-test/parity-e4:failures": 1,
+      "seon.repl-parity-test/parity-h1:failures": 1,
+      "seon.repl-parity-test/parity-h4:failures": 1,
+      "seon.repl-parity-test/parity-h6:failures": 1,
+      "seon.search-test/an-exact-transaction-report-advances-the-index-basis:errors": 1,
+      "seon.search-test/document-roster-is-the-declared-search-property-query:failures": 1
+    }
+  },
+  {
+    "commit": "be4e3fe00",
+    "log_sha256": "0a0afa1673a708894297133af96698442935bcaab02e23fa1f323d9973e3d87c",
+    "summary": [
+      "Ran 101 tests containing 200 assertions.",
+      "53 failures, 9 errors."
+    ],
+    "namespaces": {
+      "seon.cluster.mcp-test": {
+        "failures": 10,
+        "errors": 4
+      },
+      "seon.effect-test": {
+        "failures": 29,
+        "errors": 4
+      },
+      "seon.repl-parity-test": {
+        "failures": 13,
+        "errors": 0
+      },
+      "seon.search-test": {
+        "failures": 1,
+        "errors": 1
+      }
+    },
+    "failure_occurrences": {
+      "seon.cluster.mcp-test/door-artifact-size-ignores-evaluation-envelope-bulk:failures": 3,
+      "seon.cluster.mcp-test/door-evaluations-project-the-repl-text-face:errors": 1,
+      "seon.cluster.mcp-test/door-evaluations-project-the-repl-text-face:failures": 2,
+      "seon.cluster.mcp-test/door-top-level-strings-use-the-shared-value-window:errors": 1,
+      "seon.cluster.mcp-test/door-value-artifacts-drill-from-the-result-root:failures": 4,
+      "seon.cluster.mcp-test/nested-bulk-is-bounded-by-the-shared-value-window:failures": 1,
+      "seon.cluster.mcp-test/ordinary-mcp-results-always-use-the-explicit-mcp-profile:errors": 2,
+      "seon.effect-test/an-oversized-request-is-refused-and-never-dispatched:failures": 4,
+      "seon.effect-test/background-settlement-carries-its-connection-across-a-thread-hop:errors": 1,
+      "seon.effect-test/background-settlement-carries-its-connection-across-a-thread-hop:failures": 1,
+      "seon.effect-test/background-work-outlives-the-deadline-of-the-turn-that-started-it:errors": 1,
+      "seon.effect-test/background-work-outlives-the-deadline-of-the-turn-that-started-it:failures": 1,
+      "seon.effect-test/capability-reachability-is-a-database-query:errors": 1,
+      "seon.effect-test/capability-reachability-is-a-database-query:failures": 1,
+      "seon.effect-test/detached-work-is-bounded-by-its-own-limit-config-then-the-form:errors": 1,
+      "seon.effect-test/guarded-sci-evaluation-supplies-the-effect-identity-context:failures": 3,
+      "seon.effect-test/interrupted-handlers-mark-the-open-receipt-without-a-result:failures": 2,
+      "seon.effect-test/invalid-requests-never-open-a-receipt:failures": 1,
+      "seon.effect-test/request-commits-before-io-dispatch-and-settles-once:failures": 12,
+      "seon.effect-test/the-door-runs-its-handler-under-the-requesting-evaluations-arm:failures": 4,
+      "seon.repl-parity-test/parity-a1:failures": 1,
+      "seon.repl-parity-test/parity-a9:failures": 1,
+      "seon.repl-parity-test/parity-b1:failures": 1,
+      "seon.repl-parity-test/parity-b4:failures": 1,
+      "seon.repl-parity-test/parity-b9:failures": 1,
+      "seon.repl-parity-test/parity-d1:failures": 1,
+      "seon.repl-parity-test/parity-d2:failures": 1,
+      "seon.repl-parity-test/parity-d7:failures": 1,
+      "seon.repl-parity-test/parity-d8:failures": 1,
+      "seon.repl-parity-test/parity-e4:failures": 1,
+      "seon.repl-parity-test/parity-h1:failures": 1,
+      "seon.repl-parity-test/parity-h4:failures": 1,
+      "seon.repl-parity-test/parity-h6:failures": 1,
+      "seon.search-test/an-exact-transaction-report-advances-the-index-basis:errors": 1,
+      "seon.search-test/document-roster-is-the-declared-search-property-query:failures": 1
+    }
+  }
+]
