@@ -56,6 +56,7 @@ turns**: opening plus one plan reread, with zero churn.
 | `6785c980c` | Native database decoding avoids unnecessary logical projection | Fast 41/272; isolated 41/276; no read-membership change. |
 | `eef44fcc3` | Preserve database-free relation queries | Fast DB/help 44/293; isolated 44/297; no read-membership change. |
 | `549ab70b5` | Derived prompt frame and trial parity | Fast frame 8/45; combined isolated 19/369; 0 idle system bytes. |
+| `bb008321d` | Correct initial-versus-changed provenance and refresh the help concurrency regression | Fast 9/302; isolated 19/369; plan 269, inbox 452, idle 0 bytes. |
 
 The prompt-frame and provenance follow-ups pass their combined isolated
 gate: **19 tests / 369 assertions**, covering prompt, loop proof, REPL

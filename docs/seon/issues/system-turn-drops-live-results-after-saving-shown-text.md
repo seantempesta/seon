@@ -1,11 +1,23 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, render, sci, agent, wave/agent-context]
 ---
 
 # Retain system-turn results in the agent's SCI context
+
+## Resolution — 2026-09-14
+
+`e81b119f2` moves acquisition to the agent's boot-carried context state and
+reuses that context from `arm!`. Stored system evaluations bind their real
+objects only after the writer succeeds; previews remain disposable. The
+canonical loop regression resolves and evaluates the saved system handles.
+`1f18b99fc` additionally evaluates each change-only reread's full-value hint.
+The context-state carrier requires a boot boundary (**RESET NEEDED** for
+handles created before `e81b119f2`); no lazy replacement or result
+reconstruction was added. The historical evidence below describes the
+superseded path.
 
 ## Evidence — 2026-09-10
 
