@@ -27,3 +27,19 @@ and spent roughly five turns re-verifying.
   message names the argument, the schema, and the generated value.
 - The "no example test gates …" sentence is fine but should not precede a
   checker failure as if both were about the agent's code.
+
+## Core-functions repair — 2026-09-14
+
+The exact run-2 definition and stored output were reproduced read-only from
+default. Malli generates a `clojure.lang.LazySeq` for `:cat`; the checker passed
+that sequence to a kernel contract requiring a vector. The generator now
+normalizes arguments to a vector. The same definition reaches actual checking
+and fails for empty rows, which return nil despite its promised map result.
+A valid vector-input function passes 25 cases with seed 424242.
+
+Only generator construction can produce a non-generatable skip. Kernel faults
+and exceptions caught by test.check now propagate. A canonical SCI regression
+requires the original injected checker exception to leave that boundary, rather
+than become skipped text. This is not yet a separate end-to-end observation of
+the fault committer's stored transaction. Exact proof and gate boundaries are in
+`docs/prds/context-generation/research/core-functions-landing-2026-09-14.md`.

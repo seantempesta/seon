@@ -76,6 +76,8 @@
           :seon.sci.admit/caps (:seon.sci.admit/caps request)
           :seon.config/on-core-error
           (:seon.config/on-core-error request)})
+        _ (when (:seon.error/kind invocation)
+            (throw (ex-info (:seon.error/message invocation) invocation)))
         returned (:seon.sci.admit/value invocation)
         actual (or (:seon.error/diagnostic-offending returned) returned)
         explanation (m/explain output-schema actual)]
@@ -97,7 +99,7 @@
         (gen/fmap
          (fn [arguments]
            {:seon.test.accretion/index index
-            :seon.test.accretion/arguments arguments})
+            :seon.test.accretion/arguments (vec arguments)})
          (mg/generator input options))}))
    (range)
    (m/-function-schema-arities function-schema)))
@@ -125,51 +127,53 @@
       (assoc base-result
              :seon.test.accretion/status :skipped-effectful
              :seon.test.accretion/executed-count 0)
-      (try
-        (let [options
-              {:registry (:seon.schema.projection/registry projection)}
-              function-schema
-              (m/function-schema (edn/read-string (:seon.fn/spec row))
-                                 options)
-              arities (arity-generators function-schema options)
-              arity-by-index
-              (into {} (map (juxt :seon.test.accretion/index identity)) arities)
-              generated
-              (gen/one-of
-               (mapv :seon.test.accretion/generator arities))
-              property
-              (prop/for-all*
-               [generated]
-               (fn [{index :seon.test.accretion/index
-                     arguments :seon.test.accretion/arguments}]
-                 (:seon.test.accretion/pass?
-                  (observation
-                   (assoc request :seon.fn/sym (:seon.fn/sym row))
-                   (:seon.test.accretion/output (arity-by-index index))
-                   arguments))))
-              checked (tc/quick-check case-count property :seed seed)
-              completed
-              (assoc base-result
-                     :seon.test.accretion/executed-count
-                     (:num-tests checked))]
-          (if (true? (:result checked))
-            (assoc completed :seon.test.accretion/status :passed)
-            (let [{index :seon.test.accretion/index
-                   arguments :seon.test.accretion/arguments}
-                  (first (get-in checked [:shrunk :smallest]))]
-              (assoc completed
-                     :seon.test.accretion/status :failed
-                     :seon.test.accretion/failure
-                     (observation
-                      (assoc request :seon.fn/sym (:seon.fn/sym row))
-                      (:seon.test.accretion/output (arity-by-index index))
-                      arguments)))))
-        (catch Throwable failure
+      (let [options
+            {:registry (:seon.schema.projection/registry projection)}
+            function-schema
+            (m/function-schema (edn/read-string (:seon.fn/spec row))
+                               options)
+            arities (try
+                      (arity-generators function-schema options)
+                      (catch Exception failure failure))]
+        (if (instance? Exception arities)
           (assoc base-result
                  :seon.test.accretion/status :skipped-non-generatable
-                 :seon.test.accretion/skip-reason
-                 (or (ex-message failure) (.getName (class failure)))
-                 :seon.test.accretion/executed-count 0))))))
+                 :seon.test.accretion/skip-reason (ex-message arities)
+                 :seon.test.accretion/executed-count 0)
+          (let [arity-by-index
+                (into {} (map (juxt :seon.test.accretion/index identity)) arities)
+                generated
+                (gen/one-of
+                 (mapv :seon.test.accretion/generator arities))
+                property
+                (prop/for-all*
+                 [generated]
+                 (fn [{index :seon.test.accretion/index
+                       arguments :seon.test.accretion/arguments}]
+                   (:seon.test.accretion/pass?
+                    (observation
+                     (assoc request :seon.fn/sym (:seon.fn/sym row))
+                     (:seon.test.accretion/output (arity-by-index index))
+                     arguments))))
+                checked (tc/quick-check case-count property :seed seed)
+                _ (when (instance? Throwable (:result checked))
+                    (throw (:result checked)))
+                completed
+                (assoc base-result
+                       :seon.test.accretion/executed-count
+                       (:num-tests checked))]
+            (if (true? (:result checked))
+              (assoc completed :seon.test.accretion/status :passed)
+              (let [{index :seon.test.accretion/index
+                     arguments :seon.test.accretion/arguments}
+                    (first (get-in checked [:shrunk :smallest]))]
+                (assoc completed
+                       :seon.test.accretion/status :failed
+                       :seon.test.accretion/failure
+                       (observation
+                        (assoc request :seon.fn/sym (:seon.fn/sym row))
+                        (:seon.test.accretion/output (arity-by-index index))
+                        arguments))))))))))
 
 (defn seed-for
   "A stable positive test.check seed derived from one receipt identity."
