@@ -418,11 +418,27 @@
   {:malli/schema
    [:=> [:cat :seon.maintenance/report] :seon.render/hiccup]}
   [report-value]
-  (let [[summary & details] (report-lines report-value)]
-    (cond-> [:article {:class "seon-family-entry seon-maintenance-entry"}
-             [:h3 "Maintenance"]
-             [:p summary]]
-      (seq details)
-      (conj (into [:ul {:class "seon-maintenance-attention"}]
-                  (map (fn [detail] [:li detail]))
-                  details)))))
+  (let [entries (:seon.maintenance/entries report-value)]
+    [:article {:class "seon-family-entry seon-maintenance-entry"}
+     [:h3 "Maintenance"]
+     (if (seq entries)
+       (into [:ul {:class "seon-maintenance-attention"}]
+             (map (fn [entry]
+                    (let [attention (entry-attention entry)
+                          result (:seon.maintenance/error-facts entry)
+                          at (when (:seon.maintenance/receipt-facts entry)
+                               (latest-at [entry]))]
+                      [:li
+                       [:strong (operation-name entry)]
+                       [:span {:class (if (succeeded? entry) "is-success" "is-attention")}
+                        "● " (case attention
+                                :not-run "not run" :error "failed"
+                                :interrupted "interrupted" :unterminated "running"
+                                (if (succeeded? entry) "succeeded" "needs attention"))]
+                       (when at
+                         [:time {:datetime (str (.toInstant ^java.util.Date at))
+                                 :title (str at)}
+                          (.format (java.text.SimpleDateFormat. "MMM d, HH:mm") at)])
+                       (when-let [message (:seon.error/message result)] [:p message])])) )
+             entries)
+       [:p "No maintenance tasks are recorded."])]))

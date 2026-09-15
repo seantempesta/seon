@@ -96,3 +96,10 @@
 .seon-db-transaction-datoms > li { padding: 0.3rem 0; border-bottom: 1px solid var(--color-base-800); }
 .seon-datom-action { font-size: 0.625rem; color: var(--color-text-400); }
 
+.seon-family-entry.seon-maintenance-entry { font: 0.75rem/1.55 var(--font-mono); overflow-wrap: anywhere; }
+.seon-maintenance-entry ul { list-style: none; padding: 0; }
+.seon-maintenance-entry li { display: flex; flex-wrap: wrap; gap: 0.25rem 0.75rem; border-bottom: 1px solid var(--color-base-800); padding: 0.35rem 0; }
+.seon-maintenance-entry li p { flex-basis: 100%; }
+.seon-maintenance-entry :is(time, span) { font-size: 0.625rem; color: var(--color-text-400); }
+.seon-maintenance-entry .is-success { color: var(--color-success); }
+.seon-maintenance-entry .is-attention { color: var(--color-warning); }

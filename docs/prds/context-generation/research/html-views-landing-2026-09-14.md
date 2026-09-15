@@ -126,3 +126,11 @@ Screenshot log: `fixture-seon-db-transaction-entry-before → fixture-seon-db-tr
 
 Observed defects → change: The first screenshot found empty transaction/commit rows: raw database values require the existing database-value-identity projection. The final version uses that owner and hides optional metadata behind details. No transaction block is present in the live walk.
 
+## Maintenance
+
+Each supplied task shows its operation and derived dot + word status, time and error message. Empty reports explicitly say no tasks are recorded.
+
+Screenshot log: `fixture-seon-maintenance-entry-before → fixture-seon-maintenance-entry-verified; maintenance-2 records absence`.
+
+Observed defects → change: AI summary prose and diagnostic identifiers no longer determine HTML layout. A no-run specimen exposed a nil timestamp assumption; the renderer now asks for a time only when a result exists. Current root and Juniper have no maintenance pair to inspect live.
+

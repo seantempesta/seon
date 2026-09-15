@@ -139,6 +139,17 @@
         (is (= (golden :fault) (error/render-ai fault)))
         (is (= (golden :faults) (error/render-faults-ai {:seon.render/value [fault]})))))))
 
+(deftest maintenance-pair-preserves-ai
+  (support/with-database
+    (fn [_]
+      (let [report {:seon.maintenance/entries []}]
+        (readable! (maintenance/render-report-html report) ["No maintenance tasks are recorded."])
+        (readable! (maintenance/render-report-html
+                    {:seon.maintenance/entries
+                     [{:seon.schedule.task/id "collect" :seon.fn/sym "seon.maintenance/collect"}]})
+                   ["collect" "not run"])
+        (is (= (golden :maintenance) (maintenance/render-report-ai report)))))))
+
 (deftest transactions-render-values-without-entity-id-dumps
   (support/with-database
     (fn [connection]
