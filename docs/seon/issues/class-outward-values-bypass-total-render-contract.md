@@ -108,3 +108,9 @@ a 9,266-character artifact with one digest repeated six times to the complete
 1,296-character semantic refusal, inline and uncapped. The unresolved-symbol
 member remains open: its MCP face still bypasses `seon.error/render-ai` at a
 foreign modified-uncommitted `src/seon/cluster.clj` boundary.
+
+## Re-verified at HEAD (2026-09-15)
+
+UNVERIFIABLE-WITHOUT-GATE (`seon.render-simplification-test`, `seon.render.value-test`, `seon.sci.eval-test`). Audited HEAD `7e35df213` has the per-node Throwable boundary (`src/seon/render/value.clj:360-368`) and outward path census (`src/seon/fn.clj`, output-path-report); it also still chooses declared map renderers at `src/seon/render/value.clj:271-289`. The live disposable SCI pull recorded in `an-entity-pull-returns-a-sentence-instead-of-its-attributes.md` returned an opaque ExceptionInfo projection string, with a nil database complaint, instead of the requested value. This is concrete bad MCP output, but the live JVM was undergoing adoption and its exact loaded generation was not established; it is NOT a confirmed failure of all audited-HEAD rendering or an attribution to a concurrent editor. Need the named armed tests and a read-only projection with explicit database/SCI custody. Keep blocker pending result-render verification. The narrower bad-output evidence remains in that member note, not only in chat.
+
+surface: context-generation

@@ -33,3 +33,9 @@ language-specific analysis-cache constructors.
 - A stale or mixed generation is refused before execution with both expected
   and loaded identities, and a recurring live-JVM proof moves an owner without
   editing a reload list.
+
+## Re-verified at HEAD (2026-09-15)
+
+UNVERIFIABLE-WITHOUT-GATE (`seon.cluster.source-test`, `seon.dev.source-instrumentation-test`). Audited HEAD `7e35df213:src/seon/cluster.clj:1956-1999` derives reload order, reloads Vars, acquires SCI, arms contracts, then records the accepted source commit. Thus the old claim of no source identity is too broad, but a failed multi-namespace reload may precede the marker update; the source is not an atomic Var swap. The concrete residual owner is `partial-hot-reload-produces-mixed-code-with-no-warning.md`; this slice's handle-shape note is another lifecycle boundary. Need controlled mid-reload failure and old/new callable evidence on a disposable cluster. No such mutation was performed on default. Keep blocker; neither old prose nor the live health timeout confirms mixed code at audited HEAD.
+
+surface: adoption-publication

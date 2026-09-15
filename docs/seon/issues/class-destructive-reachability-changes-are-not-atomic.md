@@ -33,3 +33,9 @@ blob root publication.
   permit through publication.
 - Cold-reconnect properties cover branch resurrection, reused blobs,
   interruption, and an unchanged second sweep.
+
+## Re-verified at HEAD (2026-09-15)
+
+UNVERIFIABLE-WITHOUT-GATE (`seon.cluster.registry-test`, `seon.operator-test`, `seon.blob-test`). Audited HEAD `7e35df213:src/seon/cluster/registry.clj:250-285` replaces a branch through Datahike force-branch!, rather than destroy then create; `src/seon/operator.clj:928-960` retains the old branch until replacement. `src/seon/blob.clj:271-291` holds a reachability permit across blob publication AND root commit (commit `5019f5406`); registry collection at `:519-550` uses Datahike gc-storage with referenced blobs. These are existing corrections, not evidence that the historical race still reproduces. The member `ranged-store-collection-can-delete-live-segments-via-branch-resurrection.md` still owns the dangerous residual claim. Need interrupted replacement and branch-resurrection/concurrent-publication properties on a disposable store; never exercise collection or replacement on default. Retain blocker pending that proof.
+
+surface: store-process

@@ -31,3 +31,9 @@ transition, including child and stream settlement.
   interruption, or partial failure and settles owned child cancellation.
 - Recovery consumes the same states and never re-executes effects to infer the
   result.
+
+## Re-verified at HEAD (2026-09-15)
+
+UNVERIFIABLE-WITHOUT-GATE (`seon.effect-test`, `seon.background-blob-test`, `seon.turn-test`). Audited HEAD `7e35df213` retains accepted background work at `src/seon/effect.clj:647-693`, with terminal callback `settle-background-terminal!` at `:488-503`, and source/outcome in one evaluation entity (`src/seon/turn.clj:498`). The two-family and stream-truncation members in this slice are resolved; neither proves the universal terminal-work claim. The attempted background regression instead failed at setup before submitting work (see `background-binary-settlement-does-not-publish-required-event.md` for exact command and output). Need actual cancellation, failure, and background completion assertions on the canonical fixture. The aggregate note is not a new confirmed reproduction; keep blocker pending terminal-boundary evidence.
+
+surface: turn-loop

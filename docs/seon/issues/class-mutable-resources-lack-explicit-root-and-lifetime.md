@@ -34,3 +34,9 @@ The root/resource constructors and their operation-specific completion values.
   only after all owned completions settle.
 - Cross-root and interrupted-operation properties prove no contention, leak,
   early deletion, or second acquisition can be constructed.
+
+## Re-verified at HEAD (2026-09-15)
+
+UNVERIFIABLE-WITHOUT-GATE (`seon.cluster.store-test`, `seon.operator-test`, `seon.dev.fresh-operator-test`). Audited HEAD `7e35df213:src/seon/cluster/store.clj:117-134` derives canonical root/lock paths; `src/seon/operator.clj:928-960` explicitly distinguishes borrowed versus acquired stores and releases acquired custody in finally. Process executors remain explicitly owned by `resources/seon/operator/runtime.clj:11-30`. These owners still exist, with substantial corrections; they do not prove absence of every cross-root leak. Current member claims include `deletable-directories-have-no-claim-or-size-facts.md` and `dependency-cache-lock-wait-has-no-deadline.md`. Need the root-isolation/interruption tests; launching them is prohibited by the owner correction. No resource leak was reproduced in this triage. Retain blocker pending verification of the class's resource-lifetime members.
+
+surface: store-process
