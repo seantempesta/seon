@@ -154,3 +154,8 @@ returned 2 in 2 ms. This proves access only; no cause, Flow health, or exact
 source convergence is inferred. No lifecycle operation was performed. The
 [dated slice C landing](../../prds/context-generation/research/issue-triage-C-2026-09-15.md)
 records the remaining verification boundary and the owner's prohibition on new JVMs.
+
+Doc/dir cost verification, 2026-09-15: runtime_status again returned unknown
+health and Flow with Read timed out for PID 23729. Read-only MCP JVM allocation
+probes completed successfully. This re-observes the health endpoint boundary;
+it does not identify its cause. No lifecycle operation was performed.

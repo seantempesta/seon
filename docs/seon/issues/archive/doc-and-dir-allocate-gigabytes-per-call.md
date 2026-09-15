@@ -1,12 +1,36 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, sci, database, render]
 created: 2026-09-15
 ---
 
 # `doc` and `dir` allocate gigabytes per call
+
+## Resolution — 2026-09-15
+
+Implementation: `d5e5b870e`.
+
+The database value now carries its projection state through supplier and
+explicit connection acquisition. `read-declarations` uses origin metadata
+before thread bindings. The existing per-projection codec cache is retained;
+documentation rendering and its pull-in-find query are unchanged.
+
+Default, hot-reloaded `seon.db` with contracts re-armed: full SCI doc costs
+13.6–18.3 ms / 23.95 MB and dir 8.6–9.5 ms / 14.37 MB. Supplier wildcard
+pull-many costs 0.52–0.65 ms / 1.37 MB. The final isolated armed tests pass
+45 tests / 326 assertions, including nested/wildcard allocation and time
+bounds, a fallback-warning check, and temporal-origin decoding.
+
+[The landing note](../../../prds/context-generation/research/doc-dir-cost-2026-09-15.md)
+contains exact before/after bytes, probes, the separate platform and persistent
+recording failures, final gate status, and implementation
+commit. In-place adoption remains a separate boundary: concurrent test-run
+identity facts refused program reconciliation, so the live proof is a hot
+reload, not successful adoption. Raw unowned reads still derive and now log
+one warning per forced call; that residual belongs to
+[the narrowed projection issue](../seon-db-reads-rebuild-the-projection-per-call-when-none-is-handed.md).
 
 ## Problem
 

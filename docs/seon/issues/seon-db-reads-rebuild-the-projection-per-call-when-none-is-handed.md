@@ -7,6 +7,31 @@ tags: [issue, database, performance, class/p1, context]
 
 # `seon.db` reads rebuild the schema projection on every call when none is handed
 
+## Scope narrowed — 2026-09-15, database metadata carriage
+
+Implementation: `d5e5b870e`.
+
+The ordinary supplier and explicit `seon.db/db` acquisition paths now carry
+projection state as database metadata. Reads take that projection from the
+schema origin before consulting thread bindings. The existing projection's
+codec cache survives across reads, including wildcard pulls and temporal
+views. The implementation and exact probes are in
+[doc-dir-cost-2026-09-15.md](../../prds/context-generation/research/doc-dir-cost-2026-09-15.md).
+
+On default after hot reload plus contract re-arming, nested supplier pulls
+cost 0.51–0.57 ms / 0.82 MB, wildcard supplier pulls 0.52–0.65 ms / 1.37 MB.
+Complete SCI doc costs 13.6–18.3 ms / 23.95 MB, dir 8.6–9.5 ms / 14.37 MB.
+The canonical armed fast check passes 45 tests / 320 assertions, including
+the new allocation/time, warning, and temporal-carriage regressions.
+
+**Remaining scope:** raw `@connection` database values without a supplied
+projection, unowned fixture connections, and direct calls to
+`projection-from-database` still derive anew. Forced fallback reads now emit
+exactly one warning naming the operation and elapsed milliseconds. The
+constructor's admission-query amplification remains expensive; this slice
+removes it from ordinary agent reads, not from direct constructor callers.
+Historical claims below describe the earlier implementations.
+
 ## Native decoding gate repaired — 2026-09-14
 
 `6785c980c` avoids logical projection construction for native non-string
