@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, render, runtime, message, wave/ui-watchability]
 ---
@@ -34,3 +34,11 @@ Render one short trigger label and one complete message pair. Preserve the
 message's exact content in the pair; do not truncate or rewrite the stored
 notification. The debug-product slice leaves runtime block internals to the
 concurrently assigned HTML-views work.
+
+## Resolution — consolidate-debug
+
+The resolving commit removes content from the trigger/history link and leaves
+the complete notification to the message pair. A canonical runtime regression
+requires the exact content once. Fast 11/188 and isolated 11/192 assertions pass.
+Both Runtime screenshots show one short label plus one complete message, at
+1440 and 700. Commit and screenshot log are recorded in the lane landing note.

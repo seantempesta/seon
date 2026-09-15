@@ -65,7 +65,11 @@
                       [{:seon.agent/id "page"
                         :seon.agent/runtime
                         {:seon.runtime/agent [:seon.agent/id "page"]
-                         :seon.runtime/turns (mapv #(vector :seon.turn/id %) ["old" "current" "late-old"])}}])
+                         :seon.runtime/turns (mapv #(vector :seon.turn/id %) ["old" "current" "late-old"])
+                         :seon.runtime/trigger {:seon.message/id "runtime-trigger"
+                                                :seon.message/from [:seon.agent/id "page"]
+                                                :seon.message/to [:seon.agent/id "page"]
+                                                :seon.message/content "The exact trigger notification."}}}])
              runtime-unit {:seon.db/db @connection
                            :seon.render/value (db/pull @connection '[*] [:seon.runtime/agent [:seon.agent/id "page"]])}
              runtime-html (pr-str (transcript/render-runtime-html runtime-unit))]
@@ -74,6 +78,10 @@
          (is (:seon.error/kind (transcript/render-runtime-ai {:seon.db/db @connection})))
          (is (str/includes? runtime-html "Turn open"))
          (is (str/includes? runtime-html "Turns (3)"))
+         (is (str/includes? runtime-html "Message from page"))
+         (is (= 1 (count (filter #(and (string? %) (str/includes? % "The exact trigger notification."))
+                                (tree-seq coll? seq (transcript/render-runtime-html runtime-unit)))))
+             "The short trigger label and history links leave exact message content to its one pair.")
          (is (str/includes? runtime-html "(+ 2 2)"))
          (is (not (str/includes? runtime-html "(+ 3 3)"))
              "The runtime table shows the first reply line; full evaluations belong to the session."))

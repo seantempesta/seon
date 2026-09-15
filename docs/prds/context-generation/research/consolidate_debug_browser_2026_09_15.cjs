@@ -24,6 +24,11 @@ const fs = require('node:fs/promises');
         assert.equal(overflow, 0);
         await page.screenshot({path: `tmp/consolidate-debug/${label}-${name}-${width}.png`});
         console.log(JSON.stringify({label, name, width, status: response.status(), overflow}));
+        if (name === 'agent') {
+          await page.locator('.seon-runtime').scrollIntoViewIfNeeded();
+          await page.screenshot({path: `tmp/consolidate-debug/${label}-runtime-${width}.png`});
+          console.log(JSON.stringify({label, name: 'runtime', width}));
+        }
         await page.close();
       }
     }

@@ -1135,9 +1135,7 @@
   (when-let [message-id (:seon.message/id trigger)]
     [:a {:href (route/path ::route/data {} {:entity (pr-str [:seon.message/id message-id])})}
      (str "Message from " (or (get-in trigger [:seon.message/from :seon.agent/id])
-                               "outside this cluster")
-          (when-let [content (:seon.message/content trigger)]
-            (str ": " (first (str/split-lines content)))))]))
+                               "outside this cluster"))]))
 
 (defn- runtime-turn-table [turns latest-trigger connection]
   [:details {:class "seon-turn-history" :data-preserve-attr "open"}

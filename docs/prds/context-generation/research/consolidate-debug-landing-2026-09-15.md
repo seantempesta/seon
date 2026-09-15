@@ -42,6 +42,20 @@ later in this lane. Baseline script is read-only; it creates no turns.
 
 ## Findings
 
+### A13 one trigger message
+
+`runtime-message-link` now contains only the relationship/identity label.
+The existing message pair remains the sole content renderer. Source: 1 added,
+3 removed; regression: 9 added, 1 removed (net +6 justified by an exact-content
+once assertion). Fast 11/188 and isolated 11/192 assertions pass.
+Adoption converged at `6aa8dfff-3c02-5ac5-879f-4b864cbe03ac`.
+All four `a13-{debug,agent}-{1440,700}.png` plus both `a13-runtime-*.png`
+LOOKed at: short “Woke on Message from root” and one complete notification;
+zero overflow. All six browser routes returned 200. Juniper's live facts
+changed during these read-only captures (new opening at 00:02:45, progressing
+plan/turns); these counts are not compared as an unchanged fixture. This lane
+did not reseed, send a message, or operate default's lifecycle.
+
 ### A07 declaration boundary
 
 The renderer-symbol map, source-token classification, and `page-order` ranks
