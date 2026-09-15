@@ -1359,3 +1359,49 @@ half-edit. Measured targets in the issue.
   owner's request. Lanes page-speed-and-estimate, test-provenance,
   schema-audit still running with uncommitted edits; run 9 after adoption
   converges.
+
+## 2026-09-15 17:55Z — 100% CPU; test-JVM cap; run 9; blocker triage; MCP bridge stale
+
+- Owner: "finish up all the known bugs and problems that are shared
+  infrastructure … use our existing systems to generate context and run
+  agents through them without any reliability problems"; then "the
+  processor is 100%, investigate"; then the smarter test system (reaching
+  tests on quick iterations, larger runs only after green); then "keep
+  improving the schemas … control the messages we get back".
+- CPU: eight program-loading JVMs at 100%+ each — four `bin/test-fast`
+  loops from Codex lanes and one `bin/test` gate (coordinator + 3 workers +
+  cache) — starved the owner's cluster (a trivial query took 17 s) and run
+  9. Nothing capped concurrent test JVMs, and plain `bin/test-fast`
+  bypassed `bin/test` entirely. Fix `4de9e95f7`: `bin/_test-slot`, sourced
+  by both — one of `SEON_TEST_SLOTS` (2) project-local mkdir slots held
+  from snapshot to exit, wait bounded by `SEON_TEST_SLOT_WAIT_SECONDS`
+  (1800), loud failure naming the holders; dead holders reclaimed. Probed
+  both entry points with a fake holder (5 s bound → exit 75, holder named).
+- Run 9 (send fix live, reseeded): 6/7 derived-complete; the report step
+  failed again — the JVM wrapper refused `my.message/send` with the OLD
+  contract `[:cat :my.message/message]` three minutes after adoption
+  "converged", while call preparation supplied the new keys and doc/dir
+  showed the new schema; 14 minutes later the same JVM enforced the new
+  contract. Bootstrap projection has no function-contracts, so a wrapper
+  is the `:malli/schema` captured at arm time and only a reloaded var is
+  re-armed. Lane `adoption-contract-freshness` reproduces on a scratch
+  cluster and fixes the class with a regression. Second finding: the model
+  read the request schema's supplied keys (`:seon.db/connection`,
+  `:seon.agent/id`) as required and spent four turns hunting for a
+  connection; lane `supplied-keys-and-refusals` marks supplied keys in
+  doc/dir and in refusal text, and improves the Fix clause.
+- Blocker triage (three lanes, 75 open blockers, evidence at HEAD):
+  40 resolved (archived), 6 superseded, 5 confirmed (1 blocker:
+  bound-transaction-input-selects-an-older-turn; 4 downgraded to
+  friction), 24 unverifiable without a gate (each note names the
+  namespace). Reports: research/issue-triage-{a,b,C}-2026-09-15.md. The
+  owner's issue index needs reconciliation (`bin/issues-index --check`).
+- My seon MCP bridge process is 8 days old (launched before the 09-09
+  turn-loop rename; classpath without src/), so it reports `default` as
+  degraded, refuses door mode, and times out on runtime status. JVM mode
+  works. Needs a reconnect from the app; filed nothing new — this is the
+  stale-long-lived-tool class already ruled in AGENTS.md §4.
+- Lanes: schema-audit (26 Part A contract fixes in seon.turn/message/
+  accretion), test-provenance (`:seon.test/run` landed `131fa2a56`,
+  `0d1f72cd0`), triage-c closing, adoption-contract-freshness,
+  supplied-keys-and-refusals. `main` fast-forwarded to `503365fc9`.
