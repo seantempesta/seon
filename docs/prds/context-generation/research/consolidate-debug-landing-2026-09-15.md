@@ -177,3 +177,24 @@ unavailable directory observations fell from six to two as four now compare
 through the owner. Final fast: 10 tests / 151 assertions, zero failures/errors.
 
 A01 final isolated gate: 10 tests / 155 assertions, zero failures/errors.
+
+## A04 — captured prefix and billing observations
+
+A01 commit: `f9ed564ef`. Loaded the llm-providers skill for this boundary.
+The live database contained 119 captures in a read-only probe. The loop's
+exact-text handoff (`src/seon/turn.clj:4120–4163`) persists the captured string
+before passing it to the provider. Prefix verdicts now compare those strings;
+the terminal frame is excluded only by equality with `seon.repl/frame` at the
+same opening basis. No source spelling, token tolerance or cache counter
+participates. Missing captures/bases remain unavailable. Token totals are
+labelled billing observations.
+
+Source/tests: 46 added / 19 removed, net +27. The new lines acquire the actual
+capture and declared frame instead of estimating byte identity from billing;
+the database regression independently varies text, frames and counters.
+Fast 10 tests / 157 assertions; isolated 10 / 161, both green.
+
+A04 browser: six HTTP 200 captures, zero overflow; main/debug at 1440 and 700
+inspected. Billing label is visible and layout retained. JVM metadata proved
+the two-argument capture check loaded. Publication reached instrumentation but
+reported concurrent source change, so full source convergence is not claimed.

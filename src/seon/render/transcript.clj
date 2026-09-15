@@ -1830,23 +1830,33 @@
                   (map #(hash-map ::turn % ::detail "The trigger message references a core fault.") triggered))]))))
 
 (defn- prefix-problem
-  "Detect cache prefix replacement beyond growth and the 128-token tolerance."
-  [rows]
-  (let [attempts (vec (for [row rows a (sort-by :seon.ai.attempt/ordinal (:seon.turn/attempts row))]
-                        {::turn row ::attempt a ::usage (::usage a)}))
-        pairs (partition 2 1 attempts)
-        measured (filter #(every? number? [(get-in (first %) [::usage ::prompt])
-                                           (get-in (second %) [::usage ::prompt])
-                                           (get-in (second %) [::usage ::miss])]) pairs)
-        changed (keep (fn [[previous current]]
-                        (let [resent (- (get-in current [::usage ::miss])
-                                        (- (get-in current [::usage ::prompt]) (get-in previous [::usage ::prompt])))]
-                          (when (> resent 128)
-                            {::turn (::turn current) ::detail (str "Prefix changed, " (format "%,d" resent) " tokens re-sent")}))) measured)]
+  "Compare captured history prefixes; the owner's changing turn frame is outside history."
+  [database rows]
+  (let [rows (filter #(seq (:seon.turn/attempts %)) rows)
+        captures (db/q '[:find ?id ?text :in $ [?id ...]
+                         :where [?t :seon.turn/id ?id] [?c :seon.context.capture/run ?t]
+                                [?c :seon.context.capture/prompt ?text]]
+                       database (mapv :seon.turn/id rows))
+        captures (when-not (:seon.error/kind captures) (into {} captures))
+        prefixes (map (fn [row]
+                        (let [text (get captures (:seon.turn/id row))
+                              opening (when text (turn/opening-db database (:seon.turn/id row)))
+                              frame (when (and opening (not (:seon.error/kind opening)))
+                                      (repl/frame opening (get-in row [:seon.turn/agent :seon.agent/id])))
+                              suffix (str "\n\n" frame)]
+                          {::turn row
+                           ::prefix (when frame
+                                      (cond (= text frame) ""
+                                            (str/ends-with? text suffix) (subs text 0 (- (count text) (count suffix)))
+                                            :else text))})) rows)
+        pairs (partition 2 1 prefixes)
+        measured (filter #(every? (comp string? ::prefix) %) pairs)
+        changed (for [[previous current] measured
+                      :when (not (str/starts-with? (::prefix current) (::prefix previous)))]
+                  {::turn (::turn current) ::detail "Captured history prefix bytes changed."})]
     (assoc (finding :prefix "Prefix changed" changed)
            ::stable (- (count measured) (count changed)) ::measured (count measured)
            ::unknown (+ (- (count pairs) (count measured)) (if (empty? pairs) 1 0)))))
-
 
 (defn- session-budget
   "Detect exhausted turn/step budgets and unavailable billing or rate evidence."
@@ -1903,7 +1913,7 @@
                     (repeated-problem by-eid saved)
                     (empty-reply-problem rows saved)
                     (directory-problem database by-eid saved)
-                    (prefix-problem rows)]
+                    (prefix-problem database rows)]
                    (fault-problems database (:seon.agent/id request) rows))}))
 
 (defn- problem-links [agent-id matches]
@@ -1921,7 +1931,7 @@
    [:p (str "Budget · " (::used budget) "/" (or (::bound budget) "unavailable") " turns used · "
             (if (::plan-unavailable budget) "plan unavailable"
               (str (::completed budget) "/" (::steps budget) " steps complete")))]
-   [:p (str "Reported tokens · " (str/join " · "
+   [:p (str "Billing tokens · " (str/join " · "
               (for [[k label] [[::prompt "in"] [::hit "hit"] [::miss "miss"] [::out "out"]]]
                 (str (format "%,d" (get (::totals budget) k 0)) " " label)))
             " · " (cond (number? (::cost budget)) (format "$%.5f at rates on file" (double (::cost budget)))
@@ -1979,7 +1989,7 @@
         (for [rule passed]
           [:p {:data-problem (name (::code rule)) :data-problem-count 0}
            (if (= :prefix (::code rule))
-             (str "● Prefix stable on " (::stable rule) "/" (::measured rule) " attempts")
+             (str "● Prefix stable on " (::stable rule) "/" (::measured rule) " captured turn pairs")
              (str "● " (::label rule) " · 0"))])])]))
 
 (defn- ledger-strip

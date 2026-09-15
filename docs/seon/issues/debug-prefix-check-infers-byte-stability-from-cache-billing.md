@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, render, ai, wave/verification-audit]
 ---
@@ -26,6 +26,14 @@ Delete the billing-derived prefix verdict and tolerance. Compare the applicable 
 Estimated change: 18–35 lines replaced. Audit classes: 1, 3. No production edits for this finding were made by the audit lane.
 
 ## Acceptance
+
+Resolved by the A04 commit containing this note. Prefix verdicts compare
+captured history after excluding only the matching declared turn frame at the
+opening basis. Missing captures are unavailable; billing counters no longer
+participate. Fast 10 tests / 157 assertions; isolated 10 / 161, both green.
+The real database regression varies capture text independently of counters.
+Both responsive routes were captured and inspected; the landing note records
+counts, commit and the loaded-Var versus adoption verification boundary.
 
 Equal prompt bytes with different cache counters have the same stability verdict. Different applicable prefix bytes with equal counters do not pass. Missing captures explicitly make byte stability unavailable.
 

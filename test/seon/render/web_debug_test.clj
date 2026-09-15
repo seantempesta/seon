@@ -270,7 +270,7 @@
                              [:seon.message/id "panel-fault-message"])
                  (let [after (snapshot)
                        expected {:errors 1 :fabricated 1 :churn 2 :repeated 1 :empty-replies 1
-                                 :directory 1 :prefix 1 :faults 1 :fault-turns 1}
+                                 :directory 1 :prefix 0 :faults 1 :fault-turns 1}
                        html (hiccup/->string (#'transcript/problems-html unit after))]
                    (is (str/includes?
                         (element-text
@@ -284,7 +284,24 @@
                    (is (str/includes? html "no rate on file"))
                    (is (not (str/includes? html "#inst")))
                    (is (not (str/includes? html ":db/id"))))
-                 (is (pos? (:seon.render.transcript/unknown (#'transcript/prefix-problem [])))
+                 (let [rows (vec (take-last 3 (filter #(seq (:seon.turn/attempts %))
+                                                      (#'transcript/turn-rows @connection "juniper"))))
+                       capture! (fn [row text]
+                                  (db/transact! connection
+                                    [{:seon.context.capture/id (str "prefix-" (:seon.turn/id row))
+                                      :seon.context.capture/run [:seon.turn/id (:seon.turn/id row)]
+                                      :seon.context.capture/basis-t (db/basis-t @connection)
+                                      :seon.context.capture/prompt
+                                      (str text "\n\n" (repl/frame (turn/opening-db @connection (:seon.turn/id row)) "juniper"))}]))]
+                   (doseq [row (take 2 rows)] (is (:db-after (capture! row "café"))))
+                   (let [same (#'transcript/prefix-problem @connection rows)]
+                     (is (= 1 (:seon.render.transcript/stable same))
+                         "Identical captured history stays stable despite different billing counters and turn frames.")
+                     (is (= 1 (:seon.render.transcript/unknown same)) "The missing capture remains unavailable."))
+                   (is (:db-after (capture! (second rows) "different")))
+                   (is (= 1 (:seon.render.transcript/count (#'transcript/prefix-problem @connection rows)))
+                       "Changing only captured bytes changes the verdict; counters remain identical."))
+                 (is (pos? (:seon.render.transcript/unknown (#'transcript/prefix-problem @connection [])))
                      "No provider observations must not be reported as prefix health.")
                  (is (:db-after
                       (db/transact! connection
