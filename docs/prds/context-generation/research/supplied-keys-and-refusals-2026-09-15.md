@@ -6,6 +6,22 @@ tags: [agent, docs, schema]
 
 # Supplied keys and actionable refusals — 2026-09-15
 
+Implementation commit: `f879b0ea6` on `steward-platform`.
+
+Owned files committed:
+
+- `src/seon/call_preparation.clj`
+- `src/seon/instrument.clj` (report functions only)
+- `src/seon/sci/eval.clj` (documentation functions)
+- `src/seon/repl.clj` (directory columns)
+- `resources/seon/schemas/seon.repl.edn`
+- `test/seon/supplied_documentation_test.clj`
+- `test/seon/sci/documentation_test.clj`
+- `docs/seon/issues/default-component-probe-times-out-after-adoption.md`
+- `docs/prds/context-generation/research/supplied-keys-and-refusals-2026-09-15.md`
+- `docs/prds/context-generation/research/supplied-keys-probe-2026-09-15.clj`
+- `docs/prds/context-generation/research/supplied-keys-evidence-2026-09-15.edn`
+
 ## Result
 
 Agent input projections omit runtime-supplied map entries and accrete
