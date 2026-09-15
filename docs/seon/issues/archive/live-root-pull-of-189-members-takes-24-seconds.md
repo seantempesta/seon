@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: blocker
 tags: [issue, render, performance, wave/render-acquisition-performance]
 ---
@@ -77,3 +77,11 @@ Any future timing of "the exact live path" required by this note's acceptance
 must record whether the request carried `:seon.render/profile`; without that
 condition the measurement is dominated by the projection rebuild rather than
 by the pull this note owns.
+
+## Resolution (2026-09-15 triage)
+
+Committed-source verification with `git show HEAD:<path>` and `git log`; no new JVM launch.
+
+Commit `985a830b5` replaces recursive repeated pulls with per-entity acquisition; `d6d399561` restricts traversal to declared concerns. HEAD `src/seon/render/walk.clj:430` constructs a distance-zero pull plan and tracks acquired/visited entities; `root-acquisition` at `:481` uses that tree. The schema-wide recursive selector responsible for the dated 1.77-million frame count is not the current acquisition algorithm. The historical 189-member database/profile was not reconstructed. Current residual root latency is owned by [root-page-warm-read-evidence-replay-exceeds-300ms](../root-page-warm-read-evidence-replay-exceeds-300ms.md); today's root HTTP sample was 200 / 49,291 bytes / 1.806230 s without attribution to its inner owner. Do not transfer the historical 24-second figure to the new algorithm.
+
+surface: render-debug-page

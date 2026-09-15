@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, agent, sci, runtime, class/p1, wave/evolving-session-phases]
 ---
@@ -53,3 +53,11 @@ not create a parallel carrier.
 - A second agent in the same cluster receives its own id, proving the scope is
   per turn rather than a mutation of the cluster base.
 - Restart preserves the same behavior without a warm-process patch.
+
+## Resolution (2026-09-15 triage)
+
+Committed-source verification with `git show HEAD:<path>` and `git log`; no new JVM launch.
+
+Commit `cbee18c5f` scopes generated evaluation to its agent. HEAD `src/seon/sci/eval.clj:2148` copies `:seon.agent/id` from the evaluation request into `turn-members`, and `:2159` applies `env/scope` to the evaluation context's own environment. A retained agent context gets its scoped carrier replaced; the cluster base gets a separate carried state. `fork-for-turn` at `:1682` now reuses the agent context or forks once. Thus the omitted agent scope described by the historical fresh-fork note is repaired. Inspected the scope construction and both carrier branches; no restart or new JVM gate was run.
+
+surface: context-generation

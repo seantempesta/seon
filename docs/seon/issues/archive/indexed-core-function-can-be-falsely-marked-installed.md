@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, sci, runtime]
 ---
@@ -60,3 +60,11 @@ change other clusters independently of their program commits.
 
 The broader loading choices remain proposals in
 `docs/prds/context-generation/research/first-party-function-loading-audit-2026-09-06.md`.
+
+## Resolution (2026-09-15 triage)
+
+Committed-source verification with `git show HEAD:<path>` and `git log`; no new JVM launch.
+
+HEAD `src/seon/sci/eval.clj:1092` marks only indexed names actually present in `host-bindings`, after adding those bindings to SCI. The subsequent core-row path at `:798` marks only an actually evaluated row; a core row carrying `::skip-contract-install?` no longer enters that branch merely because installation was skipped, and its result at `:811` reports zero installed. Acquisition constructs those skipped core rows without an evaluated marker at `:1575`. This removes the exact false installed-set entry described in the note. `kernel/ensure-function!` still trusts membership; missing-host on-demand loading and cross-generation coherence are not proven by this closure and remain within [development-adoption-can-mix-host-and-sci-generations](../development-adoption-can-mix-host-and-sci-generations.md). No synthetic namespace was installed on default.
+
+surface: adoption-publication

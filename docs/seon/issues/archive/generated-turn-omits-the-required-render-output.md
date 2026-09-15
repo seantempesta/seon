@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, agent, render, schema, class/p3, wave/generate-call-transition]
 ---
@@ -50,3 +50,11 @@ owner is free.
 - The selected projection is explicitly `:seon.render/form`.
 - One regression starts from a settled root receipt and reaches the next
   dependency-ready form without an instrumentation error.
+
+## Resolution (2026-09-15 triage)
+
+Committed-source verification with `git show HEAD:<path>` and `git log`; no new JVM launch.
+
+Commit `6aca09cce` replaces the ordinary `generate-turn` call to `bootstrap/next-entry`. HEAD `src/seon/turn.clj:4631` calls `declared-sources`; that helper at `:1875` explicitly hands `:seon.render/output :seon.render/ai` to the walk (`:1883`). The old `:seon.render/form` requirement is historical, not the current projection. `git grep -n 'next-entry' HEAD -- src` confirms no loop call remains. This makes the named missing-key call impossible on the ordinary opening path; no gate is needed to establish the deleted call edge.
+
+surface: context-generation

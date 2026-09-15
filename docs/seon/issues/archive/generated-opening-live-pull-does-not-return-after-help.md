@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, agent, render, schema, performance, class/p1, class/n9,
        wave/prefix-drift-bootstrap]
@@ -142,3 +142,11 @@ Ordinal 0 had a settled result and no receipt error, the run remained in
 `:generate`, and the live query found no `seon.bootstrap/prefix-drift` fault.
 This resolves the prefix-reconciliation boundary. The issue remains open for
 its distinct single-acquisition/per-render projection cost acceptance.
+
+## Resolution (2026-09-15 triage)
+
+Committed-source verification with `git show HEAD:<path>` and `git log`; no new JVM launch.
+
+Commit `6aca09cce` replaces the ordinary opening's `next-entry` path with the shared system-turn source generator. HEAD `src/seon/turn.clj:4631` calls `declared-sources` and `system-plan`; `git grep -n 'next-entry' HEAD -- src` finds only bootstrap's own definitions, no ordinary loop caller. The specifically diagnosed repeated projection rebuild is also absent: `src/seon/config.clj:551` consumes a handed projection or refuses; it does not rebuild one per render. `src/seon/render/walk.clj:430` acquires each distinct entity once with retained read evidence (introduced by `985a830b5`). The old callable `bootstrap/next-entry` remains for legacy callers/tests; its existence does not put the removed post-help loop back in production. This closes the named mechanism, not every render latency concern.
+
+surface: context-generation
