@@ -38,7 +38,7 @@ See `README.md` for the convention.
 | [Attribute and bound the store's one-day 69 GB growth](store-grew-to-69-gigabytes-in-one-day-of-lanes.md) | blocker | exclusive sweep implementation wave |
 | [Carry agent routing into the virtual-turn control](virtual-turn-control-loses-agent-routing.md) | blocker | turn follow-up wave |
 
-## Friction (202)
+## Friction (201)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -71,6 +71,7 @@ See `README.md` for the convention.
 | [Cache reuse regression exceeds the live test bound](cache-reuse-regression-exceeds-live-test-bound.md) | friction | unscheduled — owner to rank |
 | [Keep candidate program metadata independent of its parent](candidate-context-shares-parent-program-metadata.md) | friction | agent context; coordinate with turn batching |
 | [Canonical fixture population refuses its schema transaction in default](canonical-fixture-population-missing-carried-projection.md) | friction | unscheduled — owner to rank |
+| [Refresh canonical fixture contracts after development adoption](canonical-fixture-retains-old-function-contracts-after-adoption.md) | friction | unscheduled — owner to rank |
 | [Make every durable contract predicate identifiable](class-anonymous-contracts-cannot-survive-publication.md) | friction | class-kill queue |
 | [Make classification query facts instead of text and hand lists](class-classification-is-inferred-from-hand-lists.md) | friction | class-kill queue |
 | [Translate dependency representations once at their boundary](class-dependency-representations-leak-past-boundaries.md) | friction | class-kill queue |
@@ -143,7 +144,6 @@ See `README.md` for the convention.
 | [Derive predicate-owner readiness before live source publication](live-publication-has-a-hand-maintained-predicate-owner-reload.md) | friction | publication registration-provenance wave |
 | [Give open map unions explicit discriminants](map-unions-have-no-explicit-discriminants.md) | friction | open-maps accretion wave |
 | [Fence the MCP parent watchdog by captured process identity](mcp-parent-watchdog-can-follow-a-reused-pid.md) | friction | MCP process-lifetime repair |
-| [Project an MCP value whose map keys are not keywords](mcp-projection-crashes-on-non-keyword-map-keys.md) | friction | whole-system arc repair wave |
 | [MCP runtime_status lists no clusters for an explicit live root](mcp-runtime-status-lists-no-clusters-for-an-explicit-root.md) | friction | wave/dev-mcp |
 | [MCP SCI error projection passes a nil database](mcp-sci-error-projection-passes-a-nil-database.md) | friction | unscheduled — surfaced by the 2026-09-15 triage; owner to rank |
 | [MCP session loss claims a restart without process evidence](mcp-session-loss-claims-unobserved-restart.md) | friction | unscheduled — owner to rank |
@@ -243,7 +243,6 @@ See `README.md` for the convention.
 | [Clear the floor's residue, duplicate cursors, and marker hand list](value-floor-residue-duplicate-cursors-and-marker-hand-lists.md) | friction | context wave fix lane |
 | [Virtual-loop fixture submission can meet an already-open turn](virtual-loop-fixture-submission-can-race-an-armed-turn.md) | friction | unscheduled — surfaced by the 2026-09-15 triage; owner to rank |
 | [May a run refine a schema key nothing depends on?](within-run-schema-key-refinement-needs-an-owner-ruling.md) | friction | owner design ruling (schema-key immutability vs the usage guard) |
-| [Refresh canonical fixture contracts after development adoption](canonical-fixture-retains-old-function-contracts-after-adoption.md) | friction | unscheduled — owner to rank |
 
 ## Cleanup (18)
 
