@@ -110,6 +110,58 @@
     (is (< (count output) 1500) "The small supplied profile bounds the SCI world.")
     (is (not (str/includes? output "value1999")))))
 
+(deftest nested-runs-own-their-counters-and-evidence
+  (let [namespace-name (symbol (str "seon.nested-report-probe." (id/id)))
+        namespace-object (create-ns namespace-name)
+        counters (ref test/*initial-report-counters*)
+        events (atom [])
+        contexts (atom [])
+        nested (atom [])
+        output (java.io.StringWriter.)
+        declare-test (fn [test-name body]
+                       (let [v (intern namespace-object test-name (fn []))]
+                         (alter-meta! v assoc :test body)
+                         v))]
+    (try
+      (let [children
+            [(declare-test 'green #(is true))
+             (declare-test 'red #(is false "expected nested red"))
+             (declare-test 'interrupted
+                           #(throw (InterruptedException. "expected nested interruption")))]
+            outer
+            (declare-test
+             'outer
+             (fn []
+               (doseq [[v expected] (map vector children
+                                        [[1 0 0] [0 1 0] [0 0 1]])]
+                 (let [result (runner/run-var! v)]
+                   (swap! nested conj result)
+                   (swap! contexts conj (mapv :name (map meta test/*testing-vars*)))
+                   (is (= expected (mapv result [:seon.test/pass-count
+                                                 :seon.test/fail-count
+                                                 :seon.test/error-count])))))))
+            result
+            (binding [test/*report-counters* counters
+                      test/*testing-vars* [#'nested-runs-own-their-counters-and-evidence]
+                      test/*testing-contexts* ["enclosing gate"]
+                      test/*test-out* output
+                      test/report #(swap! events conj %)]
+              (runner/run-var! outer))]
+        (is (= test/*initial-report-counters* @counters))
+        (is (empty? @events) "No nested event reaches the enclosing reporter.")
+        (is (= [['outer] ['outer] ['outer]] @contexts))
+        (is (= (str namespace-name "/outer") (:seon.test/sym result)))
+        (is (= [3 0 0] (mapv result [:seon.test/pass-count
+                                     :seon.test/fail-count :seon.test/error-count])))
+        (is (nil? (:seon.test/failing-assertions result)))
+        (is (= [0 1 1] (mapv #(count (:seon.test/failing-assertions %)) @nested)))
+        (is (str/includes? (:seon.test/failure-message (second @nested))
+                           "expected nested red"))
+        (is (str/includes? (:seon.test/failure-message (last @nested))
+                           "expected nested interruption"))
+        (is (not (str/includes? (str output) "enclosing gate"))))
+      (finally (remove-ns namespace-name)))))
+
 (deftest unused-workers-own-no-checkout
   (let [root (doto (io/file "tmp" (str "unused-workers-" (random-uuid))) .mkdirs)
         snapshot (io/file root "snapshot")

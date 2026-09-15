@@ -448,7 +448,6 @@ Measured batch-5 worker totals (not claimed wall-time savings): problems-test
 55-test sum is 392,561 ms. Gate request is narrowed to only
 `seon.contracts-plan-test`; no test JVM was launched by this lane.
 
-
 ### Batch 6 correction — existing fixture observations
 
 Read the named plan and AGENTS.md authority end to end; refreshed the
@@ -622,3 +621,73 @@ Publication `d89a9911-55af-4fc8-af48-3e52681c82e7` was queued; no convergence
 result was available at this checkpoint. The saved-file proof is an explicit
 JVM reload, not an asserted adoption proof. Gate request contains only
 `seon.contracts-plan-test`. No production/protected file or test JVM changed.
+
+### Batch 7 correction — nested test reporting belongs to its invocation
+
+Read `tmp/orchestrator/gate-results/batch-7/test-runner-waste.md` end to end
+and inspected the two attributed blocks in `named.log`. The gate confirmed
+**zero confirmation JVMs** and **99 seconds coordinator-and-tests for eight
+namespaces** (79 tests / 686 assertions). Its 40-second publication phase is
+separate. The reaching-tests-tier namespaces are green and were not changed.
+
+The reproduction falsified an execution-failure interpretation: the nested
+red and timeout results were recorded correctly, but `runner/run-var!`
+inherited the outer `clojure.test/*report-counters*` ref. It also delegated
+non-failure events to the enclosing capture reporter. Default's direct runs
+had no enclosing worker tally, hiding the contamination. The actual batch-7
+summaries counted two tests for each outer test; the nested InterruptedException
+was cancellation evidence, not an unbounded fresh-worker wait.
+
+Dependency ledger: Clojure's `test/test-vars` uses the supplied dynamic
+counter ref and test stack; `test/test-ns` owns a fresh counter ref
+(`reference-code/clojure/src/clj/clojure/test.clj:711`, `:755`). First-party
+`runner/run-selected-tests` already owns counters; `runner/run-var!` did not.
+No SCI execution mechanism was changed.
+
+The [fresh-base probe](test-runner-waste-nested-probe-2026-09-15.clj) runs on
+a plain virtual thread, without inherited operator REPL bindings. It carries
+the worker's packaged projection, privately clones batch 7's canonical base,
+acquires a fresh SCI context, and closes its own base. It borrows no default
+database facts. Before the fix it returned outer counters
+`{:test 2 :pass 0 :fail 1 :error 0}` plus correctly recorded nested red and
+50-ms timeout results. The cancellation reporter can run after that snapshot,
+explaining the gate's additional error. After the fix, both pre-edit and
+saved-file probes returned all four outer counters zero while retaining
+the nested fail/error results and their evidence. The final saved probe
+completed in **6,411 ms**. A first from-source base probe required the explicit
+packaged projection; a second exceeded the existing 20-second probe bound.
+The immutable prepared base then reproduced the worker's actual acquisition.
+
+`run-var!` now owns its counter ref, testing Vars/contexts and terminal reporter.
+All fail/error events still cross `capture-and-report-event!` and the existing
+bounded value renderer; the Clojure terminal only receives the same non-failure
+events as before. This does not restore the deleted raw assertion bypass.
+The synthetic nested tests share one namespace, so the new regression also
+verifies that a child's passing events cannot enter its parent's capture.
+Deliberately red output can still appear as diagnostic text; only the owning
+test result contributes to the enclosing tally.
+
+Evaluated the new `run-var!` and regression forms through MCP before editing,
+re-armed the live contracts, then called the fresh-base probe and recorded
+in-process tests. After editing, explicitly reloaded the saved runner and test
+namespace and re-armed; these are saved-file JVM proofs, not an adoption claim.
+
+Each row uses `(seon.test/run #'<test> (seon.operator/connection "default"))`:
+
+| Test | Before edit: run, pass/fail/error | Saved-file result |
+|---|---|---|
+| `seon.test.runner-test/nested-runs-own-their-counters-and-evidence` | 64779, 10/0/0; naming cleanup 64857, 10/0/0 | 64859 and 64892, 10/0/0 |
+| `seon.test-reaching-test/red-check-names-failure-and-stops-escalation` | 64783, 5/0/0 | Actual `run-task!`: one test, 5/0/0 |
+| `seon.test-reaching-test/a-test-completion-bound-is-recorded-as-a-named-error` | 64784, 3/0/0 | Actual `run-task!`: one test, 3/0/0 |
+| `seon.test.runner-test/assertion-report-uses-bounded-value-renderer` | — | 64861, 9/0/0 |
+
+The two `run-task!` probes returned only the outer test's result row and green
+summaries. Full MCP return values were read. Publication requests
+`ea7bc98a-e637-474e-a79d-4a10cc26187a` and
+`d89a9911-55af-4fc8-af48-3e52681c82e7` remained without completion evidence;
+the separate publication issue is
+`docs/seon/issues/incremental-publication-cannot-select-the-live-operator.md`.
+No foreign session was operated. Protected render, turn, SCI and fixture edits
+were preserved. The gate request is narrowed to **`seon.test.runner-test`**.
+No test JVM was launched. Kondo reports no new findings; the runner's existing
+shadowed bindings and unused private declaration remain outside this slice.

@@ -509,7 +509,9 @@
   "Run one host or SCI test Var and return its captured assertion result.
 
   This is the same capture and reporter path used by `bin/test`; it performs
-  no database write. `commit-results!` is the sole completion writer."
+  no database write. Each invocation owns its counters, test context and terminal
+  reporter; nested runs cannot contribute evidence to their caller.
+  `commit-results!` is the sole completion writer."
   {:malli/schema
    [:=> [:cat :seon.test/var]
     [:or :seon.test.runner/captured-result
@@ -524,8 +526,11 @@
           options (report-options)
           capture (atom {::order [] ::results {}})
           reported-signatures (atom #{})
-          default-report test/report]
-      (binding [test/report
+          default-report (.getRawRoot #'test/report)]
+      (binding [test/*report-counters* (ref test/*initial-report-counters*)
+                test/*testing-vars* ()
+                test/*testing-contexts* ()
+                test/report
                 (fn [event]
                   (capture-and-report-event!
                    options capture selected-namespaces default-report
