@@ -38,7 +38,7 @@
                [:seon.render/retained-calls
                 {:optional true}
                 [:map-of {:gen/return {}}
-                 [:vector :seon.schema/value] [:map]]]
+                 :seon.render.call/id :seon.render.call/entry]]
                [:seon.render/captured-calls
                 {:optional true}
                 :seon.call-preparation/state]
@@ -51,10 +51,10 @@
                 :seon.call-preparation/state]
                [:seon.render/candidate-call-ids
                 {:optional true}
-                [:set [:vector :seon.schema/value]]]
+                [:set :seon.render.call/id]]
                [:seon.render.call/id
                 {:optional true}
-                [:vector :seon.schema/value]]
+                :seon.render.call/id]
                [:seon.render.call/selected-producer
                 {:optional true}
                 :qualified-symbol]
@@ -131,7 +131,7 @@
                [:seon.render/output {:optional true} :seon.render/output]
                [:seon.render.call/id
                 {:optional true}
-                [:vector :seon.schema/value]]
+                :seon.render.call/id]
                [:seon.error/value {:optional true} :seon.error/value]],
               :unknown
               [:map

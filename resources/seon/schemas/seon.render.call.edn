@@ -1,0 +1,7 @@
+#:seon.render.call
+{:id [:or :qualified-keyword [:vector :seon.schema/value]]
+ :entry
+ [:map
+  [:seon.render.call/static-evidence :map]
+  [:seon.render.call/read-evidence [:vector :seon.db/read-evidence]]
+  [:seon.render.call/output :seon.render/value]]}

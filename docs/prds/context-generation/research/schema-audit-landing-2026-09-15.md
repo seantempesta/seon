@@ -283,3 +283,62 @@ A separate live query confirmed default's `:seon.source/commit-id` equals
 `seon.cluster.source/current`. A subsequent evidence query timed out during
 another adoption; it is not counted as successful evidence. Part A/B resumed
 only after the explicit convergence line.
+
+## Retained render-call contract incident — 2026-09-15
+
+The checkpoint's tightened `render-call` input exposed a wrong nested
+contract in `:seon.render/call-request`: `:seon.render/retained-calls` was
+a map whose key schema admitted vectors only. The live debug page reported
+a refusal for keyword key `:seon.render.web/root-acquisition`.
+
+Before editing, the read-only default JVM probe inspected the actual shared
+render cache: 427 retained entries, with 426 vector IDs and one qualified
+keyword ID. Every entry had a map of static evidence, a vector of read
+evidence, and an output key. The keyword entry had those three keys and no
+basis-transaction key. Sources: `seon.render/render-call` retains entries;
+`seon.render.web/acquire-root`, `refresh-root`, and `derive-context!` supply
+the two ID shapes. These observations determine the new
+`:seon.render.call/id` and `:seon.render.call/entry` declarations. The request
+uses them for retained calls, candidate IDs, and the call ID. None is a
+stored database attribute.
+
+`seon.render.call-test/retained-calls-accept-keyword-and-vector-identities`
+captures a real render result and reuses it through the armed contract with
+both identity shapes and the canonical database/SCI fixture.
+Fast loop proof plus required instrument/db/help/REPL namespaces: 76 tests,
+671 assertions, zero failures/errors. Both Juniper namespace and debug URLs
+returned HTTP 200 with bounded curl requests. The focused call regression
+passed 1 test and 6 assertions. The isolated gate for that regression,
+`seon.loop-proof-test`, and the four required namespaces passed 77 tests,
+679 assertions, zero failures/errors (exit 0). Its result-record publication
+timed out with `:seon.fresh-operator/prepl-response-silent`; these are observed
+runner results, not a claim of persisted test facts. The separate platform
+gate passed 84 tests and 505 assertions, zero failures/errors (exit 0).
+Final adoption exited 0 and printed `development cluster converged` at
+`6aa97ee2-809b-563c-906e-a7e446c3b3b9`, digest
+`8d09e147ea1095f90ccb0b5a8e43b0f8125077a24b22032e24a9ee29a29c1755`.
+The independent live query confirmed matching adopted/published stamps and
+the installed call-ID schema. After convergence, bounded curl requests to
+`/ns/my.agents.juniper/debug` and `/ns/my.agents.juniper` both returned 200.
+A subsequent full-schema read-only
+validation accepted all three retained-call maps present in default.
+
+The broader `seon.render-simplification-test` investigation reported 13
+failures and two errors apart from a duplicate-set-literal error in the
+first draft of the new regression (corrected to `set`). One error supplies
+no `:seon.db.process/id` to `seon.turn/preview-sources`; another deliberately
+traps the compiled resolver reached by `request-profile`. Other assertions
+expect older attribute-render and nested-value behavior. Their cause has
+not been established against a baseline; they are not attributed to the
+retained-call fix. No existing test was removed or weakened.
+
+Publication also encountered concurrent source changes during analysis and
+an independently edited `test/my/message_test.clj` whose three-argument
+calls did not match the then-current one-argument `my.message/send`. This
+lane did not edit those paths; it retried adoption after their updates.
+Three later retries reached JVM instrumentation but refused to mark
+convergence because source changed during adoption. Another retry failed
+with `IndexOutOfBoundsException` at `seon.fn/exact-source:142`, through
+`analysis-rows-by-file` and `build-manifest`, without identifying the file.
+This repeats the documented boundary in
+[source-analysis-can-slice-changing-files-with-stale-offsets.md](../../../seon/issues/source-analysis-can-slice-changing-files-with-stale-offsets.md).
