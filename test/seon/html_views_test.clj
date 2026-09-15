@@ -17,7 +17,8 @@
             [seon.note :as note]
             [seon.render.ns :as render.ns]
             [seon.render.hiccup :as hiccup]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.schema :as schema]))
 
 (defn- golden [key]
   (get (edn/read-string (slurp (io/resource "seon/fixtures/html_views_ai.edn"))) key))
@@ -174,3 +175,22 @@
         (readable! (db/render-rejection-html refusal) ["Duplicate identity"])
         (is (= (golden :transaction) (db/render-transaction-ai shown-report)))
         (is (= (golden :rejection) (db/render-rejection-ai refusal)))))))
+
+(deftest settings-display-follows-declarations-without-name-based-units
+  (support/with-database
+    (fn [_connection]
+      (let [forms (schema/declaration-population)
+            display #:seon.config{:display-label "Elapsed" :display-divisor 1000 :display-unit "s"}
+            forms (update-in forms [:seon.config/settings 1 :seon.config/display]
+                             assoc :example/elapsed display :example/count-ms display)]
+        (schema/call-with-forms
+         forms
+         (fn []
+           (let [html (hiccup/->string
+                       (agent/render-settings-html
+                        {:seon.render/value {:example/elapsed 1500 :example/count-ms 1500
+                                             :example/raw-ms 1000}}))]
+             (is (= 2 (count (re-seq #"1\.5 s" html))))
+             (is (str/includes? html ":example/raw-ms"))
+             (is (str/includes? html "1,000"))
+             (is (not (str/includes? html "1 s"))))))))))

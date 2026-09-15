@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, test, operator, wave/publication-velocity]
 date: 2026-09-09
@@ -39,3 +39,11 @@ it is not a claim that the complete function test namespace was run.
 After data-lane releases the file, supply provenance in the synthetic planner
 inputs and expect complete scalar rows. Run `seon.fn-test` with contracts
 armed. Keep its conservative rebuild assertions.
+
+## Resolution — 2026-09-15
+
+Commit subject: `Retire audit misc mechanisms and derive settings and API checks` (this commit).
+
+Updated the synthetic planner input with admission provenance and expected the complete desired scalar row. Conservative rebuild assertions remain. This fixture repair was necessary while gating the A05 census in seon.fn-test.
+
+See the [backstop-and-misc landing](../../../prds/context-generation/research/backstop-and-misc-landing-2026-09-15.md) for exact changes and verification boundaries.

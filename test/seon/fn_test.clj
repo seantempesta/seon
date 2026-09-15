@@ -25,6 +25,12 @@
     (spit file source)
     file))
 
+(defn- transact-fixture! [connection rows]
+  (let [result (db/transact! connection rows)]
+    (is (nil? (:seon.error/kind result))
+        (pr-str (select-keys result [:seon.error/kind :seon.error/message])))
+    result))
+
 (deftest analyze-form-refuses-an-unresolvable-namespace-reference
   (test-support/with-database
     (fn [connection]
@@ -396,21 +402,6 @@
       (is (not-any? #(= "clojure.string/trim" (:seon.fn/sym %)) rows))))
   (is (= ["src" "test"] seon.fn/source-roots)))
 
-(deftest planned-form-authorship-has-exactly-two-first-party-constructors
-  (test-support/with-database
-    (fn [connection]
-      (is (= #{"seon.turn/plan-tx"
-               "seon.turn/system-plan-tx"}
-             (set
-              (db/q '[:find [?caller-symbol ...]
-                      :in $ ?target-symbol
-                      :where
-                      [?target :seon.fn/sym ?target-symbol]
-                      [?caller :seon.fn/calls ?target]
-                      [?caller :seon.fn/sym ?caller-symbol]]
-                    @connection
-                    "seon.turn/plan-tx-for-author")))))))
-
 (deftest settled-form-records-calls-across-every-program-namespace
   (test-support/with-database
     (fn [connection]
@@ -494,6 +485,7 @@
            [{:seon.ns/name namespace-name
              :seon.ns/source "(ns sample.settlement-parity)"}
             {:seon.fn/sym "sample.settlement-parity/helper"
+             :seon.schema.admission/source :core
              :seon.fn/ns [:seon.ns/name namespace-name]
              :seon.fn/source "(defn helper [value] value)"
              :seon.fn/arglists "([value])"
@@ -509,7 +501,7 @@
           (db/transact!
            connection
            (turn/plan-tx
-            {:seon.turn/id "settlement-parity-run" :seon.db.process/id "settlement-parity-process" :seon.turn/starting-ns [:seon.ns/name namespace-name] :seon.turn/sources [{:seon.cluster.eval/source source}]}))
+            {:seon.turn/id "settlement-parity-run" :seon.db.process/id (second boot-process) :seon.turn/starting-ns [:seon.ns/name namespace-name] :seon.turn/sources [{:seon.cluster.eval/source source}]}))
           (db/transact!
            connection
            (turn/receipt-start-tx
@@ -965,6 +957,7 @@
         namespace-row {:seon.ns/name 'sample
                        :seon.ns/source "(ns sample)"}
         current-row {:seon.fn/sym "sample/value"
+                     :seon.schema.admission/source :core
                      :seon.fn/ns [:seon.ns/name 'sample]
                      :seon.fn/source "(defn value [] 1)"
                      :seon.fn/arglists "([])"
@@ -990,8 +983,7 @@
               :seon.fn.change/digest "new"
               :seon.fn.change/artifact desired
               :seon.fn.change/rows
-              [{:seon.fn/sym "sample/value"
-                :seon.fn/source "(defn value [] 2)"}]
+              [desired-row]
               :seon.fn.change/identities
               [[:seon.ns/name 'sample] [:seon.fn/sym "sample/value"]]}
              (plan {}))))
@@ -1156,6 +1148,7 @@
             function-row
             (fn [function-symbol calls]
               (cond-> {:seon.fn/sym function-symbol
+                       :seon.schema.admission/source :core
                        :seon.fn/ns namespace-ref
                        :seon.fn/source (str "(defn " (name (symbol function-symbol))
                                             " [] nil)")
@@ -1165,6 +1158,7 @@
             test-row
             (fn [test-symbol references]
               (merge {:seon.test/sym test-symbol
+                      :seon.schema.admission/source :core
                       :seon.test/ns namespace-ref
                       :seon.test/source (str "(deftest "
                                              (name (symbol test-symbol)) ")")}
@@ -1230,20 +1224,17 @@
             function-row
             (fn [function-symbol facts]
               (merge {:seon.fn/sym function-symbol
+                      :seon.schema.admission/source :core
                       :seon.fn/ns namespace-ref
                       :seon.fn/source
                       (str "(defn " (name (symbol function-symbol)) " [] nil)")
                       :seon.fn/arglists "([])"
                       :seon.fn/private? false}
                      facts))]
-        (db/transact!
+        (transact-fixture!
          connection
          [{:seon.ns/name 'sample.output
            :seon.ns/source "(ns sample.output)"}
-          (function-row "sample.output/ai-projector"
-                        {:seon.fn/projection-boundary :seon.render/ai})
-          (function-row "sample.output/raw-text"
-                        {:seon.fn/projection-boundary :none})
           (function-row "sample.output/sink"
                         {:seon.fn/external-sink :ai-visible-text
                          :seon.fn/projection-boundary :none})
@@ -1252,24 +1243,20 @@
           (function-row "sample.output/codec-sink"
                         {:seon.fn/external-sink :codec-storage
                          :seon.fn/projection-boundary :none})
-          (function-row "sample.output/projected-root" {})
-          (function-row "sample.output/bypass-root" {})
-          (function-row "sample.output/unresolved-root" {})
-          (function-row "sample.output/codec-root" {})])
-        (db/transact!
-         connection
-         [{:seon.fn/sym "sample.output/projected-root"
-           :seon.fn/calls [[:seon.fn/sym "sample.output/ai-projector"]]}
-          {:seon.fn/sym "sample.output/ai-projector"
-           :seon.fn/calls [[:seon.fn/sym "sample.output/sink"]]}
-          {:seon.fn/sym "sample.output/bypass-root"
-           :seon.fn/calls [[:seon.fn/sym "sample.output/raw-text"]]}
-          {:seon.fn/sym "sample.output/raw-text"
-           :seon.fn/calls [[:seon.fn/sym "sample.output/sink"]]}
-          {:seon.fn/sym "sample.output/unresolved-root"
-           :seon.fn/calls [[:seon.fn/sym "sample.output/unresolved-sink"]]}
-          {:seon.fn/sym "sample.output/codec-root"
-           :seon.fn/calls [[:seon.fn/sym "sample.output/codec-sink"]]}])
+          (function-row "sample.output/ai-projector"
+                        {:seon.fn/projection-boundary :seon.render/ai
+                         :seon.fn/calls [[:seon.fn/sym "sample.output/sink"]]})
+          (function-row "sample.output/raw-text"
+                        {:seon.fn/projection-boundary :none
+                         :seon.fn/calls [[:seon.fn/sym "sample.output/sink"]]})
+          (function-row "sample.output/projected-root"
+                        {:seon.fn/calls [[:seon.fn/sym "sample.output/ai-projector"]]})
+          (function-row "sample.output/bypass-root"
+                        {:seon.fn/calls [[:seon.fn/sym "sample.output/raw-text"]]})
+          (function-row "sample.output/unresolved-root"
+                        {:seon.fn/calls [[:seon.fn/sym "sample.output/unresolved-sink"]]})
+          (function-row "sample.output/codec-root"
+                        {:seon.fn/calls [[:seon.fn/sym "sample.output/codec-sink"]]})])
         (let [paths
               (->> (:seon.fn.output/paths
                     (seon.fn/output-path-report @connection))
@@ -1312,7 +1299,6 @@
       (let [report (seon.fn/output-path-report @connection)
             paths (:seon.fn.output/paths report)
             totals (:seon.fn.output/totals report)
-            text-boundary (:seon.fn.output/text-boundary report)
             visible-paths
             (filterv #(contains? #{:ai-visible-text :html-response}
                                  (:seon.fn.output/external-sink %))
@@ -1325,16 +1311,6 @@
             "a census with no identity-bearing sink subjects is a failure")
         (is (seq visible-paths)
             "the class check must exercise agent- or human-visible paths")
-        (is (true? (:seon.fn.output/text-boundary-target-found?
-                    text-boundary))
-            "a census with no bounded-text subject is a failure")
-        (is (= 1 (count (:seon.fn.output/text-boundary-callers
-                         text-boundary)))
-            (pr-str text-boundary))
-        (is (seq (:seon.fn.output/text-boundary-render-path text-boundary))
-            "the AI boundary must reach the one private text bounder")
-        (is (empty? (:seon.fn.output/text-boundary-bypasses text-boundary))
-            (pr-str text-boundary))
         (is (every? #(= :projected (:seon.fn.output/classification %))
                     visible-paths)
             (pr-str offenders))))))
@@ -1438,7 +1414,7 @@
   (test-support/with-database
     (fn [connection]
       (let [database @connection
-            evaluate (production-callers database "seon.sci.eval/evaluate")
+            evaluate (production-callers database "seon.sci.eval/evaluate-for-install")
             sources (production-callers database
                                         "seon.turn/evaluate-sources")
             previews (production-callers database

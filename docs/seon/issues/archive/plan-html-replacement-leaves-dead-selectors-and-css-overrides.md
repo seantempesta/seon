@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: cleanup
 tags: [issue, render, web, wave/verification-audit]
 ---
@@ -29,4 +29,12 @@ Estimated change: 13 dead-rule lines plus roughly 40–80 overlapping lines to c
 
 Existing HTML-view tests and browser checks at desktop/narrow widths preserve the plan layout. Check compiled selectors and actual markup; do not delete base layout rules merely because a newer rule overrides one property.
 
-See [the audit](../../prds/context-generation/research/audit-1-2026-09-15.md) for scope, change counts, and verification limits.
+See [the audit](../../../prds/context-generation/research/audit-1-2026-09-15.md) for scope, change counts, and verification limits.
+
+## Resolution — 2026-09-15
+
+Commit subject: `Retire audit misc mechanisms and derive settings and API checks` (this commit).
+
+Deleted the obsolete input.css plan section and consolidated every emitted plan selector in blocks.css. Rebuilt with bin/css. Chromium compared 64 canonical plan elements at both 1440 and 700 pixels: zero computed-style differences and no horizontal overflow. Generated output.css is excluded from the commit.
+
+See the [backstop-and-misc landing](../../../prds/context-generation/research/backstop-and-misc-landing-2026-09-15.md) for exact changes and verification boundaries.

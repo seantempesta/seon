@@ -201,3 +201,13 @@ answering, unique evaluations, and quiet fences are true: 1 test, 3 assertions,
 missing fixture process `8111-1700000000000`. No consumer-suite changes were
 retained. The [landing note](../../prds/context-generation/research/backstop-and-misc-landing-2026-09-15.md)
 contains the exact probe and separate passing real-loop evidence.
+
+During job 2 at HEAD `25bce52a0` plus owned census/settings/test paths,
+`seon.fn-test/settled-form-records-calls-across-every-program-namespace`
+emits the writer refusal `run transition refused: receipt-exists` and still
+passes its absence-of-duplicate-graph-facts assertion. That older test does not
+assert its intermediate transaction results and is not settlement proof.
+The neighboring `settled-agent-form-has-static-index-edge-parity` does assert
+settlement, entity existence, and the resulting facts; its fixture provenance
+was repaired in this lane. Repair or remove the redundant unobserved transition
+in the consumer-fixture owner; no passing settlement claim rests on it here.

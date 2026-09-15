@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, render, test, wave/verification-audit]
 ---
@@ -30,4 +30,12 @@ Estimated change: 30–50 lines retired/reworked. Audit classes: 2, 3, 5. No pro
 
 The canonical graph check proves the current whole-item projection mechanism, names live subjects, and fails if the declared boundary disappears. No removed function name or hand-authorized caller roster remains in the current check.
 
-See [the audit](../../prds/context-generation/research/audit-1-2026-09-15.md) for scope, change counts, and verification limits.
+See [the audit](../../../prds/context-generation/research/audit-1-2026-09-15.md) for scope, change counts, and verification limits.
+
+## Resolution — 2026-09-15
+
+Commit subject: `Retire audit misc mechanisms and derive settings and API checks` (this commit).
+
+Deleted the removed-function census and its report schema fields. The general sink/projection census remains, with positive subjects and synthetic projected, bypass, unresolved, and codec paths. Canonical fixture rows now carry required admission provenance; the whole-value elision test uses current message identity.
+
+See the [backstop-and-misc landing](../../../prds/context-generation/research/backstop-and-misc-landing-2026-09-15.md) for exact changes and verification boundaries.

@@ -543,11 +543,7 @@
     (is (= "{:rows [{:a 1, :b x} {:a 22, :b yy}]}" nested-text))
     (is (not (str/includes? nested-text "| :a |")))))
 
-(deftest one-private-text-bounder-serves-the-one-elision-boundary
-  ;; `seon.print/admit-string` is DELETED: admission stopped clipping strings
-  ;; when the display caps left it, and a second text bounder with no caller
-  ;; is exactly the dead mechanism this project deletes on sight. The private
-  ;; bounder now has ONE caller, `fit-text`, at the one AI boundary.
+(deftest whole-value-elision-preserves-count-and-requery
   (let [text (apply str (repeat 512 "z"))
         fitted
         (print/fit
@@ -558,10 +554,10 @@
                 :seon.render.profile/max-depth 1
                 :seon.render.profile/max-children 1
                 :seon.render.profile/composition :single-line
-                :seon.print/requery-id [:my.message/id "message-1"]))]
+                :seon.print/requery-id [:seon.message/id "message-1"]))]
     (is (= :seon.print/elided (:seon.print/face fitted)))
     (is (= 512 (:seon.render.data/total fitted)))
-    (is (= [:my.message/id "message-1"]
+    (is (= [:seon.message/id "message-1"]
            (:seon.print/requery-id fitted)))))
 
 (deftest an-object-node-never-renders-as-empty-brackets

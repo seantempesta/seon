@@ -4,7 +4,9 @@
   (:require [clojure.string :as str]
             [seon.ai :as ai]
             [seon.db :as db]
-            [seon.config :as config]))
+            [seon.config :as config]
+            [seon.schema :as schema]
+            [seon.schema.form :as schema.form]))
 
 (defn identity
   "Read stable identity values without projecting a stored ref as a scalar."
@@ -127,7 +129,11 @@
                        (set (keys (dissoc component :db/id))))
         cluster-name (when database
                        (db/q '[:find ?name . :where [_ :seon.config/cluster ?name]] database))
-        defaults (if cluster-name (config/effective database cluster-name) {})]
+        defaults (if cluster-name (config/effective database cluster-name) {})
+        declarations (schema/declaration-population)
+        display-metadata (:seon.config/display
+                          (schema.form/attr-form-properties
+                           (get declarations :seon.config/settings)))]
     (cond
       (:seon.error/kind attributes) attributes
       (:seon.error/kind defaults) defaults
@@ -136,19 +142,23 @@
             inherited (apply dissoc (select-keys defaults attributes) (keys overrides))
             absent (- (count attributes) (count overrides) (count inherited))
             label (fn [attribute]
-                    (str (str/replace (str/replace (namespace attribute) "seon.config." "") "." " / ")
-                         " / " (str/replace
-                                   (if (str/ends-with? (name attribute) "-ms")
-                                     (subs (name attribute) 0 (- (count (name attribute)) 3))
-                                     (name attribute)) "-" " ")))
+                    (or (get-in display-metadata [attribute :seon.config/display-label])
+                        (str attribute)))
             display (fn [attribute value]
-                      (cond
-                        (and (number? value) (str/ends-with? (name attribute) "-ms"))
-                        (str (if (zero? (mod value 1000)) (quot value 1000) (double (/ value 1000))) " s")
-                        (integer? value) (format "%,d" value)
-                        (keyword? value) (name value)
-                        (sequential? value) (str/join ", " (map str value))
-                        :else (str value)))]
+                      (let [{divisor :seon.config/display-divisor unit :seon.config/display-unit}
+                            (get display-metadata attribute)
+                            value (if (and divisor (number? value)) (/ value divisor) value)]
+                        (str (cond
+                               (integer? value) (format "%,d" value)
+                               (ratio? value) (double value)
+                               (keyword? value) (name value)
+                               (sequential? value) (str/join ", " (map str value))
+                               :else value)
+                             (when unit (str " " unit)))))
+            title (fn [attribute]
+                    (or (:description (schema.form/attr-form-properties
+                                       (get declarations attribute)))
+                        (str attribute)))]
         [:section {:class "seon-family-entry seon-agent-settings seon-agent-content"}
          [:h3 "Settings"]
          [:table {:class "seon-settings-table"}
@@ -156,7 +166,7 @@
           (into [:tbody]
                 (map (fn [[attribute value]]
                        [:tr
-                        [:th {:scope "row" :title (str attribute)}
+                        [:th {:scope "row" :title (title attribute)}
                          (label attribute)
                          [:span {:class "seon-setting-override"} "● override"]]
                         [:td (display attribute value)]]))
@@ -166,7 +176,7 @@
                          [:summary (str "defaults (" (count inherited) ")")]
                          (into [:dl]
                                (map (fn [[attribute value]]
-                                      [:div [:dt {:title (str attribute)} (label attribute)]
+                                      [:div [:dt {:title (title attribute)} (label attribute)]
                                        [:dd (display attribute value)]]))
                                (sort-by key inherited))]]]]]
          (when (pos? absent)

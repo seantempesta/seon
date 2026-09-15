@@ -6,6 +6,8 @@
             [datahike.core :as datahike]
             [sci.core :as sci]
             [seon.cluster.agent :as agent]
+            [seon.cluster.instruction :as instruction]
+            [seon.bootstrap :as bootstrap]
             [seon.config :as config]
             [seon.db :as db]
             [seon.flow :as flow]
@@ -73,12 +75,7 @@
                        (flow/start-work-launcher!
                         {:seon.env/environment (support/environment "examples" connection)
                          ::flow/configuration
-                         (select-keys (support/effective-config)
-                                      [:seon.config.flow.compute/queue-depth
-                                       :seon.config.flow.compute/concurrency
-                                       :seon.config.flow.io/queue-depth
-                                       :seon.config.flow.io/concurrency
-                                       :seon.config.agent/turn-completion-backstop-ms])})
+                         (support/effective-config)})
                        flow/stop-work-launcher!)
                       events-resource (support/closeable (async/chan 1024) async/close!)
                       _listener-resource
@@ -118,26 +115,19 @@
                             :seon.sci.admit/caps (config/result-caps (support/effective-config))
                             :seon.sci.eval/time-limit-ms 10000
                             :seon.config/on-core-error :panic})))
-                  namespaces (->> (.listFiles (io/file "src/my"))
-                                  (filter #(.endsWith (.getName %) ".clj"))
-                                  (map #(-> % slurp read-string second))
-                                  sort)
+                  namespaces (instruction/toolkit-namespaces @connection)
                   rows (mapcat (fn [namespace-name]
                                  (let [directory (:seon.sci.admit/value (run (str "(dir " namespace-name ")")))]
                                    (is (seq (:functions directory)) (str namespace-name))
                                    (:functions directory))) namespaces)]
               (is (seq rows))
-              (let [help (:seon.sci.admit/value (run "(help)"))
-                    tools-line (some #(when (str/starts-with? % "Tools: ") %) (:seon.help/lines help))]
-                (is (string? tools-line) (pr-str help))
-                (when tools-line
-                  (doseq [namespace-name (str/split (subs tools-line 7 (.indexOf tools-line ". Inspect")) #", ")]
-                    (let [directory (:seon.sci.admit/value (run (str "(dir " namespace-name ")")))]
-                      (is (seq (:functions directory)) namespace-name)
-                      (doseq [{function-symbol :sym} (:functions directory)]
-                        (is (true? (:seon.sci.admit/value
-                                    (run (str "(boolean (resolve '" function-symbol "))"))))
-                            (str function-symbol)))))))
+              (is (some #{'my.examples.nested-fixture} namespaces))
+              (is (= (bootstrap/help-value @connection "examples")
+                     (:seon.sci.admit/value (run "(help)"))))
+              (doseq [{function-symbol :sym} rows]
+                (is (true? (:seon.sci.admit/value
+                            (run (str "(boolean (resolve '" function-symbol "))"))))
+                    (str function-symbol)))
               (let [failed (run "(my.note/add! {:my.note/id \"bad-note\" :my.note/content 42})")
                     value (:seon.sci.admit/value failed)
                     documented (:seon.sci.admit/value (run "(doc my.note/add!)"))]

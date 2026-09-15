@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: cleanup
 tags: [issue, render, config, schema, wave/verification-audit]
 ---
@@ -28,4 +28,12 @@ Estimated change: 10–20 lines merged with declaration metadata. Audit classes:
 
 Two settings with identical declared units format consistently regardless of spelling. An attribute rename alone cannot change a numeric value's unit or magnitude.
 
-See [the audit](../../prds/context-generation/research/audit-1-2026-09-15.md) for scope, change counts, and verification limits.
+See [the audit](../../../prds/context-generation/research/audit-1-2026-09-15.md) for scope, change counts, and verification limits.
+
+## Resolution — 2026-09-15
+
+Commit subject: `Retire audit misc mechanisms and derive settings and API checks` (this commit).
+
+Added one settings-schema display metadata seam with declared labels, divisors, and units. The renderer reads these declarations and uses raw attribute names and values otherwise. The canonical regression gives differently named attributes identical units and confirms an undeclared -ms suffix cannot alter magnitude.
+
+See the [backstop-and-misc landing](../../../prds/context-generation/research/backstop-and-misc-landing-2026-09-15.md) for exact changes and verification boundaries.

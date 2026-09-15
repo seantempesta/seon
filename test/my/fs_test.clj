@@ -1,8 +1,9 @@
 (ns my.fs-test
   (:require [seon.fs :as owner]
             [clojure.test :refer [deftest is testing]]
-            [my.fs :as fs]
-            [seon.schema :as schema]))
+            [seon.schema :as schema]
+            [seon.db :as db]
+            [seon.test-support :as support]))
 
 (deftest relationship-predicates-require-one-declared-arm
   (testing "content is byte-honest and open to unrelated data"
@@ -35,11 +36,20 @@
                  :my.fs/precondition {:my.fs/expected-absence? true}
                  :example/extra :ignored}))))
 
-(deftest public-entries-declare-one-io-capability
-  (doseq [[entry handler]
-          [[#'fs/read 'seon.fs.jvm/read]
-           [#'fs/write! 'seon.fs.jvm/write]
-           [#'fs/glob 'seon.fs.jvm/glob]
-           [#'fs/stat 'seon.fs.jvm/stat]]]
-    (is (= :io (:seon.workload (meta entry))))
-    (is (= handler (:seon.effect/capability (meta entry))))))
+(deftest public-entries-declare-resolvable-io-capabilities
+  (support/with-database
+    (fn [connection]
+      (let [entries (db/q '[:find [(pull ?function [:seon.fn/sym :seon.fn/workload
+                                                   :seon.effect/capability]) ...]
+                            :where [?namespace :seon.ns/name my.fs]
+                                   [?function :seon.fn/ns ?namespace]
+                                   [?function :seon.fn/private? false]] @connection)]
+        (is (seq entries))
+        (doseq [entry entries]
+          (is (= :io (:seon.fn/workload entry)))
+          (let [handler (:seon.effect/capability entry)
+                declaration (when handler
+                              (db/pull @connection [:seon.fn/private? :seon.fn/spec]
+                                       [:seon.fn/sym (str handler)]))]
+            (is (true? (:seon.fn/private? declaration)) (pr-str entry))
+            (is (string? (:seon.fn/spec declaration)) (pr-str entry))))))))

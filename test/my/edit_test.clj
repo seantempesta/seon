@@ -1,8 +1,9 @@
 (ns my.edit-test
   (:require [seon.edit :as owner]
             [clojure.test :refer [deftest is testing]]
-            [my.edit :as edit]
-            [seon.schema :as schema]))
+            [seon.schema :as schema]
+            [seon.db :as db]
+            [seon.test-support :as support]))
 
 (deftest form-operation-relation-is-structural-and-open
   (let [base {:my.edit/path "src/example.clj"
@@ -27,8 +28,20 @@
                   (assoc base :my.edit/operation :delete
                          :example/extra :ignored)))))))
 
-(deftest public-entries-declare-the-single-io-handler
-  (doseq [entry [#'edit/form! #'edit/exact! #'edit/lines!]]
-    (is (= :io (:seon.workload (meta entry))))
-    (is (= 'seon.edit.jvm/edit
-           (:seon.effect/capability (meta entry))))))
+(deftest public-entries-declare-resolvable-io-capabilities
+  (support/with-database
+    (fn [connection]
+      (let [entries (db/q '[:find [(pull ?function [:seon.fn/sym :seon.fn/workload
+                                                   :seon.effect/capability]) ...]
+                            :where [?namespace :seon.ns/name my.edit]
+                                   [?function :seon.fn/ns ?namespace]
+                                   [?function :seon.fn/private? false]] @connection)]
+        (is (seq entries))
+        (doseq [entry entries]
+          (is (= :io (:seon.fn/workload entry)))
+          (let [handler (:seon.effect/capability entry)
+                declaration (when handler
+                              (db/pull @connection [:seon.fn/private? :seon.fn/spec]
+                                       [:seon.fn/sym (str handler)]))]
+            (is (true? (:seon.fn/private? declaration)) (pr-str entry))
+            (is (string? (:seon.fn/spec declaration)) (pr-str entry))))))))

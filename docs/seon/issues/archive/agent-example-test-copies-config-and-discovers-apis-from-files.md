@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: cleanup
 tags: [issue, test, schema, agent, wave/verification-audit]
 ---
@@ -30,4 +30,12 @@ Estimated change: 20–40 lines replaced/removed. Audit classes: 3. No productio
 
 A public function in a newly declared nested namespace is tested without editing the discovery code. Adding an admitted launcher input does not require extending a test-only key list. Renaming unrelated directory entries does not invalidate a fixed first-four assertion.
 
-See [the audit](../../prds/context-generation/research/audit-1-2026-09-15.md) for scope, change counts, and verification limits.
+See [the audit](../../../prds/context-generation/research/audit-1-2026-09-15.md) for scope, change counts, and verification limits.
+
+## Resolution — 2026-09-15
+
+Commit subject: `Retire audit misc mechanisms and derive settings and API checks` (this commit).
+
+API discovery now uses instruction/toolkit-namespaces and directory data from the canonical program population. A newly declared nested fixture namespace participates without discovery edits. Help is compared as data, the launcher receives its complete effective config, and plan/edit/fs assertions derive public entries from graph facts.
+
+See the [backstop-and-misc landing](../../../prds/context-generation/research/backstop-and-misc-landing-2026-09-15.md) for exact changes and verification boundaries.

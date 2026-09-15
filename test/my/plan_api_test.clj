@@ -41,8 +41,14 @@
                          (:seon.sci.admit/value result)))
             item-id (id/id "Verify total")
             added (evaluate "(my.plan/add! {:my.plan.item/title \"Verify total\" :my.plan.item/done-when \"The query returns 90.\"})")]
-        (is (= '[my.plan/add! my.plan/update! my.plan/complete! my.plan/current!]
-               (mapv :sym (take 4 (:functions (evaluate "(dir my.plan)"))))))
+        (let [declared (db/q '[:find [?symbol ...] :where
+                               [?namespace :seon.ns/name my.plan]
+                               [?function :seon.fn/ns ?namespace]
+                               [?function :seon.fn/private? false]
+                               [?function :seon.fn/sym ?symbol]] @connection)]
+          (is (seq declared))
+          (is (= (set (map symbol declared))
+                 (set (map :sym (:functions (evaluate "(dir my.plan)")))))))
         (is (= item-id (:my.plan.item/id added)))
         (is (= :ready (:my.plan/state added)))
         (is (= :ready (:my.plan/state
