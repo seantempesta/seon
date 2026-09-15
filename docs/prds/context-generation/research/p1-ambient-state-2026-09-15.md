@@ -666,3 +666,27 @@ old scalar-plan rendering expectations, missing preview process input, stale
 elision wording, a compiled-resolver trap, and the protected web tests'
 completion/count assertions. This gate is not represented as green.
 The new snapshot uses landed `f000669b0` plus only this lane's paths.
+
+
+### Resumed in-process test projection carriage — 2026-09-15
+
+The platform regression was verified again through `seon.test/run` on
+`default`: 31 passes, zero failures/errors (`p1-platform-resumed-2026-09-15.edn`).
+The in-process runner now takes the projection from its connection's database
+value and hands it to the existing bounded test execution. `bound-fn` preserves
+that supplied projection on the runner's virtual thread. No database rebuild
+was added.
+
+Exact regression: `seon.test-reaching-test/run-carries-the-connections-projection-to-the-test-thread`.
+The canonical database fixture runs the test entry from a fresh virtual thread;
+the nested declared test reads the declaration population, and the outer test
+verifies one recorded pass and zero failures/errors. Candidate form: 3/0/0
+(`p1-run-form-proof-2026-09-15.edn`). After explicit in-place adoption via
+`bin/seon init --dev default --changed src/seon/test.clj --changed test/seon/test_reaching_test.clj`:
+3/0/0 (`p1-run-adopted-proof-2026-09-15.edn`). Publication reported development
+cluster converged, source commit `6aa9ca84-19d6-50d4-9f43-bf672b5d1733`.
+clj-kondo: zero errors/warnings for those two paths.
+
+Boundary: this is an in-process regression, not the orchestrator gate.
+Batch-4 repair continues; no new gate request is authorized yet. The platform
+pass does not establish that every remaining named test passes.

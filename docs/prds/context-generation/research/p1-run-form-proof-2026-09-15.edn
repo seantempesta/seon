@@ -1,0 +1,1 @@
+#:seon.test{:fail-count 0, :pass-count 3, :run-at #inst "2026-09-15T22:44:13.412-00:00", :run #:db{:id 64577}, :run-basis-t 536871916, :error-count 0, :sym "seon.test-reaching-test/run-carries-the-connections-projection-to-the-test-thread"}

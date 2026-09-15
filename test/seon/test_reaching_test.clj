@@ -131,3 +131,18 @@
           (is (empty? (:seon.test/failed result)))
           (is (empty? (db/q '[:find [?run ...] :where [?run :seon.test.run/id]]
                             (db/db connection)))))))))
+
+(deftest run-carries-the-connections-projection-to-the-test-thread
+  (support/with-database
+    (fn [connection]
+      (with-test connection
+        '(clojure.test/is (seq (seon.schema/declaration-population)))
+        (fn [_ test-var]
+          (let [completion (java.util.concurrent.FutureTask.
+                             ^java.util.concurrent.Callable
+                             (fn [] (sut/run test-var connection)))
+                _ (.start (Thread/ofVirtual) ^Runnable completion)
+                result (support/await-event! completion ::run-completed)]
+            (is (= 1 (:seon.test/pass-count result)) (pr-str result))
+            (is (zero? (:seon.test/fail-count result)) (pr-str result))
+            (is (zero? (:seon.test/error-count result)) (pr-str result))))))))

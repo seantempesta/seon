@@ -98,8 +98,10 @@
       (let [provenance (:seon.test.run/provenance options)
             result (if (:seon.error/kind provenance)
                      provenance
-                     (bounded-result test-var (min (event-backstop-ms)
-                                                   (:seon.test/remaining-ms options))))]
+                     (schema/call-with-projection
+                      (db/carried-projection database)
+                      #(bounded-result test-var (min (event-backstop-ms)
+                                                     (:seon.test/remaining-ms options)))))]
         (if (:seon.error/kind result)
           result
           (let [committed

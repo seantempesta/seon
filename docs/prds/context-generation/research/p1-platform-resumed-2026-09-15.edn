@@ -1,0 +1,1 @@
+#:seon.test{:fail-count 0, :pass-count 31, :run-at #inst "2026-09-15T22:41:44.194-00:00", :run #:db{:id 64562}, :run-basis-t 536871898, :error-count 0, :sym "seon.db.declaration-population-test/reads-require-their-carried-projection-including-transaction-results"}
