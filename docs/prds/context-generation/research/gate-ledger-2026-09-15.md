@@ -31,9 +31,9 @@ the same namespace twice for the same HEAD.
 | p1-ambient-state | `b80f78a7c`, `f5ca25ba9` | batch 2 running | adoption/lifecycle members open |
 | n7-query-classification | `5deb40e4e`, `872fb25d4` | gated by lane before the rule (82/418, platform 86/542) | stored toolkit (cluster.clj), eval call edges (fn.clj), schema-fallback (P1) |
 | bisect-today-reds | `6dc70f30a`, `ee8d54dca` | gated by lane before the rule (103/248, platform 86/542) | none |
-| debug-page-cost | in flight | — | plan approved: kills 1–3, option A |
+| debug-page-cost | `cfb35a22b` (retained renders reuse across carried values), `671108b60` (passive directory audit off) | batch 3 pending | kill 3 (derive once) in flight |
 | reaching-tests-tier | in flight | — | automatic on-edit check |
-| startup-and-hook-waste | in flight | — | rows 2–3 of slow-surfaces plan |
+| startup-and-hook-waste | `c395610db` (arm builds one projection, 994/994 armed; hook drains immediately, one successor batch) | batch 3 pending | runner initializer still builds twice (extension granted); edit-feedback test assumes the quiet window (extension granted); issues filed for both |
 
 ## Live checks (default)
 
