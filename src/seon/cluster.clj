@@ -2541,6 +2541,7 @@
              ;; process-local ports and structural dials, which are not
              ;; environment members.
              :seon.env/environment (env/of ctx)
+             :seon.agent/context-state (atom {})
              :seon.sci.eval/projection-state
              (:seon.sci.eval/projection-state ctx)
              :seon.db/connection connection

@@ -342,7 +342,8 @@
   defaulted: those are the caller's world."
   [handle]
   (let [decisions (config/defaults)]
-    (merge {:seon.cluster.wake/channel (async/chan (async/sliding-buffer 1))
+    (merge {:seon.agent/context-state (atom {})
+            :seon.cluster.wake/channel (async/chan (async/sliding-buffer 1))
             :seon.render/context-channel (async/chan (async/sliding-buffer 1))
             :seon.turn.loop/completion (async/promise-chan)
             :seon.sci.admit/caps (config/result-caps decisions)

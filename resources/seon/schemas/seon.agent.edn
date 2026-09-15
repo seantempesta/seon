@@ -81,6 +81,12 @@
                       {:description
                        "The namespace this agent is assigned to work in by default; not unique — several agents may share one, and an agent may `in-ns` anywhere its REPL reaches."}
                       :seon.db/ref],
+                     :context-state
+                     [:fn
+                      {:description "Process-local agent SCI contexts owned by one cluster, retained across graph arming."
+                       :error/message "must be an atom containing the cluster's agent contexts"
+                       :gen/gen seon.flow/atom-reference-generator}
+                      seon.flow/atom-reference?],
                      :routing
                      [:fn
                       {:error/message

@@ -166,6 +166,7 @@
                  :lint-rejected [:= true],
                  :evaluate-sources-request
                  [:map
+                  [:seon.turn/write? {:optional true} :seon.turn/write?]
                   [:seon.turn.loop/cluster :seon.turn.loop/cluster]
                   [:seon.db/db
                    {:optional true}
@@ -236,6 +237,7 @@
                  :forms-run [:int {:min 0}],
                  :cluster
                  [:map
+                  [:seon.agent/context-state {:optional true} :seon.agent/context-state]
                   [:seon.db/connection :seon.db/connection]
                   [:seon.cluster/name :seon.cluster/name]
                   [:seon.db.process/id :seon.db.process/id]

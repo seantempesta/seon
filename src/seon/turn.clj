@@ -2051,16 +2051,34 @@
       (let [latest (latest-evaluations database agent-id)
             plan (system-plan database (:seon.turn/forms declared) latest)
             selected (filterv #(not= :unchanged (:seon.turn/status %)) plan)
+            turn-id (when (and write? (seq selected))
+                      (next-id database (:seon.cluster/name handle) agent-id))
+            agent-ctx (when turn-id
+                        ((requiring-resolve 'seon.cluster.agent/acquire-context!)
+                         handle agent-id))
             previews (mapv
-                      #((requiring-resolve 'seon.turn/preview-sources)
-                        {:seon.turn.loop/cluster handle
-                         :seon.db/db database
-                         :seon.sci.eval/ctx (:seon.sci.eval/ctx handle)
-                         :seon.agent/id agent-id
-                         :seon.ns/name (:seon.ns/name %)
-                         :seon.cluster.reply/text (:seon.cluster.eval/source %)
-                         :seon.sci.admit/caps (:seon.sci.admit/caps handle)})
-                      selected)]
+                      (fn [ordinal source]
+                        (if turn-id
+                          {:seon.turn.loop/evaluated-sources
+                           ((requiring-resolve 'seon.turn/evaluate-sources)
+                            {:seon.turn.loop/cluster handle
+                             :seon.db/db database
+                             :seon.sci.eval/ctx agent-ctx
+                             :seon.agent/id agent-id
+                             :seon.turn/id turn-id
+                             :seon.turn/write? true
+                             :seon.cluster.eval/ordinal ordinal
+                             :seon.ns/name (:seon.ns/name source)
+                             :seon.cluster.reply/sources [source]})}
+                          ((requiring-resolve 'seon.turn/preview-sources)
+                           {:seon.turn.loop/cluster handle
+                            :seon.db/db database
+                            :seon.sci.eval/ctx (:seon.sci.eval/ctx handle)
+                            :seon.agent/id agent-id
+                            :seon.ns/name (:seon.ns/name source)
+                            :seon.cluster.reply/text (:seon.cluster.eval/source source)
+                            :seon.sci.admit/caps (:seon.sci.admit/caps handle)})))
+                      (range) selected)]
         (or (some #(when (:seon.error/kind %) %) previews)
             (some identity
                   (map (fn [source preview]
@@ -2091,8 +2109,7 @@
                           (mapv #(if-let [text (get text-by-source (source-key %))]
                                    (assoc % :seon.turn/text text) %) plan)}]
               (if (and write? (seq evaluated))
-                (let [turn-id (next-id database (:seon.cluster/name handle) agent-id)
-                      prepared (record-evaluated-tx
+                (let [prepared (record-evaluated-tx
                                 {:seon.turn.loop/cluster handle :seon.db/db database :seon.turn/id turn-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/starting-ns [:seon.ns/name namespace-name] :seon.turn/reply (str/join "\n" (map :seon.cluster.eval/source selected)) :seon.turn/opened-tx "datomic.tx" :seon.turn/closed-tx "datomic.tx" :seon.turn.loop/evaluated-sources evaluated})
                       report (blob/with-publication!
                               connection (:seon.blob/staged-writes prepared)
@@ -2108,10 +2125,16 @@
                                       (:seon.db/tx-data prepared)
                                       []))]]))]
                   (if (:seon.error/kind report) report
-                      (cond-> result
-                        (some #(and (= :seon.turn/id (:a %))
-                                    (= turn-id (:v %))) (:tx-data report))
-                        (assoc :seon.turn/id turn-id))))
+                      (if (some #(and (= :seon.turn/id (:a %))
+                                      (= turn-id (:v %))) (:tx-data report))
+                        (do
+                          (doseq [item evaluated
+                                  :let [evaluation (:seon.sci.eval/evaluation item)]]
+                            ((requiring-resolve 'seon.sci.eval/bind-result!)
+                             agent-ctx (:seon.repl/handle evaluation)
+                             (:seon.sci.admit/value evaluation)))
+                          (assoc result :seon.turn/id turn-id))
+                        result)))
                 result)))))))
 
 (defn compact-call
@@ -4223,6 +4246,7 @@
     ctx :seon.sci.eval/ctx
     agent-id :seon.agent/id
     run-id :seon.turn/id
+    write? :seon.turn/write?
     first-ordinal :seon.cluster.eval/ordinal
     sources :seon.cluster.reply/sources
     starting-namespace :seon.ns/name}]
@@ -4241,7 +4265,7 @@
               entity-id (when run-id
                           (evaluation-entity-id
                            database (receipt-identity run-id ordinal)))
-              handle (when entity-id
+              handle (when (or entity-id (and run-id write?))
                        (admit/result-handle (receipt-identity run-id ordinal)))
               request
               (cond-> (assoc (evaluation-request
@@ -4291,7 +4315,7 @@
                                             [:seon.turn/id run-id]))))
             (when-let [fault (generated-read-fault database form evaluation)]
               (throw (ex-info (:seon.error/message fault) fault))))
-          (when handle
+          (when entity-id
             ((requiring-resolve 'seon.sci.eval/bind-result!) ctx handle (:seon.sci.admit/value evaluation)))
           (let [results (conj results
                               {:seon.cluster.eval/ordinal ordinal

@@ -456,6 +456,14 @@
                                 [?message :seon.message/to ?agent]
                                 [?message :seon.message/content ?content]] @connection)))
                  (is (every? :seon.eval/shown saved))
+                 (let [agent-ctx (agent/acquire-context! handle "juniper")]
+                   (doseq [entry saved
+                           :let [result-handle (:seon.repl/handle (repl/entity-emission entry))]]
+                     (is (some? (sci/resolve agent-ctx result-handle))
+                         (str "stored system result resolves: " result-handle))
+                     (is (= @(sci/resolve agent-ctx result-handle)
+                            (sci/eval-form agent-ctx (list 'get-in result-handle [])))))
+                   (is (identical? agent-ctx (agent/acquire-context! handle "juniper"))))
                  (is (not-any? :seon.cluster.eval/error saved))
                  (is (= 1 (count (set (map :seon.cluster.eval/run saved)))))
                  (is (= text (stored-text @connection)))

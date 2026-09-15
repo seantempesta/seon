@@ -10,6 +10,10 @@ Work in progress. No final verification claim yet.
 
 ## Commits
 
+- `8df86358b` — preserved compact pairs and plan (rules 4 and 5), with the
+  whole-item printer and marker groundwork described below. Fast runs:
+  53/425 and 56/335 tests/assertions, both green; zero no-event system bytes.
+
 - `0dca8534e` — no-self-dependency invariant, collection-bound read evidence,
   and stable opening reads. Three virtual turns: **0 generated evaluations,
   0 added system bytes**, versus the recorded historical **458 bytes per
@@ -48,6 +52,42 @@ contracts instead. The concurrent CSS and transcript changes belong to
 debug-turns and are excluded from this commit.
 
 ## Next slice dependency
+
+### Live run 3 and reset boundary
+
+The context-ownership slice (`Retain system results in the agent SCI
+context`) passes its isolated fast run: **6 tests / 232 assertions**;
+its `bin/test --paths … -- seon.loop-proof-test seon.help-trial-test`
+gate passes **6 tests / 236 assertions**. Stored system handles evaluate
+through SCI, and acquisition returns the same context across repeated
+calls and graph arming. Its no-event loop is still **0 added system bytes**.
+**RESET NEEDED for this commit**: the cluster handle now owns
+`:seon.agent/context-state`, created at boot, never lazily fabricated.
+
+Owner-observed run 3 on default reached **21 turns with only 2 system turns**:
+the opening and one plan reread. There was **zero context churn**. At
+04:07Z the hot-adopted context acquisition function met a handle built
+before `:seon.agent/context-state` existed. Juniper fault `d217ae07…` and
+root fault `ea7ee3f1…` stopped their turn procs. **RESET NEEDED** for the
+context-ownership commit below: the carrier is boot-time state. No lazy
+fallback is introduced; the orchestrator owns the single default refork.
+The lane has not stopped, restarted, or reseeded default.
+
+Read-only MCP inspection of fault
+`7ab85b9a-1107-446f-9bd8-c5694ecc7455` confirms its evidence includes the
+offending form, with no elision:
+
+```clojure
+(seon.db/q '[:find (pull ?e [*]) :where [?e :my.plan.item/id]])
+```
+
+The original stored evaluation is **agent-authored**, turn `0ab4ce1cb9ca`,
+not an opening render. Its wildcard evidence includes the excluded
+families. Since-diff incorrectly promoted it into a generated read.
+The general correction admits only turn-independent retained agent reads
+to generation; turn-dependent queries remain available on demand.
+Declared opening reads still cross the fault guard. The plan opening
+already uses the explicit selector behind `(seon.plan/plan {})`.
 
 Change-only rereads require working full-value handles. The existing
 [system-result issue](../../../seon/issues/system-turn-drops-live-results-after-saving-shown-text.md)

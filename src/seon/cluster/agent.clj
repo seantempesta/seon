@@ -638,6 +638,27 @@
    (and (identical? channel (get (:seon.agent/channels @routing) agent-eid))
         (async.protocols/closed? channel))))
 
+(defn acquire-context!
+  "Acquire the agent's live context independently of whether its graph is armed."
+  {:malli/schema [:=> [:cat :seon.turn.loop/cluster :seon.agent/id]
+                  :seon.sci.eval/ctx]}
+  [handle agent-id]
+  (let [contexts (:seon.agent/context-state handle)]
+    (when-not contexts
+      (throw (ex-info "Agent context acquisition requires the cluster's context state."
+                      {:seon.error/kind :seon.agent/missing-context-state
+                       :seon.agent/id agent-id})))
+    (locking contexts
+      (let [acquired (sci.eval/fork-for-turn
+                      (cond-> {:seon.sci.eval/ctx (:seon.sci.eval/ctx handle)
+                               :seon.db/db @(:seon.db/connection handle)
+                               :seon.agent/id agent-id}
+                        (get @contexts agent-id)
+                        (assoc :seon.sci.eval/agent-ctx (get @contexts agent-id))))
+            ctx (:seon.sci.eval/ctx acquired)]
+        (swap! contexts assoc agent-id ctx)
+        ctx))))
+
 (defn arm!
   "Arm one agent's graph: stamp → start → resume → route → prime.
   Idempotent per agent (an armed agent is left alone — the armer's
@@ -687,11 +708,7 @@
             _ (async/>!! completion :seon.agent/ready)
             agent-handle (assoc handle
                                 :seon.sci.eval/agent-ctx
-                                (:seon.sci.eval/ctx
-                                 (sci.eval/fork-for-turn
-                                  {:seon.sci.eval/ctx (:seon.sci.eval/ctx handle)
-                                   :seon.db/db @connection
-                                   :seon.agent/id agent-id}))
+                                (acquire-context! handle agent-id)
                                 :seon.cluster.wake/armer-channel
                                 (:seon.cluster.wake/channel handle)
                                 :seon.cluster.wake/channel wake-channel
