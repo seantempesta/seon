@@ -123,11 +123,33 @@
        (keyword? (:seon.error/kind value))
        (string? (:seon.error/message value))))
 
+(defn- connection-projection-state
+  [connection]
+  ;; The operator owns this table. Do not load the operator during database
+  ;; bootstrap, and match the actual connection rather than a branch name
+  ;; that another store could also use.
+  (when-let [instances (some-> (find-ns 'seon.operator.runtime)
+                              (ns-resolve 'running-instances)
+                              deref)]
+    (some (fn [instance]
+            (let [state (get-in instance [:seon.sci.eval/ctx env/state-carrier])]
+              (when (and state
+                         (identical? connection (:seon.db/connection @state)))
+                state)))
+          (vals @instances))))
+
+(defn- carry-projection-state
+  [database state]
+  (if (and state (not (error-value? database)))
+    (vary-meta database assoc :seon.sci.eval/projection-state state)
+    database))
+
 (defn- resolve-database-value
   [connection]
   (try
     ;; Resolve latest exactly once at the public-call boundary.
-    (d/db connection)
+    (carry-projection-state (d/db connection)
+                            (connection-projection-state connection))
     (catch Throwable cause
       (dependency-error ::db cause))))
 
@@ -724,7 +746,7 @@
                     (mapv #(if (= ::database %) database %) arguments)))
           parsed-query (query/memoized-parse-query (:query query-request))
           response (d/q-with-evidence query-request)]
-      (decode-query-result (read-declarations database)
+      (decode-query-result (read-declarations database 'seon.db/replay-read)
                            query-request
                            parsed-query
                            (:datahike.query/result response)))
@@ -732,7 +754,7 @@
     :pull
     (let [arguments (:seon.db/pull-arguments request)
           response (apply pull-plan-with-evidence database arguments)]
-      (decode-pull-result (read-declarations database)
+      (decode-pull-result (read-declarations database 'seon.db/replay-read)
                           (:datahike.pull/plan response)
                           :datahike.pull/result
                           (:datahike.pull/result response)))
@@ -740,13 +762,13 @@
     :pull-many
     (let [arguments (:seon.db/pull-arguments request)
           response (apply pull-many-plan-with-evidence database arguments)]
-      (decode-pull-result (read-declarations database)
+      (decode-pull-result (read-declarations database 'seon.db/replay-read)
                           (:datahike.pull/plan response)
                           :datahike.pull-many/result
                           (:datahike.pull-many/result response)))
 
     :index-page
-    (decode-index-page (read-declarations database)
+    (decode-index-page (read-declarations database 'seon.db/replay-read)
                        database
                        (d/index-page database
                                      (:seon.db/index-page-options request)))))
@@ -777,7 +799,7 @@
                        [:vector :seon.db/read-evidence] :seon.db/basis-t]
                   :seon.db/datoms]}
   [database retained basis]
-  (let [declarations (read-declarations database)]
+  (let [declarations (read-declarations database 'seon.db/read-evidence-changes)]
    (into []
         (comp (map #(datom->data declarations database %)) (distinct))
         (mapcat
@@ -904,13 +926,26 @@
                   (seq (d/datoms database :avet attribute))))
         (identity-attributes database)))
 
+(defn- fallback-read-projection
+  [database operation]
+  (let [started (System/nanoTime)]
+    (try
+      (schema/projection-from-database database)
+      (finally
+        (binding [*out* *err*]
+          (println "WARN seon.db/projection-fallback caller=" operation
+                   "elapsed-ms=" (quot (- (System/nanoTime) started) 1000000)
+                   "Supply a database value carrying its projection state."))))))
+
 (defn- read-declarations
-  [database]
+  [database operation]
   (let [origin (when database (schema-database database))]
     {::installed-schema (:schema origin)
      ::read-projection
-     (delay (or (schema/handed-projection)
-                (schema/projection-from-database origin)))}))
+     (delay (or (some-> origin meta :seon.sci.eval/projection-state
+                        deref :seon.schema/projection)
+                (schema/handed-projection)
+                (fallback-read-projection origin operation)))}))
 
 (defn- ask-declarations
   "Ask one declaration question with the population both PASSED and SUPPLIED.
@@ -1359,11 +1394,20 @@
   [environment]
   (if-not (env/environment? environment)
     (unsupplied-custody-error "a database value")
-    (or (:seon.db/db environment)
-        (let [connection (:seon.db/connection environment)]
-          (if (nil? connection)
-            (unsupplied-custody-error "a database value")
-            (resolve-database-value connection))))))
+    (let [database
+          (or (:seon.db/db environment)
+              (let [connection (:seon.db/connection environment)]
+                (if (nil? connection)
+                  (unsupplied-custody-error "a database value")
+                  (try
+                    (d/db connection)
+                    (catch Throwable cause
+                      (dependency-error ::db cause))))))
+          state (or (:seon.sci.eval/projection-state environment)
+                    (:seon.sci.eval/projection-state (meta database))
+                    (when (:seon.schema/projection environment)
+                      (env/environment-state environment)))]
+      (carry-projection-state database state))))
 
 (defn supplied-connection
   "This environment's live branch connection."
@@ -1533,7 +1577,8 @@
                 (let [response (d/q-with-evidence request)
                       result (decode-query-result
                               (read-declarations
-                               (some #(when (db.utils/db? %) %) aligned))
+                               (some #(when (db.utils/db? %) %) aligned)
+                               'seon.db/q)
                               request parsed-query
                               (:datahike.query/result response))]
                   (append-query-evidence! request response result)
@@ -1604,7 +1649,7 @@
         (try
       (let [response (apply operation database arguments)
             result (decode-pull-result
-                    (read-declarations database)
+                    (read-declarations database public-operation)
                     (:datahike.pull/plan response)
                     result-key
                     (get response result-key))]
@@ -1780,7 +1825,7 @@
     (try
       ;; Datahike's index cursor is lazy and each element is a host Datom.
       ;; Realize both layers here so no process-local cursor escapes to SCI.
-      (let [declarations (read-declarations database)
+      (let [declarations (read-declarations database 'seon.db/datoms)
             result (mapv #(datom->data declarations database %)
                          (apply d/datoms database arguments))]
         (let [options (first arguments)
@@ -1854,7 +1899,7 @@
    (if (error-value? database)
      database
      (try
-       (let [page (decode-index-page (read-declarations database)
+       (let [page (decode-index-page (read-declarations database 'seon.db/index-page)
                                      database
                                      (d/index-page database options))]
          (append-read-evidence!
@@ -1885,7 +1930,8 @@
 
     :else
     (try
-      (let [result (apply operation database arguments)]
+      (let [result (vary-meta (apply operation database arguments)
+                              merge (meta database))]
         (append-database-evidence! database :all)
         result)
       (catch Throwable cause

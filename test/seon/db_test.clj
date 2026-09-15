@@ -7,10 +7,12 @@
             [seon.config :as config]
             [seon.turn :as turn]
             [seon.db :as db]
+            [seon.env :as env]
             [seon.instrument :as instrument]
             [seon.render :as render]
             [seon.render.value :as render.value]
             [seon.sci.admit :as admit]
+            [seon.sci.eval :as sci.eval]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
             [seon.test-support :as test-support]))
@@ -85,6 +87,106 @@
     {:seon.db-test/elapsed-nanos (- (System/nanoTime) started)
      :seon.db-test/value value}))
 
+(deftest supplied-database-pulls-carry-the-projection-across-unbound-reads
+  (test-support/with-database
+   (fn [connection]
+     (let [projection (schema/handed-projection)
+           environment (env/environment
+                        {:seon.boot/cluster-name "documentation-cost"
+                         :seon.db/connection connection
+                         :seon.schema/projection projection})
+           ids-query '[:find [?function ...]
+                       :in $ ?name
+                       :where [?namespace :seon.ns/name ?name]
+                              [?function :seon.fn/ns ?namespace]
+                              [?function :seon.fn/private? false]]
+           raw @connection
+           ids (d/q ids-query raw 'my.message)
+           database (db/supplied-database-value environment)
+           allocation-bean ^com.sun.management.ThreadMXBean
+           (java.lang.management.ManagementFactory/getThreadMXBean)
+           thread-id (.getId (Thread/currentThread))
+           warnings (java.io.StringWriter.)]
+       (is (.isThreadAllocatedMemorySupported allocation-bean))
+       (is (.isThreadAllocatedMemoryEnabled allocation-bean)
+           "disabled allocation counters must not satisfy the cost bound")
+       (is (seq ids) "the measured namespace must contain public functions")
+       (is (identical? projection
+                       (:seon.schema/projection
+                        @(:seon.sci.eval/projection-state (meta database)))))
+       (is (= (d/committed-value-identity raw)
+              (d/committed-value-identity database)))
+       (is (= :datahike.cache.outcome/hit
+              (get-in (d/q-with-evidence ids-query database 'my.message)
+                      [:datahike.query/cache-evidence :datahike.cache/outcome])))
+       (binding [*err* warnings]
+         (without-handed-projection
+          (fn []
+            (doseq [selector [@#'sci.eval/program-documentation-selector '[*]]]
+              ;; Warm the actual per-projection codecs, then include supplier
+              ;; acquisition in every measured call. No dynamic projection is
+              ;; present at either acquisition or decoding.
+              (dotimes [_ 3]
+                (db/pull-many (db/supplied-database-value environment) selector ids))
+              (dotimes [_ 3]
+                (let [before (.getThreadAllocatedBytes allocation-bean thread-id)
+                      started (System/nanoTime)
+                      rows (db/pull-many (db/supplied-database-value environment)
+                                         selector ids)
+                      elapsed (- (System/nanoTime) started)
+                      allocated (- (.getThreadAllocatedBytes allocation-bean thread-id)
+                                   before)]
+                  (is (= (count ids) (count rows)))
+                  (is (every? :seon.fn/sym rows))
+                  (is (< allocated 10000000) (str "allocated bytes: " allocated))
+                  (is (< elapsed 20000000) (str "elapsed ns: " elapsed))))))))
+       (is (= "" (str warnings)))))))
+
+(deftest uncarried-read-reports-one-projection-fallback-per-call
+  (test-support/with-database
+   (fn [connection]
+     (let [database @connection
+           ids (d/q '[:find [?function ...]
+                      :where [?function :seon.fn/sym "my.message/send"]]
+                    database)]
+       (is (seq ids))
+       (without-handed-projection
+        (fn []
+          (dotimes [_ 2]
+            (let [warnings (java.io.StringWriter.)
+                  rows (binding [*err* warnings]
+                         (db/pull-many database
+                                       @#'sci.eval/program-documentation-selector ids))
+                  lines (str/split-lines (str warnings))]
+              (is (= (count ids) (count rows)))
+              (is (= 1 (count lines)))
+              (is (str/includes? (first lines)
+                                 "seon.db/projection-fallback caller= seon.db/pull-many"))
+              (is (str/includes? (first lines) "elapsed-ms="))))))))))
+
+(deftest temporal-reads-use-the-carried-origins-projection
+  (test-support/with-database
+   (fn [connection]
+     (let [environment (env/environment
+                        {:seon.boot/cluster-name "documentation-temporal"
+                         :seon.db/connection connection
+                         :seon.schema/projection (schema/handed-projection)})
+           database (db/supplied-database-value environment)
+           state (:seon.sci.eval/projection-state (meta database))
+           warnings (java.io.StringWriter.)]
+       (binding [*err* warnings]
+         (without-handed-projection
+          (fn []
+            (doseq [view [(db/history database)
+                          (db/as-of database (:max-tx database))
+                          (db/since database 0)]]
+              (is (identical? database (db/schema-database view)))
+              (is (identical? state (:seon.sci.eval/projection-state (meta view)))))
+            (is (= {:seon.ns/name 'my.message}
+                   (db/pull (db/as-of database (:max-tx database))
+                            [:seon.ns/name] [:seon.ns/name 'my.message]))))))
+       (is (= "" (str warnings)))))))
+
 (deftest ten-unhanded-queries-stay-within-twice-raw-query-cost
   (test-support/with-database
    (fn [connection]
@@ -125,7 +227,7 @@
   (test-support/with-database
    (fn [connection]
      ;; The canonical fixture binds the same cluster-owned projection-state
-     ;; that seon.sci.eval binds around a door evaluation.
+     ;; that seon.sci.eval binds around an SCI evaluation.
      (db/q schema-family-query @connection)
      (let [samples
            (mapv (fn [_]
