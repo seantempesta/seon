@@ -1,6 +1,6 @@
 ---
 type: research
-status: active
+status: complete
 tags: [contracts, provider, transcript, live-test]
 created: 2026-09-15
 ---
@@ -133,7 +133,7 @@ run still has 25 turns left and no next work. No session was resumed.
   incomplete in that earlier run).
 - Item-1 isolated gate passed 78 tests / 864 assertions, no failures/errors;
   coordinator/tests phase 249 seconds. Final combined gate and platform
-  counts are recorded below after completion.
+  counts follow below.
 
 Final isolated gate command:
 
@@ -162,8 +162,11 @@ namespaces loaded and reported `parallel-only`, no detected global-state
 leaker. This is an observed virtual-submission boundary, not an attribution
 to a foreign edit. The exact evidence is in
 [the fixture issue](../../../seon/issues/virtual-loop-fixture-submission-can-race-an-armed-turn.md).
-The full command above is being repeated with `SEON_TEST_WORKERS=1`; no
-virtual lifecycle source or foreign session is changed to obtain a result.
+The full command above repeated with `SEON_TEST_WORKERS=1` passed **135 tests /
+1175 assertions**, zero failures/errors, coordinator/tests phase 251 seconds.
+No virtual lifecycle source or foreign session was changed to obtain that
+result. Both the complete continuation test and `virtual-loop-end-to-end`
+passed in this same worker, under the complete program's armed contracts.
 
 Ownership accretions explicitly required by the owner's followup: the
 instrumentation guard seam and the datoms contract. The completion text
@@ -171,13 +174,29 @@ schema in `resources/seon/schemas/seon.ai.edn` also changes because armed
 completion outputs otherwise reject the requested empty string. No change
 to `seon.error`, `seon.turn`, the default session, or foreign source/CSS.
 
-## Broad input contracts — dated inventory, 2026-09-15
+## Landing slices
 
 Landing slice 1: `dda9f0366`, database shape guards, both instrumentation
 wrappers, exact run-6 regressions, and the completed callable-input inventory.
-Slice 2 changes completion parsing/schema and the existing reader only;
+Landing slice 2: `7a996ed48`, completion parsing/schema and the existing reader;
 the attempt→reply seam in `seon.turn` already supplies the required accepted
 error-evaluation behavior and needs no duplicate transition.
+
+Slice 3 changes the transcript state line, required attempt selector, and
+one problems rule, with the canonical stalled-session regression and the
+final evidence in this note. Both original run-6 issues are resolved.
+
+## Cleanup
+
+All awaited lane shells exited. Successful gate roots and every fast snapshot
+were removed by the runner. The failed combined root had zero live clusters,
+no orphan JVM, and no process referencing its exact root; it was then removed
+without following symlinks. The lane's scratch logs and contract scan were
+deleted after recording the evidence here. No scratch cluster or worktree
+remains. The browser verification tab was closed. Foreign uncommitted CSS,
+build/config/worker files, and the other landing note were preserved.
+
+## Broad input contracts — dated inventory, 2026-09-15
 
 Reproduction command (ordinary working-tool search, not production parsing):
 

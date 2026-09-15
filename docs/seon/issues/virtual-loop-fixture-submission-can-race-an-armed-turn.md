@@ -32,8 +32,10 @@ the secondary contract error. The active competing turn was not captured,
 so this note does not attribute its creation to an unobserved mechanism.
 
 The run6 lane does not own the virtual-turn lifecycle. Its query, empty-stop,
-and stalled-session regressions passed in that gate. The lane continues
-with the same path snapshot and all nine namespaces using one worker.
+and stalled-session regressions passed in that gate. Repeating all nine
+namespaces with `SEON_TEST_WORKERS=1` passed 135 tests / 1175 assertions,
+zero failures/errors, in a 251-second coordinator/tests phase. The pooled
+failure remains open; a single-worker pass does not resolve the race.
 
 Acceptance: establish the fixture's intended turn lifecycle through bounded
 events before submitting; repeatedly run it in the normal pooled gate with

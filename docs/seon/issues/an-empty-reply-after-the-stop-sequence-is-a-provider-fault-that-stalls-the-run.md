@@ -1,9 +1,10 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [provider, stop, reader, turn, faults, live-test]
 created: 2026-09-15
+resolved: 2026-09-15
 ---
 
 # A reply cut to nothing by the stop sequence is treated as a provider fault, and the run stalls silently
@@ -19,8 +20,16 @@ still supply a positive source bound. No alternate turn transition was added.
 The canonical running-graph regression uses the real completion parser and
 confirms two attempts, one error evaluation, and the error in the next
 prompt. Its malformed-JSON case uses the real stream parser and still
-defers after one attempt with two turns remaining. Visibility is addressed
-in the following landing slice; see
+defers after one attempt with two turns remaining.
+
+The header and first problems rule now share a derived stall: latest closed
+provider refusal, no accepted reply or open turn, unfinished plan steps,
+remaining turn budget, and no next work. The canonical fixture verifies the
+state and first panel, and suppresses the finding after step completion or an
+accepted empty reply. Browser DOM and screenshots verified the original
+run-6 session shows `stalled: :seon.ai/unparseable-body at 08:46, waiting for
+an outside wake` and `Session stalled · 1` first. The session was not resumed.
+See
 [the evidence](../../prds/context-generation/research/run6-blockers-landing-2026-09-15.md).
 
 ## Observed (live run 6, 14:46:11Z)

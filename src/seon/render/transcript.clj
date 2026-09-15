@@ -1176,7 +1176,8 @@
    {:seon.turn/trigger runtime-message-selector}
    {:seon.turn/attempts [:seon.ai.attempt/id :seon.ai.attempt/ordinal
                          :seon.ai/model :seon.ai.attempt/finish-reason
-                         :seon.ai.attempt/usage-edn]}])
+                         :seon.ai.attempt/usage-edn
+                         {:seon.ai.attempt/error [:seon.error/kind]}]}])
 
 (defn- turn-rows [database agent-id]
   (let [rows (db/q '[:find ?opened (pull ?t pattern) :in $ ?agent-id pattern
@@ -1257,6 +1258,35 @@
     (= "System" (turn-kind database row)) (if (zero? (::ordinal row)) "opening" "re-read")
     :else "agent"))
 
+(defn- session-stall [request rows]
+  (let [database (:seon.db/db request)
+        agent-id (:seon.agent/id request)
+        latest (last rows)
+        failure (some :seon.ai.attempt/error
+                      (reverse (sort-by :seon.ai.attempt/ordinal
+                                        (:seon.turn/attempts latest))))]
+    (when (and latest (:seon.turn/closed-tx latest)
+               (every? :seon.turn/closed-tx rows)
+               (nil? (:seon.turn/reply-size latest))
+               (nil? (:seon.turn/reply latest))
+               (nil? (:seon.turn/reply-blob latest))
+               failure (pos? (turn/turns-left database agent-id))
+               (nil? (turn/next-agent-work database {:seon.agent/id agent-id})))
+      (let [plan (db/pull database
+                          '[{:seon.agent/plan
+                             [{:my.plan/steps [:my.plan.item/id :my.plan.item/completed-tx]}]}]
+                          [:seon.agent/id agent-id])
+            pending (remove :my.plan.item/completed-tx
+                            (get-in plan [:seon.agent/plan :my.plan/steps]))
+            at (get-in latest [:seon.turn/closed-tx :db/txInstant])]
+        (when (seq pending)
+          {::turn latest
+           ::detail (str "stalled: " (or (:seon.error/kind failure) "unknown provider refusal")
+                         " at " (if (inst? at)
+                                  (.format (java.text.SimpleDateFormat. "HH:mm") at)
+                                  "unknown time")
+                         ", waiting for an outside wake")})))))
+
 (defn- session-header [request rows]
   (let [agent-id (:seon.agent/id request)
         agent-row (db/pull (:seon.db/db request)
@@ -1265,6 +1295,7 @@
                            [:seon.agent/id agent-id])
         active (last (remove :seon.turn/closed-tx rows))
         latest (or active (last rows))
+        stalled (session-stall request rows)
         selected (or (:seon.turn/id request) (:seon.turn/id latest))
         raw? (::raw? request)]
     [:header {:class "seon-session-header"}
@@ -1273,9 +1304,11 @@
        [:span {:class "seon-session-namespace"}
         (str (get-in agent-row [:seon.agent/namespace :seon.ns/name]))]]
       [:p {:class "seon-session-state"}
-       [:span {:class (if active "seon-status-running" "seon-status-idle")}
-        (if active "● running" "● idle")]
-       (when latest
+       [:span {:class (cond active "seon-status-running"
+                            stalled "seon-emission-error"
+                            :else "seon-status-idle")}
+        (cond active "● running" stalled (str "● " (::detail stalled)) :else "● idle")]
+       (when (and latest (not stalled))
          (list " since " (runtime-time (get-in latest [(if active :seon.turn/opened-tx :seon.turn/closed-tx) :db/txInstant]))))
        " · " (:seon.cluster/name request)]]
      (when-let [objective (get-in agent-row [:seon.agent/plan :my.plan/objective])]
@@ -1927,7 +1960,8 @@
                                       (= {:seon.repl/changes {}}
                                          (::value (readable-shown (:seon.eval/shown %))))) saved)]
     {::budget (session-budget database (:seon.agent/id request) rows)
-     ::rules (into [(fabricated-problem by-eid saved)
+     ::rules (into [(finding :stalled "Session stalled" (keep identity [(session-stall request rows)]))
+                    (fabricated-problem by-eid saved)
                     (error-problem by-eid saved)
                     (churn-problem database by-eid saved)
                     (assoc (finding :stale-but-unchanged "stale-but-unchanged reads"
