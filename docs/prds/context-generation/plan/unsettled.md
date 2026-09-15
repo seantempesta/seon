@@ -971,3 +971,25 @@ half-edit. Measured targets in the issue.
   debug-turns owns that layout fix plus the shared header (review sent).
   debug-turns Part A `d1faf13ae`: colourised faithful session, folds, gutter.
 
+## 2026-09-14 19:35 — the model explains its own confusion (owner's idea)
+
+- `research/explain_probe_2026_09_14.clj` sends the exact stored context plus
+  an out-of-band question to deepseek-flash; two calls saved as EDN. The
+  model's ranked account matches the page's evidence and adds specifics:
+  `dir` showed `:functions []` while a query found the row (fixed
+  `5081a11fb`, unverified in a new run); the auto-check's OWN contract
+  violation printed in `:out` read as "my defn did not persist" (issue
+  filed); the runtime pull re-read every turn "invites exactly the loop I
+  fell into" (supports dropping churning reads); the plan block's teaching
+  comment re-shown after `complete!` read as "a harness reminder … mark it
+  distinctly" (supports marking system re-reads); backstop fault messages
+  "written as if from a peer" (misrouting issue); bare `deftest` fails;
+  `dir` docstrings elided mid-word ("Retur"); it wants a nudge on
+  consecutive unproductive turns. It wrote five fabricated `#:seon.repl`
+  responses in run 2 — the response-after-form grammar teaches imitation.
+- Faithfulness defect found by the probe: `acquire-context!` with an early
+  turn id returns the CURRENT context (178,089 bytes at turn 2 and turn 40
+  alike; the provider billed 3,222 tokens at turn 2). The debug page's
+  "Context at turn N" is therefore the present labelled as the past — issue
+  filed, handed to debug-turns.
+
