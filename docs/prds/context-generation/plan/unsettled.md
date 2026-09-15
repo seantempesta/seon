@@ -1208,4 +1208,13 @@ half-edit. Measured targets in the issue.
   (2) a reply consisting only of the stop sequence produced "no assistant
   text" → provider fault → refusal → deferred; page said idle / checks
   passed. Issues filed; lane run6-blockers. Run 6 is not a measurement.
+- 15:00Z owner ruling: agent-call checking lives in the CONTRACT
+  (instrumentation), not only in function bodies. Confirmed instrumentation
+  reaches SCI calls (run 5's `my.note/add!` refusal). The hole was `q`'s
+  `[:* :seon.schema/value]` tail: `[]` validated and became `$`. Schema
+  work: a `:=>` guard on `seon.db/q` (both arities) tying input count to
+  `:in` and `$` to a database value; per-arity regressions for
+  pull/pull-many/entity/datoms; an inventory of every agent-callable
+  contract with `[:* …]` or bare `:seon.schema/value`, tightened or
+  justified. Sent to run6-blockers.
 
