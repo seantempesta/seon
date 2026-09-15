@@ -1,9 +1,40 @@
 #:seon.test.run{:at :inst,
                 :git-sha [:re "^[0-9a-f]{40}$"],
                 :id [:string {:min 1, :seon.db/identity true}],
+                :program-digest [:and {:seon.db/identity false} :seon.source/digest],
+                :basis-t :seon.db/basis-t,
+                :branch :seon.source/branch,
+                :immutable [:and {:seon.db/identity false} :seon.test.run/id],
+                :immutable-error
+                [:map {:seon.error/class true
+                       :seon.render/ai seon.error/render-ai
+                       :seon.render/html seon.error/render-html}
+                 [:seon.test.run/immutable :seon.test.run/immutable]
+                 [:seon.error/message :seon.error/message]],
+                :unavailable [:= true],
+                :unavailable-error
+                [:map {:seon.error/class true
+                       :seon.render/ai seon.error/render-ai
+                       :seon.render/html seon.error/render-html}
+                 [:seon.test.run/unavailable :seon.test.run/unavailable]
+                 [:seon.error/message :seon.error/message]],
+                :provenance
+                [:map
+                 [:seon.test.run/id :seon.test.run/id]
+                 [:seon.test.run/at :seon.test.run/at]
+                 [:seon.test.run/git-sha {:optional true} :seon.test.run/git-sha]
+                 [:seon.test.run/program-digest :seon.test.run/program-digest]
+                 [:seon.test.run/basis-t :seon.test.run/basis-t]
+                 [:seon.test.run/branch :seon.test.run/branch]],
+                :completion
+                [:and :seon.test.runner/completion
+                 [:map [:seon.test.run/provenance :seon.test.run/provenance]]],
                 :run
                 [:map
                  #:seon.db{:attributes true}
                  [:seon.test.run/id :seon.test.run/id]
                  [:seon.test.run/at :seon.test.run/at]
-                 [:seon.test.run/git-sha :seon.test.run/git-sha]]}
+                 [:seon.test.run/git-sha {:optional true} :seon.test.run/git-sha]
+                 [:seon.test.run/program-digest {:optional true} :seon.test.run/program-digest]
+                 [:seon.test.run/basis-t {:optional true} :seon.test.run/basis-t]
+                 [:seon.test.run/branch {:optional true} :seon.test.run/branch]]}

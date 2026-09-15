@@ -5,6 +5,7 @@
             [clojure.java.io :as io]
             [clojure.set :as set]
             [clojure.string :as str]
+            [clojure.walk :as walk]
             [clojure.test :as test]
             [clojure.test.check.generators :as gen]
             [malli.core :as m]
@@ -14,6 +15,8 @@
             [seon.cluster.store :as store]
             [seon.config :as config]
             [seon.db :as db]
+            [seon.id :as id]
+            [seon.program :as program]
             [seon.schema :as schema]
             [seon.test.selection :as selection]
             [seon.test.cache :as cache])
@@ -1287,6 +1290,82 @@
                 nil
                 nil))
 
+(defn- program-fact
+  [pulled]
+  (let [row (program/canonical-row (dissoc pulled :db/id))
+        [attribute] (program/row-identity row)]
+    (when (and attribute
+               (get row (:seon.program/source-attribute (program/shape attribute))))
+      (walk/postwalk
+       (fn [value]
+         (cond
+           (map? value) (into (sorted-map-by #(compare (pr-str %1) (pr-str %2))) value)
+           (set? value) (vec (sort-by pr-str value))
+           :else value))
+       row))))
+
+(defn program-digest
+  "Identify the tested program from its source seal and current program facts.
+  An unchanged publication keeps its exact snapshot digest. Admitted changes
+  extend that identity with canonical program facts; result-only writes do not.
+  Only program rows touched since the seal need comparison."
+  {:malli/schema [:=> [:cat :seon.db/database-value]
+                  [:or :seon.test.run/program-digest :seon.error/value]]}
+  [database]
+  (try
+   (let [seals (db/q '[:find ?digest ?t
+                     :where [_ :seon.source/digest ?digest ?t]] database)
+        _ (when (:seon.error/kind seals)
+            (throw (ex-info "Cannot read the tested source identity." seals)))
+        _ (when (> (count seals) 1)
+            (throw (ex-info "The tested program has multiple source seals." {})))
+        [digest basis] (first seals)
+        _ (when-not digest
+            (throw (ex-info "The tested program has no source snapshot identity." {})))
+        before (db/as-of database basis)
+        changed (db/since (db/history database) basis)
+        entities (db/q '[:find [?entity ...]
+                         :in $ $changed [?identity ...]
+                         :where [$changed ?entity]
+                                [?entity ?identity]]
+                       database changed program/identity-attributes)
+        _ (when (:seon.error/kind entities)
+            (throw (ex-info "Cannot identify changed program rows." entities)))
+        old-rows (db/pull-many before '[*] entities)
+        current-rows (db/pull-many database '[*] entities)
+        _ (doseq [rows [old-rows current-rows]]
+            (when (:seon.error/kind rows)
+              (throw (ex-info "Cannot read tested program rows." rows))))
+        differences
+        (into []
+              (keep (fn [[old-row current-row]]
+                      (let [old (program-fact old-row)
+                            current (program-fact current-row)]
+                        (when (not= old current)
+                          [(program/row-identity (or current old)) current]))))
+              (map vector old-rows current-rows))]
+    (if (empty? differences) digest
+        (id/digest 64 [digest (vec (sort-by pr-str differences))])))
+   (catch Exception failure
+     {:seon.error/kind :seon.test.run/unavailable
+      :seon.test.run/unavailable true
+      :seon.error/message (str "Test provenance unavailable: " (ex-message failure))})))
+
+(defn provenance
+  "Capture immutable test custody before execution.
+  Git is optional for an
+  agent's database program, which need not have a corresponding Git commit."
+  {:malli/schema [:=> [:cat :seon.db/database-value]
+                  [:or :seon.test.run/provenance :seon.error/value]]}
+  [database]
+  (let [digest (program-digest database)]
+    (if (:seon.error/kind digest) digest
+        {:seon.test.run/id (id/id)
+   :seon.test.run/at (java.util.Date.)
+   :seon.test.run/program-digest digest
+   :seon.test.run/basis-t (db/basis-t database)
+   :seon.test.run/branch (get-in database [:config :branch])})))
+
 (defn record-tx
   "Transaction data replacing each test row's complete latest result.
 
@@ -1297,20 +1376,30 @@
   a retract's lookup ref against a concurrently retracted row and reject
   the whole result transaction."
   {:malli/schema [:=> [:cat :seon.db/database-value
-                       :seon.test.runner/completion]
+                       :seon.test.run/completion]
                   :seon.test.runner/record-tx]}
   [database
    {results :seon.test.runner/results
-    basis-t :seon.test/run-basis-t
-    at :seon.test/run-at}]
+    run :seon.test.run/provenance}]
   (let [namespace-names
         (distinct
          (map #(symbol (namespace (symbol (:seon.test/sym %)))) results))
-        namespace-tempid #(str "test-result-namespace:" %)]
+        namespace-tempid #(str "test-result-namespace:" %)
+        run-id (:seon.test.run/id run)
+        basis-t (:seon.test.run/basis-t run)
+        at (:seon.test.run/at run)
+        run-ref [:seon.test.run/id run-id]
+        previous (db/pull database (vec (keys run)) run-ref)]
+    (when (and previous (not= run (dissoc previous :db/id)))
+      (throw (ex-info "A test run's provenance is immutable."
+                      {:seon.error/kind :seon.test.run/immutable
+                       :seon.test.run/immutable run-id
+                       :seon.test.run/id run-id})))
     (into
-     (mapv (fn [namespace-name]
-             {:db/id (namespace-tempid namespace-name)
-              :seon.ns/name namespace-name})
+     (into [(assoc run :db/id "test-run")]
+           (map (fn [namespace-name]
+                  {:db/id (namespace-tempid namespace-name)
+                   :seon.ns/name namespace-name}))
            namespace-names)
      (mapcat
       (fn [{test-symbol :seon.test/sym :as result}]
@@ -1319,6 +1408,7 @@
               exists? (some? (db/pull database [:db/id] test-ref))
               result-row
               (cond-> (assoc result
+                             :seon.test/run "test-run"
                              :seon.test/run-basis-t basis-t
                              :seon.test/run-at at)
                 (not exists?)
@@ -1339,13 +1429,14 @@
    :seon.test/error-count
    :seon.test/run-basis-t
    :seon.test/run-at
+   :seon.test/run
    :seon.test/failing-assertions
    :seon.test/failure-message])
 
 (defn commit-results!
   "Commit captured test results and return those exact committed facts."
   {:malli/schema
-   [:=> [:cat :seon.db/connection :seon.test.runner/completion]
+   [:=> [:cat :seon.db/connection :seon.test.run/completion]
     [:or :seon.test/results :seon.error/value]]}
   [connection {results :seon.test.runner/results :as completion}]
   (let [database (db/db connection)
@@ -1396,8 +1487,13 @@
             completion
             {:seon.test.runner/results
              (:seon.test.runner/results run-result)
-             :seon.test/run-basis-t (db/basis-t (db/db connection))
-             :seon.test/run-at (:seon.test.run/at run-result)}]
+             :seon.test/run-basis-t (:seon.test.run/basis-t run-result)
+             :seon.test/run-at (:seon.test.run/at run-result)
+             :seon.test.run/provenance
+             (select-keys run-result
+                          [:seon.test.run/id :seon.test.run/at
+                           :seon.test.run/git-sha :seon.test.run/program-digest
+                           :seon.test.run/basis-t :seon.test.run/branch])}]
         (commit-results! connection completion))
       (finally
         ((requiring-resolve 'seon.cluster/stop!) instance)))))
@@ -1419,8 +1515,9 @@
               completion
               {:seon.test.runner/results
                (:seon.test.runner/results run-result)
-               :seon.test/run-basis-t (db/basis-t database)
-               :seon.test/run-at (:seon.test.run/at run-result)}]
+               :seon.test/run-basis-t (:seon.test.run/basis-t run-result)
+               :seon.test/run-at (:seon.test.run/at run-result)
+               :seon.test.run/provenance (select-keys run-result [:seon.test.run/id :seon.test.run/at :seon.test.run/git-sha :seon.test.run/program-digest :seon.test.run/basis-t :seon.test.run/branch])}]
           (schema/call-with-projection
            projection
            #(commit-results! connection completion)))
@@ -1457,8 +1554,9 @@
                       completion#
                       {:seon.test.runner/results
                        (:seon.test.runner/results ~run-result)
-                       :seon.test/run-basis-t (seon.db/basis-t database#)
-                       :seon.test/run-at (:seon.test.run/at ~run-result)}]
+                       :seon.test/run-basis-t (:seon.test.run/basis-t ~run-result)
+                       :seon.test/run-at (:seon.test.run/at ~run-result)
+                       :seon.test.run/provenance (select-keys ~run-result [:seon.test.run/id :seon.test.run/at :seon.test.run/git-sha :seon.test.run/program-digest :seon.test.run/basis-t :seon.test.run/branch])}]
                   (seon.schema/call-with-projection
                    projection#
                    #(seon.test.runner/commit-results!
@@ -2548,6 +2646,14 @@
                           " " test-namespace)))
         (announce! progress "SELECT building the program graph")
         (let [build-manifest (requiring-resolve 'seon.fn/build-manifest)
+              tested-program (edn/read-string
+                              (slurp (io/file
+                                      (System/getProperty "seon.test.published-base")
+                                      "provenance.edn")))
+              run-provenance (assoc tested-program
+                                    :seon.test.run/id (id/id)
+                                    :seon.test.run/at (java.util.Date.)
+                                    :seon.test.run/git-sha git-sha)
               manifest (if-let [base (System/getProperty "seon.test.published-base")]
                          (cache/manifest base)
                          (build-manifest {:seon.fn/roots selection/graph-roots}))
@@ -2602,13 +2708,11 @@
               summary (merge-with + (::task-summary platform-outcome)
                                   (::task-summary bulk-outcome))
               run-result
-              {:seon.test.run/id (str (random-uuid))
-               :seon.test.run/at (java.util.Date.)
-               :seon.test.run/git-sha git-sha
+              (assoc run-provenance
                :seon.test.runner/summary summary
                :seon.test.runner/results
                (into [] (mapcat ::task-results) task-results)
-               ::stopped-after (when platform-red? :platform)}
+               ::stopped-after (when platform-red? :platform))
               persistent-root
               (configured-persistent-results-root
                (System/getProperty "seon.test.persistent-results-root")
@@ -2672,6 +2776,20 @@
           (throw (ex-info "Publication classpath does not name its snapshot."
                           {::expected (str expected) ::actual (str actual)}))))
       ((requiring-resolve 'seon.cluster/refresh-source!) root)
+      (let [held-store (store/open-store!
+                        {:seon.store/dir (str (io/file root "data" "store"))})]
+        (try
+          (let [database (source/database held-store
+                           (:seon.source/commit-id (source/current held-store)))
+                captured (provenance database)]
+            (when (:seon.error/kind captured)
+              (throw (ex-info (:seon.error/message captured) captured)))
+            (spit (io/file root "provenance.edn")
+                  (pr-str (select-keys captured
+                                      [:seon.test.run/program-digest
+                                       :seon.test.run/basis-t
+                                       :seon.test.run/branch]))))
+          (finally (store/release-store! held-store))))
       ;; Publication already holds the exact analysis; do not analyze the
       ;; same checkout again in the coordinator and every fixture JVM.
       (let [analysis @(var-get (ns-resolve 'seon.cluster 'source-analysis-cache))

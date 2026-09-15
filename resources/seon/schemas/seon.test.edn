@@ -8,6 +8,7 @@
             :error-count [:int {:min 0}],
             :run-basis-t :seon.db/basis-t,
             :run-at :inst,
+            :run :seon.db/ref,
             :failure-identity
             [:string {:min 64, :max 64}],
             :failing-assertions
@@ -39,6 +40,8 @@
              [:seon.test/error-count :seon.test/error-count]
              [:seon.test/run-basis-t :seon.test/run-basis-t]
              [:seon.test/run-at :seon.test/run-at]
+             [:seon.test/run {:optional true}
+              [:or :seon.test/run [:map [:db/id :int]]]]
              [:seon.test/failing-assertions
               {:optional true}
               :seon.test/failing-assertions]
@@ -73,6 +76,7 @@
               {:optional true}
               :seon.test/run-basis-t]
              [:seon.test/run-at {:optional true} :seon.test/run-at]
+             [:seon.test/run {:optional true} :seon.test/run]
              [:seon.test/failing-assertions
               {:optional true}
               :seon.test/failing-assertions]

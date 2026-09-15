@@ -873,6 +873,7 @@
             {:seon.test.runner/results
              (:seon.test.runner/results run-result)
              :seon.test/run-basis-t (db/basis-t @connection)
+             :seon.test.run/provenance (assoc (runner/provenance @connection) :seon.test.run/at at)
              :seon.test/run-at at}
             test-symbol (:seon.test/sym
                          (first (:seon.test.runner/results run-result)))]
@@ -896,11 +897,13 @@
             {:seon.test.runner/results
              (:seon.test.runner/results run-result)
              :seon.test/run-basis-t basis-t
+             :seon.test.run/provenance (assoc (runner/provenance @connection) :seon.test.run/at at)
              :seon.test/run-at at}]
         (test-support/seed-cluster! connection "test")
         (let [committed (runner/commit-results! connection completion)]
           (is (= (:seon.test.runner/results run-result)
                  (mapv #(dissoc % :seon.test/run-basis-t
+                                :seon.test/run
                                 :seon.test/run-at)
                        committed))
               "the completion value is pulled from the committed test rows"))
@@ -947,6 +950,7 @@
                              :fail-count 0
                              :error-count 0}]
                 :seon.test/run-basis-t next-basis
+                :seon.test.run/provenance (runner/provenance @connection)
                 :seon.test/run-at (java.util.Date.)})
               after (db/pull @connection
                              [:db/id
@@ -999,6 +1003,7 @@
                              :seon.test/pass-count
                              :seon.test/fail-count
                              :seon.test/error-count
+                             :seon.test/run
                              :seon.test/run-basis-t
                              :seon.test/run-at]
                             [:seon.test/sym (:seon.test/sym result)])]
@@ -1653,8 +1658,7 @@
                      (ProcessBuilder.
                       ^java.util.List
                       [(str (io/file project-root "bin" "test"))
-                       "--paths" "bin/test" "test/seon/test_runner_test.clj"
-                       "--" "seon.fs-test"])
+                       "--result-cluster" "evidence" "seon.fs-test"])
                       (.directory project-root)
                       (.redirectErrorStream true))
                     environment (.environment builder)]
@@ -2096,7 +2100,7 @@
                  "rmdir reference-code/* 2>/dev/null || true\n"
                  "rm -rf reference-code\n"
                  "ln -s \"$origin/reference-code\" reference-code\n"
-                 "for path in bin/test bin/test-fast src/seon/test/fast.clj src/seon/test/arm.clj src/seon/test/runner.clj; do cp \"$origin/$path\" \"$path\"; done\n"
+                 "for path in bin src resources test; do cp -R \"$origin/$path/.\" \"$path/\"; done\n"
                  "git init -q\n"
                  "git add -f -- bin src test resources config deps.edn bb.edn .agents .claude seon-skills .gitignore .clj-kondo script dev_cache.clj reference-code\n"
                  "git -c user.name=\"$(git -C \"$origin\" config user.name)\" -c user.email=\"$(git -C \"$origin\" config user.email)\" commit -qm baseline\n"

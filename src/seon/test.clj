@@ -16,7 +16,10 @@
   (let [database (db/db connection)]
     (if (:seon.error/kind database)
       database
-      (let [result (runner/run-var! test-var)]
+      (let [provenance (runner/provenance database)
+            result (if (:seon.error/kind provenance)
+                     provenance
+                     (runner/run-var! test-var))]
         (if (:seon.error/kind result)
           result
           (let [committed
@@ -24,7 +27,8 @@
                  connection
                  {:seon.test.runner/results [result]
                   :seon.test/run-basis-t (db/basis-t database)
-                  :seon.test/run-at (java.util.Date.)})]
+                  :seon.test/run-at (:seon.test.run/at provenance)
+                  :seon.test.run/provenance provenance})]
             (if (:seon.error/kind committed)
               committed
               (first committed))))))))
@@ -39,3 +43,4 @@
                             [?test :seon.test/ns ?namespace]
                             [?test :seon.test/sym ?symbol]]
                    database agent-id))))
+
