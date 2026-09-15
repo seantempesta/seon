@@ -1,4 +1,15 @@
 {:seon.sci.reader/tag :symbol
+ :seon.sci.reader/token :string
+ :seon.sci.reader/token-kind [:enum :symbol :keyword]
+ :seon.sci.reader/call :qualified-symbol
+ :seon.sci.reader/argument-index [:int {:min 0}]
+ :seon.sci.reader/prose-span? :boolean
+ :seon.sci.reader/containers
+ [:vector [:map
+           [:edamame/opened-delimiter :string]
+           [:edamame/row :int]
+           [:edamame/column :int]
+           [:edamame/elements [:vector :seon.schema/value]]]]
  :seon.sci.reader/fabricated-response [:= true]
  :seon.sci.reader/fabricated-response-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify a fabricated REPL response in agent source"} [:seon.sci.reader/fabricated-response :seon.sci.reader/fabricated-response] [:seon.error/message :seon.error/message]]
  :seon.sci.reader/unreadable [:= true]

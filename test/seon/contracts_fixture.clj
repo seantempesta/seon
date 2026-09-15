@@ -52,6 +52,7 @@
 (defn with-agent [body]
   (support/with-database
    (fn [connection]
+     (support/seed-cluster! connection "contracts-plan")
      (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "contracts-plan"
                     :seon.config/manifest {:seon.config.ai/no-provider true
                                            :seon.config/on-core-error :panic}})
@@ -73,4 +74,3 @@
                              projection (schema.datahike/database-attributes-in projection))))))
        (is (:db-after (db/transact! connection fixture/orders)))
        (body connection ctx nil)))))
-

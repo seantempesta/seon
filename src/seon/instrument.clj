@@ -12,6 +12,7 @@
             [malli.core :as m]
             [malli.instrument :as mi]
             [malli.registry :as mr]
+            [malli.util :as mu]
             [seon.call-preparation :as call-preparation]
             [seon.db :as db]
             [seon.effect :as effect]
@@ -293,6 +294,23 @@
              :malli.core/invalid-guard [(:guard data) [arguments (:value data)]]
              [(:input data) arguments])
            explanation (when-not arity? (m/explain offended value))
+           described-unions (when explanation
+                              (filter #(and (= :or (m/type (:schema %)))
+                                            (:error/message (m/properties (:schema %))))
+                                      (mu/subschemas offended)))
+           explained-problems
+           (distinct
+            (map (fn [problem]
+                   (let [union (some #(when (= (:in problem) (:in %)) %) described-unions)]
+                     (if union
+                       (-> problem (assoc :path (:path union) :schema (:schema union))
+                           (dissoc :type))
+                       problem)))
+                 (remove (fn [problem]
+                           (and (not (:check problem))
+                                (some #(and (:check %) (= (:in %) (:in problem)))
+                                      (:errors explanation))))
+                         (:errors explanation))))
            arm (case kind :malli.core/invalid-output :output
                           :malli.core/invalid-guard :guard :input)
            supplied-entries (when (= :input arm) (supplied-entry-problems function-symbol))
@@ -317,7 +335,7 @@
                                  :guard "arguments and return value"
                                  (str (or label (when (and (symbol? binding) (not= '_ binding)) binding)
                                           (str "argument " position " (0-based)"))))]
-                  (assoc
+                  (cond-> (assoc
                    (actionable-problem
                     (error/explain-problem
                     {:seon.error/problem problem
@@ -329,8 +347,12 @@
                     problem
                     (and (= 2 (count (:in problem)))
                          (contains? supplied-entries (vec (:in problem)))))
-                   :seon.error/schema-path (vec (:path problem)))))
-              (:errors explanation)))
+                   :seon.error/schema-path (vec (:path problem)))
+                    (= :guard arm)
+                    (assoc :seon.error/input arguments
+                           :seon.error/result-contract
+                           (m/form (:output (m/-function-info (:schema data))))))))
+              explained-problems))
            first-problem (first problems)
            expected (if arity? arglists (m/form offended))
            expected (if (and (vector? expected) (= :cat (first expected))

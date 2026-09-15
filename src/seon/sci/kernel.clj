@@ -496,7 +496,9 @@
                (or (ex-message throwable) "The operation was refused.")))
       (error/diagnostic
        (let [kind (if timed-out? time-limit-kind failure-kind)]
-         {kind (or subject :evaluation)
+         {kind (or subject (if timed-out?
+                             (:seon.eval/fn-entries diagnostic-record)
+                             true))
         :seon.error/kind kind
       :seon.error/message
       (or (:seon.error/message existing)

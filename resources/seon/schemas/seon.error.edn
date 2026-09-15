@@ -19,6 +19,8 @@
               [:seon.error/expected-description :string]
               [:seon.error/offending :seon.schema/value]
               [:seon.error/actual-description :string]
+              [:seon.error/input {:optional true} :seon.schema/value]
+              [:seon.error/result-contract {:optional true} :seon.schema/value]
               [:seon.error/fix :string]],
              :run [:and #:seon.db{:index true} :seon.db/ref],
              :data-blob :seon.blob/digest,

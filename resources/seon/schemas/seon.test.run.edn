@@ -7,6 +7,7 @@
                 :immutable [:and {:seon.db/identity false} :seon.test.run/id],
                 :immutable-error
                 [:map {:seon.error/class true
+                       :error/message "must identify the immutable test run"
                        :seon.render/ai seon.error/render-ai
                        :seon.render/html seon.error/render-html}
                  [:seon.test.run/immutable :seon.test.run/immutable]
@@ -14,6 +15,7 @@
                 :unavailable [:= true],
                 :unavailable-error
                 [:map {:seon.error/class true
+                       :error/message "must identify unavailable test execution"
                        :seon.render/ai seon.error/render-ai
                        :seon.render/html seon.error/render-html}
                  [:seon.test.run/unavailable :seon.test.run/unavailable]

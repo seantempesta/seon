@@ -717,8 +717,22 @@
    No message parsing or value printing occurs at this seam."
   {:malli/schema [:=> [:cat :seon.error/explain-request] :seon.error/problem-description]}
   [{:seon.error/keys [problem path argument parent]}]
-  (let [schema-type (m/type (:schema problem))
+  (let [check (let [check (:check problem)] (if (sequential? check) (first check) check))
+        checked-output (when check
+                         (or (:malli.core/explain-output check)
+                             (when-let [output (:output (m/-function-info (:schema problem)))]
+                               {:schema output :value (:malli.core/result check)})))
+        problem (if checked-output
+                  {:schema (:schema checked-output) :value (:value checked-output)}
+                  problem)
         missing? (= :malli.core/missing-key (:type problem))
+        entry-schema (when (and missing?
+                                (= :map (m/type (m/deref-all (:schema problem)))))
+                       (some (fn [[entry-key _ entry]]
+                               (when (= entry-key (last path)) entry))
+                             (m/children (m/deref-all (:schema problem)))))
+        problem (cond-> problem entry-schema (assoc :schema entry-schema))
+        schema-type (m/type (m/deref-all (:schema problem)))
         message (or (me/error-message problem) "the declared schema")
         expected (case schema-type
                    :vector "a vector" :sequential "a sequence" :map "a map"
@@ -727,8 +741,10 @@
                    :qualified-keyword "a namespaced keyword" :symbol "a symbol"
                    :qualified-symbol "a namespaced symbol" :nil "nil"
                    :fn message
+                   :or (or (:error/message (m/properties (:schema problem)))
+                           (str "a value satisfying " message))
                    (str "a value satisfying " message))]
-    {:seon.error/path (vec path)
+    (cond-> {:seon.error/path (vec path)
      :seon.error/argument argument
      :seon.error/expected (m/form (:schema problem))
      :seon.error/expected-description
@@ -742,7 +758,9 @@
        (and (= :vector schema-type) (sequential? (:value problem)))
        "Convert the sequence with vec before calling the function."
        (= :fn schema-type) message
-       :else (str "Supply " expected " at " (pr-str (vec path)) "."))}))
+       checked-output "Return a value satisfying the declared result contract for the shown input."
+       :else (str "Supply " expected " at " (pr-str (vec path)) "."))}
+      check (assoc :seon.error/input (first (:smallest check))))))
 
 (defn- refusal-value-text
   [unit value path]
@@ -764,25 +782,65 @@
       (:seon.render.value/text projection)
       (str "<value rendering unavailable: " (:seon.error/message projection) ">"))))
 
+(defn- reader-correction
+  "Select a missing declared argument key; no spelling heuristic is used."
+  [unit evidence]
+  (when-let [database (:seon.db/db unit)]
+    (when-let [operation (:seon.sci.reader/call evidence)]
+      (let [spec (db/q '[:find ?spec . :in $ ?sym
+                        :where [?f :seon.fn/sym ?sym] [?f :seon.fn/spec ?spec]]
+                      database (str operation))
+            position (:seon.sci.reader/argument-index evidence)
+            supplied ((requiring-resolve 'seon.call-preparation/supplied-map-entries)
+                      database (str operation))
+            supplied-keys (into #{} (map #(nth % 2)) (when (vector? supplied) supplied))
+            container (first (:seon.sci.reader/containers evidence))
+            present (set (take-nth 2 (:edamame/elements container)))]
+        (when (and (string? spec) (nat-int? position)
+                   (= "{" (:edamame/opened-delimiter container)))
+          (let [projection (schema/projection-from-database database)
+                compiled (m/function-schema (edn/read-string spec)
+                          {:registry (:seon.schema.projection/registry projection)})
+                candidates
+                (into #{}
+                      (mapcat
+                       (fn [arity]
+                         (let [input (:input (m/-function-info arity))
+                               argument (when (= :cat (m/type input))
+                                          (nth (m/children input) position nil))
+                               argument (when argument (m/deref-all argument))]
+                           (when (and argument (= :map (m/type argument)))
+                             (for [[key properties _] (m/children argument)
+                                   :when (and (not (:optional properties))
+                                              (not (contains? supplied-keys key))
+                                              (not (contains? present key)))]
+                               key)))))
+                      (m/-function-schema-arities compiled))]
+            (when (= 1 (count candidates)) (first candidates))))))))
+
 (defn- refusal-data
-  [fact data]
+  [unit fact data]
   (let [evidence (merge fact data)]
     (cond
       (seq (:seon.error/problems data)) data
 
-      (string? (:seon.sci.reader/text evidence))
-      {:seon.error/diagnostic-operation 'seon.sci.reader/read
+      (find evidence :seon.sci.reader/text)
+      (let [correction (reader-correction unit evidence)]
+      {:seon.error/diagnostic-operation (or (:seon.sci.reader/call evidence) 'seon.sci.reader/read)
        :seon.error/problems
        [{:seon.error/argument "source"
          :seon.error/path (into [] (keep evidence) [:seon.sci.reader/line :seon.sci.reader/column])
          :seon.error/expected :seon.cluster.eval/source
          :seon.error/expected-description "readable Clojure source"
-         :seon.error/offending (:seon.sci.reader/text evidence)
+         :seon.error/offending (or (:seon.sci.reader/token evidence) (:seon.sci.reader/text evidence))
          :seon.error/actual-description "unreadable source"
          :seon.error/fix
-         (if (= :stray-closer (:seon.sci.reader/error-kind evidence))
+         (cond
+           correction (str "Use " correction ".")
+           (:seon.sci.reader/prose-span? evidence) "Prose must start with ; on every line."
+           (= :stray-closer (:seon.sci.reader/error-kind evidence))
            "Balance the delimiters in this reply; every reply is read from scratch."
-           (str "Correct the reader error: " (:seon.error/message fact)))}]}
+           :else (str "Correct the reader error: " (:seon.error/message fact)))}]})
 
       (and (:seon.schema/definition evidence) (:seon.schema/error evidence))
       {:seon.error/diagnostic-operation 'seon.schema/register!
@@ -795,21 +853,67 @@
          :seon.error/actual-description "an incomplete schema"
          :seon.error/fix (:seon.error/message fact)}]}
 
+      (:seon.sci.eval/symbol evidence)
+      {:seon.error/diagnostic-operation 'seon.sci.eval/evaluate
+       :seon.error/problems
+       [{:seon.error/argument "source"
+         :seon.error/path []
+         :seon.error/expected :symbol
+         :seon.error/expected-description "a resolvable symbol"
+         :seon.error/offending (:seon.sci.eval/symbol evidence)
+         :seon.error/actual-description "an unresolved symbol"
+         :seon.error/fix "Define or require this symbol."}]}
+
+      (:seon.error/diagnostic-operation evidence)
+      (let [expected (:seon.error/diagnostic-expected evidence)
+            offending (:seon.error/diagnostic-offending evidence)
+            member (:seon.error/diagnostic-member evidence)
+            compiled (try
+                       (m/schema expected
+                                 (when-let [database (:seon.db/db unit)]
+                                   {:registry (:seon.schema.projection/registry
+                                               (schema/projection-from-database database))}))
+                       (catch Exception _ nil))
+            problem (when compiled
+                      (explain-problem
+                       {:seon.error/problem {:schema compiled :value offending}
+                        :seon.error/path [] :seon.error/argument (str member)}))]
+        {:seon.error/diagnostic-operation (:seon.error/diagnostic-operation evidence)
+         :seon.error/problems
+         [(or problem
+              {:seon.error/argument (str member)
+               :seon.error/path (get evidence :seon.db/path [])
+               :seon.error/expected expected
+               :seon.error/expected-description "the declared requirement"
+               :seon.error/offending offending
+               :seon.error/actual-description (value-description offending)
+               :seon.error/fix (str (:seon.error/message fact)
+                                    " Inspect the named requirement before retrying.")})]})
+
       :else data)))
 
 (defn- refusal-text
   [unit fact data]
   (let [stored-problems? (seq (:seon.error/problems data))
-        data (refusal-data fact data)
+        data (refusal-data unit fact data)
         operation (:seon.error/diagnostic-operation data)
         problems (:seon.error/problems data)
-        example (not-empty (get-in fact [:seon.error/doc :example]))]
+        example (or (not-empty (get-in fact [:seon.error/doc :example]))
+                    (when (and (:seon.db/db unit) (qualified-symbol? operation))
+                      (let [doc (db/q '[:find ?doc . :in $ ?sym
+                                        :where [?f :seon.fn/sym ?sym]
+                                               [?f :seon.fn/doc ?doc]]
+                                      (:seon.db/db unit) (str operation))]
+                        (when (string? doc)
+                          (not-empty
+                           (:example
+                            ((requiring-resolve 'seon.sci.eval/docstring-parts) doc)))))))]
     (when (and operation (seq problems))
       (str/join
        "\n"
        (map-indexed
         (fn [index {:seon.error/keys [path argument expected expected-description
-                               offending actual-description fix]}]
+                               offending actual-description fix input result-contract] :as problem}]
           (let [location (when stored-problems?
                            [:seon.error/data :seon.error/problems index])]
           (str operation " refused " argument " at " (pr-str path)
@@ -818,6 +922,10 @@
                "), got " actual-description
                " " (refusal-value-text unit offending (when location (conj location :seon.error/offending)))
                ". Fix: " fix
+               (when (find problem :seon.error/input)
+                 (str " Input: " (refusal-value-text unit input nil) "."))
+               (when result-contract
+                 (str " Result contract: " (refusal-value-text unit result-contract nil) "."))
                " Example: " (or example "No docstring example is available."))))
         problems)))))
 
@@ -1464,9 +1572,8 @@
   (let [value (rendered-error-value unit)
         source (when (:seon.error/data-edn value) (fact-source value))]
     (or (refusal-text unit (or source value) (:seon.error/data (or source value)))
-        (pr-str (merge (if (map? source) source
-                       (if (map? value) value {}))
-                   (select-keys value [:seon.error/kind :seon.error/message]))))))
+        (:seon.error/message (or source value))
+        "Error evidence is unavailable.")))
 
 (defn render-html
   "Render one fault's kind, message, time, function, turn, and evidence link."

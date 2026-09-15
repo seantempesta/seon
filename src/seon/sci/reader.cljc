@@ -627,6 +627,8 @@
             (recur (next-reading-context state form)
                    (conj events event))))))))
 
+(declare cause-data)
+
 (defn- reader-error
   ([text failure]
    (reader-error text failure nil))
@@ -635,9 +637,18 @@
         refused? (::refusal data)
         failure-line (or (:line data) (:row data))
         failure-column (or (:column data) (:col data))
+        parser-data (cause-data failure)
+        containers (:edamame/containers parser-data)
+        call-container (some #(when (= "(" (:edamame/opened-delimiter %)) %) containers)
+        call (first (:edamame/elements call-container))
         error-data
         (cond-> {::text text
                  ::phase (or (:phase data) "parse")}
+          (:edamame/token parser-data) (assoc ::token (:edamame/token parser-data)
+                                               ::token-kind (:edamame/token-kind parser-data))
+          (seq containers) (assoc ::containers containers)
+          (symbol? call) (assoc ::call (resolved-operation call (::reading-state data))
+                                ::argument-index (dec (count (:edamame/elements call-container))))
           failure-line (assoc ::line failure-line)
           failure-column (assoc ::column failure-column)
           classification (merge classification)
@@ -720,6 +731,7 @@
                        (not mismatched-closer))
         detail
         (cond
+          (:edamame/token data) :invalid-token
           unclosed? :unclosed
           (or (= "" opened) mismatched-closer) :stray-closer
           (and (map? data)
@@ -733,6 +745,8 @@
           :else :other)]
     {::recovery-kind (if unclosed? :unclosed :localized)
      ::error-kind detail
+     ::prose-span? (and (= :symbol (:edamame/token-kind data))
+                        (empty? (:edamame/containers data)))
      ::failure-offset failure-offset}))
 
 (defn- line-start-anchor
@@ -770,11 +784,11 @@
         (recur (inc offset))))))
 
 (defn- recovery-point
-  [text failure-start {::keys [recovery-kind error-kind]}]
+  [text failure-start {::keys [recovery-kind error-kind prose-span?]}]
   (let [text-length (count text)
         point
         (cond
-          (and (= :invalid-token error-kind)
+          (and (= :invalid-token error-kind) (not prose-span?)
                (not= \( (get text failure-start)))
           (token-end text failure-start)
 
@@ -811,7 +825,7 @@
       (::ns state) (assoc ::ns (::ns state)))))
 
 (defn- recovering-events
-  "Recover only at proven top-level anchors or past one invalid token."
+  "Recover at proven top-level anchors, retaining one unreadable span."
   [text reading-context failure]
   (let [starts (line-starts text)]
     (loop [offset 0

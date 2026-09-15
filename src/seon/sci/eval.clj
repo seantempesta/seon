@@ -103,6 +103,7 @@
             [clojure.walk :as walk]
             [clojure.test]
             [clojure.test.check.generators :as gen]
+            [malli.core :as m]
             [my.background]
             [my.message]
             [my.turn]
@@ -1128,7 +1129,9 @@
    :seon.error/kind :seon.sci.eval/documentation-unavailable
    :seon.error/message (str "No public program documentation is available for " requested ".")})
 
-(defn- docstring-parts
+(defn docstring-parts
+  "Split a declared docstring into its summary, body, and final Example section."
+  {:malli/schema [:=> [:cat :string] :map]}
   [docstring]
   (let [[summary & lines] (str/split-lines (or docstring ""))
         lines (mapv str/trim lines)
@@ -1147,20 +1150,22 @@
                 (:seon.fn/arities row))))
 
 (defn- documentation-contract
-  [row]
+  [database row]
   (if-let [spec (:seon.fn/spec row)]
-    (let [form (edn/read-string spec)
-          arities (if (= :function (first form)) (rest form) [form])
-          inputs (mapv #(nth % (- (count %) 2)) arities)
-          outputs (mapv last arities)]
+    (let [projection (schema/projection-from-database database)
+          compiled (m/function-schema (edn/read-string spec)
+                     {:registry (:seon.schema.projection/registry projection)})
+          arities (mapv m/-function-info (m/-function-schema-arities compiled))
+          inputs (mapv #(m/form (:input %)) arities)
+          outputs (mapv #(m/form (:output %)) arities)]
       {:in (if (= 1 (count inputs)) (first inputs) inputs)
        :out (if (= 1 (count outputs)) (first outputs) outputs)})
     {:in [] :out []}))
 
 (defn- agent-documentation-contract
-  [database row expanded?]
+  [database row]
   (let [entries (call-preparation/supplied-map-entries database (:seon.fn/sym row))
-        contract (documentation-contract row)
+        contract (documentation-contract database row)
         expanded (walk/postwalk-replace (into {} (documentation-schemas row)) contract)
         arities (if (= :function (first (edn/read-string (or (:seon.fn/spec row) "[]"))))
                   (:in expanded) [(:in expanded)])]
@@ -1180,16 +1185,16 @@
                             input
                             (group-by second (filter #(= order (first %)) entries))))
                   (range) arities)]
-        (cond-> (if expanded? expanded contract)
+        (cond-> contract
           (seq entries)
           (assoc :in (if (= 1 (count inputs)) (first inputs) inputs)
                  :supplied (vec (distinct (map #(nth % 2) entries)))))))))
 
 (defn- function-doc-map
   [database row]
-  (merge (docstring-parts (:seon.fn/doc row))
+  (merge (docstring-parts (or (:seon.fn/doc row) ""))
          {:arglists (edn/read-string (or (:seon.fn/arglists row) "()"))}
-         (agent-documentation-contract database row true)))
+         (agent-documentation-contract database row)))
 
 (defn directory-value
   "Return current public function summaries and declared schemas for a namespace."
@@ -1214,8 +1219,8 @@
          :functions (mapv (fn [row]
                             (merge {:sym (symbol (:seon.fn/sym row))
                                     :arglists (edn/read-string (or (:seon.fn/arglists row) "()"))
-                                    :doc (:summary (docstring-parts (:seon.fn/doc row)))}
-                                   (agent-documentation-contract database row false)))
+                                    :doc (:summary (docstring-parts (or (:seon.fn/doc row) "")))}
+                                   (agent-documentation-contract database row)))
                           functions)})
       :else (documentation-unavailable namespace-name))))
 

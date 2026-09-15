@@ -9,6 +9,20 @@
             [seon.schema :as schema]
             [seon.test-support :as support]))
 
+(deftest documentation-keeps-named-contracts-and-guarded-result-shapes
+  (support/with-database
+    (fn [connection]
+      (let [doc (evaluation/documentation-value @connection 'seon.db/pull 'seon.db/pull)
+            output (pr-str (:out doc))
+            contract (#'evaluation/documentation-contract
+                      @connection
+                      {:seon.fn/spec
+                       "[:function [:=> [:cat :int] :string [:fn {:error/message \"pair relation\"} clojure.core/vector?]] [:=> [:cat [:or :string :int] :boolean] :keyword]]"})]
+        (is (not (:seon.error/kind doc)))
+        (is (not (str/includes? output ":gen/gen")) output)
+        (is (= [[:cat :int] [:cat [:or :string :int] :boolean]] (:in contract)))
+        (is (= [:string :keyword] (:out contract)))))))
+
 (deftest documentation-is-returned-data-without-a-second-printed-copy
   (support/with-database
    (fn [connection]

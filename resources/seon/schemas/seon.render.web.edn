@@ -148,6 +148,7 @@
                   :preview-unavailable [:= true]
                   :preview-unavailable-error
                   [:map {:seon.error/class true :seon.render/ai seon.error/render-ai
+                         :error/message "must identify an unavailable preview"
                          :seon.render/html seon.error/render-html}
                    [:seon.render.web/preview-unavailable :seon.render.web/preview-unavailable]
                    [:seon.error/message :seon.error/message]]
@@ -158,6 +159,7 @@
                   :function-unavailable :qualified-symbol
                   :function-unavailable-error
                   [:map {:seon.error/class true
+                         :error/message "must identify the unavailable function"
                          :seon.render/ai seon.error/render-ai
                          :seon.render/html seon.error/render-html}
                    [:seon.render.web/function-unavailable :seon.render.web/function-unavailable]
@@ -165,6 +167,7 @@
                   :invalid-context-action [:= true]
                   :invalid-context-action-error
                   [:map {:seon.error/class true
+                         :error/message "must identify the invalid context action"
                          :seon.render/ai seon.error/render-ai
                          :seon.render/html seon.error/render-html}
                    [:seon.render.web/invalid-context-action :seon.render.web/invalid-context-action]

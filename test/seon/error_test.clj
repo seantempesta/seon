@@ -633,7 +633,8 @@
                   :seon.error/message "No file exists at that path."}
            ai (error/render-ai value)
            html (error/render-html value)]
-       (is (= value (edn/read-string ai)) "AI retains the complete flat error")
+       (is (str/includes? ai (:seon.error/message value))
+           "AI explains the failure without dumping internal evidence")
        (is (= :article (first html)))
        (is (schema/valid-candidate-value? :seon.render/hiccup html))
        (is (str/includes? (pr-str html) (:seon.error/message value)))))))

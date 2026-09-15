@@ -2,6 +2,7 @@
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [seon.contracts-fixture :as fixture]
+            [seon.ai.tokens :as tokens]
             [seon.db :as db]))
 
 (deftest missing-note-id-names-the-key-and-the-docstring-example
@@ -12,7 +13,7 @@
             shown (:seon.eval/shown saved)]
         (is (= :seon.instrument/contract-violated (:seon.error/kind refusal)))
         (doseq [fragment ["my.note/add! refused request at [:my.note/id]"
-                          "missing :my.note/id" "Fix: Supply :my.note/id"
+                          "missing :my.note/id" "Fix: Supply :my.note/id with a string"
                           "Example: (my.note/add!" "A verified observation."]]
           (is (str/includes? shown fragment) shown))))))
 
@@ -43,7 +44,30 @@
                                             "(my.plan/current! {:my.plan/item/id \"juniper/define\"})")
             shown (:seon.eval/shown saved)]
         (is (= :seon.sci.reader/unreadable (:seon.error/kind refusal)))
-        (doseq [fragment ["seon.sci.reader/read refused source at"
+        (doseq [fragment ["my.plan/current! refused source at"
                           "expected readable Clojure source"
-                          ":my.plan/item/id" "Fix:" "Example:"]]
+                          ":my.plan/item/id" "Fix: Use :my.plan.item/id." "Example:"]]
           (is (str/includes? shown fragment) shown))))))
+
+(deftest run11-about-refusal-names-the-attribute-and-reference-shape
+  (fixture/with-agent
+    (fn [connection handle routing]
+      (let [[saved refusal] (fixture/submit connection handle routing
+                             "(my.note/add! {:my.note/id \"probe\" :my.note/content \"Observed.\" :my.note/about \"largest-customer-original\"})")
+            shown (:seon.eval/shown saved)]
+        (is (= :seon.instrument/contract-violated (:seon.error/kind refusal)))
+        (doseq [fragment ["my.note/add! refused request at [:my.note/about]"
+                          "an entity id or a lookup ref" "[:my.note/id" "Fix:" "largest-customer-original"]]
+          (is (str/includes? shown fragment) shown))
+        (is (= 1 (count (get-in refusal [:seon.error/data :seon.error/problems]))))))))
+
+(deftest unresolved-symbol-shows-the-correction-without-the-evidence-map
+  (fixture/with-agent
+    (fn [connection handle routing]
+      (let [[saved refusal] (fixture/submit connection handle routing "my.web/no-such-fetch")
+            shown (:seon.eval/shown saved)]
+        (is (= :seon.sci.eval/evaluation-failed (:seon.error/kind refusal)))
+        (is (str/includes? shown "my.web/no-such-fetch") shown)
+        (is (str/includes? shown "Fix: Define or require this symbol.") shown)
+        (is (< (tokens/estimate shown) 150) shown)
+        (is (not (str/includes? shown "diagnostic-evidence")) shown)))))

@@ -55,7 +55,7 @@
   [projection schema-key]
   (let [registry (:seon.schema.projection/registry projection)
         compiled (m/schema schema-key {:registry registry})]
-    (mg/generator compiled)))
+    (mg/generator compiled {:registry registry})))
 
 (defn- generated-class-value
   [projection schema-key seed]
@@ -128,7 +128,9 @@
             compiled (m/schema schema-key
                                {:registry
                                 (:seon.schema.projection/registry projection)})
-            generated (mg/generate compiled {:seed 2026080603 :size 8})]
+            generated (mg/generate
+                       (class-value-generator projection schema-key)
+                       {:seed 2026080603 :size 8})]
         (testing (str schema-key)
           (is (= :seon.error/refusal-value
                  (:seon.error/refusal-shape properties)))

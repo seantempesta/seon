@@ -429,8 +429,8 @@
       (is (not= ::timeout result))
       (is (vector? result)))))
 
-(deftest invalid-prose-tokens-recover-at-token-granularity
-  (doseq [source ["denied /etc/hosts(+ 1 2)"
+(deftest invalid-prose-spans-recover-at-the-next-top-level-anchor
+  (doseq [source ["denied /etc/hosts\n(+ 1 2)"
                   "80s(+ 2 3)"]]
     (let [result (events source)]
       (is (some #(= :invalid-token
@@ -440,6 +440,19 @@
       (is (some #(and (seq? (:seon.sci.reader/form %))
                       (= '+ (first (:seon.sci.reader/form %))))
                 result)))))
+
+(deftest reader-errors-retain-token-and-enclosing-parser-evidence
+  (let [parsed (events "(my.plan/current! {:my.plan/item/id \"x\"})")
+        data (:seon.error/data (first-read-error parsed))]
+    (is (= ":my.plan/item/id" (:seon.sci.reader/token data)))
+    (is (= 'my.plan/current! (:seon.sci.reader/call data)))
+    (is (= 0 (:seon.sci.reader/argument-index data)))
+    (is (= ["{" "("] (mapv :edamame/opened-delimiter (:seon.sci.reader/containers data)))))
+  (let [source "Gate: failed\narguments: []\nexpected: number\nactual: wrong )\n(+ 1 2)"
+        parsed (events source)]
+    (is (= [:error :form] (read-kinds parsed)))
+    (is (= "Gate:" (get-in (first-read-error parsed) [:seon.error/data :seon.sci.reader/token])))
+    (is (= '(+ 1 2) (:seon.sci.reader/form (last parsed))))))
 
 (deftest mined-digit-leading-result-symbols-never-leak-a-form
   (doseq [source

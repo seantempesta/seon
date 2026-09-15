@@ -252,6 +252,7 @@
                 :documentation-unavailable-error
                 [:map
                  {:seon.error/class true,
+                  :error/message "must identify the function or namespace without documentation",
                   :seon.render/ai seon.error/render-ai,
                   :seon.render/html seon.error/render-html}
                  [:seon.sci.eval/documentation-unavailable

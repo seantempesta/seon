@@ -79,6 +79,7 @@
                :selection-refused-error
                [:and
                 {:seon.error/class true
+                 :error/message "must identify the refused context selection"
                  :seon.error/refusal true
                  :seon.error/refusal-shape :seon.error/refusal-value
                  :seon.render/ai seon.error/refusal-prose
