@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, sci, test, wave/contract-generator]
 created: 2026-09-14
@@ -73,3 +73,19 @@ The ordinary test-row admission failure is also reproduced independently in
 manufacture usage metadata or call edges to turn these tests green. The new
 exact run-2 regression passes on the same armed canonical harness; it does not
 claim the older failures repaired or fault-committer delivery observed.
+
+## Authorized resolution — 2026-09-14
+
+All three older tests are retained and green on the armed canonical fixture.
+Fixture transactions now assert admission, declare program provenance and
+namespace refs, and use sets for call edges. The usage render request's incorrect
+database-entity marker was removed so ordinary tests can be admitted without
+inventing usage metadata. No semantic assertion was weakened or test deleted.
+
+The vector-input regression checks the exact run-2 definition and its meaningful
+empty-input failure. A checker exception propagates unchanged instead of becoming
+agent output. In the existing turn owner, the call to `gate-function-install`
+is outside the agent-mistake `phase` wrapper; it therefore reaches the existing
+Flow fault path. This repair proves that boundary and the platform gate proves
+the common infrastructure; it does not claim a separately injected fault
+transaction in default, which remained read-only for verification.
