@@ -124,7 +124,7 @@
 
 (defn var-process
   "Build one Flow proc launcher from a step VAR and a pinned workload.
-  THE construction door for every proc in the system (F0(a), the F1
+  THE construction seam for every proc in the system (F0(a), the F1
   blueprint): it REFUSES a non-var step — an anonymous step captures
   its closures and hot reload silently stops applying to running
   graphs — and REFUSES a missing or `:mixed` workload, because the
@@ -137,7 +137,7 @@
   invisible on `:compute` and fatal on `:io`, the exact audited
   signature. flow's own `:params` assertion cannot make that refusal
   (`start-proc` assoc's `::flow/pid` into args, so args is always
-  truthy — falsified live 2026-08-07), so this door makes it. `args`
+  truthy — falsified live 2026-08-07), so this seam makes it. `args`
   merge into the start options' `:args` so `create-flow` definitions
   stay pure data."
   {:malli/schema

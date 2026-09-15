@@ -103,7 +103,7 @@ def model_provenance_from_run(model_config: dict[str, Any] | None,
 # An execution's outcome: "pass" | "fail" | a flake-taxonomy class string
 # (anything else). Taxonomy classes used by the runners:
 #   solve_timeout          pod reported timed_out (taxonomy: latency variance)
-#   agent_run_refused      HTTP 422 from the door (wiring defect, never a score)
+#   agent_run_refused      HTTP 422 from the endpoint (wiring defect, never a score)
 #   cluster_boot_timeout   ephemeral cluster never came ready
 #   harness_error          any other harness-side exception (bin/seon, wire…)
 #

@@ -20,7 +20,7 @@ amplifies one agent's declaration across the co-hosted process heap.
 
 ## Evidence
 
-Scratch cluster `codex-repl-dogfood-0804`, MCP `eval_clj`, `door` mode:
+Scratch cluster `codex-repl-dogfood-0804`, MCP `eval_clj`, `sci` mode:
 
 ```clojure
 (seon.schema/register! :my.dogfood/score [:int {:min 0 :max 100}])

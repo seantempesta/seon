@@ -1,4 +1,4 @@
-"""BFCL single-turn AST subset over the pod door — native completion bridge.
+"""BFCL single-turn AST subset over the pod endpoint — native completion bridge.
 
 BFCL (Berkeley Function-Calling Leaderboard) is THE canonical established
 tool-calling bench. Its V1 single-turn non-live non-exec categories are scored
@@ -6,7 +6,7 @@ by a pure-Python AST matcher (`inspect_evals.bfcl.score.ast_match`) — NO code
 runs, NO sandbox, NO tool bridge (even the single-turn `exec_*` ground truth is
 preprocessed into the same matcher; adoption plan
 docs/prds/agent-ctx/research/agentic-benchmark-adoption-2026-07-04.md). That
-deterministic host-side oracle fits our `POST /agents/run` door and the
+deterministic host-side oracle fits our `POST /agents/run` endpoint and the
 "scorers gate correctness" rule exactly — the ONE gap is the shape of the
 answer the scorer reads.
 

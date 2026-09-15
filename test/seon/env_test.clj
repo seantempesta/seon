@@ -330,7 +330,7 @@
   ([state _input _message] [state nil]))
 
 (deftest a-crossing-that-names-no-environment-is-refused-where-it-is-built
-  (testing "the proc construction door"
+  (testing "the proc construction seam"
     (let [refusal (test-support/refusal-data
                    #(flow/var-process #'inert-step :io {}))]
       (is (= :seon.env/absent-environment (:seon.error/kind refusal)))

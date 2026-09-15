@@ -331,12 +331,12 @@
             {:root (.getCanonicalPath project-root)
              :cluster "fixture"
              :namespace "mcp.fixture.target"
-             :mode "door"
+             :mode "sci"
              :session_id "coordinates"
              :code "(+ 1 2)"}))
         data (result-data result)]
     (is (true? (:isError result)))
-    (is (= "door" (:seon.dev.mcp/mode data)))
+    (is (= "sci" (:seon.dev.mcp/mode data)))
     (is (= "mcp.fixture.target" (:seon.dev.mcp/namespace data)))
     (is (= "fixture" (:seon.dev.mcp/cluster data)))
     (is (= "coordinates" (:seon.dev.mcp/session-id data)))
@@ -345,7 +345,7 @@
 
 (deftest evaluation-response-reports-the-exact-caller-source-once
   (let [source "  (+ 20 22)\n"]
-    (doseq [mode ["jvm" "door"]
+    (doseq [mode ["jvm" "sci"]
             exception? [false true]]
       (let [writer (java.io.StringWriter.)
             transport-form (atom nil)
@@ -503,14 +503,14 @@
                     "(do (def answer 41) [(inc answer) (ns-name *ns*)])")
         jvm-form ((bridge-var 'remote-evaluation-form)
                   evaluation "jvm" "fixture" namespace-symbol)
-        door-form ((bridge-var 'remote-evaluation-form)
-                   evaluation "door" "fixture" namespace-symbol)]
+        sci-form ((bridge-var 'remote-evaluation-form)
+                   evaluation "sci" "fixture" namespace-symbol)]
     (try
       (is (= [42 namespace-symbol] (eval (read-string jvm-form))))
       (is (= 41 (var-get (ns-resolve namespace-symbol 'answer))))
-      (is (str/includes? door-form
+      (is (str/includes? sci-form
                          "[:seon.ns/name (quote mcp.chosen.namespace)]"))
-      (is (str/includes? door-form "seon.sci.eval/evaluate"))
+      (is (str/includes? sci-form "seon.sci.eval/evaluate"))
       (finally
         (in-ns original-namespace)
         (when (find-ns namespace-symbol)
@@ -597,7 +597,7 @@
                        "agent/orchestrator context"))
     (is (str/includes? (:description eval-tool)
                        "(seon.operator/connection \"default\")"))
-    (is (= ["jvm" "door"]
+    (is (= ["jvm" "sci"]
            (get-in eval-tool [:inputSchema :properties :mode :enum])))
     (is (contains? (get-in eval-tool [:inputSchema :properties]) :root))
     (is (contains? (get-in eval-tool [:inputSchema :properties]) :namespace))

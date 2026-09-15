@@ -1,5 +1,5 @@
 (ns seon.repl-parity-test
-  "Stock-Clojure behavior checks exercised through Seon's production door."
+  "Stock-Clojure behavior checks exercised through Seon's production evaluation path."
   (:require [clojure.edn :as edn]
             [clojure.string :as str]
             [clojure.test :refer [deftest is use-fixtures]]
@@ -133,13 +133,13 @@
        (check-row! ~row-id ~expected-state (fn [] ~check)))))
 
 (def pending-rows
-  "Checklist rows with no honest executable production-door assertion yet."
+  "Checklist rows with no honest executable production-path assertion yet."
   [{:parity/row "A7"
     :parity/reason "Route c: Seon's reader intentionally refuses #= input."}
    {:parity/row "D10"
-    :parity/reason "Route c: the door never enables outer read-eval."}
+    :parity/reason "Route c: the evaluator never enables outer read-eval."}
    {:parity/row "E1"
-    :parity/reason "The door exposes neither clojure.main/ex-triage nor a raw Throwable."}
+    :parity/reason "The evaluator exposes neither clojure.main/ex-triage nor a raw Throwable."}
    {:parity/row "E5"
     :parity/reason "The guarded context cannot construct a Throwable with a replaced stack."}
    {:parity/row "E9"
@@ -153,7 +153,7 @@
    {:parity/row "F5"
     :parity/reason "Route c: StringWriter capture has no terminal flush behavior."}
    {:parity/row "F6"
-    :parity/reason "Route c: the production door is the input and exposes no stdin."}
+    :parity/reason "Route c: the production evaluation path is the input and exposes no stdin."}
    {:parity/row "G5"
     :parity/reason "The production reader fixes features and exposes no :read-cond :preserve option."}
    {:parity/row "G9"
@@ -161,9 +161,9 @@
    {:parity/row "I1"
     :parity/reason "Already owned by seon.sci.admit-test, not a stock-parity behavior."}
    {:parity/row "I2"
-    :parity/reason "P-TOTAL runs in seon.print-test; this gate has no second production-door assertion."}
+    :parity/reason "P-TOTAL runs in seon.print-test; this gate has no second production-path assertion."}
    {:parity/row "I3"
-    :parity/reason "P-TEE runs in seon.print-test; this gate has no second production-door assertion."}
+    :parity/reason "P-TEE runs in seon.print-test; this gate has no second production-path assertion."}
    {:parity/row "I4"
     :parity/reason "Stored result re-render is owned by seon.render.value-test."}
    {:parity/row "I5"
@@ -526,7 +526,7 @@
              (str/includes? (:out (peek results)) "Divide by zero"))))
 
 (defparity "C6" :known-divergence
-  ;; Pending Lane 1: the production door still binds *out* and *err* together.
+  ;; Pending Lane 1: the production evaluation path still binds *out* and *err* together.
   (compared false
             (:value
              (first (repl-session ["(identical? *out* *err*)"])))))

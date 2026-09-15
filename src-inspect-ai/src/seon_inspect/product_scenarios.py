@@ -231,7 +231,7 @@ def run_product_scenario(scenario: str, cluster_url: str, read_database,
     """Drive real work through ``pod_run`` and read one final database value.
 
     Restart ownership and database read-back are injected boundaries because
-    the static pod HTTP door neither owns another process nor exposes arbitrary
+    the static pod HTTP endpoint neither owns another process nor exposes arbitrary
     cross-agent database pulls. The owned-target lease supplies both live.
     """
     if scenario not in SCENARIOS:

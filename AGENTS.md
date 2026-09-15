@@ -486,8 +486,9 @@ shown text, out, error, and read evidence. The live result is not a second
 durable entity. Legacy `:seon.cluster.eval`, `:seon.cluster.run.form/*`, and
 `receipt` identifiers are source references during the owning lane's cut;
 they never justify a second entity or a duplicated attribute.
-In particular, the legacy MCP mode string `door` is an API spelling, not a
-concept: explain it as **SCI evaluation mode**. Preserve literal tool arguments,
+In particular, the MCP evaluation modes are `jvm` (the host REPL) and `sci`
+(**SCI evaluation mode**: the cluster's shared SCI context); the retired
+spelling `door` is never written. Preserve literal tool arguments,
 identifiers and historical quotations where accuracy requires them, but do not
 carry those spellings into new prose. Rendering functions are functions;
 dependency-specific producers/consumers remain producers/consumers when that is
@@ -601,7 +602,7 @@ The loop:
    mode is the host prepl with NO cluster custody bound — `seon.db`'s
    elided db/conn arities refuse there; `(seon.operator/connection
    "default")` supplies explicit custody. SCI evaluation mode (the tool's
-   current literal argument is `mode: "door"`) evaluates through
+   literal argument is `mode: "sci"`) evaluates through
    the cluster's SCI ctx where elision holds (and mutates that shared ctx,
    so keep SCI evaluation probes disposable). **If these
    tools are down, degraded, or missing, SAY SO IMMEDIATELY** — report it

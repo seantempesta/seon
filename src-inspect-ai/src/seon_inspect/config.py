@@ -6,7 +6,7 @@ calibration-run-2026-07-02.md) and selectable PER-RUN via function arguments
 or per-sample `metadata["timeout_ms"]`). Precedence is per-sample metadata then
 per-run argument; absence stays absent so the pod derives its database-owned
 run deadline. The ONLY env var is `SEON_CLUSTER_URL` —
-the cluster-INSTANCE selector (which cluster's pod door), never behavior
+the cluster-INSTANCE selector (which cluster's pod endpoint), never behavior
 config; it supplies the default endpoint when no `cluster_url` argument is
 passed, read at CALL time (never import time — a prior import-time read made
 `run_bench(cluster_url=…)` a no-op).
@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import os
 
-# Fallback pod door when neither a cluster_url argument nor SEON_CLUSTER_URL
+# Fallback pod endpoint when neither a cluster_url argument nor SEON_CLUSTER_URL
 # is given (the default cluster). Benches are cluster-agnostic: any pod that
 # mounts POST /agents/run works.
 DEFAULT_CLUSTER_URL = "http://127.0.0.1:7890/agents/run"
@@ -40,7 +40,7 @@ CLUSTER_BOOT_BUDGET_S = 60
 # Per-POD sample concurrency. One pod per cluster, one cluster = one sample's
 # isolation unit — the ceiling is 1 BY CONSTRUCTION (owner-locked; see the
 # agent-ctx CLAUDE.md "Parallelism/swarms"). Calibration 2026-07-02 measured
-# the old shared-pod door failing at effective concurrency 2 (~15% hard-fail);
+# the old shared-pod endpoint failing at effective concurrency 2 (~15% hard-fail);
 # parallel scoring = MORE clusters (bench-cluster-N, one URL each), never more
 # samples per pod.
 POD_MAX_SAMPLES = 1
@@ -63,7 +63,7 @@ BENCH_CLUSTER_PARALLELISM = 2
 
 
 def cluster_url(override: str | None = None) -> str:
-    """Resolve the pod door: argument > SEON_CLUSTER_URL > default, at call time."""
+    """Resolve the pod endpoint: argument > SEON_CLUSTER_URL > default, at call time."""
     return override or os.environ.get("SEON_CLUSTER_URL") or DEFAULT_CLUSTER_URL
 
 

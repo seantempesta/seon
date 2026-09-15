@@ -92,7 +92,7 @@ class BenchSpec:
 
 # The assessed bench registry. Adding a bench is one BenchSpec line.
 # case1 = `input text -> final answer` with a host-side scorer, driven
-# through the pod door; code-exec benches (HumanEval/MBPP) and web-tool
+# through the pod endpoint; code-exec benches (HumanEval/MBPP) and web-tool
 # benches (GAIA) are the CASE-2 / mvm tier — deferred, not faked.
 BENCHES: dict[str, BenchSpec] = {
     "gsm8k": BenchSpec("inspect_evals.gsm8k", "gsm8k"),
@@ -113,7 +113,7 @@ BENCHES: dict[str, BenchSpec] = {
 
 
 def case1_benches() -> dict[str, BenchSpec]:
-    """The registry entries runnable through the pod door (`run_bench`)."""
+    """The registry entries runnable through the pod endpoint (`run_bench`)."""
     return {n: s for n, s in BENCHES.items() if s.kind == "case1"}
 
 
@@ -145,13 +145,13 @@ def load_bench_task(
 ) -> Task:
     """Load a standard inspect_evals Task by catalog name (its own dataset+scorer).
 
-    Pod-door (case1) benches only."""
+    Pod-endpoint (case1) benches only."""
     spec = BENCHES.get(name)
     if spec is None:
         raise KeyError(
             f"{name!r} not in the assessed bench registry {sorted(BENCHES)}; "
             "code-exec (humaneval/mbpp) + web-tool (gaia) benches are the "
-            "case-2/mvm tier — not runnable through the pod door."
+            "case-2/mvm tier — not runnable through the pod endpoint."
         )
     if _admission is None:
         source_admission.verify_sources(_bench_identity(name, spec))
@@ -477,7 +477,7 @@ def run_bench(
     """Run a standard bench with a Seon cluster's pod agent as the solver.
 
     `cluster_url` (or SEON_CLUSTER_URL) selects the long-lived cluster's pod
-    door — cluster-agnostic; acme is just one value. `per_sample_cluster=True`
+    endpoint — cluster-agnostic; acme is just one value. `per_sample_cluster=True`
     switches to one ephemeral cluster per sample instead (mutually exclusive
     with `cluster_url`). `cluster_parallelism` (per-sample mode only; default
     `config.BENCH_CLUSTER_PARALLELISM`) is bench-cluster-N: that many

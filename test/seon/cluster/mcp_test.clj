@@ -38,7 +38,7 @@
      :seon.sci.eval/ctx
      (env/carry-state {} (env/environment-state environment))}))
 
-(defn- door-evaluation
+(defn- sci-evaluation
   [effective value]
   (let [admitted
         (admit/admit
@@ -104,7 +104,7 @@
     (is (true? (:seon.dev.mcp/windowed? result)))
     (is (string? (:seon.blob/digest result)))))
 
-(deftest door-evaluations-project-the-repl-text-face
+(deftest sci-evaluations-project-the-repl-text-face
   (let [cluster-name "mcp-text-face-test"
         effective (config/defaults)
         result-edn (:seon.cluster.eval/result-edn
@@ -120,17 +120,17 @@
         result (projected cluster-name effective evaluation)
         face (:seon.dev.mcp/value result)]
     (is (string? (:seon.dev.mcp/text face))
-        "a door evaluation projects the printed REPL face")
+        "an SCI evaluation projects the printed REPL face")
     (is (str/starts-with? (:seon.dev.mcp/text face) "[0 1 2")
         "the text face reads like a REPL value")
     (is (not (contains? face :seon.cluster.eval/result-edn))
         "the node tree never rides the envelope; the text replaces it")
     (is (< (utf8-size result) 8192))))
 
-(deftest door-top-level-strings-use-the-shared-value-window
+(deftest sci-top-level-strings-use-the-shared-value-window
   (let [cluster-name "mcp-top-level-string-window-test"
         effective (config/defaults)
-        evaluation (door-evaluation effective
+        evaluation (sci-evaluation effective
                                     (apply str (repeat 1048576 \x)))
         artifact
         (render.value/artifact
@@ -155,7 +155,7 @@
                          :seon.config.eval.result/blob-threshold 1000000)
         text (apply str (repeat 36 \x))
         result (projected cluster-name effective
-                          (door-evaluation effective
+                          (sci-evaluation effective
                                            (observed-query-shape)))
         face (:seon.dev.mcp/value result)
         rendered (:seon.dev.mcp/text face)]
@@ -166,11 +166,11 @@
     (is (false? (:seon.dev.mcp/windowed? result))
         "presentation fitting does not invent a durable artifact")))
 
-(deftest door-artifact-size-ignores-evaluation-envelope-bulk
-  (let [cluster-name "mcp-small-door-value-test"
+(deftest sci-artifact-size-ignores-evaluation-envelope-bulk
+  (let [cluster-name "mcp-small-sci-value-test"
         effective (config/defaults)
         evaluation
-        (assoc (door-evaluation effective 42)
+        (assoc (sci-evaluation effective 42)
                :seon.sci.eval/internal-detail (apply str (repeat 5000 \x)))
         result (projected cluster-name effective evaluation)
         face (:seon.dev.mcp/value result)]
@@ -471,12 +471,12 @@
           (finally
             (swap! running-instances dissoc cluster-name)))))))
 
-(deftest door-value-artifacts-drill-from-the-result-root
-  (let [cluster-name "mcp-door-value-test"
+(deftest sci-value-artifacts-drill-from-the-result-root
+  (let [cluster-name "mcp-sci-value-test"
         effective (config/defaults)
-        door-result (door-evaluation effective (vec (range 2000)))
+        sci-result (sci-evaluation effective (vec (range 2000)))
         nested-result
-        (door-evaluation effective {:alpha (vec (range 2000)) :omega 42})]
+        (sci-evaluation effective {:alpha (vec (range 2000)) :omega 42})]
     (support/with-database
       {:seon.test-support/fresh-store? true}
       (fn [connection]
@@ -486,7 +486,7 @@
         (swap! running-instances assoc cluster-name
                (running-instance connection cluster-name))
         (try
-          (let [stored (projected cluster-name effective door-result)
+          (let [stored (projected cluster-name effective sci-result)
                 content-digest (:seon.blob/digest stored)
                 nested-stored (projected cluster-name effective nested-result)
                 root (cluster/mcp-get-value

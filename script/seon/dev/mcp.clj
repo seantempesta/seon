@@ -578,9 +578,9 @@
 (defn- evaluation-mode!
   [mode]
   (let [mode (or mode "jvm")]
-    (when-not (contains? #{"jvm" "door"} mode)
+    (when-not (contains? #{"jvm" "sci"} mode)
       (throw
-       (ex-info "Evaluation mode must be 'jvm' or 'door'."
+       (ex-info "Evaluation mode must be 'jvm' or 'sci'."
                 {:seon.dev.mcp/failure :invalid-mode
                  :seon.dev.mcp/mode mode})))
     mode))
@@ -596,7 +596,7 @@
          (list 'clojure.core/refer (list 'quote 'clojure.core))
          (list 'clojure.core/eval (list 'quote form)))))
 
-(defn- door-evaluation-form
+(defn- sci-evaluation-form
   [source cluster namespace-symbol]
   (pr-str
    `(do
@@ -612,7 +612,7 @@
          :seon.error/message
          ~(str "Cluster '" cluster
                "' has a live JVM REPL, but its cluster layer is degraded; "
-               "door evaluation is unavailable.")
+               "SCI evaluation is unavailable.")
          :seon.dev.mcp/cluster ~cluster}
         ((requiring-resolve 'seon.sci.eval/evaluate)
          ;; THE KEYS `evaluate` DECLARES. These were the retired
@@ -632,7 +632,7 @@
   [{:seon.dev.mcp/keys [form source]} mode cluster namespace-symbol]
   (case mode
     "jvm" (jvm-evaluation-form form namespace-symbol)
-    "door" (door-evaluation-form source cluster namespace-symbol)))
+    "sci" (sci-evaluation-form source cluster namespace-symbol)))
 
 (defn- execute-clj-eval
   [{:keys [code root cluster mode session_id timeout_ms] :as request}]
@@ -838,13 +838,13 @@
 
 (def tools
   [{:name "eval_clj"
-    :description "Evaluate exactly one Clojure form in a selected operator root, cluster, namespace, and mode; the returned MCP content renders directly into the calling agent/orchestrator context. JVM mode uses the live io-prepl and retains raw *1/*2 before the cluster-side value projection. It binds no cluster custody; at a development REPL, (seon.operator/connection \"default\") supplies the explicit connection to pass to seon.db. Door mode evaluates through seon.sci.eval/evaluate with the cluster's live shared SCI ctx, admission caps, contracts, print grammar, and time limit: it MUTATES that shared per-cluster ctx, so a debug def enters the agents' world, and it creates NO run or receipts because the run loop owns those facts. Oversized values settle into the selected cluster's blob tier and return a retrievable digest. Discovery derives from the fresh operator's advertisements and degraded process-record census on every call; the default session reconnects after JVM replacement."
+    :description "Evaluate exactly one Clojure form in a selected operator root, cluster, namespace, and mode; the returned MCP content renders directly into the calling agent/orchestrator context. JVM mode uses the live io-prepl and retains raw *1/*2 before the cluster-side value projection. It binds no cluster custody; at a development REPL, (seon.operator/connection \"default\") supplies the explicit connection to pass to seon.db. SCI mode (`sci`) evaluates through seon.sci.eval/evaluate with the cluster's live shared SCI ctx, admission caps, contracts, print grammar, and time limit: it MUTATES that shared per-cluster ctx, so a debug def enters the agents' world, and it creates NO run or receipts because the run loop owns those facts. Oversized values settle into the selected cluster's blob tier and return a retrievable digest. Discovery derives from the fresh operator's advertisements and degraded process-record census on every call; the default session reconnects after JVM replacement."
     :inputSchema {:type "object"
                   :properties {:code {:type "string" :description "Exactly one Clojure form; wrap an intentional sequence in (do ...)."}
                                :root {:type "string" :description "Operator root path. Defaults to the repository root used by bin/seon."}
                                :cluster {:type "string" :description "Cluster name within root. Defaults to this MCP server's own cluster; ambiguous live matches fail with their candidate list."}
                                :namespace {:type "string" :description "Clojure namespace for either mode. Defaults to user; a missing JVM namespace is created and refers clojure.core."}
-                               :mode {:type "string" :enum ["jvm" "door"] :description "jvm evaluates in the host io-prepl; door evaluates through the cluster's shared SCI ctx. Defaults to jvm."}
+                               :mode {:type "string" :enum ["jvm" "sci"] :description "jvm evaluates in the host io-prepl; sci evaluates through the cluster's shared SCI ctx. Defaults to jvm."}
                                :session_id {:type "string" :description "Stateful io-prepl session id. Defaults to 'default'."}
                                :timeout_ms {:type "integer" :minimum 1 :maximum 120000}}
                   :required ["code"]}}

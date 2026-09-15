@@ -72,7 +72,7 @@ def static_target_snapshot(
         raise RuntimeError("static target status is not ready")
     if f':url "{target_url}"' not in status_edn:
         raise RuntimeError(
-            "static target status URL does not match the selected pod door")
+            "static target status URL does not match the selected pod endpoint")
     return {
         "cluster_url": cluster_url,
         "status_command": command,
@@ -336,7 +336,7 @@ class Cluster:
 
     @property
     def url(self) -> str:
-        """The pod door — POST /agents/run on this cluster's pod."""
+        """The pod endpoint — POST /agents/run on this cluster's pod."""
         return f"http://127.0.0.1:{self.port}/agents/run"
 
 

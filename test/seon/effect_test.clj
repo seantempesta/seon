@@ -42,7 +42,7 @@
   request)
 
 ;;; ---------------------------------------------------------------------------
-;;; The arm at the door — a handler that really enters interpreted code
+;;; The arm at the effect boundary — a handler that really enters interpreted code
 ;;; ---------------------------------------------------------------------------
 
 ;;; A capability handler is host code, so sci's `interrupt!` can only reach it
@@ -229,9 +229,9 @@
           (is (int? (:seon.effect/duration-ms receipt)))
           (is (not (neg? (:seon.effect/duration-ms receipt)))))))))
 
-(deftest the-door-runs-its-handler-under-the-requesting-evaluations-arm
+(deftest the-effect-boundary-runs-its-handler-under-the-requesting-evaluations-arm
   ;; THE CLASS: work that crosses a thread escapes the ONE limit. The
-  ;; guarded door is a crossing like any other — it hands the handler to the
+  ;; guarded boundary is a crossing like any other — it hands the handler to the
   ;; process root's `:io` executor — and until the arm travelled with the
   ;; request, every fs/shell/web/llm/db handler ran on a thread with no arm
   ;; at all: entrances attributed to nothing and `interrupt!` unable to reach

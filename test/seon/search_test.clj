@@ -192,7 +192,7 @@
                                         :seon.search/identity])
                        message-results))))))))
 
-(deftest search-is-an-ordinary-door-mode-function
+(deftest search-is-an-ordinary-sci-evaluation-function
   (with-index
     (fn [connection _]
       (let [ctx (test-support/fork-cluster-ctx connection)

@@ -13,7 +13,7 @@
   parallel across agents by construction.
 
   THREE PROCS, all pinned `:io`, all var step-fns through the one
-  `seon.flow/var-process` door (F0(a)):
+  `seon.flow/var-process` seam (F0(a)):
 
   - `:seon.agent/mailbox` — total and instant: forward one payload-free
     `:seon.agent/episode` signal downstream and count deliveries. It never reads

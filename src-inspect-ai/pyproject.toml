@@ -11,7 +11,7 @@ requires-python = ">=3.11"
 # POD-BACKED solvers use anyio.to_thread + stdlib urllib — no extra HTTP client).
 # openai: exactly locked for STANDARD inspect mode against an openai-compatible
 # endpoint (inspect's `openai-api/<svc>/<model>` provider) — the local MLX
-# model server and the Muse gateway. The pod door never needs it; the standard
+# model server and the Muse gateway. The pod endpoint never needs it; the standard
 # agentic/coding benches (humaneval, mbpp, swe_bench, …) do.
 dependencies = [
     "inspect-ai",

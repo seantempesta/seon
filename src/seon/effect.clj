@@ -316,7 +316,7 @@
 (defn- dispatching-environment
   "This request's environment, carrying the requesting thread's interrupt arm.
 
-  The door is a thread hop like every other one and obeys the same rule: the
+  The effect boundary is a thread hop like every other one and obeys the same rule: the
   arm is captured HERE, on the thread that asked, and adopted where the
   handler actually runs. Without it a capability request executes unarmed —
   the interpreted entrances it makes are attributed to nothing, so the

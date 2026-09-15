@@ -6,7 +6,7 @@ oracles) that this module RETIRES into the standard bench. Each drive POSTed a
 contract to a cluster pod, then scored the RENDERED transcript with a regex
 scanner. That scanner is replaced here by a pure oracle over the agent's
 STRUCTURED eval rows — the same `{source, ok, at, narration}` projection the
-pod composition door returns from its final immutable database value.
+pod composition endpoint returns from its final immutable database value.
 Structured rows, not scraped text, are the bench's native data.
 
 Milestones covered here (the `plan` milestone is `seon_inspect.planning` —
@@ -119,7 +119,7 @@ def _ok_indices(rows: list[dict[str, Any]], pat: str) -> list[int]:
 
 
 class EvidenceError(ValueError):
-    """A bounded door evidence value is absent or structurally invalid."""
+    """A bounded endpoint evidence value is absent or structurally invalid."""
 
 
 def _ordered_proof_rows(eval_rows: list[dict[str, Any]],

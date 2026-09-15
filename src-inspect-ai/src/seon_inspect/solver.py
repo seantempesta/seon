@@ -2,7 +2,7 @@
 
 Mechanism (Option B, unchanged in shape since the Phase-0 spike): inspect
 supplies dataset + host-side scorer; the Seon pod agent does the work, driven
-through the pod door `POST /agents/run` in `seon.web.serve` — start-or-reuse
+through the pod endpoint `POST /agents/run` in `seon.web.serve` — start-or-reuse
 an agent IN THE POD'S OWN CLUSTER, deliver the input via the real wake path,
 run the agent's OWN FSM to idle. Inspect never caps or manages turns.
 Deliberately NOT the model-proxy / sandbox_agent_bridge path (that routes the
@@ -15,7 +15,7 @@ their evidence and before any task parser or scorer runs. The deliberately raw
 `seon_diagnostic_pod_solver` exists only for diagnostics such as timeout
 honesty, where the infrastructure close itself is the observation.
 
-The pod records honestly under the clock: the door returns `timed_out` +
+The pod records honestly under the clock: the endpoint returns `timed_out` +
 `closed_reason "timeout"` on a clock cut-off (never a stale :completed/greeting
 reply), and `timeout_honesty()` is the scorer that asserts exactly that. A
 refusal (unknown `agent_id`, failed mint) is HTTP 422 `{"error": …}` — raised
@@ -49,7 +49,7 @@ class PodRunInfrastructureError(RuntimeError):
 
 def pod_run(prompt: str, timeout_ms: int | None = None, url: str | None = None,
             agent_id: str | None = None) -> dict:
-    """One request/response call to a cluster pod's /agents/run door.
+    """One request/response call to a cluster pod's /agents/run endpoint.
 
     POST {input, timeout_ms[, agent_id]} → the pod starts (or, with
     `agent_id`, REUSES — it survives pod restarts, the cluster store is
@@ -126,7 +126,7 @@ def _record_result(state: TaskState, result: dict) -> TaskState:
         "pod_evals": result.get("evals"),
         "pod_timed_out": result.get("timed_out", False),
         "pod_elapsed_ms": result.get("elapsed_ms"),
-        # Runtime-derived model provenance (2026-07-04): the door COMPUTES
+        # Runtime-derived model provenance (2026-07-04): the endpoint COMPUTES
         # model_config at response time via the pod's pure config resolver
         # (seon.ai/resolved-config: agent overrides → config row → shipped
         # defaults) — derive-don't-store; always present on a run response.
@@ -334,9 +334,9 @@ def seon_pod_solver(cluster_url: str | None = None,
                     agent_id: str | None = None):
     """Drive one long-lived cluster through the capability-scoring boundary.
 
-    `cluster_url` (or SEON_CLUSTER_URL) selects the cluster's pod door —
+    `cluster_url` (or SEON_CLUSTER_URL) selects the cluster's pod endpoint —
     e.g. acme. `agent_id` addresses one existing agent; absence preserves the
-    pod door's ordinary fresh-agent behavior. Every sample lands on the SAME
+    pod endpoint's ordinary fresh-agent behavior. Every sample lands on the SAME
     cluster serially. Records the
     pod-side metadata (turns / closed_reason / evals / timed_out / elapsed)
     so the eval log proves the multi-turn loop ran, then rejects timeout,
