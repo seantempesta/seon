@@ -31,18 +31,21 @@ Reads whose value changes on every turn BY CONSTRUCTION (a countdown, the
 list of the agent's own turns) are re-appended forever, and nothing in the
 grammar says "the system re-read this for you".
 
-## Options for the owner (decision needed; the loop is otherwise working)
+## Owner ruling, 2026-09-14
 
-1. **Keep churning data out of read forms** (simplest): the opening's
-   settings read omits the countdown and the runtime read omits the turns
-   list; turns-left is shown by the prompt/help line (derived, not an
-   evaluation) and the runtime block shows trigger + listens only. Nothing
-   changes in the grammar; system turns become rare (only real changes).
-   Gives up: the agent seeing its own turn list in-context (it can query it).
-2. **Mark system re-reads in the grammar**: a system turn's evaluations
-   print with a fixed comment (`;; changed since your last turn`) before
-   the prompt-first entry. Keeps the data, adds one line the model reads
-   as system, not self. Gives up: byte identity with the agent's own
-   evaluation of the same form.
-3. **Both** (recommended): 1 removes the by-construction churn, 2 makes
-   any remaining re-read honest.
+Generated read evidence must exclude the turn, attempt, evaluation and
+runtime-turn families, declared through schema data. A generated read that
+violates this invariant is a fault naming its source form. Turns-left
+belongs in the derived prompt frame. Runtime statistics remain available
+on demand.
+
+A changed read carries `;; changed since your last turn`, its original
+form, and an EDN change against the previous shown value. A full-value
+requery points at the new evaluation's real result handle. The opening
+remains full; the agent's own input remains byte-stable.
+
+Implementation and verification remain in progress in
+[context-renders-landing-2026-09-14.md](../../prds/context-generation/research/context-renders-landing-2026-09-14.md).
+The broader invariant also found root statistics reading excluded
+families and collection-bound queries with imprecise evidence. This issue
+is not resolved by removing only the original two churning forms.

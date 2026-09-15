@@ -1,5 +1,5 @@
-#:seon.eval{:renderer [:qualified-symbol {:description "The declared AI renderer that produced the saved shown text. History emits it directly without selecting or invoking a renderer again."}],
-            :host-interop-count [:int {:min 0}],
+#:seon.eval{:renderer [:qualified-symbol {:description "The declared AI renderer that produced the saved shown text. History emits it directly without selecting or invoking a renderer again." :seon.wake/context-inert true}],
+            :host-interop-count [:int {:min 0 :seon.wake/context-inert true}],
             :entity
             [:map
              #:seon.render{:ai seon.repl/render-ai,
@@ -29,11 +29,11 @@
              [:seon.cluster.eval/interrupted-at
               {:optional true}
               :inst]],
-            :duration-ms :int,
-            :fn-entries :int,
-            :allocated-bytes :int,
-            :outcome [:enum :ok :time :error],
+            :duration-ms [:and {:seon.wake/context-inert true} :int],
+            :fn-entries [:and {:seon.wake/context-inert true} :int],
+            :allocated-bytes [:and {:seon.wake/context-inert true} :int],
+            :outcome [:enum {:seon.wake/context-inert true} :ok :time :error],
             :shown
             [:string
              {:description
-              "Exact shown text produced once by the evaluation's value renderer under its render profile. It is an observation, not a serialization of the live object."}]}
+              "Exact shown text produced once by the evaluation's value renderer under its render profile. It is an observation, not a serialization of the live object." :seon.wake/context-inert true}]}

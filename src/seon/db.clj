@@ -345,12 +345,13 @@
   never implements joins. Unsupported clauses keep general evidence."
   [request source-position]
   (let [parsed (query/memoized-parse-query (:query request))
-        bindings (into {}
-                       (keep (fn [[input value]]
-                               (when (and (instance? BindScalar input)
-                                          (instance? Variable (:variable input)))
-                                 [(get-in input [:variable :symbol]) value])))
-                       (map vector (:qin parsed) (:args request)))
+        input-context (query/resolve-ins {:rels [] :consts {} :sources {} :rules {}}
+                                        (:qin parsed) (:args request))
+        input-variables (vec (sort (into (set (keys (:consts input-context)))
+                                         (mapcat (comp keys :attrs))
+                                         (:rels input-context))))
+        input-bindings (mapv #(zipmap input-variables %)
+                             (query/collect input-context input-variables))
         source (get-in parsed [:qin source-position :variable :symbol])
         database (nth (:args request) source-position)
         value-of (fn [bound argument]
@@ -359,7 +360,10 @@
                      (instance? Variable argument) (find bound (:symbol argument))))
         source-of (fn [clause inherited]
                     (or (get-in clause [:source :symbol]) inherited))]
-    (letfn [(supported? [clause]
+    (let [groups
+          (mapv
+           (fn [bindings]
+            (letfn [(supported? [clause]
               (or (instance? Pattern clause)
                   (and (or (instance? Not clause) (instance? Or clause)
                            (instance? And clause))
@@ -444,7 +448,10 @@
           (when-not (some nil? pull-groups)
             (into [] (distinct)
                   (concat (scope-patterns (:qwhere parsed) bindings '$)
-                          (mapcat identity pull-groups)))))))))
+                          (mapcat identity pull-groups))))))))
+           input-bindings)]
+      (when (every? some? groups)
+        (into [] (comp cat (distinct)) groups)))))
 
 (defn- pull-index-patterns
   "Bind finite explicit pull dependencies to their selected entities.

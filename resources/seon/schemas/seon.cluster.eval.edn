@@ -1,14 +1,14 @@
-#:seon.cluster.eval{:triage-edn [:string {:min 1}],
-                    :read-basis-transaction :seon.db/basis-t,
-                    :error :string,
+#:seon.cluster.eval{:triage-edn [:string {:min 1 :seon.wake/context-inert true}],
+                    :read-basis-transaction [:and {:seon.wake/context-inert true} :seon.db/basis-t],
+                    :error [:and {:seon.wake/context-inert true} :string],
                     :read-evidence
-                    [:vector #:seon.db{:component true} :seon.db/ref],
+                    [:vector #:seon.db{:component true :seon.wake/context-inert true} :seon.db/ref],
                     :source
-                    [:string {:min 1, :seon.db/no-history? true}],
+                    [:string {:min 1, :seon.db/no-history? true :seon.wake/context-inert true}],
                     :author
                     [:enum
                      {:description
-                      "Who wrote this form: :agent when the agent's reply carried it, :system when the platform generated it. Authorship is the fact a stored situation label used to stand in for."}
+                      "Who wrote this form: :agent when the agent's reply carried it, :system when the platform generated it. Authorship is the fact a stored situation label used to stand in for." :seon.wake/context-inert true}
                      :agent
                      :system],
                     :comment
@@ -16,16 +16,16 @@
                      {:min 1,
                       :seon.db/no-history? true,
                       :description
-                      "The agent's own comment, stored verbatim. The REPL prompt precedes the comment and source as one agent input; the response follows both."}],
-                    :interrupted-at :inst,
-                    :id [:string {:min 1, :seon.db/identity true}],
-                    :ns :seon.db/ref,
-                    :run :seon.db/ref,
+                      "The agent's own comment, stored verbatim. The REPL prompt precedes the comment and source as one agent input; the response follows both." :seon.wake/context-inert true}],
+                    :interrupted-at [:and {:seon.wake/context-inert true} :inst],
+                    :id [:string {:min 1, :seon.db/identity true :seon.wake/context-inert true}],
+                    :ns [:and {:seon.wake/context-inert true} :seon.db/ref],
+                    :run [:and {:seon.wake/context-inert true} :seon.db/ref],
                     :output
-                    [:string {:min 1, :seon.db/no-history? true}],
+                    [:string {:min 1, :seon.db/no-history? true :seon.wake/context-inert true}],
                     :refreshes
-                    [:and #:seon.db{:unique true} :seon.db/ref],
-                    :ordinal [:int {:min 0}],
+                    [:and #:seon.db{:unique true :seon.wake/context-inert true} :seon.db/ref],
+                    :ordinal [:int {:min 0 :seon.wake/context-inert true}],
                     :receipt
                     [:map
                      #:seon.db{:attributes true}
@@ -197,7 +197,7 @@
                      [:seon.program/row
                       {:optional true}
                       :seon.program/row]],
-                    :at :inst,
+                    :at [:and {:seon.wake/context-inert true} :inst],
                     :read-evidence-entity
                     [:map
                      #:seon.db{:attributes true}

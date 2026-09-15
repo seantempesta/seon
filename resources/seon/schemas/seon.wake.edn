@@ -1,4 +1,8 @@
-#:seon.wake{:listen
+#:seon.wake{:context-inert
+            [:boolean
+             {:description
+              "An attribute recording the agent's own turn-taking. Generated context reads must never depend on it: changing it cannot constitute new context for that agent."}]
+            :listen
             [:boolean
              {:description
               "On a ref attribute: Datahike `listen` reports its assertions and the entity the datom points at is the agent to wake. Answeredness is derived from the transaction `:t` the datom carries, so nothing is copied onto the wake and nothing references it back. THE DATOM IS ASSERTED ONCE AND NEVER RETRACTED-AND-REASSERTED: a reassertion moves the wake's `:t` forward and re-opens a paid turn."}],

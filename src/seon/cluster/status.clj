@@ -152,10 +152,10 @@
     (catch Exception failure (unknown (ex-message failure)))))
 
 (defn render-ai
-  "Emit root's schema-declared cluster observation as one ordinary form."
+  "Read cluster identity and adopted source; accounting is available on demand."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/source]}
   [_unit]
-  ";; How is my cluster doing: JVM, store, source adoption, faults, and open work?\n(seon.cluster.status/snapshot {})")
+  ";; My cluster and adopted source; (seon.cluster.status/snapshot {}) shows JVM and turn statistics on demand.\n(seon.db/q '[:find (pull ?cluster [:seon.cluster/name :seon.source/commit-id]) . :where [?cluster :seon.cluster/name]])")
 
 (defn render-html
   "Show the same cluster observation as labeled data."

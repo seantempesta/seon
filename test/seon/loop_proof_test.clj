@@ -247,15 +247,12 @@
      (let [runtime-read
            '(seon.db/pull
              '[{:seon.agent/runtime
-                [{:seon.runtime/turns
-                  [:seon.turn/id {:seon.turn/opened-tx [:db/txInstant]}
-                   {:seon.turn/closed-tx [:db/txInstant]}]}
-                 {:seon.runtime/trigger
+                [{:seon.runtime/trigger
                   [:seon.message/id :seon.message/content
                    {:seon.message/from [:seon.agent/id]}]}
                  {:seon.runtime/listens [:seon.listen/attribute :seon.listen/entity :seon.listen/value]}]}]
              [:seon.agent/id "juniper"])
-           turn-dependent? #(#{'(seon.agent/effective-settings) runtime-read}
+           turn-dependent? #(#{runtime-read}
                               (read-string (:seon.cluster.eval/source %)))
            configured
            (db/transact!
@@ -368,7 +365,11 @@
                    (is (= sources (mapv :seon.cluster.eval/source planned)))
                    (is (= sources (vec (distinct sources))))
                    (is (= "(help)" (first sources)))
-                   (is (some #{"(seon.cluster.status/snapshot {})"} sources))
+                   (is (some #{'(seon.db/q '[:find (pull ?cluster [:seon.cluster/name :seon.source/commit-id]) .
+                                             :where [?cluster :seon.cluster/name]])}
+                             (map read-string sources)))
+                   (is (not-any? #{"(seon.cluster.status/snapshot {})" "(seon.cluster.status/agents {})"}
+                                 sources))
                    (is (str/starts-with? (:seon.eval/shown (first saved))
                                         "The prompt shows your namespace my.agents.root")))))
              (testing "agent creation uses the same retained-read opening"
@@ -400,11 +401,11 @@
                          "creation stores the generator's exact source, including reader quotes"))
                    (is (every? (comp seq :seon.cluster.eval/read-evidence)
                                (remove #(str/starts-with? (:seon.cluster.eval/source %) "(dir ") saved)))
-                   (is (= ['(seon.agent/effective-settings) runtime-read]
+                   (is (= []
                           (mapv (comp read-string :seon.cluster.eval/source)
                                 (remove #(= :unchanged (:seon.turn/status %))
                                         (:seon.turn/forms refresh))))
-                       "closing the creation turn changes the derived turn count"))))
+                       "closing the creation turn changes no opening read"))))
              (fixture/install! handle routing)
              (let [plan (:seon.agent/plan
                          (db/pull @connection
@@ -470,13 +471,13 @@
                            (bytes-evidence (:seon.cluster.prompt/text first-prompt))})
                  (let [basis (db/basis-t @connection)
                        refreshed (turn/system-turn request)]
-                   (is (= ['(seon.agent/effective-settings) runtime-read]
+                   (is (= []
                           (mapv (comp read-string :seon.cluster.eval/source)
                                 (remove #(= :unchanged (:seon.turn/status %))
                                         (:seon.turn/forms refreshed))))
-                       "settings and runtime observe turns; the other opening reads stay unchanged")
-                   (is (string? (:seon.turn/id refreshed)))
-                   (is (= (inc basis) (db/basis-t @connection))))
+                       "no opening read observes turn-history churn")
+                   (is (nil? (:seon.turn/id refreshed)))
+                   (is (= basis (db/basis-t @connection))))
                  (testing "the first ordinary wake retains the seeded opening once"
                    (agent/arm! {:seon.turn.loop/cluster handle
                                 :seon.agent/routing routing :seon.agent/id "juniper"})
@@ -542,9 +543,52 @@
                            :seon.test/transactions (count reports)
                            :seon.test/datoms (mapv #(count (:tx-data %)) reports)
                            :seon.test/stored (bytes-evidence (stored-text @connection))})))
-             (submit "(my.message/inbox)")
+             (testing "ordinary turns append no generated reads without an outside change"
+               ;; The preceding wake consumed the fixture's initial message.
+               ;; Show that outside event before measuring turns with no new event.
+               (let [settled (turn/system-turn request)
+                     _ (is (nil? (:seon.error/kind settled)) (pr-str settled))
+                     sources #{"(seon.agent/settings)" (repl/source-text runtime-read)}
+                     observed #(filter (fn [entry]
+                                         (and (= :system (:seon.cluster.eval/author entry))
+                                              (not= :call (:seon.turn.work/situation
+                                                           (db/pull @connection [:seon.turn.work/situation]
+                                                                    (get-in entry [:seon.cluster.eval/run :db/id]))))))
+                                       (evaluation/of-agent @connection "juniper"))
+                     before (mapv :seon.cluster.eval/id (observed))]
+                 (is (= sources (set (keep #(sources (:seon.cluster.eval/source %)) (observed))))
+                     "both opening reads must exist")
+                 (dotimes [_ 3]
+                   (submit "(+ 10 20)")
+                   (let [refresh (turn/system-turn request)]
+                     (is (nil? (:seon.error/kind refresh)) (pr-str refresh))
+                     (is (seq (:seon.turn/forms refresh)))
+                     (is (every? #(= :unchanged (:seon.turn/status %)) (:seon.turn/forms refresh)))
+                     (is (nil? (:seon.turn/id refresh)))))
+                 (is (= before (mapv :seon.cluster.eval/id (observed))))
+                 (let [added (remove #(contains? (set before) (:seon.cluster.eval/id %)) (observed))]
+                   (println {:seon.test/stage :stable-opening-reads
+                             :seon.test/virtual-turns 3
+                             :seon.test/system-rereads (count added)
+                             :seon.test/added-system-bytes
+                             (get (bytes-evidence (apply str (map #(repl/text (repl/entity-emission %)) added)))
+                                  :seon.test/bytes)}))))
              (agent/disarm! {:seon.agent/routing routing
                              :seon.agent/id "juniper"})
+             (testing "one plan write appends exactly the plan read"
+               (let [plan-eid (get-in (db/pull @connection '[{:seon.agent/plan [:db/id]}]
+                                              [:seon.agent/id "juniper"])
+                                     [:seon.agent/plan :db/id])
+                     _ (is (some? plan-eid))
+                     written (db/transact! connection
+                                           [[:db/add plan-eid :my.plan/objective
+                                             "Verify one changed plan read."]])
+                     _ (is (nil? (:seon.error/kind written)) (pr-str written))
+                     system (turn/system-turn request)
+                     changed (filter #(= :changed (:seon.turn/status %)) (:seon.turn/forms system))]
+                 (is (string? (:seon.turn/id system)) (pr-str system))
+                 (is (= ['(seon.plan/plan {})]
+                        (mapv (comp read-string :seon.cluster.eval/source) changed)))))
              (testing "changed reads answer only observed wakes"
                (let [prefix (stored-text @connection)
                      message (db/transact!
@@ -556,10 +600,8 @@
                  (let [system (turn/system-turn request)
                        changed (filter #(= :changed (:seon.turn/status %))
                                        (:seon.turn/forms system))]
-                   (is (some #{"(my.message/inbox)"}
-                             (map :seon.cluster.eval/source changed)))
-                   (is (= #{runtime-read '(my.message/inbox) '(seon.agent/effective-settings)
-                            '(seon.db/pull '[{:seon.message/_inbox
+                   (is (= 1 (count changed)) "one message appends exactly the generated inbox read")
+                   (is (= #{'(seon.db/pull '[{:seon.message/_inbox
                                              [:seon.message/id :seon.message/content
                                               {:seon.message/from [:seon.agent/id]}]}]
                                            [:seon.agent/id "juniper"])}
@@ -610,8 +652,7 @@
                    (is (seq fresh))
                    (is (= 'seon.db/pull (first (read-string (:seon.cluster.eval/source (first fresh)))))
                        "changed read must precede the no-provider reply")
-                   (is (= #{runtime-read '(my.message/inbox) '(seon.agent/effective-settings)
-                             '(seon.db/pull '[{:seon.message/_inbox
+                   (is (= #{'(seon.db/pull '[{:seon.message/_inbox
                                               [:seon.message/id :seon.message/content
                                                {:seon.message/from [:seon.agent/id]}]}]
                                             [:seon.agent/id "juniper"])}
@@ -699,7 +740,9 @@
                    (is (= 2 (count saved)))
                    (is (str/starts-with? (:seon.cluster.eval/source (first saved)) "(seon.db/q"))
                    (is (nil? (:seon.cluster.eval/error (first saved))))
-                   (is (seq (:seon.eval/shown (first saved))))
+                   (is (seq (:seon.eval/shown (first saved)))
+                       (pr-str {:seon.test/evaluations saved
+                                :seon.test/turn (db/pull @connection '[*] [:seon.turn/id id])}))
                    (is (seq (:seon.cluster.eval/read-evidence (first saved))))
                    (is (str/includes? (:seon.cluster.eval/error (second saved))
                                       "You wrote a response. Only the REPL writes responses; send forms and wait."))

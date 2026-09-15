@@ -197,10 +197,10 @@
   [unit]
   (let [form (identity-form unit)]
     (str ";; I should understand how this REPL works before I act.\n(help)\n\n"
-         (:seon.repl/comment form) "\n" (repl/source-text (:seon.repl/form form))
+         (:seon.repl/comment form)
          (when (= "root" (:seon.agent/id unit))
-           (str "\n\n;; I should review every agent and its current work with a filtered, shaped query.\n"
-                "(seon.cluster.status/agents {})")))))
+           "\n;; (seon.cluster.status/agents {}) shows agent work and turn accounting on demand.")
+         "\n" (repl/source-text (:seon.repl/form form)))))
 
 (defn render-id-ai
   "Read the identity concern from its identifying attribute."

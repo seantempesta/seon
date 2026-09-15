@@ -501,6 +501,38 @@
          (is (not (db/read-evidence-current? @connection evidence))
              "a depended attribute revision makes the retained read stale"))))))
 
+(deftest collection-bound-query-evidence-covers-every-input-attribute
+  (test-support/with-database
+   (fn [connection]
+     (let [attributes [:seon.agent/id :seon.cluster/name]
+           capture (fn []
+                     (let [captured (atom [])]
+                       (binding [db/*read-evidence-sink* captured]
+                         (db/q '[:find ?attribute (count ?entity)
+                                 :in $ [?attribute ...]
+                                 :where [?entity ?attribute _]]
+                               @connection attributes))
+                       (db/read-evidence @captured)))
+           evidence (capture)
+           patterns (mapcat :seon.db/read-index-patterns
+                            (mapcat #(get-in % [:datahike.read/dependency-plan
+                                                :datahike.query.dependency/sources]) evidence))]
+       (is (seq evidence))
+       (is (= (set attributes) (set (map :seon.db/pattern-attribute patterns))))
+       (is (every? :seon.db/pattern-attribute patterns)
+           "no unbound all-attribute pattern survives a collection input")
+       (is (:db-after (db/transact! connection
+                                   [[:db/add "unrelated-evidence-note" :my.note/content
+                                     "An unrelated attribute changed."]])))
+       (is (db/read-evidence-current? @connection evidence))
+       (doseq [attribute attributes]
+         (let [before (capture)]
+           (is (:db-after (db/transact! connection
+                                       [[:db/add (str "bound-" (namespace attribute))
+                                         attribute (str "bound-" (namespace attribute))]])))
+           (is (false? (db/read-evidence-current? @connection before))
+               (str "the bound attribute must invalidate its evidence: " attribute))))))))
+
 (deftest durable-pull-digests-replay-without-retaining-read-results
   (test-support/with-database
    (fn [connection]

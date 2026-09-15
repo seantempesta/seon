@@ -1079,20 +1079,18 @@
           :seon.error/diagnostic-evidence [:seon.runtime/agent]}))))
 
 (defn render-runtime-ai
-  "Read my runtime component, its turn transaction refs, trigger, and listens."
+  "Read my runtime trigger and listens without observing turn-history churn."
   {:malli/schema [:=> [:cat :seon.render/unit] [:or :seon.render/source :seon.error/value]]}
   [unit]
   (let [agent-id (runtime-owner unit)]
     (if (:seon.error/kind agent-id) agent-id
-      (str ";; I should follow my runtime's owner ref before pulling its turns, trigger, and listens.\n"
+      (str ";; My trigger and listens; (seon.db/pull '[{:seon.agent/runtime [:seon.runtime/turns]}] [:seon.agent/id "
+           (pr-str agent-id) "]) reads my turns on demand.\n"
        (repl/source-text
         (list 'seon.db/pull
               (list 'quote
                     '[{:seon.agent/runtime
-                       [{:seon.runtime/turns
-                         [:seon.turn/id {:seon.turn/opened-tx [:db/txInstant]}
-                          {:seon.turn/closed-tx [:db/txInstant]}]}
-                        {:seon.runtime/trigger
+                       [{:seon.runtime/trigger
                          [:seon.message/id :seon.message/content
                           {:seon.message/from [:seon.agent/id]}]}
                         {:seon.runtime/listens

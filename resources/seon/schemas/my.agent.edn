@@ -1,12 +1,11 @@
 {:my.agent/id :string
  :my.agent/namespace :symbol
  :my.agent/steward :string
- :my.agent/turns-left [:int {:min 0}]
+ :my.agent/turns-left [:int {:min 0 :seon.wake/context-inert true}]
  :my.agent/identity [:map [:my.agent/id :my.agent/id]
                      [:my.agent/namespace {:optional true} :my.agent/namespace]
                      [:my.agent/steward {:optional true} :my.agent/steward]]
- :my.agent/settings [:and :seon.config/agent-overlay
-                     [:map [:my.agent/turns-left :my.agent/turns-left]]]
+ :my.agent/settings :seon.config/agent-overlay
  :my.agent/settings-request
  [:map [:seon.db/connection :seon.db/connection]
        [:seon.agent/id :seon.agent/id]]}

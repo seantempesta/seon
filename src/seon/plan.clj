@@ -1173,18 +1173,7 @@
   [unit]
   (str ";; My plan is my instructions; a step is done when it has :completed-tx. (doc my.plan) shows how to add, complete, and remove steps; ids are (seon.id/id title 8).\n"
        (repl/source-text
-        (list 'seon.db/pull
-              (list 'quote
-                    '[{:seon.agent/plan
-                       [:my.plan/objective
-                        {:my.plan/current-step [:my.plan.item/id]}
-                        {:my.plan/steps
-                         [:my.plan.item/id :my.plan.item/title
-                          :my.plan.item/done-when :my.plan.item/position
-                          {:my.plan.item/completed-tx [:db/txInstant]}
-                          {:my.plan.item/needs [:my.plan.item/id]}
-                          {:my.plan.item/steps ...}]}]}])
-              [:seon.agent/id (:seon.agent/id unit)]))))
+        (list 'seon.plan/plan {}))))
 
 (defn render-plan-html
   "Show the objective, current focus, progress, and every step with its state."

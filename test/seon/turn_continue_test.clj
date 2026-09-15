@@ -117,6 +117,20 @@
                        (finally
                          (agent/disarm! {:seon.agent/routing routing :seon.agent/id "juniper"}))))
                    (is (= expected (count @requests)))
+                   (let [saved (evaluation/of-agent @connection "juniper")
+                         opening (take-while #(= (:seon.cluster.eval/run (first saved))
+                                                 (:seon.cluster.eval/run %)) saved)
+                         stable-reads (filter
+                                       #(let [form (read-string (:seon.cluster.eval/source %))]
+                                          (or (= '(seon.agent/settings) form)
+                                              (some #{:seon.runtime/listens}
+                                                    (tree-seq coll? seq form)))) opening)
+                         by-source (group-by :seon.cluster.eval/source saved)]
+                     (is (= 2 (count stable-reads)) "both generated reads must exist")
+                     (doseq [entry stable-reads]
+                       (let [observations (get by-source (:seon.cluster.eval/source entry))]
+                         (is (= (count observations) (count (distinct (map :seon.eval/shown observations))))
+                             "provider continuation never repeats an unchanged settings/runtime value"))))
                    (is (= expected (count (closed-attempts @connection))))
                    (is (= outside-t (turn/outside-wake-t @connection "juniper"))
                        "self-continuation neither creates an outside wake nor refills the bound")

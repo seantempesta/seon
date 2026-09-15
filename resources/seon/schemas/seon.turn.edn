@@ -1,4 +1,4 @@
-#:seon.turn{:write? :boolean,
+#:seon.turn{:write? [:and {:seon.wake/context-inert true} :boolean],
             :turn
             [:map
              {:seon.db/attributes true,
@@ -37,10 +37,10 @@
               :seon.turn/missing-opening-datom]
              [:seon.error/message :seon.error/message]],
             :disposition
-            [:and {:description "The completed/wait control returned by the last evaluated form, recorded with settlement before presentation. These are the two closed session dispositions, not an entity kind or a stored session-open flag."}
+            [:and {:description "The completed/wait control returned by the last evaluated form, recorded with settlement before presentation. These are the two closed session dispositions, not an entity kind or a stored session-open flag." :seon.wake/context-inert true}
              :my.turn/disposition],
-            :rule :keyword,
-            :trigger [:and #:seon.db{:index true} :seon.db/ref],
+            :rule [:and {:seon.wake/context-inert true} :keyword],
+            :trigger [:and #:seon.db{:index true :seon.wake/context-inert true} :seon.db/ref],
             :system-result
             [:map
              [:seon.turn/forms :seon.turn/forms]
@@ -52,7 +52,7 @@
               "The agent whose run this is; its reverse is that agent's own evaluation history.",
               :seon.render/ai seon.render.transcript/render-history-ai,
               :seon.render/html
-              seon.render.transcript/render-history-html}
+              seon.render.transcript/render-history-html :seon.wake/context-inert true}
              :seon.db/ref],
             :form
             [:map
@@ -93,8 +93,8 @@
             [:map
              [:seon.db/connection :seon.db/connection]
              [:seon.agent/id :seon.agent/id]],
-            :basis-t :seon.db/basis-t,
-            :starting-ns :seon.db/ref,
+            :basis-t [:and {:seon.wake/context-inert true} :seon.db/basis-t],
+            :starting-ns [:and {:seon.wake/context-inert true} :seon.db/ref],
             :virtual-request
             [:map
              [:seon.turn.loop/cluster :seon.turn.loop/cluster]
@@ -119,19 +119,19 @@
              [:seon.turn.loop/cluster :seon.turn.loop/cluster]
              [:seon.agent/id :seon.agent/id]
              [:seon.turn/write? {:optional true} :seon.turn/write?]],
-            :text :string,
-            :turns-remaining [:int {:min 0}],
-            :reply [:string #:seon.db{:no-history? true}],
-            :missing-results [:int {:min 0}],
-            :changes :seon.db/datoms,
-            :missing-opening-datom [:= true],
+            :text [:and {:seon.wake/context-inert true} :string],
+            :turns-remaining [:int {:min 0 :seon.wake/context-inert true}],
+            :reply [:string #:seon.db{:no-history? true :seon.wake/context-inert true}],
+            :missing-results [:int {:min 0 :seon.wake/context-inert true}],
+            :changes [:and {:seon.wake/context-inert true} :seon.db/datoms],
+            :missing-opening-datom [:= {:seon.wake/context-inert true} true],
             :attempts
             [:set
              {:seon.db/component true,
-              :description "The provider attempts owned by this turn."}
+              :description "The provider attempts owned by this turn." :seon.wake/context-inert true}
              :seon.db/ref],
-            :refused :seon.turn/rule,
-            :forms [:vector :seon.turn/form],
+            :refused [:and {:seon.wake/context-inert true} :seon.turn/rule],
+            :forms [:vector {:seon.wake/context-inert true} :seon.turn/form],
             :system-run-request
             [:map
              [:seon.agent/id :seon.agent/id]
@@ -154,11 +154,11 @@
              [:seon.turn/opened-tx :seon.turn/opened-tx]
              [:seon.turn/starting-ns :seon.turn/starting-ns]
              [:seon.turn/trigger {:optional true} :seon.turn/trigger]],
-            :closed-tx :seon.db/ref,
-            :opened-tx :seon.db/ref,
-            :transition :keyword,
-            :reply-blob :seon.blob/digest,
-            :id [:string {:min 1, :seon.db/identity true}],
+            :closed-tx [:and {:seon.wake/context-inert true} :seon.db/ref],
+            :opened-tx [:and {:seon.wake/context-inert true} :seon.db/ref],
+            :transition [:and {:seon.wake/context-inert true} :keyword],
+            :reply-blob [:and {:seon.wake/context-inert true} :seon.blob/digest],
+            :id [:string {:min 1, :seon.db/identity true :seon.wake/context-inert true}],
             :refused-error
             [:and
              {:seon.error/class true,
@@ -171,13 +171,13 @@
                [:seon.turn/refused :seon.turn/refused]
                [:seon.error/message :seon.error/message]],
               :error/message
-              "must identify the run rule that refused its transition"}
+              "must identify the run rule that refused its transition" :seon.wake/context-inert true}
              :seon.error/refusal-value
              [:map [:seon.turn/refused :seon.turn/refused]]],
             :status
             [:enum
              {:description
-              "Why one read form participates in this system walk: no prior evaluation, unchanged dependencies, or changed dependencies."}
+              "Why one read form participates in this system walk: no prior evaluation, unchanged dependencies, or changed dependencies." :seon.wake/context-inert true}
              :none
              :unchanged
              :changed],
@@ -191,7 +191,7 @@
               {:optional true}
               :seon.cluster.eval/comment]
              [:seon.ns/name :seon.ns/name]],
-            :reply-size [:int {:min 0}],
+            :reply-size [:int {:min 0 :seon.wake/context-inert true}],
             :record-evaluated-call-request
             [:map
              [:seon.turn/id :seon.turn/id]

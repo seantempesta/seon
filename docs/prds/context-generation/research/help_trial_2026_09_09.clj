@@ -150,12 +150,11 @@
                     (checked (#'turn/declared-sources handle database "juniper" namespace-name))))
         expected-sources (mapv :seon.cluster.eval/source
                                (#'turn/system-plan database expected {}))
-        live-turns-left (:my.agent/turns-left (checked (agent/settings database "juniper")))
-        shown-settings (some-> (some #(when (= ['(seon.agent/effective-settings)]
+        live-turns-left (turn/turns-left database "juniper")
+        shown-settings (some-> (some #(when (= ['(seon.agent/settings)]
                                                (read-forms (:seon.cluster.eval/source %))) %)
                                      evaluations)
                                :seon.eval/shown edn/read-string)
-        shown-turns-left (some :my.agent/turns-left shown-settings)
         messages (checked
                   (db/q '[:find (pull ?message [:seon.message/id :seon.message/content
                                                 {:seon.message/from [:seon.agent/id]}]) :where
@@ -170,7 +169,7 @@
                    (= (count sources) (count (distinct sources)))
                    (zero? (turn/episode-runs database "juniper"))
                    (nat-int? live-turns-left)
-                   (= live-turns-left shown-turns-left)
+                   (= (checked (agent/settings database "juniper")) shown-settings)
                    (= 1 (count messages))
                    (= @(resolve 'seon.context-blocks-fixture/instruction)
                       (:seon.message/content (ffirst messages)))

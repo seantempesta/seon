@@ -11,6 +11,7 @@
             [seon.db :as db]
             [seon.eval :as evaluation]
             [seon.flow :as flow]
+            [seon.id :as id]
             [seon.render.hiccup :as hiccup]
             [seon.render.web :as web]
             [seon.repl :as repl]
@@ -34,6 +35,70 @@
           :where [?agent :seon.agent/id ?id]
           [?turn :seon.turn/agent ?agent]
           [?evaluation :seon.cluster.eval/run ?turn]] database agent-id))
+
+(deftest generated-read-evidence-rejects-turn-activity
+  (support/with-database
+   (fn [connection]
+     (config/apply! {:seon.db/connection connection
+                    :seon.boot/cluster-name "generated-read-proof"})
+     (support/seed-cluster! connection "generated-read-proof")
+     (checked-transact! connection
+                        (agent/creation-tx {:seon.agent/id "reader"
+                                            :seon.ns/name 'my.agents.reader
+                                            :seon.cluster/name "generated-read-proof"}))
+     (let [source "(seon.db/q '[:find ?id :where [_ :seon.turn/id ?id]])"
+           run-id "generated-read"
+           evaluation-id (id/evaluation run-id 0)
+           _ (checked-transact!
+              connection
+              [{:seon.turn/id run-id
+                :seon.turn/agent [:seon.agent/id "reader"]
+                :seon.turn.work/situation :generate
+                :seon.turn/opened-tx "datomic.tx"}
+               {:seon.cluster.eval/id evaluation-id
+                :seon.cluster.eval/at (java.util.Date.)
+                :seon.cluster.eval/run [:seon.turn/id run-id]
+                :seon.cluster.eval/ordinal 0
+                :seon.cluster.eval/author :system
+                :seon.cluster.eval/source source}])
+           ctx (support/fork-cluster-ctx connection)
+           handle (support/cluster-handle
+                   {:seon.env/environment (support/environment "generated-read-proof" connection)
+                    :seon.db/connection connection
+                    :seon.cluster/name "generated-read-proof"
+                    :seon.db.process/id cluster/boot-process-identity
+                    :seon.sci.eval/ctx ctx})
+           request {:seon.turn.loop/cluster handle
+                    :seon.sci.eval/ctx ctx
+                    :seon.agent/id "reader"
+                    :seon.turn/id run-id
+                    :seon.cluster.eval/ordinal 0
+                    :seon.ns/name 'my.agents.reader
+                    :seon.cluster.reply/sources [{:seon.cluster.eval/source source}]}
+           fault (try (turn/evaluate-sources request) nil
+                      (catch clojure.lang.ExceptionInfo failure (ex-data failure)))]
+       (is (= :seon.turn/generated-read-depends-on-turns (:seon.error/kind fault))
+           (pr-str fault))
+       (is (= source (get-in fault [:seon.error/data :seon.error/diagnostic-offending])))
+       (is (= #{:seon.turn/id}
+              (get-in fault [:seon.error/data :seon.error/diagnostic-evidence
+                             :datahike.read/attributes])))
+       (is (nil? (:seon.cluster.eval/read-evidence
+                  (db/pull @connection [:seon.cluster.eval/read-evidence]
+                           [:seon.cluster.eval/id evaluation-id]))))
+       (checked-transact! connection
+                          [[:db/add [:seon.cluster.eval/id evaluation-id]
+                            :seon.cluster.eval/author :agent]])
+       (is (seq (get-in (first (turn/evaluate-sources request))
+                        [:seon.sci.eval/evaluation :seon.cluster.eval/read-evidence]))
+           "an agent may explicitly inspect its own history")
+       (checked-transact! connection
+                          [[:db/add [:seon.cluster.eval/id evaluation-id]
+                            :seon.cluster.eval/author :system]
+                           [:db/add [:seon.turn/id run-id] :seon.turn.work/situation :call]])
+       (is (seq (get-in (first (turn/evaluate-sources request))
+                        [:seon.sci.eval/evaluation :seon.cluster.eval/read-evidence]))
+           "a virtual reply is authored input, not generated context")))))
 
 (deftest compaction-refuses-an-open-turn-at-the-writer
   (support/with-database
@@ -281,11 +346,11 @@
            (let [basis (db/basis-t @connection)
                  unchanged (turn/system-turn (assoc request :seon.turn/write? false))]
              (is (seq (:seon.turn/forms unchanged)) (pr-str unchanged))
-             (is (= #{'seon.agent/effective-settings 'seon.db/pull}
+             (is (= #{}
                     (set (map (comp first edn/read-string :seon.cluster.eval/source)
                               (filter #(= :changed (:seon.turn/status %))
                                       (:seon.turn/forms unchanged)))))
-                 "the saved opening precedes its own runtime turn")
+                 "the saved opening does not read its own turn history")
              (is (nil? (:seon.turn/id unchanged)))
              (is (= basis (db/basis-t @connection))))
            (turn/compact! {:seon.db/connection connection
@@ -305,7 +370,7 @@
                          [{:seon.message/id "to-b" :seon.message/to [:seon.agent/id "b"] :seon.message/content "For B" :seon.message/inbox [:seon.agent/id "b"]}])
            (let [other (turn/system-turn (assoc request :seon.turn/write? false))]
              (is (seq (:seon.turn/forms other)) (pr-str other))
-             (is (= #{'seon.agent/effective-settings 'seon.db/pull}
+             (is (= #{}
                     (set (map (comp first edn/read-string :seon.cluster.eval/source)
                               (filter #(= :changed (:seon.turn/status %))
                                       (:seon.turn/forms other))))))
@@ -323,14 +388,14 @@
                  changed (filterv #(= :changed (:seon.turn/status %))
                                   (:seon.turn/forms preview))]
              (is (= basis (db/basis-t @connection)))
-             (is (= #{'seon.db/pull 'my.message/inbox 'seon.agent/effective-settings}
+             (is (= #{'seon.db/pull 'my.message/inbox}
                     (set (map (comp first edn/read-string :seon.cluster.eval/source) changed)))
                  (pr-str preview))
              (is (seq (:seon.turn/changes (first changed))))
              (is (string? (:seon.turn/text (first changed))))
              (let [stored (turn/system-turn request)]
                (is (string? (:seon.turn/id stored)) (pr-str stored))
-               (is (= 4 (count (db/q '[:find [?e ...] :in $ ?id
+               (is (= 2 (count (db/q '[:find [?e ...] :in $ ?id
                                       :where [?turn :seon.turn/id ?id]
                                       [?e :seon.cluster.eval/run ?turn]]
                                     @connection (:seon.turn/id stored))))))))
@@ -1741,8 +1806,8 @@
                (mapv #(some #{"newer fault" "older fault"}
                             (tree-seq coll? seq %)) (subvec rendered 3)))
             "newest first, and each fault keeps the one error card")
-        (is (= [":seon.instrument/contract-violated"
-                ":seon.instrument/contract-violated"]
+        (is (= ["contract-violated"
+                "contract-violated"]
                (mapv #(last (nth % 2)) (subvec rendered 3)))
             "each card names the fault's kind")
         (is (str/includes? (hiccup/->string (nth rendered 4)) "run-1")

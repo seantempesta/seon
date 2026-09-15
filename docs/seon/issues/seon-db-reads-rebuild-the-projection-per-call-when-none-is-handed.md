@@ -7,6 +7,18 @@ tags: [issue, database, performance, class/p1, context]
 
 # `seon.db` reads rebuild the schema projection on every call when none is handed
 
+## Context-renders verification, 2026-09-14
+
+The unchanged HEAD database owner at `4f9d8286e` reproduces the canonical
+armed `seon.db-test/ten-unhanded-queries-stay-within-twice-raw-query-cost`
+failure: **5,635,710,666 ns wrapped / 35,316,833 ns raw** for ten queries.
+With the collection-bound read-evidence fix, the same check measured
+**4,639,791,251 ns / 39,107,918 ns**. Its evidence sink is unbound, so
+`query-index-patterns` does not execute on this path. The new collection
+input regression fails on HEAD and passes with the fix; the timing
+assertion remains unchanged. Repair of this separate owner is awaiting
+scope authorization; it is not claimed as a green DB gate.
+
 ## Transaction-feedback verification, 2026-09-09
 
 The original db.clj at 05510a6d4 reproduced this failure in the canonical

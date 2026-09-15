@@ -1982,6 +1982,42 @@
                                                 :seon.cluster.eval/ordinal)
                                           (vals latest))))))))
 
+(defn- generated-read-fault [database source evaluation]
+  (let [inert (set (db/q '[:find [?attribute ...]
+                          :where [?schema :seon.schema/key ?attribute]
+                          [?schema :seon.wake/context-inert true]]
+                        database))
+        evidence (:seon.cluster.eval/read-evidence evaluation)
+        offending (into (sorted-set)
+                        (mapcat (fn [read]
+                                  (let [position (:seon.db/source-argument-position read)
+                                        source (some #(when (= position (:datahike.query.source/argument-position %)) %)
+                                                     (get-in read [:datahike.read/dependency-plan
+                                                                   :datahike.query.dependency/sources]))
+                                        patterns (:seon.db/read-index-patterns source)
+                                        ;; Freshness uses these complete patterns before
+                                        ;; the conservative attribute revision as well.
+                                        attributes (if (and patterns (every? :seon.db/pattern-attribute patterns))
+                                                     (map :seon.db/pattern-attribute patterns)
+                                                     (get-in read [:datahike.read/revision
+                                                                   :datahike.read/attributes]))]
+                                    (if (= :all attributes)
+                                      inert
+                                      (filter inert attributes)))))
+                        evidence)]
+    (when (seq offending)
+      (error/diagnostic
+       {:seon.error/kind ::generated-read-depends-on-turns
+        :seon.error/message "A generated context read depends on the agent's own turn-taking."
+        :seon.error/diagnostic-layer :seon.turn
+        :seon.error/diagnostic-operation `system-turn
+        :seon.error/diagnostic-member :seon.cluster.eval/source
+        :seon.error/diagnostic-expected :seon.wake/context-inert
+        :seon.error/diagnostic-offending (:seon.cluster.eval/source source)
+        :seon.error/diagnostic-cause ::generated-read-depends-on-turns
+        :seon.error/diagnostic-evidence
+        {:datahike.read/attributes offending}}))))
+
 (defn system-turn
   "Project the declared opening and every distinct retained read form.
   Unchanged reads contribute no evaluation. With write? true, save the exact
@@ -2026,6 +2062,12 @@
                          :seon.sci.admit/caps (:seon.sci.admit/caps handle)})
                       selected)]
         (or (some #(when (:seon.error/kind %) %) previews)
+            (some identity
+                  (map (fn [source preview]
+                         (some #(generated-read-fault database source
+                                                      (:seon.sci.eval/evaluation %))
+                               (:seon.turn.loop/evaluated-sources preview)))
+                       selected previews))
             (let [evaluated (mapv (fn [ordinal source preview]
                                     (cond-> (assoc (first (:seon.turn.loop/evaluated-sources preview))
                                                    :seon.cluster.eval/ordinal ordinal)
@@ -4239,6 +4281,14 @@
                      :seon.cluster.eval/read-basis-transaction (db/basis-t database))
               evaluation (cond-> evaluation
                            handle (assoc :seon.repl/handle handle))]
+          (when (and entity-id
+                     (= :system (:seon.cluster.eval/author
+                                 (db/pull database [:seon.cluster.eval/author] entity-id)))
+                     (= :generate (:seon.turn.work/situation
+                                   (db/pull database [:seon.turn.work/situation]
+                                            [:seon.turn/id run-id]))))
+            (when-let [fault (generated-read-fault database form evaluation)]
+              (throw (ex-info (:seon.error/message fault) fault))))
           (when handle
             ((requiring-resolve 'seon.sci.eval/bind-result!) ctx handle (:seon.sci.admit/value evaluation)))
           (let [results (conj results
@@ -4361,9 +4411,10 @@
                          (:seon.program/row evaluation)}])))
                   evaluated)
             analyzed
-            (if (seq defining)
-              (phase #(seon.fn/analyze-forms database (mapv second defining)))
-              [])]
+            (cond
+              (:seon.error/kind evaluated) evaluated
+              (seq defining) (phase #(seon.fn/analyze-forms database (mapv second defining)))
+              :else [])]
         (if (:seon.error/kind analyzed)
           (do
             (settle! {:seon.turn.loop/cluster cluster
