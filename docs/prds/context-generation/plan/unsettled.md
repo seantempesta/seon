@@ -993,3 +993,20 @@ half-edit. Measured targets in the issue.
   "Context at turn N" is therefore the present labelled as the past — issue
   filed, handed to debug-turns.
 
+## 2026-09-14 19:45 — render rules and core functions (owner: general, no reward hacking)
+
+- Owner: "How can we improve the render functions (less verbose, better
+  context)?" / "Keep fixing the core functions until they are great general
+  functions the agent wants to use" / "no reward hacking … must generalize".
+- Lanes (three, plus debug-turns on the page): context-renders — five
+  general rules: no opening read changes by construction every turn
+  (turns-left becomes a derived frame line; runtime read = trigger +
+  listens), system re-reads carry a fixed system comment, elide whole items
+  never mid-string, results render through their pairs inside responses,
+  compact plan render; measured by opening bytes, bytes per system turn in
+  the loop proof, the explain probe rerun on the stored session, and the
+  help trial (must stay 12/12). core-functions — every `my.*` function:
+  names/shapes/docstring examples that run/returns as data/errors naming the
+  fix; bare `deftest` referred; the auto-check's self-violation becomes a
+  core fault; help sentences true after the changes.
+
