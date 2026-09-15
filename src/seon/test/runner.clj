@@ -10,7 +10,6 @@
             [clojure.test.check.generators :as gen]
             [malli.core :as m]
             [sci.impl.utils :as sci.utils]
-            [seon.cluster.registry :as registry]
             [seon.cluster.source :as source]
             [seon.cluster.store :as store]
             [seon.config :as config]
@@ -1498,36 +1497,23 @@
       (finally
         ((requiring-resolve 'seon.cluster/stop!) instance)))))
 
-(def ^:private persistent-results-branch :test-results)
-(def ^:private persistent-results-monitor (Object.))
-
 (defn- commit-persistent-results!
-  "Commit one bare-gate completion through the store-holding process."
+  "Commit one completion through the source publication owner."
   [held-store run-result]
-  (locking persistent-results-monitor
-    (registry/branch! {:seon.store/store held-store
-                       :seon.cluster.registry/from source/current-branch
-                       :seon.store/branch persistent-results-branch})
-    (let [connection (store/open-branch! held-store persistent-results-branch)]
-      (try
-        (let [database (db/db connection)
-              projection (schema/projection-from-database database)
-              completion
-              {:seon.test.runner/results
-               (:seon.test.runner/results run-result)
-               :seon.test/run-basis-t (:seon.test.run/basis-t run-result)
-               :seon.test/run-at (:seon.test.run/at run-result)
-               :seon.test.run/provenance (select-keys run-result [:seon.test.run/id :seon.test.run/at :seon.test.run/git-sha :seon.test.run/program-digest :seon.test.run/basis-t :seon.test.run/branch])}]
-          (schema/call-with-projection
-           projection
-           #(commit-results! connection completion)))
-        (finally
-          (store/release-branch! connection))))))
+  ((requiring-resolve 'seon.cluster.source/record-results!)
+   held-store
+   {:seon.test.runner/results (:seon.test.runner/results run-result)
+    :seon.test/run-basis-t (:seon.test.run/basis-t run-result)
+    :seon.test/run-at (:seon.test.run/at run-result)
+    :seon.test.run/provenance
+    (select-keys run-result [:seon.test.run/id :seon.test.run/at
+                            :seon.test.run/git-sha :seon.test.run/program-digest
+                            :seon.test.run/basis-t :seon.test.run/branch])}))
 
 (defn- persistent-results-form
   [run-result]
   (pr-str
-   `(do
+   `(try
       (require 'seon.cluster.registry
                'seon.cluster.source
                'seon.cluster.store
@@ -1540,33 +1526,17 @@
                           (ns-resolve 'seon.cluster
                                       (symbol "running-instances")))))]
         (if store#
-          (do
-            (seon.cluster.registry/branch!
-             {:seon.store/store store#
-              :seon.cluster.registry/from seon.cluster.source/current-branch
-              :seon.store/branch :test-results})
-            (let [connection#
-                  (seon.cluster.store/open-branch! store# :test-results)]
-              (try
-                (let [database# (seon.db/db connection#)
-                      projection#
-                      (seon.schema/projection-from-database database#)
-                      completion#
-                      {:seon.test.runner/results
-                       (:seon.test.runner/results ~run-result)
-                       :seon.test/run-basis-t (:seon.test.run/basis-t ~run-result)
-                       :seon.test/run-at (:seon.test.run/at ~run-result)
-                       :seon.test.run/provenance (select-keys ~run-result [:seon.test.run/id :seon.test.run/at :seon.test.run/git-sha :seon.test.run/program-digest :seon.test.run/basis-t :seon.test.run/branch])}]
-                  (seon.schema/call-with-projection
-                   projection#
-                   #(seon.test.runner/commit-results!
-                     connection# completion#)))
-                (finally
-                  (seon.cluster.store/release-branch! connection#)))))
+          ((deref (ns-resolve 'seon.test.runner 'commit-persistent-results!))
+           store# '~run-result)
           {:seon.error/kind
            :seon.test.runner/live-store-unavailable
            :seon.error/message
-           "The live process has no held operator store."})))))
+           "The live process has no held operator store."}))
+      (catch Throwable failure#
+        {:seon.error/kind
+         (or (:seon.error/kind (ex-data failure#))
+             :seon.test.runner/persistent-results-recording-failed)
+         :seon.error/message (ex-message failure#)}))))
 
 (defn- record-persistent-results!
   "Commit one bare-gate completion through the authoritative store holder."

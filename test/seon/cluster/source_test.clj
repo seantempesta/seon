@@ -14,6 +14,7 @@
             [seon.schema]
             [sci.core :as sci]
             [seon.sci.eval :as sci.eval]
+            [seon.test.runner :as runner]
             [seon.test-support :as test-support])
   (:import [java.util.concurrent CountDownLatch TimeUnit]))
 
@@ -506,3 +507,51 @@
         (is (nil? (sci/eval-string* ctx "(resolve 'source-deletion-probe/value)")))
         (is (= :core (:seon.schema.admission/source
                       (db/pull @connection '[*] identity))))))))
+
+(deftest latest-test-evidence-survives-rebuilding-from-an-older-base
+  (with-store
+    (fn [opened]
+      (let [manifest @test-support/source-manifest
+            population 'seon.cluster/populate-source!
+            first-publication (publish opened digest-a population
+                                       {:seon.fn/manifest manifest})
+            first-db (source/database opened (:seon.source/commit-id first-publication))
+            test-symbol "seon.id-test/data-shape-and-explicit-length-determine-identity"
+            run (assoc (runner/provenance first-db)
+                       :seon.test.run/git-sha (apply str (repeat 40 "a")))
+            completion {:seon.test.run/provenance run
+                        :seon.test/run-basis-t (:seon.test.run/basis-t run)
+                        :seon.test/run-at (:seon.test.run/at run)
+                        :seon.test.runner/results
+                        [{:seon.test/sym test-symbol :seon.test/pass-count 1
+                          :seon.test/fail-count 0 :seon.test/error-count 0}]}
+            recorded (source/record-results! opened completion)
+            recorded-commit (:seon.source/commit-id (source/current opened))
+            rebuilt (publish opened digest-a population {:seon.fn/manifest manifest})
+            rebuilt-db (source/database opened (:seon.source/commit-id rebuilt))]
+        (is (= 1 (:seon.test/pass-count (first recorded))) (pr-str recorded))
+        (is (not= recorded-commit (:seon.source/commit-id first-publication)))
+        (is (= digest-a
+               (db/q '[:find ?digest . :in $ ?symbol
+                       :where [?test :seon.test/sym ?symbol]
+                              [?test :seon.test/run ?run]
+                              [?run :seon.test.run/program-digest ?digest]]
+                     rebuilt-db test-symbol)))
+        (is (= run (dissoc (db/pull rebuilt-db '[*]
+                                    [:seon.test.run/id (:seon.test.run/id run)]) :db/id)))
+        (is (= #{recorded-commit} (d/parent-commit-ids rebuilt-db))
+            "the latest published evidence is the parent, not the older :db base")
+        (let [changed (upsert opened (:seon.source/commit-id rebuilt) digest-b [])
+              changed-db (source/database opened (:seon.source/commit-id changed))]
+          (is (= (:seon.test.run/id run)
+                 (get-in (db/pull changed-db '[{:seon.test/run [:seon.test.run/id]}]
+                                  [:seon.test/sym test-symbol])
+                         [:seon.test/run :seon.test.run/id])))
+          (is (not= digest-b
+                    (db/q '[:find ?digest . :in $ ?symbol
+                            :where [?test :seon.test/sym ?symbol]
+                                   [?test :seon.test/run ?run]
+                                   [?run :seon.test.run/program-digest ?digest]]
+                          changed-db test-symbol)))
+          (is (empty? (scratch-branches opened)))
+          (is (= #{:db :current-src} (set (registry/roster opened)))))))))

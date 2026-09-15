@@ -16,10 +16,8 @@
 # tests that reach changed code, derived from `:seon.fn/calls` edges in the one
 # program-graph manifest — never a file modification time or a filename
 # convention. The checkout-local green-basis file remains the temporary
-# selection input; every completed evidence-widening gate also replaces the
-# per-test facts of the tests it ran on the `:test-results` branch, so
-# `bin/seon status` reads real evidence rather than reporting UNKNOWN about a
-# question no tier answered.
+# selection input; every completed canonical gate also replaces the
+# per-test facts of the tests it ran on the `:current-src` branch.
 #
 # Each invocation owns one isolated operator root below `tmp/test-runs`, copies
 # the first-party checkout into it, and deletes it on success. Exit code is the
@@ -229,23 +227,11 @@ fi
 
 git_sha=$(git rev-parse HEAD)
 
-# EVERY EVIDENCE-WIDENING TIER RECORDS. Result facts are per-test and total —
-# `record-tx` replaces one test row's complete latest result — so a tier that
-# ran a subset writes real rows about exactly the tests it ran. Recording only
-# from the bare default meant the two tiers that run EVERY eligible test,
-# `--all` and `--full`, recorded nothing at all, and `bin/seon status` reported
-# "test evidence: UNKNOWN" for the whole tree while pointing the reader at a
-# gate that could never fill it.
-#
-# `--platform` is deliberately excluded: it re-writes the same declared
-# moving-part rows on every invocation, and every lane runs it after every
-# slice, so the round trip to the store holder would be a constant cost for no
-# new evidence. An explicitly named result cluster still directs the evidence
-# there instead, and an explicit namespace selection still records nothing.
+# Every canonical gate records exactly the tests it ran, including explicit
+# namespaces and platform-only selections. An explicit cluster overrides the
+# current-src destination. The fast iteration path does not persist evidence.
 persistent_results_root=
-if [ "$explicit_selection" -eq 0 ] &&
-   [ -z "$result_cluster" ] &&
-   [ "$requested_mode" != "platform" ]; then
+if [ -z "$result_cluster" ]; then
   persistent_results_root="$source_root"
 fi
 

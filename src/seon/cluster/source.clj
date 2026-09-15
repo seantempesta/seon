@@ -270,6 +270,61 @@
                               :seon.store/branch scratch})
     (catch Throwable _ nil)))
 
+(defn- result-preservation-tx
+  "Carry latest evidence from the published head, never the rebuild's base.
+  Keep the original run fingerprint even when a definition changed. Evidence
+  remains inspectable; it certifies only the program actually tested."
+  [previous]
+  (if-not (get (:schema previous) :seon.test/run)
+    []
+    (let [results (db/q '[:find [?test ...]
+                          :where [?test :seon.test/run]] previous)
+          runs (db/q '[:find [?run ...]
+                       :where [?run :seon.test.run/id]] previous)
+          selector [:seon.test/sym :seon.test/pass-count
+                    :seon.test/fail-count :seon.test/error-count
+                    :seon.test/run-basis-t :seon.test/run-at
+                    :seon.test/failing-assertions :seon.test/failure-message
+                    {:seon.test/run [:seon.test.run/id]}]]
+      (into (mapv #(dissoc (db/pull previous '[*] %) :db/id) runs)
+            (map (fn [test]
+                   (let [row (dissoc (db/pull previous selector test) :db/id)]
+                     (assoc row :seon.test/run
+                            [:seon.test.run/id
+                             (get-in row [:seon.test/run :seon.test.run/id])]))))
+            results))))
+
+(defn record-results!
+  "Publish test evidence through the result writer on a private source branch.
+  A changed expected head refuses publication; no current-src connection can
+  outlive a force-branch operation and later overwrite a newer program."
+  {:malli/schema
+   [:=> [:cat :seon.store/store :seon.test.run/completion]
+    [:or :seon.test/results :seon.error/value]]}
+  [held-store completion]
+  (let [expected (:seon.source/commit-id (current held-store))
+        scratch (scratch-branch)]
+    (when-not expected
+      (refuse! ::source-absent "Test recording requires a published current-src." {}))
+    (registry/branch! {:seon.store/store held-store
+                       :seon.cluster.registry/from expected
+                       :seon.store/branch scratch})
+    (try
+      (let [connection (store/open-branch! held-store scratch)]
+        (try
+          (let [projection (schema/projection-from-database @connection)
+                result (schema/call-with-projection
+                        projection
+                        #((requiring-resolve 'seon.test.runner/commit-results!)
+                          connection completion))]
+            (if (:seon.error/kind result)
+              result
+              (do (d/force-branch! @connection current-branch #{expected}
+                                   {:expected-current-commit expected})
+                  result)))
+          (finally (store/release-branch! connection))))
+      (finally (retire-scratch! held-store scratch)))))
+
 (defn publish!
   "Build and atomically publish one complete source database value."
   {:malli/schema [:=> [:cat :seon.source/publish-request]
@@ -305,6 +360,15 @@
              (merge populate-request
                     {:seon.db/connection connection
                      :seon.source/digest source-digest}))
+            (when expected-commit
+              (let [evidence (result-preservation-tx
+                              (database store expected-commit))]
+                (when (seq evidence)
+                  (require-committed!
+                   (db/transact! connection [[:db.fn/call (fn [_] evidence)]])
+                   ::source-seal-refused
+                   "The rebuilt source could not preserve test evidence."
+                   {:seon.source/digest source-digest}))))
             ;; The source seal is the genesis boundary. Population must first
             ;; install canonical schema/program rows and boot/config process
             ;; facts; the digest and build instant are the final complete fact.
