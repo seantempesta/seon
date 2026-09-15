@@ -6,18 +6,22 @@ tags: [sci, help, dir, my.note, deftest, live-test]
 created: 2026-09-14
 ---
 
-# `my.note/add!` and bare `deftest` do not resolve from the agent's namespace although help and `dir` name them
+# Bare `deftest` does not resolve, and the model never found `my.note/add!` although `dir` listed it
 
 ## Observed (run 2, and the model's own account in `research/explain_probe_turn40_2026_09_14.edn`)
 
 The help line says "Tools: my.agent, my.background, my.edit, my.fs,
 my.message, my.note, my.plan, …" and "A deftest becomes a durable test".
-In the session, `(my.note/add! …)` and `(my.note/create! …)` were both
-unresolved; `(require '[my.note])` and `(ns-publics 'my.note)` did not help;
-the agent fell back to `seon.db/transact!` on `:my.note/*` attributes.
-Bare `(deftest …)` was unresolved; `clojure.test/deftest` worked.
-The model: "the mismatch between the tools my agent has (help named
-`my.note`) and the symbols the REPL will accept is a real gap."
+Checked against the stored evaluations (not the model's memory): the
+agent called `(my.note/add …)` and `(my.note/create! …)` — both unresolved,
+both names it guessed; `(ns-publics 'my.note)` returned
+`{add! forget! notes}` and it still never tried `my.note/add!`, falling
+back to `seon.db/transact!` on `:my.note/*`. Bare `(deftest …)` was
+"Unable to resolve symbol: deftest"; `clojure.test/deftest` worked. The
+model's account ("neither resolves") is wrong about `add!` but right about
+the experience: the `dir` listing it saw was elided by the profile
+("Retur…", "vector 12 items … requery refused") so the names with their
+bangs never reached it whole, and help promises a bare `deftest`.
 
 ## Wanted
 
