@@ -1,28 +1,30 @@
 ---
 type: issue
 status: open
-severity: friction
-tags: [issue, test, docs, wave/dev-tooling-face-hygiene]
+severity: cleanup
+tags: [issue, docs, wave/dev-tooling-face-hygiene]
 ---
 
-# Retire quiet-window assumptions after immediate hook draining
+# Retire the quiet-window claim in AGENTS.md
 
 ## Problem
 
-The approved hook drains immediately and merges only edits arriving before
-the next publication starts. A burst of independent editors is no longer
-guaranteed to produce exactly one publication.
+AGENTS.md §6 still says a configured quiet window coalesces edits. The
+approved hook drains immediately and merges edits arriving during a
+publication into one pending successor batch.
 
 ## Evidence
 
-`test/seon/dev/edit_feedback_test.clj:88` still requires exactly one result
-for five editors and assumes the worker claim exists after all editor
-responses. Immediate publication may finish before those responses, and
-later edits may belong to successor batches. This stale test was identified
-by source inspection; no lane test JVM was launched.
+The current `.claude/seon-hook.edn` no longer declares `:quiet-seconds`,
+and `run-source-worker!` no longer consults a quiet timer.
 
-AGENTS.md §6 still says a configured quiet window coalesces edits. The
-current `.claude/seon-hook.edn` no longer declares that setting.
+The stale integration-test assumption was fixed in `db7e653ca`. Its event
+probe injects six editor requests covering five distinct paths while the
+first publication is active. The default REPL invoked that exact Babashka
+probe: **2** publications, **6** responses naming the same successor,
+**5** successor paths, **2** terminal refusals, and no remaining pending
+batch or worker claim. No timer schedules admission. No test JVM was
+launched; the orchestrator's canonical gate is still requested.
 
 The owned regression `seon.dev.hook-test/idle-edit-starts-without-quiet-delay`
 exercises the actual pending-file/lock/drain owner and proves exactly one
@@ -31,14 +33,10 @@ is recorded in [the landing note](../../prds/context-generation/research/slow-su
 
 ## Owner
 
-`test/seon/dev/edit_feedback_test.clj` and AGENTS.md §6 are outside the
-startup-and-hook-waste assignment's explicit owned paths; a scope extension
-was requested for the existing test.
+AGENTS.md §6. The authorized test scope extension is complete; this note
+is now limited to the remaining documentation claim.
 
 ## Acceptance
 
-The editor integration test verifies every submitted path has terminal
-publication evidence and bounds its event waits without requiring an idle
-worker claim to remain present. It does not assume a single batch for edits
-that may span publication completions. AGENTS.md describes the immediate
-drain and one pending successor instead of a quiet window.
+AGENTS.md describes immediate draining and one pending successor instead
+of a quiet window.

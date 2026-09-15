@@ -142,7 +142,7 @@ feedback. Those hunks were preserved; they are not this lane's work.
 The explicit runner restriction is preserved: its only change is the
 acquisition log timestamp. The complete cold-worker row 2 claim therefore
 remains open in
-[isolated runner duplication](../../../seon/issues/isolated-runner-duplicates-fast-initialization.md).
+[isolated runner duplication](../../../seon/issues/archive/isolated-runner-duplicates-fast-initialization.md).
 The old integration test and AGENTS.md quiet-window claim are recorded in
 [quiet-window assumptions](../../../seon/issues/hook-quiet-window-assumptions-survive-immediate-drain.md).
 No out-of-scope implementation was silently substituted. The new startup
@@ -154,3 +154,43 @@ runner.clj); `git diff --check` is clean. Markdown hook feedback reports
 unrelated pinned-revision errors in the AGENTS audit note. Canonical tests,
 platform gate, cold-worker timings, and successful default convergence
 remain for the orchestrator; they are not claimed green here.
+
+### Scope extension completed — 2026-09-15 21:33Z
+
+The owner authorized worker delegation and the existing hook integration
+test. Commit **`db7e653ca`** changes exactly
+`src/seon/test/runner.clj`, `test/seon/test/runner_test.clj`, and
+`test/seon/dev/edit_feedback_test.clj`. The worker now calls the existing
+arm initializer; its unused arming-decision copy is deleted. The regression
+exercises both entry points. No reaching-tests-tier file or hook hunk was
+edited during this extension.
+
+Default **PID 69622**, direct JVM REPL at **21:31:53Z**, after hot-reloading
+only the worker's private initializer from the edited source:
+
+| Entry point | Packaged constructions | Identical carried projection | Armable / unarmed | Warm elapsed |
+|---|---:|---|---|---:|
+| `seon.test.arm/initialize-contracts!` | 1 | true | 998 / 0 | 207.581708 ms |
+| `seon.test.runner/initialize-contracts!` | 1 | true | 998 / 0 | 197.990458 ms |
+
+Entering wrappers and Malli registry were restored. These are warm REPL
+observations, not cold test-JVM timings. MCP rendered the final nil normally
+on this pass; the earlier missing-config observation is historical.
+
+The same default REPL ran the exact `queued-editor-probe` stored in the
+integration test through the existing bounded subprocess owner and Babashka
+REPL. **Exit 0**, empty stderr; **2** publications, **6** edit responses
+while the first publication was active, **1** successor containing **5**
+distinct paths, **2** terminal refusal results, no pending batch, and no
+worker claim. Edit events are injected before the first publication
+returns, so batch membership no longer depends on a sleep or quiet window.
+The probe directory was removed in `finally`.
+
+The isolated-runner issue is resolved and archived. The hook-assumptions
+issue is narrowed to AGENTS.md §6's remaining quiet-window wording. Static
+analysis: **0 errors**; two existing shadowed bindings and the
+test-referenced private namespace-discovery helper are warnings.
+`git diff --check` passes. No test JVM was launched. The final gate request
+names `seon.test.runner-test`, `seon.test-runner-test`, `seon.dev.hook-test`,
+and `seon.dev.edit-feedback-test`; canonical and cold-worker evidence remain
+the orchestrator's next gate.
