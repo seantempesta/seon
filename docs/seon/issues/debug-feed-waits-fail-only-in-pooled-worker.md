@@ -1,7 +1,7 @@
 ---
 type: issue
 status: open
-severity: blocker
+severity: friction
 tags: [issue, render, test, wave/render-test]
 ---
 
@@ -32,3 +32,9 @@ pipeline, weaken the assertions, or merely increase the backstop.
 
 Evidence and concurrent platform boundary:
 [record-render landing](../../prds/context-generation/research/record-render-landing-2026-09-08.md).
+
+## Re-verified at HEAD (2026-09-15)
+
+UNVERIFIABLE-WITHOUT-GATE (`seon.render.web-test`, in the pooled isolated gate, not only test-fast). Audited HEAD `7e35df213:test/seon/render/web_test.clj` still contains reconnect-is-repaint (`:1264`), render-proc-one-derivation-many-tabs-test (`:1317`), wire reconnect (`:1476`), and mid-stream reconnect (`:1607`). The deterministic stale-pass regression at `:1424` names an older reconnect race, but that does not establish the cause of this note's four pooled-worker timeouts. Need the pooled namespace run and exact missing-event evidence; owner prohibits launching it. Downgraded to friction: historical isolated confirmations passed, and this triage has not reproduced an agent-run or context-generation blocker.
+
+surface: runner-gate

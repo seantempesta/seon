@@ -46,3 +46,9 @@ stall. The proof must run two co-hosted clusters under a declared heap ceiling,
 drive one to its enforced resource boundary, and show the sibling continues to
 query, transact, and answer through SCI. Catching one `OutOfMemoryError` is not
 acceptance because sustained retention and global GC are the failure class.
+
+## Re-verified at HEAD (2026-09-15)
+
+UNVERIFIABLE-WITHOUT-GATE (`seon.cluster.cohost-boot-test`, requiring a bounded two-cluster retention regression). Audited HEAD `7e35df213:resources/seon/operator/runtime.clj:11-30` still holds running instances and executors in one JVM. `src/seon/sci/eval.clj:22-31` describes allocation counts as diagnostics, and `:2243` arms the execution time limit; these are not per-cluster retained-heap isolation. The architecture remains, but no sustained-retention failure was reproduced in this triage. Acceptance requires a disposable process with an explicit heap ceiling, a retaining agent and a sibling query/transaction/SCI witness. The owner forbids new JVMs; never run this on default. Retain blocker for the unverified cross-cluster availability guarantee, without claiming that one successful allocation/refusal would prove it.
+
+surface: store-process

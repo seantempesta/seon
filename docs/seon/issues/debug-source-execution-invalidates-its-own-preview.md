@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, render, database, wave/live-drive-render]
 ---
@@ -453,3 +453,9 @@ expect `submit-source!` to have been called once and the retained call's
 59c a preview's run identity is a fresh in-memory uuid and no submission
 happens. The test's expectations are stale, not the behaviour. Whoever owns
 this note should close it and rewrite that oracle in the same commit.
+
+## Resolution (2026-09-15 triage)
+
+The durable preview submission mechanism is gone. Audited HEAD `7e35df213:src/seon/render/web.clj:1367-1415` calls `seon.turn/preview-sources`; `src/seon/turn.clj:4432-4476` parses and evaluates in memory without opening a turn or recording an evaluation entity. Consequently preview settlement cannot add the reverse turn reference that invalidated its own acquired input. This agrees with the historical one-eval-point checkpoint, but was verified from current source, not accepted from prose. `git log -- src/seon/cluster/loop.clj` identifies the owner move in `120caf85e`; the current definition is the evidence for deletion of the writer path. No browser or cache-lifetime guarantee beyond the named self-writing mechanism is claimed.
+
+surface: render-debug-page

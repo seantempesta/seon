@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, runtime, performance, class/p2, wave/boot-velocity]
 ---
@@ -111,3 +111,9 @@ This issue remains open only for the distinct operator contract: success must
 follow published readiness, and the silence clock must be a loud backstop
 rather than the primary completion detector. No change in this lane touched
 `script/seon/fresh_operator.clj`.
+
+## Resolution (2026-09-15 triage)
+
+The note explicitly says reconciliation slowness was repaired and retains only the operator completion contract. Commit `61cbb93ed` makes operator waits event-driven. Audited HEAD `7e35df213:script/seon/fresh_operator.clj:1746-1769` binds boot progress for the co-hosted add; `:1508-1579` consumes prepl events until terminal return, with a socket inactivity backstop rather than a total boot-duration deadline; `:2079-2120` observes progress, verifies the resulting registered advertisement, and prints success. Thus continuing progress no longer loses a healthy boot solely because total boot time exceeds the silence window. This is source proof of the remaining operator contract, not a new second-boot timing measurement. No JVM was launched for this check.
+
+surface: store-process

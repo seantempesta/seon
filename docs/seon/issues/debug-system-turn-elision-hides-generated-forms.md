@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, web, agent, wave/agent-context]
 ---
@@ -37,3 +37,9 @@ still include legacy per-step calls instead of the §17 plan component.
 The observed source bytes are retained in
 `docs/prds/context-generation/research/record-render-juniper-ai-observed-2026-09-08.txt`.
 The absence of `seon.eval/of-agent` remains independently reproducible.
+
+## Resolution (2026-09-15 triage)
+
+Commit `1d5edb65c` consolidates debug inspection onto the session component and removes system-turn-html/the old independent preview section (`git log -S 'system-turn-html' -- src/seon/render/web.clj`). Audited HEAD `7e35df213:src/seon/turn.clj:1889-1909` excludes walk elision from the fatal-error return and constructs generated sources. The other explicit blocker is also gone: `src/seon/eval.clj:9-65` implements of-agent, returning chronologically ordered saved evaluations and a diagnostic for an absent agent. The old missing function and elision-as-entire-preview path cannot occur as reported. This is source proof of those mechanisms, not a live browser performance or full context-loop gate claim.
+
+surface: render-debug-page
