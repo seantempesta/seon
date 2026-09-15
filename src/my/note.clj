@@ -1,4 +1,4 @@
-(ns my.note
+(ns ^{:seon.ns/context-relevant? true} my.note
   "Save durable observations with add! and read them with notes.
 
   Reusing :my.note/id updates that note; my agent identity is supplied.

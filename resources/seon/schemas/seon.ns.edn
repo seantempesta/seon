@@ -1,4 +1,5 @@
-#:seon.ns{:aliases [:set #:seon.db{:component true} :seon.db/ref],
+#:seon.ns{:context-relevant? [:boolean {:description "This namespace declares agent-facing context relevance; it never controls callability."}],
+          :aliases [:set #:seon.db{:component true} :seon.db/ref],
           :doc [:string #:seon.search{:index :text}],
           :imports [:set #:seon.db{:component true} :seon.db/ref],
           :name
@@ -11,6 +12,7 @@
             :seon.render/html seon.render.ns/render-html,
             :seon.render/form seon.render.ns/namespace-form}
            [:seon.ns/name :seon.ns/name]
+           [:seon.ns/context-relevant? {:optional true} :seon.ns/context-relevant?]
            [:seon.schema.admission/source
             {:optional true}
             :seon.schema.admission/source]

@@ -1,4 +1,4 @@
-(ns my.background
+(ns ^{:seon.ns/context-relevant? true} my.background
   "Start and inspect capability requests that may finish later."
   (:refer-clojure :exclude [await])
   (:require [seon.background :as background]

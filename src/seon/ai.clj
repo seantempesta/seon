@@ -350,21 +350,26 @@
           row
           (select-keys (:seon.agent/settings row) attributes))))))
 
-(defn- config-ai-ident->request-ident
-  [config-ident]
-  (keyword "seon.ai" (name config-ident)))
+(defn request-attributes
+  "Declared config-to-request routes from one schema population."
+  {:malli/schema [:=> [:cat :map] [:map-of :qualified-keyword :qualified-keyword]]}
+  [forms]
+  (into {}
+        (keep (fn [[config-ident definition]]
+                (when-let [attribute (:seon.ai/request-attribute
+                                     (schema.form/attr-form-properties definition))]
+                  [config-ident attribute])))
+        forms))
 
 (defn- primary-setting-entries
-  [dials]
-  (into {}
+  [forms dials]
+  (let [routes (request-attributes forms)]
+    (into {}
         (keep
          (fn [[config-ident value]]
-           (when (= "seon.config.ai" (namespace config-ident))
-             [(if (= :seon.config.ai/no-auth config-ident)
-                config-ident
-                (config-ai-ident->request-ident config-ident))
-              value])))
-        dials))
+           (when-let [attribute (get routes config-ident)]
+             [attribute value])))
+        dials)))
 
 (defn- resolved-target
   [target model]
@@ -404,7 +409,7 @@
 
 (defn- configured-targets
   [dials]
-   (let [primary-settings (primary-setting-entries dials)
+   (let [primary-settings (primary-setting-entries (schema/declaration-population) dials)
          primary
          (if (:seon.config.ai/no-auth dials)
            (dissoc primary-settings :seon.ai/api-key-variable)
@@ -573,8 +578,7 @@
 ;; ~66 complete classpath populations on EVERY model request, to answer a
 ;; question about one map already in hand (2026-08-07).
 (defn- wire-setting-triples
-  []
-  (let [forms (schema/declaration-population)]
+  [forms]
     (->> (map-attributes forms :seon.config/effective)
          (mapcat
           (fn [config-ident]
@@ -583,37 +587,31 @@
                  (:seon.ai/wire
                   (config-registration-properties forms config-ident)))))
          (sort-by (juxt (comp str first) second))
-         vec)))
+         vec))
 
 (defn- coercion-function
   [coercion]
   (requiring-resolve coercion))
 
-;; DeepSeek documents these controls as silently ignored whenever thinking is
-;; enabled. This is the one accepted provider constant; a second provider with
-;; a different set is the trigger to move the fact into descriptor data.
-;; `research/deepseek-thinking-mode-api-2026-08-01.md`, "Parameters silently
-;; ignored in thinking mode"; owner ruling #34, 2026-08-01.
-(def ^:private thinking-inert-settings
-  #{:seon.config.ai/temperature
-    :seon.config.ai/top-p
-    :seon.config.ai/frequency-penalty
-    :seon.config.ai/presence-penalty})
-
 (defn wire-settings
   "Wire fields honoured for a request and configured fields that are inert."
   {:malli/schema [:=> [:cat :seon.ai/request] :seon.ai/wire-settings]}
   [request]
-  (let [thinking? (not= :disabled (:seon.ai/thinking request))
+  (let [forms (schema/declaration-population)
+        routes (request-attributes forms)
+        thinking? (not= :disabled (:seon.ai/thinking request))
         inert (if thinking?
                 (into #{}
-                      (filter #(contains? request
-                                          (config-ai-ident->request-ident %)))
-                      thinking-inert-settings)
+                      (keep (fn [[config-ident attribute]]
+                              (when (and (contains? request attribute)
+                                         (:seon.ai/inert-when-thinking
+                                          (config-registration-properties forms config-ident)))
+                                config-ident)))
+                      routes)
                 #{})]
     (reduce
      (fn [result [config-ident wire-key coercion]]
-       (let [request-ident (config-ai-ident->request-ident config-ident)]
+       (let [request-ident (get routes config-ident)]
          (if (or (contains? inert config-ident)
                  (not (contains? request request-ident)))
            result
@@ -629,7 +627,7 @@
                (assoc-in result [:seon.ai/sent wire-key] wire-value))))))
      {:seon.ai/sent {}
       :seon.ai/inert inert}
-     (wire-setting-triples))))
+     (wire-setting-triples forms))))
 
 (defn- extra-body-request-ident
   []
@@ -638,7 +636,8 @@
      (fn [config-ident]
        (when (true? (:seon.ai/extra-body
                      (config-registration-properties forms config-ident)))
-         (config-ai-ident->request-ident config-ident)))
+         (:seon.ai/request-attribute
+          (config-registration-properties forms config-ident))))
      (map-attributes forms :seon.config/effective))))
 
 (defn- extra-body

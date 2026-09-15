@@ -1,4 +1,6 @@
-#:seon.ai{:provider-error :seon.ai/http-status,
+#:seon.ai{:request-attribute [:qualified-keyword {:description "Request field populated by this config declaration; spelling carries no routing semantics."}],
+          :inert-when-thinking [:boolean {:description "This setting is omitted in thinking mode under the shipped provider policy (owner ruling 34)."}],
+          :provider-error :seon.ai/http-status,
           :rate-limited-error
           [:map
            {:seon.error/class true,

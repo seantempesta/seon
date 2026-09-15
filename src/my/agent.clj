@@ -1,4 +1,4 @@
-(ns my.agent
+(ns ^{:seon.ns/context-relevant? true} my.agent
   "Read and update my record through request maps."
   (:refer-clojure :exclude [identity])
   (:require [seon.agent :as agent]

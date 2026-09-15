@@ -1,4 +1,4 @@
-(ns my.turn
+(ns ^{:seon.ns/context-relevant? true} my.turn
   "Return explicit completion or waiting data for my session."
   (:require [seon.run :as run]))
 

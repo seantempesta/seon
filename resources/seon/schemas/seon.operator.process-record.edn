@@ -1,4 +1,5 @@
-#:seon.operator.process-record{:generation :uuid
+#:seon.operator.process-record{:repository-root [:string {:min 1 :description "The installation owning this process claim and its lifecycle lock."}]
+                               :generation :uuid
                                :root :string
                                :log :string
                                :cache-path [:string {:min 1}]
@@ -6,6 +7,9 @@
                                [:map
                                 [:seon.operator.process-record/generation
                                  :seon.operator.process-record/generation]
+                                [:seon.operator.process-record/repository-root
+                                 {:optional true}
+                                 :seon.operator.process-record/repository-root]
                                 [:seon.boot/pid :seon.boot/pid]
                                 [:seon.boot/start-instant
                                  :seon.boot/start-instant]

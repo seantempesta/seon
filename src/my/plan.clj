@@ -1,4 +1,4 @@
-(ns my.plan
+(ns ^{:seon.ns/context-relevant? true} my.plan
   "Read and maintain my objective and ordered plan steps.
 
   current! selects a step; complete! completes it and clears the selection.

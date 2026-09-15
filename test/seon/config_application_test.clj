@@ -6,15 +6,10 @@
   consumes `:seon.config.fs/max-depth`\" is derived from `:seon.fn/keywords`.
   A registered dial no function reads is a dead dial and fails this namespace.
 
-  `application-modes` keeps only what the graph genuinely cannot see — WHEN an
-  applied value takes effect. `:creation-fixed` values are settled when the
-  store is created; `:arm-time` values shape structural runtime state and
-  require re-arm after apply; `:live` values query the current database value
-  on each pass; `:mixed` has both paths."
-  (:require [clojure.edn :as edn]
-            [clojure.java.io :as io]
+  Computed request and environment routes are explicit schema properties;
+  the application census is per attribute, never per namespace family."
+  (:require [clojure.java.io :as io]
             [clojure.set :as set]
-            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [seon.ai :as ai]
             [seon.cluster :as cluster]
@@ -22,98 +17,9 @@
             [seon.flow :as flow]
             [seon.fn :as seon.fn]
             [seon.render.web :as web]
+            [seon.schema :as schema]
+            [seon.schema.form :as schema.form]
             [seon.test-support :as test-support]))
-
-(def ^:private application-modes
-  "Registered config attribute -> when its applied value takes effect."
-  {:seon.config/initialization :creation-fixed
-   :seon.config.db/keep-history? :creation-fixed
-   :seon.config.flow.compute/queue-depth :arm-time
-   :seon.config.flow.compute/concurrency :arm-time
-   :seon.config.flow.io/queue-depth :arm-time
-   :seon.config.flow.io/concurrency :arm-time
-   :seon.config.flow/ping-timeout-ms :live
-   :seon.config.effect/long-call-ms :live
-   :seon.config.effect.background/time-limit-ms :live
-   :seon.config.shell/home :live
-   :seon.config.shell/lang :live
-   :seon.config.shell/path :live
-   :seon.config.shell/inline-output-bytes :live
-   :seon.config.shell/preview-bytes :live
-   :seon.config.shell/stdin-max-bytes :live
-   :seon.config.shell/termination-grace-ms :live
-   :seon.config.shell/time-limit-ms :live
-   :seon.config.eval.result/max-depth :arm-time
-   :seon.config.eval.result/max-collection :arm-time
-   :seon.config.eval.result/max-string :arm-time
-   :seon.config.eval.result/max-source :arm-time
-   :seon.config.eval.result/max-nodes :arm-time
-   :seon.config.eval.result/blob-threshold :live
-   :seon.config.render.agent/token-budget :live
-   :seon.config.render.agent/max-depth :live
-   :seon.config.render.agent/max-children :live
-   :seon.config.render.agent/composition :live
-   :seon.config.eval/time-limit-ms :arm-time
-   :seon.config.test/auto-check-cases :live
-   :seon.config.agent/turn-completion-backstop-ms :live
-   :seon.config.bootstrap/beyond-closure-token-budget :live
-   :seon.config.error/recurrence-limit :mixed
-   :seon.config.error/escalate-to :mixed
-   :seon.config/on-core-error :mixed
-   :seon.config.maintenance/min-usable-bytes :live
-   :seon.config.maintenance/min-usable-ratio :live
-   :seon.config.maintenance/log-max-bytes :live
-   :seon.config.maintenance/log-retained-files :live
-   :seon.config.operator/event-silence-backstop-ms :arm-time
-   :seon.config.message/max-chain :arm-time
-   :seon.config.run/max-episode-runs :live
-   :seon.config.web/port :arm-time
-   :seon.config.web/timeout-ms :live
-   :seon.config.web/max-response-bytes :live
-   :seon.config.web/max-inline-bytes :live
-   :seon.config.web/max-redirects :live
-   :seon.config.web/max-search-results :live
-   :seon.config.web/search-endpoint :live
-   :seon.config.web/search-api-key-variable :live
-   :seon.config.web/search-result-projection :live
-   :seon.config.render/coalesce-ms :live
-   :seon.render.value/max-collection :live
-   :seon.print/length :live
-   :seon.print/level :live
-   :seon.config.fs/working-root :live
-   :seon.config.fs/roots :live
-   :seon.config.fs/max-read-bytes :live
-   :seon.config.fs/max-inline-bytes :live
-   :seon.config.fs/max-write-bytes :live
-   :seon.config.fs/max-glob-results :live
-   :seon.config.fs/max-traversal-entries :live
-   :seon.config.fs/max-depth :live
-   :seon.config.ai/endpoint :live
-   :seon.config.ai/model :live
-   :seon.config.ai/max-tokens :live
-   :seon.config.ai/prompt-token-budget :live
-   :seon.config.ai/chars-per-token-prior :live
-   :seon.config.ai/thinking :live
-   :seon.config.ai/temperature :live
-   :seon.config.ai/top-p :live
-   :seon.config.ai/frequency-penalty :live
-   :seon.config.ai/presence-penalty :live
-   :seon.config.ai/stop :live
-   :seon.config.ai/response-format :live
-   :seon.config.ai/extra-body-edn :live
-   :seon.config.ai/api-key-variable :live
-   :seon.config.ai/no-auth :live
-   :seon.config.ai/timeout-ms :live
-   :seon.config.ai.backup/model :live
-   :seon.config.ai.backup/endpoint :live
-   :seon.config.ai.backup/api-key-variable :live
-   :seon.config.ai.backup/timeout-ms :live
-   :seon.config.ai.retry/base-delay-ms :live
-   :seon.config.ai.retry/multiplier :live
-   :seon.config.ai.retry/jitter-fraction :live
-   :seon.config.ai.retry/maximum-delay-ms :live
-   :seon.config.ai.retry/maximum-retries :live
-   :seon.config.ai.retry/maximum-total-delay-ms :live})
 
 (def ^:private applied
   {:seon.config.db/keep-history? true
@@ -194,21 +100,17 @@
    {}
    rows))
 
-(defn- unapplied-families
-  "Config keyword namespaces no indexed function reads at all.
-
-  Application is asserted at family grain because two shipped consumers apply
-  a whole family through a COMPUTED key rather than a literal one:
-  `seon.ai/primary-setting-entries` renames every `:seon.config.ai/*` dial to
-  its `:seon.ai/*` request field, and `seon.shell.jvm/environment-overrides`
-  applies every dial whose schema declares `:seon.shell/environment`. Static
-  analysis sees literal keywords only, so a per-attribute assertion would call
-  those live dials dead. Tightening to per-attribute grain is
-  `docs/seon/issues/config-ai-request-idents-are-derived-by-string-surgery.md`."
-  [rows attributes]
-  (let [consumed (set (keys (consumers-by-attribute rows attributes)))]
-    (set/difference (into #{} (map namespace) attributes)
-                    (into #{} (map namespace) consumed))))
+(defn- unapplied-attributes
+  "Dials lacking a literal reader or a declared request/environment route."
+  [rows forms attributes]
+  (let [literal (set (keys (consumers-by-attribute rows attributes)))
+        request-routes (set (keys (ai/request-attributes forms)))
+        environment-routes
+        (into #{} (keep (fn [[attribute definition]]
+                          (when (:seon.shell/environment
+                                 (schema.form/attr-form-properties definition))
+                            attribute))) forms)]
+    (set/difference attributes literal request-routes environment-routes)))
 
 (defn- source-rows []
   (into []
@@ -218,22 +120,15 @@
           {:seon.fn/roots ["src" "script/seon/fresh_operator.clj"]}))))
 
 (deftest every-config-entry-has-an-honest-application-contract
-  (let [registered
-        (set (keys (edn/read-string (slurp config/default-manifest-path))))]
-    (is (= registered (set (keys application-modes)))
-        "a newly registered entry cannot ship without a declared update mode")
-    (is (= #{:creation-fixed :arm-time :live :mixed}
-           (set (vals application-modes))))
-    (testing "the program graph, not a hand list, names each dial's consumer"
-      (let [rows (source-rows)]
-        (is (= #{} (unapplied-families rows registered))
-            (str "a registered config family no indexed first-party function reads "
-                 "is a dead dial: nothing in the running system applies it"))
-        (is (= ["seon.fs.jvm/glob"]
-               (vec (get (consumers-by-attribute rows registered)
-                         :seon.config.fs/max-depth)))
-            (str "the consumer is derived, so it stays correct without "
-                 "maintenance; the retired hand ledger named path-plan here"))))))
+  (test-support/with-database
+    (fn [connection]
+      (let [forms (:seon.schema.projection/forms
+                   (schema/projection-from-database @connection))
+            registered (config/dial-attributes forms)
+            rows (source-rows)]
+        (is (seq registered) "The canonical dial population must be present.")
+        (is (= #{} (unapplied-attributes rows forms registered))
+            "Each admitted dial has a literal consumer or a declared application route.")))))
 
 (deftest an-unread-config-attribute-is-detected-as-a-dead-dial
   (let [attributes #{:seon.config.sample/applied :seon.config.orphan/dial}
@@ -246,7 +141,7 @@
     (is (= {:seon.config.sample/applied #{"sample.consumer/apply-setting"}}
            consumers)
         "keywords outside the registered set never enter the derivation")
-    (is (= #{"seon.config.orphan"} (unapplied-families rows attributes))
+    (is (= #{:seon.config.orphan/dial} (unapplied-attributes rows {} attributes))
         "a dial only a test reads has no application owner and must fail")))
 
 (deftest ^{:seon.test/long "Starts a real cluster to observe applied runtime configuration."}
@@ -279,7 +174,7 @@
                      (select-keys (::flow/configuration launcher)
                                   flow-keys)))))
           (testing "eval, error, and message structure consumes applied values"
-            (is (= (config/result-caps applied)
+            (is (= (config/result-caps (config/effective @connection name))
                    (:seon.sci.admit/caps handle)))
             (is (= (select-keys applied
                                 [:seon.config.eval/time-limit-ms
@@ -296,13 +191,11 @@
                      :seon.config.message/max-chain]))))
           (testing "AI settings remain live facts rather than armed values"
             (is (= (select-keys applied
-                                (filter #(str/starts-with? (namespace %)
-                                                           "seon.config.ai")
-                                        (keys applied)))
+                                (keys (ai/request-attributes
+                                       (schema/declaration-population))))
                    (select-keys (config/effective @connection name)
-                                (filter #(str/starts-with? (namespace %)
-                                                           "seon.config.ai")
-                                        (keys applied)))))
+                                (keys (ai/request-attributes
+                                       (schema/declaration-population))))))
             (is (= name (:seon.cluster/name handle)))
             (is (empty? (select-keys handle
                                      [:seon.ai/primary
@@ -331,7 +224,7 @@
             (is (= 6
                    ((var-get
                      (ns-resolve 'seon.turn 'max-episode-runs))
-                    @connection))))
+                    @connection "root"))))
           (finally
             (cluster/stop! instance))))
       (finally

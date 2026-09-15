@@ -217,6 +217,8 @@
     (cond-> {:seon.ns/name namespace-name
              :seon.ns/source (exact-source contexts entry)}
       (::analyzer/doc entry) (assoc :seon.ns/doc (::analyzer/doc entry))
+      (true? (:seon.ns/context-relevant? (::analyzer/meta entry)))
+      (assoc :seon.ns/context-relevant? true)
       (seq requires)
       (assoc :seon.ns/requires (into #{} (map namespace-ref) requires))
       (seq aliases)

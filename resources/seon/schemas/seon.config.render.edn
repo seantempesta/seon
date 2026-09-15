@@ -1,1 +1,2 @@
-#:seon.config.render{:coalesce-ms [:int {:min 0, :max 1000}]}
+#:seon.config.render{:coalesce-ms
+                     [:int {:min 0, :max 1000, :seon.config/dial true}]}

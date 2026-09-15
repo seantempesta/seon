@@ -2,4 +2,5 @@
                                 [:int
                                  {:min 1,
                                   :description
-                                  "Milliseconds a detached capability request may run before its own interrupt arm cuts it. The default bound for every my.background submission; the submitting form's explicit :seon.effect/time-limit-ms wins over it in either direction."}]}
+                                  "Milliseconds a detached capability request may run before its own interrupt arm cuts it. The default bound for every my.background submission; the submitting form's explicit :seon.effect/time-limit-ms wins over it in either direction.",
+                                  :seon.config/dial true}]}

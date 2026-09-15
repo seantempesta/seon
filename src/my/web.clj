@@ -1,4 +1,4 @@
-(ns my.web
+(ns ^{:seon.ns/context-relevant? true} my.web
   "Fetch web resources and search the configured provider."
   (:require [seon.effect :as effect]
             [seon.schema.edn :as schema.edn]))

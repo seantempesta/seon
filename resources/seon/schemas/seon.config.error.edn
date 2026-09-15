@@ -1,8 +1,13 @@
 #:seon.config.error{:escalate-to
-                    [:string {:min 1, :seon.config/optional true}],
+                    [:string
+                     {:min 1,
+                      :seon.config/optional true,
+                      :seon.config/dial true}],
                     :max-evidence-bytes
                     [:int
                      {:min 1,
                       :description
-                      "UTF-8 bytes of evidence one durable fault fact keeps INLINE. The fault's meaningful source goes through the same streaming admission every stored value does, with this bound in place of the storage bound; over it the fact records :seon.sci.admit/reason and the size reached, and the complete evidence stays in the fault's content blob."}],
-                    :recurrence-limit [:int {:min 1}]}
+                      "UTF-8 bytes of evidence one durable fault fact keeps INLINE. The fault's meaningful source goes through the same streaming admission every stored value does, with this bound in place of the storage bound; over it the fact records :seon.sci.admit/reason and the size reached, and the complete evidence stays in the fault's content blob.",
+                      :seon.config/dial true}],
+                    :recurrence-limit
+                    [:int {:min 1, :seon.config/dial true}]}

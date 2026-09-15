@@ -2,9 +2,11 @@
                       [:int
                        {:min 1,
                         :description
-                        "Concurrent background IO submissions per cluster."}],
+                        "Concurrent background IO submissions per cluster.",
+                        :seon.config/dial true}],
                       :queue-depth
                       [:int
                        {:min 1,
                         :description
-                        "Queued background IO submissions per cluster."}]}
+                        "Queued background IO submissions per cluster.",
+                        :seon.config/dial true}]}

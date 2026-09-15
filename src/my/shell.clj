@@ -1,4 +1,4 @@
-(ns my.shell
+(ns ^{:seon.ns/context-relevant? true} my.shell
   "Bounded foreground argv-vector process requests."
   (:refer-clojure :exclude [run!])
   (:require [seon.shell :as shell]

@@ -140,15 +140,16 @@
 ;;; `registration-defaults` — issue
 ;;; packaged-forms-rereads-every-schema-resource-per-call).
 
-(defn- map-attributes
-  [forms schema-key]
-  (into #{}
-        (comp (filter vector?) (map first))
-        (get forms schema-key)))
-
-(defn- dial-attributes
+(defn dial-attributes
+  "Config membership declared by leaf schemas, independent of their names."
+  {:malli/schema [:=> [:cat :map] [:set :qualified-keyword]]}
   [forms]
-  (map-attributes forms :seon.config/manifest))
+  (into #{}
+        (keep (fn [[attribute definition]]
+                (when (true? (:seon.config/dial
+                              (schema.form/attr-form-properties definition)))
+                  attribute)))
+        forms))
 
 (defn- required-dial-attributes
   [forms]

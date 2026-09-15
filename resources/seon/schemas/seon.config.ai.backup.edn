@@ -2,19 +2,23 @@
                         [:string
                          {:min 1,
                           :seon.config/optional true,
-                          :seon.config/per-agent true}],
+                          :seon.config/per-agent true,
+                          :seon.config/dial true}],
                         :endpoint
                         [:string
                          {:min 1,
                           :seon.config/optional true,
-                          :seon.config/per-agent true}],
+                          :seon.config/per-agent true,
+                          :seon.config/dial true}],
                         :model
                         [:string
                          {:min 1,
                           :seon.config/optional true,
-                          :seon.config/per-agent true}],
+                          :seon.config/per-agent true,
+                          :seon.config/dial true}],
                         :timeout-ms
                         [:int
                          {:min 1,
                           :seon.config/optional true,
-                          :seon.config/per-agent true}]}
+                          :seon.config/per-agent true,
+                          :seon.config/dial true}]}

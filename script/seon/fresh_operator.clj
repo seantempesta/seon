@@ -159,10 +159,25 @@
                 (fs/absolute? (:seon.operator.process-record/cache-path record))))))
 
 (defn- read-process-records
-  [root]
+  ([root]
+   (read-process-records root (operator.state/observed-property-processes)))
+  ([root observations]
   (let [canonical-root (.getCanonicalPath (java.io.File. root))
+        repositories
+        (conj (operator.state/process-claim-repositories
+               root observations)
+              (.getCanonicalPath (repository-root)))
         {records :records errors :errors}
-        (operator.state/process-claims (repository-root))]
+        (reduce (fn [result repository]
+                  (let [claims (operator.state/process-claims repository)]
+                    (-> result
+                        (update :records into
+                                (map #(cond-> %
+                                        (not= repository (.getCanonicalPath (repository-root)))
+                                        (assoc :seon.operator.process-record/repository-root repository))
+                                     (:records claims)))
+                        (update :errors into (:errors claims)))))
+                {:records [] :errors []} repositories)]
     {:seon.fresh-operator/process-records
      (filterv #(= canonical-root
                   (:seon.operator.process-record/root %))
@@ -171,7 +186,7 @@
      (mapv (fn [error]
              {:seon.fresh-operator/path (:seon.operator.claim/path error)
               :seon.fresh-operator/error (:seon.error/message error)})
-           errors)}))
+           errors)})))
 
 (defn- write-process-record!
   [root record]
@@ -189,10 +204,13 @@
   record)
 
 (defn- clear-process-record!
-  [root record]
+  [_root record]
   (let [generation (:seon.operator.process-record/generation record)
-        deleted? (state/delete-edn! (process-record-path root generation))]
-    (state/delete-edn! (dependency-cache-reference-path generation))
+        repository (or (:seon.operator.process-record/repository-root record)
+                       (repository-root))
+        deleted? (state/delete-edn! (operator.state/process-claim-path repository generation))]
+    (state/delete-edn! (fs/path repository "target" "dev-dependency-cache-processes"
+                               (str generation ".edn")))
     deleted?))
 
 (defn- record-process-identity
@@ -1798,6 +1816,7 @@
           :seon.fresh-operator/dependency-cache-path dependency-cache-path
           :seon.fresh-operator/jvm-options
           [(str "-J-Dseon.operator.generation=" generation)
+           (str "-J-Dseon.operator.repository-root=" (.getCanonicalPath (repository-root)))
            (str "-J-Dseon.operator.log=" log)]
           :seon.fresh-operator/arguments
           ["-e" (launch-form root name manifest ready-port)]
@@ -1826,6 +1845,7 @@
               :seon.fresh-operator/log log}))
     (let [record
           {:seon.operator.process-record/generation generation
+           :seon.operator.process-record/repository-root (.getCanonicalPath (repository-root))
            :seon.boot/pid pid
            :seon.boot/start-instant start-instant
            :seon.operator.process-record/root (.getCanonicalPath (java.io.File. root))
@@ -2932,7 +2952,8 @@
                            (advertisement-for-process-record root record))
                          stopped
                          (operator.state/stop-recorded-process-under-lock!
-                          (repository-root)
+                          (or (:seon.operator.process-record/repository-root record)
+                              (repository-root))
                           record
                           (if advertisement
                             [{:seon.operator.state/advertisement advertisement}]

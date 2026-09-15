@@ -1,4 +1,4 @@
-(ns my.fs
+(ns ^{:seon.ns/context-relevant? true} my.fs
   "Read, write, inspect, and find files with bounded results."
   (:refer-clojure :exclude [read])
   (:require [seon.fs :as fs]

@@ -1,4 +1,4 @@
-(ns my.message
+(ns ^{:seon.ns/context-relevant? true} my.message
   "The inter-agent message protocol, with optional request-map calls; call preparation supplies my database and identity."
   (:refer-clojure :exclude [read send])
   (:require [seon.cluster.message :as message]))

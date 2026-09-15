@@ -1,4 +1,4 @@
-(ns my.test
+(ns ^{:seon.ns/context-relevant? true} my.test
   "Run the tests declared in my namespace."
   (:require [seon.test]))
 

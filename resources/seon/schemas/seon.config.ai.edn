@@ -1,15 +1,33 @@
-#:seon.config.ai{:retain-reasoning [:boolean {:seon.config/optional true :seon.config/per-agent true :description "Retain provider reasoning in attempt evidence when explicitly enabled. The provider output bound limits its size."}]
-:api-key-variable
-                 [:string {:min 1, :seon.config/optional true,
-                           :seon.config/per-agent true}],
+#:seon.config.ai{:api-key-variable
+                 [:string
+                  {:min 1,
+                   :seon.config/optional true,
+                   :seon.config/per-agent true,
+                   :seon.config/dial true,
+                   :seon.ai/request-attribute
+                   :seon.ai/api-key-variable}],
+                 :chars-per-token-prior
+                 [:double
+                  {:min 0.1,
+                   :seon.config/per-agent true,
+                   :seon.config/dial true,
+                   :seon.ai/request-attribute
+                   :seon.ai/chars-per-token-prior}],
                  :endpoint
-                 [:string {:min 1, :seon.config/per-agent true}],
+                 [:string
+                  {:min 1,
+                   :seon.config/per-agent true,
+                   :seon.config/dial true,
+                   :seon.ai/request-attribute :seon.ai/endpoint}],
                  :extra-body-edn
                  [:string
                   {:min 1,
                    :seon.config/optional true,
                    :seon.config/per-agent true,
-                   :seon.ai/extra-body true}],
+                   :seon.ai/extra-body true,
+                   :seon.config/dial true,
+                   :seon.ai/request-attribute
+                   :seon.ai/extra-body-edn}],
                  :frequency-penalty
                  [:double
                   {:min -2.0,
@@ -17,28 +35,40 @@
                    :seon.config/optional true,
                    :seon.config/per-agent true,
                    :seon.ai/wire
-                   [["frequency_penalty" clojure.core/identity]]}],
+                   [["frequency_penalty" clojure.core/identity]],
+                   :seon.config/dial true,
+                   :seon.ai/request-attribute
+                   :seon.ai/frequency-penalty,
+                   :seon.ai/inert-when-thinking true}],
                  :max-tokens
                  [:and
                   {:seon.config/per-agent true,
                    :seon.ai/wire
-                   [["max_tokens" clojure.core/identity]]}
+                   [["max_tokens" clojure.core/identity]],
+                   :seon.config/dial true,
+                   :seon.ai/request-attribute :seon.ai/max-tokens}
                   :seon.ai/max-tokens],
-                 :prompt-token-budget
-                 [:int {:min 1, :seon.config/per-agent true}],
-                 :chars-per-token-prior
-                 [:double {:min 0.1, :seon.config/per-agent true}],
                  :model
-                 [:string {:min 1, :seon.config/per-agent true}],
+                 [:string
+                  {:min 1,
+                   :seon.config/per-agent true,
+                   :seon.config/dial true,
+                   :seon.ai/request-attribute :seon.ai/model}],
                  :no-auth
                  [:=
-                  #:seon.config{:optional true, :per-agent true}
+                  {:seon.config/optional true,
+                   :seon.config/per-agent true,
+                   :seon.config/dial true,
+                   :seon.ai/request-attribute :seon.config.ai/no-auth}
                   true],
                  :no-provider
                  [:=
                   {:seon.config/optional true,
                    :seon.config/per-agent true,
-                   :description "Use virtual turns with a no-op reply instead of provider attempts. This per-agent setting lives on the settings component; no credential lookup, provider request, or token usage occurs."}
+                   :description
+                   "Use virtual turns with a no-op reply instead of provider attempts. This per-agent setting lives on the settings component; no credential lookup, provider request, or token usage occurs.",
+                   :seon.config/dial true,
+                   :seon.ai/request-attribute :seon.ai/no-provider}
                   true],
                  :presence-penalty
                  [:double
@@ -47,22 +77,46 @@
                    :seon.config/optional true,
                    :seon.config/per-agent true,
                    :seon.ai/wire
-                   [["presence_penalty" clojure.core/identity]]}],
+                   [["presence_penalty" clojure.core/identity]],
+                   :seon.config/dial true,
+                   :seon.ai/request-attribute
+                   :seon.ai/presence-penalty,
+                   :seon.ai/inert-when-thinking true}],
+                 :prompt-token-budget
+                 [:int
+                  {:min 1,
+                   :seon.config/per-agent true,
+                   :seon.config/dial true,
+                   :seon.ai/request-attribute
+                   :seon.ai/prompt-token-budget}],
                  :response-format
                  [:enum
                   {:seon.config/optional true,
                    :seon.config/per-agent true,
                    :seon.ai/wire
                    [["response_format"
-                     seon.ai/response-format-wire-value]]}
+                     seon.ai/response-format-wire-value]],
+                   :seon.config/dial true,
+                   :seon.ai/request-attribute :seon.ai/response-format}
                   :json-object],
+                 :retain-reasoning
+                 [:boolean
+                  {:seon.config/optional true,
+                   :seon.config/per-agent true,
+                   :description
+                   "Retain provider reasoning in attempt evidence when explicitly enabled. The provider output bound limits its size.",
+                   :seon.config/dial true,
+                   :seon.ai/request-attribute
+                   :seon.ai/retain-reasoning}],
                  :stop
                  [:vector
                   {:min 1,
                    :max 4,
                    :seon.config/optional true,
                    :seon.config/per-agent true,
-                   :seon.ai/wire [["stop" clojure.core/identity]]}
+                   :seon.ai/wire [["stop" clojure.core/identity]],
+                   :seon.config/dial true,
+                   :seon.ai/request-attribute :seon.ai/stop}
                   [:string {:min 1}]],
                  :temperature
                  [:double
@@ -71,7 +125,10 @@
                    :seon.config/optional true,
                    :seon.config/per-agent true,
                    :seon.ai/wire
-                   [["temperature" clojure.core/identity]]}],
+                   [["temperature" clojure.core/identity]],
+                   :seon.config/dial true,
+                   :seon.ai/request-attribute :seon.ai/temperature,
+                   :seon.ai/inert-when-thinking true}],
                  :thinking
                  [:and
                   {:seon.config/optional true,
@@ -79,14 +136,23 @@
                    :seon.ai/wire
                    [["thinking" seon.ai/thinking-wire-value]
                     ["reasoning_effort"
-                     seon.ai/reasoning-effort-wire-value]]}
+                     seon.ai/reasoning-effort-wire-value]],
+                   :seon.config/dial true,
+                   :seon.ai/request-attribute :seon.ai/thinking}
                   :seon.ai/thinking],
                  :timeout-ms
-                 [:int {:min 1, :seon.config/per-agent true}],
+                 [:int
+                  {:min 1,
+                   :seon.config/per-agent true,
+                   :seon.config/dial true,
+                   :seon.ai/request-attribute :seon.ai/timeout-ms}],
                  :top-p
                  [:double
                   {:min 0.0,
                    :max 1.0,
                    :seon.config/optional true,
                    :seon.config/per-agent true,
-                   :seon.ai/wire [["top_p" clojure.core/identity]]}]}
+                   :seon.ai/wire [["top_p" clojure.core/identity]],
+                   :seon.config/dial true,
+                   :seon.ai/request-attribute :seon.ai/top-p,
+                   :seon.ai/inert-when-thinking true}]}

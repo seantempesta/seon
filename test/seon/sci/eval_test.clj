@@ -775,7 +775,10 @@
               "one contracted defn stays below 64 MiB at registry size"))))))
 
 (deftest evaluate-invokes-eval-form-exactly-once-on-every-path
-  (let [ctx (eval/build-base-ctx)
+  (test-support/with-database
+    (fn [connection]
+      (let [ctx (eval/build-base-ctx)
+        _ (eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db @connection})
         eval-form sci/eval-form
         call-with-registration-delta
         seon.schema/call-with-registration-delta
@@ -836,7 +839,7 @@
             "the schema form becomes visible only inside its delta")
         (is (nil? (get (seon.schema/registered-schemas)
                        :user/once-schema))
-            "evaluation never publishes the isolated schema delta")))))
+            "evaluation never publishes the isolated schema delta")))))))
 
 (deftest success-evaluation-assembles-every-optional-projection
   (let [printed (doto (java.io.StringWriter.) (.write "abcdef"))

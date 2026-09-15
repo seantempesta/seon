@@ -1,1 +1,2 @@
-#:seon.config.operator{:event-silence-backstop-ms [:int {:min 1}]}
+#:seon.config.operator{:event-silence-backstop-ms
+                       [:int {:min 1, :seon.config/dial true}]}

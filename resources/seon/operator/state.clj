@@ -973,7 +973,7 @@
           (fn [^java.lang.ProcessHandle handle]
             (when-let [root (process-property handle "seon.operator.root")]
               (when-let [start (process-start-instant (.pid handle))]
-                {:seon.operator.state/root (canonical-path root)
+                (cond-> {:seon.operator.state/root (canonical-path root)
                  :seon.operator.state/generation
                  (when-let [generation
                             (process-property handle
@@ -982,9 +982,24 @@
                      (parse-uuid generation)
                      (catch Throwable _ nil)))
                  :seon.boot/pid (.pid handle)
-                 :seon.boot/start-instant start}))))
+                 :seon.boot/start-instant start}
+                  (process-property handle "seon.operator.repository-root")
+                  (assoc :seon.operator.process-record/repository-root
+                         (canonical-path
+                          (process-property handle "seon.operator.repository-root"))))))))
          (sort-by :seon.boot/pid)
          vec)))
+
+(defn process-claim-repositories
+  "Claim installations explicitly advertised by processes in the selected root."
+  {:malli/schema [:=> [:cat :string [:sequential :map]] [:set :string]]}
+  [managed-root observations]
+  (let [root (canonical-path managed-root)]
+    (into #{}
+          (keep (fn [observation]
+                  (when (= root (:seon.operator.state/root observation))
+                    (:seon.operator.process-record/repository-root observation))))
+          observations)))
 
 (defn- process-key
   [process]

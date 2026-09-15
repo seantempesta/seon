@@ -1,7 +1,6 @@
 (ns seon.cluster.instruction
   "Cluster-owned instruction facts and their verbatim family renders."
-  (:require [clojure.string :as str]
-            [seon.db :as db]
+  (:require [seon.db :as db]
             [seon.schema.edn :as schema.edn]))
 
 (schema.edn/load! {})
@@ -30,7 +29,7 @@
        "```"))
 
 (defn toolkit-namespaces
-  "Public contracted `my.*` namespaces in one database program graph.
+  "Declared context-relevant namespaces with public callable program facts.
 
   A CLUSTER-LEVEL RENDERING HINT, never a grant. Every agent may call
   every function in its cluster's program graph (ruling #20); this set
@@ -44,14 +43,14 @@
   (->> (db/q '[:find ?namespace-name ?private
               :where
               [?namespace :seon.ns/name ?namespace-name]
+              [?namespace :seon.ns/context-relevant? true]
               [?function :seon.fn/ns ?namespace]
               (or [?function :seon.fn/spec _]
                   [?function :seon.fn/macro? true])
               [(get-else $ ?function :seon.fn/private? false) ?private]]
             db)
        (keep (fn [[namespace-name private?]]
-               (when (and (not private?)
-                          (str/starts-with? (str namespace-name) "my."))
+               (when (not private?)
                  namespace-name)))
        distinct
        sort

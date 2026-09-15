@@ -26,10 +26,6 @@
  :seon.config.flow.io/concurrency 64
  :seon.config.flow.io/queue-depth 64
 
- ; Unit: foreground capability milliseconds before the volatile context tail
- ; recommends explicit background execution on a later call.
- :seon.config.effect/long-call-ms 2000
-
  ; Unit: milliseconds a DETACHED capability request may run before its own
  ; interrupt arm cuts it. Background work deliberately does not inherit the
  ; submitting turn's deadline (that is what `my.background` is for), so this
@@ -156,6 +152,7 @@
  ; last remote attempt, while making a missing internal event finite.
  ; Unit: milliseconds without turn completion after disarm requests stop.
  :seon.config.agent/turn-completion-backstop-ms 600000
+ :seon.config.agent/show-all-settings :seon.config/absent
 
  ; THE FILESYSTEM CAPABILITY. These are policy facts shared by every agent,
  ; never per-agent grants. Relative request paths resolve against the explicit
@@ -412,6 +409,8 @@
  ; Authentication is credential-backed by default, so the mutually exclusive
  ; literal no-auth fact is explicitly absent.
  :seon.config.ai/no-auth :seon.config/absent
+ :seon.config.ai/no-provider :seon.config/absent
+ :seon.config.ai/retain-reasoning :seon.config/absent
 
  ; Unit: milliseconds. Provenance: DeepSeek V4 Flash calibration report
  ; (commit a73d928bf): Flash thinking-high reached 103.817 s and Pro reached

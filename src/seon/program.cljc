@@ -4,6 +4,7 @@
             [seon.fn.schema-shape :as schema-shape]
             [seon.fn.signature :as signature]
             [seon.schema :as schema]
+            #?(:clj [seon.schema.form :as schema.form])
             #?(:clj [clojure.edn :as edn]
                :cljs [cljs.reader :as reader])))
 
@@ -11,35 +12,28 @@
   "Program-row identity attributes in deterministic admission order."
   [:seon.ns/name :seon.fn/sym :seon.schema/key :seon.test/sym])
 
-(def base-context-injections
-  "Host Vars copied into every base SCI context.
-
-  A vector names explicit Vars. `:publics` derives the complete public
-  namespace at construction, so context construction and program population
-  consume one declaration rather than parallel member lists."
-  {'seon.schema ['register! 'unregister!]
-   'clojure.test :publics
-   'my.turn ['wait 'complete]
-   'my.background ['background 'poll 'await]
-   'my.message ['send 'decline]
-   'seon.bootstrap ['help 'dir 'doc]})
-
 #?(:clj
    (defn base-context-injected-symbols
-     "Qualified host symbols copied into every base SCI context."
-     {:malli/schema [:=> [:cat] [:vector :symbol]]}
-     []
-     (->> base-context-injections
+     "Interpreter bindings declared with their reason in the schema population."
+     {:malli/schema [:function
+                     [:=> [:cat] [:vector :symbol]]
+                     [:=> [:cat :map] [:vector :symbol]]]}
+     ([] (base-context-injected-symbols (schema/declaration-population)))
+     ([forms]
+     (->> (vals forms)
+          (map schema.form/attr-form-properties)
+          (filter :seon.sci.binding/reason)
           (mapcat
-           (fn [[namespace-name members]]
-             (let [members
-                   (if (= :publics members)
-                     (do (require namespace-name)
-                         (keys (ns-publics namespace-name)))
-                     members)]
-               (map #(symbol (str namespace-name) (str %)) members))))
+           (fn [properties]
+             (if-let [target (:seon.sci.binding/target properties)]
+               [target]
+               (when-let [namespace-name (:seon.sci.binding/public-namespace properties)]
+                 (require namespace-name)
+                 (map #(symbol (str namespace-name) (str %))
+                      (keys (ns-publics namespace-name)))))))
+          distinct
           (sort-by str)
-          vec)))
+          vec))))
 
 (def shapes
   "Program-row shapes keyed by their database identity attribute."
@@ -47,7 +41,7 @@
    {:seon.program/identity-attribute :seon.ns/name
     :seon.program/source-attribute :seon.ns/source
     :seon.program/owned-attributes
-    [:seon.ns/name :seon.ns/source :seon.ns/doc
+    [:seon.ns/name :seon.ns/source :seon.ns/doc :seon.ns/context-relevant?
      :seon.ns/requires :seon.ns/aliases :seon.ns/imports :seon.ns/refers
      :seon.schema.admission/source]}
    :seon.fn/sym

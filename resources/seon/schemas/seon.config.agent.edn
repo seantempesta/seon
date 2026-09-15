@@ -1,8 +1,14 @@
 #:seon.config.agent{:show-all-settings
-                    [:boolean {:seon.config/per-agent true :seon.config/optional true
-                               :description "Show every effective agent setting in the settings read; absent or false shows model, no-provider, evaluation deadline, turn budget, and retry."}]
-                   :turn-completion-backstop-ms
-                    [:int
-                     {:min 1 :seon.config/per-agent true
+                    [:boolean
+                     {:seon.config/per-agent true,
+                      :seon.config/optional true,
                       :description
-                      "Milliseconds allowed for turn lifecycle completion, including permit acquisition and orderly disarm. Active work adds its resolved provider attempt timeouts and retry delays, or each admitted form's evaluation limit. Expiry names the missing part and held turn."}]}
+                      "Show every effective agent setting in the settings read; absent or false shows model, no-provider, evaluation deadline, turn budget, and retry.",
+                      :seon.config/dial true}],
+                    :turn-completion-backstop-ms
+                    [:int
+                     {:min 1,
+                      :seon.config/per-agent true,
+                      :description
+                      "Milliseconds allowed for turn lifecycle completion, including permit acquisition and orderly disarm. Active work adds its resolved provider attempt timeouts and retry delays, or each admitted form's evaluation limit. Expiry names the missing part and held turn.",
+                      :seon.config/dial true}]}

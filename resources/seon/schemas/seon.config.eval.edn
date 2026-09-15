@@ -1,1 +1,5 @@
-#:seon.config.eval{:time-limit-ms [:int {:min 1 :seon.config/per-agent true}]}
+#:seon.config.eval{:time-limit-ms
+                   [:int
+                    {:min 1,
+                     :seon.config/per-agent true,
+                     :seon.config/dial true}]}

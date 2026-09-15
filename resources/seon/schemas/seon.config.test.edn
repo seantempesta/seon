@@ -1,1 +1,2 @@
-#:seon.config.test{:auto-check-cases [:int {:min 0}]}
+#:seon.config.test{:auto-check-cases
+                   [:int {:min 0, :seon.config/dial true}]}

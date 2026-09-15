@@ -1,4 +1,4 @@
-(ns my.edit
+(ns ^{:seon.ns/context-relevant? true} my.edit
   "Edit source files only when their expected digest still matches."
   (:require [clojure.test.check.generators :as gen]
             [seon.edit :as edit]

@@ -1,0 +1,15 @@
+{:seon.sci.binding/target :qualified-symbol
+ :seon.sci.binding/public-namespace :symbol
+ :seon.sci.binding/reason [:string {:min 1}]
+ :seon.sci.binding/testing
+ [:symbol {:seon.sci.binding/public-namespace clojure.test
+           :seon.sci.binding/reason "Host test macros expand against clojure.test dynamic reporting Vars; copy that public namespace as one interpreter integration before program acquisition."}]
+ :seon.sci.binding/help
+ [:symbol {:seon.sci.binding/target seon.bootstrap/help
+           :seon.sci.binding/reason "The initial REPL can request its opening documentation before acquiring program functions."}]
+ :seon.sci.binding/dir
+ [:symbol {:seon.sci.binding/target seon.bootstrap/dir
+           :seon.sci.binding/reason "The initial REPL can inspect program namespace facts before acquiring program functions."}]
+ :seon.sci.binding/doc
+ [:symbol {:seon.sci.binding/target seon.bootstrap/doc
+           :seon.sci.binding/reason "The initial REPL can inspect program function facts before acquiring program functions."}]}
