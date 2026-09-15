@@ -53,6 +53,7 @@ Usage: bin/test [--all|--full|--platform|--changed PATH]...
   --platform      the declared moving-part regressions alone
   --paths FILE... snapshot HEAD plus these working-tree files; use -- before namespaces
   --changed PATH  platform tier, then the tests reaching PATH (repeatable)
+  --confirm       diagnostic isolation of named failing tests (ns/test ...)
 
 An explicit namespace selection always runs every test in those namespaces
 and records no green basis.
@@ -83,6 +84,7 @@ namespaces=()
 changed_paths=()
 snapshot_paths=()
 fast_iteration=0
+confirm=0
 
 set_mode() {
   if [ -n "$requested_mode" ] && [ "$requested_mode" != "$1" ]; then
@@ -121,6 +123,10 @@ while [ $# -gt 0 ]; do
       ;;
     --fast)
       fast_iteration=1
+      shift
+      ;;
+    --confirm)
+      confirm=1
       shift
       ;;
     --paths)
@@ -190,6 +196,28 @@ while [ $# -gt 0 ]; do
       ;;
   esac
 done
+
+confirm_symbols=
+if [ "$confirm" -eq 1 ]; then
+  if [ ${#namespaces[@]} -eq 0 ] || [ -n "$requested_mode" ] || [ "$fast_iteration" -eq 1 ]; then
+    echo 'bin/test: --confirm requires named failing tests: ns/test ...' >&2
+    exit 64
+  fi
+  confirm_namespaces=()
+  for test_symbol in "${namespaces[@]}"; do
+    case "$test_symbol" in
+      */*)
+        if [ -z "${test_symbol%/*}" ] || [ -z "${test_symbol##*/}" ]; then
+          echo 'bin/test: --confirm requires qualified test names' >&2
+          exit 64
+        fi
+        confirm_namespaces+=("${test_symbol%/*}") ;;
+      *) echo 'bin/test: --confirm requires qualified test names' >&2; exit 64 ;;
+    esac
+  done
+  confirm_symbols=$(printf '%s\n' "${namespaces[@]}")
+  namespaces=($(printf '%s\n' "${confirm_namespaces[@]}" | sort -u))
+fi
 
 if [ "$fast_iteration" -eq 1 ] &&
    { [ ${#snapshot_paths[@]} -eq 0 ] || [ "$explicit_selection" -ne 1 ]; }; then
@@ -740,6 +768,7 @@ fi
 record_phase published-base
 
 coordinator_jvm_arguments=(
+  "-J-Dseon.test.confirm=$confirm_symbols"
   "-J-Dseon.operator.root=$coordinator_operator_root"
   "-J-Dseon.test.root=$run_root"
   "-J-Dseon.test.source-root=$source_root"

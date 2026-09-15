@@ -1,10 +1,43 @@
 (ns seon.test.runner-test
   (:require [clojure.set :as set]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [seon.instrument :as instrument]
             [seon.test.arm :as arm]
             [seon.test.runner :as runner]
+            [seon.test-runner-failure-fixture]
             [seon.test-support :as test-support]))
+
+(deftest default-red-does-not-launch-confirmation
+  (let [task {::runner/task-id "default-red"
+              ::runner/task-ordinal 0
+              ::runner/task-namespace "seon.test-runner-failure-fixture"
+              ::runner/task-symbols ["seon.test-runner-failure-fixture/failing-example"]}
+        red (assoc (#'runner/run-task! task) ::runner/executed-by "pool-1")
+        launches (atom 0)
+        outcome (atom nil)]
+    (with-out-str
+      (with-redefs-fn
+        {#'runner/confirmation-symbols (constantly #{})
+         #'runner/run-task-pool! (fn [& _] [red])
+         #'runner/confirm-parallel-failure! (fn [& _] (swap! launches inc))}
+        #(reset! outcome
+                 (#'runner/run-parallel-stage!
+                  [] nil {:seon.fn.manifest/artifacts []} [] nil [task]))))
+    (is (= 0 @launches))
+    (is (= [red] (::runner/task-results @outcome)))
+    (is (= 1 (get-in @outcome [::runner/task-summary ::runner/fail-count])))
+    (is (= "pool-1" (::runner/executed-by red)))
+    (is (= 1 (count (:seon.test/failing-assertions
+                    (first (::runner/task-results red))))))
+    (is (str/includes? (::runner/task-output red) "deliberate broken-test evidence"))
+    (is (= [#'seon.test-runner-failure-fixture/failing-example]
+           (#'runner/confirmation-vars
+            [#'seon.test-runner-failure-fixture/passing-example
+             #'seon.test-runner-failure-fixture/failing-example]
+            #{"seon.test-runner-failure-fixture/failing-example"})))
+    (is (thrown? clojure.lang.ExceptionInfo
+                 (#'runner/confirmation-vars [] #{"missing/test"})))))
 
 (deftest initialization-acquires-one-projection
   (test-support/preserving-instrumentation-state

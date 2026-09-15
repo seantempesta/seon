@@ -1979,6 +1979,7 @@
   (let [initialized (atom nil)
         namespaces '[seon.a-test seon.b-test seon.c-test]
         task-result {::runner/task-id "confirm-world"
+                     ::runner/task-summary {::runner/fail-count 1}
                      ::runner/task-ordinal 1
                      ::runner/task-namespace "seon.a-test"
                      ::runner/task-symbols ["seon.a-test/one"]}]

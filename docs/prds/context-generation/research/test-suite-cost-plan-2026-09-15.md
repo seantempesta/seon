@@ -87,3 +87,33 @@ No deletion is proposed for S, B, T, E, or either routing property: their work c
 **Ownership / stop:** this lane owns only this note. Final observed protected edits: `src/seon/render.clj`, `src/seon/render/transcript.clj`, `src/seon/render/web.clj`, `src/seon/schedule.clj`, `test/seon/render/retained_test.clj`, `test/seon/render/web_context_test.clj`, `test/seon/render/web_debug_test.clj`, `docs/seon/issues/the-first-debug-page-after-an-adoption-takes-eighteen-seconds.md`; untracked research `debug_page_adoption_probe_2026_09_15.clj`, `debug_page_adoption_sections_2026_09_15.clj`, `debug_page_effects_probe_2026_09_15.clj` in this directory. Recheck ownership before implementation. Initial test/reaching/schema edits had landed by the final status observation; no foreign files changed here. The log-output defect is recorded here to honor the single-note deliverable. No gate requested or run.
 
 Evidence fingerprints (bytes; SHA-256): batch-1/named `63954; 736a904343bd8d3ec0dbd4e5e49e42b82e4b629ceeeee22f084a0cce677bb6a3`; batch-1/platform `66889; f77aa95ad22e361169c7ba9dc27262db7ddd7202026a4327120aa4a9f6da212c`; batch-2b/named `90335; 57d7629e7bbd2de5d241e18a061846f685008a5283f9b495dd938de6874b92bf`; batch-2c/named `78581555; 753bc9ab55a668958a943afbe6cecbbc57a220e06c2bc28a17ceb88050821068`. Reproduce ranking by parsing anchored timestamped `END worker=… elapsed-ms=… task=…`, grouping on task, taking maximum elapsed-ms, sorting descending, and taking 25; sum all observations separately. Exclude embedded copies of log-like text in failure output.
+
+## Landing
+
+Lane `test-runner-waste`, 2026-09-15. Read this plan and the testing,
+data-oriented Clojure, and REPL skills end to end; read AGENTS.md laws
+2.3–2.5. Owner approved row 1 option 1, only lazy checkouts from row 7,
+row 8, and fixture reason enforcement. Publication demand remains deferred.
+
+Dependency ledger: Clojure assertion reporting/counters are owned by
+`reference-code/clojure/src/clj/clojure/test.clj:377`; the runner's capture
+and task execution are the existing first-party integration. AI projection
+is owned by `src/seon/render/value.clj:411`, not the reporter. The existing
+manifest selection traverses call refs at `src/seon/test/selection.clj:134`;
+canonical fixture branch custody remains in `test/seon/test_support.clj`.
+
+Row 1: normal stages return original task results without confirmation.
+`bin/test --confirm ns/failing-test ...` selects only named tests and runs
+their tasks in fresh isolated workers; unknown test names refuse. The
+diagnostic does not rerun the platform tier or broaden to the namespace.
+Regression: `seon.test.runner-test/default-red-does-not-launch-confirmation`.
+Hot-reloaded JVM REPL probe: original red value unchanged, fail count 1,
+confirmation launches 0. `bash -n bin/test` and `git diff --check` passed.
+No test JVM launched: orchestrator-only assignment takes precedence over
+the ordinary lane gate. Namespaces submitted in
+`tmp/orchestrator/gate-requests/test-runner-waste.txt`.
+
+Read today's `batch-1/fixtures-events.md` (207 tests, 6191 assertions,
+0 failures/errors) and `batch-2c/phases.txt` (5 s checkouts, 44 s publication,
+748 s coordinator/tests). These are baseline evidence, not post-change gates.
+Preserved foreign edits, including projection carriage in test_support.clj.

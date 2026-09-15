@@ -2287,12 +2287,14 @@
           (println "bin/test:   no worker-global state changed before this"
                    "task in worker" (::executed-by task-result)
                    "— the hazard is not ambient state this worker can see"))
-        (cond-> (assoc task-result
+        (if-not (::task-summary task-result)
+          confirmation
+          (cond-> (assoc task-result
                        ::parallel-failure classification
                        ::confirmation-result confirmation)
           (and (= :parallel-only classification) (seq suspects))
           (assoc ::parallel-only-suspects
-                 (mapv ::task-symbols suspects))))
+                 (mapv ::task-symbols suspects)))))
       (finally
         (stop-worker! worker)))))
 
@@ -2487,6 +2489,20 @@
       (flush)
       (if (and green? (nil? failure)) 0 1))))
 
+(defn- confirmation-symbols
+  []
+  (into #{} (remove str/blank?)
+        (str/split-lines (or (System/getProperty "seon.test.confirm") ""))))
+
+(defn- confirmation-vars
+  [all-vars symbols]
+  (let [by-symbol (into {} (map (juxt (comp str var-symbol) identity)) all-vars)
+        absent (set/difference symbols (set (keys by-symbol)))]
+    (when (seq absent)
+      (throw (ex-info "Named confirmation tests are unavailable."
+                      {::missing-tests (vec (sort absent))})))
+    (mapv by-symbol (sort symbols))))
+
 (defn- run-parallel-stage!
   [namespaces progress manifest workers serial-worker tasks]
   (let [{::keys [resolved unresolved]} (split-resolved-tasks manifest tasks)]
@@ -2495,17 +2511,13 @@
                "task(s) lack complete :seon.test rows; running serially:")
       (doseq [task unresolved]
         (println " -" (str/join "," (::task-symbols task)))))
-    (let [initial (run-task-pool! progress workers serial-worker
-                                  resolved unresolved)
-          confirmed (confirm-task-results!
-                     (worker-count)
-                     progress
-                     (into #{} (map ::task-id) resolved)
-                     initial
-                     (partial confirm-parallel-failure! namespaces))]
-      (print-task-failures! confirmed)
-      {::task-results confirmed
-       ::task-summary (summarize-task-results confirmed)})))
+    (let [results (if (seq (confirmation-symbols))
+                    (mapv #(confirm-parallel-failure! namespaces progress %) tasks)
+                    (run-task-pool! progress workers serial-worker
+                                    resolved unresolved))]
+      (print-task-failures! results)
+      {::task-results results
+       ::task-summary (summarize-task-results results)})))
 
 (defn- run-coordinator!
   "Run selected tests with progress and a liveness backstop.
@@ -2538,8 +2550,10 @@
         backstop (start-liveness-backstop!
                   progress configured-silence-seconds suite-start)
         pool-size (worker-count)
-        worker-ids (conj (mapv #(str "pool-" %) (range 1 (inc pool-size)))
-                         "serial")
+        confirming (confirmation-symbols)
+        worker-ids (if (seq confirming) []
+                      (conj (mapv #(str "pool-" %) (range 1 (inc pool-size)))
+                            "serial"))
         workers* (atom [])
         shutdown-hook
         (Thread. (fn [] (doseq [worker @workers*] (stop-worker! worker)))
@@ -2606,7 +2620,9 @@
               all-vars (test-vars-in namespaces)
             {::keys [platform selected skipped unreached]}
             (if explicit?
-              {::platform [] ::selected all-vars
+              {::platform [] ::selected (if (seq confirming)
+                                         (confirmation-vars all-vars confirming)
+                                         all-vars)
                ::skipped [] ::unreached []}
               (test-selection namespaces
                               {::include-long? (= "full" selection-mode)
