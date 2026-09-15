@@ -949,4 +949,15 @@ half-edit. Measured targets in the issue.
   presentation." Lane debug-turns: Playwright screenshot loop at 1440/700 px
   per part, the header/nav and CSS shell fixed first after the transcript,
   screenshot log in the landing note; orchestrator reviews at each landing.
+- 19:05 owner: "keep improving the html views of all rendered parts. I want
+  those to be high quality and user facing on the main screen." Hands-on
+  audit of the live debug page (facts, not assumptions): the context
+  transcript exists but sits below 61 collapsed turn headers; an agent's
+  `:error` evaluation renders as a page-level error block (indistinguishable
+  from a page failure); the header is raw EDN; `body{overflow:hidden}` with
+  a 92k-px inner scroller; monochrome text throughout. Two lanes: debug-turns
+  (session view + shell) and html-views (every render pair on the main
+  namespace page, screenshot-driven). CSS rule for both: `input.css` imports
+  `blocks.css` (html-views owns it); `output.css` is a build artifact —
+  lanes rebuild, the orchestrator commits it at checkpoints.
 
