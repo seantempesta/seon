@@ -418,7 +418,7 @@
                          [(receipt "codec-reversed"
                                    reversed-request
                                    reversed-plan)]))
-         (let [selector '[*]
+         (let [selector '[* {:seon.cluster.eval/read-evidence [*]}]
                forward-raw
                (d/pull @connection selector
                        [:seon.cluster.eval/id "codec-forward"])

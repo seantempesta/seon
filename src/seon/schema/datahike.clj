@@ -478,7 +478,9 @@
 (defn- encode-call-output-in
   "Encode transaction data returned by one Datahike transaction function."
   [db projection f & args]
-  (encode-transaction-data-in projection (apply f db args)))
+  (encode-transaction-data-in
+   projection
+   (apply f (vary-meta db assoc :seon.schema/projection projection) args)))
 
 (defn- encode-transaction-data-in
   [projection transaction-data]

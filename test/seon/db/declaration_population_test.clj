@@ -1,155 +1,137 @@
-(ns ^{:seon.test/platform
-       "Moving part: one declaration population per operation, read side."}
+(ns ^{:seon.test/platform "Database reads never rebuild a missing declaration projection."}
     seon.db.declaration-population-test
-  "The class regression for per-attribute declaration resolution at DB reads.
-
-  Every `seon.db` read that may contain an EDN-backed attribute asks the
-  declarations whether an attribute is EDN-encoded. The repaired read derives
-  the exact projection from its database value when none was handed and does
-  not read packaged schema resources. Before that repair, the question
-  re-read all 152 resources once per attribute, pulled key, and datom; it
-  wedged two suites and cost one `seon.config/effective` 84,664 resource reads
-  (2026-08-07), all of them inside `db/pull '[*]`.
-
-  The class is dead when ONE read operation performs AT MOST ONE resolution,
-  whatever its attribute, key, or datom count. These tests explicitly clear
-  the runner's packaged projection, count reads at the one resource seam, and
-  exercise real EDN decoding so a future per-item shape cannot pass vacuously.
-
-  Issue: docs/seon/issues/db-read-decoding-resolves-declarations-per-attribute.md"
-  (:require [clojure.test :refer [deftest is testing]]
-            [datahike.api :as d]
+  "Carried values decode normally; missing input never rebuilds declarations."
+  (:require [clojure.string :as str]
+            [clojure.test :refer [deftest is testing]]
+            [clojure.test.check :as tc]
+            [clojure.test.check.generators :as gen]
+            [clojure.test.check.properties :as prop]
             [seon.db :as db]
-            [seon.schema.datahike :as schema.datahike]
-            [seon.schema.edn :as schema.edn]))
+            [seon.env :as env]
+            [seon.schema :as schema]
+            [seon.schema.edn :as schema.edn]
+            [seon.sci.admit :as admit]
+            [seon.test-support :as test-support]))
 
-;; A deliberately wide row. `:seon.cluster.registry/from` is EDN-backed (a
-;; mixed union), so decoding really happens and the test cannot pass by
-;; skipping the walk entirely.
-(def ^:private narrow-attributes
-  [:seon.agent/id
-   :seon.cluster.registry/from])
-
-(def ^:private wide-attributes
-  (into narrow-attributes
-        [:seon.message/id
-         :seon.message/to
-         :seon.message/content
-         :seon.message/inbox
-         :seon.turn/id
-         :seon.turn/opened-tx
-         :seon.turn/reply-size]))
-
-(defn- resource-reads
-  "Schema resource reads performed while calling `thunk`, and its value."
-  [thunk]
-  (let [reads (atom 0)
-        read-one @#'schema.edn/read-schema-resource]
-    (with-redefs [schema.edn/read-schema-resource
-                  (fn [resource] (swap! reads inc) (read-one resource))]
-      (let [value (thunk)]
-        [@reads value]))))
-
-(defn- reads-of
-  [thunk]
-  (first (resource-reads thunk)))
-
-(def ^:private carrier-symbols
-  '[*candidate-forms-overlay* *projection* *projection-state* *packaged-forms*])
-
-(defn- without-handed-projection
-  "Call `thunk` after explicitly clearing every schema projection carrier."
-  [thunk]
-  (with-bindings
-    (into {} (map (fn [sym] [(ns-resolve 'seon.schema sym) nil]))
-          carrier-symbols)
-    (thunk)))
-
-(defn- one-population-reads
-  []
-  (reads-of schema.edn/packaged-forms))
-
-(defn- with-database
-  "Call `body` with a bare in-memory connection and NO population supplied."
-  [attributes body]
-  (let [configuration {:store {:backend :memory :id (random-uuid)}
-                       :schema-flexibility :write}
-        _ (d/create-database configuration)
-        connection (d/connect configuration)]
-    (try
-      (db/transact! connection
-                    (schema.datahike/malli->datahike-schema attributes))
-      (body connection)
-      (finally
-        (d/release connection)
-        (d/delete-database configuration)))))
-
-(deftest a-read-resolves-the-declaration-population-at-most-once
-  (let [one (one-population-reads)]
-    (testing "one explicit packaged acquisition reads every schema resource"
-      (is (pos? one)
-          "the acquisition measurement must read resources, or it is vacuous"))
-    (without-handed-projection
-     (fn []
-       (with-database
-        wide-attributes
-        (fn [connection]
-          (db/transact! connection
-                        [{:seon.agent/id "agent-a" :seon.cluster.registry/from :core :seon.message/id "message-1" :seon.message/to "agent-a" :seon.message/content "hello" :seon.turn/id "run-1" :seon.turn/opened-tx "datomic.tx" :seon.message/inbox "agent-a"}])
-          (dotimes [index 8]
-            (db/transact! connection
-                          [{:seon.message/id (str "extra-" index)
-                            :seon.message/content "x"}]))
-          (let [database (db/db connection)
-                agent-ref [:seon.agent/id "agent-a"]]
-            (doseq [[operation thunk]
-                    [["pull '[*]" #(db/pull database '[*] agent-ref)]
-                     ["pull-many '[*]"
-                      #(db/pull-many database '[*] [agent-ref])]
-                     ["entity" #(db/entity database agent-ref)]
-                     ["q decoding a find element"
-                      #(db/q '[:find ?from .
-                               :where [_ :seon.cluster.registry/from ?from]]
-                             database)]
-                     ["datoms :eavt" #(db/datoms database :eavt)]]]
-              (testing operation
-                (is (<= (reads-of thunk) one)
-                    (str operation
-                         " must resolve declarations at most once, never once "
-                         "per attribute, pulled key, or datom")))))))))))
-
-(deftest a-read-that-decodes-nothing-resolves-nothing
-  (testing "a query with no decodable find element reads no schema resource"
-    (with-database
-      narrow-attributes
-      (fn [connection]
-        (db/transact! connection [{:seon.agent/id "agent-a"}])
-        (let [database (db/db connection)]
-          (is (zero?
-               (reads-of
-                #(db/q '[:find ?e :where [?e :seon.agent/id _]]
-                       database)))))))))
-
-(deftest edn-backed-attributes-still-round-trip
-  (testing "the value written through the encode seam decodes at every read"
-    (with-database
-      narrow-attributes
-      (fn [connection]
-        (let [report (db/transact! connection
-                                   [{:seon.agent/id "agent-a"
-                                     :seon.cluster.registry/from :core}])]
-          (is (nil? (:seon.error/kind report))
-              (str "the EDN-backed write must commit: " report)))
-        (let [database (db/db connection)
-              agent-ref [:seon.agent/id "agent-a"]]
-          (is (= :core
-                 (:seon.cluster.registry/from
-                  (db/pull database '[*] agent-ref))))
-          (is (= :core
-                 (:seon.cluster.registry/from
-                  (db/entity database agent-ref))))
-          (is (= :core
-                 (db/q '[:find ?from .
-                         :where [_ :seon.cluster.registry/from ?from]]
-                       database)))
-          (is (contains? (set (map :v (db/datoms database :eavt))) :core)))))))
+(deftest reads-require-their-carried-projection-including-transaction-results
+  (test-support/with-database
+   (fn [connection]
+     (let [projection (schema/handed-projection)
+           state (env/environment-state
+                  (env/environment
+                   {:seon.boot/cluster-name "projection-carriage"
+                    :seon.db/connection connection
+                    :seon.schema/projection projection}))
+           report
+           (db/transact!
+            connection
+            [{:seon.agent/id "p1-carriage"}
+             {:seon.ns/name 'seon.db.carriage}
+             [:db.fn/call
+              (fn [value]
+                (schema/call-with-projection-state
+                 (atom {})
+                 (fn []
+                   (let [agent-row (db/pull value [:seon.agent/id]
+                                        [:seon.agent/id "p1-carriage"])]
+                     [[:db/add [:seon.ns/name 'seon.db.carriage]
+                       :seon.ns/doc (:seon.agent/id agent-row)]]))))]])
+           raw @connection
+           database (db/carry-projection-state raw state)
+           rebuilds (atom 0)
+           resource-reads (atom 0)
+           warnings (java.io.StringWriter.)
+           lookup [:seon.agent/id "p1-carriage"]
+           namespace-lookup [:seon.ns/name 'seon.db.carriage]]
+       (is (some? (:db-after report)) (pr-str report))
+       (is (= "p1-carriage"
+              (:seon.ns/doc (db/pull (:db-after report) [:seon.ns/doc]
+                                    [:seon.ns/name 'seon.db.carriage]))))
+       (is (identical? projection (db/carried-projection (:db-before report))))
+       (is (identical? projection (db/carried-projection database)))
+       (testing "a retained database does not follow a later environment replacement"
+         (env/replace-environment!
+          state (env/environment {:seon.boot/cluster-name "replacement"}))
+         (is (identical? projection (db/carried-projection database))))
+       (testing "query find shapes decode identically with supplied and carried projections"
+         (let [queries ['[:find [(pull ?e [:seon.ns/name]) ...]
+                         :in $ ?name :where [?e :seon.ns/name ?name]]
+                        '[:find ?name . :in $ ?name
+                          :where [_ :seon.ns/name ?name]]
+                        '[:find [?name] :in $ ?name
+                          :where [_ :seon.ns/name ?name]]]
+               result
+               (tc/quick-check
+                30
+                (prop/for-all [query (gen/elements queries)]
+                  (let [supplied (schema/call-with-projection
+                                  projection #(db/q query raw 'seon.db.carriage))
+                        carried (schema/call-with-projection-state
+                                 (atom {}) #(db/q query database 'seon.db.carriage))]
+                    (and (not (:seon.error/kind supplied)) (= supplied carried))))
+                :seed 20260915)]
+           (is (:pass? result) (pr-str result))))
+       ;; Acquire the shipped print grammar before probing running-path work.
+       ;; Its first-use validator is independent of the database projection.
+       (is (= 0 (:seon.sci.admit/value
+                 (admit/admit-value
+                  {:seon.sci.admit/value 0
+                   :seon.sci.admit/caps {}
+                   :seon.sci.admit/unbounded? true
+                   :seon.sci.admit/interrupt-fn (fn [])
+                   :seon.schema/projection projection
+                   :seon.config/on-core-error :record}))))
+       (with-redefs [schema/projection-from-database
+                     (fn [& _] (swap! rebuilds inc)
+                       (throw (ex-info "Unexpected projection construction" {})))
+                     schema.edn/read-schema-resource
+                     (fn [& _] (swap! resource-reads inc)
+                       (throw (ex-info "Unexpected resource read" {})))]
+         (testing "all read values retain the supplied projection without a thread carrier"
+           (schema/call-with-projection-state
+            (atom {})
+            (fn []
+              (is (= (db/database-value-identity database)
+                     (:seon.sci.admit/value
+                      (admit/admit-value
+                       {:seon.sci.admit/value database
+                        :seon.sci.admit/caps {}
+                        :seon.sci.admit/unbounded? true
+                        :seon.sci.admit/interrupt-fn (fn [])
+                        :seon.config/on-core-error :record}))))
+              (doseq [value [database (:db-after report)
+                             (db/history database)
+                             (db/as-of database (:max-tx database))
+                             (db/since database 0)]]
+                (is (identical? projection (db/carried-projection value)))
+                (is (= {:seon.agent/id "p1-carriage"}
+                       (db/pull value [:seon.agent/id] lookup))))
+              (is (= 'seon.db.carriage (:seon.ns/name (db/entity database namespace-lookup))))
+              (is (= [{:seon.ns/name 'seon.db.carriage}]
+                     (db/pull-many database [:seon.ns/name] [namespace-lookup])))
+              (is (= 'seon.db.carriage
+                     (db/q '[:find ?name . :in $ ?name
+                             :where [_ :seon.ns/name ?name]]
+                           database 'seon.db.carriage)))
+              (is (some #(= 'seon.db.carriage (:v %))
+                        (db/datoms database :avet :seon.ns/name))))))
+         (testing "missing input refuses without reconstructing declarations"
+           (let [failure (binding [*err* warnings]
+                           (schema/call-with-projection-state
+                            (atom {}) #(db/pull raw [:seon.agent/id] lookup)))]
+             (is (= :seon.schema/missing-projection (:seon.error/kind failure)))
+             (is (= 'seon.db/pull (get-in failure [:seon.error/data :seon.db/operation])))
+             (is (= 1 (count (str/split-lines (str warnings)))))
+             (is (str/includes? (str warnings) "projection-fallback"))))
+         (testing "missing transaction-admission input uses the same seam without writing"
+           (let [write-warnings (java.io.StringWriter.)
+                 failure (binding [*err* write-warnings]
+                           (schema/call-with-projection-state
+                            (atom {}) #(db/transact! connection [])))]
+             (is (= :seon.schema/missing-projection (:seon.error/kind failure)))
+             (is (= 'seon.db/transact!
+                    (get-in failure [:seon.error/data :seon.db/operation])))
+             (is (identical? raw @connection))
+             (is (= 1 (count (str/split-lines (str write-warnings)))))))
+         (is (zero? @rebuilds))
+         (is (zero? @resource-reads)))))))

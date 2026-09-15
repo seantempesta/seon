@@ -109,13 +109,15 @@
 
 (defn- dependency-error
   [operation error]
-  (error-value
-   ::invalid-read
-   (or (ex-message error) "Datahike refused the database read.")
-   (cond-> {::operation operation
-            ::exception-class (.getName (class error))}
-     (map? (ex-data error))
-     (assoc ::dependency-data (ex-data error)))))
+  (if (= :seon.schema/missing-projection (:seon.error/kind (ex-data error)))
+    (ex-data error)
+    (error-value
+     ::invalid-read
+     (or (ex-message error) "Datahike refused the database read.")
+     (cond-> {::operation operation
+              ::exception-class (.getName (class error))}
+       (map? (ex-data error))
+       (assoc ::dependency-data (ex-data error))))))
 
 (defn- error-value?
   [value]
@@ -139,27 +141,38 @@
           (vals @instances))))
 
 (defn carry-projection-state
-  "Attach a cluster's projection state to a database value it derives from.
+  "Carry a cluster's state and immutable projection on a database value.
 
   Reads take their schema projection from the value itself (law 2.1), so a
   value minted anywhere else — a turn's bound read database, a fixture —
-  must carry the state before reads see it. An error value is returned
-  unchanged; a nil state leaves the value as it was."
+  must carry the state before reads see it. Capture its projection once;
+  subsequent state changes cannot change a retained database's projection.
+  Existing snapshot metadata wins. An error value is returned unchanged;
+  a nil state leaves the value as it was."
   {:malli/schema
    [:=> [:cat [:or :seon.db/database-value :seon.error/value]
          [:maybe :seon.sci.eval/projection-state]]
     [:or :seon.db/database-value :seon.error/value]]}
   [database state]
   (if (and state (not (error-value? database)))
-    (vary-meta database assoc :seon.sci.eval/projection-state state)
+    (let [projection (or (:seon.schema/projection (meta database))
+                         (:seon.schema/projection @state))]
+      (cond-> (vary-meta database assoc :seon.sci.eval/projection-state state)
+        projection (vary-meta assoc :seon.schema/projection projection)))
     database))
 
 (defn- resolve-database-value
   [connection]
   (try
     ;; Resolve latest exactly once at the public-call boundary.
-    (carry-projection-state (d/db connection)
-                            (connection-projection-state connection))
+    (let [database (carry-projection-state
+                    (d/db connection) (connection-projection-state connection))]
+      ;; Acquisition captures the caller's supplied construction projection.
+      ;; Reads subsequently consult only their immutable database value.
+      (if-let [projection (and (nil? (:seon.schema/projection (meta database)))
+                               (schema/handed-projection))]
+        (vary-meta database assoc :seon.schema/projection projection)
+        database))
     (catch Throwable cause
       (dependency-error ::db cause))))
 
@@ -936,26 +949,37 @@
                   (seq (d/datoms database :avet attribute))))
         (identity-attributes database)))
 
-(defn- fallback-read-projection
-  [database operation]
-  (let [started (System/nanoTime)]
-    (try
-      (schema/projection-from-database database)
-      (finally
-        (binding [*out* *err*]
-          (println "WARN seon.db/projection-fallback caller=" operation
-                   "elapsed-ms=" (quot (- (System/nanoTime) started) 1000000)
-                   "Supply a database value carrying its projection state."))))))
+(defn projection-fallback
+  "Report one missing carried projection; never rebuild declarations.
+
+  Each refused operation emits one occurrence at this shared seam. Callers
+  retain the returned flat error, including the operation that lacked input."
+  {:malli/schema [:=> [:cat :qualified-symbol] :seon.error/value]}
+  [operation]
+  (binding [*out* *err*]
+    (println "WARN seon.db/projection-fallback caller=" operation
+             "missing-projection count=1; supply the operation's projection."))
+  {:seon.error/kind :seon.schema/missing-projection
+   :seon.error/message "This operation requires a carried schema projection."
+   :seon.error/data {:seon.db/operation operation
+                     :seon.schema/missing-projection true}})
+
+(defn carried-projection
+  "The schema origin's immutable carried projection, or nil when absent."
+  {:malli/schema
+   [:=> [:cat :seon.db/database-value] [:maybe :seon.schema/projection]]}
+  [database]
+  (:seon.schema/projection (meta (schema-database database))))
 
 (defn- read-declarations
   [database operation]
   (let [origin (when database (schema-database database))]
     {::installed-schema (:schema origin)
      ::read-projection
-     (delay (or (some-> origin meta :seon.sci.eval/projection-state
-                        deref :seon.schema/projection)
+     (delay (or (when origin (carried-projection origin))
                 (schema/handed-projection)
-                (fallback-read-projection origin operation)))}))
+                (let [failure (projection-fallback operation)]
+                  (throw (ex-info (:seon.error/message failure) failure)))))}))
 
 (defn- ask-declarations
   "Ask one declaration question with the population both PASSED and SUPPLIED.
@@ -970,8 +994,8 @@
    value made visible for one call, never a cache."
   [declarations question]
   (let [projection @(::read-projection declarations)]
-    (schema/call-with-forms
-     (:seon.schema.projection/forms projection)
+    (schema/call-with-projection
+     projection
      #(question projection))))
 
 (defn- edn-encoded?
@@ -2440,7 +2464,8 @@
             :seon.fn/external-sink (vec (sort sinks))})
 
           :else
-          (let [projection (schema/projection-from-database database)
+          (let [projection @(::read-projection
+                             (read-declarations database 'seon.db/diff))
                 plan (diff-plan database projection function-symbol
                                 (count arguments))]
             (if (error-value? plan)
@@ -2782,19 +2807,31 @@
     connection
     (try
       (let [database (d/db connection)
+            carried-state (connection-projection-state connection)
             projection
             (or (schema/handed-projection)
-                (when (seq (d/q '[:find [?key ...]
-                                  :where [_ :seon.schema/key ?key]]
-                                database))
-                  (schema/projection-from-database database))
-                (schema/declaration-projection
-                 ((requiring-resolve 'seon.schema.edn/packaged-forms))))]
+                (carried-projection database)
+                (some-> carried-state deref :seon.schema/projection)
+                (let [failure (projection-fallback 'seon.db/transact!)]
+                  (throw (ex-info (:seon.error/message failure) failure))))]
         (or (write-error database projection transaction)
-            (d/transact connection
+            (let [report (d/transact connection
                     (schema.datahike/encode-transaction-in
                      projection
-                     (jdk-integers->long (stamp-receipt transaction))))))
+                     (jdk-integers->long (stamp-receipt transaction))))
+                  state (or (when (identical? projection
+                                               (:seon.schema/projection
+                                                (some-> carried-state deref)))
+                              carried-state)
+                            (env/environment-state
+                         (env/environment
+                          {:seon.db/connection connection
+                           :seon.boot/cluster-name
+                           (name (:branch (:config database)))
+                           :seon.schema/projection projection})))]
+              (-> report
+                  (update :db-before carry-projection-state state)
+                  (update :db-after carry-projection-state state)))))
       (catch Throwable throwable
         (let [data (error.refusal/refusal throwable)]
           (cond

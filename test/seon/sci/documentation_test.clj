@@ -12,10 +12,10 @@
 (deftest documentation-keeps-named-contracts-and-guarded-result-shapes
   (support/with-database
     (fn [connection]
-      (let [doc (evaluation/documentation-value @connection 'seon.db/pull 'seon.db/pull)
+      (let [doc (evaluation/documentation-value (db/db connection) 'seon.db/pull 'seon.db/pull)
             output (pr-str (:out doc))
             contract (#'evaluation/documentation-contract
-                      @connection
+                      (db/db connection)
                       {:seon.fn/spec
                        "[:function [:=> [:cat :int] :string [:fn {:error/message \"pair relation\"} clojure.core/vector?]] [:=> [:cat [:or :string :int] :boolean] :keyword]]"})]
         (is (not (:seon.error/kind doc)))
@@ -47,7 +47,7 @@
        (is (every? #(and (:in %) (:out %)) rows))
        (is (every? #(not (str/includes? (:doc %) "\n")) rows))
        (is (= #{:summary :body :example :arglists :in :out :supplied} (set (keys row))))
-       (is (= (first (str/split-lines (:seon.fn/doc (db/pull @connection [:seon.fn/doc]
+       (is (= (first (str/split-lines (:seon.fn/doc (db/pull (db/db connection) [:seon.fn/doc]
                                     [:seon.fn/sym "my.agent/settings!"]))))
               (:summary row)))
        (is (= (:in row)
@@ -84,7 +84,7 @@
                  (binding [db/*read-evidence-sink* captured]
                    (evaluation/evaluate
                     {:seon.sci.eval/ctx ctx
-                     :seon.db/db @connection
+                     :seon.db/db (db/db connection)
                      :seon.db/connection connection
                      :seon.cluster.eval/ns [:seon.ns/name 'fixture.own-functions]
                      :seon.cluster.eval/source source
@@ -97,7 +97,7 @@
            row (:seon.program/row defined)]
        (is (= [] (get-in initial [:seon.sci.admit/value :functions])))
        (is (seq evidence))
-       (is (true? (db/read-evidence-current? @connection evidence)))
+       (is (true? (db/read-evidence-current? (db/db connection) evidence)))
        (is (nil? (:seon.cluster.eval/error defined)) (pr-str defined))
        (is (= "fixture.own-functions/identity-number" (:seon.fn/sym row)))
        (let [written (db/transact! connection
@@ -109,7 +109,7 @@
             {:seon.sci.eval/ctx ctx :seon.db/db (:db-after written)
              :seon.sci.eval/installations
              [{:seon.program/row row :seon.sci.eval/evaluation defined}]})))
-       (is (false? (db/read-evidence-current? @connection evidence)))
+       (is (false? (db/read-evidence-current? (db/db connection) evidence)))
        (let [directory (run "(dir fixture.own-functions)")]
          (is (nil? (:seon.cluster.eval/error directory)) (pr-str directory))
          (is (= [{:sym 'fixture.own-functions/identity-number
@@ -129,11 +129,11 @@
   (support/with-database
    (fn [connection]
      (let [base (support/fork-cluster-ctx connection)
-           request {:seon.sci.eval/ctx base :seon.db/db @connection
+           request {:seon.sci.eval/ctx base :seon.db/db (db/db connection)
                     :seon.agent/id "documentation"}
            retained (:seon.sci.eval/ctx (evaluation/fork-for-turn request))
            old-dir @(sci/resolve retained 'clojure.core/dir)]
-       (#'evaluation/install-program-doc! base @connection (schema/handed-projection))
+       (#'evaluation/install-program-doc! base (db/db connection) (schema/handed-projection))
        (is (not (identical? old-dir @(sci/resolve base 'clojure.core/dir))))
        (let [updated (:seon.sci.eval/ctx
                       (evaluation/fork-for-turn
@@ -164,7 +164,7 @@
      (let [ctx (support/fork-cluster-ctx connection)
            result (evaluation/evaluate
                    {:seon.sci.eval/ctx ctx
-                    :seon.db/db @connection :seon.db/connection connection
+                    :seon.db/db (db/db connection) :seon.db/connection connection
                     :seon.agent/id "bare-tests"
                     :seon.cluster.eval/ns [:seon.ns/name 'fixture.bare-tests]
                     :seon.cluster.eval/source "(deftest durable-arithmetic (is (= 2 (+ 1 1))))"
@@ -178,7 +178,7 @@
          (is (:db-after written) (pr-str written))
          (is (= (:seon.test/source row)
                 (:seon.test/source
-                 (db/pull @connection [:seon.test/source]
+                 (db/pull (db/db connection) [:seon.test/source]
                           [:seon.test/sym "fixture.bare-tests/durable-arithmetic"])))))))))
 
 (deftest retained-context-receives-new-bare-test-referrals
@@ -191,13 +191,13 @@
      (let [base (support/fork-cluster-ctx connection)
            _ (sci/eval-string* base
                               "(do (ns-unmap 'clojure.core 'deftest) (ns-unmap 'clojure.core 'is))")
-           request {:seon.sci.eval/ctx base :seon.db/db @connection
+           request {:seon.sci.eval/ctx base :seon.db/db (db/db connection)
                     :seon.agent/id "retained-tests"}
            retained (:seon.sci.eval/ctx (evaluation/fork-for-turn request))]
        (sci/binding [sci/ns (sci/create-ns 'fixture.retained-tests)]
          (is (nil? (sci/resolve retained 'deftest)))
          (is (nil? (sci/resolve retained 'is))))
-       (#'evaluation/install-program-doc! base @connection (schema/handed-projection))
+       (#'evaluation/install-program-doc! base (db/db connection) (schema/handed-projection))
        (let [updated (:seon.sci.eval/ctx
                       (evaluation/fork-for-turn
                        (assoc request :seon.sci.eval/agent-ctx retained)))]
@@ -214,7 +214,7 @@
      (let [ctx (support/fork-cluster-ctx connection)
            run (fn [source]
                  (evaluation/evaluate
-                  {:seon.sci.eval/ctx ctx :seon.db/db @connection
+                  {:seon.sci.eval/ctx ctx :seon.db/db (db/db connection)
                    :seon.cluster.eval/source source
                    :seon.sci.admit/caps (config/result-caps (config/defaults))
                    :seon.sci.eval/time-limit-ms 10000
@@ -227,7 +227,7 @@
        (is (schema/valid-candidate-value? :seon.error/value value))
        (is (str/includes? (:seon.eval/shown failed) "Example:"))
        (is (str/includes? (:seon.eval/shown failed) (:example documentation)))
-       (is (empty? (db/q '[:find ?m :where [?m :seon.message/id]] @connection)))
+       (is (empty? (db/q '[:find ?m :where [?m :seon.message/id]] (db/db connection))))
        (let [unrelated (run "(/ 1 0)")]
          (is (:seon.cluster.eval/error unrelated))
          (is (not (find (:seon.sci.admit/value unrelated) :seon.error/doc))))))))

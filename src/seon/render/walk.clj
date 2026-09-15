@@ -345,9 +345,10 @@
     caps :seon.sci.admit/caps
     ctx :seon.sci.eval/ctx
     :as request}]
-  (let [projection (or (sci.kernel/context-projection ctx)
-                       (schema/current-projection)
-                       {})
+  (let [projection (or (:seon.schema/projection request)
+                       (db/carried-projection database)
+                       (sci.kernel/context-projection ctx)
+                       (schema/current-projection))
         distance (long (get request :seon.render/distance 1))
         selector (root-selector database distance caps)
         cache (:seon.schema.projection/compiled projection)
@@ -434,7 +435,9 @@
   (let [database (:seon.db/db request)
         plan (root-pull-plan (assoc request :seon.render/distance 0))
         cache (render/shared-cache (:seon.sci.eval/ctx request))
-        projection (schema/current-projection)
+        projection (or (:seon.schema/projection request)
+                       (db/carried-projection database)
+                       (sci.kernel/context-projection (:seon.sci.eval/ctx request)))
         installed (installed-attributes database)
         pulled (atom {})
         visited (atom #{})
@@ -491,9 +494,10 @@
   [{database :seon.db/db
     ctx :seon.sci.eval/ctx
     :as request}]
-  (let [projection (or (sci.kernel/context-projection ctx)
-                       (schema/current-projection)
-                       {})]
+  (let [projection (or (:seon.schema/projection request)
+                       (db/carried-projection database)
+                       (sci.kernel/context-projection ctx)
+                       (schema/current-projection))]
     (schema/call-with-projection
      projection
      (fn []
@@ -671,9 +675,10 @@
     output :seon.render/output
     lookup :seon.render.walk/lookup
     :as request}]
-  (let [projection (or (sci.kernel/context-projection ctx)
-                       (schema/current-projection)
-                       {})]
+  (let [projection (or (:seon.schema/projection request)
+                       (db/carried-projection database)
+                       (sci.kernel/context-projection ctx)
+                       (schema/current-projection))]
     (schema/call-with-projection
      projection
      (fn []

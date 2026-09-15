@@ -533,7 +533,9 @@
               (some (fn [candidate]
                       (when (request-member candidate :seon.schema.projection/registry)
                         candidate))
-                    [(request-member argument :seon.schema/projection)
+                    [(when (instance? clojure.lang.IMeta argument)
+                       (:seon.schema/projection (meta argument)))
+                     (request-member argument :seon.schema/projection)
                      (request-member
                       (request-member argument :seon.env/environment)
                       :seon.schema/projection)]))

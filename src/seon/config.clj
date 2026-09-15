@@ -532,41 +532,24 @@
 (declare effective-in)
 
 (defn effective
-  "Read one cluster's effective config or return one bounded error value."
+  "Read one cluster's effective config from its carried projection."
   {:malli/schema
    [:function
     [:=> [:cat :seon.db/database-value]
-     [:or :seon.config/effective
-      :seon.config/missing-effective-error]]
+     [:or :seon.config/effective :seon.error/value]]
     [:=> [:cat :seon.db/database-value :seon.boot/cluster-name]
-     [:or :seon.config/effective
-      :seon.config/missing-effective-error]]]}
+     [:or :seon.config/effective :seon.error/value]]]}
   ([db]
    (effective db "default"))
   ([db cluster-name]
-   ;; ONE population for the whole read. `db/pull` deliberately takes no
-   ;; population argument and resolves its own, so this operation supplies the
-   ;; one it already resolved for its extent — measured live 2026-08-07:
-   ;; 84,664 resource reads before the read seam was repaired, 1,216 after it,
-   ;; and 152 (one population, 12.6 ms) once supplied.
-   (if (schema/handed-projection)
-     (effective-in db (or cluster-name "default"))
-     (error/diagnostic
-      {:seon.error/kind ::missing-projection
-       :seon.error/message
-       "Effective config requires the projection handed to this operation."
-       :seon.error/diagnostic-layer :configuration
-       :seon.error/diagnostic-operation 'seon.config/effective
-       :seon.error/diagnostic-member :seon.schema/projection
-       :seon.error/diagnostic-expected :seon.schema/handed-projection
-       :seon.error/diagnostic-offending :seon.error/unknown
-       :seon.error/diagnostic-cause ::missing-projection
-       :seon.error/diagnostic-evidence nil}))))
+   (if-let [projection (or (db/carried-projection db)
+                          (schema/handed-projection))]
+     (effective-in db (or cluster-name "default") projection)
+     (db/projection-fallback 'seon.config/effective))))
 
 (defn- effective-in
-  [db cluster-name]
-  (let [forms (:seon.schema.projection/forms
-               (schema/handed-projection))
+  [db cluster-name projection]
+  (let [forms (:seon.schema.projection/forms projection)
         row (db/pull db '[*] [:seon.config/cluster cluster-name])
         effective (select-keys row (dial-attributes forms))
         missing (vec (sort (set/difference (required-dial-attributes forms)

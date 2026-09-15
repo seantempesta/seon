@@ -2255,7 +2255,7 @@
   and a repair keyframe assembled from bytes already serialized by this proc."
   ([state]
    (render-pass state
-                @(-> state :seon.turn.loop/cluster :seon.db/connection)
+                (db/db (-> state :seon.turn.loop/cluster :seon.db/connection))
                 true false))
   ([state database derive-all?]
    (render-pass state database derive-all? false))
@@ -2386,7 +2386,7 @@
                    :virtual-turn 'seon.turn/virtual-turn!
                    :compact 'seon.turn/compact!)
         prepared (merge cluster request
-                        {:seon.db/db @connection
+                        {:seon.db/db (db/db connection)
                          :seon.db/connection connection
                          :seon.turn.loop/cluster cluster
                          :seon.agent/routing
@@ -2395,7 +2395,7 @@
         result (turn-function-result
                 function [(cond-> prepared
                             (= action :system-turn) (assoc :seon.turn/write? true))])]
-    (if (:seon.error/kind result) result {:seon.db/db @connection})))
+    (if (:seon.error/kind result) result {:seon.db/db (db/db connection)})))
 
 (defn derive-context!
   "Render the requesting agent's saved evaluations from its database value."
@@ -2564,7 +2564,7 @@
        ;; sliding-1 in-ports coalesce the burst and one derivation
        ;; serves it whole
        (Thread/sleep (long remainder)))
-     (let [database @connection
+     (let [database (db/db connection)
            derive-all? (or join? settlement runtime-eval? (= ::stream input))
            ;; Evaluated code can change a selected render function or any
            ;; helper below it without changing database facts. Reuse the one
@@ -2687,12 +2687,12 @@
         debug? (= "true" (get query "debug"))
         viewer-namespace (when debug?
                            (or (some-> (get query "viewer") route-namespace)
-                               (agent-namespace @connection id)))
+                               (agent-namespace (db/db connection) id)))
         registration-key
         (if debug?
           [::debug-tab
            (debug-query query [:seon.agent/id id] viewer-namespace
-                        (when (agent-namespace @connection id) id))]
+                        (when (agent-namespace (db/db connection) id) id))]
           id)
         channel (:async-channel request)
         tap (async/chan (async/sliding-buffer 1))
@@ -2708,7 +2708,7 @@
          (Thread/ofVirtual)
          (fn []
            (try
-             (let [database @connection
+             (let [database (db/db connection)
                    opening-basis (long (db/basis-t database))
                    page (current-page service database registration-key)
                    written (write-package!
@@ -2863,13 +2863,13 @@
          (or (:seon.message/inbound-content inbound) "")
          :seon.config.eval.result/max-string
          (:seon.config.eval.result/max-string caps)}
-        decision (message/inbound-tx @connection request)]
+        decision (message/inbound-tx (db/db connection) request)]
     (if (vector? decision)
       (let [result
             (db/transact!
              connection
              {:tx-data [[:db.fn/call #'message/inbound-tx request]]
-              :tx-meta (inbound-tx-meta @connection process id)})]
+              :tx-meta (inbound-tx-meta (db/db connection) process id)})]
         (cond
           (not (:seon.error/kind result))
           {:status 204 :headers {} :body nil}
@@ -2946,16 +2946,16 @@
    namespace-name]
   ;; Any agent assigned to the namespace evaluates there; stewardship only
   ;; routes that namespace's faults and requests.
-  (or (first (cluster.agent/assigned-to @connection namespace-name))
+  (or (first (cluster.agent/assigned-to (db/db connection) namespace-name))
       (let [ensure! (requiring-resolve 'seon.cluster/ensure-entity!)
             result (ensure!
                     connection process
                     {:seon.agent/id (str namespace-name)
-                     :seon.cluster/name (current-cluster-name @connection)
+                     :seon.cluster/name (current-cluster-name (db/db connection))
                      :seon.ns/name namespace-name})]
         (if (:seon.error/kind result)
           result
-          (or (first (cluster.agent/assigned-to @connection namespace-name))
+          (or (first (cluster.agent/assigned-to (db/db connection) namespace-name))
               {:seon.error/kind ::owner-not-ensured
                :seon.error/message
                (str "The namespace owner for " namespace-name
@@ -2988,7 +2988,7 @@
    :seon.fn/projection-boundary :seon.render/html}
   [service
    agent-id]
-  (let [page (current-page service @(:seon.store/connection-object service) agent-id)
+  (let [page (current-page service (db/db (:seon.store/connection-object service)) agent-id)
             stream-html (get page stream-strip-id)
             unit-html (vals (dissoc page stream-strip-id))]
         {:status 200
@@ -2998,7 +2998,7 @@
                    :seon.render/page
                    [(transcript/render-agent-header
                      (session-controls
-                      (debug-turn-request @(:seon.store/connection-object service)
+                      (debug-turn-request (db/db (:seon.store/connection-object service))
                                           (:seon.store/connection-object service) agent-id
                                           (:seon.sci.admit/caps service)
                                           (assoc service ::transcript/debug? false))))
@@ -3016,7 +3016,7 @@
    (debug-turn-response service agent-id turn-id raw? :full))
   ([service agent-id turn-id raw? view]
   (let [connection (:seon.store/connection-object service)
-        database @connection
+        database (db/db connection)
         owner (db/q '[:find ?agent-id . :in $ ?turn-id
                        :where [?agent :seon.agent/id ?agent-id]
                               [?agent :seon.agent/runtime ?runtime]
@@ -3044,7 +3044,7 @@
   (cond
     (and agent-id (= "true" (get (query-params request) "record"))
          (= "true" (get-in request [:headers "datastar-request"])))
-    (let [page (current-page service @connection agent-id)]
+    (let [page (current-page service (db/db connection) agent-id)]
       {:status 200
        :headers {"content-type" "text/html; charset=utf-8" "datastar-mode" "replace"}
        :body (hiccup/->string
@@ -3075,7 +3075,7 @@
              [[:section {:class "seon-session-page"}
                ((if (= "true" (get (query-params request) "prompt"))
                   transcript/render-session-loading transcript/render-ledger)
-                (session-controls (debug-turn-request @connection connection agent-id
+                (session-controls (debug-turn-request (db/db connection) connection agent-id
                                     (:seon.sci.admit/caps service)
                                     (cond-> service
                                       (get (query-params request) "turn")
@@ -3090,7 +3090,7 @@
                  "Loading the agent’s current record…"]]] ]})}
 
     :else
-  (let [db @connection
+  (let [db (db/db connection)
         query (query-params request)
         default-subject (if agent-id
                           [:seon.agent/id agent-id]
@@ -3149,11 +3149,11 @@
   [{connection :seon.store/connection-object :as service} debug? request]
   (let [namespace-name (some-> (get-in request [:path-params :namespace])
                                route-namespace)]
-    (if-not (and namespace-name (namespace-exists? @connection namespace-name))
+    (if-not (and namespace-name (namespace-exists? (db/db connection) namespace-name))
       (not-found request)
       (if debug?
         (debug-response service namespace-name
-                        (first (cluster.agent/assigned-to @connection namespace-name))
+                        (first (cluster.agent/assigned-to (db/db connection) namespace-name))
                         request)
         (let [owner (ensure-namespace-owner! service namespace-name)]
           (if (string? owner)
@@ -3165,9 +3165,9 @@
 (defn- agent-alias-response
   [{connection :seon.store/connection-object :as service} debug? request]
   (let [agent-id (get-in request [:path-params :id])]
-    (if (agent-namespace @connection agent-id)
+    (if (agent-namespace (db/db connection) agent-id)
       (if debug?
-        (debug-response service (agent-namespace @connection agent-id)
+        (debug-response service (agent-namespace (db/db connection) agent-id)
                         agent-id request)
         (page-response service agent-id))
       (not-found request))))
@@ -3226,7 +3226,7 @@
     caps :seon.sci.admit/caps
     :as service}
    request]
-  (let [db @connection
+  (let [db (db/db connection)
         query (query-params request)
         value? (contains? query "value")
         value-digest (get query "value")
@@ -3435,7 +3435,7 @@
            (db/q '[:find ?process .
                   :in $ ?id
                   :where [?process :seon.db.process/id ?id]]
-                @connection process)
+                (db/db connection) process)
             (let [result
                   (db/transact! connection [{:seon.db.process/id process}])]
               (when (:seon.error/kind result)

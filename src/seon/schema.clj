@@ -2719,8 +2719,7 @@
   {:malli/schema [:=> [:cat] [:maybe :seon.schema/projection]]}
   []
   (or *projection*
-      (some-> *projection-state* deref :seon.schema/projection)
-      (when *packaged-forms* (declaration-projection *packaged-forms*))))
+      (some-> *projection-state* deref :seon.schema/projection)))
 
 (defn entity-catalog
   "Derived database-storable shape catalog for packaged schema facts."

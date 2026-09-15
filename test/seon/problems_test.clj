@@ -501,3 +501,16 @@
             "the healthy surface still occupies its space")
         (is (str/includes? (render-at broken) "the model did not answer"))
         (is (not (str/includes? (render-at broken) "nothing is wrong")))))))
+
+(deftest missing-projection-is-a-refusal-not-query-rows
+  (test-support/with-database
+   (fn [connection]
+     (let [raw @connection
+           warnings (java.io.StringWriter.)
+           result (binding [*err* warnings]
+                    (seon.schema/call-with-projection-state
+                     (atom {}) #(problems/problems raw {})))]
+       (is (= :seon.schema/missing-projection (:seon.error/kind result)))
+       (is (= 'seon.problems/problems
+              (get-in result [:seon.error/data :seon.db/operation])))
+       (is (= 1 (count (str/split-lines (str warnings)))))))))

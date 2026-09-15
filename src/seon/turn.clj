@@ -55,7 +55,7 @@
      [:seon.turn/reply-blob {:optional true} :seon.turn/reply-blob]
      [:seon.blob/staged-writes [:vector :seon.blob/staged-write]]]]}
   [connection text]
-  (let [threshold (result-blob-threshold @connection)
+  (let [threshold (result-blob-threshold (db/db connection))
         size (long (count text))
         staged (when (and threshold (> size threshold))
                  (blob/stage! connection text))]
@@ -1209,7 +1209,9 @@
                           identity-value)))
                 deleted-identities)
           current-projection
-          (when (seq schema-keys) (schema/projection-from-database db))
+          (when (seq schema-keys) (or (db/carried-projection db)
+                  (throw (ex-info "Declaration database has no carried projection"
+                                  (db/projection-fallback 'seon.turn/row-tx)))))
           candidate-projection
           (reduce schema/projection-without-schema
                   current-projection
@@ -1267,7 +1269,9 @@
             (when (or (= :seon.schema/key identity)
                       (and (= :seon.fn/sym identity)
                            (:seon.fn/spec row)))
-              (schema/projection-from-database db))
+              (or (db/carried-projection db)
+                  (throw (ex-info "Declaration database has no carried projection"
+                                  (db/projection-fallback 'seon.turn/row-tx)))))
             schema-redefinition?
             (and (= identity :seon.schema/key)
                  existing
@@ -2046,7 +2050,7 @@
     agent-id :seon.agent/id
     write? :seon.turn/write?}]
   (let [connection (:seon.db/connection handle)
-        database @connection
+        database (db/db connection)
         namespace-name ((requiring-resolve 'seon.sci.eval/agent-namespace) database agent-id)
         declared (when namespace-name
                    (declared-sources handle database agent-id namespace-name))]
@@ -3324,7 +3328,7 @@
     problem :seon.problems/form-problem
     trigger :seon.message/trigger
     batch? :seon.turn.loop/batch?}]
-  (let [database @(get cluster :seon.db/connection)
+  (let [database (db/db (get cluster :seon.db/connection))
         raw-settled (disposition (:seon.sci.admit/value evaluation))
         settled
         (cond-> raw-settled
@@ -3342,7 +3346,7 @@
                    :seon.config/on-core-error
                    (:seon.config/on-core-error cluster)
                    :seon.schema/projection
-                   (schema/projection-from-database database)}))
+                   (db/carried-projection database)}))
           evaluation)
         last-ordinal
         (db/q '[:find (max ?ordinal) .
@@ -3531,7 +3535,7 @@
          run-id :seon.turn/id}
         (first requests)
         process (:seon.db.process/id cluster)
-        recording (error-tx cluster @connection refusal now
+        recording (error-tx cluster (db/db connection) refusal now
                             {:seon.agent/id agent-id
                              :seon.turn/id run-id})
         value (error/value (first recording))
@@ -3598,7 +3602,7 @@
           failure)
         prepared
         (if (:seon.error/kind prepared)
-          (refusal-terminal-data cluster @connection now agent-id run-id
+          (refusal-terminal-data cluster (db/db connection) now agent-id run-id
                                  process ordinal nil prepared)
           prepared)
         ;; The same total commit as `settle-batch!`: one vector of staged
@@ -3618,7 +3622,7 @@
       (assoc prepared :seon.turn.loop/outcome outcome)
       (let [refusal
             (refusal-terminal-data
-             cluster @connection now agent-id run-id process ordinal
+             cluster (db/db connection) now agent-id run-id process ordinal
              (:seon.turn.loop/receipt prepared) outcome)
             refused (commit refusal)]
         (when (:seon.error/kind refused)
@@ -3773,7 +3777,7 @@
                          (:seon.error/data truncation)
                          (update :seon.error/data dissoc :seon.ai/reasoning-content)))
         connection (:seon.db/connection cluster)
-        db @connection
+        db (db/db connection)
         reasoning-size (when (seq reasoning-content)
                          (long (count reasoning-content)))
         threshold (db/q '[:find ?threshold .
@@ -3946,7 +3950,7 @@
     (let [refreshed (system-turn {:seon.turn.loop/cluster cluster
                                  :seon.agent/id agent-id
                                  :seon.turn/write? true})
-          id (next-id @connection (:seon.cluster/name cluster) agent-id)
+          id (next-id (db/db connection) (:seon.cluster/name cluster) agent-id)
           open-request
           (cond->
            {:seon.turn/id id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}
@@ -4024,7 +4028,7 @@
           ;; through a turn. Applying config or retracting/asserting an
           ;; agent override therefore changes the NEXT turn, without a
           ;; graph rebuild or a cached derived projection.
-          db @connection
+          db (db/db connection)
           providers (provider-targets
                      {:seon.db/db db
                       :seon.cluster/name (:seon.cluster/name cluster)
@@ -4067,7 +4071,7 @@
             ;; therefore exactly the set difference between intent rows and
             ;; terminal results; recovery never has to reconstruct or rerun it.
             (let [reply-text (:seon.ai/text completion)
-                  database @connection
+                  database (db/db connection)
                   namespace-name ((requiring-resolve 'seon.sci.eval/agent-namespace) database agent-id)
                   max-source
                   (get-in cluster
@@ -4131,7 +4135,7 @@
           ;; and this one call site turns that refusal into the flat
           ;; error value the loop already records — the same shape a
           ;; refused transaction takes through `db/transact!`.
-          observed-db @connection
+          observed-db (db/db connection)
           prompt-db (opening-db observed-db run-id)
           rendered
           (when-not (:seon.config.ai/no-provider settings)
@@ -4195,7 +4199,7 @@
 
         :else
         (loop [target primary
-               ordinal (attempts @connection run-id)
+               ordinal (attempts (db/db connection) run-id)
                ;; ABSENT on the primary and on every backoff retry;
                ;; present only on the backup, where it is both the role
                ;; and the proof of which failure supplied its context
@@ -4258,7 +4262,7 @@
                      ;; site. The backup reads exactly what the agent,
                      ;; the escalation owner and the log read.
                      (render/render-ai
-                      {:seon.db/db @connection
+                      {:seon.db/db (db/db connection)
                        :seon.sci.eval/ctx (:seon.sci.eval/ctx cluster)
                        :seon.render/value
                        (error/notice {:seon.error/fact fact
@@ -4343,7 +4347,7 @@
     sources :seon.cluster.reply/sources
     starting-namespace :seon.ns/name}]
   (let [connection (:seon.db/connection cluster)
-        cluster (merge cluster (ai/agent-overlay (or snapshot @connection) agent-id))]
+        cluster (merge cluster (ai/agent-overlay (or snapshot (db/db connection)) agent-id))]
     (loop [remaining (seq sources)
            ordinal first-ordinal
            namespace-name starting-namespace
@@ -4351,7 +4355,7 @@
       (if-let [source (first remaining)]
         (let [form (assoc source :seon.cluster.eval/ns
                           [:seon.ns/name namespace-name])
-              database (or snapshot @connection)
+              database (or snapshot (db/db connection))
               captured (atom [])
               _ (await-turn-part! cluster :seon.sci.eval/evaluation
                                   (:seon.config.eval/time-limit-ms cluster))
@@ -4484,14 +4488,14 @@
         forked
         (phase #((requiring-resolve 'seon.sci.eval/fork-for-turn)
                  (cond-> {:seon.sci.eval/ctx base-ctx
-                  :seon.db/db @connection
+                  :seon.db/db (db/db connection)
                   :seon.db/connection connection
                   :seon.agent/id agent-id
                   :seon.turn/id run-id}
                    (:seon.sci.eval/agent-ctx cluster)
                    (assoc :seon.sci.eval/agent-ctx
                           (:seon.sci.eval/agent-ctx cluster)))))
-        trigger (phase #(message/trigger @connection run-id))]
+        trigger (phase #(message/trigger (db/db connection) run-id))]
     (if-let [failure (some #(when (:seon.error/kind %) %)
                            [forked trigger])]
       (do
@@ -4502,7 +4506,7 @@
                   :seon.error/value failure})
         (report :error 0))
       (let [{ctx :seon.sci.eval/ctx} forked
-            database @connection
+            database (db/db connection)
             first-ordinal (:seon.cluster.eval/ordinal work)
             evaluations (fold-evaluations database run-id)
             evaluated
@@ -4646,11 +4650,11 @@
                     :where
                     [?run :seon.turn/id ?run-id]
                     [?form :seon.cluster.eval/run ?run]]
-                  @connection run-id)
+                  (db/db connection) run-id)
              0))
         entry
         (phase
-         #(let [database @connection
+         #(let [database (db/db connection)
                 namespace-name ((requiring-resolve 'seon.sci.eval/agent-namespace)
                                 database agent-id)
                 declared (declared-sources cluster database agent-id namespace-name)]
@@ -4702,7 +4706,7 @@
                        :seon.cluster.eval/source
                        (:seon.cluster.eval/source entry)
                        :seon.ns/name
-                       ((requiring-resolve 'seon.sci.eval/agent-namespace) @connection agent-id)}
+                       ((requiring-resolve 'seon.sci.eval/agent-namespace) (db/db connection) agent-id)}
                 (:seon.cluster.eval/comment entry)
                 (assoc :seon.cluster.eval/comment
                        (:seon.cluster.eval/comment entry)))))]
@@ -4762,7 +4766,7 @@
         pass (fn []
                (let [request (update request :seon.turn.loop/cluster merge
                                      (ai/agent-overlay
-                                      @(:seon.db/connection cluster) agent-id))]
+                                      (db/db (:seon.db/connection cluster)) agent-id))]
                  (case (:seon.turn.work/situation work)
                    :open (open-turn request)
                    :call (call-turn request)
@@ -4833,7 +4837,7 @@
          backstop-state :seon.agent/turn-backstop-state}
         (:seon.turn.loop/cluster state)
         agent-id (:seon.agent/id state)
-        database @connection
+        database (db/db connection)
         run-id (open-for-agent database [:seon.agent/id agent-id])
         settings (ai/agent-overlay database agent-id)
         timeout-ms
@@ -4993,7 +4997,7 @@
                       request {:seon.agent/id agent-id
                                :seon.db.process/id process}
                ;; ONE database value for the derivation
-                      next (next-agent-work @connection request)
+                      next (next-agent-work (db/db connection) request)
                       ;; THE BOUND LEARNS ITS SUBJECT HERE, once, from
                       ;; the derivation that decided it. `:open` mints
                       ;; its run inside the turn, so the report supplies
@@ -5023,7 +5027,7 @@
                ;; self-rewake into this agent's OWN mailbox, coalescing on
                ;; its (sliding-buffer 1): it cannot recurse, because the pass
                ;; is only re-entered after this transform returns
-                      (when (more-agent-work? @connection request)
+                      (when (more-agent-work? (db/db connection) request)
                         (async/offer!
                          (:seon.cluster.wake/channel cluster) :seon.agent/wake))
                       ;; THE PASS REPORTS THE RUN IT TURNED, not whatever

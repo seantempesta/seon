@@ -70,7 +70,9 @@
                   [:or :seon.render.profile/profile :seon.error/value]]}
   [request]
   (or (:seon.render/profile request)
-      (if (schema/handed-projection)
+      (if-let [projection (or (:seon.schema/projection request)
+                              (some-> (:seon.db/db request) db/carried-projection)
+                              (schema/handed-projection))]
         (let [database (:seon.db/db request)
               cluster-name
               (when database
@@ -79,7 +81,8 @@
                         [?cluster :seon.cluster/name ?cluster-name]]
                       database))
               effective (when cluster-name
-                          (config/effective database cluster-name))]
+                          (schema/call-with-projection
+                           projection #(config/effective database cluster-name)))]
           (if (:seon.error/kind effective)
             effective
             (or (when effective (agent-render-profile effective))
@@ -965,10 +968,13 @@
   [request error]
   (:seon.sci.admit/print-node
    (admit/admit-value
-    {:seon.sci.admit/value error
+    (merge (select-keys request [:seon.db/db :seon.sci.eval/ctx
+                                 :seon.schema/projection :seon.env/environment
+                                 :seon.sci.eval/projection-state])
+           {:seon.sci.admit/value error
      :seon.sci.admit/caps (:seon.sci.admit/caps request)
      :seon.sci.admit/interrupt-fn (fn [])
-     :seon.config/on-core-error (:seon.config/on-core-error request)})))
+     :seon.config/on-core-error (:seon.config/on-core-error request)}))))
 
 (defn- project-node*
   [request output path node value]

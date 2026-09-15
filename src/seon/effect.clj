@@ -176,15 +176,21 @@
 
 (defn- accepts-request?
   [database owner-sym request]
-  (schema/function-accepts-in?
-   (schema/projection-from-database database)
-   owner-sym
-   [request]))
+  (let [projection (or (db/carried-projection database)
+                       (:seon.schema/projection request)
+                       (:seon.schema/projection (env/of request)))]
+    (if projection
+      (schema/function-accepts-in? projection owner-sym [request])
+      (let [failure (db/projection-fallback 'seon.effect/accepts-request?)]
+        (throw (ex-info (:seon.error/message failure) failure))))))
 
 (defn- admission
   [request-context]
-  {:seon.sci.admit/caps (:seon.sci.admit/caps request-context)
-   :seon.config/on-core-error (:seon.config/on-core-error request-context)})
+  (merge (select-keys request-context
+                      [:seon.db/db :seon.sci.eval/ctx :seon.schema/projection
+                       :seon.env/environment :seon.sci.eval/projection-state])
+         {:seon.sci.admit/caps (:seon.sci.admit/caps request-context)
+          :seon.config/on-core-error (:seon.config/on-core-error request-context)}))
 
 (defn- admitted-value
   [dials value]
@@ -564,7 +570,7 @@
              ;; have.
              dials (admission requesting-context)
              effect-ordinal (swap! (:seon.effect/counter *request-context*) inc)
-             database @connection
+             database (db/db connection)
              owner-row
              (db/pull database
                       [:db/id :seon.fn/sym :seon.fn/spec

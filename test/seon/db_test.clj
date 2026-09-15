@@ -158,11 +158,11 @@
                          (db/pull-many database
                                        @#'sci.eval/program-documentation-selector ids))
                   lines (str/split-lines (str warnings))]
-              (is (= (count ids) (count rows)))
+              (is (= :seon.schema/missing-projection (:seon.error/kind rows)))
               (is (= 1 (count lines)))
               (is (str/includes? (first lines)
                                  "seon.db/projection-fallback caller= seon.db/pull-many"))
-              (is (str/includes? (first lines) "elapsed-ms="))))))))))
+              (is (str/includes? (first lines) "count=1"))))))))))
 
 (deftest temporal-reads-use-the-carried-origins-projection
   (test-support/with-database
@@ -187,13 +187,13 @@
                             [:seon.ns/name] [:seon.ns/name 'my.message]))))))
        (is (= "" (str warnings)))))))
 
-(deftest ten-unhanded-queries-stay-within-twice-raw-query-cost
+(deftest ten-carried-queries-stay-within-twice-raw-query-cost
   (test-support/with-database
    (fn [connection]
+    (let [database (db/db connection)]
      (without-handed-projection
       (fn []
-        (let [database @connection
-              expected [:seon.message/message]
+        (let [expected [:seon.message/message]
               _ (db/q schema-family-query database)
               raw
               (mapv
@@ -209,13 +209,13 @@
                (range 10 20))
               raw-total (reduce + (map ::elapsed-nanos raw))
               wrapped-total (reduce + (map ::elapsed-nanos wrapped))]
-          (println {::stage :unhanded-query-cost
+          (println {::stage :carried-query-cost
                     ::samples 10 ::raw-nanos raw-total
                     ::wrapped-nanos wrapped-total})
           (is (every? #(= expected (::value %)) wrapped))
           (is (<= wrapped-total (* 2 raw-total))
               (str "ten seon.db/q calls took " wrapped-total
-                   " ns versus " raw-total " ns raw"))))))))
+                   " ns versus " raw-total " ns raw")))))))))
 
 (deftest relation-only-queries-need-no-database-schema
   (is (= [:sample/fail]

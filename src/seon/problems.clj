@@ -64,6 +64,7 @@
             [seon.db :as db]
             [seon.turn :as turn]
             [seon.error :as error]
+            [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]))
 
 ;;; ---------------------------------------------------------------------------
@@ -367,9 +368,11 @@
   same value."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        :seon.problems/request]
-                  :seon.problems/problems]}
+                  [:or :seon.problems/problems :seon.error/value]]}
   [db _request]
-  (let [signatures (error-signatures db)
+  (if-not (or (db/carried-projection db) (schema/handed-projection))
+    (db/projection-fallback 'seon.problems/problems)
+    (let [signatures (error-signatures db)
         failed (failed-runs db)
         errored (errored-receipts db)
         deferred (deferred-agents db)
@@ -386,7 +389,7 @@
                 (seq stale) (assoc :seon.problems/stale-vars stale)
                 (seq missing-model-rows)
                 (assoc :seon.problems/missing-models missing-model-rows))]
-    found))
+    found)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The html projection — the problems PAGE

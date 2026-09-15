@@ -1152,14 +1152,20 @@
 (defn- documentation-contract
   [database row]
   (if-let [spec (:seon.fn/spec row)]
-    (let [projection (schema/projection-from-database database)
-          compiled (m/function-schema (edn/read-string spec)
-                     {:registry (:seon.schema.projection/registry projection)})
-          arities (mapv m/-function-info (m/-function-schema-arities compiled))
-          inputs (mapv #(m/form (:input %)) arities)
-          outputs (mapv #(m/form (:output %)) arities)]
-      {:in (if (= 1 (count inputs)) (first inputs) inputs)
-       :out (if (= 1 (count outputs)) (first outputs) outputs)})
+    (let [projection (or (db/carried-projection database)
+                         (let [failure (db/projection-fallback
+                                        'seon.sci.eval/documentation-contract)]
+                           (throw (ex-info (:seon.error/message failure) failure))))]
+      (schema/projection-cache-value
+       projection [::documentation-contract spec]
+       (fn []
+         (let [compiled (m/function-schema (edn/read-string spec)
+                          {:registry (:seon.schema.projection/registry projection)})
+               arities (mapv m/-function-info (m/-function-schema-arities compiled))
+               inputs (mapv #(m/form (:input %)) arities)
+               outputs (mapv #(m/form (:output %)) arities)]
+           {:in (if (= 1 (count inputs)) (first inputs) inputs)
+            :out (if (= 1 (count outputs)) (first outputs) outputs)}))))
     {:in [] :out []}))
 
 (defn- agent-documentation-contract
@@ -1399,7 +1405,14 @@
     supplied-projection :seon.schema/projection
     commit-fault! :seon.flow/commit-fault!}]
   (let [projection (or supplied-projection
-                       (schema/projection-from-database db))]
+                       (db/carried-projection db)
+                       (:seon.schema/projection (env/of ctx)))
+        db (if projection
+             (vary-meta db assoc :seon.schema/projection projection)
+             db)]
+    (when-not projection
+      (let [failure (db/projection-fallback 'seon.sci.eval/acquire!)]
+        (throw (ex-info (:seon.error/message failure) failure))))
     (schema/call-with-projection
      projection
      (fn []
@@ -1771,7 +1784,9 @@
                     ::kernel/install-function!
                     install-function-from-database!)
          supplied-projection
-         (:seon.schema/projection (some-> supplied-projection-state deref))
+         (or (:seon.schema/projection (some-> supplied-projection-state deref))
+             (db/carried-projection db)
+             (schema/projection-from-database db))
          ;; ABSENT MEANS NO KEY: `:seon.sci.eval/acquire-request` marks the
          ;; projection optional, and an optional key present as nil is a
          ;; contract violation on every instrumented JVM.
@@ -1965,7 +1980,7 @@
                         (:seon.instrument/contract-violated value))
         database (when function-name
                    (or (:seon.db/db request)
-                       (some-> (get-in request [:seon.sci.eval/ctx ::custody :seon.db/connection]) deref)))
+                       (some-> (get-in request [:seon.sci.eval/ctx ::custody :seon.db/connection]) db/db)))
         function-row (when (and function-name database)
                        (db/pull database program-documentation-selector
                                 [:seon.fn/sym function-name]))
@@ -2177,6 +2192,14 @@
         ;; value, so call preparation cannot read the long-lived cluster value
         ;; and silently omit the agent/run/form members.
         base-evaluation-ctx (or ctx (build-base-ctx))
+        request
+        (if-let [database (:seon.db/db request)]
+          (if-let [projection (or (db/carried-projection database)
+                                  (context-projection base-evaluation-ctx))]
+            (assoc request :seon.db/db
+                   (vary-meta database assoc :seon.schema/projection projection))
+            request)
+          request)
         turn-members (cond-> {}
                        (:seon.db/db request)
                        (assoc :seon.db/db (:seon.db/db request))
@@ -2233,7 +2256,7 @@
                    (id/evaluation run-id form-ordinal)])
         namespace-name (or (second namespace-ref)
                            (when (and connection agent-id)
-                             (agent-namespace @connection agent-id))
+                             (agent-namespace (db/db connection) agent-id))
                            'user)
         namespace-object (sci/create-ns namespace-name)
         ending-namespace (volatile! namespace-name)
@@ -2400,7 +2423,7 @@
                 ;; The turn fork, however, is a REPL: later forms must see a
                 ;; schema admitted by an earlier form before the batch commits.
                 (advance-context-projection!
-                 evaluation-ctx @connection next-projection))
+                 evaluation-ctx (db/db connection) next-projection))
             ;; Durable declarations are installed only after the row commits.
             value (if context-row (:seon.ns/name context-row) evaluated-value)
               ;; INSIDE the boundary, BEFORE disarm: an infinite lazy

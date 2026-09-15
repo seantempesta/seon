@@ -354,11 +354,14 @@
           {:seon.print/face face :seon.print/value value}
           (or (:seon.sci.admit/print-node
                (admit/admit-value
-                {:seon.sci.admit/value value
+                (merge (select-keys unit [:seon.db/db :seon.sci.eval/ctx
+                                          :seon.schema/projection :seon.env/environment
+                                          :seon.sci.eval/projection-state])
+                       {:seon.sci.admit/value value
                  :seon.sci.admit/caps (:seon.sci.admit/caps unit {})
                  :seon.sci.admit/unbounded? true
                  :seon.sci.admit/interrupt-fn (fn [])
-                 :seon.config/on-core-error :record}))
+                 :seon.config/on-core-error :record})))
               {:seon.print/face :seon.print/object
                :seon.print/class (.getName (class value))}))))))
 

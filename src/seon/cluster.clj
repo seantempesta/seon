@@ -262,7 +262,7 @@
       (if projection-state
         (schema/call-with-projection-state
          projection-state
-         #(config/effective @connection cluster-name))
+         #(config/effective (db/db connection) cluster-name))
         (error/diagnostic
          {:seon.error/kind ::mcp-missing-projection
           :seon.error/message
@@ -536,7 +536,7 @@
              (if (and connection (:seon.flow/graph instance))
                (schema/call-with-projection-state
                 projection-state
-                #(oversight/cluster-flow-status @connection instance))
+                #(oversight/cluster-flow-status (db/db connection) instance))
                :unknown)
              :seon.dev.mcp/problem-counts problem-counts}
       readiness-face (assoc :seon.dev.mcp/readiness readiness-face))))
@@ -1032,7 +1032,7 @@
   [connection rows]
   (loop [pending (vec rows)]
     (when (seq pending)
-      (let [database @connection
+      (let [database (db/db connection)
             ready?
             (fn [row]
               (every?
@@ -1142,7 +1142,7 @@
   [{connection :seon.db/connection
     source-digest :seon.source/digest
     requested-symbols :seon.activation/requested-symbols}]
-  (let [database @connection
+  (let [database (db/db connection)
         requirements (activation-requirements database)
         initialization
         (schema/call-with-forms
@@ -1317,17 +1317,17 @@
      forms
      (fn []
        (let [declarations
-             (declaration-changes @connection forms cluster-name)]
+             (declaration-changes (db/db connection) forms cluster-name)]
          (when (seq declarations)
            (require-committed!
             (db/transact! connection {:tx-data declarations})
             {:seon.boot/population :seon.schema/declarations})))
-       (let [process-rows (missing-process-rows @connection)]
+       (let [process-rows (missing-process-rows (db/db connection))]
          (when (seq process-rows)
            (require-committed!
             (db/transact! connection {:tx-data process-rows})
             {:seon.boot/population :seon.db/processes})))
-       (let [schema-rows (schema-row-changes @connection forms)]
+       (let [schema-rows (schema-row-changes (db/db connection) forms)]
          (when (seq schema-rows)
            (require-committed!
             (db/transact! connection
@@ -1363,7 +1363,7 @@
        (report-source-progress! "schema population complete")
        (report-source-progress! "instruction rows")
        (let [rows (instruction-row-changes
-                   @connection
+                   (db/db connection)
                    (instruction/seed-rows))]
          (when (seq rows)
            (require-committed!
@@ -1481,7 +1481,7 @@
   (let [{commit-id :seon.source/commit-id} (current-source! store)
         connection (store/open-branch! store source/current-branch)]
     (try
-      (let [database @connection
+      (let [database (db/db connection)
             projection (schema/projection-from-database database)
             projection-state (sci.eval/projection-state database projection)
             [activation-closure source-digest base-ctx]
@@ -1542,7 +1542,7 @@
 
 (defn- require-coherent-program!
   [connection cluster-name]
-  (let [currentness (program-currentness @connection)]
+  (let [currentness (program-currentness (db/db connection))]
     (when-not (:seon.source/coherent? currentness)
       (let [condition
             (cond
@@ -1857,7 +1857,7 @@
 
 (defn- acquire-development!
   [connection cluster-name ctx projection]
-  (let [database @connection
+  (let [database (db/db connection)
         effective (config/effective database cluster-name)
         _ (when (:seon.error/kind effective)
             (refused! "Development acquisition configuration is unavailable."
@@ -1881,10 +1881,10 @@
         cluster-ref [:seon.cluster/name cluster-name]
         ctx (:seon.sci.eval/ctx instance)
         prior-commit (:seon.source/commit-id
-                      (db/pull @connection [:seon.source/commit-id] cluster-ref))
+                      (db/pull (db/db connection) [:seon.source/commit-id] cluster-ref))
         previous-database (if prior-commit
                             (source/database held-store prior-commit)
-                            @connection)
+                            (db/db connection))
         published-database (source/database held-store (:seon.source/commit-id published))
         forms (:seon.schema.projection/forms
                (schema/projection-from-database published-database))
@@ -1922,7 +1922,7 @@
              :seon.source/database published-database
              :seon.source/previous-database previous-database}
             *source-progress!*)))
-        database @connection
+        database (db/db connection)
         projection (schema/projection-from-database database)
         deleted-identities (source/deleted-identities database)
         namespaces
@@ -2099,7 +2099,7 @@
   "Close all prior open turns before arming agents. The writer decides
   which evaluations and effects remain unfinished; nothing is replayed."
   [connection]
-  (let [db @connection
+  (let [db (db/db connection)
         now (java.util.Date.)
         open-runs (db/q '[:find [?run-id ...]
                          :where
@@ -2157,7 +2157,7 @@
   (when-not (db/q '[:find ?entity .
                    :in $ ?process
                    :where [?entity :seon.db.process/id ?process]]
-                 @connection process)
+                 (db/db connection) process)
     (require-committed!
      (db/transact!
       connection
@@ -2166,7 +2166,7 @@
                  [:seon.db.process/id boot-process-identity]}})
      {:seon.db.process/id process
       :seon.boot/population :seon.db.process/process}))
-  (let [toolkit-namespaces (instruction/toolkit-namespaces @connection)
+  (let [toolkit-namespaces (instruction/toolkit-namespaces (db/db connection))
         desired {:seon.cluster/name cluster-name
                  :seon.cluster/config
                  [:seon.config/cluster cluster-name]
@@ -2191,7 +2191,7 @@
                (map (fn [namespace-name]
                       {:seon.ns/name namespace-name}))
                toolkit-namespaces)}
-        current (some-> (db/pull @connection
+        current (some-> (db/pull (db/db connection)
                                 '[:seon.cluster/name
                                   {:seon.cluster/config
                                    [:seon.config/cluster]}
@@ -2440,7 +2440,7 @@
   query-derived count of committed facts."
   [connection cluster-name process caps fault]
   (try
-    (let [db @connection
+    (let [db (db/db connection)
           dials (config/effective db cluster-name)
           source-fault fault
           agent-id (:seon.agent/id source-fault)
@@ -2558,7 +2558,7 @@
   graph."
   [connection cluster-name process ctx work-launcher
    wake-channel stream-channel completion]
-  (let [dials (config/effective @connection cluster-name)]
+  (let [dials (config/effective (db/db connection) cluster-name)]
     (cond-> {;; The one environment value this cluster's procs and
              ;; submissions carry. The handle's remaining entries are
              ;; process-local ports and structural dials, which are not
@@ -2737,7 +2737,7 @@
                :seon.flow/read-core-error-mode
                (fn []
                  (or (:seon.config/on-core-error
-                      (config/effective @connection cluster-name))
+                      (config/effective (db/db connection) cluster-name))
                      :record))
                :seon.flow/commit-fault!
                (fn [fault]
@@ -2924,10 +2924,10 @@
            bare-ctx
            (if base-ctx
              (sci.eval/fork-cluster-ctx
-              base-ctx @connection connection projection-state)
+              base-ctx (db/db connection) connection projection-state)
              (sci.eval/cluster-ctx
-              @connection connection projection-state))
-           boot-dials (config/effective @connection cluster-name)
+              (db/db connection) connection projection-state))
+           boot-dials (config/effective (db/db connection) cluster-name)
            ;; The launcher's own graph belongs to this cluster too, but the
            ;; launcher cannot be a member of the environment its own procs
            ;; carry. Its graph therefore receives this cluster's environment
@@ -2973,7 +2973,7 @@
            instance (publish!
                      (merge instance
                             (arm-agents! instance connection cluster-name)))
-           dials (config/effective @connection cluster-name)]
+           dials (config/effective (db/db connection) cluster-name)]
        (publish! (serve! instance dials))))))
 
 (defn- stand-boot-layers!
@@ -3220,7 +3220,7 @@
   {:malli/schema [:=> [:cat :seon.boot/instance] :seon.boot/readiness]}
   [instance]
   (let [connection (:seon.boot/cluster-connection instance)
-        db (some-> connection deref)
+        db (some-> connection db/db)
         served (:seon.render.web/served instance)
         advertisement (:seon.boot/advertisement instance)
         agents (if db

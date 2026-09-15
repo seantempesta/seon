@@ -44,6 +44,7 @@
             [sci.impl.namespaces :as sci.namespaces]
             [sci.impl.types :as sci.types]
             [sci.lang]
+            [seon.env :as env]
             [seon.id :as id]
             [seon.print :as print]
             [seon.schema :as schema]
@@ -199,7 +200,8 @@
   carries what remains and how to close it."
   [value state]
   (let [identity-projection
-        (delay (some-> (:projection state)
+        (delay (some-> (or (:seon.schema/projection (meta value))
+                            (:projection state))
                        (schema/identity-only-projection-in value)))]
     (cond
       (nil? value) {::node (leaf! state (value-node ::print/nil nil))}
@@ -687,17 +689,24 @@
 (defn- admit*
   [{::keys [value interrupt-fn caps record unbounded?]
     supplied-projection :seon.schema/projection
-    on-core-error :seon.config/on-core-error}]
-  (if (and (not (true? unbounded?))
+    on-core-error :seon.config/on-core-error
+    :as request}]
+  (let [supplied-projection
+        (or (:seon.schema/projection (meta value))
+            supplied-projection
+            (:seon.schema/projection (env/of request))
+            (:seon.schema/projection (env/of (:seon.sci.eval/ctx request)))
+            (:seon.schema/projection (meta (:seon.db/db request))))]
+    (if (and (not (true? unbounded?))
            (not (int? (:seon.config.eval.result/max-bytes caps))))
     (missing-bound-refusal caps)
     (admit-walk value interrupt-fn caps record unbounded?
-                supplied-projection on-core-error)))
+                supplied-projection on-core-error))))
 
 (defn- admit-walk
   [value interrupt-fn caps record unbounded?
    supplied-projection on-core-error]
-  (let [projection (or supplied-projection (schema/handed-projection))
+  (let [projection supplied-projection
         builder (StringBuilder.)
         state {:interrupt-fn interrupt-fn
                :on-core-error on-core-error

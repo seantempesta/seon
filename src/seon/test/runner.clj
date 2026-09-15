@@ -2755,6 +2755,8 @@
         (try
           (let [database (source/database held-store
                            (:seon.source/commit-id (source/current held-store)))
+                database (vary-meta database assoc :seon.schema/projection
+                                    (schema/projection-from-database database))
                 captured (provenance database)]
             (when (:seon.error/kind captured)
               (throw (ex-info (:seon.error/message captured) captured)))
