@@ -1,7 +1,7 @@
 ---
 type: issue
 status: open
-severity: blocker
+severity: friction
 tags: [issue, agent, runtime, test, class/n2, wave/causal-episode]
 ---
 
@@ -98,3 +98,9 @@ semantics.
   grading branch at main-only quiescence.
 - The live DeepSeek O4 drive passes from a fresh published cluster, while the
   existing close-on-wait regression remains green.
+
+## Re-verified at HEAD (2026-09-15)
+
+UNVERIFIABLE-WITHOUT-GATE (`seon.eval.drive-test`, `seon.bootstrap-drive-test`). At audited HEAD `7e35df213`, `src/seon/eval/drive.clj:110-119` still selects direct objective-triggered turns; `:234-275` uses those ids and initiating-agent work for termination. `src/seon/bootstrap_drive.clj:338` still calls run-episode!. Need the canonical scripted main/peer/continuation test under the current message/turn model; source reach alone is not a present reproduction. No paid call or new JVM was launched. Downgraded to friction: O4 is a grading driver, not the current agent execution owner.
+
+surface: other

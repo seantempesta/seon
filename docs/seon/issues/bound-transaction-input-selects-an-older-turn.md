@@ -75,3 +75,15 @@ Reduce this to dependency-level facts, verify both Seon and raw Datahike
 query paths, locate the owner, and make bound transaction inputs obey the
 same constraint as the explicit predicate. Preserve result and read-evidence
 semantics under both forms. No dependency files changed in loop-continue.
+
+## Re-verified at HEAD (2026-09-15)
+
+OPEN, CONFIRMED. Read-only MCP JVM probe on default returned in 24 ms: `{:seon.triage/subject [106420 536879236], :seon.triage/bound 106106, :seon.triage/filtered nil}`. It used a hypothetical database from `with`, with no live transaction. Exact form:
+
+```clojure
+(let [original @(seon.operator/connection "default") [eid latest] (last (sort-by second (seon.db/q '[:find ?e ?t :where [?a :seon.agent/id "juniper"] [?e :seon.turn/agent ?a] [?e :seon.turn/id _ ?t] [?e :seon.turn/closed-tx _]] original))) database (:db-after (datahike.api/with original [[:db/add eid :seon.turn/disposition :wait]]))] {:seon.triage/subject [eid latest] :seon.triage/bound (seon.db/q '[:find ?turn . :in $ ?agent-id ?t :where [?agent :seon.agent/id ?agent-id] [?turn :seon.turn/agent ?agent] [?turn :seon.turn/id _ ?t] [?turn :seon.turn/closed-tx _] [?turn :seon.turn/reply-size _] [?turn :seon.turn/attempts ?attempt] (not [?attempt :seon.ai.attempt/error _]) (not [?turn :seon.turn/disposition _])] database "juniper" latest) :seon.triage/filtered (seon.db/q '[:find ?turn . :in $ ?agent-id ?latest :where [?agent :seon.agent/id ?agent-id] [?turn :seon.turn/agent ?agent] [?turn :seon.turn/id _ ?t] [(= ?t ?latest)] [?turn :seon.turn/closed-tx _] [?turn :seon.turn/reply-size _] [?turn :seon.turn/attempts ?attempt] (not [?attempt :seon.ai.attempt/error _]) (not [?turn :seon.turn/disposition _])] database "juniper" latest)})
+```
+
+Audited HEAD `7e35df213` pins Datahike `cdcb5792db8bd599487f099437265d18a31164a5` (`git ls-tree 7e35df213 reference-code/datahike`), matching the original report. A simpler bound pattern returned one correct row; the full joined query above exposes the defect. `src/seon/turn.clj:2728` retains the equality workaround. The generic query defect remains a blocker for trustworthy generated context despite that protected caller. Fix sketch: reduce the joined transaction-input discrepancy in `reference-code/datahike/src/datahike/query.cljc`, preserve result/read-evidence semantics, and retain the workaround until verified.
+
+surface: context-generation

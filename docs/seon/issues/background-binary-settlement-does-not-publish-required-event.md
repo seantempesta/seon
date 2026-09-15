@@ -1,7 +1,7 @@
 ---
 type: issue
 status: open
-severity: blocker
+severity: friction
 tags: [issue, runtime, blob, effect, class/n10, wave/background-settlement]
 ---
 
@@ -39,3 +39,9 @@ database and worker completion before assigning the cause to either side.
   assertions across the inline threshold.
 - A focused repetition distinguishes worker non-completion, refused commit,
   and lost listener delivery instead of reporting only a channel timeout.
+
+## Re-verified at HEAD (2026-09-15)
+
+UNVERIFIABLE-WITHOUT-GATE (`seon.background-blob-test`, after repairing setup). Before the no-JVM correction, ran `bin/test-fast --paths docs/seon/issues/background-binary-settlement-does-not-publish-required-event.md -- seon.background-blob-test`. Snapshot HEAD `ad5780df5856f1adf30fd1995706c0564a716129`, no snapshot differences, contracts armed (983 instrumented). Result: 1 test / 1 assertion, 0 failures / 1 error. `background_blob_test.clj:98` threw NullPointerException in `(dec threshold)` because the threshold query returned nil. No background request was submitted: this does not reproduce lost terminal delivery. Audited HEAD still queries `:seon.config.eval.result/blob-threshold` at `test/seon/background_blob_test.clj:93-98`; settlement remains at `src/seon/effect.clj:488-503`. Fix sketch: obtain the current declared effect threshold in the canonical fixture, then rerun the byte/event regression. Downgraded to friction: current proof is a broken regression setup, not a live execution failure.
+
+surface: runner-gate

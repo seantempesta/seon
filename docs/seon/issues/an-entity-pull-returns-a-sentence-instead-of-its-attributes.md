@@ -120,3 +120,9 @@ row exists; a message returns the message map; an error returns the
 `:seon.error` value `seon.error/diagnostic` already constructs. One regression
 per family asserts the pulled attributes are present in the result, not an
 English template.
+
+## Re-verified at HEAD (2026-09-15)
+
+UNVERIFIABLE-WITHOUT-GATE (`seon.render-simplification-test`, `seon.sci.eval-test`). Audited HEAD `7e35df213:src/seon/sci/eval.clj:1930-1953` passes results to value/prepare; `src/seon/render/value.clj:271-289` still allows a declared renderer to replace a map. Before the no-JVM correction, disposable SCI probe `(seon.db/pull [:seon.fn/sym :seon.fn/private?] [:seon.fn/sym "seon.db/q"])` returned MCP text beginning `#object[clojure.lang.ExceptionInfo "projection failed: seon.sci.kernel/invoke refused argument 0 (0-based) at [:seon.db/db]`, saying expected immutable Datahike database, got nil. It did not reach the historical sentence substitution. This is an outward projection failure, also recorded in `class-outward-values-bypass-total-render-contract.md`, not confirmation of the original cause. Need the armed result-selection tests with explicit database and SCI custody; retain blocker pending proof.
+
+surface: context-generation

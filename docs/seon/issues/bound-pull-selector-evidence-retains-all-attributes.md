@@ -1,7 +1,7 @@
 ---
 type: issue
 status: open
-severity: blocker
+severity: friction
 tags: [context, database, read-evidence]
 ---
 
@@ -57,3 +57,9 @@ The invariant loop proof passes three virtual turns with zero generated
 rereads and zero added system bytes. The coarse-revision cleanup described
 above remains separate; complete index patterns already provide the needed
 authority.
+
+## Re-verified at HEAD (2026-09-15)
+
+UNVERIFIABLE-WITHOUT-GATE (`seon.db-test`). Audited HEAD `7e35df213:src/seon/db.clj:664-695` attaches index patterns but computes dependency-revision from the original plan. Exact read-only MCP form: `(let [db @(seon.operator/connection "default") captured (atom []) result (binding [seon.db/*read-evidence-sink* captured] (seon.db/q '[:find (pull ?e ?selector) :in $ ?selector :where [?e :seon.agent/id "juniper"]] db [:seon.agent/id]))] {:seon.triage/result result :seon.triage/evidence (seon.db/read-evidence @captured)})`. Observed timeout at 10000 ms, not a returned coarse revision; no attribution of that timeout to this defect. Need explicit-selector/unrelated-write/selected-write/wildcard tests. Downgraded to friction: complete index patterns already provide freshness authority; the note's collection-input blocker has been repaired.
+
+surface: context-generation
