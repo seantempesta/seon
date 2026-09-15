@@ -228,7 +228,7 @@ Before the publication commit marker converged, the ordinary base-diff receive
 and evaluator already proved the fix on default PID 23557: 896 ms,
 `:seon.probe/retained-context? true`, largest-customer listed, no evaluation
 error. This is explicitly a loaded-definition observation, not a claim of
-completed source adoption. The final convergence observation follows it.
+completed source adoption. The final convergence boundary follows below.
 
 ```clojure
 (let [instance (get @seon.operator.runtime/running-instances "default")
@@ -256,3 +256,42 @@ completed source adoption. The final convergence observation follows it.
                 :seon.probe/result (select-keys result [:seon.sci.admit/value :seon.cluster.eval/error :seon.eval/shown])})))))
 #:seon.probe{:retained-context? true, :result {:seon.sci.admit/value {:schemas #:example{:amount :int, :customer :string, :order [:string #:seon.db{:identity true}], :order-row [:map #:seon.db{:attributes true} [:example/order :example/order] [:example/amount :example/amount] [:example/customer :example/customer]]}, :functions [{:sym my.agents.juniper/largest-customer, :arglists ([rows]), :doc "Given a seq of order rows, return the customer with the largest total.", :in [:cat [:vector :example/order-row]], :out [:map [:customer :example/customer] [:total :int]]}]}, :seon.eval/shown "{:functions [{:arglists ([rows]), :doc \"Given a seq of order rows, return the customer with the largest total.\", :in [:cat [:vector :example/order-row]], :out [:map [:customer :example/customer] [:total :int]], :sym my.agents.juniper/largest-customer}], :schemas #:example{:amount :int, :customer :string, :order [:string #:seon.db{:identity true}], :order-row [:map #:seon.db{:attributes true} [:example/order :example/order] [:example/amount :example/amount] [:example/customer :example/customer]]}}"}}
 ```
+
+
+## Remaining adoption boundary — 2026-09-15 01:03 UTC
+
+Implementation is committed as 5081a11fb and b28ccc1f8. All final gates above
+passed. The same exact live probe repeated at 01:03 UTC returned the same
+function data, no evaluation error, and `:seon.probe/retained-context? true`
+in 822 ms. This is a successful loaded-definition proof on default.
+
+Completed source adoption remains unverified. Repeated authorized
+`bin/seon init --dev default --changed src/seon/sci/eval.clj` operations
+reached SCI acquisition and JVM instrumentation, then refused with:
+
+```text
+Source changed during development adoption; the next edit must converge it.
+#:seon.source{:commit-id #uuid "6aa898d3-88c2-5adb-a78b-92c2006436dd"}
+```
+
+The subsequent read-only MCP JVM comparison returned in 5 ms:
+
+```clojure
+[#:seon.source{:commit-id #uuid "6aa3269c-7239-5519-80e7-7e62547e7175"}
+ #:seon.source{:branch "current-src",
+               :commit-id #uuid "6aa898d3-88c2-5adb-a78b-92c2006436dd"}]
+```
+
+The first value is default's recorded source commit; the second is
+`seon.cluster.source/current`. They differ. The publication log identifies
+concurrent render, repl, plan, and other source publications; no foreign files,
+processes, or sessions were operated to bypass this boundary. The source
+owner's final digest check was not bypassed. A quiet source window was
+requested from the owner. The directory issue stays open only for the requested
+post-adoption verification and closure; the code repair is landed.
+
+All lane shell commands have exited. Successful test roots were removed by
+the runner; lane test logs and the read-only thread dump were deleted after
+recording evidence here. The final adoption log is also deleted at handoff.
+No scratch cluster or worktree was created. Default was never stopped,
+reforked, restarted, or reseeded, and no agent was messaged.

@@ -46,8 +46,31 @@ The installation seam already writes the required facts.
 
 Exact rows, forms, expansions, and timings are recorded in
 [the lane landing note](../../prds/context-generation/research/dir-own-fns-landing-2026-09-10.md).
-Production repair awaits clarification of the assignment's installation-only
-ownership restriction on eval.clj. The issue remains open.
+
+## Repair (2026-09-14)
+
+The owner expanded the scope to the documentation owner. Commit `5081a11fb`
+deletes the acquisition-time capture: `dir` and `doc` query current program
+facts through the evaluation's database custody and ordinary read-evidence
+path. Shipped and agent-installed functions use the same namespace relation
+and query; both expose arglists and contracts.
+
+Commit `b28ccc1f8` repairs the existing retained-context base update for aliases.
+SCI's inherited Var update follows the Var's metadata namespace; the core
+aliases of the repl macros therefore kept old roots. Base updates now install
+aliases at their actual binding paths. No context replacement or cache is added.
+
+Canonical regressions cover contracted function installation after an empty
+directory, read-evidence invalidation, local and qualified documentation, and
+macro updates in the same retained SCI context. Final fast, isolated, and
+platform gates passed respectively 9/111, 9/115, and 84/505 tests/assertions,
+with zero failures or errors. The isolated selection includes
+seon.repl-grammar-test and seon.help-trial-test.
+
+The JVM-mode live probe on default retained Juniper's context and returned
+largest-customer with sym, arglists, first doc line, and input/output contract
+in 896 ms. Full source-adoption convergence is recorded separately in the
+landing note before closure.
 
 ## Acceptance
 
