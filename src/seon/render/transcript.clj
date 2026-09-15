@@ -25,6 +25,7 @@
             [seon.render.value :as value]
             [seon.render.walk :as walk]
             [seon.repl :as repl]
+            [seon.schema.form :as schema.form]
             [seon.sci.admit :as admit])
   (:import [java.io PushbackReader StringReader]))
 
@@ -1776,37 +1777,38 @@
                     ::matches (mapv #(evaluation-match by-eid %) matches)}) groups))))
 
 (defn- directory-problem
-  "Detect directory results omitting public function facts at their read basis."
+  "Compare complete directory observations with their owner at the read basis."
   [database by-eid evaluations]
-  (let [directories
-        (keep (fn [saved]
-                (let [form (some-> (:seon.cluster.eval/source saved) readable-shown ::value)
-                      argument (when (seq? form) (second form))
-                      ns-name (if (and (seq? argument) (= 'quote (first argument))) (second argument) argument)]
-                  (when (and (seq? form) (#{'dir 'clojure.core/dir} (first form)) (symbol? ns-name)
-                             (not (:seon.cluster.eval/error saved)))
-                    [saved ns-name]))) evaluations)
+  (let [renderer (some-> (db/pull database [:seon.schema/form]
+                                  [:seon.schema/key :seon.repl/directory])
+                        :seon.schema/form readable-shown ::value
+                        schema.form/schema-properties :seon.render/ai)
+        directories (filter #(and renderer (= renderer (:seon.eval/renderer %))) evaluations)
         checks
-        (mapv (fn [[saved ns-name]]
-                (let [shown (some-> (:seon.eval/shown saved) readable-shown ::value)
+        (mapv (fn [saved]
+                (let [namespace-name
+                      (some (fn [evidence]
+                              (let [lookup (last (get-in evidence [:seon.db/read-request :seon.db/pull-arguments]))]
+                                (when (and (vector? lookup) (= :seon.ns/name (first lookup)))
+                                  (second lookup)))) (:seon.cluster.eval/read-evidence saved))
+                      shown (some-> (:seon.eval/shown saved) readable-shown ::value)
                       basis (:seon.cluster.eval/read-basis-transaction saved)
-                      expected (when basis
-                                 (db/q '[:find ?sym ?private :in $ ?name
-                                         :where [?ns :seon.ns/name ?name]
-                                                [?f :seon.fn/ns ?ns] [?f :seon.fn/sym ?sym]
-                                                [(get-else $ ?f :seon.fn/private? false) ?private]]
-                                       (db/as-of database basis) ns-name))
-                      observed (when (map? shown) (get shown :functions))]
-                  (if (and (coll? observed) basis (not (:seon.error/kind expected)))
-                    (let [syms (set (map #(str (:sym %)) observed))
-                          missing (sort (keep (fn [[sym private?]] (when (and (not private?) (not (syms sym))) sym)) expected))]
-                      (when (seq missing)
-                        (assoc (evaluation-match by-eid saved) ::detail
-                               (str ns-name " omitted " (str/join ", " missing)))))
+                      expected (when (and basis namespace-name)
+                                 ((requiring-resolve 'seon.sci.eval/directory-value)
+                                  (db/as-of database basis) namespace-name true))
+                      projected (when (and expected (not (:seon.error/kind expected)))
+                                  (some-> expected repl/render-directory-ai readable-shown ::value))]
+                  (cond
+                    (or (not (map? shown)) (nil? projected)
+                        (not= (set (keys projected)) (set (keys shown)))
+                        (some #(and (map? %) (:seon.print/omitted %)) (tree-seq coll? seq shown)))
                     (assoc (evaluation-match by-eid saved) ::unavailable true
-                           ::detail "Directory shown text or read basis unavailable.")))) directories)]
+                           ::detail "Complete directory shown text or read evidence unavailable.")
+                    (not= shown projected)
+                    (assoc (evaluation-match by-eid saved) ::detail
+                           (str namespace-name " differs from its complete directory at the saved read basis."))))) directories)]
     (assoc (finding :directory "Incomplete directory results" (remove ::unavailable (remove nil? checks)))
-           ::unknown (count (filter ::unavailable checks)))))
+           ::unknown (if (seq directories) (count (filter ::unavailable checks)) 1))))
 
 (defn- fault-problems
   "Detect delivered core faults and turns whose trigger points at a fault fact."

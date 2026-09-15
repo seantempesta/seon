@@ -14,6 +14,7 @@
             [seon.error :as error]
             [seon.id :as id]
             [seon.render :as render]
+            [seon.repl :as repl]
             [seon.render.hiccup :as hiccup]
             [seon.render.transcript :as transcript]
             [seon.render.walk :as walk]
@@ -60,7 +61,7 @@
              (fixture/install! handle routing)
              (is (string? (:seon.turn/id (turn/system-turn request))))
              (agent/arm! request)
-             (let [raw ";; Preserve café, <tags> and spacing as received.\n(str \"café\")\n(/ 1 0)\n"
+             (let [raw ";; Preserve café, <tags> and spacing as received.\n(str \"café\")\n(/ 1 0)\n(clojure.repl/dir my.test)\n"
                    virtual-id (fixture/submit! handle routing raw)
                    unit (merge handle {:seon.db/db @connection :seon.agent/id "juniper"
                                        :seon.turn/id virtual-id
@@ -189,6 +190,8 @@
                                   (assoc unit :seon.db/db database) rows
                                   evaluations))
                      before (snapshot)
+                     directory (first (filter #(= "(clojure.repl/dir my.test)" (:seon.cluster.eval/source %))
+                                              (evaluation/of-agent @connection "juniper")))
                      counts #(into {} (map (juxt :seon.render.transcript/code
                                                 :seon.render.transcript/count))
                                    (:seon.render.transcript/rules %))
@@ -229,6 +232,13 @@
                      repeated {:seon.cluster.eval/source "(inc 123)" :seon.eval/shown "124"}
                      reread {:seon.cluster.eval/source "(seon.db/q '[:find (count ?a) . :where [?a :seon.agent/id]])"
                              :seon.eval/shown (pr-str (db/q '[:find (count ?a) . :where [?a :seon.agent/id]] @connection))}]
+                 (is directory "Qualified directory calls retain renderer and namespace read provenance.")
+                 (doseq [observations [[] [(assoc directory :seon.eval/shown "#:seon.print{:omitted 1}")]
+                                       [(assoc directory :seon.eval/shown "{:functions []}")]]]
+                   (is (pos? (:seon.render.transcript/unknown
+                              (#'transcript/directory-problem @connection {} observations)))))
+                 (is (zero? (:seon.render.transcript/count
+                              (#'transcript/directory-problem @connection {} [directory]))))
                  (seed-turn! :generate (:seon.cluster.eval/source reread) [reread] nil nil)
                  (seed-turn! :generate (:seon.cluster.eval/source reread) [reread] nil nil)
                  (seed-turn! :call "(inc 123)\n#:seon.repl{:value 124}\n(dir my.test)"
@@ -236,7 +246,10 @@
                               {:seon.cluster.eval/source "#:seon.repl{:value 124}"
                                :seon.cluster.eval/error "Only the REPL writes responses."
                                :seon.error/kind :seon.sci.reader/fabricated-response}
-                              {:seon.cluster.eval/source "(dir my.test)" :seon.eval/shown "{:functions []}"}]
+                              (assoc (select-keys directory [:seon.cluster.eval/source :seon.eval/renderer
+                                                            :seon.cluster.eval/read-evidence
+                                                            :seon.cluster.eval/read-basis-transaction])
+                                     :seon.eval/shown (repl/render-directory-ai {:functions [] :schemas {}}))]
                              (attempt "panel-attempt-1" 5000 0 5000) nil)
                  (seed-turn! :call "(inc 123)" [repeated]
                              (attempt "panel-attempt-2" 6000 0 6000) nil)

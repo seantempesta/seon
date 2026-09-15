@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, render, sci, test, wave/verification-audit]
 ---
@@ -27,6 +27,14 @@ Delete the duplicate public-function query and operator roster. Share the direct
 Estimated change: 35–60 lines merged/replaced. Audit classes: 1, 3, 4. No production edits for this finding were made by the audit lane.
 
 ## Acceptance
+
+Resolved by the A01 commit containing this note: the declared renderer and
+saved namespace pull identify observations. The directory owner and its current
+pair supply the comparison at the read basis; no public-function query or
+column decoder is copied. Elided, missing and unrecognized observations are
+unavailable. The real qualified SCI call and all three unknown cases pass.
+Fast: 10 tests / 151 assertions; isolated: 10 / 155, zero failures/errors.
+Responsive screenshots were inspected; hash and counts are in the landing note.
 
 Exercise real SCI directory calls and the actual current pair, including a qualified/aliased call, an elided result, and no directory observations. Never maintain a third decoder for the column layout. Compare the observed membership through the owning data boundary; do not infer missing functions from presentation cuts.
 

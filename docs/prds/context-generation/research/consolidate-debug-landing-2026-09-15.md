@@ -148,3 +148,32 @@ A02 verification: fast 10 tests / 146 assertions; isolated 10 / 150, both green.
 Default adoption completed at source `6aa8d57a-ad06-50f4-9ea9-bd78ed94ddc9`.
 Browser `a02`: six HTTP 200 captures, zero horizontal overflow; main/debug
 at 1440 and 700 inspected, layout retained.
+
+## A01 — directory observations
+
+A02 commit: `0439448cb`.
+
+The directory check reads the renderer from its schema declaration and the
+namespace from saved pull evidence. It compares the saved complete value with
+`seon.sci.eval/directory-value` and `seon.repl/render-directory-ai` at the read
+basis. The duplicate public-function query, operator spellings and column
+layout decoder are gone. No observations, missing provenance, elisions and
+unrecognized output layouts are explicitly unavailable. The output layout is
+recognized by the owner's actual projected keys, with no copied column roster.
+The canonical virtual-turn fixture now evaluates `(clojure.repl/dir my.test)`;
+its real read evidence underlies the incomplete/complete/unavailable checks.
+
+Live JVM probe of the final compatibility check returned count 0 / unknown 1
+for retired `{:functions []}` shown text, confirming the new Var was loaded.
+The preceding publication reported concurrent source change; the hook queued
+the refinement. This probe proves loaded behavior, not full adoption convergence.
+
+A01 source/tests: 43 added / 28 removed (net +15): source +2, regression +13.
+The addition is justified by explicit provenance/layout absence and qualified,
+elided and legacy-shape regression coverage; it replaces the duplicate directory
+query and literal operator recognition. Browser `a01`: six HTTP 200 captures,
+zero horizontal overflow; main/debug at both widths inspected. Juniper's
+unavailable directory observations fell from six to two as four now compare
+through the owner. Final fast: 10 tests / 151 assertions, zero failures/errors.
+
+A01 final isolated gate: 10 tests / 155 assertions, zero failures/errors.
