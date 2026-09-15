@@ -42,7 +42,10 @@
           (is (= :seon.db/invalid-write (:seon.error/kind refusal))
               (pr-str refusal))
           (is (str/includes? (:seon.error/message refusal)
-                             "one of the declared alternatives")
+                             ":core")
+              (pr-str refusal))
+          (is (not (str/includes? (:seon.error/message refusal)
+                                  "with a value satisfying missing required key"))
               (pr-str refusal)))
         (let [compiled (m/schema [:=> [:cat [:= 7]] :int]
                                 {::m/function-checker mg/function-checker
