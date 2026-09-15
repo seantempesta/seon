@@ -987,6 +987,7 @@
         projection (schema/declaration-projection forms)]
     (binding [*out* *err*]
       (println "bin/test: PACKAGED TEST PROJECTION ACQUIRED"
+               "at=" (str (Instant/now))
                "pid=" (.pid (ProcessHandle/current))
                "role=" role))
     projection))

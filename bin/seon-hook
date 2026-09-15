@@ -67,7 +67,7 @@
     (let [log-dir (root-file "logs")
           obsolete (root-file "logs/hook-debug.log.1")
           line (.getBytes
-                (str (java.util.Date.) " | " (str/join " | " parts) "\n")
+                (str (java.time.Instant/now) " | " (str/join " | " parts) "\n")
                 "UTF-8")]
       (when-not (.exists log-dir) (.mkdirs log-dir))
       (when (.exists obsolete) (.delete obsolete))
@@ -1268,6 +1268,8 @@
                   (update :seon.hook/paths #(vec (sort (into (set %) paths))))
                   (assoc :seon.hook/edited-at (System/currentTimeMillis)))]
     (spit pending-source-path (pr-str batch))
+    (log! "SOURCE_EDIT" (str "publication=" (:seon.hook/publication batch))
+          (str "paths=" (pr-str paths)))
     (let [result (source-result-path (:seon.hook/publication batch))]
       (io/make-parents result)
       (.createNewFile result))
@@ -1275,45 +1277,33 @@
     (:seon.hook/publication batch)))
 
 (defn- run-source-worker!
-  "Drain a quiet snapshot once; edits during publication get the next window."
+  "Drain pending paths immediately; in-flight edits join one successor batch."
   []
-  (let [config (load-config)
-        quiet-ms (* 1000 (get-in config [:current-source :quiet-seconds] 5))
-        timeout-ms (* 1000 (get-in config [:current-source :timeout-seconds] 180))]
+  (let [config (load-config)]
     (try
       (loop []
         (let [batch
               (with-pending-lock
                 (fn []
                   (if-let [pending (read-source-state pending-source-path)]
-                    (let [now (System/currentTimeMillis)
-                          remaining (- (+ (:seon.hook/edited-at pending) quiet-ms) now)
-                          bound (- (+ (:seon.hook/queued-at pending) timeout-ms) now)]
-                      (cond
-                        (not (pos? bound))
-                        (do (.delete pending-source-path)
-                            (assoc pending :seon.hook/feedback
-                                   "refused: no quiet window arrived within the publication deadline."))
-                        (pos? remaining) {:seon.hook/wait-ms (min remaining bound)}
-                        :else (do (.delete pending-source-path) pending)))
+                    (do (.delete pending-source-path) pending)
                     (do (.delete source-worker-path) nil))))]
           (when batch
-            (if-let [wait-ms (:seon.hook/wait-ms batch)]
-              (Thread/sleep (long wait-ms))
-              (let [id (:seon.hook/publication batch)
-                    paths (:seon.hook/paths batch)
-                    feedback (or (:seon.hook/feedback batch)
-                                 (publish-source-paths paths config id))
-                    result (source-result-path id)]
-                (io/make-parents result)
-                ;; Persist the terminal result for independent convergence inspection.
-                (with-pending-lock
-                  #(spit result (str (pr-str (assoc batch
-                                                   :seon.hook/worker-pid
-                                                   (.pid (java.lang.ProcessHandle/current))
-                                                   :seon.hook/feedback feedback)) "\n")))
-                (log! "SOURCE_BATCH" (str "publication=" id)
-                      (str "paths=" (count paths)) feedback)))
+            (let [id (:seon.hook/publication batch)
+                  paths (:seon.hook/paths batch)
+                  _ (log! "SOURCE_ADMITTED" (str "publication=" id)
+                          (str "paths=" (pr-str paths)))
+                  feedback (publish-source-paths paths config id)
+                  result (source-result-path id)]
+              (io/make-parents result)
+              ;; Persist the terminal result for independent convergence inspection.
+              (with-pending-lock
+                #(spit result (str (pr-str (assoc batch
+                                                 :seon.hook/worker-pid
+                                                 (.pid (java.lang.ProcessHandle/current))
+                                                 :seon.hook/feedback feedback)) "\n")))
+              (log! "SOURCE_BATCH" (str "publication=" id)
+                    (str "paths=" (count paths)) feedback))
             (recur))))
       (catch Exception error
         (log! "SOURCE_WORKER_ERROR" (.getMessage error))

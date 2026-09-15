@@ -47,3 +47,110 @@ Simplest first. All use canonical fixtures and armed contracts when implementati
 **Owner decision, hook scheduling:** (1) **Recommended:** drain immediately after completion, 0.5–1 engineer-day; no intentional idle delay, gives up burst quieting. (2) explicit editor batch-complete event, 1–2 days; guaranteed one publication per signalled batch, gives up unsupported editors. (3) retain five-second quiet window, zero work; existing coalescing guarantee, gives up five seconds per isolated edit. Estimates include regression work.
 
 **Ownership/protection:** this lane owns **only this note**. Final `git status` marks these prospective implementation files protected: `src/seon/{cluster,config,db,effect,instrument,problems,render,schema,turn}.clj`, `src/seon/render/{value,walk,web}.clj`, `src/seon/schema/datahike.clj`, `src/seon/sci/{admit,eval,kernel}.clj`, `src/seon/test/runner.clj`; several corresponding tests and P1/fixture issue/evidence files are also dirty and untouched. All other inherited changes were preserved. Recheck protection at implementation start. No new claim of a resolved issue; this is the N9 investigation plan and the explicit record of missing timing evidence.
+
+## Landing
+
+### startup-and-hook-waste — 2026-09-15
+
+Read this plan, `.agents/skills/clojure-testing/SKILL.md`, `bin/seon-hook`,
+and `.claude/seon-hook.edn` end to end; read AGENTS.md §2.1/§2.3 and the
+data-oriented-clojure, REPL, and flow skills. Initial owned paths were clean.
+Default PID **69622**, PREPL **55914**, answered status and the JVM probe.
+No test JVM was launched; the assignment reserves those for the orchestrator.
+
+**Dependency ledger and archaeology.** `981ad0b55` extracted the fast
+launcher's arming owner. The worker still has a duplicate initialization in
+`src/seon/test/runner.clj`; only its actual `arm-contracts!` delegates to
+`seon.test.arm`. Malli's `-schema`, `-primitive-fn?`, and `-f->original`
+(`reference-code/malli/src/malli/instrument.clj:43,15,8`) ground the existing
+`seon.instrument/armable` and wrapper restoration; no contract roster was
+introduced. Hook history `ef424c37c` already supplied one locked pending
+batch and one detached worker. This change removes that worker's quiet
+timer and retains its bounded `publish-source-paths` and completion drain.
+
+**Startup probe: hypothesis → number → verdict.** The unchanged isolated
+runner initializer, called through the default JVM REPL at **21:20:07Z**,
+constructed **2** packaged projections and covered **994/994** armable
+program Vars. The revised `seon.test.arm/initialize-contracts!`, already
+hot-loaded in default at **21:18:21Z**, constructed **1**, returned that
+identical projection object, and covered **994/994** Vars (**0** unarmed).
+Warm call times were respectively **395.305417 ms** and **775.136583 ms**;
+these are different loaded generations/warmth, not a cold-start speedup
+claim. Entering wrappers and Malli's registry were restored in `finally`.
+The exact recurring probe is
+`seon.test.runner-test/initialization-acquires-one-projection`; it uses the
+existing instrumentation-preservation fixture and real arming.
+
+Both `PACKAGED TEST PROJECTION ACQUIRED` owners and `CONTRACTS ARMED` now
+print UTC instants. Cold-worker time to first test remains **unverified**
+until the orchestrator supplies its next gate log.
+
+**Hook probe: hypothesis → number → verdict.** The Babashka program stored
+in `test/seon/dev/hook_test.clj` runs the real file lock, enqueue, drain and
+terminal-result writer, substituting only the publication effect. Before:
+publication `23cdd2b9-cbea-482f-8f33-d2d6e11f58ba`, edit
+**21:16:43.251067Z**, terminal **21:16:44.255550Z**, **0** publications:
+the old quiet branch refused when its one-second admission bound elapsed.
+After: publication `62ca56bb-a67e-4e91-940c-8b89a44a20b2`, edit
+**21:17:37.112112Z**, admission **21:17:37.113303Z** (**1.191 ms**).
+Three edits during that publication all returned successor ID
+`2d622358-5e74-4164-9f3d-71af8d0d26d3`; the only successor contained
+`["a.clj" "b.clj" "c.clj"]`. First completion **21:17:37.114812Z** to
+successor admission **21:17:37.114968Z** = **0.156 ms**. Exactly **2**
+terminal results, no remaining pending batch or worker claim. The legacy
+24-hour quiet setting is deliberately present in the probe: admission no
+longer consults it. These are probe effects, not default convergence.
+
+**Real development-hook observation.** Timestamped edit/admission logs now
+distinguish scheduling from publication. The real edit of `runner.clj` and
+`hook_test.clj` joined publication `0f9d2d2c-f034-4697-9bed-8bba4440570e`
+at **21:18:45.494210Z**, while another publication was running. That
+publication completed **21:19:00.690461Z**; ours was admitted
+**21:19:00.698067Z**, **7.606 ms** later, with other edits in its one
+successor batch. Terminal refusal at **21:19:54.233340Z** is **not**
+successful convergence. The original five-second quiet-window sample in
+row 3 remains historical; an isolated before/after success comparison is
+not established by these concurrent runs.
+
+The pre-change real edit was publication
+`45469204-8ff0-4ad7-9fd0-89fcb90ce89c`: **21:14:39.856709Z** edit to
+**21:17:13Z** refusal = approximately **153,143 ms** (the old worker logged
+only whole seconds). The post-change real edit above took **68,739.130 ms**
+to refusal. Neither is a successful-adoption latency sample, and their
+difference cannot be attributed to the deleted five-second timer.
+
+**Verification boundaries.** Default's MCP value projection reports
+`:seon.config/missing-effective` for missing
+`:seon.test/check-time-limit-ms`; the bounded JVM probe prints its result
+before that refusal. This is already recorded in
+[the partial reload issue](../../../seon/issues/partial-hot-reload-produces-mixed-code-with-no-warning.md).
+Shared publication also reported `:stale-branch-head` during another
+source change. No foreign file, cluster lifecycle, or session was repaired.
+The full failure envelope was unreadable; the existing
+[publication output issue](../../../seon/issues/init-failure-dumps-entire-prepl-event-history.md)
+owns that output class.
+
+**Pending scope decisions at this checkpoint.** The assignment permits
+only log-line edits in `runner.clj`, but its duplicate initializer still
+constructs twice. Delegation to the existing arm owner was requested.
+`seon.dev.edit-feedback-test/concurrent-editors-queue-without-waiting-for-publication`
+also assumes the retired quiet window yields exactly one batch; permission
+to update that out-of-scope test was requested. At **21:18:37Z** another
+lane edited `bin/seon-hook` and `.claude/seon-hook.edn` to add reaching-test
+feedback. Those hunks were preserved; they are not this lane's work.
+
+The explicit runner restriction is preserved: its only change is the
+acquisition log timestamp. The complete cold-worker row 2 claim therefore
+remains open in
+[isolated runner duplication](../../../seon/issues/isolated-runner-duplicates-fast-initialization.md).
+The old integration test and AGENTS.md quiet-window claim are recorded in
+[quiet-window assumptions](../../../seon/issues/hook-quiet-window-assumptions-survive-immediate-drain.md).
+No out-of-scope implementation was silently substituted. The new startup
+regression exercises the assigned `seon.test.arm` owner.
+
+Static verification: clj-kondo reports **0 errors**, **3 existing warnings**
+(the dynamically called private initializer and two shadowed bindings in
+runner.clj); `git diff --check` is clean. Markdown hook feedback reports
+unrelated pinned-revision errors in the AGENTS audit note. Canonical tests,
+platform gate, cold-worker timings, and successful default convergence
+remain for the orchestrator; they are not claimed green here.

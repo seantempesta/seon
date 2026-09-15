@@ -38,6 +38,7 @@
         projection (schema/declaration-projection forms)]
     (binding [*out* *err*]
       (println "bin/test: PACKAGED TEST PROJECTION ACQUIRED"
+               "at=" (str (java.time.Instant/now))
                "pid=" (.pid (ProcessHandle/current))
                "role=" role))
     projection))
@@ -224,6 +225,7 @@
                    :seon.test.runner/unarmed-program-contracts (vec unarmed)))))
         (binding [*out* *err*]
           (println "bin/test: CONTRACTS ARMED"
+                   "at=" (str (java.time.Instant/now))
                    "worker=" worker-id
                    "mode=" (:seon.config/on-core-error decisions)
                    "namespaces=" (count namespaces)
@@ -236,11 +238,12 @@
 (defn- initialize-contracts!
   "Load selected tests and acquire the one arming value for workers and test-fast."
   [role namespaces]
-  (schema/call-with-projection
-   (packaged-test-projection role)
-   #(doseq [namespace-name namespaces] (require namespace-name)))
-  ;; Acquire after requires so declared predicate callables are present.
+  ;; Packaged acquisition loads the declared predicate owners before compiling.
+  ;; Carry that same value through selected namespace loading and arming.
   (let [projection (packaged-test-projection role)
+        _ (schema/call-with-projection
+           projection
+           #(doseq [namespace-name namespaces] (require namespace-name)))
         decision (arming-decision)
         applied (arm-contracts! decision projection role namespaces)]
     {:seon.test.runner/projection projection
