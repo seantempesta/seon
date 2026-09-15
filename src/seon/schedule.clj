@@ -3,7 +3,7 @@
 
   Cron expressions are parsed by cron-utils. Seon owns only the database
   identities and the `java.time` conversion to nominal instants. Every due
-  instant claims one durable maintenance receipt. The existing per-agent
+  instant records one durable maintenance firing. The existing per-agent
   schedule proc calls the declared Var directly; only an error settlement
   creates a message, through `seon.error/commit-tx`.
 
@@ -114,7 +114,7 @@
          root-maintenance-portfolio)))
 
 (defn valid-cron?
-  "True when `expression` is a valid five-field Unix cron expression."
+  "True when the supplied expression is valid five-field Unix cron."
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
   [expression]
   (try

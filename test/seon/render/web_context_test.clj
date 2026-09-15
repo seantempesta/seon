@@ -108,7 +108,7 @@
                    (is (= 2 @walks) "a changed evaluation invalidates the retained history root")
                    (is (not= (:seon.cluster.prompt/text first-result) (:seon.cluster.prompt/text changed)))))))))))))
 
-(deftest adoption-invalidates-pages-with-an-unchanged-sci-snapshot
+(deftest unrelated-adoption-preserves-pages-with-an-unchanged-sci-snapshot
   (#'web-test/with-server
    (fn [connection server context]
      (flow/pause (:graph context))
@@ -132,8 +132,8 @@
            (let [after (#'web-test/fetch server "/agent/root")]
              (is (identical? snapshot @(:seon.sci.kernel/program-snapshot ctx)))
              (is (= 200 (.statusCode after)))
-             (is (< initial @calls)
-                 "adoption invalidates even without a proc wake or SCI snapshot replacement"))))))))
+             (is (= initial @calls)
+                 "an adoption stamp does not invalidate unchanged rendering dependencies"))))))))
 
 (deftest selected-session-defers-prompt-acquisition
   (#'web-test/with-server

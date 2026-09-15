@@ -257,3 +257,22 @@ Touched production/test paths: `src/seon/render.clj`,
 the two linked probe scripts, and the existing namespace-page-cost and
 partial-hot-reload issue notes. No scratch cluster or worktree was created;
 all owned shell commands ended, and unrelated shared-tree edits were preserved.
+
+### Follow-up: unrelated adoption
+
+The final bounded slice replaces adoption-wide retained identity with the
+selected renderer's recorded program dependencies, schema inputs, shown-text
+inputs, and profile. The acquisition owner checks retained child programs too.
+An exposed bulk-effects join now acquires definition facts once rather than
+rescanning them for each turn interval. No new cache or cluster lifecycle path.
+
+Entry curl: **17.909071 s, 0.125783 s, 0.119813 s**. After a real one-line
+unrelated `seon.schedule` hook adoption: **1.697270 s, 0.059250 s, 0.068848 s**,
+all HTTP 200 and **zero evaluation renders**, with source and basis unchanged
+through the three GETs. Effects-query equivalence was verified on one basis:
+**11,827.265 ms / 3,965.991 MB → 85.570 ms / 91.722 MB**, identical results.
+The remaining cold acquisition cost stays open in the
+[adoption issue](../../../seon/issues/the-first-debug-page-after-an-adoption-takes-eighteen-seconds.md),
+which owns the full evidence, hook test failures/corrections, and foreign
+verification boundary. No test JVM launched; the three namespaces were
+appended for the orchestrator gate. Default remained pid 69622.

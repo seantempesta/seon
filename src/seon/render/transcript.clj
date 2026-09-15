@@ -1581,13 +1581,19 @@
                           :where [?a :seon.agent/id ?agent] [?m :seon.message/from ?a ?tx]
                                  [(<= ?from ?tx)] [(<= ?tx ?to)] [?m :seon.message/to ?recipient]
                                  [?recipient :seon.agent/id ?target]] database agent-id intervals)
-        definitions (db/q '[:find ?id ?symbol :in $ [[?id ?from ?to]]
-                             :where (or [?f :seon.fn/sym ?symbol ?tx] [?f :seon.test/sym ?symbol ?tx])
-                                    [(<= ?from ?tx)] [(<= ?tx ?to)]] database intervals)]
+        definitions (db/q '[:find ?symbol ?tx
+                             :where (or [?f :seon.fn/sym ?symbol ?tx]
+                                        [?f :seon.test/sym ?symbol ?tx])] database)]
     (if-let [failure (some #(when (:seon.error/kind %) %) [intervals steps messages definitions])]
       failure
       {::steps (group-by first steps) ::messages (group-by first messages)
-       ::definitions (group-by first definitions)})))
+       ;; Acquire each definition once, then relate it to the saved intervals.
+       ;; Supplying every interval to the query repeats the program scan.
+       ::definitions (group-by first
+                       (set (for [[id from to] intervals
+                                  [function-symbol tx] definitions
+                                  :when (<= from tx to)]
+                              [id function-symbol])))})))
 
 (defn- turn-effects [effects row]
   (let [turn-id (:seon.turn/id row)

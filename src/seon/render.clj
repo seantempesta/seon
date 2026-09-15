@@ -12,6 +12,7 @@
   lane. A redefinition therefore changes the next call and a cold context
   re-derives the same symbol from its database program row."
   (:require [datahike.db :as datahike.db]
+            [sci.core :as sci]
             [seon.ai.tokens :as tokens]
             [seon.config :as config]
             [seon.db :as db]
@@ -635,17 +636,60 @@
           :where [?cluster :seon.cluster/name _]
                  [?cluster :seon.source/commit-id ?commit]] database))
 
+(defn- program-evidence-current?
+  [snapshot evidence]
+  (and (some? evidence)
+       (every? (fn [[section rows]]
+                 (every? (fn [[member row]]
+                           (= row (get-in snapshot [section member]))) rows))
+               evidence)))
+
+(defn- render-program-evidence
+  "Follow recorded call edges once; retained calls carry these program rows."
+  [database snapshot selected]
+  (loop [pending #{(str selected)} visited #{}]
+    (if (empty? pending)
+      (let [symbols (map symbol visited)
+            namespaces (set (map #(symbol (namespace %)) symbols))]
+        {:functions (into {} (map #(vector % (get (:functions snapshot) %))) symbols)
+         :namespaces (into {} (map #(vector % (get (:namespaces snapshot) %))) namespaces)})
+      (let [rows (db/pull-many database
+                              '[:seon.fn/sym {:seon.fn/calls [:seon.fn/sym]}]
+                              (mapv #(vector :seon.fn/sym %) pending))
+            visited (into visited pending)]
+        (if (:seon.error/kind rows)
+          nil
+          (recur (into #{} (comp (mapcat :seon.fn/calls)
+                                (map :seon.fn/sym) (remove visited)) rows)
+                 visited))))))
+
 (defn call-cache-evidence
   "Describe a retained call's code, projection, and supplied input."
   {:malli/schema [:=> [:cat :map :qualified-symbol] :map]}
   [request selected]
   (let [ctx (:seon.sci.eval/ctx request)
-        projection (sci.kernel/context-projection ctx)]
+        projection (sci.kernel/context-projection ctx)
+        snapshot (some-> (:seon.sci.kernel/program-snapshot ctx) deref)
+        previous (get (:seon.render/retained-calls request)
+                      (:seon.render.call/id request))
+        program (when snapshot
+                  (if (and (= selected (first (::selection-input previous)))
+                           (or (identical? snapshot (::program-snapshot previous))
+                               (program-evidence-current? snapshot (::program-evidence previous)))
+                           (::program-evidence previous))
+                    (::program-evidence previous)
+                    (render-program-evidence (:seon.db/db request) snapshot selected)))]
     {:seon.db/db (:seon.db/db request)
-     ::source-generation (source-generation (:seon.db/db request))
-     ::program-snapshot
-     (some-> (:seon.sci.kernel/program-snapshot ctx) deref)
+     ::program-snapshot snapshot
+     ::program-evidence program
+     ;; Private SCI definitions have no durable row. Their actual callable
+     ;; identity changes on redefinition and never pretends to be program data.
+     ::private-callable (when-not (get-in snapshot [:functions selected])
+                          (some-> (sci/resolve ctx selected) deref))
      ::projection projection
+     ::projection-evidence (select-keys projection
+                                       [:seon.schema.projection/forms
+                                        :seon.schema.projection/function-contracts])
      ::selection-input
      [selected
       (:seon.render/output request)
@@ -658,6 +702,24 @@
                             :seon.render.call/source-output?])]}))
 
 (declare same-call-cache-evidence?)
+
+(defn retained-program-current?
+  "Verify retained program and schema inputs against the acquired SCI context."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :map] :boolean]}
+  [ctx previous]
+  (let [snapshot (some-> (:seon.sci.kernel/program-snapshot ctx) deref)
+        projection (sci.kernel/context-projection ctx)
+        selected (first (::selection-input previous))]
+    (and (some? (::program-evidence previous))
+         (or (identical? snapshot (::program-snapshot previous))
+             (program-evidence-current? snapshot (::program-evidence previous)))
+         (= (::projection-evidence previous)
+            (select-keys projection [:seon.schema.projection/forms
+                                     :seon.schema.projection/function-contracts]))
+         (or (get-in snapshot [:functions selected])
+             (identical? (::private-callable previous)
+                         (some-> (sci/resolve ctx selected) deref)))
+         true)))
 
 (defn same-committed-database?
   "True for committed values of the same connection generation and commit.
@@ -672,9 +734,8 @@
   [request selected evidence]
   [selected
    (:seon.render/output request)
-   (::source-generation evidence)
-   (System/identityHashCode (::program-snapshot evidence))
-   (get (::projection evidence) :seon.schema.projection/fingerprint)
+   (hash (::program-evidence evidence))
+   (hash (::projection-evidence evidence))
    (hash (::selection-input evidence))])
 
 (defn- reusable-invocation
@@ -699,12 +760,12 @@
   "True when two invocation entries describe the same code and input."
   {:malli/schema [:=> [:cat :map :map] :boolean]}
   [previous current]
-  (and (= (::source-generation previous) (::source-generation current))
-       (some? (::program-snapshot current))
+  (and (some? (::program-snapshot current))
+       (some? (::program-evidence current))
        (some? (::projection current))
-       (identical? (::program-snapshot previous)
-                   (::program-snapshot current))
-       (identical? (::projection previous) (::projection current))
+       (= (::program-evidence previous) (::program-evidence current))
+       (identical? (::private-callable previous) (::private-callable current))
+       (= (::projection-evidence previous) (::projection-evidence current))
        (= (::selection-input previous) (::selection-input current))))
 
 (def ^:private same-call-cache-evidence? same-invocation-evidence?)
@@ -1287,10 +1348,10 @@
                      (db/read-evidence-current?
                       database (:seon.render.call/read-evidence previous))))]
         (if fast-reusable?
-          (let [entry (assoc (if check-read-evidence?
+          (let [entry (merge (if check-read-evidence?
                                (refresh-read-evidence database previous)
                                previous)
-                             :seon.db/db database)]
+                             fast-evidence)]
             (when (and call-id captured-calls)
               (swap! captured-calls assoc call-id entry))
             (:seon.render.call/output previous))

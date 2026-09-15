@@ -2411,11 +2411,15 @@
              retained (get-in @cache [::ai-calls key] {})
              previous (get retained root-call)
              evidence (render/call-cache-evidence
-                       (assoc request :seon.render/value
+                       (assoc request :seon.render.call/id root-call
+                              :seon.render/retained-calls retained
+                              :seon.render/value
                               (dissoc request :seon.db/db :seon.db/connection :seon.sci.eval/ctx))
                        'seon.render.walk/history)
              reusable? (and previous
                             (render/same-invocation-evidence? previous evidence)
+                            (every? #(render/retained-program-current? (:seon.sci.eval/ctx request) %)
+                                    (vals retained))
                             (or (render/same-committed-database? (:seon.db/db request) (:seon.db/db previous))
                                 (every? #(db/read-evidence-current? (:seon.db/db request)
                                           (:seon.render.call/read-evidence %))
@@ -2437,7 +2441,7 @@
            (let [database (:seon.db/db request)
                  result (assoc (:seon.render.call/output previous) :seon.db/db database)]
              (swap! cache assoc-in [::ai-calls key root-call]
-                    (assoc previous :seon.db/db database :seon.render.call/output result))
+                    (assoc (merge previous evidence) :seon.render.call/output result))
              result)
            (:seon.error/kind entries)
            entries
