@@ -97,3 +97,33 @@ Failures are the two web-debug tests named above (A03/A09); the two migrated
 turn assertions and entity-inspection route assertions pass. This is not a green
 whole-namespace gate. Browser `a08-authorized`: all six captures HTTP 200,
 zero horizontal overflow; main/debug at both widths inspected, layout retained.
+
+## A09 — evaluation owner and per-render summaries
+
+A08 commit: `1d5edb65c` (215 added / 249 removed including the evidence
+script and landing note; implementation/test/skill/CSS net −184).
+
+A09 removes the ledger membership query. The evaluation owner's optional pull
+selector preserves its original two-argument contract, identity, transaction,
+order and missing-agent diagnostic. Current acquired history segments supply
+byte amounts; per-evaluation outcomes/emissions and per-turn usage/counts
+serve the card, strip and problems panel. The empty ledger acquires no prompt.
+The additional lines are justified by the additive contracted projection,
+read-evidence expansion, interrupted outcome and regression of full/narrow
+projection equivalence; there is no second census or persisted summary.
+
+Browser `a09`: six HTTP 200 captures, zero horizontal overflow. Main/debug at
+1440 and 700 inspected: retained layout. JVM metadata confirmed `of-agent`
+full/narrow arities and ledger request arity loaded in default. Development
+publication initially reported concurrent source change, then retried. No
+cluster lifecycle operations were used. During this work context-renders
+landed `bb008321d` (changed-read provenance), after which the formerly failing
+saved-history assertions pass in the latest path-isolated snapshot.
+
+A09 final: `bin/test-fast --paths` on eval/transcript and the changed
+page-review/web-debug tests, running page-review, web-debug and web-context:
+15 tests / 195 assertions, zero failures/errors. Matching `bin/test --paths`:
+15 / 199, zero failures/errors. Source/tests: 129 added / 104 removed, net +25,
+justified above. Earlier intermediate runs and failed roots are superseded
+by these results. A09 commit is the commit containing this section; its hash
+is recorded with the next finding.

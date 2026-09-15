@@ -9,15 +9,24 @@
 (defn of-agent
   "Return every evaluation of the agent, in turn transaction and ordinal order.
 
-  Namespace and read-evidence refs are expanded. This reads saved facts only;
+  The optional pull selector narrows the projection; identity, turn, ordinal and
+  transaction remain present. Namespace and read-evidence refs are expanded by
+  default. This reads saved facts only;
   it does not execute source or apply a presentation limit. A missing agent
   is a diagnostic, distinct from an existing agent with no evaluations."
   {:malli/schema
-   [:=> [:cat :seon.db/db :seon.agent/id]
-    [:or [:vector [:and :seon.eval/entity
-                   [:map [:db/id :int] [:t :seon.db/basis-t]]]]
-     :seon.error/value]]}
-  [database agent-id]
+   [:function
+    [:=> [:cat :seon.db/db :seon.agent/id]
+     [:or [:vector [:and :seon.eval/entity
+                    [:map [:db/id :int] [:t :seon.db/basis-t]]]] :seon.error/value]]
+    [:=> [:cat :seon.db/db :seon.agent/id :seon.db/pull-selector]
+     [:or [:vector [:and :seon.eval/entity
+                    [:map [:db/id :int] [:t :seon.db/basis-t]]]] :seon.error/value]]]}
+  ([database agent-id]
+   (of-agent database agent-id
+             '[* {:seon.cluster.eval/ns [:db/id :seon.ns/name]}
+               {:seon.cluster.eval/read-evidence [*]}]))
+  ([database agent-id selector]
   (let [agent-row (db/pull database [:seon.agent/id]
                        [:seon.agent/id agent-id])]
     (cond
@@ -36,10 +45,8 @@
       :else
       (let [rows
             (db/q '[:find ?t ?turn-id ?ordinal ?evaluation-t
-                    (pull ?evaluation
-                          [* {:seon.cluster.eval/ns [:db/id :seon.ns/name]}
-                           {:seon.cluster.eval/read-evidence [*]}])
-                    :in $ ?agent-id
+                    (pull ?evaluation ?selector)
+                    :in $ ?agent-id ?selector
                     :where
                     [?agent :seon.agent/id ?agent-id]
                     [?agent :seon.agent/runtime ?runtime]
@@ -48,8 +55,10 @@
                     [?evaluation :seon.cluster.eval/run ?turn]
                     [?evaluation :seon.cluster.eval/id _ ?evaluation-t]
                     [?evaluation :seon.cluster.eval/ordinal ?ordinal]]
-                  database agent-id)]
+                  database agent-id (vec (distinct (into selector [:db/id :seon.cluster.eval/id
+                                                                 :seon.cluster.eval/run
+                                                                 :seon.cluster.eval/ordinal]))))]
         (if (:seon.error/kind rows)
           rows
           (mapv #(assoc (nth % 4) :t (nth % 3))
-                (sort-by #(subvec % 0 3) rows)))))))
+                (sort-by #(subvec % 0 3) rows))))))))

@@ -16,6 +16,7 @@
             [seon.turn :as turn]
             [seon.config :as config]
             [seon.error :as error]
+            [seon.eval :as evaluation]
             [seon.print :as print]
             [seon.render :as render]
             [seon.render.agent :as agent]
@@ -1216,19 +1217,34 @@
       (when (and connection (:seon.turn/reply-blob row))
         (blob/get connection (:seon.turn/reply-blob row)))))
 
+(defn- readable-shown [source]
+  (try
+    (with-open [reader (PushbackReader. (StringReader. source))]
+      (let [value (edn/read {:eof ::eof} reader)]
+        (when (= ::eof (edn/read {:eof ::eof} reader))
+          {::value value})))
+    (catch Exception _ nil)))
+
+(defn- attempt-usage [attempt]
+  (let [usage (some-> (:seon.ai.attempt/usage-edn attempt) readable-shown ::value)
+        prompt (get usage "prompt_tokens")
+        hit (or (get usage "prompt_cache_hit_tokens") (get-in usage ["prompt_tokens_details" "cached_tokens"]))
+        miss (or (get usage "prompt_cache_miss_tokens")
+                 (when (and (number? prompt) (number? hit)) (- prompt hit)))
+        out (get usage "completion_tokens")]
+    (into {} (filter (comp number? val)) {::prompt prompt ::hit hit ::miss miss ::out out})))
+
 (defn- attempt-html [attempt]
-  (let [usage (try (some-> (:seon.ai.attempt/usage-edn attempt) edn/read-string)
-                   (catch Exception _ nil))]
+  (let [usage (attempt-usage attempt)]
     [:li {:class "seon-debug-attempt"}
      (str "Attempt " (:seon.ai.attempt/ordinal attempt) " · "
           (or (:seon.ai/model attempt) "model unavailable")
           " · finish: " (or (:seon.ai.attempt/finish-reason attempt) "unavailable")
-          " · prompt tokens: " (if-let [n (get usage "prompt_tokens")] (format "%,d" n) "unavailable")
-          " · completion tokens: " (if-let [n (get usage "completion_tokens")] (format "%,d" n) "unavailable")
-          " · cache-hit tokens: " (if-let [n (or (get usage "prompt_cache_hit_tokens")
-                                               (get-in usage ["prompt_tokens_details" "cached_tokens"]))]
+          " · prompt tokens: " (if-let [n (::prompt usage)] (format "%,d" n) "unavailable")
+          " · completion tokens: " (if-let [n (::out usage)] (format "%,d" n) "unavailable")
+          " · cache-hit tokens: " (if-let [n (::hit usage)]
                                      (format "%,d" n) "unavailable")
-          " · miss: " (if-let [n (get usage "prompt_cache_miss_tokens")] (format "%,d" n) "unavailable"))]))
+          " · miss: " (if-let [n (::miss usage)] (format "%,d" n) "unavailable"))]))
 
 (defn- session-id [agent-id]
   (block/surface-id (keyword "debug-session" agent-id)))
@@ -1298,14 +1314,6 @@
   [request]
   (let [rows (turn-rows (:seon.db/db request) (:seon.agent/id request))]
     (session-header request (if (vector? rows) rows []))))
-
-(defn- readable-shown [source]
-  (try
-    (with-open [reader (PushbackReader. (StringReader. source))]
-      (let [value (edn/read {:eof ::eof} reader)]
-        (when (= ::eof (edn/read {:eof ::eof} reader))
-          {::value value})))
-    (catch Exception _ nil)))
 
 (defn- changed-paths [before after path]
   (cond
@@ -1461,26 +1469,34 @@
                   (map vector entries saved))))
          [:span {:class "seon-session-end" :data-init "el.scrollIntoView({block:'end'})"}]]])]))
 
-(defn- ledger-evaluations [database agent-id]
-  (let [found (db/q '[:find [?e ...]
-                       :in $ ?agent-id
-                       :where [?a :seon.agent/id ?agent-id] [?a :seon.agent/runtime ?r]
-                              [?r :seon.runtime/turns ?t] [?e :seon.cluster.eval/run ?t]]
-                     database agent-id)]
-    (if (:seon.error/kind found) found
-      (let [pulled (db/pull-many database
-                    '[:db/id :seon.cluster.eval/id :seon.cluster.eval/run
-                      :seon.cluster.eval/ordinal :seon.cluster.eval/source
-                      :seon.cluster.eval/comment :seon.eval/shown :seon.eval/renderer
-                      :seon.cluster.eval/error :seon.cluster.eval/output
-                      :seon.error/kind :seon.cluster.eval/read-basis-transaction
-                      :seon.cluster.eval/interrupted-at :seon.cluster.eval/triage-edn
-                      :seon.eval/duration-ms :seon.sci.eval/ending-ns
-                      :seon.print/length :seon.print/level
-                      {:seon.cluster.eval/ns [:seon.ns/name]}] found)]
-        (if (:seon.error/kind pulled) pulled
-          (group-by #(get-in % [:seon.cluster.eval/run :db/id])
-                    (sort-by :seon.cluster.eval/ordinal pulled)))))))
+(defn- ledger-evaluations [request]
+  (let [database (:seon.db/db request)
+        saved (evaluation/of-agent database (:seon.agent/id request)
+               '[:seon.cluster.eval/source :seon.cluster.eval/comment
+                 :seon.eval/shown :seon.eval/renderer :seon.cluster.eval/error
+                 :seon.cluster.eval/output :seon.error/kind
+                 :seon.cluster.eval/read-basis-transaction
+                 :seon.cluster.eval/interrupted-at :seon.cluster.eval/triage-edn
+                 :seon.eval/duration-ms :seon.sci.eval/ending-ns
+                 :seon.print/length :seon.print/level
+                 {:seon.cluster.eval/ns [:seon.ns/name]}
+                 {:seon.cluster.eval/read-evidence [*]}])
+        acquired (when (and (vector? saved) (seq saved))
+                   (render/acquire-context! (dissoc request :seon.turn/id)))
+        bytes (zipmap (map :seon.render.history/subject (:seon.render.history/entries acquired))
+                      (map utf8-size (:seon.render.history/segments acquired)))]
+    (cond (:seon.error/kind saved) saved
+          (:seon.error/kind acquired) acquired
+          :else
+      (group-by #(get-in % [:seon.cluster.eval/run :db/id])
+        (map
+          (fn [row]
+            (let [emission (repl/entity-emission (assoc row :seon.db/db database))]
+              (assoc row ::emission emission
+                     ::outcome (cond (:seon.cluster.eval/interrupted-at row) "interrupted"
+                                     (:seon.cluster.eval/error row) "error"
+                                     (:seon.eval/shown row) "value" :else "out")
+                     ::contributed-bytes (get bytes [:seon.cluster.eval/id (:seon.cluster.eval/id row)] 0)))) saved)))))
 
 (defn- ledger-url [agent-id turn-id query]
   (route/path ::route/agent-debug {:id agent-id} (assoc query :turn turn-id)))
@@ -1502,7 +1518,7 @@
 
 (defn- ledger-emissions [evaluations]
   (for [saved evaluations]
-    [:pre (repl/render-emission-html (repl/entity-emission saved))]))
+    [:pre (repl/render-emission-html (::emission saved))]))
 
 (defn- emission-label
   "Human block labels over saved renderer identities and the read form's declared attributes."
@@ -1532,13 +1548,11 @@
                        (str/split-lines (or reply "")))]
     (if (> (count line) 90) (str (subs line 0 90) "…") line)))
 
-(defn- results-summary [evaluations]
-  (let [counts (frequencies (map #(cond (:seon.cluster.eval/error %) "error"
-                                      (:seon.eval/shown %) "value" :else "out") evaluations))]
-    (if (empty? evaluations) "no forms"
+(defn- results-summary [counts]
+    (if (empty? counts) "no forms"
       (str/join " · " (keep #(when-let [n (get counts %)]
                               (str n " " % (when (and (> n 1) (not= % "out")) "s")))
-                            ["value" "error" "out"])))))
+                            ["value" "error" "interrupted" "out"]))))
 
 (defn- ledger-effects
   "Derive completed steps, sent messages and installed definitions at this turn's transactions."
@@ -1567,13 +1581,18 @@
                                     (seq messages) (conj "message sent")
                                     (seq definitions) (conj "definition installed")))}))))
 
-(defn- emission-byte-count [rows emissions]
-  (let [first-emission (first emissions)
-        starts-opening? (and (= (get-in first-emission [:seon.cluster.eval/run :db/id])
-                                (:db/id (first rows)))
-                             (zero? (or (:seon.cluster.eval/ordinal first-emission) 0)))]
-    (+ (reduce + 0 (map #(utf8-size (repl/text (repl/entity-emission %))) emissions))
-       (* 2 (max 0 (- (count emissions) (if starts-opening? 1 0)))))))
+(defn- emission-byte-count [emissions]
+  (reduce + 0 (map ::contributed-bytes emissions)))
+
+(defn- ledger-rows [rows evaluations]
+  (if (:seon.error/kind rows) rows
+    (mapv (fn [row]
+            (let [attempts (mapv #(assoc % ::usage (attempt-usage %))
+                                 (sort-by :seon.ai.attempt/ordinal (:seon.turn/attempts row)))
+                  own (get evaluations (:db/id row) [])]
+              (assoc row :seon.turn/attempts attempts ::attempt (last attempts)
+                     ::bytes (emission-byte-count own)
+                     ::outcomes (frequencies (map ::outcome own))))) rows)))
 
 (defn- ledger-turn-body [request rows evaluations row]
   (let [database (:seon.db/db request)
@@ -1584,14 +1603,14 @@
                     (->> rows (take ordinal) reverse
                          (take-while #(empty? (:seon.turn/attempts %))) reverse
                          (mapcat #(get evaluations (:db/id %) []))) own)
-        added-bytes (emission-byte-count rows generated)
+        added-bytes (emission-byte-count generated)
         reply (or (turn-reply (:seon.db/connection request) row) "")
         turn-id (:seon.turn/id row)
         capture (when provider?
                   (db/q '[:find ?text . :in $ ?id :where [?t :seon.turn/id ?id]
                           [?c :seon.context.capture/run ?t] [?c :seon.context.capture/prompt ?text]] database turn-id))
-        attempt (last (sort-by :seon.ai.attempt/ordinal (:seon.turn/attempts row)))
-        usage (some-> (:seon.ai.attempt/usage-edn attempt) readable-shown ::value)
+        attempt (::attempt row)
+        usage (::usage attempt)
         calibration (when (:seon.ai/model attempt)
                       ((requiring-resolve 'seon.cluster.prompt/model-calibration) database (:seon.ai/model attempt)))
         opening (filter #(= (:db/id (first rows)) (get-in % [:seon.cluster.eval/run :db/id])) generated)
@@ -1636,7 +1655,7 @@
           (str "Full context as sent"
                (when capture (str ": " (format "%,d" (utf8-size capture)) " bytes · rebuilt ≈"
                                   (format "%,d" (tokens/estimate capture calibration)) " tokens"))
-               (when-let [billed (get usage "prompt_tokens")] (str " · billed " (format "%,d" billed))))]
+               (when-let [billed (::prompt usage)] (str " · billed " (format "%,d" billed))))]
          [:div {:id (ledger-context-id turn-id)}]])]
      (when provider?
        (list
@@ -1650,9 +1669,8 @@
                          (str (count own) (if (= 1 (count own)) " evaluation" " evaluations")))
          (if (seq own)
            (for [saved own
-                 :let [outcome (cond (:seon.cluster.eval/error saved) "error"
-                                     (:seon.eval/shown saved) "value" :else "out")
-                       answer (or (repl/response (repl/entity-emission saved)) "No response recorded.")
+                 :let [outcome (::outcome saved)
+                       answer (or (repl/response (::emission saved)) "No response recorded.")
                        rendered (colour-source answer)
                        long? (> (count (str/split-lines answer)) 6)]]
              [:article {:class (str "seon-ledger-result seon-ledger-result-" outcome)
@@ -1673,12 +1691,13 @@
   "Load one card from saved reply and evaluations without executing forms."
   {:malli/schema [:=> [:cat :seon.cluster.prompt/request] :seon.render/hiccup]}
   [request]
-  (let [rows (turn-rows (:seon.db/db request) (:seon.agent/id request))
-        row (some #(when (= (:seon.turn/id request) (:seon.turn/id %)) %) rows)]
-    (let [evaluations (ledger-evaluations (:seon.db/db request) (:seon.agent/id request))]
+  (let [rows (turn-rows (:seon.db/db request) (:seon.agent/id request))]
+    (let [evaluations (ledger-evaluations request)]
       (if (:seon.error/kind evaluations)
         [:div {:id (ledger-body-id (:seon.turn/id request))} [:p (:seon.error/message evaluations)]]
-        (ledger-turn-body request rows evaluations row)))))
+        (let [rows (ledger-rows rows evaluations)
+              row (some #(when (= (:seon.turn/id request) (:seon.turn/id %)) %) rows)]
+          (ledger-turn-body request rows evaluations row))))))
 
 (defn render-ledger-context
   "Expand the same faithful per-turn transcript beneath its ledger card."
@@ -1690,15 +1709,6 @@
      [:p "Exact saved prompt · readline, input, then response"]
      (last rendered)]))
 
-
-(defn- attempt-usage [attempt]
-  (let [usage (some-> (:seon.ai.attempt/usage-edn attempt) readable-shown ::value)
-        prompt (get usage "prompt_tokens")
-        hit (or (get usage "prompt_cache_hit_tokens") (get-in usage ["prompt_tokens_details" "cached_tokens"]))
-        miss (or (get usage "prompt_cache_miss_tokens")
-                 (when (and (number? prompt) (number? hit)) (- prompt hit)))
-        out (get usage "completion_tokens")]
-    (into {} (filter (comp number? val)) {::prompt prompt ::hit hit ::miss miss ::out out})))
 
 (defn- finding [code label matches]
   {::code code ::label label ::count (count matches) ::matches (vec matches)})
@@ -1818,7 +1828,7 @@
   "Detect cache prefix replacement beyond growth and the 128-token tolerance."
   [rows]
   (let [attempts (vec (for [row rows a (sort-by :seon.ai.attempt/ordinal (:seon.turn/attempts row))]
-                        {::turn row ::attempt a ::usage (attempt-usage a)}))
+                        {::turn row ::attempt a ::usage (::usage a)}))
         pairs (partition 2 1 attempts)
         measured (filter #(every? number? [(get-in (first %) [::usage ::prompt])
                                            (get-in (second %) [::usage ::prompt])
@@ -1837,7 +1847,7 @@
   "Detect exhausted turn/step budgets and unavailable billing or rate evidence."
   [database agent-id rows]
   (let [attempts (vec (for [row rows a (:seon.turn/attempts row)]
-                        {::turn row ::attempt a ::usage (attempt-usage a)}))
+                        {::turn row ::attempt a ::usage (::usage a)}))
         totals (reduce #(merge-with + %1 (::usage %2)) {} attempts)
         models (into {} (for [model (distinct (keep #(get-in % [::attempt :seon.ai/model]) attempts))]
                           [model (db/pull database
@@ -1880,10 +1890,7 @@
 (defn- session-problems [request rows evaluations]
   (let [database (:seon.db/db request)
         by-eid (into {} (map (juxt :db/id identity)) rows)
-        saved (mapv (fn [index row]
-                      (assoc row ::contributed-bytes (+ (if (pos? index) 2 0)
-                                                        (utf8-size (repl/render-ai row)))))
-                    (range) (mapcat #(get evaluations (:db/id %) []) rows))]
+        saved (mapcat #(get evaluations (:db/id %) []) rows)]
     {::budget (session-budget database (:seon.agent/id request) rows)
      ::rules (into [(fabricated-problem by-eid saved)
                     (error-problem by-eid saved)
@@ -1974,7 +1981,7 @@
   "Navigate every stored turn; area shows added bytes and colour shows recorded outcome."
   [request rows evaluations selected problems]
   (let [amounts (into {} (map (fn [row] [(:seon.turn/id row)
-                                        (emission-byte-count rows (get evaluations (:db/id row) []))]) rows))
+                                        (::bytes row)]) rows))
         largest (reduce max 1 (vals amounts))
         marks (reduce (fn [result rule]
                         (reduce (fn [result match]
@@ -1988,14 +1995,14 @@
             :let [turn-id (:seon.turn/id row)
                   own (get evaluations (:db/id row) [])
                   provider? (seq (:seon.turn/attempts row))
-                  errors (count (filter :seon.cluster.eval/error own))
+                  errors (get (::outcomes row) "error" 0)
                   tone (cond (pos? errors) "error"
                              (and provider? (or (empty? own) (nil? (:seon.turn/closed-tx row)))) "warning"
                              provider? "success" :else "neutral")
                   kind (turn-kind (:seon.db/db request) row)
                   amount (get amounts turn-id)
-                  attempt (last (sort-by :seon.ai.attempt/ordinal (:seon.turn/attempts row)))
-                  usage (some-> (:seon.ai.attempt/usage-edn attempt) readable-shown ::value)
+                  attempt (::attempt row)
+                  usage (::usage attempt)
                   href (ledger-url (:seon.agent/id request) turn-id {})]]
         [:a {:href href :data-strip-turn turn-id :data-added-bytes amount
              :aria-current (when (= selected turn-id) "step")
@@ -2009,11 +2016,10 @@
                          (when provider?
                            (str "\n"
                                 (str/join " · "
-                                  (for [[label value] [["in" (get usage "prompt_tokens")]
-                                                      ["hit" (or (get usage "prompt_cache_hit_tokens")
-                                                                 (get-in usage ["prompt_tokens_details" "cached_tokens"]))]
-                                                      ["miss" (get usage "prompt_cache_miss_tokens")]
-                                                      ["out" (get usage "completion_tokens")]]]
+                                  (for [[label value] [["in" (::prompt usage)]
+                                                      ["hit" (::hit usage)]
+                                                      ["miss" (::miss usage)]
+                                                      ["out" (::out usage)]]]
                                     (str (if (number? value) (format "%,d" value) "unavailable") " " label)))))
                          (when-let [labels (seq (get marks turn-id))]
                            (str "\n" (str/join " · " (sort labels)))))
@@ -2033,8 +2039,8 @@
       (remove str/blank?
         (if provider?
           [(reply-intent (turn-reply (:seon.db/connection request) row))
-           (results-summary own) effects (when done? "done")]
-          [(cond (not= "System" (turn-kind (:seon.db/db request) row)) (results-summary own)
+           (results-summary (::outcomes row)) effects (when done? "done")]
+          [(cond (not= "System" (turn-kind (:seon.db/db request) row)) (results-summary (::outcomes row))
                  (zero? (::ordinal row)) (str "opening · " (count own) " emissions")
                  (empty? own) "no new emissions"
                  :else (str "re-read " (str/join ", " (distinct (map emission-label own)))))])))))
@@ -2049,7 +2055,8 @@
   (let [database (:seon.db/db request)
         rows (turn-rows database (:seon.agent/id request))
         selected (or (:seon.turn/id request) (:seon.turn/id (last rows)))
-        evaluations (ledger-evaluations database (:seon.agent/id request))
+        evaluations (ledger-evaluations request)
+        rows (ledger-rows rows evaluations)
         expanded (conj (set (map :seon.turn/id (take-last 3 rows))) selected)
         problems (when-not (or (:seon.error/kind rows) (:seon.error/kind evaluations))
                    (session-problems request rows evaluations))]
@@ -2064,8 +2071,8 @@
        (seq rows)
        (for [row rows
              :let [turn-id (:seon.turn/id row)
-                   attempt (last (sort-by :seon.ai.attempt/ordinal (:seon.turn/attempts row)))
-                   usage (some-> (:seon.ai.attempt/usage-edn attempt) readable-shown ::value)]]
+                   attempt (::attempt row)
+                   usage (::usage attempt)]]
          [:details {:class "seon-ledger-turn" :open (contains? expanded turn-id)
                     :data-turn-id turn-id :data-turn-kind (turn-kind database row)
                     :id (block/surface-id (keyword "turn" turn-id))
@@ -2079,8 +2086,8 @@
            (runtime-time (get-in row [:seon.turn/opened-tx :db/txInstant]))
            (when attempt
              (str " · " (:seon.ai/model attempt)
-                  " · " (format "%,d" (get usage "prompt_tokens" 0)) " in / "
-                  (format "%,d" (get usage "completion_tokens" 0)) " out"))
+                  " · " (format "%,d" (get usage ::prompt 0)) " in / "
+                  (format "%,d" (get usage ::out 0)) " out"))
            (str " · " (runtime-duration (get-in row [:seon.turn/opened-tx :db/txInstant])
                                        (get-in row [:seon.turn/closed-tx :db/txInstant])))
            [:span {:class "seon-ledger-story" :data-turn-story turn-id}

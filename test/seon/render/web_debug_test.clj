@@ -168,10 +168,12 @@
                  (is (not (str/includes? (apply str (map :data-turn-id headers)) forbidden))))
                (is (seq (evaluation/of-agent @connection "juniper")))
                (let [snapshot #(let [database @connection
-                                     rows (#'transcript/turn-rows database "juniper")]
+                                     evaluations (#'transcript/ledger-evaluations (assoc unit :seon.db/db database))
+                                     rows (#'transcript/ledger-rows
+                                           (#'transcript/turn-rows database "juniper") evaluations)]
                                  (#'transcript/session-problems
                                   (assoc unit :seon.db/db database) rows
-                                  (#'transcript/ledger-evaluations database "juniper")))
+                                  evaluations))
                      before (snapshot)
                      counts #(into {} (map (juxt :seon.render.transcript/code
                                                 :seon.render.transcript/count))

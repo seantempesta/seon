@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: cleanup
 tags: [issue, render, database, wave/verification-audit]
 ---
@@ -25,6 +25,18 @@ Accrete a narrow projection at the evaluation query owner, keeping one membershi
 Estimated change: 50–100 lines merged. Audit classes: 1, 3, 5. No production edits for this finding were made by the audit lane.
 
 ## Acceptance
+
+### Consolidation — 2026-09-15
+
+The ledger now requests its narrow selector through `seon.eval/of-agent`.
+The existing full arity retains its output guarantees; both arities preserve
+identity, turn/ordinal order, transaction and absent-agent diagnostics.
+One acquired current history supplies segment byte counts. Evaluation outcome
+and emission summaries and normalized attempt usage are derived once for the
+ledger, with the same miss derivation used by its strip and billing panel.
+No summaries are persisted. Final verification and commit are recorded in
+the consolidate-debug landing note. Resolved by the A09 commit containing
+this note: fast 15 tests / 195 assertions; isolated gate 15 / 199, both green.
 
 Absent-agent diagnostics agree across callers. The same usage row has the same availability/totals everywhere. Interrupted/output-only/error evaluations have consistent summaries, and strip byte totals equal the acquired current history including generated annotations.
 

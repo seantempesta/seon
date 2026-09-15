@@ -91,4 +91,11 @@
                        :seon.runtime/turns [[:seon.turn/id "empty"]]}])))
      (is (= ["old-eval" "current-a" "current-b"]
             (mapv :seon.cluster.eval/id (evaluation/of-agent @connection "page"))))
+     (let [full (evaluation/of-agent @connection "page")
+           narrow (evaluation/of-agent @connection "page" [:seon.eval/shown])
+           keys [:db/id :t :seon.cluster.eval/id :seon.cluster.eval/run
+                 :seon.cluster.eval/ordinal :seon.eval/shown]]
+       (is (= (mapv #(select-keys % keys) full) narrow))
+       (is (= (evaluation/of-agent @connection "absent")
+              (evaluation/of-agent @connection "absent" [:seon.eval/shown]))))
      (is (:seon.error/kind (evaluation/of-agent @connection "absent"))))))
