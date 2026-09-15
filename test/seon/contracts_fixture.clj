@@ -5,6 +5,7 @@
             [seon.db :as db]
             [seon.env :as env]
             [seon.program :as program]
+            [seon.render :as render]
             [seon.schema.datahike :as schema.datahike]
             [seon.sci.eval :as sci-eval]
             [seon.test-support :as support]))
@@ -31,13 +32,16 @@
   (largest-customer order-rows))")
 
 (defn request [connection ctx source]
-  {:seon.sci.eval/ctx ctx :seon.db/db @connection
-   :seon.db/connection connection :seon.agent/id "contracts-plan"
-   :seon.cluster.eval/ns [:seon.ns/name 'my.agents.juniper]
-   :seon.cluster.eval/source source
-   :seon.sci.eval/time-limit-ms 10000
-   :seon.sci.admit/caps (config/result-caps (config/defaults))
-   :seon.config/on-core-error :panic})
+  (let [effective (config/defaults)]
+    {:seon.sci.eval/ctx ctx :seon.db/db (db/db connection)
+     :seon.db/connection connection :seon.agent/id "contracts-plan"
+     :seon.cluster.eval/ns [:seon.ns/name 'my.agents.juniper]
+     :seon.cluster.eval/source source
+     :seon.sci.eval/time-limit-ms 10000
+     :seon.sci.admit/caps (config/result-caps effective)
+     :seon.render/profile (render/agent-render-profile effective)
+     :seon.schema/projection (:seon.schema/projection (env/of ctx))
+     :seon.config/on-core-error :panic}))
 
 (defn submit [connection ctx _ source]
   (let [evaluated (sci-eval/evaluate-for-install (request connection ctx source))]

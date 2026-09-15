@@ -413,3 +413,37 @@ the only additional committed files are this landing note and its diagnostic
 probe script. Gate request includes `seon.contracts-install-test` because it
 also consumes the shared contracts fixture. No test JVM, paid provider call,
 production edit, default restart, or scratch worktree was used.
+
+### Batch 5 correction — render inputs on the contracts fixture
+
+Read `tmp/orchestrator/gate-results/batch-5/slow-tests-merge.md` end to end.
+Five of six namespaces passed; the grammar regression had 8 failures among
+27 assertions because shown text was raw error-map EDN. The request omitted
+both the agent render profile and the context's schema projection.
+`evaluate-for-install` already delegates to `seon.sci.eval/evaluate`
+(`src/seon/sci/eval.clj:2551`); preserving it retains candidate installation
+semantics. The fixture request now carries the profile, projection and
+`db/db` database value into that same evaluation-and-value-render path.
+No assertion or acquisition-count check was weakened.
+
+Before editing, evaluated the replacement `request` form in default's JVM,
+then called `sci-eval/evaluate` on `my.web/no-such-fetch` in a real canonical
+scratch fixture. Complete shown text was:
+
+> seon.sci.eval/evaluate refused source at []: expected a resolvable symbol (:symbol), got an unresolved symbol my.web/no-such-fetch. Fix: Define or require this symbol. Example: No docstring example is available.
+
+Exact in-process regression before editing:
+`(seon.test/run #'seon.contracts-plan-test/refusal-grammar-survives-real-evaluation (seon.operator/connection "default"))`
+→ **27 pass / 0 fail / 0 error**, run **64486**, 6,717 ms MCP envelope.
+After `apply_patch` and loading the saved fixture definition, the same form
+→ **27 pass / 0 fail / 0 error**, run **64487**, 8,601 ms including load.
+These replace the earlier direct-probe confidence with recorded green results.
+Hook publication queued as `4701da3b-e79d-49c1-9727-155a7f644a71`.
+Kondo: zero errors/warnings. Hook docstring lint reports the five pre-existing
+undocumented fixture functions; no production file changed.
+
+Measured batch-5 worker totals (not claimed wall-time savings): problems-test
+15 tests / **221,132 ms**, mcp-test 11 / **54,621 ms**, agent-test 22 /
+**72,145 ms**, config-application-test 4 / **27,098 ms**. The report's complete
+55-test sum is 392,561 ms. Gate request is narrowed to only
+`seon.contracts-plan-test`; no test JVM was launched by this lane.
