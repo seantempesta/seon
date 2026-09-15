@@ -1029,4 +1029,15 @@ half-edit. Measured targets in the issue.
   every public `my.*` docstring example evaluates in canonical SCI as a test.
 - Token estimate 13 % under billed on long prompts — issue filed (derive
   the prior from attempts).
+- 21:05 owner: "test these fixes with live agents. Clear and reset the
+  context each time so we know we are testing the latest code and keep
+  iterating." Cadence from here: at each landing wave (adoption converged
+  on default, loop proof green on HEAD) → reseed Juniper with the provider
+  on — `(juniper-fixture-2026-09-06/install! "default" #(dissoc %
+  :seon.config.ai/no-provider))` clears history and regenerates the opening
+  from current code — → run to done or budget → record: system re-reads
+  with no outside event (must be 0), steps per provider turn, fabricated
+  responses, prefix stability, tokens/cost; then the explain probe on the
+  new session; then the next wave. Run 3 triggers when context-renders'
+  invariant and debug-turns' loop-proof fix have landed.
 
