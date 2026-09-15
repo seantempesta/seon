@@ -1,0 +1,19 @@
+/Users/sean/src/seon/src/seon/db.clj:425:5: warning: Redundant let expression.
+/Users/sean/src/seon/src/seon/db.clj:487:51: error: Unresolved var: parser.type/->Variable
+/Users/sean/src/seon/src/seon/db.clj:1889:15: warning: Shadowed var: seon.db/entity
+/Users/sean/src/seon/src/seon/db.clj:2244:21: warning: Shadowed var: seon.db/identity-attributes
+/Users/sean/src/seon/src/seon/db.clj:2908:27: warning: Shadowed var: seon.db/entity
+/Users/sean/src/seon/src/seon/db.clj:2913:30: warning: Shadowed var: clojure.core/identity
+/Users/sean/src/seon/src/seon/effect.clj:9:14: warning: namespace clojure.string is required but never used
+/Users/sean/src/seon/src/seon/effect.clj:37:13: warning: Shadowed var: clojure.core/ref
+/Users/sean/src/seon/src/seon/effect.clj:437:10: warning: Shadowed var: seon.effect/staged-result
+/Users/sean/src/seon/src/seon/render/value.clj:269:9: warning: Shadowed var: clojure.core/identity
+/Users/sean/src/seon/src/seon/render/value.clj:335:30: warning: Shadowed var: clojure.core/key
+/Users/sean/src/seon/test/seon/render/value_test.clj:354:7: warning: Redundant let expression.
+/Users/sean/src/seon/test/seon/render_simplification_test.clj:764:12: warning: Redundant let expression.
+/Users/sean/src/seon/test/seon/schema/datahike_test.clj:39:13: warning: Shadowed var: clojure.core/indexed?
+/Users/sean/src/seon/test/seon/schema/datahike_test.clj:55:15: warning: Shadowed var: clojure.core/indexed?
+/Users/sean/src/seon/test/seon/sci/eval_test.clj:37:14: warning: namespace seon.sci.admit is required but never used
+/Users/sean/src/seon/test/seon/sci/eval_test.clj:294:23: warning: Shadowed var: clojure.core/ns-map
+/Users/sean/src/seon/test/seon/sci/eval_test.clj:566:46: warning: Shadowed var: seon.sci.eval-test/caps
+linting took 350ms, errors: 1, warnings: 17

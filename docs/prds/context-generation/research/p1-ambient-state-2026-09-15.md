@@ -6,6 +6,99 @@ tags: [research, schema, database, architecture]
 
 # P1: projection carriage and remaining producer boundaries
 
+## Batch 2c repair handoff — 2026-09-15
+
+Code and regressions: **`28e955327`**. No test JVM was started. Re-gate request
+rewritten at `tmp/orchestrator/gate-requests/p1-ambient-state.txt`; the
+orchestrator owns execution. The 392-test gate's 50 failures and 20 errors
+are the entering evidence, not a verdict on this repair.
+
+### One carriage seam for fixtures and fresh threads
+
+`seon.db/carry-connection-projection-state!` attaches the existing state
+pointer to connection metadata. `connection-projection-state` consumes that
+before the existing operator lookup. `db/db` captures an immutable projection
+on each acquired value; transaction admission and report carriage use the same
+state. No global registry, database reconstruction, or per-test fallback was
+added. The canonical `run-database-body` attaches it once before extra schema
+or the body; both fresh-store and branched fixtures go through that seam.
+`fork-cluster-ctx` reuses that fixture state instead of inventing a second
+projection state for the same connection. Read births in the six affected
+namespaces and shared fixture helpers now use `db/db`.
+
+Dependency evidence: Datahike's `Connection` exposes metadata from its wrapped
+atom (`reference-code/datahike/src/datahike/connector.cljc:38–46`). Its ordinary
+non-streaming dereference reconstructs a database from store data (`:82–99`),
+so attaching metadata only to the initial database snapshot failed a disposable
+probe: all four carriage checks were false after one transaction. Connection
+metadata survived the same probe; database acquisition and both report values
+then carried the projection without a thread binding. This attachment happens
+at acquisition, not inside the writer's transaction logic.
+
+### Datom failure
+
+The live Datahike database answers `map?` true while `(first (seq database))`
+is a `datahike.datom.Datom`. `render.value/value-node*` sorted generic map
+entries by `key` before identity admission, causing the Map.Entry cast. It now
+uses the existing registry-declared `identity-only-projection-in` before
+structural inspection. No Datahike-class roster or second renderer was added.
+Default's real ctx rendered the nested value as:
+
+```clojure
+#:probe{:database "database :cluster-default at basis transaction 536871763 commit 6aa9c166-dfcf-58d9-9919-db02afe5413c"}
+```
+
+That public render probe completed in 125 ms. The existing nested-values
+canonical regression remains the recurring proof; its transaction-report face
+expectation is a separate gate boundary, not established by this observation.
+
+### Missing effect events
+
+Background settlement's request discarded the carried world, retaining only
+connection/caps/policy. The request now captures its database once and carries
+its database/ctx/environment/projection through settlement admission. Canonical
+fixture connections also retain their state on a fresh thread. Effect tests
+observe terminal facts through `db/db`, rather than reading raw listener-report
+values. Terminal effect facts are monotonic, so the latest database is the
+appropriate event predicate authority.
+
+The disposable probe installs the complete canonical Datahike attribute schema,
+seeds one effect identity, and invokes the real settlement owner on a new Java
+thread. Result: **one listener event**, `#:probe{:value 7}` persisted, no
+transaction error, and report `:db-after` carried its projection. The thread
+was joined, listener removed, connection released and disposable database
+deleted. Script: [p1-batch2c-probe-2026-09-15.clj](p1-batch2c-probe-2026-09-15.clj).
+
+### Verification and exact boundaries
+
+Default remained PID **69622**. The MCP sessions were lost twice; the first reconnect
+verified the same PID, falsifying the tool's unobserved restart attribution.
+Live source was loaded through `require :reload`, then 1056 contracts re-armed (49 ms; PID again 69622).
+Default could not load `seon.test-support` from its classpath; the already open
+`development-adoption-cannot-load-test-support.md` belongs to the reaching-tests
+lane. No classpath alteration or test-runner workaround was attempted here.
+The canonical fixture regression therefore awaits the orchestrator gate.
+
+Clj-kondo: one pre-existing unresolved generated `parser.type/->Variable`
+constructor, 17 warnings. The preceding handoff records both cache-refresh
+attempts and its dependency definition. No new syntax/name errors were found.
+The fixture class regression now asserts carriage and a real transaction from
+an unbound Java thread, replacing its obsolete expectation that a canonical
+fixture's transaction must refuse on a fresh thread.
+
+While this lane worked, another lane edited MCP artifact lifecycle tests.
+The commit used an owned-file snapshot containing only our constructor changes
+and real-fixture config regression; their lifecycle changes remain untouched.
+Other dirty render, cluster, hook, schedule and test-runner paths were preserved.
+The temporary commit snapshot was deleted; no lane-owned background shell or
+JVM remains. The retained gate root `tmp/test-runs/run.Vepjoy` was not modified.
+
+The rest of batch 2c is not asserted green: it includes old `seon.run/complete`
+expectations, removed result-EDN fields, scalar attribute renderer selection,
+preview process provenance, a resolver trap, and declaration-codec expectations.
+The re-gate must distinguish surviving semantic failures from consequences of
+missing carriage. No contracts or assertions were weakened to conceal them.
+
 ## Outcome — final handoff, 2026-09-15
 
 Implementation and canonical regressions: **`b80f78a7c`**. Read all named
