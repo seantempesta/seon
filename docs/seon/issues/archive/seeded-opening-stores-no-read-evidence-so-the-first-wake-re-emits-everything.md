@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, turn, context, read-evidence, fixture, class/p1]
 ---
@@ -73,3 +73,9 @@ helpers so Tools excludes them, and projects plan dependencies as ids.
 The landing note contains the complete scratch prompt. Default reseeding
 and the final trial remain the final assigned slice, so this issue stays open
 until that live verification is recorded.
+
+## Resolution (2026-09-15 triage)
+
+surface: context-generation
+
+The original missing-evidence attribution was already falsified in this note. Fix `6aca09cce` routes creation through the shared system generator; `e915d2de0` orders the opening and guards its append against changed history. At HEAD `91d5547b5`, `src/seon/turn.clj:2080–2090` executes generated sources through `evaluate-sources`; `:2180–2192` checks the current history inside Datahike's serial transaction before appending. `test/seon/loop_proof_test.clj:508–527` asserts no unchanged system append and one copy of each stable seeded source after the first real proc wake. `test/seon/help_test.clj:17` covers help-first storage. Current `test/seon/render/value_test.clj` includes collection-cardinality invariance; the focused fast run is recorded in the landing note. These are current mechanism and regression evidence, not a new reseed of the owner's default cluster.

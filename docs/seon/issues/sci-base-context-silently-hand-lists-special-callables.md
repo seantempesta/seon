@@ -1,7 +1,7 @@
 ---
 type: issue
 status: open
-severity: blocker
+severity: friction
 tags: [issue, sci, agent, class/n7, wave/sci-base-context-derivation]
 ---
 
@@ -60,3 +60,9 @@ must remain.
   roster remains.
 - A query/proof compares special base bindings with the situation's declared
   injection data and refuses an unexplained member.
+
+## Re-verified at HEAD (2026-09-15)
+
+surface: context-generation
+
+The duplicate membership source is fixed by `750ed404d`: `src/seon/sci/eval.clj:183–201` and `src/seon/fn.clj:1663–1678` consume the same `seon.program/base-context-injected-symbols`. However, `src/seon/program.cljc:15–25` still explicitly chooses schema, test, turn, background, message and help bindings; the remaining criterion is explaining or eliminating their exceptional bootstrap status. Read-only default MCP JVM probe `seon.program/base-context-injections` returned in 1 ms: `{seon.schema [register! unregister!], clojure.test :publics, my.turn [wait complete], my.background [background poll await], my.message [send decline], seon.bootstrap [help dir doc]}`. HEAD `91d5547b5` has the same declaration. Current help at `src/seon/bootstrap.clj:45–61` teaches messages, test macros and documentation, but does not explain schema/background bootstrap exceptions. Downgraded to friction: this is an explanation/derivation gap, not evidence of blocked callability or a failed agent run. Fix sketch: derive ordinary callable installation through acquisition, and document the interpreter-only exceptions beside their single declaration.

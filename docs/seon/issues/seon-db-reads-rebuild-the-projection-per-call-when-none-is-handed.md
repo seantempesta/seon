@@ -1,7 +1,7 @@
 ---
 type: issue
 status: open
-severity: blocker
+severity: friction
 tags: [issue, database, performance, class/p1, context]
 ---
 
@@ -176,3 +176,22 @@ projection-from-database → build-projection`. The overlay only needs its key
 set: live `:seon.schema/references` already names those leaves (2 ms query).
 The components change queries those refs and deletes the projection rebuild
 from this read path. This does not close the other entry-point findings above.
+
+## Re-verified at HEAD (2026-09-15)
+
+surface: context-generation
+
+At HEAD `91d5547b5`, `src/seon/db.clj:907–913` creates a fresh delayed projection for an unhanded read; `:932–944` forces it for string-backed attributes. `src/seon/schema.clj:2445–2465` derives on each one-argument call and explicitly has no process-global cache. Native decoding was fixed by `6785c980c`; the residual remains. Read-only default MCP JVM probe (20,000 ms bound):
+
+```clojure
+(let [database @(seon.operator/connection "default")]
+  (mapv (fn [_]
+          (let [start (System/nanoTime)
+                result (seon.db/pull database [:seon.agent/id]
+                                     [:seon.agent/id "root"])]
+            {:result result
+             :elapsed-ms (/ (- (System/nanoTime) start) 1000000.0)}))
+        (range 2)))
+```
+
+Observed `[{:result {:seon.agent/id "root"}, :elapsed-ms 17442.284416} {:result {:seon.agent/id "root"}, :elapsed-ms 1989.76425}]`, total MCP evaluation 19,436 ms. This is default's loaded JVM, alongside the matching HEAD derivation path, not an exact-adoption proof or an attribution of all elapsed time to compilation. Downgraded to friction: the reads complete, and this does not reproduce a blocked ordinary turn with its supplied projection. Fix sketch: carry the acquired projection into unhanded entry points and reuse it against the observed database basis.

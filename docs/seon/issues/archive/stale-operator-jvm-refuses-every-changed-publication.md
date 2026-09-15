@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, operator, tooling, wave/publication-velocity]
 ---
@@ -74,3 +74,9 @@ The cached `data/clusters` source artifact being stale is a *symptom*, not
 the disease: HEAD's `valid-source-manifest?` already rejects it and falls
 back to a complete rebuild. Only the pre-`b0fdadd2e` code in the running JVM
 turns it into a throw.
+
+## Resolution (2026-09-15 triage)
+
+surface: adoption-publication
+
+The incident required a JVM predating `b0fdadd2e`. Triage `bin/seon status` and MCP identify default PID 23729, started 2026-09-15T04:24:19Z, not the recorded September 5 PID 14798. At HEAD `91d5547b5`, `src/seon/cluster.clj:1625–1630` validates cached manifests, and `:1704–1715` routes an invalid/stale artifact to complete publication before `manifest-function-symbols` can consume it. Verified with `git show HEAD:src/seon/cluster.clj`. This resolves that obsolete-process/artifact incident; it does not guarantee atomic hot adoption or declare concurrent live publication healthy. The separate adoption-generation class remains owned by the existing `development-adoption-can-mix-host-and-sci-generations.md` note.
