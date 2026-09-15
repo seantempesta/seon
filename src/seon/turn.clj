@@ -21,6 +21,7 @@
             [seon.flow :as seon.flow]
             [seon.fn :as seon.fn]
             [seon.id :as id]
+            [seon.plan :as plan]
             [seon.program :as program]
             [seon.render :as render]
             [seon.render.walk :as walk]
@@ -2187,7 +2188,8 @@
                                     ;; The writer admits this append only against
                                     ;; the history from which it was derived.
                                     (if (= latest (latest-evaluations current agent-id))
-                                      (into refresh-tx (:seon.db/tx-data prepared))
+                                      (conj (into refresh-tx (:seon.db/tx-data prepared))
+                                            [:db.fn/call #'plan/settle-call agent-id])
                                       []))]]))]
                   (if (:seon.error/kind report) report
                       (if (some #(and (= :seon.turn/id (:a %))
@@ -3406,7 +3408,8 @@
          (:seon.error/values-tx delivery))
         tx-data (if batch?
                   (vec side-tx)
-                  (into (receipt-settle-tx database receipt) side-tx))]
+                  (conj (into (receipt-settle-tx database receipt) side-tx)
+                        [:db.fn/call #'plan/settle-call agent-id]))]
     {:seon.turn.loop/settled settled
      :seon.turn.loop/undisposed? undisposed?
      :seon.turn.loop/evaluation evaluation
@@ -3440,10 +3443,13 @@
         {:seon.blob/staged-writes
          (into [] (mapcat :seon.blob/staged-writes) prepared)
          :seon.db/tx-data
-         (into (into namespace-rows
-                     (receipt-settle-batch-tx (mapv :seon.turn.loop/receipt prepared)))
-               (mapcat :seon.db/tx-data)
-               prepared)}
+         (into
+          (into (into namespace-rows
+                      (receipt-settle-batch-tx (mapv :seon.turn.loop/receipt prepared)))
+                (mapcat :seon.db/tx-data)
+                prepared)
+          (map (fn [agent-id] [:db.fn/call #'plan/settle-call agent-id]))
+          (distinct (map :seon.agent/id requests)))}
         ;; `with-publication!` IS TOTAL OVER AN EMPTY VECTOR — it calls the
         ;; commit directly — so the caller has no branch to get wrong. The
         ;; branch this replaced handed `(seq …)`, a `ChunkedSeq`, where the
@@ -4613,7 +4619,8 @@
   [{cluster :seon.turn.loop/cluster work :seon.turn.loop/work now :seon.turn.loop/now report :seon.turn.loop/report}]
   (let [outcome (db/transact!
                  (:seon.db/connection cluster)
-                 (close-tx {:seon.turn/id (:seon.turn/id work) :seon.turn/closed-tx "datomic.tx"}))]
+                 (conj (close-tx {:seon.turn/id (:seon.turn/id work) :seon.turn/closed-tx "datomic.tx"})
+                       [:db.fn/call #'plan/settle-call (:seon.agent/id work)]))]
     (if (:seon.error/kind outcome)
       (do (settle! {:seon.turn.loop/cluster cluster :seon.turn.loop/now now
                      :seon.agent/id (:seon.agent/id work)

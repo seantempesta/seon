@@ -15,6 +15,8 @@
            [:my.plan.item/id {:optional true} :my.plan.item/id]
            [:my.plan.item/title {:optional true} :my.plan.item/title]
            [:my.plan.item/done-when {:optional true} :my.plan.item/done-when]
+                [:my.plan.item/done-query {:optional true} :my.plan.item/done-query]
+                [:my.plan.item/subject {:optional true} :my.plan.item/subject]
            [:my.plan.item/completed-tx {:optional true} :my.plan/completion]
            [:my.plan.item/about {:optional true} :my.plan.item/about]
            [:my.plan/needs {:optional true} :my.plan/needs]
@@ -24,6 +26,8 @@
            [:my.plan.item/id :my.plan.item/id]
            [:my.plan.item/title :my.plan.item/title]
            [:my.plan.item/done-when {:optional true} :my.plan.item/done-when]
+                [:my.plan.item/done-query {:optional true} :my.plan.item/done-query]
+                [:my.plan.item/subject {:optional true} :my.plan.item/subject]
            [:my.plan.item/completed-tx {:optional true} :my.plan/completion]
            [:my.plan.item/about {:optional true} :my.plan.item/about]
            [:my.plan/needs {:optional true} :my.plan/needs]
@@ -95,6 +99,8 @@
            [:my.plan.item/done-when
             {:optional true}
             :my.plan.item/done-when]
+                [:my.plan.item/done-query {:optional true} :my.plan.item/done-query]
+                [:my.plan.item/subject {:optional true} :my.plan.item/subject]
            [:my.plan.item/completed-tx
             {:optional true}
             :my.plan/completion]
@@ -123,6 +129,8 @@
               [:my.plan.item/done-when
                {:optional true}
                :my.plan.item/done-when]
+                [:my.plan.item/done-query {:optional true} :my.plan.item/done-query]
+                [:my.plan.item/subject {:optional true} :my.plan.item/subject]
               [:my.plan.item/completed-tx
                {:optional true}
                :my.plan.item/completed-tx]
@@ -237,17 +245,23 @@
           :subject-not-found-error [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark a plan subject that does not exist"} [:my.plan/subject-not-found :my.plan/subject-not-found] [:seon.error/message :seon.error/message]],
           :unusable-current-step [:= true],
           :unusable-current-step-error [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark a current step that is not an open step of this plan"} [:my.plan/unusable-current-step :my.plan/unusable-current-step] [:seon.error/message :seon.error/message]]
- :add-request [:map [:my.plan.item/id {:optional true} :my.plan.item/id] [:my.plan.item/done-when {:optional true} :my.plan.item/done-when] [:my.plan.item/title :my.plan.item/title] [:seon.db/connection :seon.db/connection] [:seon.agent/id :seon.agent/id]]
+ :add-request [:map [:my.plan.item/id {:optional true} :my.plan.item/id] [:my.plan.item/done-when {:optional true} :my.plan.item/done-when]
+                [:my.plan.item/done-query {:optional true} :my.plan.item/done-query]
+                [:my.plan.item/subject {:optional true} :my.plan.item/subject] [:my.plan.item/title :my.plan.item/title] [:seon.db/connection :seon.db/connection] [:seon.agent/id :seon.agent/id]]
  :complete-request [:map [:my.plan.item/id :my.plan.item/id] [:seon.db/connection :seon.db/connection] [:seon.agent/id :seon.agent/id]]
  :current-request [:map [:my.plan.item/id :my.plan.item/id] [:seon.db/connection :seon.db/connection] [:seon.agent/id :seon.agent/id]]
  :update-fields [:map [:my.plan.item/id :my.plan.item/id]
                  [:my.plan.item/title {:optional true} :my.plan.item/title]
                  [:my.plan.item/description {:optional true} :my.plan.item/description]
-                 [:my.plan.item/done-when {:optional true} :my.plan.item/done-when]]
+                 [:my.plan.item/done-when {:optional true} :my.plan.item/done-when]
+                [:my.plan.item/done-query {:optional true} :my.plan.item/done-query]
+                [:my.plan.item/subject {:optional true} :my.plan.item/subject]]
  :update-request [:map [:my.plan.item/id :my.plan.item/id]
                   [:my.plan.item/title {:optional true} :my.plan.item/title]
                   [:my.plan.item/description {:optional true} :my.plan.item/description]
                   [:my.plan.item/done-when {:optional true} :my.plan.item/done-when]
+                [:my.plan.item/done-query {:optional true} :my.plan.item/done-query]
+                [:my.plan.item/subject {:optional true} :my.plan.item/subject]
                   [:seon.db/connection :seon.db/connection]
                   [:seon.agent/id :seon.agent/id]]
 }

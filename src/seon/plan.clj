@@ -78,6 +78,8 @@
     :my.plan.item/title
     :my.plan.item/description
     :my.plan.item/done-when
+    :my.plan.item/done-query
+    {:my.plan.item/subject [:db/id]}
     {:my.plan.item/completed-tx [:db/txInstant]}
     :my.plan.item/about
     {:my.plan.item/needs [:my.plan.item/id]}
@@ -226,6 +228,8 @@
                                            :my.plan.item/needs
                                            :db/id)
                              (seq needs) (assoc :my.plan/needs needs)
+                             (:my.plan.item/subject node)
+                             (update :my.plan.item/subject :db/id)
                              parent (assoc :my.plan/parent parent)
                              true (assoc :my.plan/depth depth
                                          :my.plan/state
@@ -362,6 +366,7 @@
     step
     (assoc (select-keys step [:my.plan.item/id :my.plan.item/title
                                      :my.plan.item/done-when
+                                     :my.plan.item/done-query :my.plan.item/subject
                                      :my.plan.item/completed-tx :my.plan.item/about
                                      :my.plan/state])
            :my.plan/needs (vec (:my.plan/needs step)))))
@@ -512,6 +517,72 @@
         (:my.plan/current? request)
         (conj [:db/add plan-entity :my.plan/current-step tempid])))))
 
+(defn- query-deadline
+  [database agent-id]
+  (let [limit (or (db/q '[:find ?limit . :in $ ?agent-id
+                          :where [?agent :seon.agent/id ?agent-id]
+                                 [?agent :seon.agent/settings ?settings]
+                                 [?settings :seon.config.eval/time-limit-ms ?limit]]
+                        database agent-id)
+                  (db/q '[:find ?limit .
+                          :where [?cluster :seon.cluster/config ?config]
+                                 [?config :seon.config.eval/time-limit-ms ?limit]] database))]
+    (when-not (pos-int? limit)
+      (refuse! :my.plan/missing-query-bound
+               "Plan completion queries require the configured evaluation time limit."
+               {:seon.agent/id agent-id}))
+    (+ (System/nanoTime) (* 1000000 limit))))
+
+(defn- done-query-result
+  [database step deadline]
+  (let [query (:my.plan.item/done-query step)
+        subject (:my.plan.item/subject step)
+        request (if (and (map? query) (:query query)) query {:query query})
+        result (db/q (assoc request
+                           :args (cond-> [database] subject (conj (if (map? subject) (:db/id subject) subject)))
+                           :cancel (reify clojure.lang.IDeref
+                                     (deref [_] (> (System/nanoTime) deadline)))))]
+    (when (error-value? result)
+      (refuse! :my.plan/done-query-failed
+               (str "Completion query failed: " (pr-str query) "; found " (pr-str result))
+               {:my.plan.item/id (:my.plan.item/id step)
+                :my.plan.item/done-query query
+                :seon.db/result result}))
+    result))
+
+(defn- query-satisfied?
+  [result]
+  (if (coll? result) (boolean (seq result)) (boolean result)))
+
+(defn- completion-tx
+  [database plan-entity step]
+  (cond-> [[:db/add step :my.plan.item/completed-tx "datomic.tx"]]
+    (= step (db/q '[:find ?current . :in $ ?plan
+                    :where [?plan :my.plan/current-step ?current]] database plan-entity))
+    (conj [:db/retract plan-entity :my.plan/current-step step])))
+
+(defn settle-call
+  "Evaluate every open query-backed step and record first completion in this write."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
+                  :seon.db/tx-data]}
+  [database agent-id]
+  (let [steps (db/q '[:find [?step ...] :in $ % ?agent-id
+                      :where [?agent :seon.agent/id ?agent-id]
+                             (owned ?agent ?step)
+                             [?step :my.plan.item/done-query _]
+                             (not [?step :my.plan.item/completed-tx _])]
+                    database rules agent-id)]
+    (if (empty? steps)
+      []
+      (let [deadline (query-deadline database agent-id)
+            plan-entity (plan-eid database (agent-eid database agent-id))]
+        (into []
+              (mapcat (fn [eid]
+                        (let [step (db/pull database step-selector eid)]
+                          (when (query-satisfied? (done-query-result database step deadline))
+                            (completion-tx database plan-entity eid)))))
+              steps)))))
+
 (defn- complete-step-call
   [database request]
   (let [item-id (:my.plan.item/id request)
@@ -532,18 +603,21 @@
                     " is not in this agent's plan.")
                {:my.plan.item/id item-id
                 :seon.agent/id agent-id}))
+    (let [row (db/pull database step-selector step)]
+      (when-let [query (:my.plan.item/done-query row)]
+        (let [result (done-query-result database row (query-deadline database agent-id))]
+          (when-not (query-satisfied? result)
+            (refuse! :my.plan/done-query-unsatisfied
+                     (str "Plan step " (pr-str item-id) " is not complete: done-query "
+                          (pr-str query) " found " (pr-str result) ".")
+                     {:my.plan.item/id item-id :my.plan.item/done-query query
+                      :seon.db/result result})))))
     (if (db/q '[:find ?completed-at .
                 :in $ ?step
                 :where [?step :my.plan.item/completed-tx ?completed-at]]
               database step)
       []
-      (cond->
-       [[:db/add step :my.plan.item/completed-tx "datomic.tx"]]
-        (= step (db/q '[:find ?current .
-                        :in $ ?agent
-                        :where [?agent :my.plan/current-step ?current]]
-                      database plan-entity))
-        (conj [:db/retract plan-entity :my.plan/current-step step])))))
+      (completion-tx database plan-entity step))))
 
 (defn- changed-item
   [database agent-id item-id]
@@ -619,7 +693,8 @@
                {:my.plan.item/id item-id :seon.agent/id agent-id}))
     (let [attributes (select-keys changes [:my.plan.item/title
                                           :my.plan.item/description
-                                          :my.plan.item/done-when])]
+                                          :my.plan.item/done-when
+                                          :my.plan.item/done-query :my.plan.item/subject])]
       (if (seq attributes) [(assoc attributes :db/id step)] []))))
 
 (defn update!
@@ -720,6 +795,7 @@
                     [:db/retract [:my.plan.item/id id] attribute])))
           [:my.plan.item/description
            :my.plan.item/done-when
+           :my.plan.item/done-query :my.plan.item/subject
            :my.plan.item/completed-tx
            :my.plan.item/about])))
 
@@ -736,13 +812,15 @@
     :my.plan.item/title
     :my.plan.item/description
     :my.plan.item/done-when
+    :my.plan.item/done-query
+    {:my.plan.item/subject [:db/id]}
     :my.plan.item/completed-tx
     :my.plan.item/about
     {:my.plan.item/needs [:my.plan.item/id]}
     {:my.plan.item/steps [:my.plan.item/id]}])
 
 (defn- comparable
-  [position title description expected completed-at about parent needs]
+  [position title description expected completed-at about parent needs done-query subject]
   {:my.plan/position position
    :my.plan/title title
    :my.plan/description description
@@ -750,7 +828,9 @@
    :my.plan/completed-at completed-at
    :my.plan/about about
    :my.plan/parent parent
-   :my.plan/needs needs})
+   :my.plan/needs needs
+   :my.plan.item/done-query done-query
+   :my.plan.item/subject subject})
 
 (defn- stored-comparables
   "The current authored content of each owned step, keyed by identity."
@@ -776,11 +856,13 @@
                               (:my.plan.item/about row)
                               (get parents (:my.plan.item/id row))
                               (into #{} (map :my.plan.item/id)
-                                    (:my.plan.item/needs row)))]))
+                                    (:my.plan.item/needs row))
+                              (:my.plan.item/done-query row)
+                              (get-in row [:my.plan.item/subject :db/id]))]))
           rows)))
 
 (defn- entry-comparable
-  [entry needs-by-id]
+  [database entry needs-by-id]
   (comparable (:my.plan.item/position entry)
               (:my.plan.item/title entry)
               (:my.plan.item/description entry)
@@ -788,7 +870,10 @@
               (:my.plan.item/completed-tx entry)
               (:my.plan.item/about entry)
               (:my.plan/parent-id entry)
-              (set (get needs-by-id (:my.plan.item/id entry)))))
+              (set (get needs-by-id (:my.plan.item/id entry)))
+              (:my.plan.item/done-query entry)
+              (when-let [subject (:my.plan.item/subject entry)]
+                (ref-eid database subject))))
 
 (defn- compile-tree
   [database agent-id input]
@@ -907,7 +992,7 @@
                                  (and (contains? stored id)
                                       (not= (get stored id)
                                             (entry-comparable
-                                             entry needs-by-id)))))
+                                             database entry needs-by-id)))))
                              entries))]
         {:my.plan/tx-data (vec (concat step-maps
                                 (when (or objective (seq entries))
@@ -1003,7 +1088,11 @@
     (str number " " (state-word state) " — " (:my.plan.item/title step)
          (when completed (str " — " (.toInstant ^java.util.Date completed)))
          (when (and (= :current state) (:my.plan.item/done-when step))
-           (str "\n   Done when: " (:my.plan.item/done-when step))))))
+           (str "\n   Done when: " (:my.plan.item/done-when step)))
+         (when (and (= :current state) (:my.plan.item/done-query step))
+           (str "\n   done-query: " (pr-str (:my.plan.item/done-query step))
+                (when-let [subject (:my.plan.item/subject step)]
+                  (str "\n   subject: " (pr-str subject))))))))
 
 (defn format-item-ai
   "Format one plan step as terminal text."

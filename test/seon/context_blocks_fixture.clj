@@ -34,23 +34,88 @@
   "Find the customer with the largest order total with a contracted function and a test, add an order of 40 for them, and tell me the customer and both totals.")
 
 (def authored-plan
-  (let [steps [["read" "Read the orders" "A query over :example/order entities has returned their :example/order ids, :example/customer values, and :example/amount values."]
-               ["define" "Define `largest-customer` with a `:malli/schema` contract (rows → `{:customer :total}`)" "A query finds the :seon.fn row for largest-customer with :seon.fn/spec present."]
-               ["test" "Write a `deftest` over the fixture data and run it" "After (my.test/run), a query finds the :seon.test row's last result with a positive :seon.test/pass-count, zero :seon.test/fail-count, and zero :seon.test/error-count."]
-               ["save" "Run it and save the answer" "A query finds a :my.note entity linked to Juniper whose :my.note/content records the customer and original total returned by largest-customer."]
-               ["add" "Add an order of 40 for that customer" "A query finds the new :example/order entity with that :example/customer and :example/amount 40."]
-               ["again" "Run it again and record the new total" "A query finds the :my.note entity's :my.note/content carrying the customer and both totals, with the new total verified by calling largest-customer on freshly queried orders."]
-               ["report" "Report and finish" "A query finds the :seon.message from Juniper to root containing the customer and both verified totals; after (my.agent/done), session state shows the session closed."]]]
+  (let [steps
+        [["read" "Read the orders"
+          "A query over :example/order entities has returned their :example/order ids, :example/customer values, and :example/amount values."
+          '[:find ?evaluation :in $ ?subject
+            :where [?turn :seon.turn/agent ?subject]
+                   [?evaluation :seon.cluster.eval/run ?turn]
+                   [?evaluation :seon.eval/shown _]
+                   (not [?evaluation :seon.cluster.eval/error _])
+                   [?evaluation :seon.cluster.eval/read-evidence ?evidence]
+                   [(seon.db/pull $ [:seon.db/read-request :datahike.read/dependency-plan] ?evidence) ?read]
+                   [(get-in ?read [:seon.db/read-request :seon.db/read-operation]) ?operation]
+                   [(= ?operation :q)]
+                   [(get-in ?read [:datahike.read/dependency-plan :datahike.query.dependency/sources]) [?source ...]]
+                   [(get ?source :datahike.query.source/attributes) ?attributes]
+                   [(coll? ?attributes)]
+                   [(set ?attributes) ?attribute-set]
+                   [(clojure.set/subset? #{:example/order :example/customer :example/amount} ?attribute-set)]]]
+         ["define" "Define `largest-customer` with a `:malli/schema` contract (rows → `{:customer :total}`)"
+          "A query finds the :seon.fn row for largest-customer with :seon.fn/spec present."
+          '[:find ?function :in $ ?subject
+            :where [?subject :seon.agent/namespace ?namespace]
+                   [?function :seon.fn/ns ?namespace]
+                   [?namespace :seon.ns/name ?namespace-name]
+                   [(str ?namespace-name "/largest-customer") ?symbol]
+                   [?function :seon.fn/sym ?symbol]
+                   [?function :seon.fn/spec _]]]
+         ["test" "Write a `deftest` over the fixture data and run it"
+          "After (my.test/run), a query finds the :seon.test row's last result with a positive :seon.test/pass-count, zero :seon.test/fail-count, and zero :seon.test/error-count."
+          '[:find ?test :in $ ?subject
+            :where [?subject :seon.agent/namespace ?namespace]
+                   [?test :seon.test/ns ?namespace]
+                   [?test :seon.test/pass-count ?passed] [(pos? ?passed)]
+                   [?test :seon.test/fail-count 0] [?test :seon.test/error-count 0]]]
+         ["save" "Run it and save the answer"
+          "A query finds a :my.note entity linked to Juniper whose :my.note/content records the customer and original total returned by largest-customer."
+          '[:find ?note :in $ ?subject
+            :where [?note :my.note/agent ?subject] [?note :my.note/content ?content]
+                   [(clojure.string/includes? ?content "Ada")]
+                   [(clojure.string/includes? ?content "115")]]]
+         ["add" "Add an order of 40 for that customer"
+          "A query finds the new :example/order entity with that :example/customer and :example/amount 40."
+          '[:find ?order :in $ ?subject
+            :where [?subject :seon.agent/id _]
+                   [?order :example/order ?id] [(not= ?id "a1")] [(not= ?id "a2")]
+                   [?order :example/customer "Ada"] [?order :example/amount 40]]]
+         ["again" "Run it again and record the new total"
+          "A query finds the :my.note entity's :my.note/content carrying the customer and both totals, with the new total verified by calling largest-customer on freshly queried orders."
+          '[:find ?note ?evaluation :in $ ?subject
+            :where [?note :my.note/agent ?subject] [?note :my.note/content ?content]
+                   [(clojure.string/includes? ?content "Ada")]
+                   [(clojure.string/includes? ?content "115")]
+                   [(clojure.string/includes? ?content "155")]
+                   [?order :example/customer "Ada"] [?order :example/amount 40 ?added]
+                   [?turn :seon.turn/agent ?subject]
+                   [?evaluation :seon.cluster.eval/run ?turn]
+                   [?evaluation :seon.eval/shown ?shown ?observed] [(> ?observed ?added)]
+                   (not [?evaluation :seon.cluster.eval/error _])
+                   [?evaluation :seon.cluster.eval/read-evidence _]
+                   [(clojure.string/includes? ?shown "Ada")]
+                   [(clojure.string/includes? ?shown "155")]]]
+         ["report" "Report and finish"
+          "A query finds the :seon.message from Juniper to root about root's request containing the customer and both verified totals; after (my.agent/done), session state shows the session closed."
+          '[:find ?message :in $ ?subject
+            :where [?subject :seon.message/from ?root] [?subject :seon.message/to ?juniper]
+                   [?message :seon.message/from ?juniper] [?message :seon.message/to ?root]
+                   [?message :seon.message/about ?subject] [?message :seon.message/content ?content]
+                   [(clojure.string/includes? ?content "Ada")]
+                   [(clojure.string/includes? ?content "115")]
+                   [(clojure.string/includes? ?content "155")]]]]]
     {:db/id "juniper-plan"
      :my.plan/agent [:seon.agent/id "juniper"]
      :my.plan/objective instruction
      :my.plan/current-step "fixture-juniper/read"
      :my.plan/steps
-     (mapv (fn [position [id title criterion]]
+     (mapv (fn [position [id title criterion query]]
              (cond-> {:db/id (str "fixture-juniper/" id)
                       :my.plan.item/id (str "juniper/" id)
                       :my.plan.item/title title
                       :my.plan.item/done-when criterion
+                      :my.plan.item/done-query query
+                      :my.plan.item/subject (if (= id "report") "fixture-root-message"
+                                               [:seon.agent/id "juniper"])
                       :my.plan.item/position position}
                (pos? position)
                (assoc :my.plan.item/needs
@@ -101,7 +166,7 @@
                         [{:db/id agent-eid
                           :seon.agent/plan (assoc (update authored-plan :my.plan/steps set) :my.plan/agent agent-eid)
                           :seon.agent/settings seeded-settings}
-                         {:seon.message/id (id/id (random-uuid) 8) :seon.message/from [:seon.agent/id "root"] :seon.message/to [:seon.agent/id "juniper"] :seon.message/content instruction :seon.message/inbox [:seon.agent/id "juniper"]}]))))]]))
+                         {:db/id "fixture-root-message" :seon.message/id (id/id (random-uuid) 8) :seon.message/from [:seon.agent/id "root"] :seon.message/to [:seon.agent/id "juniper"] :seon.message/content instruction :seon.message/inbox [:seon.agent/id "juniper"]}]))))]]))
   {:seon.test/orders (count orders)}))
 
 (defn submit!

@@ -15,23 +15,19 @@
             [seon.test-support :as support]
             [seon.turn :as turn]))
 
-(deftest accepted-provider-replies-continue-until-done-refusal-or-bound
-  (let [read-source "(seon.db/q '[:find (sum ?amount) . :where [?order :example/customer \"Ada\"] [?order :example/amount ?amount]])"
-        done "(my.agent/done)"
-        refusal (with-open [body (java.io.ByteArrayInputStream.
-                                  (.getBytes "data: {malformed json\n\n" "UTF-8"))]
-                  (#'ai/streamed-completion body nil))]
-    (is (= :seon.ai/unparseable-body (:seon.error/kind refusal)))
-    (doseq [[scenario replies limit expected disposition]
-            [[:read-then-done [read-source done] 3 2 :wait]
-             [:prose-then-done ["I will inspect the orders next." done] 3 2 :wait]
-             [:empty-then-done ["" done] 3 2 :wait]
-             [:comments-then-done [";; I will inspect the orders next." done] 3 2 :wait]
-             [:done [done] 3 1 :wait]
-             [:slow-provider [done] 3 1 :wait]
-             [:completed ["(seon.run/complete \"Verified.\")"] 3 1 :completed]
-             [:refusal [refusal] 3 1 nil]
-             [:bound [read-source read-source] 2 2 nil]]]
+(def ^:private read-source
+  "(seon.db/q '[:find (sum ?amount) . :where [?order :example/customer \"Ada\"] [?order :example/amount ?amount]])")
+
+(def ^:private done-source "(my.agent/done)")
+
+(defn- provider-refusal []
+  (with-open [body (java.io.ByteArrayInputStream.
+                    (.getBytes "data: {malformed json\n\n" "UTF-8"))]
+    (#'ai/streamed-completion body nil)))
+
+(defn- prove-session
+  [scenario replies limit expected disposition]
+  (let [refusal (provider-refusal)]
       (testing (name scenario)
         (support/with-database
          (fn [connection]
@@ -195,4 +191,35 @@
                                         [?message :seon.message/to ?root]] @connection))))
                    (is (nil? (async/poll! @faults)))
                    (println {:seon.test/scenario scenario :seon.test/provider-attempts (count @requests)
-                             :seon.test/turns-left (turn/turns-left @connection "juniper")})))))))))))
+                             :seon.test/turns-left (turn/turns-left @connection "juniper")}))))))))))
+
+
+; Each independent real cluster scenario fits the runner's existing task bound.
+(deftest read-results-arrive-before-done
+  (prove-session :read-then-done [read-source done-source] 3 2 :wait))
+
+(deftest prose-refusal-arrives-before-done
+  (prove-session :prose-then-done ["I will inspect the orders next." done-source] 3 2 :wait))
+
+(deftest empty-reply-refusal-arrives-before-done
+  (prove-session :empty-then-done ["" done-source] 3 2 :wait))
+
+(deftest comment-only-refusal-arrives-before-done
+  (prove-session :comments-then-done [";; I will inspect the orders next." done-source] 3 2 :wait))
+
+(deftest done-ends-the-session
+  (prove-session :done [done-source] 3 1 :wait))
+
+(deftest provider-progress-has-its-own-bound
+  (prove-session :slow-provider [done-source] 3 1 :wait))
+
+(deftest completion-replies-end-the-session
+  (prove-session :completed ["(seon.run/complete \"Verified.\")"] 3 1 :completed))
+
+(deftest provider-refusal-defers-the-trigger
+  (let [refusal (provider-refusal)]
+    (is (= :seon.ai/unparseable-body (:seon.error/kind refusal)))
+    (prove-session :refusal [refusal] 3 1 nil)))
+
+(deftest continuation-stops-at-the-turn-bound
+  (prove-session :bound [read-source read-source] 2 2 nil))

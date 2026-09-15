@@ -808,7 +808,36 @@
                (submit "(seon.db/transact! [{:example/order \"a3\" :example/customer \"Ada\" :example/amount 40}])")
                (submit "(seon.db/q '[:find (sum ?amount) . :where [?order :example/customer \"Ada\"] [?order :example/amount ?amount]])")
                (is (= "155" (:seon.eval/shown (last (evaluation/of-agent @connection "juniper")))))
-               (submit "(let [sent (my.message/send {:my.message/to \"root\" :my.message/content \"Ada had the largest total, 115. I added an order of 40 and verified the new total is 155.\"})] :sent)")
+               (testing "completion is derived from the report message, never asserted"
+                 (is (= 7 (db/q '[:find (count ?step) . :where
+                                  [?step :my.plan.item/done-query _]] @connection)))
+                 (submit "(my.plan/complete! {:my.plan.item/id \"juniper/report\"})")
+                 (let [last-evaluation (last (evaluation/of-agent @connection "juniper"))]
+                   (is (str/includes? (:seon.cluster.eval/error last-evaluation) "done-query"))
+                   (is (str/includes? (:seon.cluster.eval/error last-evaluation) "found #{}")))
+                 (is (nil? (:my.plan.item/completed-tx
+                            (db/pull @connection [:my.plan.item/completed-tx]
+                                     [:my.plan.item/id "juniper/report"]))))
+                 (let [about (db/q '[:find ?id . :where
+                                     [?step :my.plan.item/id "juniper/report"]
+                                     [?step :my.plan.item/subject ?request]
+                                     [?request :seon.message/id ?id]] @connection)
+                       source (str "(let [sent (my.message/send "
+                                   (pr-str {:my.message/to "root" :my.message/about about
+                                            :my.message/content "Ada had the largest total, 115. I added an order of 40 and verified the new total is 155."})
+                                   ")] :sent)")
+                       run-id (submit source)
+                       completed (db/pull @connection '[{:my.plan.item/completed-tx [:db/id :db/txInstant]}]
+                                          [:my.plan.item/id "juniper/report"])
+                       settled (db/q '[:find ?tx . :in $ ?run-id
+                                       :where [?turn :seon.turn/id ?run-id]
+                                              [?evaluation :seon.cluster.eval/run ?turn]
+                                              [?evaluation :seon.eval/shown _ ?tx]]
+                                     @connection run-id)]
+                   (is (string? about))
+                   (is (inst? (get-in completed [:my.plan.item/completed-tx :db/txInstant])))
+                   (is (= settled
+                          (get-in completed [:my.plan.item/completed-tx :db/id])))))
                (is (= 1 (db/q '[:find (count ?message) . :where
                                 [?agent :seon.agent/id "juniper"]
                                 [?message :seon.message/from ?agent]

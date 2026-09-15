@@ -3,7 +3,8 @@
 
   current! selects a step; complete! completes it and clears the selection.
   Use add!, update!, current! and complete! with request maps. A completed
-  step has :my.plan.item/completed-tx. Verify its done-when before completion.
+  step has :my.plan.item/completed-tx. A done-query completes it automatically
+  when the queried facts exist; without one, verify done-when before complete!.
 
   Example:
   (my.plan/add! {:my.plan.item/id \"verify-total\"
@@ -103,7 +104,9 @@
   "Add a plan step and return the saved step with its derived state.
 
   Supply :my.plan.item/title and optionally :my.plan.item/id and
-  :my.plan.item/done-when. An omitted id derives from the title; the position
+  :my.plan.item/done-when, :my.plan.item/done-query and :my.plan.item/subject.
+  A query takes $ plus ?subject when the subject ref is present.
+  An omitted id derives from the title; the position
   appends to the plan. Returns :my.plan.item/id, :my.plan.item/title,
   :my.plan/state and :my.plan/needs, plus the supplied completion criterion.
 
@@ -117,7 +120,7 @@
   (plan/add! (dissoc request :seon.db/connection :seon.agent/id) (:seon.db/connection request) (:seon.agent/id request)))
 
 (defn update!
-  "Update the named item's title, description, or done-when and return it.
+  "Update an item's content or completion query and return it.
 
   Supply :my.plan.item/id first and the fields to change. Omitted fields
   remain unchanged. Returns the saved step map with :my.plan/state.
@@ -139,6 +142,8 @@
   Returns the step map with :my.plan/state :completed and
   :my.plan.item/completed-tx containing :db/txInstant. If it was current,
   that selection is cleared. Completing an already completed step is inert.
+  A present done-query must return evidence; false, nil, an empty result, or
+  a query error refuses completion and names the query and its result.
 
   Example:
   (let [step (my.plan/add! {:my.plan.item/id \"verify-arithmetic\"

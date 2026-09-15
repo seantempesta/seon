@@ -42,6 +42,12 @@
                 {:min 1,
                  :description
                  "Optional falsifiable evidence expected when work completes."}],
+               :done-query
+               [:and {:description "Completion query: a nonempty result or truthy scalar is evidence of completion; false, nil, or an empty result is not. Inputs are $ and, when subject is present, ?subject. Errors never complete the step."}
+                :seon.db/query],
+               :subject
+               [:and {:description "Optional entity bound as the completion query's second input after $."}
+                :seon.db/ref],
                :position
                [:int
                 {:min 0,
@@ -75,7 +81,9 @@
                  :my.plan.item/completed-tx]
                 [:my.plan.item/done-when
                  {:optional true}
-                 :my.plan.item/done-when]],
+                 :my.plan.item/done-when]
+                [:my.plan.item/done-query {:optional true} :my.plan.item/done-query]
+                [:my.plan.item/subject {:optional true} :my.plan.item/subject]],
                :add-request
                [:map
                 {:description
@@ -90,5 +98,7 @@
                 [:my.plan.item/done-when
                  {:optional true}
                  :my.plan.item/done-when]
+                [:my.plan.item/done-query {:optional true} :my.plan.item/done-query]
+                [:my.plan.item/subject {:optional true} :my.plan.item/subject]
                 [:my.plan/parent-step {:optional true} :my.plan/parent-step]
                 [:my.plan/current? {:optional true} :my.plan/current?]]}

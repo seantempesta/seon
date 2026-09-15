@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [my.plan, done-when, derive-or-die, live-test, design]
 created: 2026-09-15
@@ -35,3 +35,18 @@ class the stewards PRD §8.4 names: completion must be DERIVED from facts.
 - The seven fixture steps carry done-queries; the loop proof asserts that
   a step cannot be completed by assertion alone.
 - The problems panel reports "steps completed with a false done-query".
+
+## Resolution — 2026-09-15
+
+New optional `:my.plan.item/done-query` and `:my.plan.item/subject` facts
+accrete beside the prose. Settlement evaluates open steps at the writer;
+the first nonempty result or truthy scalar records `completed-tx` as that
+transaction. `complete!` refuses a false query with the exact query and result.
+Steps without a query retain their previous assertion behavior.
+
+The canonical loop proof verifies false assertion followed by automatic
+completion. All seven fixture queries completed in the live scratch proof,
+with only the two intentional errors (premature completion and nested done).
+[Landing and exact evidence](../../../prds/context-generation/research/run7-wave-landing-2026-09-15.md).
+The broader problems-panel audit belongs to the stewards PRD; this bounded
+wave fixes the completion writer and does not implement that panel.
