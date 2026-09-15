@@ -1,11 +1,55 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: friction
 tags: [issue, render, config, class/p3, wave/context-fixes]
 ---
 
 # The transcript and namespace renderers invent private token dials
+
+## Supersession verified — 2026-09-15
+
+`f48d27012` removed producer-side `budgeted-ai` from namespace acquisition.
+The current owner law places presentation bounds on the final value
+projection, so the old acceptance criterion that the namespace producer
+itself clips is superseded. The former private keys have no current reader.
+
+A read-only JVM probe on default used its compiled agent profile and rendered
+a nonempty 40-element value through `seon.render.value/render-ai`. In 4,507 ms
+it returned 113 estimated tokens: 32 children plus an elision naming the
+8 omitted children, the declared `max-children` bound, and a requery form.
+The supplied immutable probe value was not installed in an agent context;
+this verifies profile consumption, not execution of the illustrative requery.
+The canonical web regression also exercises the public render entry with a
+5 MiB string and a 5,000-element vector, asserting elision data and complete
+HTML. Commit `e4f8bbe07` makes its fixture expectations read that data rather
+than retired prose. That regression passed in the 91-test isolated run;
+the run's two failures were in the separately corrected provider-backstop
+test. Final combined/platform verification is handed to the orchestrator.
+
+The earlier directory-value probe's 15-second timeout remains an acquisition
+latency residual, covered by
+`default-component-probe-times-out-after-adoption.md`; no missing private
+budget key is inferred from it. The retained probe and gate results live in
+`docs/prds/context-generation/research/fixtures-events-2026-09-15.md`.
+
+## Current-boundary probe — 2026-09-15
+
+The fixtures-events lane verified that default's compiled settings produce
+the declared agent profile: 1,024 tokens, depth 8, 32 children. Direct JVM
+namespace rendering of the nonempty `my.fs` subject produced 4,031 estimated
+tokens at distance 1 (2,809 ms) and 2,890 at distance 2 (3,784 ms). This alone
+does not prove an escaped agent-visible bound: `f48d27012` explicitly removed
+the call to `budgeted-ai` and moved full acquired data to the value projection.
+The current namespace test asserts that changing this profile leaves acquired
+namespace data unchanged. Restoring the old call would restore a superseded
+mechanism rather than repair a missing producer key.
+
+The MCP JVM probe of `seon.sci.eval/directory-value` followed by
+`seon.render.value/render-ai` timed out at its 15,000 ms transport bound.
+No final rendered-token or value-bound claim follows from that unavailable
+observation. The later final-value probe above supplies that missing boundary
+evidence. Default was not stopped or reforked.
 
 ## Problem
 
@@ -108,7 +152,7 @@ Measured consequences on the live default cluster (pid 31570):
   transcript and nothing else.
 
 Full measurement and the API-first fit ordering this needs:
-[context quality audit 2026-08-10](../../prds/sci-execution-runtime/research/context-quality-audit-2026-08-10.md),
+[context quality audit 2026-08-10](../../../prds/sci-execution-runtime/research/context-quality-audit-2026-08-10.md),
 findings 1 and 2. This is named there as the single change with the largest
 effect on what agents read.
 
@@ -144,7 +188,7 @@ that integration.
 ## Census cross-reference — 2026-08-14
 
 The outward-bounding census
-([context-clipping-census-2026-08-14](../../prds/context-generation/research/context-clipping-census-2026-08-14.md))
+([context-clipping-census-2026-08-14](../../../prds/context-generation/research/context-clipping-census-2026-08-14.md))
 records this note as the missing-FACT half of the §2.4 law, beside a
 missing-HONESTY half. `seon.render.ns`'s budgeted assembly is a MODEL member of
 the compliant pattern in shape — `:337-341,470-478,587-609` emit a real

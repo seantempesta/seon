@@ -45,6 +45,17 @@ This closes successful-zero-trial reporting at the shared assertion seam.
 It does not prove that every property covers its production subject; the
 remaining class members below stay open.
 
+## Routing harness continuation — 2026-09-15
+
+Commit `e4f8bbe07` makes the agent routing property construct at least one agent through the
+production creation path before generated interleavings. Its verdict includes
+nonempty subjects, and `routing-proof-rejects-an-empty-production-subject`
+retains `[:message]` as the counterexample: no agent exists, so an apparently
+settled empty routing table cannot pass the conservation proof. Both agent
+properties use the shared counterexample-preserving `assert-check!` seam.
+The landing note records serial gate results; the remaining render-property
+and live-drive members still prevent class closure.
+
 ## Owner
 
 `bin/test`, fixture constructors, and the program-graph subject discovery used

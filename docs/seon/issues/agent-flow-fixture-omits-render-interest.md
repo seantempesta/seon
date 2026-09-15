@@ -68,6 +68,19 @@ initialization before either fixture could exercise its subject.
   reproduction passed 92 / 510; the same goal test completed in 18.626 seconds
   while the routing property completed in 76.179 seconds.
 
+## Fixtures-events continuation — 2026-09-15
+
+Commit `e4f8bbe07` makes the current agent fixture reach both conservation properties under armed
+contracts. Its routing setup now invokes `test-support/seed-cluster!` before
+constructing the handle; the former ordering constructed that handle without
+the configuration it declared. The producer-output regression creates its
+agent through `agent/creation-tx`, arms the real graph, and observes the
+declared idle report through the started value retained by `agent/arm!`.
+The focused gate passed 22 tests / 146 assertions. Final combined/platform
+verification is handed to the orchestrator. The broader loop, streaming,
+message, and generative-loop fixture inventory remains in this note; the
+agent namespace's repair alone does not close that inventory.
+
 ## Owner
 
 The hand-built render graph fixtures in `test/seon/cluster/agent_test.clj`,

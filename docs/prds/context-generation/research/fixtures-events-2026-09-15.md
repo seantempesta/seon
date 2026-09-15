@@ -6,6 +6,180 @@ tags: [research, test, flow, database]
 
 # Fixtures and events — 2026-09-15
 
+## Class continuation checkpoint — `e4f8bbe07`
+
+The owning construction now returns Flow's existing started value on new
+agent handles and publishes completed idle passes, so consumers can await
+observable events under the declared backstop. Cancellation closes the
+existing completion-observer channel. Canonical cluster setup precedes handle
+construction; the routing property requires nonempty production subjects and
+retains `[:message]` as its empty-subject counterexample. The implementation
+changes 10 paths, adding 299 lines and deleting 247.
+
+**Gate ownership changed at 21:05Z.** The owner's orchestrator-only rule
+(`fd98bc5a5`) supersedes the earlier lane gate workflow. No test invocation
+was launched after that instruction. The interrupted final-byte gate
+`run.eLfej9` has no claimed result; its old shell PID 17565 no longer exists.
+The last completed focused gate passed 22 tests / 146 assertions, before the
+final additive-schema and namespaced-verdict corrections. Final combined and
+platform verification belongs to the orchestrator. The request is
+`tmp/orchestrator/gate-requests/fixtures-events.txt`:
+
+```text
+seon.cluster.agent-test
+seon.turn-backstop-test
+seon.test-support-test
+seon.render.web-test
+platform
+```
+
+Resumed verification: default remains PID 69622. In 2,486 ms, a read-only JVM
+probe verified the installed optional started declaration, the loaded
+pass-report contract, and successful reading of root's existing armed handle.
+A disposable observer probe completed in 6 ms: cancellation published channel
+closure, cleared observer state, and emitted no fault. Its executor was
+closed. The retained probe file includes that operation. Focused clj-kondo
+reported zero errors and 43 warnings across eight Clojure files; warnings
+remain in pre-existing unused/shadowed declarations. `git diff --check` passed.
+
+P2, P3, and N2 remain open. This checkpoint supersedes the obsolete private
+render-budget member with the current value-projection owner and names its
+acquisition-latency residual. The graph member's remaining render-report
+work, broader fixture inventory, and transcript property are explicitly
+unclosed below. `src/seon/effect.clj` and `src/seon/test/runner.clj` contain
+foreign projection-carriage edits and are excluded from this commit.
+
+Cleanup verified no live runner held this lane's retained `run.SoY61d` or
+interrupted `run.eLfej9` roots before removing them. The lane's three temporary
+thread dumps were removed; no owned background shell remains. The orchestrator
+gate request is retained.
+
+### Implementation and probe chronology
+
+Protected-owner follow-up, **not applied or verified**: extract the current
+ping projection in `src/seon/render/web.clj` and publish it at completed-pass
+output. The web owner must reconcile this diff with its concurrent edits;
+then the fixture can consume the report channel instead of `await-ping!`.
+
+```diff
++(defn- pass-report [state]
++  {::passes (::passes state 0)
++   ::watched-agents (::watched state 0)
++   ::tap-count (transduce (map long) + 0
++                         (vals @(:seon.render.web/registration state)))
++   ::streaming-agents (count (::streams state))})
+@@ render-step zero-argument description
+-    :ping-map-fn (fn [state] ...existing projection...)
++    :ping-map-fn pass-report
+@@ render-step completed-pass output
+-       [(assoc state ::last-pass-nanos (System/nanoTime))
+-        (when (seq published) {::pages [published]})]
++       [(assoc state ::last-pass-nanos (System/nanoTime))
++        (cond-> {::flow/report [(pass-report state)]}
++          (seq published) (assoc ::pages [published]))]
+```
+
+The owner authorized the remaining P2/P3/N2 harness members without another
+design stop. At inherited HEAD `8574992e4`, default PID 69622 answered the
+explicit-connection MCP probe in 2 ms. Protected concurrent edits now also
+include `test/seon/sci/eval_test.clj`; the first P2 member is deferred at that
+exact boundary, without altering its source.
+
+The graph member still had seven calls to a 25 ms polling helper. The current
+slice retains Flow's existing started value on the armed handle, declares it
+on that producer's schema, and publishes idle passes through Flow's existing
+report channel. The tests await reports under the shared event bound; the
+poll helper and count-based completion inference are deleted. Dependency:
+`reference-code/core.async/src/main/clojure/clojure/core/async/flow/impl.clj`
+owns the sliding report channel (101), output publication (218), and stop
+transition (207). First-party ownership stays at `agent/arm!` and `turn/step`.
+
+First armed fast invocation `run.HwaYdY` reached the parallel property but
+stalled in `agent/await-turn-completion!` at line 777. A virtual-thread dump
+showed main waiting on `[turn-stopped failure-channel]` with no active turn
+or backstop task. The cancellation path cleared the observer state without
+closing its channel; an already-waiting disarm could retain the cancelled
+observer forever. Cancellation now closes that same channel; disarm then
+re-derives its stop wait under the existing bound. The new canonical
+`cancelled-completion-observer-releases-every-existing-waiter` regression
+observes that cancellation directly. The stalled owned JVM was terminated;
+no other process was operated. Its shutdown reported an active fixture
+connection because termination interrupted fixture teardown.
+
+The current candidate also corrects provider-turn counting to require the
+stored `:seon.turn/attempts`, observes `closed-tx` as a ref, uses the canonical
+fixture's installed boot process identity, and routes both agent properties
+through `assert-check!`. A live read-only query found 81 attempt-bearing
+turns on default in 6 ms; system turns cannot be counted as provider calls.
+These edits are not yet a passing-gate or member-closure claim.
+
+The next fast runs measured 20 tests / 108 assertions (6 failures, 4 errors)
+and 23 tests / 144 assertions (2 failures, 2 errors). The latter verified
+both completion-observer regressions, provider-turn counting, park/wake,
+hot reload, terminal wait, and the producer-output regression. Its routing
+failure exposed fixture ordering: the handle was constructed before its
+cluster configuration existed. The fixture now calls `seed-cluster!` before
+constructing the handle. A subsequent held-provider routing test passed in
+9.865 seconds. The install-gate expectation is corrected to the durable typed
+phase diagnostic already ruled in
+`archive/started-receipt-can-outlive-a-lost-settlement-fault.md`; no production
+fault translation was changed. The single-provider bound fixture now
+explicitly disables the inherited backup provider.
+
+Read-only default probes subsequently verified 81 attempt-bearing turns and
+the installed armed-handle declaration in 4,016 ms, then the installed idle
+report declaration in 3,196 ms. These observe in-place development adoption
+of schema facts; they do not claim an old armed handle was reconstructed.
+The retained probe file includes both queries. The routing property now
+generates an initial production agent creation and rejects the retained
+empty-subject counterexample `[:message]`.
+
+The four-namespace fast run `run.sNAHmh` completed 90 tests / 610 assertions:
+5 failures and 1 error, all in the web namespace. Agent, backstop, and shared
+support namespaces passed. The remaining web observations were an unrelated
+transaction incorrectly expected to cause a render wake, a sampled pass-count
+window that included unrelated work, and four expectations for retired
+elision prose. The candidate now uses the existing render settlement reply,
+asserts nonempty equivalent delivered packages, and reads the elision data's
+unit, omitted count, and requery form. The held-derivation regression passed
+in 9,024 ms without a tuned delay.
+
+The shared `await-event!` seam now accepts watched references: register before
+derive, deliver the accepted value, and remove the watch on every exit. The
+web registration loops use this existing helper. Future failures expose the
+original publisher exception; timeout cancels the awaited future before
+reporting the missing event. No separate polling implementation was added.
+
+Exact remaining P2 boundary: `src/seon/render/web.clj` is concurrently edited.
+Its `render-step` exposes pass/stream counts only through `:ping-map-fn`; it
+does not publish completed-pass reports when no page package changes. The
+remaining `await-ping!` consumers require that producer to emit its existing
+state projection on Flow's report channel. Repeated ping cannot be replaced
+honestly with an unrelated settlement event for stream/runtime input ports.
+This lane does not edit that protected owner or claim this member closed.
+The episode-driver bound similarly requires a declared config default in
+the concurrently edited config owner; its duplicated `240000` fallback is
+still an explicit residual.
+
+The first isolated gate, `run.SoY61d`, ran 91 tests / 630 assertions and
+reported two assertions in one provider-backstop test. All web, shared-support,
+and completion-observer tests passed. Confirmation showed that the test took
+the initial idle pass's timeout fault rather than the later provider turn's
+fault. It now awaits initial idle readiness and selects the exact turn ID.
+The focused isolated gate `run.0btSko` then passed 22 tests / 146 assertions;
+its routing property completed in 147,053 ms. The producer-output test now
+uses `agent/creation-tx`, not a hand-rostered agent map.
+
+The live loaded `turn/step` contract includes the new pass-report schema
+(4 ms). A subsequent read found root and Juniper still carry their original
+armed handles without the new started value (6 ms). The declaration therefore
+keeps this additive field optional for existing handles during hot adoption;
+new construction supplies it, and the canonical regression requires it.
+No existing default graph was stopped, rebuilt, or mutated by the probes.
+This is a live-adoption boundary, not a claim that existing handles were
+retroactively reconstructed. Final-byte verification follows the namespaced
+test verdict key and this additive declaration correction.
+
 ## Authorized continuation: runner fixes first
 
 Implementation commit: `bc3746037`.

@@ -57,6 +57,33 @@ retain the existing Flow report channel and its open schema to admit it; a
 hidden test-only channel would recreate the interface defect rather than fix
 it.
 
+## Continuation — 2026-09-15
+
+Commit `e4f8bbe07` retains Flow's started value on newly armed
+handle and publishes completed idle passes through its existing report
+channel. The seven remaining `await-until` calls in the agent namespace are
+replaced with named idle or closed-turn reports. The canonical fast run
+verified park/wake and hot reload after removing the helper. The render-test
+ping helper now requests one proc reply with the shared event bound instead
+of retrying Flow's default one-second window; the long-derivation regression
+uses an explicit hold/release event instead of a 1,500 ms coalescing setting.
+
+The same run exposed disarm retaining a cancelled completion observer's
+never-closed channel. The candidate closes that existing channel on
+cancellation and re-derives the bounded stop wait. A dedicated canonical
+regression is included. The focused agent gate passed 22 tests / 146
+assertions. The final additive declaration preserves existing live handles;
+default's loaded pass-report contract and readable root handle were verified
+by MCP JVM probe. Final combined/platform gates are requested from the
+orchestrator under the 21:05Z rule.
+
+This note remains open: the concurrently edited `src/seon/render/web.clj`
+publishes no completed-pass report when no package changes. Remaining stream
+and runtime-event tests still poll that proc's ping projection. The needed
+change is to publish that existing projection through Flow's report channel;
+the lane does not alter the protected owner or substitute an unrelated
+interest-port settlement for those events.
+
 ## Owner
 
 The armed-agent and render graph handles: retain and expose named lifecycle

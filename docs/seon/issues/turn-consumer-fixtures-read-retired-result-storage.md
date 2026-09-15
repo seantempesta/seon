@@ -7,6 +7,23 @@ tags: [issue, test, runtime, class/p3, wave/contract-gate]
 
 # Turn consumers retain obsolete fixture and observation contracts
 
+## Agent consumer repair — 2026-09-15
+
+Commit `e4f8bbe07` repairs the recorded agent failures: canonical process
+identity and cluster configuration before handle construction; provider-turn
+queries require attempts instead of counting system turns; closed transactions
+are refs; episode fixtures use the production plan constructor; and waits
+select idle, terminal, and fault events by their actual identity. The focused
+armed gate passed 22 tests / 146 assertions. Default's new pass-report contract
+and readable existing root handle were verified through MCP JVM mode.
+
+Final combined/platform verification is delegated to the orchestrator under
+the owner's 21:05Z rule. The transcript fixture at
+`test/seon/render/transcript_test.clj:893` still constructs retired result-EDN
+rows and permits an empty generated history; this broader note remains open.
+See `docs/prds/context-generation/research/fixtures-events-2026-09-15.md` for
+the exact test request and protected boundaries.
+
 ## Context-renders verification — 2026-09-15 05:21 UTC
 
 The HEAD-plus-paths fast invocation of `seon.cluster.agent-test`,
