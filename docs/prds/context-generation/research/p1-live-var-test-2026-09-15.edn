@@ -1,0 +1,1 @@
+#:seon.test{:fail-count 0, :pass-count 4, :run-at #inst "2026-09-15T22:52:02.273-00:00", :run #:db{:id 64744}, :run-basis-t 536872008, :error-count 0, :sym "seon.sci.eval-test/contracted-defn-renders-the-var-it-declared"}

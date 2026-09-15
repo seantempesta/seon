@@ -323,8 +323,8 @@
     (fn [connection-a]
       (test-support/with-database
         (fn [connection-b]
-          (db/transact! connection-a [{:seon.cluster/name "fork-a"}])
-          (db/transact! connection-b [{:seon.cluster/name "fork-b"}])
+          (test-support/seed-cluster! connection-a "fork-a")
+          (test-support/seed-cluster! connection-b "fork-b")
           (let [ctx-a (test-support/fork-cluster-ctx connection-a)
                 ctx-b (test-support/fork-cluster-ctx connection-b)
                 query
@@ -607,7 +607,7 @@
         "every declared injection resolves in the constructed context")))
 
 (deftest runtime-function-rows-carry-parsed-contract-facts
-  (let [ctx (eval/build-base-ctx)
+  (let [ctx (sci/fork (eval/build-base-ctx))
         evaluation
         (run-in ctx
                 (str "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
@@ -635,7 +635,7 @@
                      (#'seon.fn/desired-rows
                       {:seon.fn/roots ["src" (str root)]}
                       (fn [_phase]))))
-            ctx (eval/build-base-ctx)
+            ctx (sci/fork (eval/build-base-ctx))
             runtime-row
             (:seon.program/row
              (eval/evaluate
@@ -667,20 +667,12 @@
         (test-support/delete-recursively! (str root))))))
 
 (deftest contracted-defn-renders-the-var-it-declared
-  (let [def-node
-        (edn/read-string
-         (:seon.cluster.eval/result-edn (run "(def plain-declaration 1)")))
-        defn-node
-        (edn/read-string
-         (:seon.cluster.eval/result-edn
-          (run
-           (str "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
-                "rendered-declaration [x] x)"))))]
-    (is (= (:seon.print/face def-node)
-           (:seon.print/face defn-node)
-           :seon.print/var))
-    (is (= 'user/rendered-declaration
-           (symbol (:seon.print/name defn-node))))))
+  (let [plain (run "(def plain-declaration 1)")
+        contracted (run "(defn ^{:malli/schema [:=> [:cat :int] :int]} rendered-declaration [x] x)")]
+    (is (instance? sci.lang.Var (:seon.sci.admit/value plain)))
+    (is (instance? sci.lang.Var (:seon.sci.admit/value contracted)))
+    (is (= "#'user/plain-declaration" (:seon.eval/shown plain)))
+    (is (= "#'user/rendered-declaration" (:seon.eval/shown contracted)))))
 
 (deftest every-public-capability-function-in-the-graph-resolves-in-the-ctx
   ;; The class: ctx membership derived from what something else HAPPENED to
@@ -850,7 +842,7 @@
         (#'eval/success-evaluation
          {:seon.sci.eval/admitted
           {:seon.sci.admit/value 7
-           :seon.cluster.eval/result-edn "7"
+           :seon.eval/shown "7"
            :seon.sci.admit/record record}
           :seon.sci.admit/caps
           (assoc caps :seon.config.eval.result/max-string 3)
@@ -859,16 +851,16 @@
           :seon.sci.eval/namespace-name 'user
           :seon.sci.eval/ending-namespace 'next
           :seon.print/options {:seon.print/length 4}
-          :seon.sci.eval/defs defs
+          :seon.sci.eval/bindings defs
           :seon.program/row row})]
     (is (= {:seon.sci.admit/value 7
-            :seon.cluster.eval/result-edn "7"
+            :seon.eval/shown "7"
             :seon.print/options {:seon.print/length 4}
             :seon.cluster.eval/ns [:seon.ns/name 'user]
             :seon.sci.eval/ending-ns 'next
             :seon.sci.admit/record record
             :seon.program/row row
-            :seon.sci.eval/defs defs
+            :seon.sci.eval/bindings defs
             :seon.cluster.eval/output "restored\nabcdef"}
            evaluation))))
 
@@ -879,7 +871,7 @@
         value {:seon.error/kind :seon.sci.eval/time-limit
                :seon.error/message "Ran out of time."}
         admitted {:seon.sci.admit/value value
-                  :seon.cluster.eval/result-edn (pr-str value)}
+                  :seon.eval/shown (pr-str value)}
         defs [{:seon.def/id "user/x"}]
         evaluation
         (#'eval/failed-evaluation
@@ -890,31 +882,48 @@
           :seon.sci.eval/printed printed
           :seon.sci.eval/namespace-name 'user
           :seon.print/options {:seon.print/level 3}
-          :seon.sci.eval/defs defs
+          :seon.sci.eval/bindings defs
           :seon.sci.admit/record record
           :seon.sci.admit/value value
           :seon.cluster.eval/interrupted-at interrupted-at})]
     (is (= {:seon.sci.admit/value value
-            :seon.cluster.eval/result-edn (pr-str value)
+            :seon.eval/shown (pr-str value)
             :seon.print/options {:seon.print/level 3}
             :seon.cluster.eval/ns [:seon.ns/name 'user]
             :seon.sci.eval/ending-ns 'user
             :seon.cluster.eval/error "Ran out of time."
             :seon.sci.admit/record record
-            :seon.sci.eval/defs defs
+            :seon.sci.eval/bindings defs
             :seon.cluster.eval/interrupted-at interrupted-at
             :seon.cluster.eval/output "lost\nbefore failure"}
            evaluation))))
 
 (deftest evaluation-projection-prefers-the-live-context
-  (let [projection {:seon.schema.projection/forms {:user/x :int}}
-        ctx (assoc (eval/build-base-ctx)
-                   :seon.schema/projection projection)]
-    (with-redefs [seon.schema/current-projection
-                  (fn [] (throw (ex-info "fallback reached" {})))]
-      (is (identical?
-           projection
-           (#'eval/evaluation-projection {:seon.sci.eval/ctx ctx}))))))
+  (test-support/with-database
+    (fn [connection]
+      (let [database (db/db connection)
+            projection (db/carried-projection database)
+            fallback db/projection-fallback
+            missing (atom [])]
+        (with-redefs [schema/build-projection
+                      (fn [& _] (throw (ex-info "Unexpected projection rebuild" {})))
+                      db/projection-fallback
+                      (fn [operation]
+                        (swap! missing conj operation)
+                        (fallback operation))]
+          (let [ctx (eval/build-base-ctx)]
+            (is (identical? projection (#'eval/evaluation-projection
+                                       {:seon.sci.eval/ctx ctx})))
+            (is (identical? projection (#'eval/evaluation-projection
+                                       {:seon.db/db database})))
+            (is (identical? projection (#'eval/evaluation-projection
+                                       {:seon.schema/projection projection})))
+            (is (= 2 (:seon.sci.admit/value (run-in ctx "(+ 1 1)" 2000))))
+            (is (empty? @missing))
+            (let [refusal (test-support/refusal-data
+                           #(#'eval/evaluation-projection {}))]
+              (is (= :seon.schema/missing-projection (:seon.error/kind refusal)))
+              (is (= ['seon.sci.eval/evaluate] @missing)))))))))
 
 (deftest unmap-row-carries-the-exact-forked-namespace-state
   (let [ctx (eval/build-base-ctx)
@@ -974,6 +983,7 @@
           :seon.schema/projection projection})]
     (is (= 1 @calls))
     (is (= {:seon.schema/key :user/direct-schema
+            :seon.schema/ns [:seon.ns/name 'user]
             :seon.schema/form "[:int {:min 0}]"
             :seon.schema.admission/source :agent
             :seon.schema/generatable? true}

@@ -1,0 +1,2 @@
+#:seon.test{:fail-count 0, :pass-count 1, :run-at #inst "2026-09-15T22:49:54.332-00:00", :run #:db{:id 64740}, :run-basis-t 536872004, :error-count 0, :sym "seon.sci.eval-test/success-evaluation-assembles-every-optional-projection"}
+#:seon.test{:fail-count 0, :pass-count 1, :run-at #inst "2026-09-15T22:49:56.078-00:00", :run #:db{:id 64741}, :run-basis-t 536872005, :error-count 0, :sym "seon.sci.eval-test/failed-evaluation-assembles-failure-presence-facts"}

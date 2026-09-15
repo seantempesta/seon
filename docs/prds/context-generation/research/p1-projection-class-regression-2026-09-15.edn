@@ -1,0 +1,1 @@
+#:seon.test{:fail-count 0, :pass-count 7, :run-at #inst "2026-09-15T22:53:43.937-00:00", :run #:db{:id 64746}, :run-basis-t 536872010, :error-count 0, :sym "seon.sci.eval-test/evaluation-projection-prefers-the-live-context"}

@@ -1,0 +1,2 @@
+#:seon.test{:fail-count 0, :pass-count 3, :run-at #inst "2026-09-15T22:49:14.858-00:00", :run #:db{:id 64738}, :run-basis-t 536872002, :error-count 0, :sym "seon.sci.eval-test/runtime-function-rows-carry-parsed-contract-facts"}
+#:seon.test{:fail-count 0, :pass-count 4, :run-at #inst "2026-09-15T22:49:17.335-00:00", :run #:db{:id 64739}, :run-basis-t 536872003, :error-count 0, :sym "seon.sci.eval-test/static-and-runtime-contracted-definitions-publish-identical-facts"}

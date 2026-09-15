@@ -247,7 +247,11 @@
     (assoc ctx
            ::kernel/guard guard
            ::kernel/installed-functions (atom #{})
-           ::kernel/program-snapshot (atom {:functions {} :namespaces {}}))))
+           ::kernel/program-snapshot (atom {:functions {} :namespaces {}})
+           :seon.schema/projection
+           (or (schema/handed-projection)
+               (let [failure (db/projection-fallback 'seon.sci.eval/build-base-ctx)]
+                 (throw (ex-info (:seon.error/message failure) failure)))))))
 
 (defn agent-namespace
   "The namespace name assigned to `agent-id`, or nil when it is absent.
@@ -616,9 +620,13 @@
       (:seon.schema/projection ctx)))
 
 (defn- evaluation-projection
-  [{ctx :seon.sci.eval/ctx}]
+  [{ctx :seon.sci.eval/ctx database :seon.db/db
+    projection :seon.schema/projection}]
   (or (context-projection ctx)
-      (schema/build-projection (schema/registered-schemas))))
+      projection
+      (when database (db/carried-projection database))
+      (let [failure (db/projection-fallback 'seon.sci.eval/evaluate)]
+        (throw (ex-info (:seon.error/message failure) failure)))))
 
 (defn- advance-context-projection!
   "Advance a live context's projection at the database's basis transaction."

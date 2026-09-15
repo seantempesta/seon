@@ -1,0 +1,1 @@
+#:seon.test{:fail-count 0, :pass-count 4, :run-at #inst "2026-09-15T22:45:09.969-00:00", :run #:db{:id 64590}, :run-basis-t 536871928, :error-count 0, :sym "seon.sci.eval-test/acquired-source-context-forks-have-branch-custody-and-private-defs"}

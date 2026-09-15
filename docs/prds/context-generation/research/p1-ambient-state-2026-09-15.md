@@ -690,3 +690,37 @@ clj-kondo: zero errors/warnings for those two paths.
 Boundary: this is an in-process regression, not the orchestrator gate.
 Batch-4 repair continues; no new gate request is authorized yet. The platform
 pass does not establish that every remaining named test passes.
+
+
+### Remaining bare-context rebuild removed — 2026-09-15
+
+Verified `evaluation-projection` still rebuilt from registered schemas when a
+base context carried none. `build-base-ctx` now retains the supplied projection
+at construction. Evaluation reads the context, request, or database value;
+absence calls `seon.db/projection-fallback` and refuses. No rebuild remains in
+that function. Base-context injected bindings are unchanged.
+
+A ThreadMXBean probe of the same `(+ 1 1)` evaluation on a separately built base
+returned `2` before and after: **2,607,781,816 bytes / 992.861208 ms** before;
+**2,227,712 bytes / 1.723084 ms** after. See the adjacent dated
+`p1-bare-projection-before` and `p1-bare-projection-after` EDN evidence.
+
+The strengthened existing regression
+`seon.sci.eval-test/evaluation-projection-prefers-the-live-context` disables
+`schema/build-projection`, verifies each carried source and an actual evaluation,
+and verifies exactly one shared missing-projection event: candidate **7/0/0**,
+adopted **7/0/0**. In-place publication converged at source commit
+`6aa9ccb8-31a7-5bab-95f8-f97e1026ce9c`; no reset or new test JVM.
+
+The complete exact adopted in-process runs are in
+`p1-context-adopted-regressions-2026-09-15.edn`: projection carriage 7;
+branch custody/private defs 4; evaluated schema delta 5; runtime contract facts
+3; static/runtime contract parity 4; success projection 1; failure projection 1;
+live Var rendering 4. Total **29 passes, zero failures/errors**. Candidate results
+are retained separately. These test corrections use `seed-cluster!`, SCI's
+generation-aware `fork`, schema namespace provenance, and the current live-value,
+shown-text and binding fields. They do not reinstate serialized results.
+
+clj-kondo found zero errors and 41 warnings across the two files (existing
+shadowed names/unused bindings, including the unused test `admit` require).
+Remaining batch-4 failures are still being probed; no gate request yet.
