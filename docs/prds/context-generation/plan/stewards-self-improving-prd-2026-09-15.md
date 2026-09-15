@@ -390,3 +390,87 @@ files. Nothing in that sentence is a model's claim.
    generates items; the picture pair for `:seon.ns` reads the same
    detectors.
 
+
+## 11. The task as stored data, with tests as the success functions (owner, 2026-09-15 10:50)
+
+Owner: "it might actually be a set of functions for validating success —
+maybe explicit deftests, test-driven. Which data structure defines a task?
+Agents should inspect and add their own. A user asking a question is
+another task; the response is written too; the context is all
+communications with that user."
+
+### 11.1 Success conditions are tests
+
+A success function is a `deftest`: durable (`:seon.test` row with source,
+subject, ns), runnable by the agent (`(my.test/run)`), recorded with
+provenance (`:seon.test/run` → program digest, basis), and read by one
+predicate (`seon.test/verified?`). A test can assert a live fact as
+easily as a computed value — `(is (message-answered? db msg))` — so code
+tasks and communication tasks share one success mechanism. This is
+test-driven development as the loop: the tests exist before the work;
+the agent's job is to make them pass; completion is derived from their
+results, never asserted.
+
+### 11.2 The data structure: a task kind is references to functions
+
+```clojure
+#:my.task{:id       "message/answer"            ; identity
+          :title    "Answer a message you were sent"
+          :subjects [:seon.fn/sym "seon.cluster.message/unanswered"] ; detector: db → subjects
+          :context  [:seon.fn/sym "seon.cluster.message/thread"]     ; subject → the data the agent needs (here: every message between the two agents, the sender's identity and plan)
+          :tests    #{[:seon.test/sym "seon.cluster.message-test/answered"]} ; test templates bound to the subject
+          :writes   #{:seon.message}
+          :budget   12}
+```
+
+Every value is a ref to a row that already exists or that an agent can
+create with `defn`/`deftest`: the detector and the context are contracted
+functions, the tests are durable tests. A task kind is therefore data an
+agent can inspect (`(seon.db/pull '[*] [:my.task/id "message/answer"])`),
+copy, and add to by transacting a row that references functions it wrote.
+No kind stamp: the presence of `:my.task/id` is the family.
+
+### 11.3 An instance is a plan item
+
+`(my.task/instantiate task subject)` → ordinary plan transaction data:
+`:my.plan.item/task` (ref), `:my.plan.item/subject` (ref), the tests
+instantiated for the subject as `:seon.test` rows referenced by
+`:my.plan.item/tests`, the title and prose done-when rendered from the
+kind, `done-query` = "every test in `:my.plan.item/tests` is verified at a
+basis after this item's creation". Completion is recorded at settlement
+by the existing check (`d31d31639`). The item id derives through
+`seon.id` from kind + subject + basis.
+
+### 11.4 Rendering the task (one pair)
+
+The `:my.task` pair renders, for the viewer: the title and statement;
+the subject through its own pair; the context function's output (each
+entity through its pair, with viewer/subject/window on the request); the
+tests with their current results ("`answered` — not yet run" / "failed:
+…"); the exact calls that complete it (`(my.test/run)`; `(my.agent/done)`
+last). That block is the opening of the session and the debug page's
+Record for the item.
+
+### 11.5 A user question is the same row
+
+`#:my.task{:id "message/answer" …}` already covers it: the subject is the
+message; the context function returns the thread with that user (every
+`:seon.message` between the two agents, by `from`/`to` and `about`) plus
+the sender's plan and identity; the test asserts a reply `:about` the
+message exists and the inbox edge is gone; the response IS the write.
+Quality of a prose answer is not machine-verifiable; the test asserts
+delivery and threading, and the human's follow-up is the next task.
+
+### 11.6 First rows
+
+| id | subjects fn | context fn | tests | writes |
+|---|---|---|---|---|
+| `message/answer` | `message/unanswered` | `message/thread` | `answered` | message |
+| `test/red` | `test/red` | `test/subject-context` (test, fn, callers, faults) | the red test itself | fn, test |
+| `fn/untested` | `fn/untested` | `fn/context` (fn, contract, callers) | a new test reaching the fn, green | test |
+| `fault/recurring` | `error/recurring` | `error/context` (op, callers, evaluations) | a regression test naming the signature, green | fn, test |
+| `fn/export` | `fn/exportable` (admitted, tested, not on disk) | `fn/context` | files exist with the row's digest | files |
+
+The five detector/context functions and five test templates are the
+first build slice, each with its own deftest; the kinds are five
+transactions.
