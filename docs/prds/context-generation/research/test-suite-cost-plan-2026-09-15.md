@@ -128,3 +128,34 @@ and runner JVM probe returned zero tasks and `:serial-acquired? false`.
 The first probe correctly refused an unreloaded cache Var; reloading the
 changed dependency before its caller resolved it. Shell syntax and diff checks
 passed; the orchestrator gate remains pending.
+
+## Landing (tests)
+
+Lane `slow-tests-merge`, 2026-09-15. Read this plan and
+`.agents/skills/clojure-testing/SKILL.md` end to end, plus AGENTS.md §5;
+also read the data-oriented Clojure and REPL skills. No test JVM launched:
+the orchestrator-only assignment supersedes the ordinary lane gate rule.
+Requested namespaces are in `tmp/orchestrator/gate-requests/slow-tests-merge.txt`.
+
+Dependency ledger: canonical `seon.test-support/with-database` branches the
+shared memory base (`test/seon/test_support.clj:649`); its private
+`with-fresh-database` owns physical isolation (`:595`). SCI's real fork
+copies its env atom (`reference-code/sci/src/sci/core.cljc:345`);
+`seon.contracts-fixture` uses `support/fork-cluster-ctx`, as does
+`test/seon/cluster/agent_test.clj:90`. Assertions run through real
+`clojure.test/test-var` (`reference-code/clojure/src/clj/clojure/test.clj:708`)
+in default's JVM, with scratch fixture connections, never default's data.
+These are in-process REPL probes of loaded test definitions, not isolated
+gate results or development-adoption proofs.
+
+### Row 4 — refusal grammar
+
+`contracts_plan_test.clj` transfers all assertions from the four standalone
+grammar tests into `refusal-grammar-survives-real-evaluation`. Its four named
+cases share one canonical database and real SCI context. Acquisition and
+order-installation observers assert one and zero respectively.
+`contracts_fixture.clj` separates `with-grammar-agent` and `install-orders!`;
+`with-agent` still installs orders for the retained run-5 installation test.
+Both tests were loaded and invoked through MCP JVM on default: **52 passed,
+0 failed, 0 errors, 2 tests**. The corrected Ada/115 output remains asserted.
+Syntax lint: zero errors and warnings in these two files.

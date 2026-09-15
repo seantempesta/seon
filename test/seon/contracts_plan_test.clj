@@ -5,17 +5,16 @@
             [seon.ai.tokens :as tokens]
             [seon.db :as db]))
 
-(deftest missing-note-id-names-the-key-and-the-docstring-example
-  (fixture/with-agent
-    (fn [connection handle routing]
-      (let [[saved refusal] (fixture/submit connection handle routing
-                                            "(my.note/add! {:my.note/content \"A verified observation.\"})")
-            shown (:seon.eval/shown saved)]
-        (is (= :seon.instrument/contract-violated (:seon.error/kind refusal)))
-        (doseq [fragment ["my.note/add! refused request at [:my.note/id]"
-                          "missing :my.note/id" "Fix: Supply :my.note/id with a string"
-                          "Example: (my.note/add!" "A verified observation."]]
-          (is (str/includes? shown fragment) shown))))))
+(defn- missing-note-id-names-the-key-and-the-docstring-example
+  [connection handle routing]
+  (let [[saved refusal] (fixture/submit connection handle routing
+                                        "(my.note/add! {:my.note/content \"A verified observation.\"})")
+        shown (:seon.eval/shown saved)]
+    (is (= :seon.instrument/contract-violated (:seon.error/kind refusal)))
+    (doseq [fragment ["my.note/add! refused request at [:my.note/id]"
+                      "missing :my.note/id" "Fix: Supply :my.note/id with a string"
+                      "Example: (my.note/add!" "A verified observation."]]
+      (is (str/includes? shown fragment) shown))))
 
 (deftest installed-contract-refusal-names-the-run5-failing-coordinate
   (fixture/with-agent
@@ -37,37 +36,58 @@
         (is (nil? (:seon.cluster.eval/error saved)))
         (is (= {:customer "Ada" :total 115} value))))))
 
-(deftest run7-reader-refusal-uses-the-shared-grammar
-  (fixture/with-agent
-    (fn [connection handle routing]
-      (let [[saved refusal] (fixture/submit connection handle routing
-                                            "(my.plan/current! {:my.plan/item/id \"juniper/define\"})")
-            shown (:seon.eval/shown saved)]
-        (is (= :seon.sci.reader/unreadable (:seon.error/kind refusal)))
-        (doseq [fragment ["my.plan/current! refused source at"
-                          "expected readable Clojure source"
-                          ":my.plan/item/id" "Fix: Use :my.plan.item/id." "Example:"]]
-          (is (str/includes? shown fragment) shown))))))
+(defn- run7-reader-refusal-uses-the-shared-grammar
+  [connection handle routing]
+  (let [[saved refusal] (fixture/submit connection handle routing
+                                        "(my.plan/current! {:my.plan/item/id \"juniper/define\"})")
+        shown (:seon.eval/shown saved)]
+    (is (= :seon.sci.reader/unreadable (:seon.error/kind refusal)))
+    (doseq [fragment ["my.plan/current! refused source at"
+                      "expected readable Clojure source"
+                      ":my.plan/item/id" "Fix: Use :my.plan.item/id." "Example:"]]
+      (is (str/includes? shown fragment) shown))))
 
-(deftest run11-about-refusal-names-the-attribute-and-reference-shape
-  (fixture/with-agent
-    (fn [connection handle routing]
-      (let [[saved refusal] (fixture/submit connection handle routing
-                             "(my.note/add! {:my.note/id \"probe\" :my.note/content \"Observed.\" :my.note/about \"largest-customer-original\"})")
-            shown (:seon.eval/shown saved)]
-        (is (= :seon.instrument/contract-violated (:seon.error/kind refusal)))
-        (doseq [fragment ["my.note/add! refused request at [:my.note/about]"
-                          "an entity id or a lookup ref" "[:my.note/id" "Fix:" "largest-customer-original"]]
-          (is (str/includes? shown fragment) shown))
-        (is (= 1 (count (get-in refusal [:seon.error/data :seon.error/problems]))))))))
+(defn- run11-about-refusal-names-the-attribute-and-reference-shape
+  [connection handle routing]
+  (let [[saved refusal] (fixture/submit connection handle routing
+                         "(my.note/add! {:my.note/id \"probe\" :my.note/content \"Observed.\" :my.note/about \"largest-customer-original\"})")
+        shown (:seon.eval/shown saved)]
+    (is (= :seon.instrument/contract-violated (:seon.error/kind refusal)))
+    (doseq [fragment ["my.note/add! refused request at [:my.note/about]"
+                      "an entity id or a lookup ref" "[:my.note/id" "Fix:" "largest-customer-original"]]
+      (is (str/includes? shown fragment) shown))
+    (is (= 1 (count (get-in refusal [:seon.error/data :seon.error/problems]))))))
 
-(deftest unresolved-symbol-shows-the-correction-without-the-evidence-map
-  (fixture/with-agent
-    (fn [connection handle routing]
-      (let [[saved refusal] (fixture/submit connection handle routing "my.web/no-such-fetch")
-            shown (:seon.eval/shown saved)]
-        (is (= :seon.sci.eval/evaluation-failed (:seon.error/kind refusal)))
-        (is (str/includes? shown "my.web/no-such-fetch") shown)
-        (is (str/includes? shown "Fix: Define or require this symbol.") shown)
-        (is (< (tokens/estimate shown) 150) shown)
-        (is (not (str/includes? shown "diagnostic-evidence")) shown)))))
+(defn- unresolved-symbol-shows-the-correction-without-the-evidence-map
+  [connection handle routing]
+  (let [[saved refusal] (fixture/submit connection handle routing "my.web/no-such-fetch")
+        shown (:seon.eval/shown saved)]
+    (is (= :seon.sci.eval/evaluation-failed (:seon.error/kind refusal)))
+    (is (str/includes? shown "my.web/no-such-fetch") shown)
+    (is (str/includes? shown "Fix: Define or require this symbol.") shown)
+    (is (< (tokens/estimate shown) 150) shown)
+    (is (not (str/includes? shown "diagnostic-evidence")) shown)))
+
+(deftest refusal-grammar-survives-real-evaluation
+  (let [installations (atom 0)
+        acquisitions (atom 0)
+        executed (atom [])
+        install fixture/install-orders!
+        acquire fixture/with-grammar-agent
+        cases [[:note-id missing-note-id-names-the-key-and-the-docstring-example]
+               [:reader run7-reader-refusal-uses-the-shared-grammar]
+               [:about run11-about-refusal-names-the-attribute-and-reference-shape]
+               [:symbol unresolved-symbol-shows-the-correction-without-the-evidence-map]]]
+    (with-redefs [fixture/install-orders!
+                  (fn [& args] (swap! installations inc) (apply install args))
+                  fixture/with-grammar-agent
+                  (fn [body] (swap! acquisitions inc) (acquire body))]
+      (fixture/with-grammar-agent
+       (fn [connection ctx routing]
+         (doseq [[case-id verify!] cases]
+           (verify! connection ctx routing)
+           (swap! executed conj case-id)))))
+    (is (= [:note-id :reader :about :symbol] @executed))
+    (is (= 1 @acquisitions))
+    (is (zero? @installations)
+        "Refusal grammar needs no order schemas or order data.")))

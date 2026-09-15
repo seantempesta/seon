@@ -49,7 +49,7 @@
         [{:seon.program/row row :seon.sci.eval/evaluation evaluated}]}))
     [evaluated (:seon.sci.admit/value evaluated)]))
 
-(defn with-agent [body]
+(defn with-grammar-agent [body]
   (support/with-database
    (fn [connection]
      (support/seed-cluster! connection "contracts-plan")
@@ -59,18 +59,26 @@
      (db/transact! connection [{:seon.agent/id "contracts-plan"
                                :seon.agent/namespace {:seon.ns/name 'my.agents.juniper}}])
      (let [ctx (support/fork-cluster-ctx connection)]
-       (with-open [reader (java.io.PushbackReader. (java.io.StringReader. fixture/schema-source))]
-         (loop []
-           (let [form (read {:eof ::eof} reader)]
-             (when-not (= ::eof form)
-               (let [[result] (submit connection ctx nil (pr-str form))]
-                 (is (nil? (:seon.cluster.eval/error result))
-                     (:seon.cluster.eval/error result)))
-               (recur)))))
-       (let [projection (:seon.schema/projection (env/of ctx))]
-         (is (:db-after
-              (db/transact! connection
-                            (schema.datahike/malli->datahike-schema-in
-                             projection (schema.datahike/database-attributes-in projection))))))
-       (is (:db-after (db/transact! connection fixture/orders)))
        (body connection ctx nil)))))
+
+(defn install-orders! [connection ctx]
+  (with-open [reader (java.io.PushbackReader. (java.io.StringReader. fixture/schema-source))]
+    (loop []
+      (let [form (read {:eof ::eof} reader)]
+        (when-not (= ::eof form)
+          (let [[result] (submit connection ctx nil (pr-str form))]
+            (is (nil? (:seon.cluster.eval/error result))
+                (:seon.cluster.eval/error result)))
+          (recur)))))
+  (let [projection (:seon.schema/projection (env/of ctx))]
+    (is (:db-after
+         (db/transact! connection
+                       (schema.datahike/malli->datahike-schema-in
+                        projection (schema.datahike/database-attributes-in projection))))))
+  (is (:db-after (db/transact! connection fixture/orders))))
+
+(defn with-agent [body]
+  (with-grammar-agent
+   (fn [connection ctx routing]
+     (install-orders! connection ctx)
+     (body connection ctx routing))))
