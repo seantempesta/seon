@@ -7,6 +7,20 @@ tags: [issue, database, performance, class/p1, context]
 
 # `seon.db` reads rebuild the schema projection on every call when none is handed
 
+## P1 read-only verification — 2026-09-15
+
+At source basis `22893b713`, default MCP JVM session `p1-ambient-state`
+measured one raw `@connection` pull at 4,506,504,040 thread-allocated bytes /
+982.175166 ms, emitting one `projection-fallback` warning. The same pull with
+`seon.db/db` carriage cost 583,712 / 583,248 bytes and 0.407208 / 0.285417 ms.
+Both returned root's id. This verifies the residual after `d5e5b870e`, not a
+new repair. Acquisition still searches `running-instances`, and the metadata
+holds mutable projection state. The full no-sideways-input guarantee needs
+producer changes as well as deleting the read fallback. The assignment's
+cross-owner design stop, three priced options, exact forms, and boundaries
+are recorded in
+[the P1 landing note](../../prds/context-generation/research/p1-ambient-state-2026-09-15.md).
+
 ## Scope narrowed — 2026-09-15, database metadata carriage
 
 Implementation: `d5e5b870e`.

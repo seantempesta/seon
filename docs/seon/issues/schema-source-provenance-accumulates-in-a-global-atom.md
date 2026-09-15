@@ -7,6 +7,17 @@ tags: [issue, schema, class/p1, wave/schema-admission]
 
 # Carry schema source provenance as immutable admission data
 
+## P1 verification — 2026-09-15
+
+The historical `!source-files` atom is absent at HEAD `22893b713` and on
+default (`ns-resolve` returned nil); `git log -S` identifies `656cea270` as
+the removal. The complete acceptance remains open: `refusal!` at
+`src/seon/schema/edn.clj:410` now calls `resource-population default-resource`
+to find the file, rather than receiving the candidate population's provenance.
+This replaces the accumulating atom with a sideways packaged-source read.
+The [P1 landing note](../../prds/context-generation/research/p1-ambient-state-2026-09-15.md)
+records the design boundary. No production repair was attempted in that audit.
+
 ## Problem
 
 `seon.schema.edn/!source-files` accumulates schema-key-to-resource provenance
