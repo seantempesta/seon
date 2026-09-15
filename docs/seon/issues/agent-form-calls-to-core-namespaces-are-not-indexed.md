@@ -1,7 +1,7 @@
 ---
 type: issue
 status: open
-severity: blocker
+severity: friction
 tags: [issue, agent, sci, class/n7, wave/program-graph-indexing]
 ---
 
@@ -80,3 +80,9 @@ the agent actually did — FULL and HALF both completed the work correctly.
 ## Owner
 
 Program-graph indexing owner (`src/seon/fn.clj` reply/form analysis path).
+
+## Re-verified at HEAD (2026-09-15)
+
+OPEN, UNVERIFIABLE. Audited HEAD `7e35df213` still has `seon.fn/analyze-form` (`src/seon/fn.clj:642`) and relation persistence (`src/seon/turn.clj:1170-1178`); the removed form family does not establish removal of the edge defect. Exact live probe: `(let [db @(seon.operator/connection "default")] (seon.fn/analyze-form db "(seon.db/q '[:find ?e :where [?e :seon.agent/id]])" [:seon.ns/name "user"] nil))`. Observed: contract refusal in `analyze-forms` at `[0 :seon.program/row]`, expected map, got nil; the analysis never ran. Omitting the batch key and supplying `{}` also refused before analysis. This live contract boundary is not attributed to the historical edge omission or to a concurrent editor. Needed: a canonical armed evaluation with a valid declared program-row input, then inspect persisted edges for core and my.* calls. Downgraded to friction: the note demonstrates incorrect analysis/grading, not blocked execution or prompt generation at HEAD.
+
+surface: other

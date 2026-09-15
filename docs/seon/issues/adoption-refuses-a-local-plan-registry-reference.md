@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, adoption, schema]
 ---
@@ -23,3 +23,9 @@ negative evidence against treating the adoption marker alone as proof of loaded
 behavior; it does not establish the schema/indexing cause. The lane preserved
 the concurrently edited adoption owner. Outcomes are recorded in the
 [page-feed landing note](../../prds/context-generation/research/page-feed-landing-2026-09-08.md).
+
+## Resolution (2026-09-15 triage)
+
+At audited HEAD `7e35df213`, `src/seon/schema.clj:33-51` derives references through Malli's walker, only emitting keys in the canonical population and following local registry references. `resources/seon/schemas/my.plan.edn:119-148` still contains the local recursive key, so this is positive inspection of the original shape, not absence of its subject. The local key cannot become a canonical ref through this constructor. Verified with `git show 7e35df213:src/seon/schema.clj` and the schema resource. The historical subsequent stale browser paint is not evidence against this local-reference fix; adoption/loaded-state concerns remain in `class-loaded-artifacts-lack-source-identity.md`.
+
+surface: adoption-publication

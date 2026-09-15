@@ -79,3 +79,9 @@ default's one batched refork; the lane requested it before the remaining
 paid trial. Acceptance: after that refork, the shared fixture remains clean,
 ordinary no-provider turns settle as in the canonical loop test, and the
 single paid trial consumes the captured real prompt.
+
+## Re-verified at HEAD (2026-09-15)
+
+OPEN, UNVERIFIABLE. At audited HEAD `7e35df213`, `src/seon/cluster/agent.clj:657-681` serializes graph acquisition with `locking routing`; commit `e12ba7535` explicitly implements that fix and empty virtual replies. This removes the identified duplicate-acquisition race, but the note explicitly retains a separate historical 282-second pre-reply stall. Reproducing it requires the canonical installer, a no-provider wake, and adoption on a disposable cluster; read-only default inspection cannot reconstruct the old leaked graphs. MCP health timed out while JVM `(+ 1 2)` returned 3. No fresh no-provider turn was submitted and the old timing is not confirmed at HEAD. Keep blocker pending the lifecycle proof.
+
+surface: turn-loop

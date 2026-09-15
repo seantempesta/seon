@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, schema, runtime, class/n3, wave/seon-env-p3]
 ---
@@ -104,3 +104,9 @@ into agent context.
 - An admission that genuinely cannot resolve a predicate returns a flat
   `:seon.error` value naming the schema key and the predicate symbol; a
   regression asserts the value's shape and asserts that nothing throws.
+
+## Resolution (2026-09-15 triage)
+
+At audited HEAD `7e35df213`, `src/seon/sci/admit.clj:195-197` calls `identity-only-projection-in` with the projection carried in admission state, and `:696-702` acquires that supplied/handed projection once. It no longer calls the disk-derived zero-argument `shape-projection` in the reported identity path. Commit `3f6958fc2` contains the replacement. Read-only MCP JVM `(+ 1 2)` returned 3, but that alone is not an adoption proof. The separate incompatible development-adoption class remains owned by `a-hot-adopted-handle-shape-change-wedges-the-live-turn-proc-silently.md`; this resolution is specifically the implicit classpath pickup at value admission.
+
+surface: adoption-publication

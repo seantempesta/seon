@@ -1,7 +1,7 @@
 ---
 type: issue
 status: open
-severity: blocker
+severity: friction
 tags: [issue, render, web, class/n11, wave/transcript-deletion]
 ---
 
@@ -67,3 +67,9 @@ must not own a second session derivation.
   are unrepresentable.
 - The old transcript assembler and its direct drive/session callers are
   deleted, with one recurring same-entry-identity proof across AI and HTML.
+
+## Re-verified at HEAD (2026-09-15)
+
+OPEN, UNVERIFIABLE. Audited HEAD `7e35df213` no longer routes the agent schema to `render-session-html`: `resources/seon/schemas/seon.agent.edn:13-16` selects `render-identity-ai/html`. However `src/seon/render/transcript.clj:141`, `:669`, `:811`, and `:909` retain candidate/history and session helpers. `history-entries` now filters actual evaluations and uses `seon.repl/text` (`:831-848`), so the historical invented-form claim is not a current reproduction. Needed: an armed cross-surface history identity test and current caller-reach proof before declaring all separate assembly dead. No such test was run in this triage. Downgraded to friction because the specified agent-HTML route is gone and no present live-run blocker was reproduced.
+
+surface: render-debug-page
