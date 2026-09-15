@@ -2243,7 +2243,13 @@
      projection-state
      (fn []
        (with-bindings {#'db/*conn* connection
-                       #'db/*read-database* (:seon.db/db turn-environment)
+                       ;; The bound read value carries this evaluation's
+                       ;; projection state: interpreted reads run past the
+                       ;; dynamic binding above, and a bare value rebuilds
+                       ;; the projection per read (measured 2026-09-15).
+                       #'db/*read-database*
+                       (some-> (:seon.db/db turn-environment)
+                               (db/carry-projection-state projection-state))
                        #'db/*receipt* receipt
                        #'effect/*request-context*
                        (when (and run-id (some? form-ordinal) cluster-name)

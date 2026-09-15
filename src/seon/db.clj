@@ -138,7 +138,17 @@
                 state)))
           (vals @instances))))
 
-(defn- carry-projection-state
+(defn carry-projection-state
+  "Attach a cluster's projection state to a database value it derives from.
+
+  Reads take their schema projection from the value itself (law 2.1), so a
+  value minted anywhere else — a turn's bound read database, a fixture —
+  must carry the state before reads see it. An error value is returned
+  unchanged; a nil state leaves the value as it was."
+  {:malli/schema
+   [:=> [:cat [:or :seon.db/database-value :seon.error/value]
+         [:maybe :seon.sci.eval/projection-state]]
+    [:or :seon.db/database-value :seon.error/value]]}
   [database state]
   (if (and state (not (error-value? database)))
     (vary-meta database assoc :seon.sci.eval/projection-state state)
