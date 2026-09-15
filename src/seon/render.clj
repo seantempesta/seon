@@ -1417,6 +1417,28 @@
          (swap! state #(if (:seon.render/cache %) %
                           (assoc % :seon.render/cache (atom {}))))))))
 
+(defn- captured-history [request acquired]
+  (let [capture (db/q '[:find ?text . :in $ ?id :where [?t :seon.turn/id ?id]
+                        [?c :seon.context.capture/run ?t] [?c :seon.context.capture/prompt ?text]]
+                      (:seon.db/db request) (:seon.turn/id request))]
+    (if (or (not (string? capture)) (= capture (:seon.cluster.prompt/text acquired))
+            (:seon.error/kind acquired)) acquired
+      (let [entries (:seon.render.history/entries acquired)
+            saved (db/pull-many (:seon.db/db acquired)
+                               '[* {:seon.cluster.eval/ns [:seon.ns/name]}]
+                               (mapv :seon.render.history/subject entries))
+            emitted (mapv #((requiring-resolve 'seon.repl/text)
+                             ((requiring-resolve 'seon.repl/entity-emission) %)) saved)
+            segments (mapv #(str (when (pos? %1) "\n\n") %2) (range) emitted)]
+        (if (= capture (apply str segments))
+          (assoc acquired :seon.cluster.prompt/text capture
+                          :seon.render.history/segments segments
+                          :seon.render.history/entries
+                          (mapv #(assoc %1 :seon.render.history/bytes %2) entries emitted))
+          {:seon.error/kind ::capture-mismatch
+           :seon.error/message "Saved evaluations do not reconstruct the captured provider prompt."
+           :seon.turn/id (:seon.turn/id request)})))))
+
 (defn acquire-context!
   "Fold saved shown text at the named turn's immutable prompt basis.
 
@@ -1442,8 +1464,9 @@
                   (db/as-of database (get-in row [:seon.turn/closed-tx :db/id]))
                   ((requiring-resolve 'seon.turn/opening-db) database turn-id))]
       (if (:seon.error/kind basis) basis
-        ((requiring-resolve 'seon.render.web/derive-context!)
-         (assoc request :seon.db/db basis))))))
+        (captured-history request
+          ((requiring-resolve 'seon.render.web/derive-context!)
+           (assoc request :seon.db/db basis)))))))
 
 
 (defn- namespace-owner

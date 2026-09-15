@@ -1126,10 +1126,10 @@
       (cond
         (neg? millis) "Duration unavailable"
         (< millis 1000) (str millis " ms")
-        (< millis 60000) (str (quot millis 1000) " s")
+        (< millis 60000) (format "%.1f s" (/ millis 1000.0))
         (< millis 3600000) (str (quot millis 60000) " min")
-        :else (str (quot millis 3600000) " h "
-                   (mod (quot millis 60000) 60) " min")))
+        (< millis 86400000) (str (quot millis 3600000) " h " (mod (quot millis 60000) 60) " min")
+        :else (str (quot millis 86400000) " d " (mod (quot millis 3600000) 24) " h")))
     "Duration unavailable"))
 
 (defn- runtime-message-link [trigger]
@@ -1279,10 +1279,11 @@
       (when (and selected (not= false (::debug? request)))
         [:a {:class "seon-session-toggle" :href (session-url agent-id selected (not raw?))
              (keyword "data-on:click")
-             (str "evt.preventDefault(); history.replaceState(null, '', '"
-                  (session-url agent-id selected (not raw?)) "'); @get('"
-                  (session-url agent-id selected (not raw?)) "')")}
-         (if raw? "Colourised session" "As the model saw it")])
+             (when-not raw?
+               (str "evt.preventDefault(); history.replaceState(null, '', '"
+                    (session-url agent-id selected true) "'); @get('"
+                    (session-url agent-id selected true) "')"))}
+         (if raw? "Turn ledger" "As the model saw it")])
       (when (not= false (::debug? request))
         [:a {:href (route/path ::route/agent-debug {:id agent-id})} "Latest"])
       (when (::message-form request)
@@ -1328,7 +1329,9 @@
       (= first-shown last-shown) "identical shown text"
       (and (= 1 (count changes)) (seq (::path (first changes))))
       (let [change (first changes)]
-        (str "only " (last (::path change)) " changed " (::before change) " → " (::after change)))
+        (str "only " (last (::path change)) " changed"
+             (when (and (number? (::before change)) (number? (::after change)))
+               (str " " (::before change) " → " (::after change)))))
       (and (seq changes) (seq (::path (first changes)))) (str (count changes) " changed paths")
       :else (str (utf8-size (or first-shown "")) " → " (utf8-size (or last-shown "")) " shown bytes"))))
 
@@ -1364,13 +1367,8 @@
         selected (or (some #(when (= (:seon.turn/id request) (:seon.turn/id %)) %) rows)
                      (last rows))
         selected-id (:seon.turn/id selected)
-        opening (cond
-                  (and (= "System" (turn-kind database selected))
-                       (get-in selected [:seon.turn/closed-tx :db/id]))
-                  (db/as-of database (get-in selected [:seon.turn/closed-tx :db/id]))
-                  selected-id (turn/opening-db database selected-id)
-                  :else database)
-        acquired (render/acquire-context! (assoc request :seon.db/db opening :seon.turn/id selected-id))
+        acquired (render/acquire-context! (assoc request :seon.turn/id selected-id))
+        opening (:seon.db/db acquired)
         entries (:seon.render.history/entries acquired)
         prompt (:seon.cluster.prompt/text acquired)
         by-eid (into {} (map (juxt :db/id identity)) rows)
@@ -1465,6 +1463,224 @@
                   (map vector entries saved))))
          [:span {:class "seon-session-end" :data-init "el.scrollIntoView({block:'end'})"}]]])]))
 
+(defn- ledger-evaluations [database agent-id]
+  (let [found (db/q '[:find [?e ...]
+                       :in $ ?agent-id
+                       :where [?a :seon.agent/id ?agent-id] [?a :seon.agent/runtime ?r]
+                              [?r :seon.runtime/turns ?t] [?e :seon.cluster.eval/run ?t]]
+                     database agent-id)]
+    (if (:seon.error/kind found) found
+      (let [pulled (db/pull-many database
+                    '[:db/id :seon.cluster.eval/id :seon.cluster.eval/run
+                      :seon.cluster.eval/ordinal :seon.cluster.eval/source
+                      :seon.cluster.eval/comment :seon.eval/shown :seon.eval/renderer
+                      :seon.cluster.eval/error :seon.cluster.eval/output
+                      :seon.cluster.eval/interrupted-at :seon.cluster.eval/triage-edn
+                      :seon.eval/duration-ms :seon.sci.eval/ending-ns
+                      :seon.print/length :seon.print/level
+                      {:seon.cluster.eval/ns [:seon.ns/name]}] found)]
+        (if (:seon.error/kind pulled) pulled
+          (group-by #(get-in % [:seon.cluster.eval/run :db/id])
+                    (sort-by :seon.cluster.eval/ordinal pulled)))))))
+
+(defn- ledger-url [agent-id turn-id query]
+  (route/path ::route/agent-debug {:id agent-id} (assoc query :turn turn-id)))
+
+(defn- ledger-body-id [turn-id]
+  (block/surface-id (keyword "ledger-turn" turn-id)))
+
+(defn- ledger-context-id [turn-id]
+  (block/surface-id (keyword "ledger-context" turn-id)))
+
+(defn- colour-source [source]
+  (into [:code]
+        (map (fn [[style token]] [:span {:class (str "seon-syntax-" style)} token]))
+        (repl/syntax-tokens source)))
+
+(defn- ledger-heading [label author detail]
+  [:header {:class "seon-ledger-section-heading" :data-author "seon"}
+   [:h3 label] [:span detail] [:span {:class "seon-ledger-author"} (str "[" author "]")]])
+
+(defn- ledger-emissions [evaluations]
+  (for [saved evaluations]
+    [:pre (repl/render-emission-html (repl/entity-emission saved))]))
+
+(defn- ledger-effects
+  "Derive completed steps, sent messages and installed definitions at this turn's transactions."
+  [database agent-id row]
+  (let [opened (db/q '[:find ?tx . :in $ ?id :where [_ :seon.turn/id ?id ?tx]] database (:seon.turn/id row))
+        closed (get-in row [:seon.turn/closed-tx :db/id])]
+    (if-not (and opened closed) "Turn is still open."
+      (let [steps (db/q '[:find ?id :in $ ?agent ?from ?to
+                          :where [?a :seon.agent/id ?agent] [?tx :seon.db/user ?a]
+                                 [?s :my.plan.item/completed-tx ?tx]
+                                 [(<= ?from ?tx)] [(<= ?tx ?to)] [?s :my.plan.item/id ?id]]
+                        database agent-id opened closed)
+            messages (db/q '[:find ?target :in $ ?agent ?from ?to
+                             :where [?a :seon.agent/id ?agent] [?m :seon.message/from ?a ?tx]
+                                    [(<= ?from ?tx)] [(<= ?tx ?to)] [?m :seon.message/to ?recipient]
+                                    [?recipient :seon.agent/id ?target]] database agent-id opened closed)
+            definitions (db/q '[:find ?symbol :in $ ?from ?to
+                                :where (or [?f :seon.fn/sym ?symbol ?tx] [?f :seon.test/sym ?symbol ?tx])
+                                       [(<= ?from ?tx)] [(<= ?tx ?to)]] database opened closed)
+            effects (concat (map #(str "plan step " (first %) " completed") steps)
+                            (map #(str "message sent to " (first %)) messages)
+                            (map #(str "definition installed during this turn: " (first %)) definitions))]
+        (if (seq effects) (str/join " · " effects) "—")))))
+
+(defn- ledger-turn-body [request rows evaluations row]
+  (let [database (:seon.db/db request)
+        ordinal (::ordinal row)
+        provider? (seq (:seon.turn/attempts row))
+        own (get evaluations (:db/id row) [])
+        generated (if provider?
+                    (->> rows (take ordinal) reverse
+                         (take-while #(empty? (:seon.turn/attempts %))) reverse
+                         (mapcat #(get evaluations (:db/id %) []))) own)
+        first-generated (first generated)
+        starts-opening? (and (= (get-in first-generated [:seon.cluster.eval/run :db/id])
+                                (:db/id (first rows)))
+                             (zero? (or (:seon.cluster.eval/ordinal first-generated) 0)))
+        added-bytes (+ (reduce + 0 (map #(utf8-size (repl/text (repl/entity-emission %))) generated))
+                       (* 2 (max 0 (- (count generated) (if starts-opening? 1 0)))))
+        reply (or (turn-reply (:seon.db/connection request) row) "")
+        turn-id (:seon.turn/id row)
+        capture (when provider?
+                  (db/q '[:find ?text . :in $ ?id :where [?t :seon.turn/id ?id]
+                          [?c :seon.context.capture/run ?t] [?c :seon.context.capture/prompt ?text]] database turn-id))
+        attempt (last (sort-by :seon.ai.attempt/ordinal (:seon.turn/attempts row)))
+        usage (some-> (:seon.ai.attempt/usage-edn attempt) readable-shown ::value)
+        calibration (when (:seon.ai/model attempt)
+                      ((requiring-resolve 'seon.cluster.prompt/model-calibration) database (:seon.ai/model attempt)))
+        groups (partition-by :seon.cluster.eval/source generated)]
+    [:div {:id (ledger-body-id turn-id) :data-ledger-loaded turn-id :class "seon-ledger-body"}
+     [:section {:class "seon-ledger-sent" :data-author "seon"}
+      (ledger-heading (cond provider? "WE SENT"
+                            (zero? ordinal) "WE GENERATED (opening)"
+                            :else (str "WE GENERATED (system turn " ordinal ")"))
+                      "seon" (str (count generated) " emissions · " (format "%,d" added-bytes) " bytes"))
+      (when provider? [:p {:class "seon-ledger-note"} "Generated context added before this reply; earlier results remain in the full context."])
+      (if (seq generated)
+        (list
+         (for [matches groups]
+           (let [source (:seon.cluster.eval/source (first matches))
+                 prior (->> rows (take ordinal)
+                            (mapcat #(get evaluations (:db/id %) []))
+                            (take-while #(not= (:seon.cluster.eval/id %)
+                                              (:seon.cluster.eval/id (first matches))))
+                            (filter #(= source (:seon.cluster.eval/source %))) last)]
+             [:details {:class "seon-ledger-generated"}
+              [:summary [:code (first (str/split-lines source))]
+               (when prior
+                 [:span (str " · re-read · " (reread-summary [prior (last matches)]))])]
+              (ledger-emissions matches)])))
+        [:p "Nothing new — no generated context was added before this turn."])
+      (when provider?
+        [:details {:class "seon-ledger-full-context"
+                   (keyword "data-on:toggle")
+                   (str "if(el.open && !el.querySelector('[data-context-loaded]')) @get('"
+                        (ledger-url (:seon.agent/id request) turn-id {:context "true"}) "')")}
+         [:summary
+          (str "Full context as sent"
+               (when capture (str ": " (format "%,d" (utf8-size capture)) " bytes · rebuilt ≈"
+                                  (format "%,d" (tokens/estimate capture calibration)) " tokens"))
+               (when-let [billed (get usage "prompt_tokens")] (str " · billed " (format "%,d" billed))))]
+         [:div {:id (ledger-context-id turn-id)}]])]
+     (when provider?
+       (list
+        [:section {:class "seon-ledger-reply" :data-author "agent"}
+         (ledger-heading "AGENT REPLIED" "agent" (str (format "%,d" (utf8-size reply)) " bytes"))
+         [:pre {:data-reply-bytes (utf8-size reply) :data-reply-turn turn-id} (colour-source reply)]]
+        [:section {:class (str "seon-ledger-results"
+                              (when (some :seon.cluster.eval/error own) " seon-ledger-results-error"))
+                   :data-author "seon" :data-evaluation-count (count own)}
+         (ledger-heading "RESULTS (evaluated by seon)" "seon" (str (count own) " evaluations"))
+         (if (seq own)
+           (for [saved own
+                 :let [outcome (cond (:seon.cluster.eval/error saved) "error"
+                                     (:seon.eval/shown saved) "value" :else "out")
+                       answer (or (repl/response (repl/entity-emission saved)) "No response recorded.")
+                       rendered (colour-source answer)
+                       long? (> (count (str/split-lines answer)) 6)]]
+             [:article {:class (str "seon-ledger-result seon-ledger-result-" outcome)
+                        :data-result-ordinal (:seon.cluster.eval/ordinal saved)}
+              [:header [:span (str (inc (:seon.cluster.eval/ordinal saved)))]
+               [:code (first (str/split-lines (or (:seon.cluster.eval/source saved) "Reader input")))]
+               [:strong outcome]]
+              (if long?
+                [:details [:summary
+                           [:pre (colour-source (str/join "\n" (take 6 (str/split-lines answer))))]
+                           "Show all"] [:pre rendered]]
+                [:pre rendered])])
+           [:p "No evaluations recorded for this reply."])
+         [:p {:class "seon-ledger-effects"}
+          (str "Effects: " (ledger-effects database (:seon.agent/id request) row))]]))]))
+
+(defn render-ledger-turn
+  "Load one card from saved reply and evaluations without executing forms."
+  {:malli/schema [:=> [:cat :seon.cluster.prompt/request] :seon.render/hiccup]}
+  [request]
+  (let [rows (turn-rows (:seon.db/db request) (:seon.agent/id request))
+        row (some #(when (= (:seon.turn/id request) (:seon.turn/id %)) %) rows)]
+    (let [evaluations (ledger-evaluations (:seon.db/db request) (:seon.agent/id request))]
+      (if (:seon.error/kind evaluations)
+        [:div {:id (ledger-body-id (:seon.turn/id request))} [:p (:seon.error/message evaluations)]]
+        (ledger-turn-body request rows evaluations row)))))
+
+(defn render-ledger-context
+  "Expand the same faithful per-turn transcript beneath its ledger card."
+  {:malli/schema [:=> [:cat :seon.cluster.prompt/request] :seon.render/hiccup]}
+  [request]
+  (let [rendered (render-session request)]
+    [:div {:id (ledger-context-id (:seon.turn/id request)) :data-context-loaded "true"
+           :data-signals (:data-signals (second rendered))}
+     [:p "Exact saved prompt · readline, input, then response"]
+     (last rendered)]))
+
+(defn render-ledger
+  "Turn ledger: generated context, raw model reply, evaluated results.
+  Only selected and last three cards have bodies on initial render."
+  {:malli/schema [:=> [:cat [:and :seon.render/unit
+                             [:map [:seon.db/db :seon.db/db] [:seon.agent/id :seon.agent/id]]]]
+                  :seon.render/hiccup]}
+  [request]
+  (let [database (:seon.db/db request)
+        rows (turn-rows database (:seon.agent/id request))
+        selected (or (:seon.turn/id request) (:seon.turn/id (last rows)))
+        evaluations (ledger-evaluations database (:seon.agent/id request))
+        expanded (conj (set (map :seon.turn/id (take-last 3 rows))) selected)]
+    [:section {:id (session-id (:seon.agent/id request)) :class "seon-session seon-ledger" :data-author "seon"}
+     [:div {:class "seon-session-sticky"} (session-header request rows)
+      [:h2 "Turn ledger"]
+      [:p {:class "seon-ledger-note"} "What we sent · what the agent said · what happened. Open a turn to inspect it."]]
+     (cond
+       (:seon.error/kind evaluations) [:p (:seon.error/message evaluations)]
+       (seq rows)
+       (for [row rows
+             :let [turn-id (:seon.turn/id row)
+                   attempt (last (sort-by :seon.ai.attempt/ordinal (:seon.turn/attempts row)))
+                   usage (some-> (:seon.ai.attempt/usage-edn attempt) readable-shown ::value)]]
+         [:details {:class "seon-ledger-turn" :open (contains? expanded turn-id)
+                    :data-turn-id turn-id :data-turn-kind (turn-kind database row)
+                    :id (block/surface-id (keyword "turn" turn-id))
+                    :data-init (when (= selected turn-id) "el.scrollIntoView({block:'start'})")
+                    (keyword "data-on:toggle")
+                    (str "if(el.open && !el.querySelector('[data-ledger-loaded]')) @get('"
+                         (ledger-url (:seon.agent/id request) turn-id {:card "true"}) "')")}
+          [:summary
+           (str "Turn " (::ordinal row) " · " (str/lower-case (turn-kind database row)) " · ")
+           (runtime-time (get-in row [:seon.turn/opened-tx :db/txInstant]))
+           (when attempt
+             (str " · " (:seon.ai/model attempt)
+                  " · " (format "%,d" (get usage "prompt_tokens" 0)) " in / "
+                  (format "%,d" (get usage "completion_tokens" 0)) " out"))
+           (str " · " (runtime-duration (get-in row [:seon.turn/opened-tx :db/txInstant])
+                                       (get-in row [:seon.turn/closed-tx :db/txInstant])))]
+          (if (contains? expanded turn-id)
+            (ledger-turn-body request rows evaluations row)
+            [:div {:id (ledger-body-id turn-id)}])])
+       :else [:p "No turns recorded."])]))
+
 (defn render-runtime-html
   "Show transaction times, message triggers, listens, and newest-first turns."
   {:malli/schema [:=> [:cat :seon.render/unit]
@@ -1507,9 +1723,9 @@
             (if open "Turn open" "Idle")
             (when since
               (list " since " (runtime-time since) " ("
-                    [:span {:data-text (str "Math.max(0, Math.floor((Date.now() - "
+                    [:span {:data-text (str "(() => {const m=Math.max(0,Math.floor((Date.now()-"
                                             (.getTime ^java.util.Date since)
-                                            ") / 60000)) + ' min'")}
+                                            ")/60000));return m>=1440?Math.floor(m/1440)+' d '+Math.floor(m%1440/60)+' h':m>=60?Math.floor(m/60)+' h '+m%60+' min':m+' min'})()")}
                      (runtime-duration since (java.util.Date.))] ")"))]
            (when trigger
              [:div {:class "seon-runtime-trigger"}

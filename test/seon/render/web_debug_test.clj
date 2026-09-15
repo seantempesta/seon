@@ -111,6 +111,24 @@
                (is (= (set turns) (set (map :data-turn-id headers))))
                (is (= 1 (count (filter #(= "Provider" (:data-turn-kind %)) headers))))
                (is (= expected exact))
+               (let [ledger (transcript/render-ledger (#'web/session-controls unit))
+                     ledger-nodes (tree-seq coll? seq ledger)
+                     reply-node (first (filter #(and (vector? %) (= provider-id (:data-reply-turn (second %)))) ledger-nodes))
+                     expected-reply (:seon.turn/reply (db/pull @connection [:seon.turn/reply] [:seon.turn/id provider-id]))]
+                 (is (= expected-reply (element-text reply-node)))
+                 (is (= (set turns) (set (keep #(when (map? %) (:data-turn-id %)) ledger-nodes))))
+                 (is (str/includes? (element-text ledger) "WE SENT"))
+                 (is (str/includes? (element-text ledger) "AGENT REPLIED"))
+                 (is (str/includes? (element-text ledger) "RESULTS (evaluated by seon)"))
+                 (is (= (db/q '[:find (count ?e) . :in $ ?id
+                                 :where [?t :seon.turn/id ?id] [?e :seon.cluster.eval/run ?t]]
+                               @connection provider-id)
+                        (reduce + (keep #(when (map? %) (:data-evaluation-count %)) ledger-nodes))))
+                 (doseq [node ledger-nodes
+                         :when (and (vector? node) (= :section (first node)))]
+                   (is (#{"seon" "agent"} (:data-author (second node)))))
+                 (doseq [card ledger-nodes :when (and (vector? card) (= "System" (:data-turn-kind (second card))))]
+                   (is (not (str/includes? (element-text card) "AGENT REPLIED")))))
                (is (= expected (:seon.cluster.prompt/text (render/acquire-context! unit)))
                    "The acquisition owner honors the turn id even with today's database.")
                (doseq [row (#'transcript/turn-rows @connection "juniper")

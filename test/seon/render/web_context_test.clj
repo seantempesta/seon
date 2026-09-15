@@ -69,9 +69,9 @@
            calls (atom 0)]
        (with-redefs [kernel/invoke
                      (fn [request] (swap! calls inc) (invoke request))]
-         (let [before (#'web-test/fetch server "/agent/root/debug")
+         (let [before (#'web-test/fetch server "/agent/root")
                initial @calls
-               _ (#'web-test/fetch server "/agent/root/debug")]
+               _ (#'web-test/fetch server "/agent/root")]
            (is (= 200 (.statusCode before)))
            (is (pos? initial) "the real SCI renderer ran")
            (is (= initial @calls) "the unchanged page reuses its calls")
@@ -80,34 +80,29 @@
                             :seon.source/commit-id
                             #uuid "f54229d7-54eb-472d-9ae8-917a0f97af71"]])]
              (is (:db-after report) (pr-str report)))
-           (let [after (#'web-test/fetch server "/agent/root/debug")]
+           (let [after (#'web-test/fetch server "/agent/root")]
              (is (identical? snapshot @(:seon.sci.kernel/program-snapshot ctx)))
              (is (= 200 (.statusCode after)))
              (is (< initial @calls)
                  "adoption invalidates even without a proc wake or SCI snapshot replacement"))))))))
 
-(deftest the-context-algorithm-is-primary-with-a-collapsed-comparison
+(deftest selected-session-defers-prompt-acquisition
   (#'web-test/with-server
    (fn [_connection server _context]
-     (let [derive @#'web/debug-prompt
+     (let [derive-prompt @#'web/debug-prompt
            calls (atom 0)]
        (with-redefs-fn {#'web/debug-prompt
-                       (fn [& args] (swap! calls inc) (apply derive args))}
+                       (fn [& args] (swap! calls inc) (apply derive-prompt args))}
          (fn []
            (let [ordinary (#'web-test/fetch server "/agent/root/debug")]
              (is (= 200 (.statusCode ordinary)))
-             (is (pos? @calls))
-             (is (not (str/includes? (.body ordinary) "prompt=")))
-             (is (str/includes? (.body ordinary) "Context now"))
-             (is (< (str/index-of (.body ordinary) "Context now")
-                    (str/index-of (.body ordinary) "Entity attributes and connections")))
-             (is (str/includes? (.body ordinary)
-                                "<details class=\"seon-debug-provider-prompt\"><summary>Provider prompt comparison</summary>")))
+             (is (zero? @calls))
+             (is (str/includes? (.body ordinary) "Turn ledger"))
+             (is (str/includes? (.body ordinary) "Record")))
            (let [explicit (#'web-test/fetch server "/agent/root/debug?prompt=true")]
              (is (= 200 (.statusCode explicit)))
-             (is (pos? @calls))
-             (is (str/includes? (.body explicit) "Context now"))
-             (is (str/includes? (.body explicit) "Would-be system turn")))))))))
+             (is (zero? @calls))
+             (is (str/includes? (.body explicit) "Session")))))))))
 
 (deftest a-new-message-does-not-reinvoke-the-identity-pair
   (#'web-test/with-server
@@ -121,14 +116,17 @@
                               (str (:seon.fn/sym request)))
                          (swap! calls inc))
                        (invoke request))]
-         (let [before (#'web-test/fetch server "/agent/root/debug")
+         (let [before (#'web-test/fetch server "/agent/root")
                initial @calls]
            (is (= 200 (.statusCode before)))
            (is (pos? initial))
            (db/transact! connection
                          [{:seon.message/id "identity-cache-message" :seon.message/to [:seon.agent/id "root"] :seon.message/content "A newly connected message." :seon.message/inbox [:seon.agent/id "root"]}])
-           (let [after (#'web-test/fetch server "/agent/root/debug")]
+           (let [after (#'web-test/fetch server "/agent/root")]
              (is (= 200 (.statusCode after)))
-             (is (str/includes? (.body after) "A newly connected message."))
+             (is (= "A newly connected message."
+                    (:seon.message/content
+                     (db/pull @connection [:seon.message/content]
+                              [:seon.message/id "identity-cache-message"]))))
              (is (= initial @calls)
                  "reverse concern changes are not inputs to the scalar identity pair"))))))))

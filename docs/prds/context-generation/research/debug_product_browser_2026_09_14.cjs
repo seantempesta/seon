@@ -1,77 +1,65 @@
-// NODE_PATH must include Playwright. Run from the checkout after adoption.
+// Read-only live ledger verification. NODE_PATH must include Playwright.
 const { chromium } = require('playwright');
-const fs = require('node:fs/promises');
 const assert = require('node:assert/strict');
-
+const fs = require('node:fs/promises');
 (async () => {
-  const browser = await chromium.launch({ headless: true, channel: 'chrome' });
-  try {
-    await fs.mkdir('tmp/debug-product', { recursive: true });
-    for (const width of [1440, 700]) {
-      const page = await browser.newPage({ viewport: { width, height: 900 } });
-      page.setDefaultTimeout(30000);
-      const errors = [];
-      page.on('pageerror', error => errors.push(error.message));
-      const response = await page.goto('http://127.0.0.1:7994/ns/my.agents.juniper/debug');
-      assert.equal(response.status(), 200);
-      await page.locator('[data-session-loaded]').waitFor({ state: 'attached' });
-      const coloured = await page.locator('[data-emission-bytes]').allTextContents();
-      assert.ok(coloured.length > 0);
-      const selected = await page.locator('[data-session-loaded]').getAttribute('data-session-loaded');
-      await page.screenshot({ path: `tmp/debug-product/${process.argv[2] || 'a-final'}-${width}.png`, fullPage: true });
-      await page.screenshot({ path: `tmp/debug-product/${process.argv[2] || 'a-final'}-${width}-end.png` });
-      const layout = await page.evaluate(() => ({
-        viewport: innerWidth, documentWidth: document.documentElement.scrollWidth,
-        scrollTop: scrollY,
-        overflow: [...document.querySelectorAll('.seon-session-page *')]
-          .filter(el => el.getBoundingClientRect().width && el.scrollWidth > el.clientWidth + 1
-            && getComputedStyle(el).display !== 'inline')
-          .map(el => ({ tag: el.tagName, class: el.className }))
-      }));
-      assert.equal(layout.documentWidth, width);
-      assert.ok(layout.scrollTop > 0);
-      assert.deepEqual(layout.overflow, []);
-      await page.evaluate(() => window.scrollTo(0, 0));
-      await page.screenshot({ path: `tmp/debug-product/${process.argv[2] || 'a-final'}-${width}-top.png` });
-      await page.getByRole('link', { name: 'As the model saw it', exact: true }).click();
-      const raw = page.locator('[data-prompt-bytes]');
-      await raw.waitFor();
-      assert.equal(await raw.textContent(), coloured.join(''));
-      assert.equal(Number(await raw.getAttribute('data-prompt-bytes')), Buffer.byteLength(coloured.join('')));
-      assert.equal(await page.locator('.seon-agent-routes').count(), 0);
-      assert.equal(await page.locator('.seon-session-message').getAttribute('open'), null);
-      assert.match(await page.locator('.seon-session-state').textContent(), /default/);
-      await page.locator('.seon-session-message summary').click();
-      await page.getByPlaceholder('message agent juniper …').fill('unsent browser verification');
-      assert.equal(await page.getByPlaceholder('message agent juniper …').inputValue(), 'unsent browser verification');
-      await page.locator('.seon-session-message summary').click();
-      await page.locator('.seon-session-record summary').click();
-      await page.locator('.seon-session-record .seon-walk-unit').first().waitFor({ state: 'attached' });
-      assert.deepEqual(errors, []);
-      console.log(JSON.stringify({ selected, emissions: coloured.length,
-        bytes: Buffer.byteLength(coloured.join('')), ...layout }));
-      await page.goto('http://127.0.0.1:7994/ns/my.agents.juniper');
-      await page.locator('.seon-session-header').waitFor();
-      await page.screenshot({ path: `tmp/debug-product/${process.argv[2] || 'a-final'}-agent-${width}.png`, fullPage: true });
-      await page.screenshot({ path: `tmp/debug-product/${process.argv[2] || 'a-final'}-agent-${width}-top.png` });
-      assert.match(await page.locator('h1').first().textContent(), /juniper/);
-      const blocks = page.locator('.seon-rank-layout > .seon-walk-unit');
-      assert.equal(await blocks.first().getAttribute('data-walk-path'), '[:seon.agent/plan]');
-      assert.match(await blocks.nth(1).textContent(), /Runtime/);
-      assert.equal(await blocks.nth(2).getAttribute('data-walk-path'), '[:seon.message/_inbox]');
-      assert.equal(await page.getByText('show everything', { exact: true }).count(), 0);
-      const mainLayout = await page.evaluate(() => ({
-        documentWidth: document.documentElement.scrollWidth,
-        innerScrollers: [...document.querySelectorAll('.seon-namespace-page *')]
-          .filter(el => ['auto', 'scroll'].includes(getComputedStyle(el).overflowY)
-            && el.scrollHeight > el.clientHeight + 1).map(el => el.className)
-      }));
-      assert.equal(mainLayout.documentWidth, width);
-      assert.deepEqual(mainLayout.innerScrollers, []);
-      await page.locator('.seon-turn-history summary').click();
-      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), width);
-      console.log(JSON.stringify({ page: 'agent', width, ...mainLayout }));
-      await page.close();
-    }
-  } finally { await browser.close(); }
-})().catch(error => { console.error(error); process.exitCode = 1; });
+ const browser = await chromium.launch({headless:true, channel:'chrome'});
+ const prefix = process.argv[2] || 'ledger';
+ const turn = process.argv[3];
+ try {
+  await fs.mkdir('tmp/debug-product', {recursive:true});
+  for (const width of [1440,700]) {
+   const page = await browser.newPage({viewport:{width,height:900}});
+   page.setDefaultTimeout(30000);
+   const errors=[]; page.on('pageerror',e=>errors.push(e.message));
+   const start=Date.now();
+   const response=await page.goto('http://127.0.0.1:7994/ns/my.agents.juniper/debug'+(turn?'?turn='+turn:''));
+   assert.equal(response.status(),200);
+   await page.locator('.seon-ledger').waitFor();
+   const cards=page.locator('.seon-ledger-turn');
+   assert.equal(await cards.count(),61);
+   const selected=turn || await cards.last().getAttribute('data-turn-id');
+   const card=page.locator(`.seon-ledger-turn[data-turn-id="${selected}"]`);
+   await card.scrollIntoViewIfNeeded();
+   await page.screenshot({path:`tmp/debug-product/${prefix}-${width}-selected.png`});
+   await page.evaluate(()=>scrollTo(0,0));
+   await page.screenshot({path:`tmp/debug-product/${prefix}-${width}.png`,fullPage:true});
+   await page.screenshot({path:`tmp/debug-product/${prefix}-${width}-top.png`});
+   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth),width);
+   for (const system of await page.locator('.seon-ledger-turn[data-turn-kind="System"]').all())
+    assert.equal(await system.locator('.seon-ledger-reply').count(),0);
+   const bytes=await card.locator('[data-reply-bytes]').textContent();
+   assert.equal(Buffer.byteLength(bytes),Number(await card.locator('[data-reply-bytes]').getAttribute('data-reply-bytes')));
+   assert.equal(await card.locator('.seon-ledger-sent[data-author="seon"]').count(),1);
+   assert.equal(await card.locator('.seon-ledger-reply[data-author="agent"]').count(),1);
+   assert.equal(await card.locator('.seon-ledger-results[data-author="seon"]').count(),1);
+   assert.equal(await card.locator('.seon-ledger-result').count(),
+    Number(await card.locator('[data-evaluation-count]').getAttribute('data-evaluation-count')));
+   await card.locator('.seon-ledger-full-context > summary').click();
+   await card.locator('[data-context-loaded]').waitFor();
+   const coloured=(await card.locator('[data-emission-bytes]').allTextContents()).join('');
+   assert.ok(coloured.length);
+   const raw=await browser.newPage({viewport:{width,height:900}});
+   await raw.goto(`http://127.0.0.1:7994/ns/my.agents.juniper/debug?turn=${selected}&prompt=true`);
+   await raw.locator('[data-prompt-bytes]').waitFor();
+   assert.equal(await raw.locator('[data-prompt-bytes]').textContent(),coloured);
+   await raw.getByRole('link',{name:'Turn ledger',exact:true}).click();
+   await raw.locator('.seon-ledger').waitFor();
+   await raw.close();
+   const opening=cards.first();
+   if (!(await opening.getAttribute('open'))) {
+    await opening.locator(':scope > summary').click();
+    await opening.locator('[data-ledger-loaded]').waitFor();
+   }
+   assert.equal(await opening.locator('.seon-ledger-reply').count(),0);
+   assert.ok((await opening.locator('.seon-ledger-sent').textContent()).includes('WE GENERATED (opening)'));
+   assert.deepEqual(errors,[]);
+   console.log(JSON.stringify({width,selected,cards:61,replyBytes:Buffer.byteLength(bytes),promptBytes:Buffer.byteLength(coloured),elapsedMs:Date.now()-start}));
+   await page.goto('http://127.0.0.1:7994/ns/my.agents.juniper');
+   await page.locator('.seon-session-header').waitFor();
+   await page.screenshot({path:`tmp/debug-product/${prefix}-agent-${width}.png`,fullPage:true});
+   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth),width);
+   await page.close();
+  }
+ } finally { await browser.close(); }
+})().catch(e=>{console.error(e);process.exitCode=1;});

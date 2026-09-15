@@ -3121,6 +3121,8 @@
 (defn- debug-turn-response
   ([service agent-id turn-id] (debug-turn-response service agent-id turn-id false))
   ([service agent-id turn-id raw?]
+   (debug-turn-response service agent-id turn-id raw? :full))
+  ([service agent-id turn-id raw? view]
   (let [connection (:seon.store/connection-object service)
         database @connection
         owner (db/q '[:find ?agent-id . :in $ ?turn-id
@@ -3134,7 +3136,10 @@
        :headers {"content-type" "text/html; charset=utf-8"
                  "datastar-mode" "replace"}
        :body (hiccup/->string
-              (transcript/render-session
+              ((case view :card transcript/render-ledger-turn
+                          :context transcript/render-ledger-context
+                          :ledger transcript/render-ledger
+                          transcript/render-session)
                (session-controls (debug-turn-request database connection agent-id
                                    (:seon.sci.admit/caps service)
                                    (assoc service :seon.turn/id turn-id
@@ -3159,7 +3164,12 @@
     (and (get (query-params request) "turn")
          (= "true" (get-in request [:headers "datastar-request"])))
     (debug-turn-response service agent-id (get (query-params request) "turn")
-                         (= "true" (get (query-params request) "prompt")))
+                         (= "true" (get (query-params request) "prompt"))
+                         (cond
+                           (get (query-params request) "card") :card
+                           (get (query-params request) "context") :context
+                           (get (query-params request) "ledger") :ledger
+                           :else :full))
 
     (and agent-id (not (get (query-params request) "subject")))
     {:status 200
@@ -3171,7 +3181,8 @@
              :seon.render.debug/viewer-namespace viewer-namespace
              :seon.render/page
              [[:section {:class "seon-session-page"}
-               (transcript/render-session-loading
+               ((if (= "true" (get (query-params request) "prompt"))
+                  transcript/render-session-loading transcript/render-ledger)
                 (session-controls (debug-turn-request @connection connection agent-id
                                     (:seon.sci.admit/caps service)
                                     (cond-> service

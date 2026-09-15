@@ -6,6 +6,68 @@ tags: [research, debug, web, prompt]
 
 # Debug session product — 2026-09-14
 
+## Turn ledger (owner replacement of author-interleaved view)
+
+The default now has 61 chronological cards for run 2. Only the selected
+turn and last three cards render bodies initially. Provider cards separate
+WE SENT, AGENT REPLIED, and RESULTS; generated turns have only WE GENERATED.
+Raw replies retain fences and fabricated responses exactly. Results use
+the existing REPL response grammar and lexer, with a six-line disclosure
+for long results. Full context opens the existing faithful transcript inside
+the card; `?prompt=true` remains the uncoloured byte view.
+
+Screenshot log (files in `tmp/debug-product/`):
+
+| Capture | Observed defect | Change / verification |
+|---|---|---|
+| `ledger-1-*` | Expanded generated forms pushed reply and results far below the first screen. | Generated emissions now have individual native disclosures and change summaries. Results show the response without repeating the readline/input. |
+| `ledger-3-{1440,700}-selected.png` | All three sections readable together; preceding system card remains above the selected card. | Keep normal document scrolling and shared section edges. |
+| `ledger-early-{1440,700}-selected.png` | First provider turn clearly separates generated opening, reply and result. | 346 reply bytes, 1 evaluation, 10,422 exact prompt bytes. |
+| `ledger-final-{1440,700}.png` | A derived change summary exposed a timestamp map. | Summary now names the changed key; numeric changes retain before/after values. Exact stored text remains inside the disclosure. |
+| `ledger-3-agent-{1440,700}.png` | Shared header and full-width blocks remain readable at both widths. | Keep the approved main-page layout. |
+
+The first broad evaluation pull took **1,100.277 ms** by itself and caused
+a **1.173724 s** initial GET. Querying evaluation ids and pulling only the
+stored rendering fields reduced the complete armed default GET to
+**HTTP 200 / 0.035198 s**. Query refusals are displayed, not interpreted as
+zero evaluations. This replaces the older 4.9 ms measurement, which measured
+the previous deferred-transcript shell. The original 17 s failed render
+remains a performance defect found during this work, not an acceptable bound.
+
+All **30/30** run-2 provider prompts again match their stored capture bytes.
+When a newer renderer derives extra changed-since annotations, acquisition
+first checks its result against the stored capture, then uses the same REPL
+grammar on the saved evaluation rows without that new derived annotation.
+It refuses a remaining mismatch rather than calling new text historical.
+The token estimator still meets the requested tolerance on only **13/30**
+attempts; byte identity is the stronger proof and no estimates are falsified.
+
+Live verification used hot-reloaded Vars, explicitly re-armed with the
+running projection. Concurrent publication first hit an invalid in-flight
+`resources/seon/schemas/my.agent.edn`, then reported source movement during
+adoption. The isolated gate uses HEAD plus this lane's files, excluding the
+concurrent `render-runtime-ai` hunk in transcript.clj and all foreign schema
+and REPL edits. No other lane's process or files were operated.
+
+Effects identify message senders and plan transaction authors. Definition
+events currently say “installed during this turn”: their transaction window
+is known, but these stored rows do not attribute their author. The later
+effects pass must preserve that distinction under concurrent agent work.
+
+Final isolated ledger gate: **91 tests / 636 assertions, zero failures or
+errors**. Fast iteration: **27 tests / 207 assertions, green**. The later
+convergence probe, with the running projection handed explicitly, completed
+in 4 ms: adopted and published source both
+`6aa8adfd-abc4-5344-afe1-62cd8641e9f9`. A preceding unscoped status query hit
+its 10-second bound; the MCP liveness probe and the explicitly scoped query
+both answered. The page remained **HTTP 200 / 0.047897 s** during that probe.
+Post-adoption `ledger-adopted-{1440,700}-selected.png` and
+`ledger-adopted-agent-{1440,700}.png` were inspected at both widths: the
+three labelled sections remain visible together, and the main-page layout
+is unchanged. `ledger-verified-*` also verifies opening a previously unloaded
+card and returning from raw prompt to ledger through the actual browser links.
+Platform gate: **84 tests / 505 assertions, zero failures or errors**.
+
 ## Historical prompt owner correction
 
 `render/acquire-context!` now chooses the named provider turn's opening

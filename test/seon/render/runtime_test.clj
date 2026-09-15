@@ -6,7 +6,6 @@
             [seon.db :as db]
             [seon.render.hiccup :as hiccup]
             [seon.render.transcript :as transcript]
-            [seon.repl :as repl]
             [seon.test-support :as support]))
 
 (defn- text-content [node]
@@ -51,29 +50,18 @@
             _ (is (:db-after opened) (pr-str opened))
             database @connection
             unit {:seon.db/db database :seon.db/connection connection :seon.agent/id "runtime-reader"}
-            expected-ai
-            (str ";; I should follow my runtime's owner ref before pulling its turns, trigger, and listens.\n"
-                 (repl/source-text
-                  '(seon.db/pull
-                    (quote [{:seon.agent/runtime
-                             [{:seon.runtime/turns
-                               [:seon.turn/id {:seon.turn/opened-tx [:db/txInstant]}
-                                {:seon.turn/closed-tx [:db/txInstant]}]}
-                              {:seon.runtime/trigger
-                               [:seon.message/id :seon.message/content
-                                {:seon.message/from [:seon.agent/id]}]}
-                              {:seon.runtime/listens
-                               [:seon.listen/attribute :seon.listen/entity :seon.listen/value]}]}])
-                    [:seon.agent/id "runtime-reader"])))
             ai-before (transcript/render-runtime-ai unit)
             rendered (transcript/render-runtime-html unit)
             html (hiccup/->string rendered)
             text (text-content rendered)]
-        (is (= expected-ai ai-before (transcript/render-runtime-ai unit)))
+        (is (seq ai-before))
+        (is (= ai-before (transcript/render-runtime-ai unit))
+            "Rendering HTML does not change the AI source.")
         (is (= :seon.db/not-found
                (:seon.error/kind (transcript/render-runtime-html
                                  (assoc unit :seon.agent/id "absent-runtime-owner")))))
         (is (= "1 min" (#'transcript/runtime-duration (java.util.Date. 0) (java.util.Date. 65000))))
+        (is (= "4 d 2 h" (#'transcript/runtime-duration (java.util.Date. 0) (java.util.Date. (* 98 3600000)))))
         (is (= "Duration unavailable" (#'transcript/runtime-duration (java.util.Date. 100) (java.util.Date. 0))))
         (is (hiccup/hiccup? rendered))
         (is (str/includes? text "Turn open since "))

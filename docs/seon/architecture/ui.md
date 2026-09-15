@@ -62,8 +62,13 @@ evidence changed. The since-query algorithm covers every distinct read
 form, generated or agent-written; it never repeats writes or effects.
 Passive page rendering does not append history.
 
-The agent debug page is a reader for one selected turn, defaulting to the
-latest. Its context comes from the provider acquisition fold at the turn's
+The agent debug page defaults to a chronological turn ledger. Each provider
+card separates WE SENT (generated context), AGENT REPLIED (the exact raw
+reply), and RESULTS (the saved evaluations). System cards contain only WE
+GENERATED. Section labels and colours identify authorship without changing
+bytes. The selected turn and last three cards are open; other card bodies
+load on demand. A card's Full context as sent disclosure opens the faithful
+REPL transcript below that card. Its context comes from the provider acquisition fold at the turn's
 opening database. `render/acquire-context!` owns this temporal selection even
 when passed the current database; completed generated system turns use their
 close transaction. Rebuilt estimates and provider-billed tokens are shown
@@ -82,7 +87,7 @@ toolbar; the message form is collapsed until requested.
 The same header appears on the ordinary namespace page, with agent/debug
 navigation. Debug history uses normal document scrolling, with selected-turn
 facts and navigation in the sticky header. Re-read disclosures reveal entries
-in place, and the last emission scrolls into view on load.
+in place, and the selected card scrolls into view on load.
 The ordinary page is one full-width column ordered by declared concern:
 plan, runtime, inbox, notes, settings, identity, faults, namespace bindings.
 The walk still owns membership and stable block identities; presentation
