@@ -1250,4 +1250,14 @@ half-edit. Measured targets in the issue.
   the 15:00 ruling); the guard IS the schema (Malli's `:=>` third child),
   and `seon.instrument` had not been running guards — now it does for
   every armed function.
+- 15:55Z owner: "fix all schemas that you know are wrong; improve the
+  error messages." Lane schema-audit (high): inventory DERIVED from the
+  program graph (contracts with :any/:some/[:maybe] stored, [:* value],
+  bare value inputs, unguarded variadics; 18 `:any` hits in schema
+  resources), each fixed or justified as a declared fact, with a checker
+  regression so the inventory cannot drift; one refusal grammar at the
+  instrument seam ("<fn> refused <arg> at <path>: expected …, got …. Fix:
+  …. Example: …") humanised from Malli explain data, applied to contract,
+  transact!, and reader refusals; regressions from the run-4/5/7 bytes.
+  run7-wave (send writes directly; done-query; help truth) running.
 
