@@ -724,52 +724,6 @@
           :seon.render.value/root [:seon.agent/id agent-id]
           :seon.sci.admit/caps caps}))
 
-(defn- debug-prompt
-  [database connection agent-id caps render-context]
-  (let [request (debug-turn-request database connection agent-id caps render-context)
-        evaluations (turn-function-result 'seon.eval/of-agent [database agent-id])
-        prospective (when (and (::prompt-preview? render-context)
-                               (not (:seon.error/kind evaluations)))
-                      (turn-function-result 'seon.turn/system-turn
-                                            [(assoc request :seon.turn/write? false)]))]
-    {:seon.render.debug/request request
-     :seon.render.debug/agent agent-id
-     :seon.render.debug/evaluations evaluations
-     :seon.render.debug/system-turn prospective}))
-
-(defn- algorithm-value-html
-  [request result]
-  ;; Unavailable never becomes an empty collection or a false fresh state.
-  (if-let [function (:seon.render.web/function-unavailable result)]
-    [:p {:class "seon-debug-error"} (str "Not yet available: " function)]
-    (value/render-html (assoc request :seon.render/value result))))
-
-(defn- system-turn-html
-  [request result]
-  (if (:seon.error/kind result)
-    (algorithm-value-html request result)
-    (let [forms (:seon.turn/forms result)]
-      (into [:div {:class "seon-debug-system-forms"}
-             (when-not (some :seon.turn/text forms)
-               [:p "No system turn."])]
-            (map (fn [form]
-                   [:section {:class "seon-debug-system-form"}
-                    [:p [:strong (pr-str (:seon.turn/status form))]
-                     (when-let [lookup (:seon.render.walk/lookup form)]
-                       [:code (str " · " (pr-str lookup))])]
-                    (when-let [basis (:seon.cluster.eval/read-basis-transaction form)]
-                      [:p "Read basis transaction " (str basis)])
-                    (when (seq (:seon.turn/changes form))
-                      [:details
-                       [:summary (str (count (:seon.turn/changes form)) " changed facts")]
-                       [:pre (pr-str (:seon.turn/changes form))]])
-                    ;; The turn API already produced these bytes through
-                    ;; seon.repl/text; printing the string again escapes them.
-                    [:pre {:class "seon-debug-source"}
-                     (or (:seon.turn/text form)
-                         (:seon.cluster.eval/source form))]])
-                 forms)))))
-
 (defn- system-action-form
   [agent-id action label]
   [:form {(keyword "data-on:submit")
@@ -788,63 +742,6 @@
             (system-action-form agent-id "compact" "Compact")]
            ::transcript/message-form
            (message-bar-html {:seon.agent/id agent-id ::message-autofocus? false}))))
-
-(defn- debug-comparison-html [agent-id result]
-  (let [request (:seon.render.debug/request result)
-        evaluations (:seon.render.debug/evaluations result)]
-    [:div {:id (block/surface-id (keyword "debug-comparison" agent-id))
-           :data-ignore-morph "" :data-comparison-loaded ""}
-     (when-not (:seon.error/kind evaluations)
-       [:pre {:class "seon-debug-source"}
-        (str/join "\n\n" (map #(turn-function-result 'seon.repl/render-ai [%]) evaluations))])
-     (when-let [prospective (:seon.render.debug/system-turn result)]
-       [:section {:class "seon-debug-prompt-pane"}
-        [:h3 "Would-be system turn"]
-        (system-turn-html request prospective)])]))
-
-(defn- debug-ai-html
-  [agent-id result]
-  (let [request (:seon.render.debug/request result)
-        evaluations (:seon.render.debug/evaluations result)
-        loading? (::loading? result)]
-    (hiccup/->string
-     [:section {:id (str "debug-ai-" agent-id)
-                :class "seon-debug-body seon-debug-body-ai"}
-      [:h2 "Context algorithm"]
-      [:div {:class "seon-debug-state"}
-       [:strong "Agent "] [:code agent-id]
-       (cond
-         loading? [:span " · Loading saved evaluations through the feed…"]
-         (:seon.error/kind evaluations)
-         (algorithm-value-html request evaluations)
-         :else
-         [:span (str " · " (count evaluations) " evaluations · "
-                     (if (empty? evaluations) "fresh" "continuing"))])]
-      [:div {:class "seon-debug-context-actions"}
-       (system-action-form agent-id "system-turn" "System turn")
-       (system-action-form agent-id "virtual-turn" "Virtual turn")
-       (system-action-form agent-id "compact" "Compact")]
-      (when-not (:seon.error/kind evaluations)
-       [:section {:class "seon-debug-prompt-pane"}
-       [:h3 "Context now"]
-       (if loading?
-         [:p {:role "status"} "Loading saved evaluations…"]
-       (into [:div {:class "seon-debug-evaluations"}]
-             (map #(turn-function-result 'seon.repl/render-html
-                                         [(assoc request :seon.render/value %)]) evaluations)))])
-      [:details {:class "seon-debug-provider-prompt"
-                 :id (block/surface-id (keyword "debug-comparison-disclosure" agent-id))
-                 :data-preserve-attr "open"
-                 :open (boolean (::prompt-preview? request))
-                 (keyword "data-on:toggle")
-                 (str "if (el.open && !el.querySelector('[data-comparison-loaded]')) @get('"
-                      (route/path ::route/agent-debug {:id agent-id} {:prompt "true"}) "')")}
-       [:summary "Provider prompt comparison"]
-       (if (::prompt-preview? request)
-         (debug-comparison-html agent-id result)
-         [:div {:id (block/surface-id (keyword "debug-comparison" agent-id))
-                :data-ignore-morph ""}
-          [:p "Open to compute the would-be system turn without writing."]])]])))
 
 (defn- debug-value-html
   [value]
@@ -1880,29 +1777,16 @@
             (or acquisition
                 {:seon.error/kind ::render-value-missing
                  :seon.error/message "The selected entity does not exist."}))])
-        prompt-id (str "debug-ai-"
-                       (or (:seon.agent/id debug-request) "inspection"))
-        prompt-result
-        (when-let [agent-id (:seon.agent/id debug-request)]
-            (debug-prompt db connection agent-id caps
-                          (assoc handle :seon.render/profile profile
-                                        ::prompt-preview? (::prompt-preview? debug-request)
-                                        :seon.turn.loop/cluster handle)))
         program-identity
         (debug-program-identity db (:seon.sci.eval/ctx handle))
         page
-        (cond->
-         {"debug-inspection-header"
+        {"debug-inspection-header"
           (debug-header-html db debug-request observation acquisition acquisition-ms
                              program-identity)
           "debug-units" (hiccup/->string units-html)
           "debug-graph"
           (debug-graph-html debug-request (installed-ref-attributes db)
-                            observation)}
-          prompt-result
-          (assoc prompt-id
-                 (debug-ai-html (:seon.agent/id debug-request)
-                                prompt-result)))]
+                            observation)}]
     {:seon.render.web/page page
      :seon.render.web/fragments {}
      :seon.render/captured-calls @captured-calls
@@ -3197,17 +3081,6 @@
                 [:div {:id (block/surface-id (keyword "session-record" agent-id))}
                  "Loading the agent’s current record…"]]] ]})}
 
-    (and agent-id (= "true" (get (query-params request) "prompt"))
-         (= "true" (get-in request [:headers "datastar-request"])))
-    {:status 200
-     :headers {"content-type" "text/html; charset=utf-8" "datastar-mode" "replace"}
-     :body (hiccup/->string
-            (debug-comparison-html
-             agent-id (debug-prompt @connection connection agent-id (:seon.sci.admit/caps service)
-                                    (assoc service ::prompt-preview? true
-                                           :seon.turn.loop/cluster
-                                           (:seon.turn.loop/cluster service service)))))}
-
     :else
   (let [db @connection
         query (query-params request)
@@ -3224,27 +3097,16 @@
         render-context
         (assoc service :seon.render/profile
                (render/agent-render-profile effective))
-        rendered-page
-        (if (and agent-id (not (::prompt-preview? debug-request)))
-          ; The existing feed fills these same morph targets. Initial GET
-          ; reads turn headers only; full evaluation read evidence and entity
-          ; previews must not delay the first usable page.
-          {(str "debug-ai-" agent-id)
-           (debug-ai-html agent-id
-                          {::loading? true
-                           :seon.render.debug/request
-                           (debug-turn-request db connection agent-id
-                                               (:seon.sci.admit/caps service) render-context)})
-           "debug-units" "<section id=\"debug-units\"><p>Loading entity projections…</p></section>"
-           "debug-graph" "<section id=\"debug-graph\"><p>Loading reference graph…</p></section>"}
-          (current-page render-context db [::debug-tab debug-request]))
+        rendered-page (current-page render-context db [::debug-tab debug-request])
         feed-id (or agent-id (str viewer-namespace))
         prompt-section
         (when agent-id
-          [:section {:class "seon-debug-prompt-detail"}
-           [:h2 "Agent context"]
-           [:section {:class "seon-debug-pane seon-debug-pane-ai"}
-            (hiccup/raw (get rendered-page (str "debug-ai-" agent-id)))]])
+          (transcript/render-session-loading
+           (session-controls
+            (debug-turn-request db connection agent-id
+                                (:seon.sci.admit/caps service)
+                                (assoc render-context ::transcript/raw?
+                                       (::prompt-preview? debug-request))))))
         page
         [[:section {:class "seon-debug"
                     :data-signals__ifmissing
@@ -3266,6 +3128,7 @@
      (shell
       (cond->
        {:seon.render.debug/viewer-namespace viewer-namespace
+         ::agent-header? (boolean agent-id)
          :seon.render/page page
          :seon.render.web/feed-url
          (route/path ::route/feed

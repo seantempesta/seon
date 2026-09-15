@@ -4,7 +4,6 @@
             [seon.db :as db]
             [seon.eval :as evaluation]
             [seon.render.transcript :as transcript]
-            [seon.render.web :as web]
             [seon.test-support :as support]))
 
 (deftest turn-headers-and-all-evaluations-have-one-place-each
@@ -58,10 +57,7 @@
                          [:seon.agent/runtime :seon.runtime/turns])
            unit (assoc (db/pull database '[*] [:seon.turn/id "current"])
                        :seon.db/db database :seon.sci.eval/ctx ctx)
-           headers (pr-str (transcript/render-history-html turns database))
-           html (#'web/debug-ai-html "page"
-                  {:seon.render.debug/request {}
-                   :seon.render.debug/evaluations evaluations})]
+           headers (pr-str (transcript/render-history-html turns database))]
        (is (= ["old-eval" "current-a" "current-b"] (mapv :seon.cluster.eval/id evaluations)))
        (is (= "" (transcript/render-history-ai turns database)))
        (is (= "" (transcript/render-run-ai unit)))
@@ -76,9 +72,11 @@
          (is (:db-after linked))
          (is (str/includes? (transcript/render-runtime-ai runtime-unit) "[:seon.agent/id \"page\"]"))
          (is (:seon.error/kind (transcript/render-runtime-ai {:seon.db/db @connection})))
-         (is (str/includes? runtime-html "Recorded"))
+         (is (str/includes? runtime-html "Turn open"))
          (is (str/includes? runtime-html "Turns (3)"))
-         (is (not (str/includes? runtime-html "(+ 2 2)"))))
+         (is (str/includes? runtime-html "(+ 2 2)"))
+         (is (not (str/includes? runtime-html "(+ 3 3)"))
+             "The runtime table shows the first reply line; full evaluations belong to the session."))
        (is (str/includes? headers "Recorded"))
        (is (str/includes? headers "Opened"))
        (is (str/includes? headers "Trigger"))
@@ -86,13 +84,7 @@
        (is (str/includes? headers "[:dd \"2\"]"))
        (is (str/includes? headers "[:dd \"0\"]"))
        (is (not (str/includes? headers "(+ 2 2)")))
-       (is (not (str/includes? headers "Run ")))
-       (is (str/includes? html "Context now"))
-       (is (str/includes? html "(+ 2 2)"))
-       (is (str/includes? html "(+ 3 3)"))
-       (is (str/includes? html "(+ 1 1)"))
-       (is (not (str/includes? html "seon-value-"))
-           "Evaluations use their declared pair, not repeated floor wrappers with one root id."))
+       (is (not (str/includes? headers "Run "))))
      (is (:db-after (db/transact! connection
                      [{:seon.turn/id "empty" :seon.turn/agent [:seon.agent/id "page"] :seon.turn/opened-tx "datomic.tx"}
                       {:seon.runtime/agent [:seon.agent/id "page"]

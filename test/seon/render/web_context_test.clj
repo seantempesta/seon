@@ -7,7 +7,6 @@
             [seon.db :as db]
             [seon.render :as render]
             [seon.render.web-test :as web-test]
-            [seon.render.web :as web]
             [seon.sci.kernel :as kernel]
             [seon.test-support :as support])
   (:import [java.net URI]
@@ -89,9 +88,9 @@
 (deftest selected-session-defers-prompt-acquisition
   (#'web-test/with-server
    (fn [_connection server _context]
-     (let [derive-prompt @#'web/debug-prompt
+     (let [derive-prompt render/acquire-context!
            calls (atom 0)]
-       (with-redefs-fn {#'web/debug-prompt
+       (with-redefs-fn {#'render/acquire-context!
                        (fn [& args] (swap! calls inc) (apply derive-prompt args))}
          (fn []
            (let [ordinary (#'web-test/fetch server "/agent/root/debug")]
@@ -102,7 +101,13 @@
            (let [explicit (#'web-test/fetch server "/agent/root/debug?prompt=true")]
              (is (= 200 (.statusCode explicit)))
              (is (zero? @calls))
-             (is (str/includes? (.body explicit) "Session")))))))))
+             (is (str/includes? (.body explicit) "Session")))
+           (let [inspection (#'web-test/fetch server "/agent/root/debug?subject=%5B%3Aseon.agent%2Fid%20%22root%22%5D")]
+             (is (= 200 (.statusCode inspection)))
+             (is (str/includes? (.body inspection) "Session"))
+             (is (str/includes? (.body inspection) "debug-units"))
+             (is (not (str/includes? (.body inspection) "Context now")))
+             (is (not (str/includes? (.body inspection) "debug-ai-"))))))))))
 
 (deftest a-new-message-does-not-reinvoke-the-identity-pair
   (#'web-test/with-server

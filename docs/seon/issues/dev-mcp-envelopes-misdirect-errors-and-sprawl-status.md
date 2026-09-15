@@ -7,6 +7,14 @@ tags: [issue, mcp, sci, wave/dev-mcp]
 
 # Repair development MCP error locations and status scope
 
+## Consolidate-debug observation — 2026-09-15
+
+At lane entry default PID 23729 was alive at PREPL 54412 and HTTP 7994.
+Explicit-root `runtime_status` returned `java.lang.ClassCastException` at
+`clojure.lang.RT/dissoc` (RT.java:911): a `clojure.lang.MapEntry` could not
+be cast to `clojure.lang.IPersistentMap`. This establishes an unavailable
+health projection, not cluster death. No default lifecycle operation was used.
+
 ## Trial rerun observation — 2026-09-10
 
 Default PID 23557 was alive at PREPL 49971 and HTTP 7994. Supported

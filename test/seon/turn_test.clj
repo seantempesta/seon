@@ -13,6 +13,7 @@
             [seon.flow :as flow]
             [seon.id :as id]
             [seon.render.hiccup :as hiccup]
+            [seon.render.transcript :as transcript]
             [seon.render.web :as web]
             [seon.repl :as repl]
             [seon.test-support :as support]
@@ -227,20 +228,19 @@
            (is (= 'my.agents.a
                   (get-in (first saved) [:seon.cluster.eval/ns :seon.ns/name])))
            (is (= saved (evaluation/of-agent database "a")))
-           (let [html (#'web/debug-ai-html
-                       "a"
-                       {:seon.render.debug/evaluations saved
-                        :seon.render.debug/request
-                        {
-                         :seon.render.call/id [:seon.turn-test/history]
-                         :seon.db/db database
-                         :seon.sci.eval/ctx ctx
-                         :seon.sci.admit/caps (:seon.sci.admit/caps handle)
-                         :seon.sci.eval/time-limit-ms 2000
-                         :seon.config/on-core-error :panic}})]
-             (is (str/includes? html "seon-eval-entry") html)
+           (let [turn-id (:seon.turn/id
+                          (db/pull database [:seon.turn/id]
+                                   (get-in (first saved) [:seon.cluster.eval/run :db/id])))
+                 rendered (transcript/render-ledger-turn
+                        (merge handle
+                               {:seon.db/db database :seon.db/connection connection
+                                :seon.agent/id "a" :seon.turn/id turn-id
+                                :seon.sci.eval/time-limit-ms 2000}))
+                 text (apply str (filter string? (tree-seq sequential? seq rendered)))
+                 html (hiccup/->string rendered)]
+             (is (str/includes? html "data-ledger-loaded") html)
              (is (str/includes? html "my.agents.a") html)
-             (is (str/includes? html "(+ 1 1)") html)
+             (is (str/includes? text "(+ 1 1)") html)
              (is (not (str/includes? html "items, depth")) html)
              (is (not (str/includes? html "read-evidence")) html))
            (is (= basis (db/basis-t @connection)))
@@ -340,8 +340,17 @@
            (is (nil? (:seon.error/kind opening)) (pr-str opening))
            (is (seq opening-sources) (pr-str opening))
            (is (string? (:seon.turn/id opening)))
-           (let [html (hiccup/->string (#'web/system-turn-html {} opening))]
-             (is (str/includes? html ":none"))
+           (let [rendered (transcript/render-ledger-turn
+                        (merge handle
+                               {:seon.db/db @connection :seon.db/connection connection
+                                :seon.agent/id "a" :seon.turn/id (:seon.turn/id opening)
+                                :seon.sci.eval/time-limit-ms 2000}))
+                 text (apply str (filter string? (tree-seq sequential? seq rendered)))
+                 html (hiccup/->string rendered)]
+             (is (some #(= :none (:seon.turn/status %)) (:seon.turn/forms opening)))
+             (is (str/includes? html "WE GENERATED"))
+             (doseq [source opening-sources]
+               (is (str/includes? text source)))
              (is (not (str/includes? html "items, depth"))))
            (let [basis (db/basis-t @connection)
                  unchanged (turn/system-turn (assoc request :seon.turn/write? false))]

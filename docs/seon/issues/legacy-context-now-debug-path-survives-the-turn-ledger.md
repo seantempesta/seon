@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: cleanup
 tags: [issue, render, web, docs, wave/verification-audit]
 ---
@@ -26,6 +26,18 @@ Keep entity inspection as a concern, but route its history/context display throu
 Estimated change: 100–180 lines net deletion after route consolidation. Audit classes: 1, 2, 4, 5. No production edits for this finding were made by the audit lane.
 
 ## Acceptance
+
+### Resolution — 2026-09-15
+
+The consolidate-debug draft removes the Context-now assembly and feed target,
+and routes entity inspection through the existing selected-session component.
+Main/debug screenshots at 1440 and 700 retain their layout; inspection uses
+one header and exposes the existing capture-mismatch diagnostic rather than
+reassembling prompt bytes. The owner authorized migration of the two
+`test/seon/turn_test.clj` assertion groups to `render-ledger-turn`; both pass.
+The isolated gate ran 39 tests / 584 assertions with five failures in the
+separate A03/A09 history and byte-accounting findings, and zero errors.
+Commit: the A08 commit containing this resolution (hash recorded in the landing note).
 
 Ordinary, subject, raw-prompt, and Datastar debug routes retain entity inspection and actions but share one history assembly. Route-level tests cover the replacement; the skill describes the observed UI. Confirm selectors are no longer emitted before removing their CSS.
 
