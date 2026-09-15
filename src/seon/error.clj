@@ -733,13 +733,15 @@
                              (m/children (m/deref-all (:schema problem)))))
         problem (cond-> problem entry-schema (assoc :schema entry-schema))
         schema-type (m/type (m/deref-all (:schema problem)))
-        message (or (me/error-message problem) "the declared schema")
+        message (or (me/error-message (cond-> problem missing? (dissoc :type)))
+                    "the declared schema")
         expected (case schema-type
                    :vector "a vector" :sequential "a sequence" :map "a map"
                    :set "a set" :string "a string" :int "an integer"
                    :double "a double" :boolean "a boolean" :keyword "a keyword"
                    :qualified-keyword "a namespaced keyword" :symbol "a symbol"
                    :qualified-symbol "a namespaced symbol" :nil "nil"
+                   :enum "one of the declared alternatives"
                    :fn message
                    :or (or (:error/message (m/properties (:schema problem)))
                            (str "a value satisfying " message))

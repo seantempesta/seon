@@ -40,6 +40,9 @@
                                     [{:seon.fn/sym "seon.id/id"
                                       :seon.fn/doc "incomplete"}])]
           (is (= :seon.db/invalid-write (:seon.error/kind refusal))
+              (pr-str refusal))
+          (is (str/includes? (:seon.error/message refusal)
+                             "one of the declared alternatives")
               (pr-str refusal)))
         (let [compiled (m/schema [:=> [:cat [:= 7]] :int]
                                 {::m/function-checker mg/function-checker
