@@ -31,7 +31,7 @@ the same namespace twice for the same HEAD.
 | p1-ambient-state | `b80f78a7c`, `f5ca25ba9` | batch 2 running | adoption/lifecycle members open |
 | n7-query-classification | `5deb40e4e`, `872fb25d4` | gated by lane before the rule (82/418, platform 86/542) | stored toolkit (cluster.clj), eval call edges (fn.clj), schema-fallback (P1) |
 | bisect-today-reds | `6dc70f30a`, `ee8d54dca` | gated by lane before the rule (103/248, platform 86/542) | none |
-| debug-page-cost | `cfb35a22b` (retained renders reuse across carried values), `671108b60` (passive directory audit off) | batch 3 pending | kill 3 (derive once) in flight |
+| debug-page-cost | `cfb35a22b`, `671108b60`, `c20b83d20` (three kills: retained reuse across carried values; passive directory audit off; shared derivations once) | batch 3 pending: seon.render.retained-test seon.render.web-debug-test seon.render.web-context-test | cold page after adoption 19.5 s (issue; slice 4 in flight) |
 | reaching-tests-tier | in flight | — | automatic on-edit check |
 | startup-and-hook-waste | `c395610db`, `db7e653ca`, `f75c85402` (both initializers build one projection, 998/998 armed; hook drains immediately, exactly one successor batch; edit-feedback test updated) | batch 3 pending: seon.test.runner-test seon.test-runner-test seon.dev.hook-test seon.dev.edit-feedback-test | hook issue narrowed to AGENTS.md wording |
 
@@ -43,3 +43,4 @@ the same namespace twice for the same HEAD.
 | 21:10Z | 0.70 s | 7 | P1 edits adopted |
 | 21:45Z | 0.75 s | 7 | P1 committed; plan attributes the floor to retained-read replay and directory reconstruction |
 | 22:05Z | 0.18 s (cold after adoption 18.4 s) | 7 | debug-page-cost kills 1–2 adopted; cold path filed as an issue |
+| 22:35Z | 0.14 s (cold after adoption 19.5 s) | 7 | kill 3 adopted; lane in-process 64–76 ms |
