@@ -2249,6 +2249,70 @@ details.tool-call-details[open] .tool-preview {
   font-family: var(--font-mono);
   font-size: 0.75rem;
 }
+.seon-ledger-strip {
+  margin: 0.35rem 0 0.5rem;
+}
+.seon-ledger-strip > p {
+  margin: 0 0 0.25rem;
+  color: var(--color-text-400);
+  font-size: 0.625rem;
+}
+.seon-ledger-strip-cells {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+.seon-ledger-turn-cell {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  min-height: 22px;
+  box-sizing: border-box;
+  border: 1px solid var(--color-base-700);
+  color: var(--color-text-400);
+  font-size: 0.625rem;
+  text-decoration: none;
+}
+.seon-ledger-turn-cell-provider {
+  background: color-mix(in srgb, #34d399 14%, #0d0d0c);
+  @supports (color: color-mix(in lab, red, red)) {
+    background: color-mix(in srgb, var(--color-success) 14%, var(--color-base-950));
+  }
+}
+.seon-ledger-turn-cell-success {
+  color: var(--color-success);
+  border-color: color-mix(in srgb, #34d399 45%, #3d3a36);
+  @supports (color: color-mix(in lab, red, red)) {
+    border-color: color-mix(in srgb, var(--color-success) 45%, var(--color-base-700));
+  }
+}
+.seon-ledger-turn-cell-error {
+  color: var(--color-error);
+  border-color: var(--color-error);
+}
+.seon-ledger-turn-cell-provider.seon-ledger-turn-cell-error {
+  background: color-mix(in srgb, #f87171 16%, #0d0d0c);
+  @supports (color: color-mix(in lab, red, red)) {
+    background: color-mix(in srgb, var(--color-error) 16%, var(--color-base-950));
+  }
+}
+.seon-ledger-turn-cell-warning {
+  color: var(--color-warning);
+  border-color: var(--color-warning);
+  background: color-mix(in srgb, #fbbf24 12%, #0d0d0c);
+  @supports (color: color-mix(in lab, red, red)) {
+    background: color-mix(in srgb, var(--color-warning) 12%, var(--color-base-950));
+  }
+}
+.seon-ledger-turn-cell[aria-current] {
+  box-shadow: inset 0 -3px var(--color-signal);
+  color: var(--color-text-50);
+}
+.seon-ledger-turn-cell:hover, .seon-ledger-turn-cell:focus-visible {
+  outline: 1px solid var(--color-text-200);
+  outline-offset: 1px;
+}
 .seon-ledger *, .seon-ledger pre, .seon-ledger code {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -2257,7 +2321,6 @@ details.tool-call-details[open] .tool-preview {
 .seon-ledger-turn {
   border: 1px solid var(--color-base-700);
   margin: 0.5rem 0;
-  scroll-margin-top: 13rem;
 }
 .seon-ledger-turn > summary {
   cursor: pointer;

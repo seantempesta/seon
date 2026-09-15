@@ -71,7 +71,11 @@ transaction effects, or the generated concerns for a system turn. Named
 emission disclosures retain order; the first provider card folds the opening
 separately from its since-diff re-reads. The selected turn and last three cards are open; other card bodies
 load on demand. A card's Full context as sent disclosure opens the faithful
-REPL transcript below that card. Its context comes from the provider acquisition fold at the turn's
+REPL transcript below that card. A chronological strip selects every turn;
+cell width shows bytes added, fill distinguishes provider turns, and semantic
+colour shows errors or missing results. Its selected underline stays visible
+on narrow screens. Selected cards scroll below the measured sticky header.
+The full context comes from the provider acquisition fold at the turn's
 opening database. `render/acquire-context!` owns this temporal selection even
 when passed the current database. A request without a turn id folds all
 current evaluations, including the latest reply's results; a named reply

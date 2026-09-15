@@ -117,6 +117,14 @@
                      expected-reply (:seon.turn/reply (db/pull @connection [:seon.turn/reply] [:seon.turn/id provider-id]))]
                  (is (= expected-reply (element-text reply-node)))
                  (is (= (set turns) (set (keep #(when (map? %) (:data-turn-id %)) ledger-nodes))))
+                 (is (= (mapv :seon.turn/id (#'transcript/turn-rows @connection "juniper"))
+                        (vec (keep #(when (map? %) (:data-strip-turn %)) ledger-nodes))))
+                 (is (every? #(<= 0 %) (keep #(when (map? %) (:data-added-bytes %)) ledger-nodes)))
+                 (is (= (alength (.getBytes ^String
+                                (:seon.cluster.prompt/text
+                                 (render/acquire-context! (dissoc unit :seon.turn/id))) "UTF-8"))
+                        (reduce + (keep #(when (map? %) (:data-added-bytes %)) ledger-nodes)))
+                     "The strip accounts for every byte in current context exactly once.")
                  (is (str/includes? (element-text ledger) "WE SENT"))
                  (is (str/includes? (element-text ledger) "AGENT REPLIED"))
                  (is (str/includes? (element-text ledger) "RESULTS (evaluated by seon)"))

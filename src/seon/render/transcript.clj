@@ -1648,7 +1648,8 @@
         [:section {:class (str "seon-ledger-results"
                               (when (some :seon.cluster.eval/error own) " seon-ledger-results-error"))
                    :data-author "seon" :data-evaluation-count (count own)}
-         (ledger-heading "RESULTS (evaluated by seon)" "seon" (str (count own) " evaluations"))
+         (ledger-heading "RESULTS (evaluated by seon)" "seon"
+                         (str (count own) (if (= 1 (count own)) " evaluation" " evaluations")))
          (if (seq own)
            (for [saved own
                  :let [outcome (cond (:seon.cluster.eval/error saved) "error"
@@ -1692,6 +1693,52 @@
      (last rendered)]))
 
 
+(defn- ledger-strip
+  "Navigate every stored turn; area shows added bytes and colour shows recorded outcome."
+  [request rows evaluations selected]
+  (let [amounts (into {} (map (fn [row] [(:seon.turn/id row)
+                                        (emission-byte-count rows (get evaluations (:db/id row) []))]) rows))
+        largest (reduce max 1 (vals amounts))]
+    [:nav {:class "seon-ledger-strip" :aria-label "Select a turn" :data-author "seon"}
+     [:p "Turns · filled: provider · hollow: generated or virtual · width: context added · red: errors · amber: no result/open"]
+     [:div {:class "seon-ledger-strip-cells"}
+      (for [row rows
+            :let [turn-id (:seon.turn/id row)
+                  own (get evaluations (:db/id row) [])
+                  provider? (seq (:seon.turn/attempts row))
+                  errors (count (filter :seon.cluster.eval/error own))
+                  tone (cond (pos? errors) "error"
+                             (and provider? (or (empty? own) (nil? (:seon.turn/closed-tx row)))) "warning"
+                             provider? "success" :else "neutral")
+                  kind (turn-kind (:seon.db/db request) row)
+                  amount (get amounts turn-id)
+                  attempt (last (sort-by :seon.ai.attempt/ordinal (:seon.turn/attempts row)))
+                  usage (some-> (:seon.ai.attempt/usage-edn attempt) readable-shown ::value)
+                  href (ledger-url (:seon.agent/id request) turn-id {})]]
+        [:a {:href href :data-strip-turn turn-id :data-added-bytes amount
+             :aria-current (when (= selected turn-id) "step")
+             :class (str "seon-ledger-turn-cell seon-ledger-turn-cell-" tone
+                         (when provider? " seon-ledger-turn-cell-provider"))
+             :style (str "width:" (max 24 (long (* 96 (/ amount largest)))) "px")
+             :title (str "Turn " (::ordinal row) " · " kind " · " turn-id "\n"
+                         (when-let [opened (get-in row [:seon.turn/opened-tx :db/txInstant])]
+                           (format "%tT" opened))
+                         " · " (format "%,d" amount) " bytes added"
+                         (when provider?
+                           (str "\n"
+                                (str/join " · "
+                                  (for [[label value] [["in" (get usage "prompt_tokens")]
+                                                      ["hit" (or (get usage "prompt_cache_hit_tokens")
+                                                                 (get-in usage ["prompt_tokens_details" "cached_tokens"]))]
+                                                      ["miss" (get usage "prompt_cache_miss_tokens")]
+                                                      ["out" (get usage "completion_tokens")]]]
+                                    (str (if (number? value) (format "%,d" value) "unavailable") " " label)))))
+                         (when (pos? errors) (str "\n" errors " evaluation errors")))
+             (keyword "data-on:click")
+             (str "evt.preventDefault(); history.replaceState(null, '', '" href "'); @get('"
+                  (ledger-url (:seon.agent/id request) turn-id {:ledger "true"}) "')")}
+         (str (::ordinal row) (when (pos? errors) "·"))])]]))
+
 (defn- turn-story [request evaluations row]
   (let [own (get evaluations (:db/id row) [])
         provider? (seq (:seon.turn/attempts row))
@@ -1704,7 +1751,8 @@
         (if provider?
           [(reply-intent (turn-reply (:seon.db/connection request) row))
            (results-summary own) effects (when done? "done")]
-          [(cond (zero? (::ordinal row)) (str "opening · " (count own) " emissions")
+          [(cond (not= "System" (turn-kind (:seon.db/db request) row)) (results-summary own)
+                 (zero? (::ordinal row)) (str "opening · " (count own) " emissions")
                  (empty? own) "no new emissions"
                  :else (str "re-read " (str/join ", " (distinct (map emission-label own)))))])))))
 
@@ -1723,7 +1771,8 @@
     [:section {:id (session-id (:seon.agent/id request)) :class "seon-session seon-ledger" :data-author "seon"}
      [:div {:class "seon-session-sticky"} (session-header request rows)
       [:h2 "Turn ledger"]
-      [:p {:class "seon-ledger-note"} "What we sent · what the agent said · what happened. Open a turn to inspect it."]]
+      [:p {:class "seon-ledger-note"} "What we sent · what the agent said · what happened. Open a turn to inspect it."]
+      (when-not (:seon.error/kind evaluations) (ledger-strip request rows evaluations selected))]
      (cond
        (:seon.error/kind evaluations) [:p (:seon.error/message evaluations)]
        (seq rows)
@@ -1734,7 +1783,8 @@
          [:details {:class "seon-ledger-turn" :open (contains? expanded turn-id)
                     :data-turn-id turn-id :data-turn-kind (turn-kind database row)
                     :id (block/surface-id (keyword "turn" turn-id))
-                    :data-init (when (= selected turn-id) "el.scrollIntoView({block:'start'})")
+                    :data-init (when (= selected turn-id)
+                                 "el.style.scrollMarginTop = (el.closest('.seon-ledger').querySelector('.seon-session-sticky').offsetHeight + 8) + 'px'; el.scrollIntoView({block:'start'})")
                     (keyword "data-on:toggle")
                     (str "if(el.open && !el.querySelector('[data-ledger-loaded]')) @get('"
                          (ledger-url (:seon.agent/id request) turn-id {:card "true"}) "')")}

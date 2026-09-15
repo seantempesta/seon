@@ -2232,11 +2232,20 @@ handle))}}
         (is (str/includes? body "Virtual turn"))
         (is (str/includes? body "Compact"))))))
 
-(deftest context-now-keeps-runtime-history-through-an-empty-turn-and-a-wake
+(deftest next-turn-context-keeps-runtime-history-through-an-empty-turn-and-a-wake
   (with-server
     (fn [connection server _context]
       (let [check-page
             (fn [entries]
+              ;; A named turn is its opening prompt, before its own results.
+              ;; Open the next turn to inspect all currently completed work.
+              (let [id (turn/next-id @connection "web-test" "root")]
+                (is (:db-after
+                     (db/transact! connection
+                       (conj (turn/open-tx {:seon.turn/id id
+                                           :seon.turn/agent [:seon.agent/id "root"]
+                                           :seon.turn/opened-tx "datomic.tx"})
+                             [:db/add [:seon.turn/id id] :seon.turn/closed-tx "datomic.tx"])))))
               (let [basis (db/basis-t @connection)
                     turns (db/q '[:find ?id ?opened :where
                                    [?a :seon.agent/id "root"] [?a :seon.agent/runtime ?runtime]

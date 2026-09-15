@@ -6,6 +6,43 @@ tags: [research, debug, web, prompt]
 
 # Debug session product — 2026-09-14
 
+## Turn strip
+
+The strip keeps all **61 turns** chronological. Provider cells are filled;
+generated and virtual cells are hollow. Width is proportional to exact bytes
+added, with a 24 px minimum. Error turns are red and marked; open or empty
+provider results are amber. The selected cell has a signal underline at both
+widths. Hover text exposes id, kind, time, bytes, and provider token facts;
+click selects the turn through the existing Datastar route and updates the URL.
+
+Screenshot log (under `tmp/debug-product/`):
+
+- `strip-1-700-selected.png`: the sticky header covered the selected heading.
+  Replaced a fixed scroll offset with the measured sticky-header height.
+- `strip-2-{1440,700}-selected.png`: headings were visible; the result count
+  still read “1 evaluations”. Corrected the singular label.
+- `strip-final-1440-selected.png`, `strip-final-700-selected.png`, and
+  `strip-final-700-navigation.png`: inspected; selected headings, underline,
+  opening disclosure, and the three author-labelled sections read clearly.
+- `strip-final-agent-{1440,700}.png`: inspected; shared shell and full-width
+  blocks retain their layout, wrapping, and normal document scroll.
+
+Default GET: **HTTP 200 / 0.161424 s**. Browser checks at both widths confirm
+**61 cards/cells**, navigation to turn 2, **375 exact reply bytes**, and
+**177,576 exact context bytes** for turn 60. The canonical fixture regression
+checks that all cell byte counts sum to current context exactly once.
+Fast gate: **27 tests / 212 assertions**, zero failures/errors.
+The broader gate exposed an old web-test expectation that a completed system
+turn's opening contains its later results. That fixture now opens the next
+turn before checking current completed history; the assertion remains exact.
+Development adoption completed at `6aa8b8f8-4a61-5616-a2bd-0b4b82f7f3b6`.
+The subsequent `strip-adopted-*` browser checks pass at both widths; the
+700 px selected view and 1440 px overview were inspected again.
+Final isolated gate: **87 tests / 613 assertions**, zero failures/errors.
+The updated web namespace also passed its fast gate: **58 tests / 384
+assertions**. The foreign `render-runtime-ai` hunk remains excluded from
+the commit and gate snapshot.
+
 ## Context now versus a named turn's opening
 
 The `63ac0608a` regression was mine: the loop proof and two research helpers
