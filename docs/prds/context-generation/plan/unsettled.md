@@ -1069,3 +1069,20 @@ half-edit. Measured targets in the issue.
   loop proof + continuation green on HEAD. Run 3 reseeded with the provider
   on.
 
+## 2026-09-15 04:15Z — run 3: the invariant holds; the run stalled on a live handle change
+
+- Run 3 (reseeded 22:05, provider on, HEAD green): 21 turns = 19 provider +
+  2 system (opening, one plan re-read after `complete!`) — the churn is
+  gone (run 2: 31 system turns). Max prompt 10,019 tokens; 88,075 prompt /
+  2,888 out so far; step 1 completed at turn 19 (the model fabricated
+  responses 4×, fought `dir` elision by the token budget, and wrote "I keep
+  writing responses instead of forms" — the printer slice and the response
+  grammar remain the top confusions).
+- Stalled at 04:07Z: context-renders' uncommitted handle change
+  (`:seon.agent/context-state`) was hot-adopted; the live handle lacks it;
+  turn proc faulted `missing-context-state`; work pending, nothing running,
+  page says idle. Issue filed (absence-as-health + adoption gate); lane told
+  RESET NEEDED discipline; refork after its commit, then run 4. Also a
+  production `generated-read-depends-on-turns` fault for juniper — the
+  invariant caught a remaining dependent read; lane to name and fix it.
+
