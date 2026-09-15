@@ -911,3 +911,21 @@ half-edit. Measured targets in the issue.
 - Lanes: reader-fences (high), dir-own-fns (medium), debug-refs (medium,
   identity links instead of the id dump).
 
+## 2026-09-14 18:10 — owner: show what the agent saw before ruling
+
+- Landed since run 2: reader reads Markdown fences as whitespace between
+  forms (`35f0ab749`); a no-forms reply is one accepted `:error` evaluation
+  in the agent's history, never a core fault (`c15d37d55`); debug block
+  headers link installed identities instead of dumping db ids (`ffb90dcc6`);
+  dir-own-fns falsified the missing-relation hypothesis — the row is
+  complete; `dir`/`doc` embed acquisition-time documentation
+  (`eval.clj:1105–1248`), repair resumed at that owner.
+- Owner, on the system-turn churn options: "update the debug view so I can
+  see what the agent was seeing and you can show prompt construction
+  clearly with well formatted (but faithful) renditions". Lane debug-turns
+  (high): per-turn header from facts, the exact prompt the attempt saw
+  (acquire-context! at that turn, on demand), the ordered build list with
+  derived origins (opening / since-diff / agent form / reader error) and
+  running bytes, the raw reply and its evaluations. The churn ruling waits
+  on that view.
+
