@@ -32,3 +32,18 @@ bangs never reached it whole, and help promises a bare `deftest`.
 - Either bare `deftest` resolves in the agent namespace (referred like
   `dir`/`doc`) or help says `clojure.test/deftest`. Same for `defn`
   contracts: help names the exact schema shape `[:=> [:cat …] …]`.
+
+## Core-functions work — 2026-09-14
+
+Help now says to use `(dir ns)` first, copy exact names including `!`, and call
+`(doc my.note/add!)` for the worked example. The real canonical SCI regression
+walks every help Tools namespace and requires every `dir` function to resolve.
+Juniper's retained default context returns the new note docs without errors;
+exact bytes are in
+`docs/prds/context-generation/research/core-functions-landing-2026-09-14.md`.
+
+Bootstrap seed namespace rows now refer `clojure.test/deftest` and `is`.
+The universal core referral still belongs to `src/seon/sci/eval.clj`, explicitly
+excluded from this lane. The retained context reports both bare symbols absent.
+The requested narrow scope extension has not yet been approved; this issue
+remains open and the bootstrap-only change is not claimed as the full repair.

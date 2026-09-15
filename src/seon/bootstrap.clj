@@ -44,16 +44,16 @@
     {:seon.help/lines
     [(str "The prompt shows your namespace " namespace-name
           " and is drawn for you. Send only ;; thinking comments and forms.")
-     "Results are data: chain them with ->>, sort-by, filter, map, and get-in. Every function in the program is callable."
+     "Results are data: chain them with ->>, sort-by, filter, map, and get-in. Functions are callable by their fully qualified symbols."
      "Forms are evaluated in order, and their results arrive in your NEXT turn. Act on a result only after you have seen it; do not complete a step in the same reply as the form that does the work."
-     "A declared AI renderer prints its output directly. Other results use #:seon.repl: :value (or :error) is data, :out is printed text, and :result names the live value."
+     "The REPL supplies responses: :value (or :error) is result data, :out is printed text, and :result names the live value. Do not write responses yourself."
      "result/e... is a real symbol bound to the live value: evaluate it, pass it as an argument, or dig in with get-in and keys."
-     (str "When unsure, inspect data first: (dir " namespace-name
-          ") lists your namespace's public functions and schema declarations; (doc seon.db/q) returns its docstring and contract.")
+     (str "When unsure, use (dir ns) first, for example (dir my.note). Copy the exact function name, including ! on mutations. (doc my.note/add!) gives its request keys, return shape and example. (dir " namespace-name
+          ") lists your own public functions and schema declarations.")
      "Your plan is your instructions. Read its current step and completion criterion before acting; mark it complete only after seeing the result. Update an existing component by its identity or :db/id: a new identity-less nested map replaces it."
      "Read incoming messages with a reverse-ref pull on your agent. (my.message/send {:my.message/to \"root\" :my.message/content \"...\"}) sends; sending does not end your turn. Remove an entity and its incoming refs with (seon.db/transact! [[:db.fn/retractEntity lookup-ref]]); retract removes only the named fact."
      "Use pull for a known entity's shape, nested refs, and reverse refs such as :seon.message/_inbox; q for filters, joins, and aggregates; q with inner pull for filtering and shaping. (seon.db/transact! tx-data) writes. Your cluster database is supplied."
-     "A defn with :malli/schema becomes a durable function. A deftest becomes a durable test. (my.test/run) runs yours."
+     "Define a function with its invoke contract: (defn increment {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 1)). The input :cat describes the arguments; the last schema describes the result. Admitted definitions are durable; auto-check tests generated inputs and reports a failing value when the contract does not hold. A deftest becomes a durable test. (my.test/run) runs yours."
      (str "A mistake returns :error data. Read the expected schema, offending value, and attribute candidates before retrying. Time is the transaction: a ref value \"datomic.tx\" names this write, for example (seon.db/transact! [{:my.note/id \"observation\" :my.note/agent [:seon.agent/id "
           (pr-str agent-id)
           "] :my.note/content \"Verified\" :my.note/about \"datomic.tx\"}]); pull :db/txInstant through that ref.")
@@ -845,6 +845,7 @@
          :seon.ns/requires
          [[:seon.ns/name 'my.turn]
           [:seon.ns/name 'my.message]
+          [:seon.ns/name 'clojure.test]
           [:seon.ns/name 'seon.bootstrap]]
          :seon.ns/refers
          [{:seon.ns.refer/local 'help
@@ -855,7 +856,13 @@
            :seon.ns.refer/target-name 'dir}
           {:seon.ns.refer/local 'doc
            :seon.ns.refer/target-ns 'seon.bootstrap
-           :seon.ns.refer/target-name 'doc}]}
+           :seon.ns.refer/target-name 'doc}
+          {:seon.ns.refer/local 'deftest
+           :seon.ns.refer/target-ns 'clojure.test
+           :seon.ns.refer/target-name 'deftest}
+          {:seon.ns.refer/local 'is
+           :seon.ns.refer/target-ns 'clojure.test
+           :seon.ns.refer/target-name 'is}]}
         message-row
         {:seon.message/id message-id :seon.message/to [:seon.agent/id agent-id] :seon.message/content (task-message) :seon.message/inbox [:seon.agent/id agent-id]}]
     (into [namespace-row message-row]

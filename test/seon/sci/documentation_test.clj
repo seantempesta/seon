@@ -33,8 +33,8 @@
        (is (every? #(and (:in %) (:out %)) rows))
        (is (every? #(not (str/includes? (:doc %) "\n")) rows))
        (is (= #{:summary :body :example :arglists :in :out} (set (keys row))))
-       (is (= (:seon.fn/doc (db/pull @connection [:seon.fn/doc]
-                                    [:seon.fn/sym "my.agent/settings!"]))
+       (is (= (first (str/split-lines (:seon.fn/doc (db/pull @connection [:seon.fn/doc]
+                                    [:seon.fn/sym "my.agent/settings!"]))))
               (:summary row)))
        (is (= [:cat :my.agent/settings-request]
               (:in (first (filter #(= 'my.agent/settings! (:sym %)) rows)))))

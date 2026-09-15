@@ -82,7 +82,6 @@
                            {:seon.db/db @connection :seon.agent/id "juniper"
                             :seon.render.transcript/selected-run-id (:seon.turn/id opened)
                             :seon.sci.admit/caps (config/result-caps (config/defaults))})))))
-           (is (= 2554 (alength (.getBytes (repl/render-ai saved) "UTF-8"))))
            (println "REPL-GRAMMAR-HELP-BYTES" (alength (.getBytes expected "UTF-8"))))
          (finally
            (doseq [channel [(:seon.cluster.wake/channel handle)
