@@ -1463,3 +1463,25 @@ half-edit. Measured targets in the issue.
   refusal an agent sees; Part B remainder), fixtures-events (P2 clocks, P3
   producer-less keys, N2 vacuous proofs; runner flakes). Queued behind
   bisect: n1-total-render (23 members, render owners) then n11-duplicates.
+
+## 2026-09-15 20:20Z — wave 2 gate decisions after the second restart
+
+- Run 11 (fresh fork, all fixes): 7/7 steps, report delivered; `dir`
+  77–154 ms (was 300–976); 12 error evaluations: six from prose lines
+  without `;` (issue filed), one `my.note/about` string-vs-entity-id
+  refusal the model called "the single worst sink", the rest its own.
+  Explain probe saved: research/explain_probe_run11_2026_09_15.edn.
+- Every wave-2 lane stopped at the §2.5 design gate with three options.
+  Owner on N7: "get rid of all half baked ideas and turn it into simple
+  data, queries, schemas, functions and tests" → option 1 (owner-specific
+  facts + queries + regressions). Orchestrator applied the smallest option
+  to the rest: P1 strict read/admission carriage (+ transact! report
+  carriage); refusal grammar minimal parser-evidence extension with the
+  run-11 cases; fixtures-events runner failures first. All resumed with
+  "do not stop again inside this scope"; refusal-grammar relaunched as
+  refusal-grammar-2 (session record corrupted by a bad resume).
+- Owner: "check for outdated docs in the CLAUDE.md too" → lane
+  agents-md-audit verifies every claim in AGENTS.md against HEAD and
+  fixes in place (adoption freshness, sci mode, carried projection,
+  test-slot cap, test evidence on current-src).
+- MCP bridge reconnected by the owner's second restart; `sci` mode works.
