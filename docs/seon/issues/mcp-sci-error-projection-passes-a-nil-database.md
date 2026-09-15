@@ -40,3 +40,9 @@ seon.sci.kernel/invoke refused argument 0 (0-based) at [:seon.db/db]` with nil.
 The raw evaluation error remained available and was recorded separately in
 [the probe transcript](../../prds/context-generation/research/adoption-contract-freshness-2026-09-15.json).
 No MCP implementation changes were made by this lane.
+
+## Re-observed at HEAD 85c992d16 (2026-09-15 18:30Z)
+
+Door mode on `default`, `(dir my.note)` returned the printed text
+`#object[clojure.lang.ExceptionInfo "projection failed: seon.sci.kernel/invoke refused argument 0 (0-based) at [:seon.db/db]: expected must be an immutable Datahike database value, got nil. Fix: must be an immutable Datahike database value"]`
+— an opaque host object string, not a `:seon.error` value — while `(doc my.message/send)` in the same session succeeded. Two defects in one: the door ctx supplies no database for `dir`'s request, and a projection failure renders as `#object[…]` instead of the error pair. Same class as the triage-A note "a disposable SCI pull returned an opaque projection-error string".
