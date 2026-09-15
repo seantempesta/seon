@@ -75,3 +75,20 @@ profile. It passed 76 assertions with no failures or errors: both callable
 summaries survive the final `seon.print/fit`, exact sources remain in collapsed
 disclosures before fitting, and later detail is represented by the existing
 HTML elision. Browser acceptance remains outstanding, so this issue stays open.
+
+## HTML-pair lane observation — 2026-09-14
+
+The live Juniper namespace page still gives an empty `Faults (0)` block the
+primary column and constrains the revised plan/settings to a 261-pixel rail.
+At 1440×900, `.seon-rank-rail` and `.seon-rank-deep` still apply
+`max-height: 10rem; overflow: auto` in `resources/public/css/input.css`.
+At 700×900 the plan and settings wrap within 522 pixels without overflow.
+Root's document nevertheless measures 949 pixels: the first overflowing
+element is `table.seon-runtime-turns` (860 pixels wide, right edge 949).
+These are shell/history ownership boundaries for the html-views lane.
+
+Evidence and the executable browser probes are recorded in
+[the HTML views landing note](../../prds/context-generation/research/html-views-landing-2026-09-14.md).
+Screenshots: `tmp/html-views/plan-verified-1440.png`,
+`tmp/html-views/plan-verified-700.png`, `tmp/html-views/root-700.png`;
+DOM measurements: `tmp/html-views/inspect.log`.

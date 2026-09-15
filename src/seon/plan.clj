@@ -983,15 +983,6 @@
     :ready "ready"
     "open"))
 
-(defn- state-label
-  [state]
-  (case state
-    :completed "Completed"
-    :current "Current step"
-    :blocked "Blocked"
-    :ready "Ready"
-    "Open"))
-
 (defn- needs-text
   [step]
   (when-let [needs (seq (:my.plan/needs step))]
@@ -1027,36 +1018,41 @@
    (list `format-item-ai
          (list `item {:my.plan.item/id (:my.plan.item/id step)}))))
 
-(defn render-item-html
-  "Explain one step in an agent's plan and its expected outcome."
-  {:malli/schema [:=> [:cat :my.plan/render-step] :seon.render/hiccup]}
-  [step]
+(defn- item-html
+  [step titles]
   (let [state (get step :my.plan/state :open)]
     [:article {:class (str "seon-family-entry my-plan-item is-"
                            (state-word state))}
-     [:p {:class "my-plan-id"}
-      [:span {:class "my-plan-state"} (state-label state)]
-      [:code {:style {:color "var(--color-text-300)"}} (:my.plan.item/id step)]]
+     [:p {:class "my-plan-status"}
+      [:span {:class "my-plan-state"}
+       [:span {:aria-hidden "true"} "●"] " "
+       (case state :completed "done" :current "current" :blocked "blocked" "pending")]
+      (when-let [at (get-in step [:my.plan.item/completed-tx :db/txInstant])]
+        (let [instant (.toInstant ^java.util.Date at)
+              local (.atZone instant (java.time.ZoneId/systemDefault))]
+          [:time {:datetime (str instant) :title (str local)}
+           (.format local (java.time.format.DateTimeFormatter/ofPattern "MMM d, HH:mm"))]))]
      [:h3 (:my.plan.item/title step)]
-     (into (if (= :current state)
-             [:details {:open true} [:summary "Details"]]
-             [:details [:summary "Details"]])
-           (remove nil?)
-           [(when-let [description (:my.plan.item/description step)]
-              [:p {:style {:color "var(--color-text-200)"}} description])
-            (when-let [expected (:my.plan.item/done-when step)]
-              [:p {:class "my-plan-expected"}
-               [:strong "Done when: "] expected])
-            (when-let [parent (:my.plan/parent step)]
-              [:p {:class "my-plan-relation"}
-               [:strong "Part of "] [:code (:my.plan.item/id parent)]])
-            (when-let [needs (seq (:my.plan/needs step))]
-              [:p {:class "my-plan-relation"}
-               [:strong "Waiting for "]
-               (str/join ", " needs)])
-            [:p {:class "my-plan-reference" :style {:color "var(--color-text-300)"}}
-             [:strong "Reference "]
-             [:code (pr-str [:my.plan.item/id (:my.plan.item/id step)])]]])]))
+     (when-let [description (:my.plan.item/description step)] [:p description])
+     (when-let [expected (:my.plan.item/done-when step)]
+       (let [criterion [:p {:class "my-plan-expected"} [:strong "Done when: "] expected]]
+         (if (= :completed state)
+           [:details {:data-preserve-attr "open"} [:summary "Completion criterion"] criterion]
+           criterion)))
+     (when (= :blocked state)
+       (when-let [needs (seq (:my.plan/needs step))]
+         [:p {:class "my-plan-relation"} [:strong "Blocked on: "]
+          (str/join ", " (map #(get titles % %) needs))]))]))
+
+(defn render-item-html
+  "Show a step's state, completion time, and expected outcome."
+  {:malli/schema [:=> [:cat :my.plan/render-step] :seon.render/hiccup]}
+  [step]
+  (item-html step
+             (when-let [database (:seon.db/db step)]
+               (into {} (map (juxt :my.plan.item/id :my.plan.item/title))
+                     (db/pull-many database [:my.plan.item/id :my.plan.item/title]
+                                   (mapv #(vector :my.plan.item/id %) (:my.plan/needs step)))))))
 
 (defn format-ready-items-ai
   "Format a supplied ready plan frontier as terminal text."
@@ -1199,15 +1195,16 @@
         [:section {:class "seon-family-entry my-plan"}
          [:header [:p {:class "seon-kicker"} "Plan"]
           [:h3 (get view :my.plan/objective "No objective set")]]
-         [:p [:strong "Current step: "]
+         [:p {:class "my-plan-progress"} [:strong "Current step: "]
           (or (current-title view) "None selected")]
-         [:p (str done " of " (count steps) " steps completed")]
+         [:p {:class "my-plan-progress"} (str done " of " (count steps) " steps completed")]
          [:progress {:value done :max (max 1 (count steps))
                      :aria-label "Plan progress"}]
          (if (seq steps)
-           (into [:ol {:class "my-plan-steps"}]
-                 (map (fn [step]
-                        [:li {:style {:margin-left (str (* 1.25 (get step :my.plan/depth 0)) "rem")}}
-                         (render-item-html step)]))
-                 steps)
+           (let [titles (into {} (map (juxt :my.plan.item/id :my.plan.item/title)) steps)]
+             (into [:ol {:class "my-plan-steps"}]
+                   (map (fn [step]
+                          [:li {:style {:margin-left (str (* 0.75 (get step :my.plan/depth 0)) "rem")}}
+                           (item-html step titles)]))
+                   steps))
            [:p "No steps yet."])]))))

@@ -3,3 +3,36 @@
    Owned by the html-views lane; imported by input.css so both source files
    build into one output.css through bin/css. Semantic component classes
    only; utilities come from input.css's safelist. */
+
+/* Pair styles are deliberately more specific than the historical shell rules. */
+.seon-family-entry.my-plan, .seon-family-entry.my-plan-ready {
+  font: 0.75rem/1.55 var(--font-mono);
+  overflow-wrap: anywhere;
+}
+.my-plan > header h3 { color: var(--color-text-50); font-weight: 600; margin: 0.25rem 0 0.6rem; }
+.my-plan > header .seon-kicker { color: var(--color-text-400); font-size: 0.625rem; }
+.my-plan > progress { width: 100%; height: 3px; margin: 0.35rem 0; accent-color: var(--color-success); }
+.my-plan .my-plan-steps { list-style: decimal; padding-left: 1.5rem; margin: 0.5rem 0 0; }
+.my-plan .my-plan-steps > li { padding-left: 0.25rem; margin: 0; }
+.my-plan .my-plan-steps > li::marker { color: var(--color-text-400); font-size: 0.625rem; }
+.seon-family-entry.my-plan-item {
+  padding: 0.5rem 0; border: 0; border-bottom: 1px solid var(--color-base-800);
+  border-radius: 0; background: transparent; gap: 0.2rem;
+  font: 0.75rem/1.55 var(--font-mono); overflow-wrap: anywhere;
+}
+.seon-family-entry.my-plan-item.is-current {
+  border-left: 1px solid var(--color-signal); padding-left: 0.65rem;
+  background: var(--color-base-900);
+}
+.seon-family-entry.my-plan-item.is-completed { opacity: 1; }
+.my-plan-item.is-completed h3, .my-plan-item.is-completed .my-plan-expected { color: var(--color-text-400); }
+.my-plan-item .my-plan-status { display: flex; flex-wrap: wrap; gap: 0.25rem 0.75rem; font-size: 0.625rem; color: var(--color-text-400); }
+.my-plan-item .my-plan-state { font: inherit; letter-spacing: normal; text-transform: none; color: var(--color-text-400); }
+.my-plan-item .my-plan-expected { border: 0; padding: 0; font-size: 0.75rem; color: var(--color-text-300); }
+.my-plan-item.is-current .my-plan-expected { color: var(--color-text-100); }
+.my-plan-item h3 { font-size: 0.75rem; line-height: 1.55; }
+.my-plan-item .my-plan-relation { font-size: 0.625rem; }
+.my-plan-item.is-completed details { font: 0.625rem/1.55 var(--font-mono); }
+.my-plan-item.is-completed summary { cursor: pointer; color: var(--color-text-400); }
+.my-plan .my-plan-progress strong { color: var(--color-text-300); font-weight: 400; }
+
