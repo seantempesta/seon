@@ -57,3 +57,15 @@ the same namespace twice for the same HEAD.
 | debug-page-cost-plan (`5755bcd60`) | kills 1–3 approved; option A for the directory audit | debug-page-cost (landed; cold-page slice in flight) |
 | test-suite-cost-plan (`78f0d15c0`) | row 1 option 1 (no automatic confirmation; explicit `--confirm`); row 7 publication deferred, lazy checkouts approved; row 8 approved; rows 2–6 approved; regrowth check approved | test-runner-waste (rows 1, 7-lazy, 8, regrowth); slow-tests-merge (rows 2–6; row 4 landed `e3af34340`) |
 
+## 23:55Z — Codex usage limit
+
+The Codex account hit its usage limit ("try again at Sep 19th, 2026 3:03 AM").
+reaching-tests-tier died after landing `558d5614a` (reconciliation fixture
+repair; request narrowed to seon.source-reconciliation-test +
+seon.test-reaching-test). debug-page-cost died mid-slice with uncommitted
+edits in src/seon/render.clj and test/seon/render/retained_test.clj —
+preserved, untouched. p1-ambient-state, slow-tests-merge (row 3 landed
+`fc90bb972`; row 4 `e3af34340`), test-runner-waste (`ea5861329` landed) will
+fail on their next turn. Owner decision pending: credits, or Opus
+implementation threads under the same rules.
+
