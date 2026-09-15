@@ -1,11 +1,34 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, test, datahike]
 ---
 
 # Parallel published-base acquisition can lose a filestore key
+
+## Resolution — 2026-09-15
+
+Commit `bc3746037` makes each fixture JVM clone and reidentify its backend
+before connecting. Konserve's `sync-on-connect` enumerates backend keys;
+filestore migration can delete old-format paths during that enumeration even
+with frontend-only writes. No fixture connection now opens the published
+store. The existing private clone owner also bounds child exit/output waits.
+
+The canonical regression
+`seon.test-support-test/simultaneous-fixture-bases-never-open-the-published-store`
+opens two real populated bases concurrently, proves distinct store identities
+and paths plus isolated writes, closes both, and compares every published
+file's SHA-256 before/after. It passed in the three-worker gate
+`run.0j9ayQ` in 7,663 ms; the complete gate passed 36 tests / 327 assertions,
+exit 0 with persistent result recording. The earlier armed fast run also
+passed. This proves the ownership boundary; it does not identify the actor
+that deleted each historical key below.
+
+The [landing note](../../../prds/context-generation/research/fixtures-events-2026-09-15.md)
+records the final platform gate and live adoption boundary. Default was not
+restarted or reforked; the concurrent acquisition proof used actual file
+stores in the canonical fixture, not the owner's store.
 
 ## Run7-wave recurrence — 2026-09-15
 
@@ -154,4 +177,4 @@ connected its fixture. The same Konserve migration/tiered-sync stack occurred.
 Isolated confirmation passed in 9,079 ms with no earlier worker-global drift.
 The adoption child regression passed in 206,207 ms. The deleting actor is
 unestablished; the final lane gate uses one worker. See the
-[adoption landing note](../../prds/context-generation/research/adoption-contract-freshness-2026-09-15.md).
+[adoption landing note](../../../prds/context-generation/research/adoption-contract-freshness-2026-09-15.md).

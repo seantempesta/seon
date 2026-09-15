@@ -1,11 +1,34 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, test, database]
 ---
 
 # Test result recording refuses after a branch head changes
+
+## Resolution — 2026-09-15
+
+Commit `bc3746037` repairs contention at `seon.cluster.source/record-results!`.
+After one `:stale-branch-head` refusal, it reapplies the same completion to a
+new scratch branch from the latest head. The expected-head guard remains;
+a second conflict refuses, every scratch branch is retired, and the tested
+program fingerprint is never replaced with the new program's fingerprint.
+
+The existing canonical file-store regression
+`latest-test-evidence-survives-rebuilding-from-an-older-base` now proves both
+controlled cases: one concurrent publication yields successful evidence whose
+parent is that publication; continued contention ends after two attempts,
+preserving the latest source and leaving the unpublished run absent. It
+passed in `run.0j9ayQ` in 71,054 ms. The complete three-worker gate passed
+36 tests / 327 assertions and persistently recorded its results, exit 0.
+
+The separate operator silence-timeout observation remains owned by
+`test-results-persistence-can-time-out-during-development-adoption.md`; this
+change does not claim to repair that transport boundary. The
+[landing note](../../../prds/context-generation/research/fixtures-events-2026-09-15.md)
+records the green platform gate and final MCP verification that default now
+loads the new definitions. No restart/refork was performed.
 
 ## Problem
 
@@ -23,7 +46,7 @@ bin/test: persistent results NOT recorded: :seon.test.runner/persistent-results-
 ```
 
 Exit was 1. The independent six fixture failures are recorded in
-[test-launcher-fixtures-omit-required-helpers.md](test-launcher-fixtures-omit-required-helpers.md).
+[test-launcher-fixtures-omit-required-helpers.md](../test-launcher-fixtures-omit-required-helpers.md).
 The responsible competing operation has not been identified; this is evidence
 of a recording refusal, not an attribution to another process or lane.
 
@@ -74,4 +97,4 @@ would lose source or evidence; any repair must reapply the transaction to the
 new head under a declared bound or coordinate at the existing branch authority.
 The test-provenance exit change makes recording refusal nonzero and prevents
 advancement of the green selection basis. See the
-[landing evidence](../../prds/steward-platform/research/test-provenance-landing-2026-09-15.md).
+[landing evidence](../../../prds/steward-platform/research/test-provenance-landing-2026-09-15.md).

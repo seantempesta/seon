@@ -1,11 +1,31 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, flow, render, class/p2, wave/render-oversight-event]
 ---
 
 # Derive fleet state from events, not a 20 ms ping absence
+
+## Resolution verified — 2026-09-15
+
+The original classifier was dissolved in `b5665971d`, verified by history and
+current `src/seon/oversight.clj:94,221`. A missing pong is explicitly unknown;
+an open turn fact supplies mid-turn, and a pong without an open turn supplies
+parked. The 20 ms value is a declared config fact, not evidence that work is
+running. No replacement production mechanism was needed in this lane.
+
+MCP JVM probes on default returned
+`{:seon.oversight/proc :probe/absent :seon.oversight/ping :unknown}`.
+The three-worker `run.0j9ayQ` gate passed the absence matrix and a freshly
+booted real-cluster/page proof (`a-booted-cluster-tells-its-live-fleet-story`,
+40,182 ms), as part of 36 tests / 327 assertions with no failures/errors.
+
+Unknown deliberately does not diagnose why a proc failed to answer. Named
+graph-transition observations and removal of test polling remain tracked by
+`observable-graph-transitions-are-polled-in-tests.md`; no comprehensive
+busy-versus-scheduler diagnosis is claimed. See the
+[landing note](../../../prds/context-generation/research/fixtures-events-2026-09-15.md).
 
 ## Problem
 

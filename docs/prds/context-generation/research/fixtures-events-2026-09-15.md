@@ -8,6 +8,8 @@ tags: [research, test, flow, database]
 
 ## Authorized continuation: runner fixes first
 
+Implementation commit: `bc3746037`.
+
 The owner selected option 1 and authorized continuing into inexpensive
 fixture/event members without another design stop. Implementation now changes
 the existing owners:
@@ -48,9 +50,38 @@ conflicts (two attempts, no unpublished result, latest source preserved).
   successful persistent result recording. Slot wait **75 s**. Concurrent-base
   proof **7,663 ms**; source evidence proof **71,054 ms**; coordinator/tests
   **143 s**. The successful isolated root was removed by the runner.
-- The required platform gate is running with the final source simplification
-  (the second attempt is directly in the catch body, so it cannot retry
-  recursively). No platform-green claim is made until it finishes.
+- Final platform gate, `run.kPvCZ4`, snapshot `f22f1f215` plus the four
+  owned code paths: **exit 0**, persistent recording succeeded. Slot wait
+  **35 s**, base preparation **60 s**, coordinator/tests **185 s**. The
+  runner removed its successful root. This exercised the final source
+  simplification: the second attempt is directly in the catch body and
+  cannot retry recursively.
+
+### Closures and exact remaining scope
+
+Four notes are resolved and archived: the two runner notes (`bc3746037`),
+oversight ping absence (existing fix `b5665971d`, live unknown probe plus
+canonical boot/page test **40,182 ms**), and the schedule environment fixture
+(existing fix `2fa2e1e17`, canonical graph test **1,204 ms**). Their archived
+records retain the historical evidence and name their residual boundaries.
+
+P2, P3, and N2 are not closed. The dated inventory below records why the
+remaining members require production lifecycle events, settlement, ordering,
+or nonempty program-analysis subjects beyond these inexpensive repairs.
+The N2 shared assertion now rejects zero trials, but that cannot establish
+the nonempty production subject of every individual property.
+
+Exact code/skill paths: `src/seon/cluster/source.clj`,
+`test/seon/cluster/source_test.clj`, `test/seon/test_support.clj`,
+`test/seon/test_support_test.clj`, `.agents/skills/clojure-testing/SKILL.md`.
+Documentation paths: this note, the retained read-only probe, the N2 class
+note, and the four archived issue notes. No protected file was edited.
+No additional runtime mechanism or schema was introduced.
+
+The failed `run.51bnuS` root was removed after its failure was corrected and
+the process table showed no holder. Both later successful roots were removed
+by the runner. All lane commands have exited; no lane shell, worker,
+scratch cluster, or worktree remains.
 
 ### Default live boundary
 
@@ -72,9 +103,14 @@ A later 1 ms MCP JVM probe printed the following before returning nil:
  {:seon.oversight/proc :probe/absent :seon.oversight/ping :unknown}}
 ```
 
-This proves the new retry is not yet adopted on default and independently
-reconfirms the current oversight absence behavior. No restart/refork or
-unverified manual reload was performed.
+That observation was temporary. Final MCP JVM probes took **2 ms** and
+**3 ms** and printed `:probe/record-results-at-head-loaded? true`, the new
+public docstring describing one stale-head reapplication, and
+`:probe/connection? true` from `(seon.operator/connection "default")`.
+Missing pong still returned `:unknown`. Thus the new definitions are now
+loaded on default through in-place development adoption. The controlled
+contention behavior was exercised in the canonical file-store regression,
+not by mutating default. No restart/refork or manual reload was performed.
 
 ## Initial investigation and satisfied design boundary
 
@@ -258,7 +294,7 @@ Archived original N2 records read end to end: transport taxonomy
 (`5bc903010`). The N2 class note also records assertionless-test enforcement
 in `ad3d13e9b`. None establishes complete class closure.
 
-## Verification and cleanup
+## Initial checkpoint verification and cleanup (historical)
 
 - Production tests/gates: **not run**; stop is before production edits under
   the assignment's design gate. No green canonical-harness claim.

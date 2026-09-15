@@ -1,11 +1,27 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, runtime, flow, test, class/p3, wave/schedule-fixture]
 ---
 
 # Construct the schedule graph test from a real environment-bearing handle
+
+## Resolution verified — 2026-09-15
+
+`2fa2e1e17` replaced the partial handle with `with-database`, the canonical
+`cluster-handle`, a real SCI context, and the environment constructor. Current
+`test/seon/schedule_test.clj:348` still invokes the production graph definition
+with that value and checks its mailbox, turn, and schedule procs. No production
+fallback or new fixture was added in this lane.
+
+The real constructor regression passed under armed contracts in the
+three-worker `run.0j9ayQ` gate in 1,204 ms. Every schedule test passed; the
+combined gate reported 36 tests / 327 assertions / zero failures or errors,
+exit 0 with persistent result recording. This is a live constructor proof in
+the canonical database fixture, not a static schema-only check. See the
+[landing note](../../../prds/context-generation/research/fixtures-events-2026-09-15.md)
+for the final platform and default boundaries.
 
 ## Problem
 
