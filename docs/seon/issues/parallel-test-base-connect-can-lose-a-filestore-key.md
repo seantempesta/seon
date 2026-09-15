@@ -133,3 +133,13 @@ acquisition. Isolated confirmation passed; no worker-global drift was
 detected. A subsequent focused gate passed this test. The deleting actor
 remains unknown. Evidence: `tmp/html-views/final-gate-2.log:531` and
 `tmp/html-views/focused-gate.log`.
+
+## 2026-09-15 17:19Z re-observed
+
+`bin/test --paths … -- seon.cluster.message-test` (run root `tmp/test-runs/run.AN4WL8`):
+`generated-message-histories-preserve-identity-fanout-and-depth` failed in the
+parallel pool with `NoSuchFileException` under
+`target/test-published-bases/64435198…/base/data/store/e4038ab0-…` raised from
+`konserve.filestore/migrate-file-v1` during `konserve.tiered/sync-on-connect`;
+the runner's isolated confirmation of the same task passed (`confirmation
+parallel-only`). Same class, still open.
