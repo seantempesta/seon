@@ -12,14 +12,11 @@ This is the one maintained repository instruction authority. Codex reads
 claim here, the claim is the bug: fix this file in the same commit as the
 change that exposed it.
 
-**Lane instructions — verbatim from [turn PRD §10](docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md).**
-The copy below includes the PRD's explicit supersession annotations. An
-assignment's stricter stop rule takes precedence: do not operate another
+**Lane instructions — current workflow; history in [turn PRD §10](docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md).**
+An assignment's stricter stop rule takes precedence: do not operate another
 lane's session to repair a foreign gate failure. Execute a bounded assignment
 directly, without delegating again; preserve unrelated edits and name the
 exact verification boundary when reporting.
-
-Owner rulings 2026-09-07/08, collected so no two lanes read different rules:
 
 0. **You are a hyper-competent principal engineer.** Do the right thing
    quickly; do not fuss over detail a later revision will erase. Obsess over
@@ -34,18 +31,17 @@ Owner rulings 2026-09-07/08, collected so no two lanes read different rules:
    base publication. Plain namespaces use the working tree. **Gate a commit with
    `bin/test --paths <your own files…> -- <namespaces…>`** — it
    snapshots HEAD and overlays ONLY the paths you name, so no other lane's
-   in-flight edit can block you (landed `e33a887fe`); bare `bin/test`
+   in-flight edit can block you; bare `bin/test`
    selects by `:seon.fn/calls` reach when you are alone; **plus
    `bin/test --platform` green.** Foreign breakage is never a reason to
-   stop. (superseded by §0 when an explicit assignment requires stopping) NEVER
+   stop unless the assignment explicitly requires it. NEVER
    `--all` or `--full` in a lane — full suites are the orchestrator's
-   integration checkpoints only. "It's a waste of time to run the entire
-   test suite for every change."
+   integration checkpoints only.
 2. **The gate is instrumented**: every regression runs under the same
    contracts a cluster arms. A test that passes only unarmed is a defect.
 3. **One clipping spot**: presentation elision happens in the AI render
-   functions and the value renderer only; storage is bounded by `max-bytes`
-   only (superseded by §15); HTML never clips. A spec or diff adding a `fit`/`elision` call
+   functions and the value renderer only; evaluations store shown text;
+   HTML never clips. A spec or diff adding a `fit`/`elision` call
    anywhere else is wrong on sight.
 4. **Protected = concurrently edited only.** A path is protected while
    another lane holds uncommitted edits in it; otherwise fix every root
@@ -57,14 +53,13 @@ Owner rulings 2026-09-07/08, collected so no two lanes read different rules:
 6. **Background hygiene**: never poll with `pgrep -f` on your own command
    line; run awaited commands in the background; end every shell and delete
    scratch roots/worktrees before reporting.
-7. **Words**: verify / falsify / probe — never adversarial verbs. The
-   retired spellings in §0a are never written.
+7. **Words**: verify / falsify / probe — never adversarial verbs;
+   use the current terms in the vocabulary table below.
 8. **The default cluster IS the development environment** (main root,
    `bin/seon start`, MCP with no root argument): the edit hook keeps it
    current on every edit and a lane verifies there (configured coalescing
    means publication is not immediate). **A lane never stops, reforks, or
-   restarts `default`** — it is the owner's window, and lanes reforking it
-   kept it down most of 2026-09-08. On "predates the incompatible schema
+   restarts `default`** — it is the owner's window. On "predates the incompatible schema
    change" the lane records RESET NEEDED with the commit in its landing
    note, verifies on its own scratch cluster (`bin/seon --root
    tmp/<lane>-root start <lane>`, Juniper fixture seeded, downed and deleted
@@ -79,33 +74,29 @@ Owner rulings 2026-09-07/08, collected so no two lanes read different rules:
 
 ## How we work here
 
-**This is the second implementation.** The first one worked — for months —
-and was torn down deliberately by its author, because he had learned enough
-to build it properly. That fact should reorganize how you work: almost
+**This is the second implementation.** Almost
 everything you are asked to build has been built before, and the previous
 version is readable through Git history. `git show` and `git log` are the
 quarry; `docs/prds/*/research/` holds dated investigations with `file:line`
-evidence and measured numbers; `reference-code/` vendors over a hundred dependencies as
+evidence and measured numbers; `reference-code/` vendors dependencies as
 submodules so their semantics can be READ rather than remembered. The prime
 directive is not "write good code" — it is **do the archaeology before you
 design, then design something better than what you found**. The fresh tree is
 not zero knowledge; it is zero *baggage*: every piece re-earns its place.
 
 **Ask what the dependency already does before you build anything.** sci keeps
-a live env; konserve has GC and content-addressed blobs; Datahike branches
+a live env; konserve has GC and binary storage; Datahike branches
 are head pointers, not copies. If your design recomputes something a
-dependency already maintains, the design is wrong — this exact mistake once
-put a 283 ms cold-start rebuild on every agent turn. The cheapest place to
+dependency already maintains, the design is wrong. The cheapest place to
 delete code is before it exists: build the smallest real thing and let live
-falsifiers attack the design while it is still a decision.
+probes falsify the design while it is still a decision.
 
 **Prefer dissolution to addition.** The best change deletes a mechanism.
 When you meet a tuned constant, ask what observable event it stands in for.
 When a fix feels like hardening a mechanism against its own normal
 operation, stop and ask whether the mechanism belongs on that path at all.
 
-**Derive state; do not remember it.** This project has had six of six
-assumptions falsified in one sitting. Verify prose — including this file —
+**Derive state; do not remember it.** Verify prose — including this file —
 with one live command before acting on it. Nothing stores what a query can
 derive: `open?` means no `closed-tx`; a boolean is legitimate only when
 someone genuinely asserts the false.
@@ -144,7 +135,7 @@ CLJS build is off and the pod/self-host engine is deleted; git history is
 the archive for everything deleted. Fresh `src/` + `test/` are the system.
 
 The system has exactly two states: **boot** and **running**. Boot is the
-0→1 construction in dependency order, and it opens the REPL at second zero
+0→1 construction in dependency order, and it opens the REPL before store acquisition
 so a boot failure is always fixable live; each layer reads only the one
 below it and publishes its own readiness. Then running code takes over:
 platform infrastructure plus agents, all receiving the environment boot
@@ -161,8 +152,7 @@ produced. The boot order:
    serial loop per connection — we never build writers, we call `transact`
    and it serializes ([writer](reference-code/datahike/src/datahike/writer.cljc)).
    The `flock` is ours: nothing in Datahike stops a second process opening
-   the same store, and two JVMs on one store once destroyed 40/40 commits
-   silently. One JVM may host many cluster instances; nothing may assume
+   the same store. One JVM may host many cluster instances; nothing may assume
    "the" cluster.
 3. **Facts.** A config manifest reconciles into database facts; running
    code reads the database, never files or env vars. One non-executing
@@ -203,39 +193,41 @@ the publication on an explicitly selected development cluster in its
 hosting JVM; the edit hook's `:current-source` root and cluster select that target.
 Its adoption commit is recorded only after schema and program reconciliation,
 loaded definitions, SCI acquisition, and JVM instrumentation succeed. Publication
-retains existing wrappers and restores them even after a reload failure;
+re-arms wrappers when their authored contract changes; unchanged wrappers retain
+identity (`src/seon/instrument.clj:588`). A source-change refusal retries adoption
+once (`src/seon/cluster.clj:2042`);
 individual Var replacement during reload is not atomic. A live proof after file
 edits must name whether it exercised a hot-reloaded Var, a new fork, or this
 in-place development adoption; browser paint requires its own observation.
 
 **Transport law:** anything recovery or another process could ever need is
 a DATABASE FACT — identities, evaluations, messages, errors, the settled
-reply — with bulky durable payloads as blobs. [TARGET] Evaluation result
+reply — with bulky durable payloads as blobs. Evaluation result
 objects are excluded: §15 stores their shown text, never result blobs. Everything IN FLIGHT rides channels,
 provided loss is free: re-derivable from facts or superseded by a newer
 complete value. The buffer encodes the loss semantics: sliding-1 for
 latest-wins, fixed for backpressure, counted-dropping for observation.
 Any design where channel loss breaks recovery is wrong by definition.
 
-**[TARGET] Crash and turn model (turn PRD §4, §14–§15): interrupted execution never resumes.** The binding
+**Crash and turn model: interrupted execution never resumes.** The binding
 [turn PRD §14–§15](docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md)
-requires boot to close open turns and mark unfinished evaluations interrupted.
+is implemented by boot recovery (`src/seon/turn.clj:1680`): close open turns and
+mark unfinished evaluations interrupted.
 The agent adapts from stored shown text. Private defs, atoms, and result objects
 disappear with the JVM; they are neither serialized nor restored. Each agent
 owns one persistent SCI context, forked once from the program base and updated
-with accepted base diffs before later turns. Process custody stamps, claim epochs, and fresh per-turn forks are retired
-designs. This is a target, not a claim that their removal is complete:
-`src/seon/sci/eval.clj:1821` still forks and rehydrates stored defs.
+with accepted base diffs before later turns (`src/seon/sci/eval.clj:1709`,
+`src/seon/cluster/agent.clj:636`).
 
-**[TARGET] Waking and the loop (turn PRD §3, §14).** Schema-declared listened
+**Waking and the loop.** Schema-declared listened
 attributes identify wake datoms; answering derives from their `:t` and a
 qualifying turn's basis. An accepted ordinary reply answers them; a
-system-only turn or opening alone does not (owner resume, 2026-09-09).
+system-only turn or opening alone does not (`src/seon/turn.clj:2823`).
 System turn 0 stores
 the opening. Before each agent turn, the since-diff checks every distinct
 read form's latest evaluation and appends changed reads in a system turn;
-writes and effects never rerun. The partial owner is
-`src/seon/turn.clj:2033`; its existence is not full-loop proof.
+writes and effects never rerun. `src/seon/turn.clj:2039` owns the system turn;
+`src/seon/turn.clj:4933` advances the ordinary agent proc.
 
 **Errors are two classes, never mixed.** An agent mistake becomes a flat
 `:seon.error` value the agent sees — nothing throws into the loop. A core
@@ -267,20 +259,18 @@ fresh on every call. Derived state rides the value it derives from (a
 validator on its projection, a writer on its connection), so staleness and
 cross-environment reads are structurally impossible. Temporal database
 values (`history`/`as-of`/`since`) derive schema through Datahike's origin
-chain, never from the wrapper
-([versioning](reference-code/datahike/src/datahike/versioning.cljc)).
+chain (`src/seon/db.clj:901`). Database values carry their projection state
+(`src/seon/db.clj:141`); reads use it before the supplied-projection fallback
+(`src/seon/db.clj:950`). Evaluation binds a database carrying that state
+(`src/seon/sci/eval.clj:2250`).
 
 ```clojure
-;; Illustrative shape; `projection` and the remaining request keys come from
-;; the caller or fixture.
-;; a caller or fixture hands the projection explicitly, like production:
-(schema/register! {:seon.schema/projection projection, ...})
-;; not: register! silently reading a process-global registry
+;; The caller or fixture hands the projection explicitly:
+(seon.schema.datahike/storable-attribute-in? projection :seon.agent/id)
 ```
 
 Fetch-at-call-time is also the recurring performance killer: the same
-defect that reads stale state also recomputes a projection on every call
-(measured 217 s vs 6.2 s in one wake path). Grounding:
+defect that reads stale state also recomputes a projection on every call. Grounding:
 [seon-env PRD](docs/prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md);
 open members are tagged `class/p1` in `docs/seon/issues/`.
 
@@ -361,10 +351,10 @@ caller. Diagnostics tell the truth or say nothing: a thread dump that omits
 virtual threads lies.
 
 Outward values cross one total render contract: renders never throw and
-never refuse an ordinary value. The **[TARGET] turn PRD §15** retains the actual
+never refuse an ordinary value. Evaluation retains the actual
 result object in the agent's SCI context and stores the exact shown text;
-it deletes result serialization, result blobs, and a separate result-storage
-bound. **The AI projection is bounded by the render profile** —
+(`src/seon/sci/eval.clj:1957`); it does not serialize the result object.
+**The AI projection is bounded by the render profile** —
 the AI RENDER FUNCTIONS and the VALUE RENDERER (`seon.render.value`'s AI
 projection) apply its string, child-count, depth and token limits, and that
 is the ONE place presentation elides anything — never the walk, never the
@@ -372,8 +362,9 @@ history, never a render terminal, never a request seam (owner, 2026-09-08:
 "the ai projection is supposed to be handled by the ai render functions or
 the value renderer. DO NOT INTRODUCE MORE spots where clipping occurs"). Presentation elides only
 under a profile, and a request that carries none is not a request without one:
-`seon.render/request-profile` DERIVES the cluster's agent profile at the render
-entry points. The projection is made once at evaluation time; historical
+`seon.render/request-profile` derives the cluster's agent profile at the render
+entry points when a projection is supplied; otherwise it returns a typed refusal
+(`src/seon/render.clj:67`). The projection is made once at evaluation time; historical
 evaluations render their saved shown text unchanged. **HTML has no presentation clipping** — a page serves the live object it holds, or saved shown text after
 restart. The three controls are the AI presentation profile, query-work bounds,
 and evaluation deadlines (turn PRD §5, §15); result storage has no separate
@@ -454,14 +445,15 @@ genuinely mean key membership and the collection is a map or set.
 a capability has ONE durable fact family and ONE system-side owning
 mechanism (`seon.cluster.message`, `seon.turn`), and `my.<name>` is
 the thin agent-facing protocol over those same facts — reads through
-`seon.db`, effects as returned values the run loop interprets. Finding two
+`seon.db`, with writes at the owning function (`src/my/message.clj:31`). Finding two
 namespaces for one noun is the ruled layering; finding two FACT families or
 two delivery paths for one noun is the defect.
 
-`seon.db` is the ONE database namespace: all of Datahike's core data
-functions, agent-first, each with Datahike's own positional AND
-argument-map arities, both able to elide db/conn to the calling agent's
-cluster's current database. Failures return flat `:seon.error` values.
+`seon.db` is the ONE database namespace. Use its declared positional and
+argument-map arities; agent calls can elide db/conn to the calling agent's
+cluster's current database. `transact!` with an explicit connection returns
+the transaction report; its elided arity returns transaction identity and datoms
+(`src/seon/db.clj:2961`). Failures return flat `:seon.error` values.
 Direct `datahike.api` calls survive only inside `seon.db`, the
 store/registry and classified branch-custody owners, and system-side
 listeners
@@ -487,8 +479,7 @@ durable entity. Legacy `:seon.cluster.eval`, `:seon.cluster.run.form/*`, and
 `receipt` identifiers are source references during the owning lane's cut;
 they never justify a second entity or a duplicated attribute.
 In particular, the MCP evaluation modes are `jvm` (the host REPL) and `sci`
-(**SCI evaluation mode**: the cluster's shared SCI context); the retired
-spelling `door` is never written. Preserve literal tool arguments,
+(**SCI evaluation mode**: the cluster's shared SCI context). Preserve literal tool arguments,
 identifiers and historical quotations where accuracy requires them, but do not
 carry those spellings into new prose. Rendering functions are functions;
 dependency-specific producers/consumers remain producers/consumers when that is
@@ -529,13 +520,12 @@ writing.
 | call preparation, supplied defaults | sci's hook seam supplying a function's declared-and-absent arguments from the environment; caller wins; unavailable is a flat error (`reference-code/sci/src/sci/core.cljc` init docstring) | ambient injection, batteries |
 | **[TARGET] canvas** | the focal agent surface; design lives in `docs/seon/architecture/ui.md`; no declared attribute exists yet — update this row when it lands | tile, live-tile, world |
 | surface; card (CSS only) | a context render; a visual component | tile |
-| web UI | `/`, `/agent/{id}`, debug, and `/data` | inspector |
-| subagents | agents connected through database refs | collaboration system |
+| web UI | `/`, `/ns/{namespace}`, `/agent/{id}`, their debug routes, and `/data` (`src/seon/render/route.clj:5`) | inspector |
 | cluster | one database branch, its agents, and shared plumbing; produces one environment | environment (for the cluster itself) |
 | attributes + connections | the Datahike model | entity kind/type |
 | build, operator, artifact | the `bin/seon`/`bin/acme` supervisor scope; the digested publication output | flavor |
 | get-in, path | paged navigation into a nested value | drill |
-| `my.plan`, "the plan" | The task system's authored plan facts and derived obligations; its render function chooses forms from current data and its writes return the changed entity ([turn PRD §13–§15](docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md); `resources/seon/schemas/seon.agent.edn:1` declares the plan component; `src/my/plan.clj` follows it) | todo, bare "plan" for turn sources |
+| `my.plan`, "the plan" | The task system's authored plan facts and derived obligations; its render function chooses forms from current data and its writes return the changed entity ([turn PRD §13–§15](docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md); `resources/seon/schemas/seon.agent.edn:151` declares the plan component; `src/my/plan.clj` follows it) | todo, bare "plan" for turn sources |
 | provider descriptor row | one hosted provider's data row under the config singleton | adapter, integration |
 | packages/, package.json, deps.edn | each ecosystem's own manifest names | npm-pkgs, maven-pkgs |
 | contexts on hosts, binding tables | sci's own vocabulary for agent execution | sandbox, VM, jail |
@@ -545,44 +535,44 @@ writing.
 | `:seon.eval/fn-entries` | a RECORDED DIAGNOSTIC, never a limit | a step budget |
 | every `fn` body entrance | where sci calls the `:interrupt-fn` | safepoint |
 | `ctx`, `fork` | sci's own names (`reference-code/sci/src/sci/core.cljc`) | warm base, the agent's world |
-| `:io` / `:compute` / `:mixed` | core.async's workload tags: `:io` may block but not compute, `:compute` must not block (`reference-code/core.async/.../impl/dispatch.clj`) | eval pool, wait pool |
-| turn | An agent's ordered evaluations and any provider attempts; open means no `:seon.turn/closed-tx`, enforced at the writer. `seon.turn` owns the transitions; its schema declares the transcript render pair ([open?](src/seon/turn.clj:194), [open-call](src/seon/turn.clj:378), [schema](resources/seon/schemas/seon.turn.edn:1)); process provenance rides execution requests, never the turn entity. | run, `seon.cluster.run`, `:seon.cluster.run/process` |
+| `:io` / `:compute` / `:mixed` | core.async's workload tags: `:io` may block but not compute, `:compute` must not block (`reference-code/core.async/src/main/clojure/clojure/core/async/impl/dispatch.clj`) | eval pool, wait pool |
+| turn | An agent's ordered evaluations and any provider attempts; open means no `:seon.turn/closed-tx`, enforced at the writer. `seon.turn` owns the transitions; its schema declares the history render pair ([open?](src/seon/turn.clj:189), [open-call](src/seon/turn.clj:348), [schema](resources/seon/schemas/seon.turn.edn:1)); process provenance rides execution requests, never the turn entity. | run, `seon.cluster.run`, `:seon.cluster.run/process` |
 | accretion / breakage | a change that requires no more and provides no less | graduation, nursery |
 | **[TARGET]** source initialization rows, transaction data | Static source population is admitted transaction data; the agent's opening is separately evaluated and stored as system turn 0 ([turn PRD §13–§15](docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md); `src/seon/bootstrap.clj`) | bootstrap-plan rows, seed bundle |
 | process record, generation, (pid, start-instant) | operator-managed process descriptors (`script/seon/fresh_operator.clj` ↔ `src/seon/cluster/process.clj`) | orphan registry, liveness flag |
-| system turn | An ordinary turn with a reply and no provider attempt; "system" is derived, never stamped. `seon.turn/system-turn` computes the opening and changed reads and optionally stores their evaluations ([owner](src/seon/turn.clj:2033), [debug controls](src/seon/render/web.clj:2465)); the wake-answering `:t` rule remains specified by [turn PRD §14](docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md). | generated opening episode, generated run |
-| turn loop | The per-agent Flow proc derives work from database facts, advances open/call/evaluations/close, and rewakes when work remains. Its proc and transitions share `seon.turn` ([step](src/seon/turn.clj:4814), [work](src/seon/turn.clj:2649), [turn](src/seon/turn.clj:4619)); the agent owner supplies its [graph](src/seon/cluster/agent.clj:396). The full additive-context algorithm remains specified by [turn PRD §14–§16](docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md). | run loop, driver, driving |
-| `seon.effect`, `effect/request!` | the one system-side owner every CAPABILITY request enters (fs, web, llm, db writes) — about effects crossing out, never about which functions an agent may call | the door, capability dispatch |
+| system turn | An ordinary turn with a reply and no provider attempt; "system" is derived, never stamped. `seon.turn/system-turn` computes the opening and changed reads and optionally stores their evaluations ([owner](src/seon/turn.clj:2039), [debug controls](src/seon/render/web.clj:709)); the wake-answering `:t` rule remains specified by [turn PRD §14](docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md) and implemented at `src/seon/turn.clj:2823`. | generated opening episode, generated run |
+| turn loop | The per-agent Flow proc derives work from database facts, advances open/call/evaluations/close, and rewakes when work remains. Its proc and transitions share `seon.turn` ([step](src/seon/turn.clj:4933), [next-agent-work](src/seon/turn.clj:2753), [turn](src/seon/turn.clj:4723)); the agent owner supplies its [graph](src/seon/cluster/agent.clj:422). The full additive-context algorithm remains specified by [turn PRD §14–§16](docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md). | run loop, driver, driving |
+| `seon.effect`, `effect/request!` | the system-side owner for declared capability requests (fs, web, llm); database writes enter `seon.db/transact!` (`src/seon/db.clj:2961`) — about effects crossing out, never about which functions an agent may call | the door, capability dispatch |
 | every function is callable | an agent may call ANY function in its cluster's program graph; what differs per agent is only what is RENDERED into its context, which never gates execution | toolkit, grants, allowlist |
 | program graph | the collective `:seon.fn`/`:seon.ns`/`:seon.schema`/`:seon.test` facts | corpus |
-| proc, step-fn, conns, graph-def | `clojure.core.async.flow`'s own vocabulary (`reference-code/core.async/.../flow/spi.clj`) | invented scheduler nouns |
+| proc, step-fn, conns, graph-def | `clojure.core.async.flow`'s own vocabulary (`reference-code/core.async/src/main/clojure/clojure/core/async/flow.clj:78`, `reference-code/core.async/src/main/clojure/clojure/core/async/flow.clj:165`) | invented scheduler nouns |
 | `(sliding-buffer 1)` tap | core.async's own newest-only delivery | latest-wins mailbox |
 | tuple (`:db/tupleType`) | Datahike's single-value ordered construct; cardinality-many is a SET (`reference-code/datahike/src/datahike/index/persistent_set.cljc`) | small limited vector |
-| `my.agents.<id>` | the DEFAULT namespace for a temp agent only; real agents own namespaces anywhere. ASSIGNMENT IS NOT IDENTITY: `:seon.agent/namespace` is not unique (`resources/seon/schemas/seon.agent.edn:87`) — several agents may share one, and an agent may `in-ns` anywhere its REPL reaches. The one agent a namespace answers for is its `:seon.ns/steward` | agent workspace, sandbox ns |
-| **[TARGET]** render function | A function of the data that chooses its forms. ONE AI/HTML pair per entity schema, never per scalar attribute; when no pair is declared, use the default attribute-map printer. Evaluation entities render saved shown text through `seon.repl/render-ai` and `render-html` ([turn PRD §13–§15](docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md); `src/seon/repl.clj:315`) | producer, view, read form, `/form` face, `:seon.render/form` |
-| **[TARGET]** `:seon.render/ai` | The entity's AI projection. Generated source is evaluated in an ordinary system turn; historical evaluations render stored shown text without executing their forms. The walk and evaluation schema pair share `seon.repl/text` as the REPL grammar ([turn PRD §13–§15](docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md); `src/seon/repl.clj:246`) | separate teaching prose, text render, "the string consumed by agent context" |
+| `my.agents.<id>` | the DEFAULT namespace for a temp agent only; real agents own namespaces anywhere. ASSIGNMENT IS NOT IDENTITY: `:seon.agent/namespace` is not unique (`resources/seon/schemas/seon.agent.edn:79`) — several agents may share one, and an agent may `in-ns` anywhere its REPL reaches. The one agent a namespace answers for is its `:seon.ns/steward` | agent workspace, sandbox ns |
+| **[TARGET]** render function | A function of the data that chooses its forms. ONE AI/HTML pair per entity schema, never per scalar attribute; when no pair is declared, use the default attribute-map printer. Evaluation entities render saved shown text through `seon.repl/render-ai` and `render-html` ([turn PRD §13–§15](docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md); `src/seon/repl.clj:387`) | producer, view, read form, `/form` face, `:seon.render/form` |
+| `:seon.render/ai` | The entity's AI projection. Generated source is evaluated in an ordinary system turn; historical evaluations render stored shown text without executing their forms. The walk and evaluation schema pair share `seon.repl/text` as the REPL grammar ([turn PRD §13–§15](docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md); `src/seon/repl.clj:213`) | separate teaching prose, text render, "the string consumed by agent context" |
 | `:seon.render/html` | the Hiccup consumed by the web UI, or the symbol naming its function (`src/seon/render/hiccup.clj`) | hiccup contract |
-| **[TARGET]** live result object | The actual result retained by evaluation id in the agent's SCI context, bound directly by `result/e<id>`. It is not serialized, admitted as a stored node, or restored after restart ([turn PRD §13–§15](docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md); SCI binding: `reference-code/sci/src/sci/core.cljc:260`) | result serialization, stored print node, result blob, restorable node |
+| live result object | The actual result retained by evaluation id in the agent's SCI context, bound directly by `result/e<id>`. It is not serialized, admitted as a stored node, or restored after restart ([turn PRD §13–§15](docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md); binding: `src/seon/sci/eval.clj:513`; SCI `intern`: `reference-code/sci/src/sci/core.cljc:260`) | result serialization, stored print node, result blob, restorable node |
 | wire (external crossings only) | a crossing that LEAVES the process (provider HTTP, browser SSE); internal transport is channels, flow, facts | wire (internal) |
 | namespace page | one namespace's web surface: route → namespace → owner agent → walk in `/html` (`src/seon/render/route.clj`) | page, screen, dashboard |
 | **[TARGET]** block | One entity rendered through its schema pair, covering a whole concern. Scalars share its own block; components and declared derived queries supply their blocks. The identified output is the HTML morph target ([turn PRD §13–§15](docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md); `src/seon/render/block.clj:61`) | widget, component, panel, scalar block |
 | package, keyframe, delta | the delivery units: one revisioned package per change; a revision gap snaps to keyframe | frame, bundle |
-| **[TARGET]** base SCI context / agent SCI context / prompt | The cluster's acquired program-only context; each agent's persistent context forked once and receiving base diffs; the ordered rendering of its stored evaluations. Neither private objects nor prompt visibility gates callability ([turn PRD §13–§15](docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md); `reference-code/sci/src/sci/core.cljc:330`, `:345`, `:260`) | turn fork, "the context" for all three |
+| base SCI context / agent SCI context / prompt | The cluster's acquired program-only context; each agent's persistent context forked once and receiving base diffs; the ordered rendering of its stored evaluations. Neither private objects nor prompt visibility gates callability ([turn PRD §13–§15](docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md); `src/seon/sci/eval.clj:1709`; SCI `init`: `reference-code/sci/src/sci/core.cljc:331`, `fork`: `reference-code/sci/src/sci/core.cljc:345`, `intern`: `reference-code/sci/src/sci/core.cljc:260`) | turn fork, "the context" for all three |
 | candidate context | a built context used to test a definition before installing it; `sci/fork` is admissible (copy-on-write Vars) | sandbox ctx, scratch fork |
-| **[TARGET]** compaction | Wipe the agent's evaluations; the next system turn regenerates the opening from current record facts using the same algorithm. There is no manual curation path ([turn PRD §13–§15](docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md)) | editor, revision, proof, curation, supersession |
-| **[TARGET]** render profile | The presentation policy applied by the value renderer once at evaluation time; the evaluation stores the resulting shown text. History never clips again; HTML renders the live object without presentation clipping, or saved text after restart ([turn PRD §13–§15](docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md); `resources/seon/schemas/seon.render.profile.edn`) | cap, window, separate result storage bound |
+| compaction | Wipe the agent's evaluations; the next system turn regenerates the opening from current record facts using the same algorithm. There is no manual curation path ([turn PRD §13–§15](docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md); `src/seon/turn.clj:2207`) | editor, revision, proof, curation, supersession |
+| render profile | The presentation policy applied by the value renderer once at evaluation time; the evaluation stores the resulting shown text. History never clips again; HTML renders the live object without presentation clipping, or saved text after restart ([turn PRD §13–§15](docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md); `resources/seon/schemas/seon.render.profile.edn`) | cap, window, separate result storage bound |
 | elision value | ordinary data describing omitted count, path, next offset, and requery identity (`resources/seon/schemas/seon.print.edn` ↔ `src/seon/print.cljc`) | ellipsis, truncation marker |
 | `:seon.fn/external-sink`, `:seon.fn/projection-boundary` | queryable program-graph leaf facts; `seon.fn/output-path-report` derives projected/bypass/unresolved paths (`resources/seon/schemas/seon.fn.edn` ↔ `src/seon/fn.clj`) | sink roster, output allowlist |
 | **[TARGET] root maintenance portfolio** | root's declared scheduled reclamation/inspection/repair tasks ([design](docs/prds/sci-execution-runtime/research/scheduler-mining-and-gc-design-2026-08-04.md)); update this row when the owners land | maintenance daemon |
-| **[TARGET] `my.branch`** | agent-facing branch/history verbs over database branches — git vocabulary without claiming to be git ([PRD](docs/prds/sci-execution-runtime/plan/agent-desk-and-checkout-prd-2026-08-05.md)); update this row when it lands | my.git, my.repo |
-| **[TARGET]** private layer | The agent's defs and atoms as actual objects in its persistent SCI context, isolated from the base and other agents, lost on JVM restart. Installed functions, schemas, and tests are durable program facts ([turn PRD §13–§15](docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md); SCI isolation: `reference-code/sci/src/sci/core.cljc:345`) | `:seon.def/*`, session image, restored defs |
-| **[TARGET]** evaluation entity | One `:seon.eval` entity per branch/turn/ordinal identity, carrying source and outcome evidence including shown text, out, error, and read evidence. Its actual result stays in memory; identity derives through `seon.id/evaluation` ([turn PRD §13–§15](docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md); `src/seon/id.clj:50`) | `:seon.cluster.eval`, `:seon.cluster.run.form/*`, frozen form entity, receipt, `form-identity` |
-| **[TARGET]** the agent's history | The walk rendering `(seon.eval/of-agent db agent)` in chronological turn order and ordinal through the evaluation schema's pair, from stored shown text. All turns are shown by default; previous prompt bytes remain unchanged until compaction ([turn PRD §13–§15](docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md); `src/seon/repl.clj:246`) | transcript, transcript entries, session units, run-form facts |
-| **[TARGET]** `doc`, `dir` | REPL documentation as DATA from public program rows: `dir` returns symbol, arglists, first docstring line, and input/output contract; `doc` returns the full docstring and contract ([turn PRD §13–§15](docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md)) | faces tool, print face, separate teaching prose |
-| `seon.id/id`, `seon.id/digest`, `seon.id/evaluation` | THE ONE IDENTITY DERIVATION: `id` hashes `(pr-str data)` with SHA-256, default length 12 or supplied length; zero arguments mint a fresh event. `digest` and `evaluation` call it ([owner](src/seon/id.clj:1)). Ordinary turn IDs include branch, agent, and turn ordinal ([next-id](src/seon/turn.clj:483)); their evaluation id is `(seon.id/evaluation turn ordinal)` because the turn already includes its branch, and the handle is `(seon.id/symbol-in "result" \e id)` ([handle](src/seon/sci/admit.clj:614)). The explicit branch/turn/ordinal arity also remains available. `random-uuid` only for a genuinely fresh EVENT with no identity of its own. Never a new generator, never a second truncation (owner, 2026-09-08) | short-id, nanoid, hand-rolled hashes, `(str (random-uuid))` for things that have parts |
-| **[TARGET]** read evidence | The dependency plans and revisions a read observed, used with its evaluation `:t` to detect changed facts. Every distinct generated or agent-written read participates; writes and effects never rerun ([turn PRD §13–§15](docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md); `src/seon/db.clj:468`, `:561`) | copied read result, inbox-only refresh |
-| **[TARGET]** shown text | The exact value-renderer text the agent saw at evaluation time, saved with source, out, and error. It includes profile elisions and requery forms, survives restart, and cannot restore the live object ([turn PRD §13–§15](docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md)) | result EDN, stored print node, serialized result |
-| candidates (per-render selection) | the contract-fitting render producer selection consulted per render call (`src/seon/render.clj`) | roster, acquired index |
+| **[TARGET] `my.branch`** | agent-facing branch/history functions over database branches — git vocabulary without claiming to be git ([PRD](docs/prds/sci-execution-runtime/plan/agent-desk-and-checkout-prd-2026-08-05.md)); update this row when it lands | my.git, my.repo |
+| private layer | The agent's defs and atoms as actual objects in its persistent SCI context, isolated from the base and other agents, lost on JVM restart. Installed functions, schemas, and tests are durable program facts ([turn PRD §13–§15](docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md); agent acquisition: `src/seon/cluster/agent.clj:636`; SCI isolation: `reference-code/sci/src/sci/core.cljc:345`) | `:seon.def/*`, session image, restored defs |
+| **[TARGET]** evaluation entity | One `:seon.eval` entity per branch/turn/ordinal identity, carrying source and outcome evidence including shown text, out, error, and read evidence. Its actual result stays in memory; identity derives through `seon.id/evaluation` ([turn PRD §13–§15](docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md); `src/seon/id.clj:55`) | `:seon.cluster.eval`, `:seon.cluster.run.form/*`, frozen form entity, receipt, `form-identity` |
+| the agent's history | The walk rendering `(seon.eval/of-agent db agent)` (`src/seon/eval.clj:9`) in chronological turn order and ordinal through the evaluation schema's pair, from stored shown text. All turns are shown by default; previous prompt bytes remain unchanged until compaction ([turn PRD §13–§15](docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md); `src/seon/repl.clj:213`) | transcript, transcript entries, session units, run-form facts |
+| `doc`, `dir` | REPL documentation as DATA from public program rows: `dir` returns symbol, arglists, first docstring line, and input/output contract; `doc` returns the full docstring and contract ([turn PRD §13–§15](docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md); `src/seon/sci/eval.clj:1194`, `src/seon/sci/eval.clj:1222`) | faces tool, print face, separate teaching prose |
+| `seon.id/id`, `seon.id/digest`, `seon.id/evaluation` | THE ONE IDENTITY DERIVATION: `id` hashes `(pr-str data)` with SHA-256, default length 12 or supplied length; zero arguments mint a fresh event. `digest` and `evaluation` call it ([owner](src/seon/id.clj:1)). Ordinary turn IDs include branch, agent, and turn ordinal ([next-id](src/seon/turn.clj:452)); their evaluation id is `(seon.id/evaluation turn ordinal)` because the turn already includes its branch, and the handle is `(seon.id/symbol-in "result" \e id)` ([handle](src/seon/sci/admit.clj:614)). The explicit branch/turn/ordinal arity also remains available. `random-uuid` only for a genuinely fresh EVENT with no identity of its own. Never a new generator, never a second truncation (owner, 2026-09-08) | short-id, nanoid, hand-rolled hashes, `(str (random-uuid))` for things that have parts |
+| read evidence | The dependency plans and revisions a read observed, used with its evaluation `:t` to detect changed facts. Every distinct generated or agent-written read participates; writes and effects never rerun ([turn PRD §13–§15](docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md); `src/seon/db.clj:682`, `src/seon/db.clj:849`) | copied read result, inbox-only refresh |
+| shown text | The exact value-renderer text the agent saw at evaluation time, saved with source, out, and error. It includes profile elisions and requery forms, survives restart, and cannot restore the live object ([turn PRD §13–§15](docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md); `src/seon/sci/eval.clj:1957`, `src/seon/repl.clj:52`) | result EDN, stored print node, serialized result |
+| candidates (per-render selection) | the contract-fitting render function selection consulted per render call (`src/seon/render.clj`) | roster, acquired index |
 
 ## 4. REPL-driven development
 
@@ -594,9 +584,9 @@ source and tests are the durable authority.
 The loop:
 
 1. **Get a live system.** `bin/seon status`; use `default` for ordinary changes, as configured in
-   `.claude/seon-hook.edn:23–26`. Isolated operator roots are for destructive
+   `.claude/seon-hook.edn:25`. Isolated operator roots are for destructive
    drills; a bounded assignment never operates another lane's process.
-2. **Reach it.** `mcp__seon__runtime_status` lists live clusters;
+2. **Reach it.** `mcp__seon__runtime_status` reports the selected cluster's health;
    `mcp__seon__eval_clj` evaluates in the selected cluster's JVM (qualify
    the cluster when several are live — ambiguity must fail). Its `jvm`
    mode is the host prepl with NO cluster custody bound — `seon.db`'s
@@ -662,9 +652,6 @@ deepest file that owns it.
 
 ### Test fixtures — the one right way
 
-Nearly every red in the 2026-08-13 tally repair was a wrong fixture, not a
-production defect:
-
 1. **Never hand-roster schema.** Use the canonical database fixture
    (`seon.test-support/with-database` installs the complete population)
    plus `::test-support/extra-schema` for genuinely synthetic attributes.
@@ -718,6 +705,13 @@ recorded result facts; tests explicitly exercising file-backed boot still
 create their own fixture roots. These are iteration results, not the
 isolated gate's proof.
 
+Both entry points acquire a slot through `bin/_test-slot:14` before launching
+test JVMs and release it on exit. The default is two concurrent invocations
+per source checkout, shared by its lanes; separate checkouts have separate
+slot directories. `SEON_TEST_SLOTS` sets the count and
+`SEON_TEST_SLOT_WAIT_SECONDS` bounds the wait. A slot bounds invocations,
+not the number of worker JVMs inside one gate.
+
 `bin/test` is the one correctness gate, tiered: the declared
 `:seon.test/platform` regressions run FIRST and stop the run when red; bare
 adds tests reaching code changed since the recorded green basis (derived
@@ -733,7 +727,9 @@ plus `--platform` is a lane's whole gate; full suites are the orchestrator's
 integration checkpoints. The runner enforces the
 bounded-execution law: a liveness watchdog dumps coordinator AND worker
 JVMs, and the tally is total — unlaunchable or unconfirmed work is typed,
-never silent.
+never silent. By default, every canonical gate records the tests it ran on `:current-src`
+through `seon.test.runner/commit-results!` (`src/seon/test/runner.clj:1435`);
+recording failure fails the gate. Fast iterations do not persist that evidence.
 
 Tests find design issues; structure dissolves them: when a failure class
 appears, move the invariant to one choke point and keep ONE regression per
@@ -747,8 +743,7 @@ what is still broken honestly.
 The edit hook runs clj-kondo over prospective Clojure edits and publishes
 admitted changes to `current-src`; it never runs tests. A KONDO "Unresolved
 var" ON A PROTOCOL OR A DEPENDENCY NAME IS A STALE DEPENDENCY CACHE UNTIL
-PROVEN OTHERWISE (2026-09-08: five files "blocked" the gate with no code
-defect): repopulate with the publication classpath, `clj-kondo --lint "$(clojure -Spath)"
+PROVEN OTHERWISE: repopulate with the publication classpath, `clj-kondo --lint "$(clojure -Spath)"
 --dependencies --skip-lint --copy-configs`, re-lint, and only then treat a
 surviving error as yours. Do not feed the test alias's `.` entry to clj-kondo:
 it recursively traverses the whole checkout, including disposable test roots
@@ -757,8 +752,8 @@ For a test-only dependency, lint that dependency's classpath entry explicitly.
 Never rewrite correct references to satisfy a
 cache. The configured hooks
 cover `apply_patch`, `Edit`, and `Write`, including default config and schema
-publication. Shell file writes do not trigger them: use `bin/seon init --changed
-PATH` after such edits and verify publication. Syntax,
+publication. Shell file writes do not trigger them: use `bin/seon init --dev default --changed
+PATH` after source edits and verify adoption. Syntax,
 unresolved-name, privacy, and arity errors block; read hook feedback and
 report smells.
 
@@ -785,7 +780,7 @@ SECOND DEPLOYMENTS USE `--root`. `bin/acme` is a thin root-scoped wrapper
 selecting cluster `acme`.
 
 **The default cluster is the development environment.** The hook selects
-`:root "."` and `:cluster "default"` (`.claude/seon-hook.edn:23–26`);
+`:root "."` and `:cluster "default"` (`.claude/seon-hook.edn:25`);
 `bin/seon start` uses that ordinary cluster. Juniper is fixture data, not a
 cluster name or a separate development root. Use explicit root and cluster
 in MCP calls; JVM evaluation has no agent-scoped database argument defaults.
@@ -797,11 +792,10 @@ completed adoption per edit. Read hook feedback and
 `logs/current-source-failure.log` on publication failure. A source commit
 is recorded only after adoption succeeds; compare the cluster's
 `:seon.source/commit-id` with `seon.cluster.source/current`, then observe the
-browser separately. A running JVM cannot acquire changes to its own old
-adoption path without restarting. Shell source writes bypass the edit hook;
+browser separately. Shell source writes bypass the edit hook;
 follow them with `bin/seon init --dev default --changed PATH`.
 
-Lane development and schema-refork rules are the verbatim §10 copy above.
+Lane development and schema-refork rules are above.
 They do not override an explicit assignment to stop at a foreign failure.
 Scratch roots are reserved for destructive drills, never a second ordinary
 development environment.
@@ -811,14 +805,14 @@ exhaust sweep; a bounded lane verifies its inherited state and cleans only
 its own disposable work. A fresh session begins by
 verifying the system it inherited, not by trusting it: check `bin/seon
 status` and that the MCP tools answer (a stale long-lived JVM serves old
-code — reset it onto current source rather than debugging phantoms);
+code — verify adoption freshness; a lane never resets `default`);
 `git status` for another session's residue (preserve it, report it, never
 build on it unreviewed); and sweep the disposable exhaust. Operationally: a retained
 `tmp/test-runs/run.*` root is sweepable when no live runner holds it and
 its recorded failures have since been fixed or re-observed at HEAD (when
 in doubt, a holderless root older than a day is exhaust); scratch cluster
 roots under `tmp/` are sweepable when their creating probe or lane has
-returned; and the shared root's store footprint (`bin/seon status` prints
+returned; and the shared root's store footprint (`bin/seon status --verbose` prints
 it) is judged against its size after the last reset — an
 order-of-magnitude growth is the investigation signal, not a number to
 tune. **Before deleting any
@@ -839,7 +833,7 @@ explicit foreign-failure boundary in the assignment. **Recursive deletion NEVER 
 sentinel in any cleanup regression.
 
 The shipped model is DeepSeek through the single `seon.ai` HTTP owner;
-every AI dial is a `:seon.config.ai/*` config fact with per-agent overlay.
+AI dials are schema-declared config facts with per-agent overlays (`config/default.edn:358`), including the separate backup and retry namespaces.
 Credentials name environment variables and never become datoms. Paid runs
 are deliberate: cheapest probe first
 ([reference](docs/seon/reference/llm-adapters.md)).
@@ -861,8 +855,7 @@ only the context needed for its assignment and verify its output.
 integration gates; implementation goes to capable code agents.** One
 research question gets one agent with complete context. A Claude
 orchestrator launches Codex lanes through `bin/codex-agent` as
-harness-tracked background commands, run BARE — never piped (a filter
-reduces the owner's live panel to one line). The default lane model is
+harness-tracked background commands, run BARE — never piped. The default lane model is
 `gpt-6-astra` at `low` effort ("astra light", owner 2026-09-08); Opus
 subagents are not the default implementation agent:
 
