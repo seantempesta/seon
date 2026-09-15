@@ -7,6 +7,14 @@ tags: [issue, mcp, runtime]
 
 # Default component probe timed out after development adoption
 
+Refusal-grammar, 2026-09-15: default PID 69622 / PREPL 55914 initially
+answered runtime status with all three plumbing procs replying. The read-only
+JVM reader/cause-chain probe returned in 1,016 ms. Loading the saved expanded
+probe in session `refusal-grammar` then timed out at 20,000 ms; completion is
+unknown. No transaction, shared SCI evaluation, or lifecycle operation was
+requested. This does not establish an adoption cause. See
+[the refusal-grammar landing](../../prds/context-generation/research/refusal-grammar-2026-09-15.md).
+
 Supplied-keys lane, 2026-09-15: default PID 23729 / PREPL 54412 initially
 answered runtime status and JVM arithmetic. The run-9 shown-text query
 returned in 10,574 ms. A subsequent documentation query timed out at
