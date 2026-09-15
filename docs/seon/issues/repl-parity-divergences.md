@@ -83,3 +83,15 @@ The live replay first returned `#'my.agents.varface/parity_value` for `def`
 but a quoted symbol string for contracted `defn` on the lane's scratch
 cluster. A cluster forked from the repaired `current-src` publication then
 returned `#'my.agents.varface/parity_fn_after` for the same contracted form.
+
+## September 15 fixture verification
+
+At pre-WIP commit `38c49a1db`, the namespace reports 13 failures and no
+errors. `repl-session` still reads `:seon.cluster.eval/result-edn` and
+derives its printed observations from that retired field. The September 8
+shown-text transition (`ff9507c1b`) changed the production result contract.
+These 13 failures are not evidence of 13 new September 15 SCI divergences.
+Update the fixture to observe saved shown text and the retained actual
+result before classifying the remaining semantic differences. Exact
+measurements are in
+[the September 15 investigation](../../prds/context-generation/research/bisect-today-reds-2026-09-15.md).

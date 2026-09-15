@@ -1,0 +1,126 @@
+---
+type: research
+status: active
+tags: [test, schema, runtime]
+---
+
+# September 15 four-namespace failure investigation
+
+## Assignment and verification boundary
+
+Investigate `seon.cluster.mcp-test`, `seon.effect-test`,
+`seon.repl-parity-test`, and `seon.search-test` at the requested commit
+boundaries. Run one JVM at a time in `tmp/bisect-wt`, with
+`SEON_TEST_SLOTS=1` and the shared `reference-code` symlink. Preserve the
+concurrent edits. The assignment explicitly protects `src/seon/instrument.clj`,
+`src/seon/cluster.clj`, `src/seon/test.clj`, `src/seon/test/runner.clj`, and
+`src/seon/db.clj`; a root cause in those files is a stop boundary.
+
+Read the context-generation plan README and working edge end to end, and
+the data-oriented Clojure, testing, and REPL skills. `bin/seon status`
+reported default alive, PID 23729; MCP JVM evaluation of `(+ 1 1)` returned
+2 in 3 ms. No default restart or adoption was performed by this assignment.
+
+## Method
+
+The command at each historical commit is:
+
+```sh
+SEON_TEST_SLOTS=1 bin/test-fast seon.cluster.mcp-test seon.effect-test seon.repl-parity-test seon.search-test
+```
+
+Git initially populated empty submodule directories in the worktree.
+The first invocation failed before initialization because the Datastar local
+dependency was absent. Removed only those empty directories with `rmdir`
+and installed the requested symlink; this attempt supplies no test tally.
+
+## Dependency ledger and initial probes
+
+- Malli guards receive `[args value]`, including the original arguments:
+  `reference-code/malli/src/malli/core.cljc:2219`. The first-party query
+  guard consumes that pair in `src/seon/db.clj`, `query-call-valid?`.
+- Admission's one producer is `src/seon/sci/admit.clj`, `admit*` and
+  `admit-walk`; an explicitly unbounded request bypasses the storage
+  bound. Its schema is `resources/seon/schemas/seon.sci.admit.edn`.
+- The MCP projection owner is `src/seon/cluster.clj`, `mcp-project`;
+  `src/seon/render/value.clj`, `artifact`, re-admits missing markers.
+
+Live JVM probe (current adopted definitions, not a historical snapshot):
+
+```clojure
+(seon.render.value/artifact
+ {:seon.sci.admit/reason :over-bound :seon.sci.admit/bytes 100})
+```
+
+The nested `admit-value` refuses the empty `:seon.sci.admit/caps` map:
+`expected the required key :seon.config.eval.result/max-bytes with a map,
+got a map missing :seon.config.eval.result/max-bytes`.
+This establishes the fallback's schema/producer mismatch, independently
+of the historical test tallies still being collected.
+
+## Commit measurements
+
+| Commit | Tests / assertions | MCP fail/error | Effect fail/error | Parity fail/error | Search fail/error | Total fail/error |
+|---|---|---|---|---|---|---|
+| `38c49a1db` (`6acd8818e^`) | 101 / 200 | 10 / 4 | 29 / 4 | 13 / 0 | 1 / 1 | 53 / 9 |
+| `6acd8818e` | 101 / 200 | 10 / 4 | 29 / 4 | 13 / 0 | 1 / 1 | 53 / 9 |
+
+The pre-WIP run began reporting tests at 18:56:40Z and finished at
+19:01:53Z. Each reported namespace total in the assignment (14, 33, 13,
+2) equals this run's failures plus errors. All four namespaces are already
+red before the WIP checkpoint. This is not evidence of a single new
+September 15 regression.
+
+The WIP run finished at 19:08Z. Comparing the multisets of failed/erroring
+test names yields no additions or removals. In both snapshots, MCP plus
+effects alone total **39 failures / 8 errors**, exactly the pure-HEAD
+reproduction quoted in the assignment. This falsifies the WIP commit as
+the origin of that failure set, not merely its aggregate count.
+
+As requested, historical first-party revisions share the main checkout's
+dependencies rather than initializing each commit's submodule revisions.
+Observed dependency HEADs: Datahike `cdcb5792db8bd599487f099437265d18a31164a5`,
+Malli `3517a3cd9271b2083780ac7be1725493905bca2e`,
+SCI `fcbd8862800e638dc0f8f5521111f999279cbcd2`, and
+core.async `dc35f3e0d7bc2eef502e77982f48641f025c8051`.
+
+## Root-cause evidence
+
+### Effect setup refuses before dispatch
+
+`test/seon/effect_test.clj`, `install-capability!` and `install-arm-probe!`,
+transact schema rows without `:seon.schema.admission/source`. Both ignore
+the transaction result. The schema has required that member since
+`06f4ebc4b8` (August 3); `26ec13420` (September 9) introduced authored
+transaction validation. A non-writing live JVM `seon.db/write-error` probe
+of the exact capability setup returned `:seon.db/invalid-write` at
+`[0 :seon.schema.admission/source]`. The capability remains absent;
+`effect/request!` returns `:seon.effect/undeclared-owner`. The missing
+handler values, zero invocation counts, and missing completion events
+follow from that refusal. This is not a shared executor failure.
+
+### Search passes refused setup as a transaction report
+
+`test/seon/search_test.clj:132` inserts a function without admission
+provenance. A non-writing live probe returns the same missing-source
+refusal. `search/apply-report!` extracts nil `:db-before`/`:db-after` from
+that refusal and passes nil to `document-specs`'s query. The September 15
+guard names the bad input; it does not make the refused fixture valid.
+The other failure compares the query with a stale literal field set.
+
+### MCP and parity retain older expectations
+
+`9248692d6` (September 8) removed the MCP-local `print/fit` call, leaving
+`projected-node print-node` in protected `src/seon/cluster.clj`. The
+pre-WIP nested-bulk test emits 551,392 bytes versus the 8,192-byte
+expectation. Any production repair must respect the one value-renderer
+projection authority; restoring the deleted clipping seam is not a fix.
+
+`ff9507c1b` (September 8) moved evaluation output to shown text and changed
+the MCP SCI branch to recognize `:seon.eval/shown` plus the record.
+The MCP fixture still synthesizes an admission envelope without shown
+text, so it takes the ordinary-value branch and stores the entire
+envelope. `test/seon/repl_parity_test.clj:48-74` likewise still reads and
+decodes `:seon.cluster.eval/result-edn`. These source-history attributions
+are distinct from the measured pre-WIP tally; neither old September 8
+commit has been tested by this assignment.
