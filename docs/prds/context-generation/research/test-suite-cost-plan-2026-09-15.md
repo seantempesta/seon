@@ -548,3 +548,77 @@ Gate request now names all four batch-6 namespaces.
 | `seon.test-reaching-test/reaching-is-the-program-graph-relation` | 64726 | 4 / 0 / 0 |
 | `seon.test-reaching-test/red-check-names-failure-and-stops-escalation` | 64727 | 5 / 0 / 0 |
 | `seon.test-reaching-test/widened-hook-check-reports-and-runs-nothing` | 64728 | 6 / 0 / 0 |
+
+### Batch 7 — fresh acquisition and renderer-selection evidence
+
+Read `tmp/orchestrator/gate-results/batch-7/slow-tests-merge.md` end to end.
+The repeated eight failures falsify the prior claim that merely adding the
+profile/projection resolved the cold-worker difference. No assertion is removed.
+
+Selection ownership: `render.value/value-node*` calls `render/project-node`;
+`render/project-node*` reads the SCI context projection and
+`schema-producer` matches schema-declared render pairs. The generic
+`:seon.error/value` has no pair. The concrete reader/evaluation error schemas
+select `seon.error/render-ai`; instrumentation errors select
+`seon.error/instrumentation-prose`. A hypothesis that every refusal selects
+the former was falsified by two assertion failures (recorded run 64782,
+29 pass / 2 fail / 0 error); the regression now checks the schema-selection
+stage, not a hand-maintained renderer list.
+
+`with-grammar-agent` now calls `sci-eval/cluster-ctx` on its canonical branch,
+with a database-derived projection and a complete explicitly constructed
+cluster environment state. It no longer inherits the fixture base's SCI
+Vars through `support/fork-cluster-ctx`. Request profile and projection remain
+explicit. `submit` asserts that every error selects its schema renderer before
+returning the evaluation to the existing shown-text assertions. Installation
+still uses `evaluate-for-install`, which delegates to `evaluate` and preserves
+candidate isolation.
+
+Before file edits, both changed function forms were evaluated in MCP JVM.
+The same recorded regression form used above returned **31 pass / 0 fail /
+0 error**, run **64856** (15,021 ms envelope); fresh-context-only iteration
+was **27 / 0 / 0**, run **64773**. The saved file passes kondo with zero
+errors/warnings; the hook repeats the existing five missing-docstring warnings.
+
+Independent probes built a new canonical in-memory base with
+`#'support/create-base nil`, and a separate private copy of batch 7's exact
+published base at `target/test-published-bases/368dc5a6094e5093f70f2183b471a5418dab5b37aa422ebf9adf102682f075da/base`.
+Each received a fresh `cluster-ctx`, database projection, explicit environment
+and agent profile. Both selected `seon.error/render-ai` at the schema stage
+for `my.web/no-such-fetch`, and returned the complete correction grammar
+quoted in the previous section. Both bases were released in `finally`.
+Initial attempts without handing the construction projection failed at
+`seon.program/base-context-injected-symbols`; the corrected probes wrap
+construction with `schema/call-with-projection` over the canonical packaged
+population. This is explicit input, not a default-cluster schema read.
+
+**Verification limit:** neither independent probe reproduced the raw EDN in
+the long-lived host JVM. Fresh SCI acquisition and explicit inputs remove
+fixture inheritance, but do not prove hot-loaded host definitions irrelevant.
+The next isolated gate must confirm this slice; no cold-worker green or
+established host-staleness cause is claimed. The new selection checks will
+separate missing schema selection from a later rendering failure in that gate.
+
+After saving, the recorded regression also ran with a newly populated memory
+base substituted only for the duration of the probe, then restored and closed:
+
+```clojure
+(schema/call-with-projection
+ (schema/build-projection (schema.edn/packaged-forms))
+ (fn []
+   (let [base (#'support/create-base nil)]
+     (try
+       (with-redefs-fn {#'support/database-base (delay base)}
+         #(seon.test/run
+           #'seon.contracts-plan-test/refusal-grammar-survives-real-evaluation
+           (seon.operator/connection "default")))
+       (finally (#'support/close-base! base))))))
+```
+
+Result: **31 pass / 0 fail / 0 error**, recorded run **64890**. Default's
+connection records the result only; evaluation uses the newly populated
+canonical memory base and fresh SCI context. All probe futures completed.
+Publication `d89a9911-55af-4fc8-af48-3e52681c82e7` was queued; no convergence
+result was available at this checkpoint. The saved-file proof is an explicit
+JVM reload, not an asserted adoption proof. Gate request contains only
+`seon.contracts-plan-test`. No production/protected file or test JVM changed.

@@ -6,6 +6,7 @@
             [seon.env :as env]
             [seon.program :as program]
             [seon.render :as render]
+            [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
             [seon.sci.eval :as sci-eval]
             [seon.test-support :as support]))
@@ -44,14 +45,24 @@
      :seon.config/on-core-error :panic}))
 
 (defn submit [connection ctx _ source]
-  (let [evaluated (sci-eval/evaluate-for-install (request connection ctx source))]
+  (let [evaluation-request (request connection ctx source)
+        evaluated (sci-eval/evaluate-for-install evaluation-request)
+        value (:seon.sci.admit/value evaluated)]
+    (when (:seon.error/kind value)
+      (is (some #(and (= :schema (:seon.render.selection.stage/name %))
+                      (= :selected (:seon.render.selection.stage/status %)))
+                (:seon.render.selection/stages
+                 (render/selection
+                  (assoc evaluation-request :seon.render/value value
+                         :seon.render/output :seon.render/ai))))
+          "The fixture projection selects the refusal's schema renderer."))
     (when-let [row (:seon.program/row evaluated)]
       (is (:db-after (db/transact! connection [(program/canonical-row row)])))
       (sci-eval/install-evaluated-rows!
-       {:seon.sci.eval/ctx ctx :seon.db/db @connection
+       {:seon.sci.eval/ctx ctx :seon.db/db (db/db connection)
         :seon.sci.eval/installations
         [{:seon.program/row row :seon.sci.eval/evaluation evaluated}]}))
-    [evaluated (:seon.sci.admit/value evaluated)]))
+    [evaluated value]))
 
 (defn with-grammar-agent [body]
   (support/with-database
@@ -62,7 +73,16 @@
                                            :seon.config/on-core-error :panic}})
      (db/transact! connection [{:seon.agent/id "contracts-plan"
                                :seon.agent/namespace {:seon.ns/name 'my.agents.juniper}}])
-     (let [ctx (support/fork-cluster-ctx connection)]
+     (let [database (db/db connection)
+           projection (schema/projection-from-database database)
+           state (env/environment-state
+                  (env/refuse-incomplete-environment!
+                   (env/environment
+                    {:seon.boot/cluster-name "contracts-plan"
+                     :seon.db/connection connection
+                     :seon.db/basis-t (db/basis-t database)
+                     :seon.schema/projection projection})))
+           ctx (sci-eval/cluster-ctx database connection state)]
        (body connection ctx nil)))))
 
 (defn install-orders! [connection ctx]
