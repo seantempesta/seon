@@ -64,7 +64,11 @@ Passive page rendering does not append history.
 
 The agent debug page is a reader for one selected turn, defaulting to the
 latest. Its context comes from the provider acquisition fold at the turn's
-opening database. `seon.repl/render-emission-html` colourises the exact
+opening database. `render/acquire-context!` owns this temporal selection even
+when passed the current database; completed generated system turns use their
+close transaction. Rebuilt estimates and provider-billed tokens are shown
+separately, since the estimator does not prove byte identity.
+`seon.repl/render-emission-html` colourises the exact
 `seon.repl/text` bytes; prompt, comment, form and response stay in their
 original order. Turn boundaries and origin gutters sit outside those bytes.
 Repeated system reads fold in place, with every exact entry available at

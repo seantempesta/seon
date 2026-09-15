@@ -1418,12 +1418,32 @@
                           (assoc % :seon.render/cache (atom {}))))))))
 
 (defn acquire-context!
-  "Derive context on the calling turn's thread using shared read evidence."
+  "Fold saved shown text at the named turn's immutable prompt basis.
+
+  Provider and virtual turns use their opening transaction, exactly as the
+  loop does before calling the provider. A completed generated system turn
+  includes its own evaluations at close. Later replies cannot enter an
+  earlier prompt merely because the caller supplies today's database."
   {:malli/schema [:=> [:cat :seon.render/context-request]
                   [:or :seon.render/acquired-context
                    :seon.render/context-change-result :seon.error/value]]}
   [request]
-  ((requiring-resolve 'seon.render.web/derive-context!) request))
+  (if (:seon.render/context-action request)
+    ((requiring-resolve 'seon.render.web/derive-context!) request)
+    (let [database (:seon.db/db request)
+          turn-id (:seon.turn/id request)
+          row (db/pull database
+                       '[:seon.turn.work/situation :seon.turn/attempts
+                         {:seon.turn/closed-tx [:db/id]}]
+                       [:seon.turn/id turn-id])
+          basis (if (and (= :generate (:seon.turn.work/situation row))
+                         (empty? (:seon.turn/attempts row))
+                         (get-in row [:seon.turn/closed-tx :db/id]))
+                  (db/as-of database (get-in row [:seon.turn/closed-tx :db/id]))
+                  ((requiring-resolve 'seon.turn/opening-db) database turn-id))]
+      (if (:seon.error/kind basis) basis
+        ((requiring-resolve 'seon.render.web/derive-context!)
+         (assoc request :seon.db/db basis))))))
 
 
 (defn- namespace-owner

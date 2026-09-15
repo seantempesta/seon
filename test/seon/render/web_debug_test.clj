@@ -111,6 +111,16 @@
                (is (= (set turns) (set (map :data-turn-id headers))))
                (is (= 1 (count (filter #(= "Provider" (:data-turn-kind %)) headers))))
                (is (= expected exact))
+               (is (= expected (:seon.cluster.prompt/text (render/acquire-context! unit)))
+                   "The acquisition owner honors the turn id even with today's database.")
+               (doseq [row (#'transcript/turn-rows @connection "juniper")
+                       :when (not= :generate (:seon.turn.work/situation row))]
+                 (let [historical (turn/opening-db @connection (:seon.turn/id row))
+                       historical-request (assoc unit :seon.turn/id (:seon.turn/id row))
+                       rebuilt (render/acquire-context! historical-request)
+                       folded (web/derive-context! (assoc historical-request :seon.db/db historical))]
+                   (is (= (:seon.cluster.prompt/text folded) (:seon.cluster.prompt/text rebuilt))
+                       "Every reply turn excludes its own and later reply evaluations.")))
                (is (= byte-count (alength (.getBytes ^String exact "UTF-8"))))
                (is (not (str/includes? exact "later must not enter earlier prompt")))
                (is (str/includes? (element-text detail) "re-read"))

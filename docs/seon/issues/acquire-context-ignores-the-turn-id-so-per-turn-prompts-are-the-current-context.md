@@ -1,12 +1,23 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [render, context, debug-page, faithfulness, turn]
 created: 2026-09-14
 ---
 
 # `acquire-context!` with an early turn id returns the CURRENT context, so "what the model saw at turn N" is not what it saw
+
+## Resolution — 2026-09-14
+
+The acquisition owner now folds stored shown text at the provider turn's
+opening transaction, the same basis used by the loop. All 30 run-2 provider
+attempts match their stored captures byte for byte. Turn 2 is 10,422 bytes;
+turn 40 is 111,975 bytes. The page displays rebuilt estimated and billed
+tokens separately. The requested estimate tolerance holds for only 13/30:
+the character-ratio estimator is approximate even when the bytes are exact.
+Full residuals and the reproducible read-only proof are in the
+[landing note](../../prds/context-generation/research/debug-product-landing-2026-09-14.md).
 
 ## Observed (default, 2026-09-14, `research/explain_probe_2026_09_14.clj`)
 

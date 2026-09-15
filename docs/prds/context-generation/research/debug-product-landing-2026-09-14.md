@@ -6,6 +6,54 @@ tags: [research, debug, web, prompt]
 
 # Debug session product — 2026-09-14
 
+## Historical prompt owner correction
+
+`render/acquire-context!` now chooses the named provider turn's opening
+transaction through `seon.turn/opening-db`, then folds stored shown text.
+This is the same immutable basis the loop uses before capture; the turn's
+own reply and all later evaluations are excluded. Completed generated system
+turns use their close transaction to include their generated evaluations.
+The debug renderer no longer duplicates this temporal selection.
+
+Read-only default proof: all **30/30 provider attempts** reproduce their
+stored capture exactly, with matching opening/capture transaction bases.
+Turn 2 is **10,422 bytes**, turn 40 **111,975 bytes**, and turn 60
+**177,576 bytes**. The previous direct owner call returned the current
+178,089-byte context regardless of the requested turn.
+
+The requested estimated-token tolerance is not a valid exactness check for
+the existing character-ratio estimator: **13/30** estimates fall within
+64 plus completion tokens; the largest residual is **957 tokens**, despite
+all captured strings being identical. The page shows both values honestly:
+turn 2 `rebuilt ≈3,682 tokens · billed 3,222`; turn 60
+`rebuilt ≈62,690 tokens · billed 63,514`. No per-attempt calibration was fitted
+to manufacture agreement. Reproducible proof and all observations:
+[script](debug_prompt_proof_2026_09_14.clj),
+[results](debug_prompt_proof_2026_09_14.edn).
+
+Screenshot log: `tmp/debug-product/basis-2-{1440,700}.png` and their `-top`
+views show the historical opening, visible readline and top-aligned gutter.
+The prior gutter alignment placed labels at the bottom of tall entries;
+explicit flex start alignment fixes it. Both widths pass exact DOM text/raw
+prompt identity and overflow assertions. Runtime elapsed text now expresses
+days/hours rather than thousands of minutes. Initial default debug GET:
+**HTTP 200, 0.004903 seconds**.
+
+Full-page capture review found a screenshot artifact: capturing while the
+document was scrolled to its end painted the sticky header midway down the
+full PNG and left its original space blank. The browser script now captures
+the end viewport first, then scrolls to the top for the full-page PNG. This
+changes the evidence capture, not the page's initial end-scroll behavior.
+
+The broader check exposed existing prompt fixture failures, reproduced in a
+HEAD-only snapshot and recorded in
+[the fixture issue](../../../seon/issues/prompt-tests-retain-incompatible-turn-fixtures.md).
+The inbox pair also omits message content in the canonical page fixture;
+[that block defect](../../../seon/issues/inbox-block-omits-message-content.md)
+is outside this lane's shell ownership. Cache tests now target the ordinary
+page and keep their cache assertions; the session test asserts deferred
+acquisition rather than the retired eager debug comparison.
+
 ## Main-page layout
 
 Removed the recency primary/rail grid and its 52rem/10rem inner scroll
