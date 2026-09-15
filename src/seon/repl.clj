@@ -22,7 +22,8 @@
   "Print directory columns once while retaining every summary and contract."
   {:malli/schema [:=> [:cat :seon.repl/directory] :string]}
   [directory]
-  (let [columns [:sym :arglists :doc :in :out]]
+  (let [columns (cond-> [:sym :arglists :doc :in :out]
+                  (some :supplied (:functions directory)) (conj :supplied))]
     (binding [*print-length* nil *print-level* nil *print-readably* true]
       (pr-str (array-map
                :seon.repl/columns columns

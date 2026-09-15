@@ -11,6 +11,7 @@
             [malli.core :as m]
             [malli.instrument :as mi]
             [malli.registry :as mr]
+            [seon.call-preparation :as call-preparation]
             [seon.db :as db]
             [seon.effect :as effect]
             [seon.env :as env]
@@ -235,6 +236,44 @@
         arity? (assoc ::arity (:arity data))
         function-symbol (assoc ::fn (str function-symbol)))})))
 
+(defn- supplied-entry-problems
+  [function-symbol]
+  (when-let [environment (env/of effect/*request-context*)]
+    (when-let [connection (:seon.db/connection environment)]
+      (let [entries (call-preparation/supplied-map-entries (db/db connection)
+                                                           (str function-symbol))]
+        (when-not (:seon.error/kind entries)
+          (into #{} (map (fn [[_ position entry-key]] [position entry-key])) entries))))))
+
+(defn- actionable-problem
+  [description problem supplied?]
+  (let [value (:value problem)
+        entry-key (last (:seon.error/path description))
+        missing? (= :malli.core/missing-key (:type problem))
+        lookup-ref? (and (vector? value) (= 2 (count value))
+                         (keyword? (first value)))
+        expects-string? (= :string (m/type (:schema problem)))]
+    (cond
+      supplied?
+      (assoc description
+             :seon.error/expected-description (str entry-key " supplied by the runtime")
+             :seon.error/fix
+             (if missing?
+               (str "Runtime fault: " entry-key
+                    " is supplied by the runtime but is missing. Report the call-preparation fault; do not pass it.")
+               (str entry-key " is supplied by the runtime; do not pass it. Remove it from the request map.")))
+
+      lookup-ref?
+      (cond-> (assoc description :seon.error/actual-description "a lookup-ref vector")
+        expects-string?
+        (assoc :seon.error/fix
+               (str (if (string? (second value))
+                      "Pass the string id (the second element of the lookup-ref vector) at "
+                      "Pass a string id at ")
+                    (pr-str (:seon.error/path description)) ".")))
+
+      :else description)))
+
 (defn- violation
   "Retain the actual offending values; the error render pair owns projection."
   [_caps kind data]
@@ -255,6 +294,7 @@
            explanation (when-not arity? (m/explain offended value))
            arm (case kind :malli.core/invalid-output :output
                           :malli.core/invalid-guard :guard :input)
+           supplied-entries (when (= :input arm) (supplied-entry-problems function-symbol))
            problems
            (if arity?
              [{:seon.error/argument "argument count"
@@ -277,13 +317,17 @@
                                  (str (or label (when (and (symbol? binding) (not= '_ binding)) binding)
                                           (str "argument " position " (0-based)"))))]
                   (assoc
-                   (error/explain-problem
+                   (actionable-problem
+                    (error/explain-problem
                     {:seon.error/problem problem
                      :seon.error/path (problem-path kind problem)
                      :seon.error/parent
                      (when (and (= :input arm) (seq (:in problem)))
                        (get-in (vec arguments) (pop (vec (:in problem)))))
                      :seon.error/argument argument})
+                    problem
+                    (and (= 2 (count (:in problem)))
+                         (contains? supplied-entries (vec (:in problem)))))
                    :seon.error/schema-path (vec (:path problem)))))
               (:errors explanation)))
            first-problem (first problems)
@@ -298,7 +342,10 @@
            paths (into [] (comp (map :seon.error/path) (remove empty?)) problems)
            caller (caller-frame)]
        (error/diagnostic
-        {:seon.error/kind ::contract-violated
+        {:seon.error/kind (if (some #(and (= :malli.core/missing-key (:type %))
+                                          (contains? supplied-entries (vec (:in %))))
+                                    (:errors explanation))
+                            ::missing-supplied-key ::contract-violated)
          :seon.instrument/contract-violated (str function-symbol)
          :seon.error/message
          (str function-symbol " refused " (:seon.error/argument first-problem)

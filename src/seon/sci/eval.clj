@@ -1157,12 +1157,39 @@
        :out (if (= 1 (count outputs)) (first outputs) outputs)})
     {:in [] :out []}))
 
+(defn- agent-documentation-contract
+  [database row expanded?]
+  (let [entries (call-preparation/supplied-map-entries database (:seon.fn/sym row))
+        contract (documentation-contract row)
+        expanded (walk/postwalk-replace (into {} (documentation-schemas row)) contract)
+        arities (if (= :function (first (edn/read-string (or (:seon.fn/spec row) "[]"))))
+                  (:in expanded) [(:in expanded)])]
+    (if (:seon.error/kind entries)
+      entries
+      (let [inputs
+            (mapv (fn [order input]
+                    (reduce (fn [form [position supplied]]
+                              (let [offset (if (map? (second form)) 2 1)
+                                    index (+ offset position)
+                                    argument (get form index)
+                                    keys (set (map #(nth % 2) supplied))]
+                                (if (and (vector? argument) (= :map (first argument)))
+                                  (assoc form index
+                                         (into [] (remove #(and (vector? %) (keys (first %)))) argument))
+                                  form)))
+                            input
+                            (group-by second (filter #(= order (first %)) entries))))
+                  (range) arities)]
+        (cond-> (if expanded? expanded contract)
+          (seq entries)
+          (assoc :in (if (= 1 (count inputs)) (first inputs) inputs)
+                 :supplied (vec (distinct (map #(nth % 2) entries)))))))))
+
 (defn- function-doc-map
-  [row]
+  [database row]
   (merge (docstring-parts (:seon.fn/doc row))
          {:arglists (edn/read-string (or (:seon.fn/arglists row) "()"))}
-         (walk/postwalk-replace (into {} (documentation-schemas row))
-                                (documentation-contract row))))
+         (agent-documentation-contract database row true)))
 
 (defn directory-value
   "Return current public function summaries and declared schemas for a namespace."
@@ -1188,7 +1215,7 @@
                             (merge {:sym (symbol (:seon.fn/sym row))
                                     :arglists (edn/read-string (or (:seon.fn/arglists row) "()"))
                                     :doc (:summary (docstring-parts (:seon.fn/doc row)))}
-                                   (documentation-contract row)))
+                                   (agent-documentation-contract database row false)))
                           functions)})
       :else (documentation-unavailable namespace-name))))
 
@@ -1201,7 +1228,7 @@
       (if (:seon.error/kind functions)
         functions
         (if-let [row (some #(when (= (str qualified) (:seon.fn/sym %)) %) functions)]
-          (function-doc-map row)
+          (function-doc-map database row)
           (documentation-unavailable requested))))
     (let [row (db/pull database [:seon.ns/doc] [:seon.ns/name requested])]
       (cond
@@ -1938,7 +1965,7 @@
                        (db/pull database program-documentation-selector
                                 [:seon.fn/sym function-name]))
         value (if (:seon.fn/sym function-row)
-                (assoc value :seon.error/doc (function-doc-map function-row)) value)
+                (assoc value :seon.error/doc (function-doc-map database function-row)) value)
         profile (render/request-profile request)
         projection (render.value/prepare
                (assoc request

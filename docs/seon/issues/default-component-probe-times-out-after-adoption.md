@@ -7,6 +7,22 @@ tags: [issue, mcp, runtime]
 
 # Default component probe timed out after development adoption
 
+Supplied-keys lane, 2026-09-15: default PID 23729 / PREPL 54412 initially
+answered runtime status and JVM arithmetic. The run-9 shown-text query
+returned in 10,574 ms. A subsequent documentation query timed out at
+20,000 ms; the evidence capture load-file in session `supplied-keys` timed
+out at 60,000 ms. Its output file was absent immediately afterward;
+completion remains unknown. `logs/current-source-failure.log` also said
+`Publication did not finish within its declared bound.` No cause is
+inferred and no default lifecycle operation was performed.
+
+Follow-up in the same lane: JVM arithmetic still returned in 1 ms. With
+the database projection explicitly handed through
+`seon.schema/call-with-projection`, the documentation probe returned in
+11,269 ms and the final audit capture in 12,519 ms. The new supplied-key
+projection and refusal text were observed. This proves those JVM paths;
+it does not establish full adoption convergence or explain the timeouts.
+
 Core-functions follow-up, 2026-09-14: `runtime_status` again reported health
 and Flow unknown with `Read timed out` for default PID 23557 / PREPL 49971.
 The read-only retained SCI referral probe returned in 2 ms. No lifecycle

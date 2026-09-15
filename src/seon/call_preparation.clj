@@ -623,6 +623,31 @@
     [?entry :seon.schema.shape.entry/optional? false]
     [?entry :seon.schema.map-entry/key-keyword ?entry-key]])
 
+(defn supplied-map-entries
+  "Return [arity-order argument-index key] for declared supplied map entries.
+
+  Uses the plan's required, top-level map-entry query and supplier rows.
+  Both the key and complete value shape must match, exactly as preparation
+  requires. Optional entries and positional defaults are not map entries."
+  {:malli/schema
+   [:=> [:cat :seon.db/database-value :seon.fn/sym]
+    [:or [:vector [:tuple :int :int :qualified-keyword]] :seon.error/value]]}
+  [database sym]
+  (let [rows (db/q database row-query)]
+    (if (error-value? rows)
+      rows
+      (let [declared (into #{} (map (fn [[entry-key _ fingerprint _]] [entry-key fingerprint])) rows)
+            fingerprints (vec (distinct (map #(nth % 2) rows)))
+            entries (if (seq fingerprints)
+                      (db/q database map-entry-query sym fingerprints) [])]
+        (if (error-value? entries)
+          entries
+          (->> entries
+               (filter (fn [[_ _ entry-key fingerprint]] (contains? declared [entry-key fingerprint])))
+               (map #(subvec (vec %) 0 3))
+               sort
+               vec))))))
+
 (defn- candidate-indexes
   [candidates]
   (mapv (fn [candidate]

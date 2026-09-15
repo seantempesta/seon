@@ -32,18 +32,18 @@
        (is (some #(= 'my.agent/settings! (:sym %)) rows))
        (is (every? #(and (:in %) (:out %)) rows))
        (is (every? #(not (str/includes? (:doc %) "\n")) rows))
-       (is (= #{:summary :body :example :arglists :in :out} (set (keys row))))
+       (is (= #{:summary :body :example :arglists :in :out :supplied} (set (keys row))))
        (is (= (first (str/split-lines (:seon.fn/doc (db/pull @connection [:seon.fn/doc]
                                     [:seon.fn/sym "my.agent/settings!"]))))
               (:summary row)))
-       (is (= [:cat :my.agent/settings-request]
+       (is (= (:in row)
               (:in (first (filter #(= 'my.agent/settings! (:sym %)) rows)))))
        (is (= :map (first (get-in directory-value [:schemas :my.agent/settings-request]))))
        (is (= :map (first (second (:in row)))))
        (doseq [target ["my.message/send" "my.agent/done" "my.plan" "my.note"]
                :let [doc (:seon.sci.admit/value (run (str "(doc " target ")")))]]
          (is (= (cond-> #{:summary :body :example :in :out}
-                  (namespace (symbol target)) (conj :arglists))
+                  (namespace (symbol target)) (conj :arglists :supplied))
                 (set (keys doc))))
          (is (not (str/blank? (:summary doc))))
          (is (not (str/blank? (:body doc))))
@@ -211,8 +211,8 @@
        (is (= :seon.instrument/contract-violated (:seon.error/kind value)) (pr-str failed))
        (is (= documentation (:seon.error/doc value)) (pr-str failed))
        (is (schema/valid-candidate-value? :seon.error/value value))
-       (is (str/includes? (:seon.eval/shown failed) ":example"))
-       (is (str/includes? (:seon.eval/shown failed) "Return an addressed message"))
+       (is (str/includes? (:seon.eval/shown failed) "Example:"))
+       (is (str/includes? (:seon.eval/shown failed) (:example documentation)))
        (is (empty? (db/q '[:find ?m :where [?m :seon.message/id]] @connection)))
        (let [unrelated (run "(/ 1 0)")]
          (is (:seon.cluster.eval/error unrelated))
