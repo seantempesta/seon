@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# Sourced by bin/test and bin/test-fast; requires $source_root and, for the
+# ledger line, $run_root (may be empty).
+# Machine-wide admission of test JVMs. Every bin/test and bin/test-fast
+# invocation holds one slot from snapshot to exit; each invocation launches a
+# program-loading JVM at 100%+ CPU (a gate: coordinator + workers + cache),
+# and 2026-09-15 six lanes launched eight at once, starving the owner's
+# cluster and the live agent run. The bound is declared here, enforced at the
+# seam that admits the work, and a wait that never ends is reported as a
+# failure naming the holders, never a silent hang. Slots are project-local
+# directories whose mkdir is atomic; a slot whose holder pid is dead is
+# reclaimed. SEON_TEST_SLOTS overrides the count; SEON_TEST_SLOT_WAIT_SECONDS
+# the bound.
+test_slot_count=${SEON_TEST_SLOTS:-2}
+test_slot_wait_seconds=${SEON_TEST_SLOT_WAIT_SECONDS:-1800}
+test_slot_parent="${source_root:-$PWD}/tmp/test-slots"
+held_test_slot=
+
+acquire_test_slot() {
+  local waited=0 slot holder announced=0
+  mkdir -p "$test_slot_parent"
+  while :; do
+    for slot in $(seq 1 "$test_slot_count"); do
+      if mkdir "$test_slot_parent/slot-$slot" 2>/dev/null; then
+        printf '%s\n' "$$" >"$test_slot_parent/slot-$slot/pid"
+        printf '%s\n' "${run_root:-$PWD}" >"$test_slot_parent/slot-$slot/run-root"
+        held_test_slot="$test_slot_parent/slot-$slot"
+        if [ -n "${run_root-}" ]; then
+          printf 'test-slot=%s acquired-after-seconds=%s\n' "$slot" "$waited" \
+            >>"$run_root/test-run.txt"
+        fi
+        return 0
+      fi
+      holder=$(cat "$test_slot_parent/slot-$slot/pid" 2>/dev/null || true)
+      if [ -z "$holder" ] || ! kill -0 "$holder" 2>/dev/null; then
+        if [ -n "$holder" ] || [ -z "$(ls -A "$test_slot_parent/slot-$slot" 2>/dev/null)" ]; then
+          echo "bin/test: reclaiming test slot $slot from dead holder pid=${holder:-none}" >&2
+          rm -rf "$test_slot_parent/slot-$slot"
+        fi
+      fi
+    done
+    if [ "$waited" -ge "$test_slot_wait_seconds" ]; then
+      echo "bin/test: no test JVM slot free after ${test_slot_wait_seconds}s; holders:" >&2
+      for slot in $(seq 1 "$test_slot_count"); do
+        printf 'bin/test:   slot-%s pid=%s run-root=%s\n' "$slot" \
+          "$(cat "$test_slot_parent/slot-$slot/pid" 2>/dev/null || echo none)" \
+          "$(cat "$test_slot_parent/slot-$slot/run-root" 2>/dev/null || echo none)" >&2
+      done
+      return 75
+    fi
+    if [ "$announced" -eq 0 ]; then
+      echo "bin/test: all $test_slot_count test JVM slots busy; waiting up to ${test_slot_wait_seconds}s (SEON_TEST_SLOTS / SEON_TEST_SLOT_WAIT_SECONDS)"
+      announced=1
+    fi
+    sleep 5
+    waited=$((waited + 5))
+  done
+}
+
+release_test_slot() {
+  if [ -n "$held_test_slot" ]; then
+    rm -rf "$held_test_slot"
+    held_test_slot=
+  fi
+}
+

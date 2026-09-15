@@ -417,11 +417,14 @@ await_runner() {
   return "$runner_exit"
 }
 
+source bin/_test-slot
+
 retain_run_root() {
   local caught_signal=$1
   local status=$2
   trap - HUP INT TERM
   reap_runner TERM
+  release_test_slot
   printf 'retained-reason=signal-%s\n' "$caught_signal" >>"$run_root/test-run.txt"
   if [ "$fast_iteration" -eq 1 ]; then
     echo "bin/test-fast: interrupted by $caught_signal; removing snapshot $run_root" >&2
@@ -439,6 +442,7 @@ reap_runner_on_launcher_exit() {
     printf 'retained-reason=launcher-exit-%s\n' "$status" \
       >>"$run_root/test-run.txt"
   fi
+  release_test_slot
   if [ "$fast_iteration" -eq 1 ]; then
     cd "$source_root"
     remove_run_root
@@ -546,6 +550,11 @@ git -C "$source_root" --work-tree="$run_root" ls-files --others --exclude-standa
   done
 echo "bin/test: end snapshot differences"
 record_phase snapshot
+
+if ! acquire_test_slot; then
+  exit 75
+fi
+record_phase test-slot
 
 # test-fast shares this exact snapshot and child lifecycle, but stops before
 # dependency-cache preparation, worker copies, and base publication.
@@ -760,5 +769,6 @@ else
   echo "bin/test: retained failed isolated operator root $run_root" >&2
 fi
 
+release_test_slot
 trap - EXIT HUP INT TERM
 exit "$status"
