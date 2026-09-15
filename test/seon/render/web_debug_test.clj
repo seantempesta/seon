@@ -4,6 +4,8 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [seon.render.web :as web]
+            [seon.render.web-test :as web-test]
+            [seon.sci.eval :as sci.eval]
             [seon.db :as db]
             [seon.config :as config]
             [seon.cluster :as cluster]
@@ -270,7 +272,7 @@
                              [:seon.message/id "panel-fault-message"])
                  (let [after (snapshot)
                        expected {:errors 1 :fabricated 1 :churn 2 :repeated 1 :empty-replies 1
-                                 :directory 1 :prefix 0 :faults 1 :fault-turns 1}
+                                 :directory 0 :prefix 0 :faults 1 :fault-turns 1}
                        html (hiccup/->string (#'transcript/problems-html unit after))]
                    (is (str/includes?
                         (element-text
@@ -642,3 +644,43 @@
            (when (empty? expected)
              (is (not-any? #(and (map? %)
                                 (= "seon-debug-stored-value" (:class %))) nodes)))))))))
+
+(deftest passive-ledger-never-reconstructs-directory
+  (#'web-test/with-server
+   (fn [connection _server context]
+     (let [shown "{:functions [café  spaced], :schemas {}}\n"
+           _ (db/transact! connection
+               [{:seon.turn/id "saved-directory-turn"
+                 :seon.turn/agent [:seon.agent/id "root"]
+                 :seon.turn/opened-tx "datomic.tx"
+                 :seon.turn/closed-tx "datomic.tx"
+                 :seon.turn/reply "" :seon.turn/reply-size 0}
+                {:seon.agent/id "root"
+                 :seon.agent/runtime {:seon.runtime/agent [:seon.agent/id "root"]
+                                      :seon.runtime/turns [[:seon.turn/id "saved-directory-turn"]]}}
+                {:seon.cluster.eval/id "saved-directory"
+                 :seon.cluster.eval/run [:seon.turn/id "saved-directory-turn"]
+                 :seon.cluster.eval/ordinal 0 :seon.cluster.eval/at (java.util.Date.)
+                 :seon.cluster.eval/source "(dir my.test)"
+                 :seon.eval/renderer 'seon.repl/render-directory-ai
+                 :seon.eval/shown shown}])
+           request {:seon.db/db (db/db connection) :seon.db/connection connection
+                    :seon.agent/id "root" :seon.sci.eval/ctx (:ctx context)
+                    :seon.sci.admit/caps (config/result-caps (config/defaults))
+                    :seon.sci.eval/time-limit-ms (* 1000 support/event-backstop-seconds)
+                    :seon.config/on-core-error :record
+                    :seon.render/profile (render/agent-render-profile (config/defaults))}
+           calls (atom {:directory 0 :render 0})
+           directory sci.eval/directory-value
+           render-directory repl/render-directory-ai]
+       (with-redefs [sci.eval/directory-value
+                     (fn [& args] (swap! calls update :directory inc) (apply directory args))
+                     repl/render-directory-ai
+                     (fn [& args] (swap! calls update :render inc) (apply render-directory args))]
+         (let [ledger (transcript/render-ledger request)
+               text (element-text ledger)
+               audit (#'transcript/directory-problem (:seon.db/db request) {} [])]
+           (is (str/includes? text shown) "saved shown text is displayed byte-for-byte")
+           (is (str/includes? text "Directory integrity · not checked"))
+           (is (pos? (:seon.render.transcript/unknown audit)))
+           (is (= {:directory 0 :render 0} @calls))))))))

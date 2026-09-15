@@ -1801,38 +1801,10 @@
                     ::matches (mapv #(evaluation-match by-eid %) matches)}) groups))))
 
 (defn- directory-problem
-  "Compare complete directory observations with their owner at the read basis."
-  [database by-eid evaluations]
-  (let [renderer (some-> (db/pull database [:seon.schema/form]
-                                  [:seon.schema/key :seon.repl/directory])
-                        :seon.schema/form readable-shown ::value
-                        schema.form/schema-properties :seon.render/ai)
-        directories (filter #(and renderer (= renderer (:seon.eval/renderer %))) evaluations)
-        checks
-        (mapv (fn [saved]
-                (let [namespace-name
-                      (some (fn [evidence]
-                              (let [lookup (last (get-in evidence [:seon.db/read-request :seon.db/pull-arguments]))]
-                                (when (and (vector? lookup) (= :seon.ns/name (first lookup)))
-                                  (second lookup)))) (:seon.cluster.eval/read-evidence saved))
-                      shown (some-> (:seon.eval/shown saved) readable-shown ::value)
-                      basis (:seon.cluster.eval/read-basis-transaction saved)
-                      expected (when (and basis namespace-name)
-                                 ((requiring-resolve 'seon.sci.eval/directory-value)
-                                  (db/as-of database basis) namespace-name true))
-                      projected (when (and expected (not (:seon.error/kind expected)))
-                                  (some-> expected repl/render-directory-ai readable-shown ::value))]
-                  (cond
-                    (or (not (map? shown)) (nil? projected)
-                        (not= (set (keys projected)) (set (keys shown)))
-                        (some #(and (map? %) (:seon.print/omitted %)) (tree-seq coll? seq shown)))
-                    (assoc (evaluation-match by-eid saved) ::unavailable true
-                           ::detail "Complete directory shown text or read evidence unavailable.")
-                    (not= shown projected)
-                    (assoc (evaluation-match by-eid saved) ::detail
-                           (str namespace-name " differs from its complete directory at the saved read basis."))))) directories)]
-    (assoc (finding :directory "Incomplete directory results" (remove ::unavailable (remove nil? checks)))
-           ::unknown (if (seq directories) (count (filter ::unavailable checks)) 1))))
+  "Passive history displays saved directory bytes; integrity remains unchecked."
+  [_database _by-eid _evaluations]
+  (assoc (finding :directory "Directory integrity" [])
+         ::unknown 1 ::not-checked true))
 
 (defn- fault-problems
   "Detect delivered core faults and turns whose trigger points at a fault fact."
@@ -2036,8 +2008,10 @@
        [:details {:data-problem (name (::code rule)) :data-problem-count (::count rule)}
         [:summary
          [:span {:class (if (#{:churn :prefix :repeated} (::code rule)) "seon-problem-warning" "seon-emission-error")} "● "]
-         (str (::label rule) " · " (::count rule)
-              (when (pos? (get rule ::unknown 0)) (str " · " (::unknown rule) " checks unavailable")))]
+         (if (::not-checked rule)
+           (str (::label rule) " · not checked")
+           (str (::label rule) " · " (::count rule)
+                (when (pos? (get rule ::unknown 0)) (str " · " (::unknown rule) " checks unavailable"))))]
         (if (::groups rule)
           (for [group (::groups rule)]
             [:div [:p (str (::detail group) " · " (format "%,d" (::bytes group)) " bytes")]

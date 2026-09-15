@@ -9,6 +9,8 @@ tags: [issue, render, web, performance, class/n9, wave/namespace-page-performanc
 
 ## Problem
 
+2026-09-15: directory integrity belongs at evaluation settlement (debug-page-cost plan option C); the passive ledger deliberately reports it as not checked until durable audit evidence exists.
+
 Core namespace pages take several seconds even after the declaration bridge
 cost is absent. The 2026-08-10 route walk tentatively attributed their
 12-18-second latency to the same declaration-population fallback that stalled
