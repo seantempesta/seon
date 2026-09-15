@@ -23,6 +23,23 @@ class alive.
 
 ## Evidence
 
+Dir-own-fns follow-up, 2026-09-14: a JVM-mode MCP probe through Juniper's
+retained SCI context evaluated
+`(seon.db/pull [:seon.fn/sym :seon.fn/private? {:seon.fn/ns [:seon.ns/name]}]
+[:seon.fn/sym "my.agents.juniper/largest-customer"])`. The actual value
+contained the existing function identity, `:seon.fn/private? false`, and
+namespace `my.agents.juniper`, but `:seon.eval/shown` was exactly:
+
+```text
+Restart the JVM to remove stale loaded Var my.agents.juniper/largest-customer; it is absent from the published program graph.
+```
+
+The probe took 79 ms on default PID 23557. No restart was performed. This
+confirms the wrong stale-Var presentation for an existing agent-installed
+function; it does not establish a reason to reset the JVM. The directory
+repair uses explicit documentation data and is separate from this renderer
+selection defect.
+
 Observed live 2026-08-14 in the Drive 1 stored capture facts
 (`tmp/drive-1-root`). It accounts for **74 of 210 result positions** across the
 six captures that carry a prompt.

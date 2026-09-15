@@ -171,3 +171,88 @@ Platform gate with the same owned paths and `--platform`: 84 tests / 505
 assertions, zero failures or errors; coordinator-and-tests 179 seconds.
 Successful root run.aAKL47 was removed by the runner. No `--all` or `--full`
 run was requested or executed. `git diff --check` passed for the code and tests.
+
+## Retained-context follow-up — 2026-09-14
+
+Implementation checkpoint 5081a11fb passed those gates. A live probe during
+partial adoption then exposed a second stale binding: the retained context's
+qualified `clojure.repl/dir` listed largest-customer (833 ms), but bare `dir`
+still expanded to the old literal empty vector. Both contexts' namespace
+bindings had empty `:refers` maps, falsifying the initial explicit-referral
+hypothesis. The actual alias is the `clojure.core/dir` binding pointing to a
+Var whose metadata names `clojure.repl`.
+
+SCI's `utils/bind-root!` (reference-code/sci/src/sci/impl/utils.cljc:362)
+copies an inherited Var to the namespace named in its metadata. The existing
+`receive-base!` used `sci/intern` at every binding path, so updating the core
+alias copied its new root into clojure.repl and left the core binding stale.
+The repair stays in that existing base-update mechanism: aliases receive a
+fresh Var at their actual binding path; ordinary interns retain SCI's existing
+root-copy operation. Roots and metadata still come from the base diff. No new
+refresh pass, cache, or directory-specific alias registry was introduced.
+
+The canonical regression reinstalls the actual REPL macros in the base and
+receives the diff into the same retained context. It proves the old root
+changed, the context object survived, and both core and repl spellings of dir
+and doc now hold the base's current macro roots. Gates are rerun for this
+follow-up; earlier green counts above describe checkpoint 5081a11fb.
+
+Publication diagnostics were read-only. `jcmd 23557 Thread.dump_to_file
+-format=json /Users/sean/src/seon/tmp/dir-own-fns-threads.json` captured all
+threads at 2026-09-15T00:27:03.501052Z, including virtual threads. Thread 88305
+was inside `projection-cache-value` → `compiled-wrapper` →
+`projection-fingerprint` → `projection-from-database` →
+`development-source-refresh!` (cluster.clj:1921); thread 88333 was at
+`refresh-source!` (cluster.clj:2030), before entering the refresh monitor.
+This locates the observed wait; it does not diagnose a dependency defect.
+The queued request later resumed and reported changed source during analysis.
+
+Final follow-up gates: `bin/test-fast --paths` with the owned paths and
+seon.sci.documentation-test, seon.directory-test, seon.repl-grammar-test,
+seon.help-trial-test passed 9 tests / 111 assertions. The corresponding
+`bin/test --paths` gate passed 9 tests / 115 assertions (58 seconds in the
+coordinator-and-tests phase); `--platform` passed 84 tests / 505 assertions
+(89 seconds). All had zero failures and errors. Successful isolated roots
+run.w542yp and run.XTteJY were removed by the runner. The snapshots exclude
+foreign render, CSS, and seon.repl edits; those files were left untouched.
+
+Follow-up files: src/seon/sci/eval.clj,
+test/seon/sci/documentation_test.clj, this landing note, and
+docs/seon/issues/an-entity-pull-returns-a-sentence-instead-of-its-attributes.md.
+The latter records the independently observed misleading function-row render;
+it does not change or claim to repair the renderer.
+
+## Live retained-context behavior after loaded definitions
+
+Before the publication commit marker converged, the ordinary base-diff receive
+and evaluator already proved the fix on default PID 23557: 896 ms,
+`:seon.probe/retained-context? true`, largest-customer listed, no evaluation
+error. This is explicitly a loaded-definition observation, not a claim of
+completed source adoption. The final convergence observation follows it.
+
+```clojure
+(let [instance (get @seon.operator.runtime/running-instances "default")
+      connection (seon.operator/connection "default")
+      projection (:seon.schema/projection (#'seon.operator/selected-environment "default"))]
+  (seon.schema/call-with-projection
+   projection
+   (fn []
+     (let [base (:seon.sci.eval/ctx instance)
+           retained (get-in (seon.cluster.agent/armed (:seon.agent/routing instance) "juniper")
+                            [:seon.turn.loop/cluster :seon.sci.eval/agent-ctx])
+           ctx (:seon.sci.eval/ctx
+                (seon.sci.eval/fork-for-turn
+                 {:seon.sci.eval/ctx base :seon.sci.eval/agent-ctx retained
+                  :seon.db/db @connection :seon.agent/id "juniper"}))
+           decisions (seon.config/effective @connection "default")
+           result (seon.sci.eval/evaluate
+                   {:seon.sci.eval/ctx ctx :seon.db/db @connection
+                    :seon.db/connection connection :seon.agent/id "juniper"
+                    :seon.cluster.eval/ns [:seon.ns/name 'my.agents.juniper]
+                    :seon.cluster.eval/source "(dir my.agents.juniper)"
+                    :seon.sci.admit/caps (seon.config/result-caps decisions)
+                    :seon.sci.eval/time-limit-ms 10000 :seon.config/on-core-error :panic})]
+       (pr-str {:seon.probe/retained-context? (identical? retained ctx)
+                :seon.probe/result (select-keys result [:seon.sci.admit/value :seon.cluster.eval/error :seon.eval/shown])})))))
+#:seon.probe{:retained-context? true, :result {:seon.sci.admit/value {:schemas #:example{:amount :int, :customer :string, :order [:string #:seon.db{:identity true}], :order-row [:map #:seon.db{:attributes true} [:example/order :example/order] [:example/amount :example/amount] [:example/customer :example/customer]]}, :functions [{:sym my.agents.juniper/largest-customer, :arglists ([rows]), :doc "Given a seq of order rows, return the customer with the largest total.", :in [:cat [:vector :example/order-row]], :out [:map [:customer :example/customer] [:total :int]]}]}, :seon.eval/shown "{:functions [{:arglists ([rows]), :doc \"Given a seq of order rows, return the customer with the largest total.\", :in [:cat [:vector :example/order-row]], :out [:map [:customer :example/customer] [:total :int]], :sym my.agents.juniper/largest-customer}], :schemas #:example{:amount :int, :customer :string, :order [:string #:seon.db{:identity true}], :order-row [:map #:seon.db{:attributes true} [:example/order :example/order] [:example/amount :example/amount] [:example/customer :example/customer]]}}"}}
+```

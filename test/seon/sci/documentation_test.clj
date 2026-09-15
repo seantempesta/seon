@@ -1,6 +1,7 @@
 (ns seon.sci.documentation-test
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is]]
+            [sci.core :as sci]
             [seon.config :as config]
             [seon.db :as db]
             [seon.program :as program]
@@ -109,6 +110,27 @@
                    :example "" :arglists '([number]) :in [:cat :int] :out :int}
                   (:seon.sci.admit/value documented)))
            (is (seq (db/read-evidence @captured)))))))))
+
+(deftest retained-context-receives-the-current-repl-macro-through-its-core-alias
+  (support/with-database
+   (fn [connection]
+     (let [base (support/fork-cluster-ctx connection)
+           request {:seon.sci.eval/ctx base :seon.db/db @connection
+                    :seon.agent/id "documentation"}
+           retained (:seon.sci.eval/ctx (evaluation/fork-for-turn request))
+           old-dir @(sci/resolve retained 'clojure.core/dir)]
+       (#'evaluation/install-program-doc! base @connection (schema/handed-projection))
+       (is (not (identical? old-dir @(sci/resolve base 'clojure.core/dir))))
+       (let [updated (:seon.sci.eval/ctx
+                      (evaluation/fork-for-turn
+                       (assoc request :seon.sci.eval/agent-ctx retained)))]
+         (is (identical? retained updated))
+         (doseq [function ['dir 'doc]
+                 namespace-name ['clojure.core 'clojure.repl]]
+           (let [qualified (symbol (str namespace-name) (str function))]
+             (is (identical? @(sci/resolve base qualified)
+                             @(sci/resolve updated qualified))
+                 (str qualified " receives its current macro root")))))))))
 
 (deftest a-contract-mistake-carries-the-same-documentation-as-doc
   (support/with-database

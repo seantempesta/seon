@@ -1655,9 +1655,18 @@
       (if (= 2 (count entry))
         (let [[value metadata] entry
               binding-name (with-meta binding-name metadata)]
-          (if (identical? absent-intern value)
-            (sci/intern ctx namespace-name binding-name)
-            (sci/intern ctx namespace-name binding-name value)))
+          ;; An alias can hold a Var whose metadata names another namespace.
+          ;; SCI's inherited-root copy follows that metadata; install the alias
+          ;; at its actual binding path instead of updating only its origin.
+          (if (not= namespace-name (some-> (:ns metadata) str symbol))
+            (sci/add-namespace!
+             ctx namespace-name
+             {binding-name (if (identical? absent-intern value)
+                             (sci/new-var binding-name)
+                             (sci/new-var binding-name value metadata))})
+            (if (identical? absent-intern value)
+              (sci/intern ctx namespace-name binding-name)
+              (sci/intern ctx namespace-name binding-name value))))
         (swap! (:env ctx) assoc-in
                [:namespaces namespace-name binding-name] (first entry))))
     (reset! (::base-bindings ctx) current)
