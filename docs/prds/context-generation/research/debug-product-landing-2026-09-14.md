@@ -6,6 +6,91 @@ tags: [research, debug, web, prompt]
 
 # Debug session product — 2026-09-14
 
+## Problems panel
+
+Review screenshots: [desktop problems](../../../../tmp/debug-product/panel-final-1440-problems.png),
+[mobile problems](../../../../tmp/debug-product/panel-final-700-problems.png),
+[desktop selected turn](../../../../tmp/debug-product/panel-final-1440-selected.png),
+[mobile selected turn](../../../../tmp/debug-product/panel-final-700-selected.png).
+
+The initial live panel reports **30/30 turns used**, **4/7 steps complete**,
+**21 evaluation errors**, **8 delivered fault notifications**, and **71
+repeated system reads**. Reported usage totals are **954,877 prompt / 890,752
+hit / 64,125 miss / 7,259 completion tokens**; the current rates on file give
+**$0.01350**. Twenty-five provider turns had no current plan step selected at
+their opening; five belonged to `juniper/read`. These are observed facts,
+not an inferred assignment of the later replies to plan steps.
+
+The nine checks report: fabricated responses **9**, error evaluations **21**,
+repeated system reads **71**, repeated provider forms with identical results
+**2**, replies with zero evaluations **1**, incomplete directory results **1**
+(**7 unavailable** because the saved output cannot be compared), delivered
+fault notifications **8**, fault-triggered turns **2**, prefix changes **0**.
+The passing prefix line reads **“Prefix stable on 29/29 attempts”** (the
+first attempt has no preceding prompt to compare).
+Unavailable observations are not counted as passing checks. Costs explicitly
+use the rates currently on file, not a claim about historical invoices.
+
+Fast regression: **27 tests / 236 assertions**, zero failures/errors. The
+canonical real-loop fixture adds stored rows to exercise all nine rule counts,
+missing rates, exact usage totals, configured cost, and absent prefix evidence.
+The first seeded version was refused because its fault and model facts were
+incomplete; the fixture now uses the error normalizer and the canonical
+provider reference.
+
+Screenshot log (`tmp/debug-product/`):
+
+- `panel-1-{1440,700}-top.png`: inspected; budget and problem rows read clearly.
+  The strip only marked evaluation errors; extended its dots and hover text
+  to all matched problem rules.
+- `panel-2-{1440,700}-problems.png`: inspected; fabricated responses expand
+  to four offending turn links without exposing raw metadata. Both widths
+  retain readable labels, wrapping, and ordinary document scroll.
+- `panel-2-agent-{1440,700}.png`: inspected; main-page blocks remain full width
+  with no nested scroll boxes. Runtime fault prose still repeats its message;
+  [recorded separately](../../../seon/issues/runtime-html-repeats-the-trigger-message.md)
+  because this is inside the concurrently assigned runtime block.
+- `panel-final-{1440,700}-{selected,problems}.png`: inspected; all problem
+  dots are live and the selected heading remains below the sticky header.
+  `panel-links` also verifies that a fabricated-response link selects its
+  owning turn through the existing route at both widths.
+
+Browser checks at both widths pass: all nine rules, 61 cards/cells, route
+selection, **375 reply bytes**, and **177,576 prompt bytes**. Latest measured
+initial GET before the final strip-mark adoption: **HTTP 200 / 0.323641 s**.
+With all problem marks live: **HTTP 200 / 0.079370 s**.
+Later read-only sample: initial ledger **200 / 0.266706 s**; full context
+expansion for turn 40 (`a51f8821e5be`, `context=true`, Datastar request)
+**200 / 1.557847 s**. The larger context remains an on-demand request.
+The first isolated gate passed **87 tests / 637 assertions**. A subsequent
+gate uses current HEAD after `0dca8534e` landed the previously excluded
+runtime-AI hunk; that landed change is preserved.
+That current-HEAD pass exposed one stale fixture assumption: its origin check
+depended on runtime turn-history churn. Adding an order did not cause this
+virtual-submission fixture to append a changed-read emission. The origin
+assertion now runs against the two explicit generated turns already seeded
+for the panel regression, through the real prompt fold and session renderer.
+It verifies stored re-read provenance without requiring the retired churn.
+The platform gate on the first isolated snapshot passed **84 tests / 505
+assertions**. Default's adopted source advanced to
+`6aa8c04a-d965-5ac5-99a9-871245d3ea1c`; the final screenshots visibly contain
+the new problem dots. A newer concurrent publication was already at
+`6aa8c137-5c18-584f-901e-0cd152fdd9de` on the subsequent read, so this is
+evidence of the panel's live adoption, not whole-tree convergence.
+The final current-HEAD platform snapshot also passed **84 tests / 505
+assertions**, zero failures/errors. The corrected web-debug fast pass is
+**11 tests / 137 assertions**, zero failures/errors.
+Final current-HEAD isolated gate: **87 tests / 635 assertions**, zero
+failures/errors. The earlier failed snapshot is superseded by this green
+run; only the stale origin assertion moved, with its coverage retained.
+
+A read-only MCP probe of the rule result timed out at **30,000 ms** while
+HTTP returned the new panel with **200 / 0.114422 s**. This re-observes the
+[existing MCP timeout issue](../../../seon/issues/default-component-probe-times-out-after-adoption.md),
+whose file has another lane's in-flight edits. No alternate REPL transport
+or lifecycle operation was used. The HTTP observation proves page rendering,
+not Flow health or the timed-out probe's completion.
+
 ## Turn strip
 
 The strip keeps all **61 turns** chronological. Provider cells are filled;

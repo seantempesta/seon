@@ -12,6 +12,7 @@
             [seon.eval :as evaluation]
             [seon.flow :as flow]
             [seon.error :as error]
+            [seon.id :as id]
             [seon.render :as render]
             [seon.render.hiccup :as hiccup]
             [seon.render.transcript :as transcript]
@@ -156,7 +157,6 @@
                        "Every reply turn excludes its own and later reply evaluations.")))
                (is (= byte-count (alength (.getBytes ^String exact "UTF-8"))))
                (is (not (str/includes? exact "later must not enter earlier prompt")))
-               (is (str/includes? (element-text detail) "re-read"))
                (doseq [origin ["● opening" "● agent" "● error"]]
                  (is (str/includes? (element-text detail) origin)))
                (is (str/includes? (element-text detail) "cache-hit tokens: 80"))
@@ -166,7 +166,110 @@
                (is (= 404 (:status (#'web/debug-turn-response service "root" provider-id))))
                (doseq [forbidden ["#inst" ":db/id"]]
                  (is (not (str/includes? (apply str (map :data-turn-id headers)) forbidden))))
-               (is (seq (evaluation/of-agent @connection "juniper"))))
+               (is (seq (evaluation/of-agent @connection "juniper")))
+               (let [snapshot #(let [database @connection
+                                     rows (#'transcript/turn-rows database "juniper")]
+                                 (#'transcript/session-problems
+                                  (assoc unit :seon.db/db database) rows
+                                  (#'transcript/ledger-evaluations database "juniper")))
+                     before (snapshot)
+                     counts #(into {} (map (juxt :seon.render.transcript/code
+                                                :seon.render.transcript/count))
+                                   (:seon.render.transcript/rules %))
+                     seed-turn!
+                     (fn [situation source forms attempt trigger]
+                       (let [database @connection
+                             id (turn/next-id database "debug-turns" "juniper")
+                             tx (cond-> (conj (turn/open-tx
+                                               {:seon.turn/id id
+                                                :seon.turn/agent [:seon.agent/id "juniper"]
+                                                :seon.turn/opened-tx "datomic.tx"
+                                                :seon.turn.work/situation situation})
+                                              [:db/add [:seon.turn/id id] :seon.turn/reply source]
+                                              [:db/add [:seon.turn/id id] :seon.turn/reply-size
+                                               (alength (.getBytes ^String source "UTF-8"))]
+                                              [:db/add [:seon.turn/id id] :seon.turn/closed-tx "datomic.tx"])
+                                  attempt (conj (assoc attempt :db/id "panel-attempt")
+                                                [:db/add [:seon.turn/id id] :seon.turn/attempts "panel-attempt"])
+                                  trigger (conj [:db/add [:seon.turn/id id] :seon.turn/trigger trigger]))
+                             tx (into tx (map-indexed
+                                           (fn [ordinal form]
+                                             (merge {:seon.cluster.eval/id (id/evaluation id ordinal)
+                                                     :seon.cluster.eval/run [:seon.turn/id id]
+                                                     :seon.cluster.eval/ordinal ordinal
+                                                     :seon.cluster.eval/at (java.util.Date.)
+                                                     :seon.cluster.eval/ns [:seon.ns/name 'my.agents.juniper]
+                                                     :seon.cluster.eval/read-basis-transaction (db/basis-t database)} form)) forms))]
+                         (is (:db-after (db/transact! connection tx)))
+                         id))
+                     attempt (fn [id prompt hit miss]
+                               {:seon.ai.attempt/id id :seon.ai.attempt/ordinal 0
+                                :seon.ai.attempt/at (java.util.Date.)
+                                :seon.ai/endpoint "http://fixture.invalid" :seon.ai/model "fixture-model"
+                                :seon.ai.attempt/settings-edn "{}" :seon.ai.attempt/finish-reason "stop"
+                                :seon.ai.attempt/usage-edn
+                                (pr-str {"prompt_tokens" prompt "prompt_cache_hit_tokens" hit
+                                         "prompt_cache_miss_tokens" miss "completion_tokens" 0})})
+                     repeated {:seon.cluster.eval/source "(inc 123)" :seon.eval/shown "124"}
+                     reread {:seon.cluster.eval/source "(seon.db/q '[:find (count ?a) . :where [?a :seon.agent/id]])"
+                             :seon.eval/shown (pr-str (db/q '[:find (count ?a) . :where [?a :seon.agent/id]] @connection))}]
+                 (seed-turn! :generate (:seon.cluster.eval/source reread) [reread] nil nil)
+                 (seed-turn! :generate (:seon.cluster.eval/source reread) [reread] nil nil)
+                 (seed-turn! :call "(inc 123)\n#:seon.repl{:value 124}\n(dir my.test)"
+                             [repeated
+                              {:seon.cluster.eval/source "#:seon.repl{:value 124}"
+                               :seon.cluster.eval/error "Only the REPL writes responses."
+                               :seon.error/kind :seon.sci.reader/fabricated-response}
+                              {:seon.cluster.eval/source "(dir my.test)" :seon.eval/shown "{:functions []}"}]
+                             (attempt "panel-attempt-1" 5000 0 5000) nil)
+                 (seed-turn! :call "(inc 123)" [repeated]
+                             (attempt "panel-attempt-2" 6000 0 6000) nil)
+                 (is (:db-after
+                      (db/transact! connection
+                        [(error/normalize
+                          {:seon.error/source {:seon.error/kind :seon.debug/panel-fixture
+                                               :seon.error/message "Known fixture fault."}
+                           :seon.error/id "panel-fault" :seon.error/at (java.util.Date.)
+                           :seon.error/process cluster/boot-process-identity
+                           :seon.sci.admit/caps (config/result-caps (support/effective-config))
+                           :seon.config.error/max-evidence-bytes
+                           (:seon.config.error/max-evidence-bytes (support/effective-config))})
+                         {:seon.message/id "panel-fault-message" :seon.message/to [:seon.agent/id "juniper"]
+                          :seon.message/content "A known fixture fault was delivered."
+                          :seon.message/about [:seon.error/id "panel-fault"]}])))
+                 (seed-turn! :call "" [] (attempt "panel-attempt-3" 7100 7000 100)
+                             [:seon.message/id "panel-fault-message"])
+                 (let [after (snapshot)
+                       expected {:errors 1 :fabricated 1 :churn 2 :repeated 1 :empty-replies 1
+                                 :directory 1 :prefix 1 :faults 1 :fault-turns 1}
+                       html (hiccup/->string (#'transcript/problems-html unit after))]
+                   (is (str/includes?
+                        (element-text
+                         (transcript/render-session
+                          (assoc unit :seon.db/db @connection
+                                 :seon.turn/id (:seon.turn/id (last (#'transcript/turn-rows @connection "juniper"))))))
+                        "re-read"))
+                   (doseq [[rule added] expected]
+                     (is (= (+ added (get (counts before) rule)) (get (counts after) rule)) (name rule)))
+                   (is (pos? (get-in after [:seon.render.transcript/budget :seon.render.transcript/missing-rates])))
+                   (is (str/includes? html "no rate on file"))
+                   (is (not (str/includes? html "#inst")))
+                   (is (not (str/includes? html ":db/id"))))
+                 (is (pos? (:seon.render.transcript/unknown (#'transcript/prefix-problem [])))
+                     "No provider observations must not be reported as prefix health.")
+                 (is (:db-after
+                      (db/transact! connection
+                        [{:seon.ai.model/id "fixture-model"
+                          :seon.ai.model/provider
+                          (:seon.ai.model/provider
+                           (db/pull @connection '[:seon.ai.model/provider]
+                                    [:seon.ai.model/id (:seon.config.ai/model (support/effective-config))]))
+                          :seon.ai.model/input-usd-per-mtok 1.0
+                          :seon.ai.model/cached-input-usd-per-mtok 0.1
+                          :seon.ai.model/output-usd-per-mtok 2.0}])))
+                 (let [budget (:seon.render.transcript/budget (snapshot))]
+                   (is (= 18200 (get-in budget [:seon.render.transcript/totals :seon.render.transcript/prompt])))
+                   (is (< (abs (- 0.011852 (:seon.render.transcript/cost budget))) 1.0e-12)))))
              (finally
                (agent/disarm! request)
                (doseq [channel-key [:seon.cluster.wake/channel :seon.render/context-channel :seon.turn.loop/completion]]

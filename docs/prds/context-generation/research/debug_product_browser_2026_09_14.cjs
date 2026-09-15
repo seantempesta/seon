@@ -25,6 +25,17 @@ const fs = require('node:fs/promises');
    await page.evaluate(()=>scrollTo(0,0));
    await page.screenshot({path:`tmp/debug-product/${prefix}-${width}.png`,fullPage:true});
    await page.screenshot({path:`tmp/debug-product/${prefix}-${width}-top.png`});
+   assert.equal(await page.locator('[data-problem]').count(),9);
+   await page.getByRole('link',{name:'Review problems',exact:true}).click();
+   await page.locator('[data-problem="fabricated"] > summary').click();
+   await page.screenshot({path:`tmp/debug-product/${prefix}-${width}-problems.png`});
+   console.log(JSON.stringify({width,problems:await page.locator('.seon-session-problems').innerText()}));
+   const problemLink=page.locator('[data-problem="fabricated"] a').first();
+   const problemTurn=new URL(await problemLink.getAttribute('href'),page.url()).searchParams.get('turn');
+   await problemLink.click();
+   await page.locator(`[data-strip-turn="${problemTurn}"][aria-current="step"]`).waitFor();
+   await page.locator(`[data-turn-id="${problemTurn}"] [data-ledger-loaded]`).waitFor();
+   assert.ok(page.url().includes(problemTurn));
    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth),width);
    for (const system of await page.locator('.seon-ledger-turn[data-turn-kind="System"]').all())
     assert.equal(await system.locator('.seon-ledger-reply').count(),0);

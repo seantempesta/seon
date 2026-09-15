@@ -1,9 +1,9 @@
 (ns seon.render.transcript
-  "One agent's messages and eval receipts as a bounded REPL transcript.
+  "One agent's messages, turns, and evaluation results.
 
   The renderer is the schema-declared agent-session projection. Messages are
   reverse connections while evaluations are reached through the
-  agent's runs. Raw facts never acquire a detail level; every full, summary,
+  agent's turns. Raw facts never acquire a detail level; every full, summary,
   and elided decision is derived for this call."
   (:require [clojure.edn :as edn]
             [clojure.string :as str]
@@ -16,7 +16,6 @@
             [seon.turn :as turn]
             [seon.config :as config]
             [seon.error :as error]
-            [seon.eval :as evaluation]
             [seon.print :as print]
             [seon.render :as render]
             [seon.render.agent :as agent]
@@ -1474,6 +1473,7 @@
                       :seon.cluster.eval/ordinal :seon.cluster.eval/source
                       :seon.cluster.eval/comment :seon.eval/shown :seon.eval/renderer
                       :seon.cluster.eval/error :seon.cluster.eval/output
+                      :seon.error/kind :seon.cluster.eval/read-basis-transaction
                       :seon.cluster.eval/interrupted-at :seon.cluster.eval/triage-edn
                       :seon.eval/duration-ms :seon.sci.eval/ending-ns
                       :seon.print/length :seon.print/level
@@ -1691,14 +1691,298 @@
      (last rendered)]))
 
 
+(defn- attempt-usage [attempt]
+  (let [usage (some-> (:seon.ai.attempt/usage-edn attempt) readable-shown ::value)
+        prompt (get usage "prompt_tokens")
+        hit (or (get usage "prompt_cache_hit_tokens") (get-in usage ["prompt_tokens_details" "cached_tokens"]))
+        miss (or (get usage "prompt_cache_miss_tokens")
+                 (when (and (number? prompt) (number? hit)) (- prompt hit)))
+        out (get usage "completion_tokens")]
+    (into {} (filter (comp number? val)) {::prompt prompt ::hit hit ::miss miss ::out out})))
+
+(defn- finding [code label matches]
+  {::code code ::label label ::count (count matches) ::matches (vec matches)})
+
+(defn- evaluation-match [by-eid saved]
+  {::turn (get by-eid (get-in saved [:seon.cluster.eval/run :db/id]))
+   ::detail (let [form (::value (readable-shown (:seon.cluster.eval/source saved)))]
+              (cond (= :seon.sci.reader/fabricated-response (some-> (:seon.error/kind saved) keyword))
+                    "Agent-written REPL response"
+                    (and (seq? form) (symbol? (first form))) (str (first form))
+                    :else "Unreadable reply form"))})
+
+(defn- error-problem
+  "Detect evaluated forms that failed, independently of provider success."
+  [by-eid evaluations]
+  (finding :errors "Error evaluations"
+           (map #(evaluation-match by-eid %) (filter :seon.cluster.eval/error evaluations))))
+
+(defn- fabricated-problem
+  "Detect agent-authored responses rejected by the reply grammar."
+  [by-eid evaluations]
+  (finding :fabricated "Fabricated responses"
+           (map #(evaluation-match by-eid %)
+                (filter #(= :seon.sci.reader/fabricated-response (some-> (:seon.error/kind %) keyword)) evaluations))))
+
+(defn- empty-reply-problem
+  "Detect settled replies that produced no evaluation evidence."
+  [rows evaluations]
+  (let [evaluated (set (map #(get-in % [:seon.cluster.eval/run :db/id]) evaluations))]
+    (finding :empty-replies "Replies with zero evaluations"
+             (for [row rows
+                   :when (and (:seon.turn/closed-tx row)
+                              (seq (:seon.turn/attempts row))
+                              (or (some? (:seon.turn/reply row)) (:seon.turn/reply-blob row))
+                              (not (evaluated (:db/id row))))]
+               {::turn row ::detail "A reply was saved, but no evaluations followed."}))))
+
+(defn- repeated-problem
+  "Detect repeated provider forms whose saved results did not change."
+  [by-eid evaluations]
+  (finding :repeated "Repeated forms with identical results"
+           (mapcat (fn [[_ matches]] (map #(evaluation-match by-eid %) (rest matches)))
+                   (group-by (juxt :seon.cluster.eval/source :seon.eval/shown :seon.cluster.eval/error :seon.cluster.eval/output)
+                             (filter #(seq (:seon.turn/attempts (get by-eid (get-in % [:seon.cluster.eval/run :db/id])))) evaluations)))))
+
+(defn- churn-problem
+  "Detect prompt growth from repeated system reads, including changed keys."
+  [database by-eid evaluations]
+  (let [groups (->> evaluations
+                    (filter #(let [row (get by-eid (get-in % [:seon.cluster.eval/run :db/id]))]
+                               (and (pos? (::ordinal row)) (= "System" (turn-kind database row)))))
+                    (group-by :seon.cluster.eval/source)
+                    (filter #(< 1 (count (val %))))
+                    (sort-by first))]
+    (assoc (finding :churn "Repeated system reads"
+                    (mapcat (fn [[_ matches]] (map #(evaluation-match by-eid %) matches)) groups))
+           ::groups
+           (mapv (fn [[_ matches]]
+                   {::detail (str (emission-label (first matches)) " · ×" (count matches)
+                                  " · " (reread-summary matches))
+                    ::bytes (reduce + (map ::contributed-bytes matches))
+                    ::matches (mapv #(evaluation-match by-eid %) matches)}) groups))))
+
+(defn- directory-problem
+  "Detect directory results omitting public function facts at their read basis."
+  [database by-eid evaluations]
+  (let [directories
+        (keep (fn [saved]
+                (let [form (some-> (:seon.cluster.eval/source saved) readable-shown ::value)
+                      argument (when (seq? form) (second form))
+                      ns-name (if (and (seq? argument) (= 'quote (first argument))) (second argument) argument)]
+                  (when (and (seq? form) (#{'dir 'clojure.core/dir} (first form)) (symbol? ns-name)
+                             (not (:seon.cluster.eval/error saved)))
+                    [saved ns-name]))) evaluations)
+        checks
+        (mapv (fn [[saved ns-name]]
+                (let [shown (some-> (:seon.eval/shown saved) readable-shown ::value)
+                      basis (:seon.cluster.eval/read-basis-transaction saved)
+                      expected (when basis
+                                 (db/q '[:find ?sym ?private :in $ ?name
+                                         :where [?ns :seon.ns/name ?name]
+                                                [?f :seon.fn/ns ?ns] [?f :seon.fn/sym ?sym]
+                                                [(get-else $ ?f :seon.fn/private? false) ?private]]
+                                       (db/as-of database basis) ns-name))
+                      observed (when (map? shown) (get shown :functions))]
+                  (if (and (coll? observed) basis (not (:seon.error/kind expected)))
+                    (let [syms (set (map #(str (:sym %)) observed))
+                          missing (sort (keep (fn [[sym private?]] (when (and (not private?) (not (syms sym))) sym)) expected))]
+                      (when (seq missing)
+                        (assoc (evaluation-match by-eid saved) ::detail
+                               (str ns-name " omitted " (str/join ", " missing)))))
+                    (assoc (evaluation-match by-eid saved) ::unavailable true
+                           ::detail "Directory shown text or read basis unavailable.")))) directories)]
+    (assoc (finding :directory "Incomplete directory results" (remove ::unavailable (remove nil? checks)))
+           ::unknown (count (filter ::unavailable checks)))))
+
+(defn- fault-problems
+  "Detect delivered core faults and turns whose trigger points at a fault fact."
+  [database agent-id rows]
+  (let [messages (db/q '[:find ?mid ?error :in $ ?agent-id
+                         :where [?a :seon.agent/id ?agent-id] [?m :seon.message/to ?a]
+                                [?m :seon.message/about ?f] [?f :seon.error/id ?error]
+                                [?m :seon.message/id ?mid]] database agent-id)]
+    (if (:seon.error/kind messages)
+      [(assoc (finding :faults "Fault delivery" []) ::unknown 1)
+       (assoc (finding :fault-turns "Turns opened by faults" []) ::unknown 1)]
+      (let [fault-message-ids (set (map first messages))
+            triggered (filter #(fault-message-ids (get-in % [:seon.turn/trigger :seon.message/id])) rows)]
+        [(finding :faults "Fault notifications delivered"
+                  (for [[mid _] messages]
+                    {::message mid ::detail "Delivered core fault"
+                     ::turn (first (filter #(= mid (get-in % [:seon.turn/trigger :seon.message/id])) rows))}))
+         (finding :fault-turns "Turns opened by faults"
+                  (map #(hash-map ::turn % ::detail "The trigger message references a core fault.") triggered))]))))
+
+(defn- prefix-problem
+  "Detect cache prefix replacement beyond growth and the 128-token tolerance."
+  [rows]
+  (let [attempts (vec (for [row rows a (sort-by :seon.ai.attempt/ordinal (:seon.turn/attempts row))]
+                        {::turn row ::attempt a ::usage (attempt-usage a)}))
+        pairs (partition 2 1 attempts)
+        measured (filter #(every? number? [(get-in (first %) [::usage ::prompt])
+                                           (get-in (second %) [::usage ::prompt])
+                                           (get-in (second %) [::usage ::miss])]) pairs)
+        changed (keep (fn [[previous current]]
+                        (let [resent (- (get-in current [::usage ::miss])
+                                        (- (get-in current [::usage ::prompt]) (get-in previous [::usage ::prompt])))]
+                          (when (> resent 128)
+                            {::turn (::turn current) ::detail (str "Prefix changed, " (format "%,d" resent) " tokens re-sent")}))) measured)]
+    (assoc (finding :prefix "Prefix changed" changed)
+           ::stable (- (count measured) (count changed)) ::measured (count measured)
+           ::unknown (+ (- (count pairs) (count measured)) (if (empty? pairs) 1 0)))))
+
+
+(defn- session-budget
+  "Detect exhausted turn/step budgets and unavailable billing or rate evidence."
+  [database agent-id rows]
+  (let [attempts (vec (for [row rows a (:seon.turn/attempts row)]
+                        {::turn row ::attempt a ::usage (attempt-usage a)}))
+        totals (reduce #(merge-with + %1 (::usage %2)) {} attempts)
+        models (into {} (for [model (distinct (keep #(get-in % [::attempt :seon.ai/model]) attempts))]
+                          [model (db/pull database
+                                         [:seon.ai.model/input-usd-per-mtok
+                                          :seon.ai.model/cached-input-usd-per-mtok
+                                          :seon.ai.model/output-usd-per-mtok]
+                                         [:seon.ai.model/id model])]))
+        costs (mapv (fn [{a ::attempt u ::usage}]
+                      (let [rates (get models (:seon.ai/model a))
+                            input (:seon.ai.model/input-usd-per-mtok rates)
+                            cached (:seon.ai.model/cached-input-usd-per-mtok rates)
+                            output (:seon.ai.model/output-usd-per-mtok rates)]
+                        (when (every? number? [input cached output (::miss u) (::hit u) (::out u)])
+                          (/ (+ (* input (::miss u)) (* cached (::hit u)) (* output (::out u))) 1000000.0)))) attempts)
+        plan ((requiring-resolve 'seon.plan/plan) {:seon.db/db database :seon.agent/id agent-id})
+        steps (:my.plan/steps plan)
+        per-step (frequencies
+                  (for [row rows :when (seq (:seon.turn/attempts row))]
+                    (let [basis (turn/opening-db database (:seon.turn/id row))]
+                      (when-not (:seon.error/kind basis)
+                        (get-in (db/pull basis
+                                         '[{:seon.agent/plan [{:my.plan/current-step [:my.plan.item/id]}]}]
+                                         [:seon.agent/id agent-id])
+                                [:seon.agent/plan :my.plan/current-step :my.plan.item/id])))))]
+    {::used (turn/episode-runs database agent-id)
+     ::bound (#'turn/max-episode-runs database agent-id)
+     ::completed (count (filter :my.plan.item/completed-tx steps))
+     ::steps (count steps) ::plan-unavailable (boolean (:seon.error/kind plan))
+     ::per-step per-step ::totals totals ::attempts (count attempts)
+     ::missing-usage (count (remove #(every? number? (map (::usage %) [::prompt ::hit ::miss ::out])) attempts))
+     ::cost (when (every? number? costs) (reduce + 0 costs))
+     ::missing-rates (count (filter
+                             (fn [{a ::attempt}]
+                               (not (every? number?
+                                      (map #(get-in models [(:seon.ai/model a) %])
+                                           [:seon.ai.model/input-usd-per-mtok
+                                            :seon.ai.model/cached-input-usd-per-mtok
+                                            :seon.ai.model/output-usd-per-mtok])))) attempts))}))
+
+(defn- session-problems [request rows evaluations]
+  (let [database (:seon.db/db request)
+        by-eid (into {} (map (juxt :db/id identity)) rows)
+        saved (mapv (fn [index row]
+                      (assoc row ::contributed-bytes (+ (if (pos? index) 2 0)
+                                                        (utf8-size (repl/render-ai row)))))
+                    (range) (mapcat #(get evaluations (:db/id %) []) rows))]
+    {::budget (session-budget database (:seon.agent/id request) rows)
+     ::rules (into [(fabricated-problem by-eid saved)
+                    (error-problem by-eid saved)
+                    (churn-problem database by-eid saved)
+                    (repeated-problem by-eid saved)
+                    (empty-reply-problem rows saved)
+                    (directory-problem database by-eid saved)
+                    (prefix-problem rows)]
+                   (fault-problems database (:seon.agent/id request) rows))}))
+
+(defn- problem-links [agent-id matches]
+  [:span {:class "seon-problem-links"}
+   (for [row (sort-by ::ordinal (distinct (keep ::turn matches)))
+         :let [href (ledger-url agent-id (:seon.turn/id row) {})]]
+     [:a {:href href
+          (keyword "data-on:click")
+          (str "evt.preventDefault(); history.replaceState(null, '', '" href "'); @get('"
+               (ledger-url agent-id (:seon.turn/id row) {:ledger "true"}) "')")}
+      (str "turn " (::ordinal row))])])
+
+(defn- budget-html [budget]
+  [:div {:class "seon-session-budget"}
+   [:p (str "Budget · " (::used budget) "/" (or (::bound budget) "unavailable") " turns used · "
+            (if (::plan-unavailable budget) "plan unavailable"
+              (str (::completed budget) "/" (::steps budget) " steps complete")))]
+   [:p (str "Reported tokens · " (str/join " · "
+              (for [[k label] [[::prompt "in"] [::hit "hit"] [::miss "miss"] [::out "out"]]]
+                (str (format "%,d" (get (::totals budget) k 0)) " " label)))
+            " · " (cond (number? (::cost budget)) (format "$%.5f at rates on file" (double (::cost budget)))
+                         (pos? (::missing-rates budget)) "no rate on file"
+                         :else "cost unavailable: incomplete usage")
+            (when (pos? (::missing-usage budget)) (str " · usage unavailable on " (::missing-usage budget) " attempts")))]
+   [:details [:summary "Provider turns per plan step"]
+    (if (seq (::per-step budget))
+      (for [[step n] (sort-by (comp str key) (::per-step budget))]
+        [:p (str (or step "No step selected at opening") " · " n)])
+      [:p "No provider turns recorded."])]] )
+
+(defn- problem-summary [request problems]
+  (let [by-code (into {} (map (juxt ::code identity)) (::rules problems))
+        budget (::budget problems)]
+    [:div {:class "seon-problem-summary"}
+     [:p (str (::used budget) "/" (or (::bound budget) "unavailable") " turns used · "
+              (::completed budget) "/" (::steps budget) " steps complete")]
+     [:p [:span {:class (when (pos? (get-in by-code [:errors ::count])) "seon-emission-error")}
+          (str (get-in by-code [:errors ::count]) " evaluation errors")]
+      " · " [:span {:class (when (pos? (get-in by-code [:faults ::count])) "seon-emission-error")}
+              (str (get-in by-code [:faults ::count]) " faults delivered")]
+      " · " [:span {:class (when (pos? (get-in by-code [:churn ::count])) "seon-problem-warning")}
+              (str (get-in by-code [:churn ::count]) " repeated system reads")]
+      " · "
+      [:a {:href (str "#" (block/surface-id (keyword "session-problems" (:seon.agent/id request))))}
+       "Review problems"]]]))
+
+(defn- problems-html [request problems]
+  (let [agent-id (:seon.agent/id request)
+        rules (::rules problems)
+        active (filter #(or (pos? (::count %)) (pos? (get % ::unknown 0))) rules)
+        passed (remove (set active) rules)]
+    [:section {:class "seon-session-problems" :data-author "seon"
+               :id (block/surface-id (keyword "session-problems" agent-id))
+               :data-init "el.style.scrollMarginTop = (el.closest('.seon-ledger').querySelector('.seon-session-sticky').offsetHeight + 8) + 'px'"}
+     [:h2 "What went wrong"]
+     (budget-html (::budget problems))
+     (for [rule active]
+       [:details {:data-problem (name (::code rule)) :data-problem-count (::count rule)}
+        [:summary
+         [:span {:class (if (#{:churn :prefix :repeated} (::code rule)) "seon-problem-warning" "seon-emission-error")} "● "]
+         (str (::label rule) " · " (::count rule)
+              (when (pos? (get rule ::unknown 0)) (str " · " (::unknown rule) " checks unavailable")))]
+        (if (::groups rule)
+          (for [group (::groups rule)]
+            [:div [:p (str (::detail group) " · " (format "%,d" (::bytes group)) " bytes")]
+             (problem-links agent-id (::matches group))])
+          [:div
+           (problem-links agent-id (::matches rule))
+           (for [detail (distinct (map ::detail (::matches rule)))] [:p detail])])])
+     (when (seq passed)
+       [:details {:class "seon-checks-passed"}
+        [:summary (str "Checks passed · " (count passed))]
+        (for [rule passed]
+          [:p {:data-problem (name (::code rule)) :data-problem-count 0}
+           (if (= :prefix (::code rule))
+             (str "● Prefix stable on " (::stable rule) "/" (::measured rule) " attempts")
+             (str "● " (::label rule) " · 0"))])])]))
+
 (defn- ledger-strip
   "Navigate every stored turn; area shows added bytes and colour shows recorded outcome."
-  [request rows evaluations selected]
+  [request rows evaluations selected problems]
   (let [amounts (into {} (map (fn [row] [(:seon.turn/id row)
                                         (emission-byte-count rows (get evaluations (:db/id row) []))]) rows))
-        largest (reduce max 1 (vals amounts))]
+        largest (reduce max 1 (vals amounts))
+        marks (reduce (fn [result rule]
+                        (reduce (fn [result match]
+                                  (if-let [id (:seon.turn/id (::turn match))]
+                                    (update result id (fnil conj #{}) (::label rule)) result))
+                                result (::matches rule))) {} (::rules problems))]
     [:nav {:class "seon-ledger-strip" :aria-label "Select a turn" :data-author "seon"}
-     [:p "Turns · filled: provider · hollow: generated or virtual · width: context added · red: errors · amber: no result/open"]
+     [:p "Turns · filled: provider · hollow: generated or virtual · width: context added · red: errors · amber: no result/open · dot: problem"]
      [:div {:class "seon-ledger-strip-cells"}
       (for [row rows
             :let [turn-id (:seon.turn/id row)
@@ -1731,11 +2015,12 @@
                                                       ["miss" (get usage "prompt_cache_miss_tokens")]
                                                       ["out" (get usage "completion_tokens")]]]
                                     (str (if (number? value) (format "%,d" value) "unavailable") " " label)))))
-                         (when (pos? errors) (str "\n" errors " evaluation errors")))
+                         (when-let [labels (seq (get marks turn-id))]
+                           (str "\n" (str/join " · " (sort labels)))))
              (keyword "data-on:click")
              (str "evt.preventDefault(); history.replaceState(null, '', '" href "'); @get('"
                   (ledger-url (:seon.agent/id request) turn-id {:ledger "true"}) "')")}
-         (str (::ordinal row) (when (pos? errors) "·"))])]]))
+         (str (::ordinal row) (when (seq (get marks turn-id)) "·"))])]]))
 
 (defn- turn-story [request evaluations row]
   (let [own (get evaluations (:db/id row) [])
@@ -1765,12 +2050,15 @@
         rows (turn-rows database (:seon.agent/id request))
         selected (or (:seon.turn/id request) (:seon.turn/id (last rows)))
         evaluations (ledger-evaluations database (:seon.agent/id request))
-        expanded (conj (set (map :seon.turn/id (take-last 3 rows))) selected)]
+        expanded (conj (set (map :seon.turn/id (take-last 3 rows))) selected)
+        problems (when-not (or (:seon.error/kind rows) (:seon.error/kind evaluations))
+                   (session-problems request rows evaluations))]
     [:section {:id (session-id (:seon.agent/id request)) :class "seon-session seon-ledger" :data-author "seon"}
      [:div {:class "seon-session-sticky"} (session-header request rows)
       [:h2 "Turn ledger"]
-      [:p {:class "seon-ledger-note"} "What we sent · what the agent said · what happened. Open a turn to inspect it."]
-      (when-not (:seon.error/kind evaluations) (ledger-strip request rows evaluations selected))]
+      (when problems (problem-summary request problems))
+      (when-not (:seon.error/kind evaluations) (ledger-strip request rows evaluations selected problems))]
+     (when problems (problems-html request problems))
      (cond
        (:seon.error/kind evaluations) [:p (:seon.error/message evaluations)]
        (seq rows)

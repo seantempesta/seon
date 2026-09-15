@@ -75,6 +75,13 @@ REPL transcript below that card. A chronological strip selects every turn;
 cell width shows bytes added, fill distinguishes provider turns, and semantic
 colour shows errors or missing results. Its selected underline stays visible
 on narrow screens. Selected cards scroll below the measured sticky header.
+A problems panel derives counts and turn links from saved evaluations,
+attempt usage, fault messages, and historical directory facts. The compact
+summary keeps the turn budget, completed steps, errors, and repeated reads
+visible while reading cards. Zero-count rules appear under Checks passed;
+missing evidence is explicitly unavailable. Provider costs use the current
+model rates on file and are unavailable when rates or usage are absent.
+Problem dots on the strip link those findings to their owning turns.
 The full context comes from the provider acquisition fold at the turn's
 opening database. `render/acquire-context!` owns this temporal selection even
 when passed the current database. A request without a turn id folds all
