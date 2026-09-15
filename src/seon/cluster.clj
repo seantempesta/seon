@@ -236,14 +236,17 @@
 
 (defn project-next-prepl-value!
   "Mark this io-prepl connection's next returned value for MCP projection."
-  {:malli/schema [:=> [:cat] :nil]}
-  []
-  (.set mcp-projection true)
-  nil)
+  {:malli/schema [:function
+                  [:=> [:cat] :nil]
+                  [:=> [:cat :boolean] :nil]]}
+  ([] (project-next-prepl-value! false))
+  ([evaluation?]
+   (.set mcp-projection (if evaluation? :evaluation :value))
+   nil))
 
 (defn- consume-mcp-projection!
   []
-  (let [project? (true? (.get mcp-projection))]
+  (let [project? (.get mcp-projection)]
     (.remove mcp-projection)
     project?))
 
@@ -277,13 +280,6 @@
           :seon.error/diagnostic-evidence
           {:seon.boot/cluster-name cluster-name}}))
       bootstrap-effective)))
-
-(defn- prepl-exception-envelope?
-  [value]
-  (and (map? value)
-       (vector? (:via value))
-       (vector? (:trace value))
-       (contains? value :cause)))
 
 (defn- nil-deref?
   [cause]
@@ -320,138 +316,171 @@
       true (assoc :seon.dev.mcp/exception-class (str (:type cause-entry)))
       frame (assoc :seon.dev.mcp/frame frame))))
 
+(defn- mcp-projection-error
+  [value]
+  {:seon.dev.mcp/value
+   {:seon.error/kind :seon.dev.mcp/projection-failed
+    :seon.error/message "The MCP value projection failed."
+    :seon.error/data
+    {:seon.error/diagnostic-offending (if (nil? value) "nil" (.getName (class value)))}}
+   :seon.dev.mcp/windowed? false})
+
 (defn- mcp-project
-  [cluster-name bootstrap-effective value]
-  (let [instance (mcp-instance cluster-name)
-        connection (:seon.boot/cluster-connection instance)
-        effective (mcp-effective cluster-name bootstrap-effective)
-        caps (when-not (:seon.error/kind effective)
-               (config/result-caps effective))]
-    (cond
-      (:seon.error/kind effective)
-      {:seon.dev.mcp/value effective :seon.dev.mcp/windowed? false}
+  ([cluster-name bootstrap-effective value]
+   (mcp-project cluster-name bootstrap-effective value false false))
+  ([cluster-name bootstrap-effective value evaluation? exception?]
+   (try
+     (let [instance (mcp-instance cluster-name)
+           connection (:seon.boot/cluster-connection instance)
+           effective (mcp-effective cluster-name bootstrap-effective)
+           caps (when-not (:seon.error/kind effective)
+                  (config/result-caps effective))]
+       (cond
+         (:seon.error/kind effective)
+         {:seon.dev.mcp/value effective :seon.dev.mcp/windowed? false}
 
-      (:seon.error/kind caps)
-      {:seon.dev.mcp/value caps :seon.dev.mcp/windowed? false}
+         (:seon.error/kind caps)
+         {:seon.dev.mcp/value caps :seon.dev.mcp/windowed? false}
 
-      (and (:seon.sci.admit/record value) (string? (:seon.eval/shown value)))
-      {:seon.dev.mcp/value
-       (assoc (select-keys value [:seon.cluster.eval/ns
-                                 :seon.sci.eval/ending-ns
-                                 :seon.sci.admit/record
-                                 :seon.cluster.eval/error
-                                 :seon.cluster.eval/output])
-              :seon.dev.mcp/text (:seon.eval/shown value))
-       :seon.dev.mcp/windowed? false}
+         (and evaluation? (not exception?) (string? (:seon.eval/shown value)))
+         {:seon.dev.mcp/value
+          (assoc (select-keys value [:seon.cluster.eval/ns
+                                    :seon.sci.eval/ending-ns
+                                    :seon.sci.admit/record
+                                    :seon.cluster.eval/error
+                                    :seon.cluster.eval/output])
+                 :seon.dev.mcp/text (:seon.eval/shown value))
+          :seon.dev.mcp/windowed? false}
 
-      :else
-      (let [exception-envelope? (prepl-exception-envelope? value)
-            exception-summary-value (when exception-envelope?
-                                      (exception-summary value))
-            instance-projection
-            (some-> (:seon.sci.eval/ctx instance)
-                    env/of
-                    :seon.schema/projection)
-            admitted
-              (admit/admit-value
-               (cond-> {:seon.sci.admit/value (or exception-summary-value
-                                                  value)
-                        :seon.sci.admit/interrupt-fn (fn [])
-                        :seon.sci.admit/caps caps
-                        :seon.config/on-core-error
-                        (:seon.config/on-core-error effective)}
-                 instance-projection
-                 (assoc :seon.schema/projection instance-projection)))
-            artifact (render.value/artifact admitted)
-            content (render.value/artifact-edn artifact)
-            content-digest (blob/digest content)
-            threshold (:seon.config.eval.result/blob-threshold effective)
-            oversized? (> (count content) threshold)
-            artifact-backed? oversized?
-            profile
-            (cond-> (assoc (render/agent-render-profile effective)
-                           :seon.render.profile/id :seon.render.profile/mcp)
-              (and artifact-backed? connection)
-              (assoc :seon.print/requery-id
-                     (list 'seon.render.value/artifact-value
-                           (list 'seon.render.value/read-artifact
-                                 (list 'seon.blob/get
-                                       (list 'seon.operator/connection cluster-name)
-                                       content-digest))))
+         :else
+         (let [exception-summary-value (when exception?
+                                         (exception-summary value))
+               instance-projection
+               (some-> (:seon.sci.eval/ctx instance)
+                       env/of
+                       :seon.schema/projection)
+               admitted
+                 (admit/admit-value
+                  (cond-> {:seon.sci.admit/value (or exception-summary-value
+                                                     value)
+                           :seon.sci.admit/interrupt-fn (fn [])
+                           :seon.sci.admit/caps caps
+                           :seon.config/on-core-error
+                           (:seon.config/on-core-error effective)}
+                    instance-projection
+                    (assoc :seon.schema/projection instance-projection)))
+               artifact (render.value/artifact admitted)
+               content (render.value/artifact-edn artifact)
+               content-digest (blob/digest content)
+               threshold (:seon.config.eval.result/blob-threshold effective)
+               oversized? (> (count content) threshold)
+               artifact-backed? oversized?
+               profile
+               (cond-> (assoc (render/agent-render-profile effective)
+                              :seon.render.profile/id :seon.render.profile/mcp)
+                 (and artifact-backed? connection)
+                 (assoc :seon.print/requery-id
+                        (list 'seon.render.value/artifact-value
+                              (list 'seon.render.value/read-artifact
+                                    (list 'seon.blob/get
+                                          (list 'seon.operator/connection cluster-name)
+                                          content-digest))))
 
-              (not (and artifact-backed? connection))
-              (assoc :seon.print/requery-refusal
-                     (if artifact-backed?
-                       "the cluster has no database connection"
-                       "the value has no durable MCP artifact")))
-            projection
-            (render.value/prepare
-             {:seon.render/value (render.value/artifact-value artifact)
-              :seon.render/profile profile
-              :seon.render.value/root [:seon.blob/digest content-digest]
-              :seon.sci.admit/caps caps})
-            projected-node (:seon.render.value/tree projection)
-            staged (when (and artifact-backed? connection)
-                     (blob/stage! connection content))
-            stored-digest
-            (when staged
-              (blob/with-publication!
-               connection
-               [staged]
-               (fn []
-                 (let [result
-                       (db/transact!
-                        connection
-                        [{:seon.dev.mcp.artifact/id content-digest
-                          :seon.dev.mcp.artifact/digest content-digest}])]
-                   (when (:seon.error/kind result)
-                     (throw
-                      (ex-info
-                       "The durable MCP artifact root did not commit."
-                       {:seon.error/kind :core-bug
-                        :seon.dev.mcp.artifact/root-not-committed content-digest
-                        :seon.error/message
-                        "The durable MCP artifact root did not commit."
-                        :seon.dev.mcp.artifact/digest content-digest
-                        :seon.dev.mcp.artifact/transaction-result result})))
-                   content-digest))))]
-        (cond-> {:seon.dev.mcp/value
-                 (admit/semantic-value projected-node)
-                 :seon.dev.mcp/windowed? artifact-backed?}
-          artifact-backed?
-          (assoc :seon.blob/digest content-digest
-                 :seon.blob/size (count content)
-                 :seon.dev.mcp/retrievable? (boolean stored-digest))
+                 (not (and artifact-backed? connection))
+                 (assoc :seon.print/requery-refusal
+                        (if artifact-backed?
+                          "the cluster has no database connection"
+                          "the value has no durable MCP artifact")))
+               projection
+               (render.value/prepare
+                {:seon.render/value (render.value/artifact-value artifact)
+                 :seon.render/profile profile
+                 :seon.render.value/root [:seon.blob/digest content-digest]
+                 :seon.sci.admit/caps caps})
+               projected-node (:seon.render.value/tree projection)
+               staged (when (and artifact-backed? connection)
+                        (blob/stage! connection content))
+               stored-digest
+               (when staged
+                 (blob/with-publication!
+                  connection
+                  [staged]
+                  (fn []
+                    (let [result
+                          (db/transact!
+                           connection
+                           [{:seon.dev.mcp.artifact/id content-digest
+                             :seon.dev.mcp.artifact/digest content-digest}])]
+                      (when (:seon.error/kind result)
+                        (throw
+                         (ex-info
+                          "The durable MCP artifact root did not commit."
+                          {:seon.error/kind :core-bug
+                           :seon.dev.mcp.artifact/root-not-committed content-digest
+                           :seon.error/message
+                           "The durable MCP artifact root did not commit."
+                           :seon.dev.mcp.artifact/digest content-digest
+                           :seon.dev.mcp.artifact/transaction-result result})))
+                      content-digest))))]
+           (cond-> {:seon.dev.mcp/value
+                    (admit/semantic-value projected-node)
+                    :seon.dev.mcp/windowed? artifact-backed?}
+             artifact-backed?
+             (assoc :seon.blob/digest content-digest
+                    :seon.blob/size (count content)
+                    :seon.dev.mcp/retrievable? (boolean stored-digest))
 
-          (and artifact-backed? (nil? stored-digest))
-          (assoc :seon.dev.mcp/remainder
-                 "The cluster has no database connection; the remainder is not retrievable."))))))
+             (and artifact-backed? (nil? stored-digest))
+             (assoc :seon.dev.mcp/remainder
+                    "The cluster has no database connection; the remainder is not retrievable.")))))
+    (catch Throwable _ (mcp-projection-error value)))))
 
 (defn mcp-valf
-  "Project marked MCP returns; preserve ordinary io-prepl returns unchanged."
-  {:malli/schema [:=> [:cat :seon.boot/cluster-name :seon.config/effective [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Clojure's prepl hands the projection arbitrary evaluation results, including live JVM objects and nil.", :gen/elements [nil false 0 "" :k [] {}]}]] :string]}
-  [cluster-name bootstrap-effective value]
-  ;; A host eval can redefine Vars shared by every cohosted cluster. This
-  ;; distinct input invalidates retained render calls; a newest-database wake
-  ;; cannot displace the code-change signal in its own sliding buffer.
-  (doseq [instance (vals @running-instances)
-          :let [view (:seon.render.web/view instance)]
-          :when (:seon.render.web/runtime-eval-channel view)]
-    (async/offer! (:seon.render.web/runtime-eval-channel view)
-                  :seon.render.web/runtime-eval))
-  (admit/canonical-edn
-   (if (consume-mcp-projection!)
-     (mcp-project cluster-name bootstrap-effective value)
-     value)))
+  "Project marked MCP returns with caller-supplied exception recognition."
+  {:malli/schema
+   [:function
+    [:=> [:cat :seon.boot/cluster-name :seon.config/effective [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Clojure's prepl hands the projection arbitrary evaluation results, including live JVM objects and nil.", :gen/elements [nil false 0 "" :k [] {}]}]] :string]
+    [:=> [:cat :seon.boot/cluster-name :seon.config/effective [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Clojure's prepl hands the projection arbitrary evaluation results, including live JVM objects and nil.", :gen/elements [nil false 0 "" :k [] {}]}] :boolean] :string]]}
+  ([cluster-name bootstrap-effective value]
+   (mcp-valf cluster-name bootstrap-effective value false))
+  ([cluster-name bootstrap-effective value exception?]
+   (let [projection (consume-mcp-projection!)]
+     (try
+       ;; A host evaluation may replace Vars used by any cohosted cluster.
+       (doseq [instance (vals @running-instances)
+               :let [view (:seon.render.web/view instance)]
+               :when (:seon.render.web/runtime-eval-channel view)]
+         (async/offer! (:seon.render.web/runtime-eval-channel view)
+                       :seon.render.web/runtime-eval))
+       (admit/canonical-edn
+        (if projection
+          (mcp-project cluster-name bootstrap-effective value
+                       (= :evaluation projection) exception?)
+          value))
+       (catch Throwable _
+         ;; Fixed semantic data never re-enters admission or a failed producer.
+         (binding [*print-length* nil *print-level* nil]
+           (pr-str (mcp-projection-error value))))))))
 
 (defn mcp-io-prepl
-  "Serve one cluster io-prepl with the cluster-side MCP value projector."
+  "Serve PREPL events with explicit exception status at MCP projection."
   {:malli/schema [:=> [:cat :seon.boot/cluster-name
                        :seon.config/effective]
                   :nil]}
   [cluster-name bootstrap-effective]
-  (clojure.core.server/io-prepl
-   :valf (partial mcp-valf cluster-name bootstrap-effective)))
+  (let [out *out*
+        lock (Object.)]
+    (clojure.core.server/prepl
+     *in*
+     (fn [event]
+       (binding [*out* out *flush-on-newline* true *print-readably* true]
+         (locking lock
+           (prn
+            (if (#{:ret :tap} (:tag event))
+              (assoc event :val
+                     (mcp-valf cluster-name bootstrap-effective
+                               (:val event) (true? (:exception event))))
+              event))))))))
 
 (defn mcp-get-value
   "Read and drill one stored MCP value artifact without mutating REPL state."

@@ -600,7 +600,7 @@
   [source cluster namespace-symbol]
   (pr-str
    `(do
-      ((requiring-resolve 'seon.cluster/project-next-prepl-value!))
+      ((requiring-resolve 'seon.cluster/project-next-prepl-value!) true)
       (let [instances# @@(ns-resolve 'seon.cluster
                                    (symbol "running-instances"))
           instance# (get instances# ~cluster)

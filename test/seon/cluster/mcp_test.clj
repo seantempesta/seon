@@ -35,9 +35,9 @@
           "bounded admission still requires its declared limits"))))
 
 (defn- projected
-  [cluster-name effective value]
-  (cluster/project-next-prepl-value!)
-  (edn/read-string (cluster/mcp-valf cluster-name effective value)))
+  [cluster-name effective value & [evaluation? exception?]]
+  (cluster/project-next-prepl-value! (boolean evaluation?))
+  (edn/read-string (cluster/mcp-valf cluster-name effective value (boolean exception?))))
 
 (defn- utf8-size
   [value]
@@ -123,7 +123,7 @@
   (let [cluster-name "mcp-text-face-test"
         effective (config/defaults)
         evaluation (sci-evaluation effective "(vec (range 50000))")
-        result (projected cluster-name effective evaluation)
+        result (projected cluster-name effective evaluation true false)
         face (:seon.dev.mcp/value result)]
     (is (string? (:seon.dev.mcp/text face))
         "an SCI evaluation projects the printed REPL face")
@@ -140,7 +140,7 @@
         effective (config/defaults)
         evaluation (sci-evaluation effective
                                     "(apply str (repeat 1048576 \\x))")
-        result (projected cluster-name effective evaluation)
+        result (projected cluster-name effective evaluation true false)
         text (get-in result [:seon.dev.mcp/value :seon.dev.mcp/text])]
     (is (< (utf8-size result) 8192)
         "a scalar face is bounded by the same window as structural values")
@@ -179,7 +179,7 @@
         evaluation
         (assoc (sci-evaluation effective "42")
                :seon.sci.eval/internal-detail (apply str (repeat 5000 \x)))
-        result (projected cluster-name effective evaluation)
+        result (projected cluster-name effective evaluation true false)
         face (:seon.dev.mcp/value result)]
     (is (= "42" (:seon.dev.mcp/text face)))
     (is (= (:seon.sci.admit/record evaluation)
@@ -219,11 +219,11 @@
     (swap! running-instances assoc cluster-name
            (running-instance connection cluster-name))
     (try
-      (let [result (projected cluster-name effective envelope)
+      (let [result (projected cluster-name effective envelope false true)
             face (:seon.dev.mcp/value result)
             oversized-result
             (projected cluster-name effective
-                       (assoc envelope :cause oversized-message))
+                       (assoc envelope :cause oversized-message) false true)
             retained-message
             (cluster/mcp-get-value
              cluster-name (:seon.blob/digest oversized-result)
@@ -291,7 +291,7 @@
           :trace [deref-frame serving-frame]
           :cause
           "Cannot invoke java.util.concurrent.Future.get() because fut is null"
-          :phase :execution})
+          :phase :execution} false true)
         face (:seon.dev.mcp/value result)]
     (is (= :seon.dev.mcp/nil-deref (:seon.error/kind face)))
     (is (= deref-frame (:seon.dev.mcp/frame face)))

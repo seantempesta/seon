@@ -380,9 +380,18 @@
     (assoc (value-node* value unit profile output depth path remaining)
            :seon.render.data/path path)
     (catch Throwable failure
-      {:seon.print/face :seon.print/failed
-       :seon.print/class (.getName (class failure))
-       :seon.print/message (or (ex-message failure) "value realization failed")})))
+      ;; Fixed terminal nodes cannot invoke the producer that just failed.
+      {:seon.print/face :seon.print/map
+       :seon.render.data/path path
+       :seon.print/entries
+       [[{:seon.print/face :seon.print/keyword
+          :seon.print/value :seon.error/kind}
+         {:seon.print/face :seon.print/keyword
+          :seon.print/value :seon.render.value/projection-failed}]
+        [{:seon.print/face :seon.print/keyword
+          :seon.print/value :seon.error/message}
+         {:seon.print/face :seon.print/string
+          :seon.print/value (or (ex-message failure) "The value projection failed.")}]]})))
 
 (defn- breadcrumbs
   [unit path]
@@ -409,7 +418,7 @@
          (path-link unit path (+ offset shown) "next →" "seon-data-page"))]))
 
 (defn prepare
-  "Project live values within the AI profile, then emit through the shared grammar."
+  "Validate the root, project live values, and emit the shared grammar."
   {:malli/schema
    [:function
     [:=> [:cat :seon.render/unit]
@@ -419,45 +428,46 @@
   ([unit]
    (prepare unit :seon.render/ai))
   ([unit output]
-   (let [display (display-value unit)
-          profile (render-profile unit)
-          raw (:seon.render/value unit)
-          initial-tree (value-node raw unit profile output 0 []
-                                   (volatile! (:seon.render.profile/token-budget profile)))
-          tree (cond-> initial-tree
-                 (= output :seon.render/ai) (print/fit profile))
-          options (cond-> (assoc (print-options unit)
-                                 :seon.print/length nil
-                                 :seon.print/level nil
-                                 :seon.print/table? false)
-                    (or (= output :seon.render/ai)
-                        (= :single-line
-                           (:seon.render.profile/composition profile)))
-                    (assoc :seon.print/width 0))
-          emitted (print/emit-both tree options)
-          truncated? (boolean
-                      (or (:seon.render.value/more? display)
-                          (pos? (:seon.render.value/offset display))))
-          path (vec (get-in unit [:seon.render.data/cursor
-                                  :seon.render.data/path] []))
-          id (node-id unit path)]
-      (if (:seon.error/kind id)
-        id
-        (cond-> {:seon.render.value/tree tree
-         :seon.render.value/options options
-         :seon.render.value/truncated? truncated?
-         :seon.render.value/text (:seon.print/text emitted)
-         :seon.render.value/html
-         [:div {:id id :class "seon-data-panel"}
-          (breadcrumbs unit path)
-          (pager unit path display)
-          (:seon.print/hiccup emitted)
-          (when truncated?
-            [:p {:class "seon-data-capped"}
-             "elided — this value is larger than the configured window"]) ]}
-          (:seon.render.call/selected-producer initial-tree)
-          (assoc :seon.render.call/selected-producer
-                 (:seon.render.call/selected-producer initial-tree)))))))
+   (let [path (vec (get-in unit [:seon.render.data/cursor
+                                :seon.render.data/path] []))
+         id (node-id unit path)]
+     (if (:seon.error/kind id)
+       id
+       (let [display (display-value unit)
+             profile (render-profile unit)
+             raw (:seon.render/value unit)
+             initial-tree
+             (value-node raw unit profile output 0 []
+                         (volatile! (:seon.render.profile/token-budget profile)))
+             tree (cond-> initial-tree
+                    (= output :seon.render/ai) (print/fit profile))
+             options (cond-> (assoc (print-options unit)
+                                    :seon.print/length nil
+                                    :seon.print/level nil
+                                    :seon.print/table? false)
+                       (or (= output :seon.render/ai)
+                           (= :single-line
+                              (:seon.render.profile/composition profile)))
+                       (assoc :seon.print/width 0))
+             emitted (print/emit-both tree options)
+             truncated? (boolean
+                         (or (:seon.render.value/more? display)
+                             (pos? (:seon.render.value/offset display))))]
+         (cond-> {:seon.render.value/tree tree
+                  :seon.render.value/options options
+                  :seon.render.value/truncated? truncated?
+                  :seon.render.value/text (:seon.print/text emitted)
+                  :seon.render.value/html
+                  [:div {:id id :class "seon-data-panel"}
+                   (breadcrumbs unit path)
+                   (pager unit path display)
+                   (:seon.print/hiccup emitted)
+                   (when truncated?
+                     [:p {:class "seon-data-capped"}
+                      "elided — this value is larger than the configured window"])]}
+           (:seon.render.call/selected-producer initial-tree)
+           (assoc :seon.render.call/selected-producer
+                  (:seon.render.call/selected-producer initial-tree))))))))
 
 (defn render-ai-data
   "Return the text sink result from one already prepared projection."
