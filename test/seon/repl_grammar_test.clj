@@ -30,6 +30,19 @@
     (is (= (subs expected 0 (str/index-of expected "\n#:seon.repl"))
            (get-in html [2 1 2])))))
 
+(deftest changed-read-marker-does-not-rewrite-agent-input
+  (let [emission {:seon.ns/name 'my.agent
+                  :seon.cluster.eval/comment ";; Read the current value."
+                  :seon.cluster.eval/source "(seon.plan/plan {})"
+                  :seon.eval/shown "{}"}
+        original (repl/text emission)
+        changed (assoc emission :seon.repl/changed-since? true)]
+    (is (= "my.agent=> ;; Read the current value.\n(seon.plan/plan {})\n#:seon.repl{:value {}}"
+           original))
+    (is (= ";; changed since your last turn\nmy.agent=> (seon.plan/plan {})\n#:seon.repl{:value {}}"
+           (repl/text changed)))
+    (is (= original (repl/text emission)))))
+
 (deftest stored-help-keeps-its-renderer-and-bare-response
   (support/with-database
    (fn [connection]

@@ -1,6 +1,7 @@
 (ns my.plan-test
   "The agent-owned plan component tree, its derivation, and its two projections."
-  (:require [clojure.string :as str]
+  (:require [clojure.edn :as edn]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [seon.plan :as plan]
             [seon.config :as config]
@@ -77,8 +78,8 @@
         (is (= [] (:my.plan/steps current)))
         (is (= [] (:my.plan/ready current)))
         (is (not (contains? current :my.plan/current-step)))
-        (is (str/includes? ai "Steps: none yet."))
-        (is (str/includes? ai "Current step: none selected"))
+        (is (= {} (:seon.plan/step-lines (edn/read-string ai))))
+        (is (nil? (:seon.plan/current-line (edn/read-string ai))))
         (is (str/includes? (pr-str html) "No steps yet."))))))
 
 (deftest one-step-is-owned-by-the-agent-through-the-component-edge
@@ -140,7 +141,7 @@
   (with-plan
     (fn [connection]
       (is (= {} (plan/current @connection "alice")))
-      (is (str/includes? (plan/render-plan-ai (plan-of connection)) "(seon.db/pull"))
+      (is (str/includes? (plan/render-plan-ai (plan-of connection)) "(seon.plan/plan {})"))
       (let [prepare (add connection "prepare" "Prepare")
             verify (add connection "verify" "Verify"
                         {:my.plan.item/needs #{[:my.plan.item/id "prepare"]}})]
@@ -180,8 +181,8 @@
       (let [current (plan-of connection)]
         (is (not (contains? current :my.plan/current-step)))
         (is (= :ready (:my.plan/state (first (:my.plan/steps current)))))
-        (is (str/includes? (plan/format-plan-ai current)
-                           "Current step: none selected"))))))
+        (is (nil? (:seon.plan/current-line
+                   (edn/read-string (plan/format-plan-ai current)))))))))
 
 (deftest completing-the-current-step-retracts-the-current-step-ref
   (with-plan
@@ -226,13 +227,13 @@
             ai (plan/format-plan-ai current)
             html (plan/render-plan-html (render-view connection current))
             printed (pr-str html)]
-        (is (= 1 (count (re-seq #"Plan for alice" ai))))
+        (is (= "alice" (:seon.agent/id (edn/read-string ai))))
         (is (= 1 (count (re-seq #"my-plan\"" printed))))
-        (is (str/includes? ai "1. Improve the plan"))
-        (is (str/includes? ai "1.1 Inspect the facts"))
+        (is (str/includes? ai "1. current — Improve the plan"))
+        (is (str/includes? ai "1.1 ready — Inspect the facts"))
         (is (not (str/includes? ai "Objective: Improve the plan"))
             "a step title is not the plan objective")
-        (is (str/includes? ai "Current step: Improve the plan"))
+        (is (str/includes? (:seon.plan/current-line (edn/read-string ai)) "Improve the plan"))
         (is (str/includes? printed "Inspect the facts"))
         (is (str/includes? printed "0 of 2 steps completed"))))))
 
@@ -240,7 +241,7 @@
   (with-plan
     (fn [connection]
       (add connection "ship" "Ship the plan unit")
-      (is (str/includes? (plan/render-plan-ai (plan-of connection)) "(seon.db/pull")
+      (is (str/includes? (plan/render-plan-ai (plan-of connection)) "(seon.plan/plan {})")
           "the AI projection emits source the agent can run itself"))))
 
 (deftest no-numeric-entity-reference-reaches-either-projection
@@ -426,7 +427,7 @@
         (is (= ["bob-work"] (ids (:my.plan/ready bob))))
         (is (= bob explicit)
             "an explicit map entry wins over the calling agent default")
-        (is (str/includes? bob-text "Plan for bob")
+        (is (= "bob" (:seon.agent/id (edn/read-string bob-text)))
             "the rendered source resolves the calling agent")))))
 
 (def ^:private juniper-fixture-steps
@@ -480,7 +481,7 @@
         (is (= "Improve Juniper context inspection" (:my.plan/objective current)))
         (is (= "juniper/render-plan"
                (get-in current [:my.plan/current-step :my.plan.item/id])))
-        (is (str/includes? ai "(seon.db/pull"))
+        (is (str/includes? ai "(seon.plan/plan {})"))
         (is (str/includes? printed "1 of 4 steps completed"))
         (is (str/includes? printed "Current step: "))
         (is (not (str/includes? printed ":open nil"))

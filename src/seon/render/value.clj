@@ -1,7 +1,6 @@
 (ns seon.render.value
   "One structural value renderer: profile-bounded AI and complete HTML."
   (:require [clojure.string :as str]
-            [seon.ai.tokens :as tokens]
             [seon.id :as id]
             [clojure.edn :as edn]
             [seon.print :as print]
@@ -125,17 +124,12 @@
   (let [profile (or (:seon.render/profile unit)
                     ((requiring-resolve 'seon.render/agent-render-profile)
                      ((requiring-resolve 'seon.config/defaults))))
-        root (or (:seon.repl/handle unit)
-                 (:seon.render.value/root unit)
-                 (when-let [evaluation-id (:seon.eval/id unit)]
-                   (id/symbol-in "result" \e evaluation-id))
-                 (when-let [eid (or (:db/id unit)
-                                    (:db/id (:seon.render/value unit)))]
-                   [:db/id eid]))]
+        root (or (:seon.repl/handle unit) (:seon.render.value/root unit))
+        root (when (and (qualified-symbol? root) (= "result" (namespace root))) root)]
     (if root
       (assoc profile :seon.print/requery-id root)
       (assoc profile :seon.print/requery-refusal
-             "the value has no result handle or entity identity"))))
+             "the value has no result handle"))))
 
 (defn- stable-entries
   [value]
@@ -276,9 +270,19 @@
                                :seon.print/bound-by bound})
                  total (assoc :seon.render.data/total total)
                  prefix (assoc :seon.print/prefix prefix))))
-        exhausted? (and ai? (not (pos? @remaining)))]
+        exhausted? (and ai? (not (pos? @remaining)))
+        selected (when (and (map? value) (:seon.sci.eval/ctx unit)
+                            (not (get-in unit [:seon.render.value/options
+                                              :seon.render.value/structural?])))
+                   (let [node {:seon.print/face :seon.print/map :seon.print/entries []}
+                         projected ((requiring-resolve 'seon.render/project-node)
+                                    unit value node output)]
+                     (when (not= node projected) projected)))]
     (when ai? (vswap! remaining dec))
     (cond
+      ;; A declared pair shapes a reached value before structural limits apply.
+      selected selected
+
       (and (coll? value) (not= 0 total) ai?
            (or exhausted? (>= depth (:seon.render.profile/max-depth profile))))
       (cut 0 total :subtree
@@ -289,52 +293,25 @@
                 " depth " depth " "))
 
       (string? value)
-      (let [limit (if ai? (max 1 (tokens/estimate-chars
-                                 (:seon.render.profile/token-budget profile)))
-                      (count value))]
-        (if (< limit (count value))
-          {:seon.print/face :seon.print/truncated-string
-           :seon.print/value (subs value 0 limit)
-           :seon.print/length (count value)
-           :seon.print/bound-by :seon.render.profile/token-budget
-           :seon.render.data/path path}
-          {:seon.print/face :seon.print/string :seon.print/value value}))
+      {:seon.print/face :seon.print/string :seon.print/value value}
 
       (coll? value)
-      ;; The returned entity may choose its AI pair. Nested query data keeps
-      ;; its selected shape; a model field alone is not a missing-model report.
-      (let [selected (when (and (or (not ai?) (zero? depth) (:seon.error/kind value))
-                                (map? value) (:seon.sci.eval/ctx unit)
-                                (not (get-in unit [:seon.render.value/options
-                                                   :seon.render.value/structural?])))
-                       (let [node {:seon.print/face :seon.print/map :seon.print/entries []}
-                             projected ((requiring-resolve 'seon.render/project-node)
-                                        unit value node output)]
-                         (when (not= node projected) projected)))
-            map-value? (map? value)
+      (let [map-value? (map? value)
             set-value? (set? value)
             face (cond map-value? :seon.print/map set-value? :seon.print/set
                        (vector? value) :seon.print/vector :else :seon.print/list)
             child-key (if map-value? :seon.print/entries :seon.print/items)
             limit (if ai? (:seon.render.profile/max-children profile) Long/MAX_VALUE)
-            ;; Map keys and HTML sets use complete print keys for ordering.
-            ;; AI sets traverse only retained members; saved shown text owns
-            ;; their historical order. Omitted map values are never visited.
-            key-node #(value-node % unit profile :seon.render/html depth [] remaining)
-            key-text #(print/emit-text % {:seon.print/length nil :seon.print/level nil
-                                         :seon.print/width 0 :seon.print/table? false})
+            ;; Order whole members before choosing which children to retain.
             entries (cond
-                      map-value? (sort-by (comp key-text first)
-                                         (map (fn [[k v]] [(key-node k) k v]) value))
-                      set-value? (if ai?
-                                   (map (fn [v] [nil v v]) value)
-                                   (let [members (map (fn [v] [(key-node v) v v]) value)]
+                      map-value? (map (fn [[k v]] [nil k v])
+                                      (sort-by key print/compare-values value))
+                      set-value? (let [members (map (fn [v] [nil v v]) value)]
                                      (if (sorted? value) members
-                                         (sort-by (comp key-text first) members))))
+                                       (sort-by second print/compare-values members)))
                       :else (map-indexed (fn [i v] [nil i v]) value))
             children
-            (when-not selected
-             (loop [entries (seq entries) result []]
+            (loop [entries (seq entries) result []]
               (if-not entries
                 result
                 (let [offset (count result)]
@@ -343,20 +320,22 @@
                                       (if (>= offset limit)
                                         :seon.render.profile/max-children
                                         :seon.render.profile/token-budget) nil))
-                    (let [[key-node key child] (first entries)
-                          ;; Lists are not associative: name their parent.
-                          child-path (if (or map-value? set-value? (vector? value))
-                                       (conj path key) path)
+                    (let [[_ key child] (first entries)
+                          key-node (when map-value?
+                                     (value-node key
+                                                 (assoc-in unit [:seon.render.value/options
+                                                                 :seon.render.value/structural?] true)
+                                                 profile :seon.render/html depth [] remaining))
+                          child-path (conj path key)
                           node (value-node (if map-value? (attribute-value unit key child output) child)
                                            unit profile output (inc depth)
                                            child-path remaining)]
                       (recur (next entries)
-                             (conj result (if map-value? [key-node node] node)))))))))]
-        (or selected
-         (cond-> {:seon.print/face face child-key children
+                             (conj result (if map-value? [key-node node] node))))))))]
+        (cond-> {:seon.print/face face child-key children
                  :seon.render.data/path path}
           (and set-value? (sorted? value)) (assoc :seon.print/ordered? true)
-          total (assoc :seon.render.data/total total))))
+          total (assoc :seon.render.data/total total)))
 
       :else
       (let [face (cond (nil? value) :seon.print/nil

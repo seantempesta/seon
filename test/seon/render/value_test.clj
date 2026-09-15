@@ -2,11 +2,17 @@
   "The render floor is one adapter over the sealed print emitter."
   (:require [clojure.string :as str]
             [clojure.edn :as edn]
+            [clojure.walk :as walk]
+            [clojure.test.check :as tc]
+            [clojure.test.check.generators :as gen]
+            [clojure.test.check.properties :as prop]
             [seon.db :as db]
             [sci.core :as sci]
             [clojure.test :refer [deftest is]]
             [seon.config :as config]
             [seon.print :as print]
+            [seon.plan :as plan]
+            [seon.repl :as repl]
             [seon.render :as render]
             [seon.render.hiccup :as hiccup]
             [seon.render.value :as value]
@@ -37,6 +43,66 @@
   (assoc (registered-unit connection raw)
          :seon.sci.eval/time-limit-ms 2000
          :seon.config/on-core-error :panic))
+
+(deftest declared-pairs-render-inside-response-values
+  (support/with-database
+   (fn [connection]
+     (let [report (db/transact! connection
+                                [{:my.plan.item/id "prepare"
+                                  :my.plan.item/title "Prepare input"
+                                  :my.plan.item/done-when "Input is available"}
+                                 {:my.plan.item/id "check"
+                                  :my.plan.item/title "Check output"}])
+           database @connection
+           directory (evaluation/directory-value database 'seon.repl true)
+           step (plan/item {:seon.db/db database :my.plan.item/id "prepare"})
+           _ (db/transact! connection [{:seon.agent/id "plan-reader"}])
+           installed (plan/plan!
+                      {:my.plan/objective "Verify the render"
+                       :my.plan/current-step {:my.plan.item/id "focus"}
+                       :my.plan/steps [{:my.plan.item/id "focus" :my.plan.item/title "Current task"
+                                        :my.plan.item/done-when "Current criterion"}
+                                       {:my.plan.item/id "later" :my.plan.item/title "Later task"
+                                        :my.plan.item/done-when "Later criterion"}
+                                       {:my.plan.item/id "finished" :my.plan.item/title "Finished task"
+                                        :my.plan.item/done-when "Finished criterion"}]}
+                      @connection connection "plan-reader")
+           completed (plan/complete! "finished" connection "plan-reader")
+           whole-plan (plan/plan {:seon.db/db @connection :seon.agent/id "plan-reader"})
+           request (assoc (render-request connection nil)
+                          :seon.render/profile
+                          {:seon.render.profile/id :seon.render.profile/test
+                           :seon.render.profile/token-budget 20000
+                           :seon.render.profile/max-depth 3
+                           :seon.render.profile/max-children 256
+                           :seon.render.profile/composition :single-line})]
+       (is (nil? (:seon.error/kind report)) (pr-str report))
+       (is (nil? (:seon.error/kind installed)) (pr-str installed))
+       (is (nil? (:seon.error/kind completed)) (pr-str completed))
+       (let [shown-plan (edn/read-string (plan/format-plan-ai whole-plan))]
+         (is (str/includes? (:seon.plan/current-line shown-plan) "Current criterion"))
+         (is (= #{"later" "finished"} (set (keys (:seon.plan/step-lines shown-plan)))))
+         (is (not (str/includes? (pr-str shown-plan) "Later criterion")))
+         (is (not (str/includes? (pr-str shown-plan) "Finished criterion")))
+         (is (str/includes? (get-in shown-plan [:seon.plan/step-lines "finished"])
+                            "completed — Finished task — "))
+         (is (= 'my.plan/current! (first (edn/read-string (:seon.plan/update-example shown-plan))))))
+       (is (seq (:functions directory)))
+       (is (str/starts-with? (db/render-transaction-ai report)
+                             "Wrote 5 facts on 2 entities:"))
+       (doseq [[raw render-pair] [[report db/render-transaction-ai]
+                                 [directory repl/render-directory-ai]
+                                 [step plan/render-item-ai]
+                                 [whole-plan plan/format-plan-ai]]]
+         (let [response {:outer/value [{:seon.repl/value raw}]}
+               shown (value/render-ai (assoc request :seon.render/value response))]
+           (is (= (render-pair raw)
+                  (get-in (edn/read-string shown) [:outer/value 0 :seon.repl/value]))
+               (pr-str {:seon.test/shown shown
+                        :seon.test/matching-pairs
+                        (into [] (keep #(when (:seon.render/ai %)
+                                         (select-keys % [:seon.schema/key :seon.render/ai])))
+                              (schema/matching-shapes-in (schema/handed-projection) raw))}))))))))
 
 (defn- lexical-hiccup-text
   [form]
@@ -155,7 +221,7 @@
                 (#'seon.render/producer request
                  :seon.render/html :seon.render/html))))))))
 
-(deftest registered-floor-elisions-retain-their-requery-identity
+(deftest registered-floor-elisions-do-not-invent-a-result-handle
   (support/with-database
    (fn [connection]
      (let [rows (mapv (fn [ordinal]
@@ -180,10 +246,10 @@
            ai (value/render-ai-data projection)
            html (hiccup/->string (value/render-html-data projection))]
        (is (= :seon.print/elided (:seon.print/face root-elision)))
-       (is (= root (:seon.print/requery-id root-elision)))
+       (is (nil? (:seon.print/requery-id root-elision)))
        (is (= 2 (:seon.print/omitted root-elision)))
-       (is (str/includes? ai "(get-in (seon.db/pull (quote [*]) (quote [:my.message/inbox \"root\"])) [])"))
-       (is (str/includes? html "requery (get-in (seon.db/pull"))))))
+       (is (not (str/includes? ai "requery-form")))
+       (is (not (str/includes? html "requery-form")))))))
 
 (deftest a-live-list-feeds-both-render-sinks
   (let [projection
@@ -251,7 +317,7 @@
   (let [raw (vec (range 100))
         request (assoc (unit raw) :seon.sci.admit/caps
                        {:seon.config.eval.result/max-bytes 1})]
-    (is (str/includes? (value/render-ai request) "68 more children of 100"))
+    (is (= 68 (:seon.print/omitted (last (edn/read-string (value/render-ai request))))))
     (is (str/includes? (hiccup/->string (value/render-html request)) ">99<"))
     (is (not (str/includes? (value/render-ai request) "over-bound")))))
 
@@ -285,11 +351,11 @@
                          :seon.render.profile/id
                          :seon.print/requery-id])))
     (let [text (:seon.render.value/text projection)]
-      (is (str/includes? text (str (- (count raw) kept) " more children of "
-                                   (count raw))))
-      (is (str/includes? text
-                         "bounded by :seon.render.profile/max-children"))
-      (is (str/includes? text "requery (get-in result/e0123456789ab [])")))
+      (let [cut (last (edn/read-string text))]
+        (is (= (- (count raw) kept) (:seon.print/omitted cut)))
+        (is (= :seon.render.profile/max-children (:seon.print/bound-by cut)))
+        (is (= '(seon.print/value-at result/e0123456789ab [])
+               (:seon.print/requery-form cut)))))
     (is (not (str/includes? html "seon-print-elision"))
         "HTML is not bounded at all — it elides nothing to requery")
     (is (str/includes? html ">99<")
@@ -356,6 +422,78 @@
          :seon.render/profile probe-profile
          :seon.render.value/root 'result/e0123456789ab))
 
+(deftest generated-values-have-deterministic-readable-executable-elisions
+  (support/with-database
+   (fn [connection]
+     (let [ctx (support/fork-cluster-ctx connection)
+           handle 'result/e0123456789ab
+           observed-cuts (atom 0)
+           scalar (gen/one-of [gen/small-integer gen/boolean
+                              (gen/fmap #(apply str (repeat % "whole word "))
+                                        (gen/choose 0 12))])
+           values (gen/recursive-gen
+                   (fn [child]
+                     (gen/one-of [(gen/vector child 0 8)
+                                  (gen/fmap #(apply list %) (gen/vector child 0 8))
+                                  (gen/set child {:max-elements 8})
+                                  (gen/map (gen/elements [:sample/a :sample/b :sample/c
+                                                         :seon.print/elision])
+                                           child {:max-elements 4})])) scalar)
+           result
+           (tc/quick-check
+            80
+            (prop/for-all [raw values]
+              (let [request (assoc (probe-unit raw) :seon.repl/handle handle
+                                   :seon.render/profile
+                                   (assoc probe-profile
+                                          :seon.render.profile/token-budget 1024
+                                          :seon.render.profile/max-string-length 24))
+                    _ (evaluation/bind-result! ctx handle raw)
+                    first-render (value/render-ai request)
+                    second-render (value/render-ai request)
+                    parsed (edn/read-string first-render)
+                    cuts (atom [])]
+                (walk/postwalk #(do (when (and (map? %) (:seon.print/omitted %))
+                                      (swap! cuts conj %)) %) parsed)
+                (swap! observed-cuts + (count @cuts))
+                (and (= first-render second-render)
+                     (or (seq @cuts) (= raw parsed))
+                     (every?
+                      (fn [cut]
+                        (let [path (:seon.render.data/path cut)
+                              expected (print/value-at raw path)
+                              actual (sci/eval-form ctx (:seon.print/requery-form cut))]
+                          (and (= expected actual)
+                               (= (count expected) (:seon.render.data/total cut))
+                               (= (- (count expected) (:seon.render.data/next-offset cut))
+                                  (:seon.print/omitted cut)))))
+                      @cuts))))
+            :seed 20260914)]
+       (is (:pass? result) (pr-str result))
+       (is (pos? @observed-cuts) "the generated cases must exercise elision and requery")))))
+
+(deftest documentation-body-is-whole-or-one-executable-elision
+  (support/with-database
+   (fn [connection]
+     (let [documentation (evaluation/documentation-value @connection 'seon.db/read-evidence 'seon.db/read-evidence)
+           body (:body documentation)
+           ctx (support/fork-cluster-ctx connection)
+           handle 'result/e0123456789ab
+           request (assoc (probe-unit documentation)
+                          :seon.repl/handle handle
+                          :seon.render/profile
+                          (assoc probe-profile :seon.render.profile/max-children 64
+                                               :seon.render.profile/max-string-length 24))]
+       (is (string? body) (pr-str documentation))
+       (is (> (count body) 24) "the real documentation must exceed the string limit")
+       (evaluation/bind-result! ctx handle documentation)
+       (let [shown (edn/read-string (value/render-ai request))
+             cut (:body shown)]
+         (is (= 0 (:seon.render.data/next-offset cut)))
+         (is (= (count body) (:seon.print/omitted cut)))
+         (is (= [:body] (:seon.render.data/path cut)))
+         (is (= body (sci/eval-form ctx (:seon.print/requery-form cut)))))))))
+
 (deftest equal-unordered-values-render-identical-bytes
   (doseq [[left right]
           [[(array-map :z/value 3 :a/value 1 :m/value 2)
@@ -373,7 +511,8 @@
         raw (map (fn [i] (swap! visits conj i) i) (iterate inc 0))
         text (value/render-ai (probe-unit raw))]
     (is (str/includes? text "0 1 2"))
-    (is (str/includes? text "bounded by :seon.render.profile/max-children"))
+    (is (= :seon.render.profile/max-children
+           (:seon.print/bound-by (last (edn/read-string text)))))
     (is (<= (count @visits) 4)
         "only the retained children and one lookahead are realized")))
 
@@ -387,7 +526,7 @@
     (is (= (pr-str raw) text))
     (is (not (str/includes? text "\n")))
     (is (= [:payload/text] (:seon.render.data/path node)))
-    (is (= '(get-in result/e0123456789ab [:payload/text])
+    (is (= '(seon.print/value-at result/e0123456789ab [:payload/text])
            (:seon.print/requery-form node)))
     (is (= (count large) (:seon.render.data/total node)))
     (is (pos? (:seon.print/omitted node)))
@@ -399,8 +538,8 @@
         request (probe-unit raw)
         ai (value/render-ai request)
         html (hiccup/->string (value/render-html request))]
-    (is (str/includes? ai "depth 4"))
-    (is (str/includes? ai "bounded by :seon.render.profile/max-depth"))
+    (is (= :seon.render.profile/max-depth
+           (get-in (edn/read-string ai) [:a :b :c :d :seon.print/bound-by])))
     (is (str/includes? ai "[:a :b :c :d]"))
     (is (str/includes? html "last-leaf"))
     (is (not (str/includes? html "seon-print-elision")))))
@@ -457,7 +596,7 @@
           html-ms (/ (- end middle) 1e6)]
       (println "VALUE-RENDERER" label "AI-ms" ai-ms "HTML-ms" html-ms)
       (is (< ai-ms 100.0) (str label " AI took " ai-ms " ms"))
-      (is (str/includes? ai "requery (get-in result/e0123456789ab [])"))
+      (is (str/includes? ai "(seon.print/value-at result/e0123456789ab [])"))
       (if terminal
         (is (str/includes? (hiccup/->string html) terminal))
         (is (= (pr-str raw) (lexical-hiccup-text html)))))))

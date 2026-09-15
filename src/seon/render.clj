@@ -187,9 +187,9 @@
         ;; the pulled value and the names reached through its refs.
         producer-value value]
     (if (map? value)
-      (assoc (merge producer-value
-                    (dissoc argument :seon.render/value
-                            :seon.render.call/id))
+      (assoc (merge (dissoc argument :seon.render/value
+                           :seon.render.call/id)
+                    producer-value)
              :seon.render/value value)
       (dissoc argument :seon.render.call/id))))
 
@@ -300,15 +300,17 @@
              matches
              (filter #(get % output) matches)
              matches
-             (if (:db/id value)
-               (let [specificity (apply max 0
-                                        (map (comp count
-                                                   :seon.schema/required-attrs)
-                                             matches))]
-                 (filter #(= specificity
-                             (count (:seon.schema/required-attrs %)))
-                         matches))
-               matches)
+             (let [specificity (fn [row]
+                                 (max (count (:seon.schema/required-attrs row))
+                                      (count (filter #(some? (get value %))
+                                                     (map first
+                                                          (schema.form/map-entries
+                                                           (get-in projection
+                                                                   [:seon.schema.projection/forms
+                                                                    (:seon.schema/key row)])))))))
+                   most-specific (apply max 0 (map specificity matches))]
+               (filter #(= most-specific (specificity %))
+                       matches))
              producers
              (->> matches
                   (map #(get % output))

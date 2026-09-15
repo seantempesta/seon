@@ -16,7 +16,6 @@
   (:require [clojure.string :as str]
             [seon.db :as db]
             [seon.id :as id]
-            [seon.print :as print]
             [seon.repl :as repl]
             [seon.schema.edn :as schema.edn]))
 
@@ -997,23 +996,14 @@
     :ready "ready"
     "open"))
 
-(defn- needs-text
-  [step]
-  (when-let [needs (seq (:my.plan/needs step))]
-    (str " — waiting for "
-         (str/join ", " (map pr-str needs)))))
-
 (defn- step-line
   [number step]
-  (str number " " (:my.plan.item/title step)
-       " [" (:my.plan.item/id step) "] — "
-       (state-word (:my.plan/state step))
-       (needs-text step)
-       (when-let [description (:my.plan.item/description step)]
-         (str "\n" (str/join (repeat (count number) " ")) "   " description))
-       (when-let [expected (:my.plan.item/done-when step)]
-         (str "\n" (str/join (repeat (count number) " "))
-              "   Done when: " expected))))
+  (let [completed (get-in step [:my.plan.item/completed-tx :db/txInstant])
+        state (if completed :completed (:my.plan/state step))]
+    (str number " " (state-word state) " — " (:my.plan.item/title step)
+         (when completed (str " — " (.toInstant ^java.util.Date completed)))
+         (when (and (= :current state) (:my.plan.item/done-when step))
+           (str "\n   Done when: " (:my.plan.item/done-when step))))))
 
 (defn format-item-ai
   "Format one plan step as terminal text."
@@ -1022,15 +1012,14 @@
   [step]
   (if (error-value? step)
     step
-    (str "Plan step " (step-line "1" step))))
+    (str "Plan step [" (:my.plan.item/id step) "] "
+         (step-line (str (inc (get step :my.plan.item/position 0))) step))))
 
 (defn render-item-ai
-  "Render source which reads and formats one plan step."
-  {:malli/schema [:=> [:cat :my.plan/render-step] :seon.render/source]}
+  "Render a returned plan step through the same compact step formatter."
+  {:malli/schema [:=> [:cat :my.plan/render-step] :string]}
   [step]
-  (pr-str
-   (list `format-item-ai
-         (list `item {:my.plan.item/id (:my.plan.item/id step)}))))
+  (format-item-ai step))
 
 (defn- item-html
   [step titles]
@@ -1116,9 +1105,7 @@
       (str "(my.plan/add! {:my.plan.item/id \"" agent-id "/first-step\""
            " :my.plan.item/title \"My first step\"} )")
       (pr-str
-       (list 'seon.db/transact!
-             [{:db/id [:seon.agent/id agent-id]
-               :my.plan/current-step [:my.plan.item/id next-step]}])))))
+       (list 'my.plan/current! {:my.plan.item/id next-step})))))
 
 (defn- current-title
   [view]
@@ -1127,45 +1114,30 @@
               (:my.plan/steps view))
         current)))
 
-(defn- section-ai
-  [title steps]
-  (str title " (" (count steps) ")"
-       (when (seq steps)
-         (str ":\n"
-              (str/join "\n"
-                        (map #(str "- " (:my.plan.item/title %)
-                                   " [" (:my.plan.item/id %) "]"
-                                   (needs-text %))
-                             steps))))))
-
 (defn format-plan-ai
-  "Format this agent's whole plan as terminal text."
+  "Show the current criterion and one line per other step as readable data."
   {:malli/schema [:=> [:cat [:or :my.plan/component-view :seon.error/value]]
                   [:or :string :seon.error/value]]}
   [view]
   (if (error-value? view)
     view
     (let [steps (:my.plan/steps view)
-          older (:my.plan/older-completions view)
-          objective (:my.plan/objective view)]
-      (str/join
-       "\n\n"
-       (cond->
-        [(str "Plan for " (:seon.agent/id view)
-              (when objective
-                (str "\nObjective: " objective))
-              (if-let [current (current-title view)]
-                (str "\nCurrent step: " current)
-                "\nCurrent step: none selected"))
-         (if (seq steps)
-           (str "Steps:\n"
-                (str/join "\n" (map step-line (outline-numbers steps) steps)))
-           "Steps: none yet.")
-         (section-ai "Ready now" (:my.plan/ready view))
-         (section-ai "Waiting" (:my.plan/blocked view))
-         (section-ai "Recently finished" (:my.plan/recent-completions view))
-         (str "Update the current step:\n" (update-example view))]
-         older (conj (print/render-elision-ai older)))))))
+          current-id (get-in view [:my.plan/current-step :my.plan.item/id])
+          lines (mapv (fn [number step]
+                        [(:my.plan.item/id step) (step-line number step)])
+                      (outline-numbers steps) steps)
+          current (some #(when (= current-id (first %)) (second %)) lines)]
+      (str "{:seon.agent/id " (pr-str (:seon.agent/id view))
+           (when-let [objective (:my.plan/objective view)]
+             (str "\n :my.plan/objective " (pr-str objective)))
+           (when current
+             (str "\n :seon.plan/current-line "
+                  (pr-str (str "[" current-id "] " current))))
+           "\n :seon.plan/step-lines {"
+           (str/join "\n                   "
+                     (map (fn [[id line]] (str (pr-str id) " " (pr-str line)))
+                          (remove #(= current-id (first %)) lines)))
+           "}\n :seon.plan/update-example " (pr-str (update-example view)) "}"))))
 
 (defn render-plan-ai
   "Read my complete plan with one thinking comment; doc carries the write examples."

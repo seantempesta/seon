@@ -58,14 +58,14 @@
                "a second real system pass committed while this pass evaluated")
            (is (string? (:seon.turn/id @committed)))
            (is (= "(help)" (:seon.cluster.eval/source saved)))
-           (is (= ['help 'seon.db/pull 'seon.db/pull 'seon.db/pull
-                   'seon.agent/effective-settings 'seon.db/pull 'dir 'seon.db/pull]
+           (is (= ['help 'seon.db/pull 'seon.plan/plan 'seon.db/pull
+                   'seon.agent/settings 'get 'dir 'seon.db/pull]
                   (mapv (comp first edn/read-string :seon.cluster.eval/source)
                         (evaluation/of-agent @connection "help"))))
            (let [entries (evaluation/of-agent @connection "help")
                  empty-reads (subvec entries 2 6)]
-             (is (= ["nil" "nil" "nil"] (mapv :seon.eval/shown (mapv empty-reads [0 1 3]))))
-             (is (str/includes? (:seon.eval/shown (nth empty-reads 2)) "turns-left"))
+             (is (= ["nil" "[]"] (mapv :seon.eval/shown (mapv empty-reads [1 3]))))
+             (is (= {} (edn/read-string (:seon.eval/shown (nth empty-reads 2)))))
              (is (every? #(seq (:seon.cluster.eval/read-evidence %)) empty-reads)))
            (is (vector? lines) (pr-str lines))
            (is (= 13 (count lines)))
@@ -92,11 +92,9 @@
            (is (seq evidence))
            (is (= 0 (turn/episode-runs @connection "help")))
            (let [again (turn/system-turn request)]
-             (is (string? (:seon.turn/id again)))
+             (is (nil? (:seon.turn/id again)))
              (let [changed (filter #(= :changed (:seon.turn/status %)) (:seon.turn/forms again))]
-               (is (= 2 (count changed)))
-               (is (= "(seon.agent/effective-settings)" (:seon.cluster.eval/source (first changed))))
-               (is (str/includes? (:seon.cluster.eval/source (second changed)) ":seon.runtime/turns"))))
+               (is (empty? changed))))
            (is (true? (db/read-evidence-current? @connection evidence)))
            (is (= 'seon.bootstrap/render-help-ai (:seon.eval/renderer saved)))
            (is (= (:seon.eval/shown saved) (repl/response (repl/entity-emission saved))))

@@ -2082,7 +2082,9 @@
                                    (repl/text
                                     (merge (:seon.turn.loop/admitted-form item)
                                            (:seon.sci.eval/evaluation item)
-                                           {:seon.ns/name (:seon.ns/name source)}))])
+                                           (cond-> {:seon.ns/name (:seon.ns/name source)}
+                                             (seq latest)
+                                             (assoc :seon.repl/changed-since? true))))])
                                 selected evaluated))
                   result {:seon.render.walk/units (:seon.render.walk/units declared)
                           :seon.turn/forms

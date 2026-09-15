@@ -347,7 +347,8 @@
     (is (= [:seon.render.call/id :fixture/long]
            (:seon.print/requery-id fitted))
         "and it carries the identity the reader asks again with")
-    (is (str/includes? (print/render-elision-ai fitted) "more characters"))))
+    (is (= :characters (:seon.print/elision-unit
+                         (edn/read-string (print/render-elision-ai fitted)))))))
 
 (deftest fit-preserves-breadth-and-long-strings
   (let [text (apply str (repeat 36 \x))
@@ -377,8 +378,8 @@
         "and the cut is a declared elision value, never a silent drop")
     (is (= :seon.print/elided (:seon.print/face long-string-fit))
         "an over-budget string becomes a declared elision value")
-    (is (= line-width (:seon.render.data/next-offset long-string-fit))
-        "the string floor is the emitter's own line width, never below it")
+    (is (= 0 (:seon.render.data/next-offset long-string-fit))
+        "a string is replaced whole, never cut at the display width")
     (is (= (* 2 line-width) (:seon.render.data/total long-string-fit))
         "and the elision states the whole size it was cut from")))
 

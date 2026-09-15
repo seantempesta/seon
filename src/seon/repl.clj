@@ -18,6 +18,36 @@
 
 (schema.edn/load! {})
 
+(defn render-directory-ai
+  "Print directory columns once while retaining every summary and contract."
+  {:malli/schema [:=> [:cat :seon.repl/directory] :string]}
+  [directory]
+  (let [columns [:sym :arglists :doc :in :out]]
+    (binding [*print-length* nil *print-level* nil *print-readably* true]
+      (pr-str (array-map
+               :seon.repl/columns columns
+               :seon.repl/rows (mapv #(mapv % columns) (:functions directory))
+               :seon.repl/schemas (into (sorted-map) (:schemas directory)))))))
+
+(defn render-directory-html
+  "Show complete directory data using the same named columns."
+  {:malli/schema [:=> [:cat :seon.repl/directory] :seon.render/hiccup]}
+  [directory]
+  [:pre (render-directory-ai directory)])
+
+(defn frame
+  "Derive the current turn budget outside the saved evaluation history."
+  {:malli/schema [:=> [:cat :seon.db/db :seon.agent/id] :string]}
+  [database agent-id]
+  (let [remaining ((requiring-resolve 'seon.turn/turns-left) database agent-id)
+        overrides ((requiring-resolve 'seon.ai/agent-overlay) database agent-id)
+        maximum (or (:seon.config.run/max-episode-runs overrides)
+                    ((requiring-resolve 'seon.db/q)
+                     '[:find ?limit . :where
+                       [?config :seon.config/cluster _]
+                       [?config :seon.config.run/max-episode-runs ?limit]] database))]
+    (str "turns left: " remaining " of " maximum)))
+
 (defn source-text
   "Print a generated form with reader quotes and explicit keyword keys."
   {:malli/schema [:=> [:cat :seon.repl/expression] :seon.render/source]}
@@ -158,9 +188,10 @@
 
 (defn- input-text
   [{prose :seon.cluster.eval/comment source :seon.cluster.eval/source
-    prompt-ns :seon.ns/name}]
-  (str (or prompt-ns 'user) "=> "
-       (when (seq prose) (str (str/trim-newline prose) "\n"))
+    prompt-ns :seon.ns/name changed? :seon.repl/changed-since?}]
+  (str (when changed? ";; changed since your last turn\n")
+       (or prompt-ns 'user) "=> "
+       (when (and (not changed?) (seq prose)) (str (str/trim-newline prose) "\n"))
        source))
 
 (defn text
@@ -242,11 +273,15 @@
   [emission]
   (let [emitted (text emission)
         prompt (str (or (:seon.ns/name emission) 'user) "=> ")
+        prefix-length (if (:seon.repl/changed-since? emission)
+                        (inc (str/index-of emitted "\n")) 0)
+        prompt-end (+ prefix-length (count prompt))
         input-end (count (input-text emission))
         answer (response emission)]
     [:code {:class "seon-emission-bytes"}
-     [:span {:class "seon-syntax-prompt"} (subs emitted 0 (count prompt))]
-     (syntax-spans (subs emitted (count prompt) input-end))
+     (when (pos? prefix-length) (syntax-spans (subs emitted 0 prefix-length)))
+     [:span {:class "seon-syntax-prompt"} (subs emitted prefix-length prompt-end)]
+     (syntax-spans (subs emitted prompt-end input-end))
      (when answer
        (list "\n"
              [:span {:class (if (:seon.cluster.eval/error emission)
@@ -271,9 +306,26 @@
   is what a REPL with no namespace in effect is called."
   {:malli/schema [:=> [:cat :seon.repl/entity-request] :seon.repl/emission]}
   [unit]
-  (let [unit (if (map? (:seon.render/value unit))
+  (let [database (:seon.db/db unit)
+        unit (if (map? (:seon.render/value unit))
                (:seon.render/value unit)
-               unit)]
+               unit)
+        turn-ref (:seon.cluster.eval/run unit)
+        turn-eid (if (map? turn-ref) (:db/id turn-ref) turn-ref)
+        changed? (or (:seon.repl/changed-since? unit)
+                     (when (and database turn-eid)
+                       (true?
+                        ((requiring-resolve 'seon.db/q)
+                         '[:find ?changed . :in $ ?turn :where
+                           [?turn :seon.turn/id _ ?t]
+                           [?turn :seon.turn/reply-size _ ?t]
+                           (not [?turn :seon.turn/attempts])
+                           (not [?turn :seon.turn.work/situation :call])
+                           [?turn :seon.turn/agent ?agent]
+                           [?earlier :seon.turn/agent ?agent]
+                           [?earlier :seon.turn/id _ ?before]
+                           [(< ?before ?t)]
+                           [(identity true) ?changed]] database turn-eid))))]
    (cond-> (select-keys unit [:seon.ns/name
                              :seon.cluster.eval/id
                              :seon.cluster.eval/source
@@ -294,6 +346,7 @@
                              :seon.print/length
                              :seon.print/level
                              :seon.print/options])
+    changed? (assoc :seon.repl/changed-since? true)
     ;; ONE ENTITY PER (run, ordinal), ONE SPELLING. The frozen form family
     ;; is gone; the source, the ordinal and the namespace are this
     ;; evaluation's own attributes, so there is nothing to reconcile here.

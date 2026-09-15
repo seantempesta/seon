@@ -83,7 +83,9 @@
           :render-step
           [:map
            {:description
-            "One derived plan step as both projections consume it: stored content plus the derived parent, dependencies, depth, and state."}
+            "One derived plan step as both projections consume it: stored content plus the derived parent, dependencies, depth, and state."
+            :seon.render/ai seon.plan/render-item-ai
+            :seon.render/html seon.plan/render-item-html}
            [:my.plan.item/id :my.plan.item/id]
            [:my.plan.item/title :my.plan.item/title]
            [:my.plan.item/position {:optional true} :my.plan.item/position]
@@ -142,7 +144,9 @@
           :component-view
           [:map
            {:description
-            "The derived current projection of one agent-owned plan component tree, read by both projections from the same function."}
+            "The derived current projection of one agent-owned plan component tree, read by both projections from the same function."
+            :seon.render/ai seon.plan/format-plan-ai
+            :seon.render/html seon.plan/render-plan-html}
            [:seon.agent/id :seon.agent/id]
            [:my.plan/objective {:optional true} :my.plan/objective]
            [:my.plan/steps :my.plan/render-steps]

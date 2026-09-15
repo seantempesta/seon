@@ -2587,24 +2587,29 @@
     unit))
 
 (defn render-transaction-ai
-  "Render a committed transaction report as bounded readable text."
+  "Summarize the facts and identified entities changed by a transaction."
   {:malli/schema
    [:=> [:cat :seon.db/transaction-report] [:string {:min 1}]]}
   [unit]
-  (let [{database :db-after
-         transaction-data :tx-data
-         tempids :tempids}
+  (let [{database :db-after before :db-before transaction-data :tx-data}
         (rendered-value unit)
-        datom-count (count transaction-data)]
-    (str "Committed transaction " (:t database)
-         " at commit " (:datahike/commit-id database)
-         " with " datom-count " datoms"
-         "."
-         (when (seq tempids)
-           (str "\nTempids: " (pr-str tempids)))
-         (when (seq transaction-data)
-           (str "\nCommitted datoms:\n"
-                (str/join "\n" (map pr-str transaction-data)))))))
+        facts (remove #(= (:e %) (:tx %)) transaction-data)
+        entities (sort (distinct (map :e facts)))
+        identities (when (and (seq entities) (database-value? database))
+                     (vec (sort (identity-attributes database))))
+        labels (mapv (fn [entity]
+                       (let [row (when identities
+                                   (merge (when (database-value? before)
+                                            (pull before identities entity))
+                                          (pull database identities entity)))
+                             identity (first (sort-by (comp str key)
+                                                      (dissoc row :db/id)))]
+                         (if identity
+                           (str (namespace (key identity)) " " (pr-str (val identity)))
+                           (str "entity " entity))))
+                     entities)]
+    (str "Wrote " (count facts) " facts on " (count entities) " entities"
+         (when (seq labels) (str ": " (str/join ", " labels))) ".")))
 
 (defn- transaction-value-html
   [value]

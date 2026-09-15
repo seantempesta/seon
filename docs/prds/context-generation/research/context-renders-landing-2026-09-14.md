@@ -8,6 +8,57 @@ tags: [research, render, context, test]
 
 Work in progress. No final verification claim yet.
 
+## Commits
+
+- `0dca8534e` — no-self-dependency invariant, collection-bound read evidence,
+  and stable opening reads. Three virtual turns: **0 generated evaluations,
+  0 added system bytes**, versus the recorded historical **458 bytes per
+  refresh**. One plan write and one message each append only their own read.
+  The invariant fast proof and platform gate pass; the separate pre-existing
+  DB projection-cost gate failure remains explicitly recorded below.
+
+## Preserved slice checkpoint
+
+The resumed slice lands rule 4's compact transaction/directory/plan pairs
+inside response values and rule 5's compact plan. It also preserves the
+whole-item printer work and the fixed reread marker. These are foundations,
+not a claim that change-only rereads or stored-result requery ownership are
+complete. The owner explicitly requested this preserved mixed slice be
+committed before continuing the remaining rules separately.
+
+The printer orders collection members structurally before rendering visible
+children. Rendering every member to obtain a sort key made the saved broad
+query exceed the loop's existing deadline; the structural comparison fixes
+that work without changing the deadline or presentation limits.
+Fast verification: **53 tests / 425 assertions, zero failures or errors**
+across value, print, and loop-proof tests. The loop measures **3 virtual
+turns / 0 generated rereads / 0 added system bytes**; plan and message
+changes each select only their own read.
+
+The final value/plan/help/REPL-grammar/help-trial fast run passes **56 tests /
+335 assertions, zero failures or errors**, including the final specificity
+lookup change. These fast results are the owner's requested commit
+checkpoint; isolated and platform gates for the completed lane follow.
+
+The additional render-simplification suite is red on unchanged HEAD too:
+**21 tests / 122 assertions**, with stale attribute-pair, identity-source,
+and preview-custody expectations. Its result is not counted as green for
+this slice. The owned nested-response regression exercises current pair
+contracts instead. The concurrent CSS and transcript changes belong to
+debug-turns and are excluded from this commit.
+
+## Next slice dependency
+
+Change-only rereads require working full-value handles. The existing
+[system-result issue](../../../seon/issues/system-turn-drops-live-results-after-saving-shown-text.md)
+identifies the ownership seam: `system-turn` discards its preview context;
+`seon.cluster.agent/arm!` creates the retained agent context later. Context
+acquisition must serve stored openings too and be reused when arming. The
+owner has now authorized context acquisition and `arm!`, `seon.db/diff`,
+schema-producer specificity, and the DB/schema projection performance owner.
+The marker now excludes virtual `:call` turns, matching the invariant's
+existing-provenance distinction; that later-slice edit is not committed.
+
 ## Grounding and boundary
 
 Read AGENTS.md, the run-2 landing, both explain-probe `:text` values,
@@ -17,7 +68,7 @@ own repeated actions and reported mid-word documentation cuts with
 unusable requery hints. The owner's correction places printer work last:
 one deterministic structural printer, no scenario-specific elision rules.
 
-The lane preserves concurrent edits in render.clj, transcript.clj outside
+The lane preserves concurrent edits in transcript.clj outside
 render-runtime-ai, CSS, web-debug tests, and the core-functions lane.
 Default remains the stored run-2 session; no reseed, stop, or refork.
 
@@ -45,7 +96,7 @@ of the stored historical opening. Reproducible script:
 exact bytes: [context_renders_before_2026_09_14.edn](context_renders_before_2026_09_14.edn).
 The live record has 137 evaluations and zero turns left.
 Run-2's historical measurement was 458 added bytes per ordinary system
-refresh (run-2 landing); the revised loop measurement is pending.
+refresh (run-2 landing); the revised no-event loop adds zero system bytes.
 
 ## Publication and verification
 
@@ -206,4 +257,5 @@ Schema formatting was repaired with an EDN equality assertion; declarations
 did not change. No production edits crossed the requested scope boundaries.
 The stopped lane worktree and scratch files were removed after checking
 that no lane test process still held them. Production edits remain in the
-shared working tree; no invariant commit or completed gate is claimed.
+shared working tree at that earlier checkpoint. The subsequent invariant
+commit is `0dca8534e`, with its actual gate boundary recorded above.

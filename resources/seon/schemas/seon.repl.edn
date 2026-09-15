@@ -1,4 +1,17 @@
-#:seon.repl{:comment [:string {:min 1}],
+#:seon.repl{:directory
+            [:map {:seon.render/ai seon.repl/render-directory-ai
+                   :seon.render/html seon.repl/render-directory-html
+                   :description "The existing dir API's function and schema data."}
+             [:functions [:vector [:map [:sym :qualified-symbol]
+                                    [:arglists :seon.schema/value]
+                                    [:doc :string]
+                                    [:in :seon.schema/value]
+                                    [:out :seon.schema/value]]]]
+             [:schemas [:map-of :qualified-keyword :seon.schema/value]]]
+            :columns [:vector :keyword]
+            :rows [:vector [:vector :seon.schema/value]]
+            :schemas [:map-of :qualified-keyword :seon.schema/value]
+            :comment [:string {:min 1}],
             :subject :seon.render.walk/lookup,
             :interrupted
             [:string
@@ -63,6 +76,8 @@
              [:seon.repl/subject :seon.repl/subject]
              [:seon.repl/entry :seon.repl/entry]],
             :entries [:vector {:min 1} :seon.repl/entry],
+            :changed-since?
+            [:boolean {:description "Derived emission metadata: this system turn follows an earlier turn. Never stored on an evaluation."}]
             :emission
             [:map
              {:description
@@ -74,6 +89,7 @@
               {:optional true}
               :seon.cluster.eval/id]
              [:seon.ns/name {:optional true} :seon.ns/name]
+             [:seon.repl/changed-since? {:optional true} :seon.repl/changed-since?]
              [:seon.cluster.eval/comment
               {:optional true}
               :seon.cluster.eval/comment]

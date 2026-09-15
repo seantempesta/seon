@@ -1,0 +1,6 @@
+{:seon.plan/current-line
+ [:string {:description "The current plan step's position, state, title, and completion criterion in the compact AI projection."}]
+ :seon.plan/step-lines
+ [:map-of :my.plan.item/id :string]
+ :seon.plan/update-example
+ [:string {:description "One executable plan update example shown with the opening plan."}]}
