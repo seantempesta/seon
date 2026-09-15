@@ -232,7 +232,7 @@ Generated plan items reference the problem and the subject; sessions are
 ordinary turns; the ledger, the metric deltas, and the explain probe judge
 them. Adding a task class is a transaction of one `:seon.problem` row.
 
-## 9. The data model of a task (owner, 2026-09-15 09:45: "focus on the data model")
+## 9. The data model of a task (SUPERSEDED by §10 — kept for the record; the `seon.problem` family is withdrawn: detectors are functions, not declarations)
 
 A task is three pieces of data, nothing else: a **problem declaration**
 (what to find, what to show, what proves it done), a **context request**
@@ -310,3 +310,83 @@ settle: evaluate done-queries, record completions, record metric deltas
 → judge: the ledger and the explain probe. The only new code paths are
 the plan generator (find → items) and the settlement check (done-query →
 completed-tx); everything else is the existing walk, pairs, loop.
+
+## 10. From the audits: the inside-out build (2026-09-15 16:40Z)
+
+Two read-only audits probed default and replaced §9's abstractions with
+facts: [data-audit-a](../research/data-audit-a-2026-09-15.md) (program
+side) and [data-audit-b](../research/data-audit-b-2026-09-15.md)
+(session side). Both reached the same conclusions independently:
+
+1. **No problem family, no metrics registry, no task-kind stamp.** A
+   detector is a query, so it is a public contracted function that returns
+   subjects (`seon.cluster.message/unanswered`, `seon.test/red`, …); the
+   success function is another (`seon.test/verified?`, `seon.fn/tested?`,
+   `seon.cluster.message/answered?`); a missing subject is `false`, a query
+   refusal is an error, never completion. `seon.problems` already derives
+   aggregates; the picture and the panel read the detectors.
+2. **The plan item is the task.** Existing rows plus two accretions that
+   run7-wave is landing: `:my.plan.item/subject` (ref) and
+   `:my.plan.item/done-query` (bound to the subject, evaluated at
+   settlement, `completed-tx` recorded the first time it is true; `complete!`
+   refuses while false). The item id derives through `seon.id` from
+   detector identity + subject + basis. Run 7's `juniper/report` is the
+   standing counterexample (completion recorded, no message).
+3. **Test evidence must name the tested program.** One schema delta serves
+   every program chain: `:seon.test/run` (ref) and `seon.test.run`
+   {id, at, git-sha — built today, discarded; + program-digest, basis-t,
+   branch}. Results are recorded to `:current-src` by default through the
+   one writer seam (`commit-results!`/`record-tx`), retiring the duplicate
+   `:test-results` destinations; a recording failure gates completion.
+4. **The render request.** No pair receives viewer/subject/detail/basis
+   today (probe P7: none survive `render-argument`). Accrete to
+   `seon.render.edn`: existing db/value/profile/distance + `viewer`
+   (namespace ref), `subject` (entity ref), optional `window` (transaction
+   bounds); basis derives from the db value; detail IS the profile. The
+   new keys join the retained-call/invocation evidence so a render cached
+   for another viewer is never reused.
+5. **The call ledger is deferred.** No seam sees every call (computed
+   callees bypass SCI's hook). When built: bounded per-evaluation
+   aggregates by fn+outcome as `:seon.eval/calls` components, with explicit
+   coverage; not needed for the first task.
+6. **Persisting as program files.** Durable source strings and bounded
+   writers exist; the reverse `.clj` writer does not. MVP restriction: a
+   pure `seon.program/source-files` over existing program shapes → exact
+   `{path, text, identities, basis}` for a NEW explicit source namespace and
+   test namespace at two new paths, plus an effect
+   `seon.cluster.export/source!` through the fs/edit owner. Editing files
+   in place is a separate scope.
+
+### 10.1 The minimum viable task (one, complete by definition)
+
+An agent-to-agent request that owes a response about a message — the
+chain with a concrete false witness today (`e10231f6`) — where the agent's
+reusable result is a small pure predicate plus its test, installed through
+ordinary admission, verified by a test run tied to the program digest, and
+exported to two new files. Success = `answered?` true AND the function has
+source/spec/ns AND a reaching test with positive passes and zero failures
+at the relevant program basis with a fresh run AND the export wrote both
+files. Nothing in that sentence is a model's claim.
+
+### 10.2 Build order, inside out (each step: schema/function + regression + live proof on default)
+
+1. Data: `:my.plan.item/subject`, `done-query` (run7-wave); `:seon.test/run`
+   + `seon.test.run` provenance; default recording to `:current-src`.
+2. Read functions: `seon.cluster.message/unanswered`, `answered?`;
+   `seon.test/verified?`, `red`; `seon.fn/tested?`, `untested` — contracted,
+   typed absent-subject behaviour, tests on the canonical fixture.
+3. Generation: one function `plan-item` (detector + subject + basis →
+   plan transaction data with done-query); no scheduler yet — the
+   orchestrator calls it for the first task.
+4. Context: the request keys on the pair contract; message/agent/plan/item
+   pairs take explicit subject arguments; the generated opening teaches the
+   exact completing/reporting calls and shows the success query's current
+   result.
+5. Session: the ordinary turn graph; budget from config; the ledger and
+   the explain probe judge.
+6. Files: `seon.program/source-files` + `seon.cluster.export/source!`; the
+   task's last step exports; done-query includes the two files' digests.
+7. Then the batch: root's schedule runs detectors for every steward and
+   generates items; the picture pair for `:seon.ns` reads the same
+   detectors.
+
