@@ -335,3 +335,39 @@ The gate request was replaced with only `seon.source-reconciliation-test`
 and `seon.test-reaching-test`. The existing schema file also received foreign
 fixture-observation additions during this slice; the commit includes only
 this lane's optional-digest hunk, preserving those additions uncommitted.
+
+## Resumed verification — 2026-09-15
+
+Commit `558d5614a` already contains the empty-check optimization as well as
+the fixture repair. Reverified default without a lifecycle operation or test
+JVM. The docs-only request returned zero tests, zero failures, no digest,
+and **1.856625 ms** elapsed at basis 536871835. The enclosing MCP form took
+4266 ms, including its explicit projection acquisition; that is not the
+check's measured elapsed time.
+
+The requested two namespaces then passed through `seon.test/check` in the
+same default JVM: **7 tests, 45 assertions, 0 failures, 0 errors**, elapsed
+32181.538875 ms. The schema path widened selection to exactly the two supplied
+namespaces. All seven results link to run entity 64448, basis 536871835,
+at 2026-09-15T22:31:01.163Z, digest
+`34fde7951ed260bba753fd5b7b30621e9bf08ad41034beb1af4867a101e1106a`.
+The complete unelided response was read from the saved EDN and is committed
+as [resumed run evidence](reaching-tests-resumed-result-2026-09-15.edn).
+
+The exact check request, under the default connection's projection, was:
+
+```clojure
+(seon.test/check
+ {:seon.db/connection (seon.operator/connection "default")
+  :seon.test/changed [[:seon.ns/name 'seon.source-reconciliation-test]
+                      [:seon.ns/name 'seon.test-reaching-test]]
+  :seon.test/paths ["src/seon/test.clj" "resources/seon/schemas/seon.test.edn"
+                    "test/seon/source_reconciliation_test.clj"
+                    "test/seon/test_reaching_test.clj"]
+  :seon.test/namespaces ['seon.source-reconciliation-test 'seon.test-reaching-test]})
+```
+
+The earlier live fixture refusal is no longer reproduced by this run. This
+lane made no fixture-owner changes during the resumed verification and does
+not attribute its recovery. No further production change was needed. The
+gate request remains byte-for-byte the same two namespace lines.
