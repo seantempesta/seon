@@ -94,3 +94,11 @@ Screenshot log: `plan-before → notes-final; fixture-my-note-entry-verified and
 
 Observed defects → change: The live note originally exposed {:db/id …}. Its actual about target is a transaction, so it now says the recorded transaction. The canonical fixture proves a plan-item about link labelled Prepare. No invented note title or timestamp attribute.
 
+## Help
+
+The exact help lines appear as a readable list; the Clojure reader identifies inline parenthesized forms for code spans. No width-based line splitting. Only render-help-html changed in bootstrap.
+
+Screenshot log: `fixture-seon-help-before → fixture-seon-help-verified; help-2 records absence from Juniper`.
+
+Observed defects → change: The original list used inconsistent typography and left forms undifferentiated. The final list uses the mono stack, signal markers and inline code color. Help is absent from the current main-page walk; fixture proof is not claimed as live pair paint.
+

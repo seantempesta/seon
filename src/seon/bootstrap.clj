@@ -71,8 +71,26 @@
   "Show the same help lines as a list."
   {:malli/schema [:=> [:cat :seon.help/help] :seon.render/hiccup]}
   [instructions]
-  (into [:ul {:class "seon-help"}]
-        (map #(vector :li %) (:seon.help/lines instructions))))
+  (let [line-html
+        (fn [line]
+          (loop [remaining line children [:li]]
+            (let [start (.indexOf ^String remaining "(")]
+              (if (or (neg? start) (str/includes? remaining "\n"))
+                (conj children remaining)
+                (let [source (subs remaining start)
+                      length (try
+                               (with-open [reader (clojure.lang.LineNumberingPushbackReader.
+                                                   (java.io.StringReader. source))]
+                                 (edn/read {:readers {} :default tagged-literal} reader)
+                                 (dec (.getColumnNumber reader)))
+                               (catch Exception _ 0))]
+                  (if (pos? length)
+                    (recur (subs source length)
+                           (conj children (subs remaining 0 start)
+                                 [:code (subs source 0 length)]))
+                    (conj children remaining)))))))]
+    (into [:ul {:class "seon-help seon-help-instructions"}]
+          (map line-html (:seon.help/lines instructions)))))
 
 (defn situation
   "Derive one agent's live opening seeds from current database facts."

@@ -65,3 +65,8 @@
 .my-note-entry .my-note-content { margin: 0.35rem 0; white-space: pre-wrap; }
 .my-note-entry a { color: var(--color-info); text-decoration: underline; text-underline-offset: 0.2em; }
 
+.seon-help.seon-help-instructions { font: 0.75rem/1.65 var(--font-mono); list-style: disc; padding-left: 1.25rem; white-space: normal; overflow-wrap: anywhere; }
+.seon-help.seon-help-instructions > li { padding-left: 0.25rem; margin: 0.5rem 0; }
+.seon-help-instructions > li::marker { color: var(--color-signal); }
+.seon-help.seon-help-instructions code { color: var(--color-info); font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; }
+

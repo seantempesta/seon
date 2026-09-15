@@ -106,3 +106,11 @@
                                                    :my.note/agent [:seon.agent/id "alice"]})))
         (is (= (golden :notes) (note/render-notes-ai unit)))))))
 
+(deftest help-preserves-lines-and-ai
+  (support/with-database
+    (fn [_]
+      (let [unit {:seon.help/lines ["Inspect (dir my.plan) before acting." "Then (doc seon.db/q)."]}
+            html (bootstrap/render-help-html unit)]
+        (readable! html ["<code>(dir my.plan)</code>" "<code>(doc seon.db/q)</code>"])
+        (is (= (golden :help) (bootstrap/render-help-ai unit)))))))
+
