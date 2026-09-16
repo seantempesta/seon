@@ -117,7 +117,7 @@
     (present-values
      entry
      [:from :from-var :to :name :alias :refer :arity :macro :private
-      :fixed-arities :varargs-min-arity :defmethod :dispatch-val-str :lang]))))
+      :fixed-arities :varargs-min-arity :defmethod :dispatch-val-str :var-quote :lang]))))
 
 ;; clj-kondo's analysis README documents `:keywords` without naming `:from`
 ;; or `:from-var`, but the implementation emits both for every keyword read
@@ -335,12 +335,24 @@
         implementations (map #(assoc % :from (:protocol-ns %)
                                       :from-var (:method-name %))
                              (:protocol-impls analysis))
-        spans (group-by :filename (concat methods implementations))]
+        spans (group-by :filename (concat methods implementations))
+        var-quotes (group-by :filename (:var-quotes analysis))]
     (mapv (fn [usage]
             (if-let [span (innermost-span (get spans (:filename usage)) usage)]
               (merge usage (select-keys span [:from :from-var]))
-              usage))
+              (cond-> usage
+                (some #(contains-position? % usage)
+                      (get var-quotes (:filename usage)))
+                (assoc :var-quote true))))
           usages)))
+
+(defn- var-quote-spans
+  [filename source]
+  (into []
+        (comp (filter #(= :var (:tag %)))
+              (map #(assoc (meta %) :filename filename)))
+        (tree-seq (comp seq :children) :children
+                  (kondo.utils/parse-string-all source))))
 
 (defn analyze
   "Analyze captured source text, complete source roots, or individual files.
@@ -382,7 +394,11 @@
                           (.toPath parent) "analysis"
                           (into-array java.nio.file.attribute.FileAttribute [])))))
         lint-paths (if mirror-root (write-mirror! mirror-root sources) paths)
+        stdin-source (when (some #{"-"} paths) (slurp *in*))
         result (try
+                 (binding [*in* (if stdin-source
+                                 (java.io.BufferedReader. (java.io.StringReader. stdin-source))
+                                 *in*)]
                  (invoke-kondo
                   ;; ONE cache rule, decided here: only the checkout's own
                   ;; declared source may read or write the shared dependency
@@ -395,11 +411,19 @@
                   ;; `checkout-source?` reads the source path back out of it.
                   (cond-> {:lint lint-paths}
                     (not (every? checkout-source? lint-paths))
-                    (assoc :cache false)))
+                    (assoc :cache false))))
                  (finally
                    (when mirror-root (delete-tree! mirror-root))))
-        analysis (update (:analysis result) :var-usages
-                         (fn [_] (attributed-usages (:analysis result))))]
+        raw-analysis (:analysis result)
+        quotes (mapcat (fn [filename]
+                         (var-quote-spans
+                          filename
+                          (or (get sources (analyzed-source-path filename))
+                              stdin-source
+                              (slurp filename))))
+                       (distinct (map :filename (:var-usages raw-analysis))))
+        analysis (assoc raw-analysis :var-usages
+                        (attributed-usages (assoc raw-analysis :var-quotes quotes)))]
     {::namespace-definitions
      (filterv jvm-entry?
               (normalized-entries analysis :namespace-definitions namespace-definition))

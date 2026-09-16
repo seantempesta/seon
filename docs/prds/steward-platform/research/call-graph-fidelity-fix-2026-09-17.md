@@ -57,3 +57,25 @@ other lanes at the operator lifecycle lock. No foreign session was operated.
 
 In-process results are iteration evidence only. The orchestrator must read
 all diffs and the fixtures before requesting its batched cold gate.
+
+## Slice 2 — declared function values
+
+The regression `declared-function-values-contribute-edges-without-arities`
+ran in default with the same three-argument run form: **12 pass / 0 fail /
+0 error**, covering capability, graph Var, declared renderer and task function
+values. It asserts both edges and reach and rejects invented call arities.
+Kondo does not emit a usage for `var` itself; its parser's `:var` node owns
+Var-quote span recognition. This was probed before implementation.
+
+`declared-function-targets` classifies values through schema aliases and scalar
+symbol/identity declarations, joining consumers via existing keyword facts.
+`:seon.fn/reference-to` describes a reference's target identity, accretively;
+capability and schedule function refs declare it. Stored task refs contribute
+edges at query time through this property and attribute-consumer facts, so a
+new task does not require reindexing source. Whole-graph reach and gate-set
+share that relation. The artifact regression also covers literal task values.
+No property-name roster or regular expression was added.
+
+A live build-artifact of `src/seon/print.cljc` returns 81 rows and now includes
+`emit` → `emit-sequential`, `emit-map-like`, protocol methods and other body
+callees. This is a JVM owner probe, not an adopted-database measurement.

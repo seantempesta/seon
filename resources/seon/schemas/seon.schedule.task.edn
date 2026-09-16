@@ -1,6 +1,6 @@
 #:seon.schedule.task{:id [:string {:min 1, :seon.db/identity true}],
                      :owner [:and #:seon.db{:index true} :seon.db/ref],
-                     :function [:and #:seon.db{:index true} :seon.db/ref],
+                     :function [:and {:seon.db/index true :seon.fn/reference-to :seon.fn/sym} :seon.db/ref],
                      :schedule [:and #:seon.db{:index true} :seon.db/ref],
                      :task
                      [:map {:seon.db/attributes true}

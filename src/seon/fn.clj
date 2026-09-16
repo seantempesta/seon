@@ -14,6 +14,8 @@
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
             [seon.schema.edn :as schema.edn]
+            [seon.schema.form :as schema.form]
+            [clj-kondo.impl.utils :as kondo.utils]
             [seon.test.accretion :as accretion])
   (:import [java.nio.charset StandardCharsets]
            [java.nio.file Files]
@@ -342,7 +344,7 @@
 
 (defn- call-target
   [usage]
-  (when (contains? usage ::analyzer/arity)
+  (when (or (contains? usage ::analyzer/arity) (::analyzer/var-quote usage))
     (usage-symbol usage)))
 
 (defn- external-target?
@@ -466,7 +468,7 @@
    (fn [arities usage]
      (let [caller (usage-caller usage)
            target (call-target usage)]
-       (if (and caller target
+       (if (and caller target (contains? usage ::analyzer/arity)
                 (contains? (get calls-by-caller caller) target))
          (update arities caller (fnil conj (sorted-set))
                  [target (long (::analyzer/arity usage))])
@@ -507,6 +509,54 @@
            (nil? (next (next value))))
     (second value)
     value))
+
+(defn- function-value-schema?
+  "Whether a declaration explicitly admits a function identity or symbol.
+  Follow aliases and scalar alternatives, never map entry names."
+  [forms form seen]
+  (cond
+    (= :seon.fn/sym form) true
+    (contains? #{:symbol :qualified-symbol} form) true
+    (and (keyword? form) (not (seen form)) (get forms form))
+    (function-value-schema? forms (get forms form) (conj seen form))
+    (vector? form)
+    (or (= :seon.fn/sym (:seon.fn/reference-to (schema.form/attr-form-properties form)))
+        (contains? #{:symbol :qualified-symbol} (first form))
+        (and (contains? #{:or :and :schema} (first form))
+             (some #(function-value-schema? forms % seen)
+                   (remove map? (rest form)))))
+    :else false))
+
+(defn- declared-function-targets
+  "Literal function-valued declarations, classified by their own schema.
+  Consumers are joined by the attribute they use; no callable-key roster."
+  [forms values first-party-functions]
+  (let [attributes (into #{} (keep (fn [[k v]]
+                                    (when (or (= :seon.fn/sym k)
+                                              (function-value-schema? forms v #{k})) k)))
+                         forms)]
+    (reduce
+     (fn [targets value]
+       (if (map? value)
+         (reduce-kv
+          (fn [targets attribute value]
+            (let [value (capability-symbol value)
+                  target (cond
+                           (qualified-symbol? value) (str value)
+                           (string? value) value
+                           (and (vector? value) (= :seon.fn/sym (first value)))
+                           (second value))]
+              (if (and (attributes attribute) (first-party-functions target))
+                (update targets attribute (fnil conj #{}) target)
+                targets)))
+          targets value)
+         targets))
+     {} (mapcat #(tree-seq coll? seq %) values))))
+
+(defn- declared-calls-by-caller
+  [used-keywords targets]
+  (update-vals used-keywords
+               #(into #{} (mapcat targets) %)))
 
 (defn- var-row
   [contexts namespace-contexts
@@ -608,7 +658,9 @@
                ;; capability" is a join instead of a symbol every reader
                ;; re-resolves. `assert-capability-contracts!` refuses a
                ;; marker whose handler has no row, so this never dangles.
-               :seon.fn/capability-fn [:seon.fn/sym (str capability)]))
+               :seon.fn/capability-fn [:seon.fn/sym (str capability)])
+        capability-declared?
+        (update :seon.fn/calls (fnil conj #{}) [:seon.fn/sym (str capability)]))
 
       :else nil)))
 
@@ -980,10 +1032,19 @@
   re-read the authored resources a SECOND time per file, at 18 ms a call,
   against a population that cannot change while one operation runs
   (AGENTS.md 2.1)."
-  [analysis first-party-functions contexts declared-attributes]
-  (let [calls-by-caller
-        (call-targets-by-caller analysis first-party-functions)
-        used-keywords (keywords-by-holder analysis)
+  ([analysis first-party-functions contexts declared-attributes]
+   (analysis-rows-by-file analysis first-party-functions contexts declared-attributes {}))
+  ([analysis first-party-functions contexts declared-attributes forms]
+  (let [used-keywords (keywords-by-holder analysis)
+        literal-values (mapcat #(map kondo.utils/sexpr
+                                     (:children (kondo.utils/parse-string-all (:text %))))
+                               (vals contexts))
+        targets (declared-function-targets forms (concat (vals forms) literal-values)
+                                           first-party-functions)
+        calls-by-caller
+        (merge-with set/union
+                    (call-targets-by-caller analysis first-party-functions)
+                    (declared-calls-by-caller used-keywords targets))
         edges {:calls-by-caller calls-by-caller
                :used-keywords used-keywords
                :writes (writes-by-writer analysis declared-attributes)
@@ -1007,7 +1068,7 @@
          rows))
      {}
      (concat (::analyzer/namespace-definitions analysis)
-             (::analyzer/var-definitions analysis)))))
+             (::analyzer/var-definitions analysis))))))
 
 (defn source-rows
   "Construct source declarations through the indexer's analysis and row owners.
@@ -1035,7 +1096,8 @@
                         (map :seon.fn/sym) function-rows)
         rows (analysis-rows-by-file
               (source-analysis analysis first-row last-row)
-              functions {"<stdin>" (text-context text)} declared-attributes)]
+              functions {"<stdin>" (text-context text)} declared-attributes
+              (:seon.schema.projection/forms (db/carried-projection database)))]
     (into []
           (comp
            (filter #(or (:seon.fn/sym %) (:seon.test/sym %)))
@@ -1133,17 +1195,25 @@
 (def ^:private request-symbol "seon.effect/request!")
 
 (def ^:private test-reach-rules
-  '[[(function-reaches ?function ?target)
+  '[[(call-edge ?function ?target)
      [?function :seon.fn/calls ?target]]
+    [(call-edge ?function ?target)
+     [?declaration :seon.fn/reference-to :seon.fn/sym]
+     [?declaration :seon.schema/key ?attribute]
+     [?holder ?attribute ?target]
+     [?target :seon.fn/sym]
+     [?function :seon.fn/keywords ?attribute]]
     [(function-reaches ?function ?target)
-     [?function :seon.fn/calls ?called]
+     (call-edge ?function ?target)]
+    [(function-reaches ?function ?target)
+     (call-edge ?function ?called)
      (function-reaches ?called ?target)]
     [(test-reaches ?test ?target)
      [?test :seon.test/sym]
-     [?test :seon.fn/calls ?target]]
+     (call-edge ?test ?target)]
     [(test-reaches ?test ?target)
      [?test :seon.test/sym]
-     [?test :seon.fn/calls ?called]
+     (call-edge ?test ?called)
      (function-reaches ?called ?target)]
     [(test-reaches ?test ?target)
      [?test :seon.test/sym]
@@ -1158,6 +1228,20 @@
     [(test-currently-failing ?test)
      [?test :seon.test/error-count ?count]
      [(pos? ?count)]]])
+
+(defn- declared-reference-edges
+  "Attribute consumers reach function identities named by stored declarations.
+  The attribute's schema supplies the target identity; task/handler families
+  are not enumerated here. The writer's current facts decide each edge."
+  [database]
+  (db/q '[:find ?caller ?target
+          :where
+          [?declaration :seon.fn/reference-to :seon.fn/sym]
+          [?declaration :seon.schema/key ?attribute]
+          [?holder ?attribute ?target]
+          [?target :seon.fn/sym]
+          [?caller :seon.fn/keywords ?attribute]]
+        database))
 
 (defn gate-set
   "Tests gating one function identity from one database value.
@@ -1174,6 +1258,8 @@
     (if (:seon.error/kind row)
       row
       (let [target (:db/id row)
+            declared (declared-reference-edges database)
+            incoming-declared (group-by second (when-not (:seon.error/kind declared) declared))
             walked
             (loop [pending (if target [target] [])
                    seen #{}
@@ -1184,13 +1270,14 @@
                   (let [edges (db/datoms database :avet :seon.fn/calls entity)]
                     (if (:seon.error/kind edges)
                       edges
-                      (let [incoming (mapv :e edges)]
+                      (let [incoming (into (mapv :e edges)
+                                           (map first (get incoming-declared entity)))]
                         (recur (into (pop pending) incoming)
                                (conj seen entity)
                                (into callers incoming))))))
                 callers))]
-        (if (:seon.error/kind walked)
-          walked
+        (if (or (:seon.error/kind declared) (:seon.error/kind walked))
+          (if (:seon.error/kind declared) declared walked)
           (let [subjects (cond-> walked target (conj target))
                 by-edge (when (seq walked)
                           (db/q '[:find [?symbol ...]
@@ -1667,7 +1754,7 @@
                   (containing-root directory (or roots source-roots) file)
                   (get contexts canonical-path)
                   (get (analysis-rows-by-file analysis first-party-functions
-                                              contexts (set (keys forms)))
+                                              contexts (set (keys forms)) forms)
                        canonical-path
                        [])
                   findings)))))
@@ -1768,7 +1855,7 @@
                   (publication-findings analysis first-party-functions))
         rows-by-file
         (analysis-rows-by-file analysis first-party-functions contexts
-                               (set (keys forms)))
+                               (set (keys forms)) forms)
         artifacts
         (mapv (fn [file]
                 (artifact row-shapes

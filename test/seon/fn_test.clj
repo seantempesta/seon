@@ -2501,3 +2501,28 @@
                                            [:seon.fn/sym caller])))))))
         (is (= ["sample.call-implementations/reaches-implementations"]
                (seon.fn/tests-reaching @connection target)))))))
+(deftest declared-function-values-contribute-edges-without-arities
+  (with-provenance-file
+    "sample/call_declarations.clj"
+    (slurp (io/resource "test/fixtures/call_graph_fidelity/declarations.txt"))
+    (fn [connection file _]
+      (let [forms (assoc (schema.edn/packaged-forms)
+                         :sample.call-declarations/rendered
+                         [:map {:seon.render/ai 'sample.call-declarations/render-target}])
+            artifact (seon.fn/build-artifact
+                      {:seon.fn/source-path (.getPath file)
+                       :seon.fn.file/first-party-functions []
+                       :seon.schema.projection/forms forms})
+            rows (:seon.fn.file/rows artifact)]
+        (test-support/transacted! connection (seon.fn/reconcile-tx @connection rows []))
+        (doseq [[caller target] [["capability" "handler"] ["graph" "step"]
+                                 ["render-owner" "render-target"] ["task-owner" "task-target"]]]
+          (let [caller (str "sample.call-declarations/" caller)
+                target (str "sample.call-declarations/" target)
+                row (db/pull @connection
+                             '[:seon.fn/call-arities {:seon.fn/calls [:seon.fn/sym]}]
+                             [:seon.fn/sym caller])]
+            (is (contains? (set (map :seon.fn/sym (:seon.fn/calls row))) target))
+            (is (not-any? #(= target (first %)) (:seon.fn/call-arities row)))
+            (is (= ["sample.call-declarations/reaches-declarations"]
+                   (seon.fn/tests-reaching @connection target)))))))))

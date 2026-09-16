@@ -1,0 +1,19 @@
+(ns sample.call-declarations
+  (:require [clojure.test :refer [deftest is]]
+            [seon.effect :as effect]))
+(defn- handler {:malli/schema [:=> [:cat :map] :map]} [request] request)
+(defn capability
+  {:seon.workload :io :seon.effect/capability sample.call-declarations/handler}
+  [request] (effect/request! 'sample.call-declarations/capability request))
+(defn step [x] x)
+(defn graph [] {:procs {:sample/proc {:step-fn #'step}}})
+(defn render-target [x] x)
+(defn render-owner [definition] (:seon.render/ai definition))
+(defn task-target [x] x)
+(defn task-owner [task] (:seon.fn/sym task))
+(def task {:seon.fn/sym "sample.call-declarations/task-target"})
+(deftest reaches-declarations
+  (is (graph))
+  (is (render-owner {}))
+  (is (task-owner task))
+  (is (capability {})))

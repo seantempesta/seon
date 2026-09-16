@@ -1,11 +1,13 @@
 #:seon.fn{:root [:string {:min 1}],
           :source-path [:string {:min 1}],
           :arglists :string,
+          :reference-to [:qualified-keyword {:description "Identity attribute of the function named by a declared reference value; enables call-graph joins from attribute consumers to the referenced identity."}]
           :capability-fn
           [:and
            {:description
             "The function that executes this capability's requests: a ref to the handler's own declaration, beside the `:seon.effect/capability` symbol the metadata carries."
-            :seon.db/index true}
+            :seon.db/index true
+            :seon.fn/reference-to :seon.fn/sym}
            :seon.db/ref],
           :file [:and {:description "Indexed source file shared by function and test declarations; absent on agent-admitted definitions."} :seon.db/ref],
           :form-span [:tuple {:description "Half-open UTF-8 byte offsets of this declaration's exact source within its indexed file."} :int :int],
@@ -44,7 +46,8 @@
   members verbatim — it resolves neither a lookup ref nor a tempid inside
   a tuple (probed 2026-09-16), so a `[ref long]` tuple would store an
   unresolvable vector. `:seon.fn/calls` remains the reach index; this set
-  only refines it, and its population is exactly that edge set."}
+  only refines calls whose argument count is known. Declared function values
+  carry reach without claiming an arity."}
            [:tuple [:string {:min 1}] [:int {:min 0}]]],
           :caller [:string {:min 1}],
           :callee [:string {:min 1}],
