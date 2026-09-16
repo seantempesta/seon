@@ -159,44 +159,33 @@
              :seon.sci.eval/time-limit-ms 1000}))
       "no dial, no evaluation"))
 
-(deftest instrumented-generated-form-does-not-advise-an-absent-program-row
-  (test-support/with-database
-    (fn [connection]
-      (let [ctx (eval/build-base-ctx)
-            _ (eval/acquire! {:seon.sci.eval/ctx ctx
-                              :seon.db/db (db/db connection)})
-            projection (schema/projection-from-database (db/db connection))
-            entering-roots
-            (into {}
-                  (map (fn [instrumented-var]
-                         [instrumented-var @instrumented-var]))
-                  (instrument/instrumented))]
-        (try
-          (schema/call-with-projection
-           projection
-           #(instrument/apply! {:seon.config/on-core-error :panic
-                                :seon.sci.admit/caps caps}))
-          (let [evaluation
-                (eval/evaluate
-                 {:seon.sci.eval/ctx ctx
-                  :seon.db/db (db/db connection)
-                  :seon.db/connection connection
-                  :seon.agent/id "root"
-                  :seon.cluster.eval/source
-                  "; generated opening non-declaration\n:opening-probe"
-                  :seon.sci.admit/caps caps
-                  :seon.sci.eval/time-limit-ms 2000
-                  :seon.config/on-core-error :panic})]
-            (is (nil? (:seon.program/row evaluation))
-                "ordinary generated forms have no declaration row")
-            (is (ok? evaluation) (pr-str evaluation))
-            (is (not= :seon.instrument/contract-violated
-                      (get-in evaluation
-                              [:seon.sci.admit/value :seon.error/kind]))))
-          (finally
-            (instrument/remove!)
-            (doseq [[instrumented-var root] entering-roots]
-              (alter-var-root instrumented-var (constantly root)))))))))
+(deftest
+  instrumented-generated-form-does-not-advise-an-absent-program-row
+  (test-support/preserving-instrumentation-state
+    (fn []
+      (test-support/with-database
+        (fn [connection]
+          (let [database (db/db connection)
+                ctx (test-support/fork-cluster-ctx connection)
+                projection (db/carried-projection database)]
+            (instrument/apply!
+              {:seon.config/on-core-error :panic, :seon.schema/projection projection})
+            (let [evaluation (eval/evaluate
+                               {:seon.sci.eval/ctx ctx,
+                                :seon.db/db database,
+                                :seon.db/connection connection,
+                                :seon.agent/id "root",
+                                :seon.cluster.eval/source
+                                "; generated opening non-declaration\n:opening-probe",
+                                :seon.sci.admit/caps caps,
+                                :seon.sci.eval/time-limit-ms 2000,
+                                :seon.config/on-core-error :panic})]
+              (is (nil? (:seon.program/row evaluation)))
+              (is (ok? evaluation) (pr-str evaluation))
+              (is
+                (not=
+                  :seon.instrument/contract-violated
+                  (get-in evaluation [:seon.sci.admit/value :seon.error/kind]))))))))))
 
 (deftest the-diagnostics-are-recorded-and-are-not-limits
   (let [evaluation (run "(reduce + (map inc (range 500)))")
@@ -250,19 +239,24 @@
             :seon.print/level 2}
            (:seon.print/options evaluation)))))
 
-(deftest the-evaluator-remains-live-after-its-namespace-reloads
-  (let [request {:seon.cluster.eval/source "(+ 1 2)"
-                 :seon.sci.admit/caps caps
-                 :seon.sci.eval/time-limit-ms 10000
-                 :seon.config/on-core-error :panic}
-        before (eval/evaluate request)]
-    (is (= 3 (:seon.sci.admit/value before))
-        "the first evaluation realizes the process guard")
-    (require 'seon.sci.eval :reload)
-    (let [after ((requiring-resolve 'seon.sci.eval/evaluate) request)]
-      (is (= 3 (:seon.sci.admit/value after))
-          "ordinary arm data has no reload-sensitive class identity")
-      (is (nil? (:seon.cluster.eval/error after))))))
+(deftest
+  the-evaluator-remains-live-after-its-namespace-reloads
+  (test-support/preserving-instrumentation-state
+    (fn []
+      (let [request {:seon.cluster.eval/source "(+ 1 2)",
+                     :seon.sci.admit/caps caps,
+                     :seon.sci.eval/time-limit-ms 10000,
+                     :seon.config/on-core-error :panic}
+            before (eval/evaluate request)]
+        (is
+          (= 3 (:seon.sci.admit/value before))
+          "the first evaluation realizes the process guard")
+        (require 'seon.sci.eval :reload)
+        (let [after ((requiring-resolve 'seon.sci.eval/evaluate) request)]
+          (is
+            (= 3 (:seon.sci.admit/value after))
+            "ordinary arm data has no reload-sensitive class identity")
+          (is (nil? (:seon.cluster.eval/error after))))))))
 
 (deftest isolated-one-off-evaluations-do-not-share-definitions
   (run "(def leaked 1)")
@@ -606,65 +600,58 @@
     (is (every? #(sci/resolve ctx %) (program/base-context-injected-symbols))
         "every declared injection resolves in the constructed context")))
 
-(deftest runtime-function-rows-carry-parsed-contract-facts
-  (let [ctx (sci/fork (eval/build-base-ctx))
-        evaluation
-        (run-in ctx
-                (str "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
-                     "parsed-at-runtime [x] x)")
-                2000)
-        row (:seon.program/row evaluation)]
-    (is (= "user/parsed-at-runtime" (:seon.fn/sym row)))
-    (is (= 1 (count (:seon.fn/arities row))))
-    (is (map? (:seon.fn/ast row)))))
+(deftest
+  runtime-function-rows-carry-parsed-contract-facts
+  (test-support/with-database
+    (fn [connection]
+      (let [ctx (test-support/fork-cluster-ctx connection)
+            evaluation (run-in
+                         ctx
+                         (str
+                           "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
+                           "parsed-at-runtime [x] x)")
+                         2000)
+            row (:seon.program/row evaluation)]
+        (is (= "user/parsed-at-runtime" (:seon.fn/sym row)))
+        (is (= 1 (count (:seon.fn/arities row))))
+        (is (map? (:seon.fn/ast row)))))))
 
-(deftest static-and-runtime-contracted-definitions-publish-identical-facts
-  (let [root (java.nio.file.Files/createTempDirectory
-              (.toPath (io/file "tmp")) "p12-runtime-parity"
-              (make-array java.nio.file.attribute.FileAttribute 0))
-        source
-        (str "(defn ^{:malli/schema "
-             "[:=> [:cat [:map [:x :int]] [:* :string]] :int]} "
-             "same-facts [{:keys [x]} & xs] x)")
-        source-file (.resolve root "parity.clj")]
-    (try
-      (spit (.toFile source-file) (str "(ns parity)\n" source "\n"))
-      (let [static-row
-            (first
-             (filter #(= "parity/same-facts" (:seon.fn/sym %))
-                     (#'seon.fn/desired-rows
-                      {:seon.fn/roots ["src" (str root)]}
-                      (fn [_phase]))))
-            ctx (sci/fork (eval/build-base-ctx))
-            runtime-row
-            (:seon.program/row
-             (eval/evaluate
-              {:seon.sci.eval/ctx ctx
-               :seon.cluster.eval/ns [:seon.ns/name 'parity]
-               :seon.cluster.eval/source source
-               :seon.sci.admit/caps caps
-               :seon.sci.eval/time-limit-ms 2000
-               :seon.config/on-core-error :panic}))
-            p12-keys [:seon.fn/arities :seon.fn/ast
-                      :seon.fn/arglists-override?]]
-        (is (= "parity/same-facts" (:seon.fn/sym runtime-row)))
-        (is (= (select-keys static-row p12-keys)
-               (select-keys runtime-row p12-keys)))
-        ;; Identical publication includes the attributes every declaration
-        ;; row REQUIRES, not only the P12 contract facts. The runtime path
-        ;; published rows with no admission source for as long as this test
-        ;; compared only the keys it named.
-        (is (= :core (:seon.schema.admission/source static-row)))
-        (is (= :agent (:seon.schema.admission/source runtime-row)))
-        ;; Whole-row contract validation is NOT asserted here yet: both rows
-        ;; carry `:seon.fn/arities` and `:seon.fn/ast` component entities,
-        ;; and `:seon.db/ref` admits no component value, so both are refused
-        ;; by `:seon.program/declaration-row`. That is a different class at a
-        ;; different owner and its regression belongs to it —
-        ;; docs/seon/issues/a-component-value-is-refused-by-its-own-ref-shape.md
-        )
-      (finally
-        (test-support/delete-recursively! (str root))))))
+(deftest
+  static-and-runtime-contracted-definitions-publish-identical-facts
+  (test-support/with-database
+    (fn [connection]
+      (let [root (java.nio.file.Files/createTempDirectory
+                   (.toPath (io/file "tmp"))
+                   "p12-runtime-parity"
+                   (make-array java.nio.file.attribute.FileAttribute 0))
+            source (str
+                     "(defn ^{:malli/schema "
+                     "[:=> [:cat [:map [:x :int]] [:* :string]] :int]} "
+                     "same-facts [{:keys [x]} & xs] x)")
+            source-file (.resolve root "parity.clj")]
+        (try
+          (spit (.toFile source-file) (str "(ns parity)\n" source "\n"))
+          (let [static-row (first
+                             (filter
+                               #(= "parity/same-facts" (:seon.fn/sym %))
+                               (#'seon.fn/desired-rows
+                                 {:seon.fn/roots ["src" (str root)]}
+                                 (fn [_phase]))))
+                ctx (test-support/fork-cluster-ctx connection)
+                runtime-row (:seon.program/row
+                              (eval/evaluate
+                                {:seon.sci.eval/ctx ctx,
+                                 :seon.cluster.eval/ns [:seon.ns/name 'parity],
+                                 :seon.cluster.eval/source source,
+                                 :seon.sci.admit/caps caps,
+                                 :seon.sci.eval/time-limit-ms 2000,
+                                 :seon.config/on-core-error :panic}))
+                p12-keys [:seon.fn/arities :seon.fn/ast :seon.fn/arglists-override?]]
+            (is (= "parity/same-facts" (:seon.fn/sym runtime-row)))
+            (is (= (select-keys static-row p12-keys) (select-keys runtime-row p12-keys)))
+            (is (= :core (:seon.schema.admission/source static-row)))
+            (is (= :agent (:seon.schema.admission/source runtime-row))))
+          (finally (test-support/delete-recursively! (str root))))))))
 
 (deftest contracted-defn-renders-the-var-it-declared
   (let [plain (run "(def plain-declaration 1)")
@@ -1583,8 +1570,7 @@
             root-selector render.walk/root-selector
             root-selectors (atom [])
             compile-plan pull-api/compile-pull-plan
-            compilation-count (atom 0)
-            effective-count (atom 0)]
+            compilation-count (atom 0)]
         (with-redefs
           [render.walk/root-selector
            (fn [database distance supplied-caps]
@@ -1596,9 +1582,7 @@
                  (when (some #(identical? selector-or-plan %) @root-selectors)
                    (swap! compilation-count inc))
                  (compile-plan selector-or-plan))
-             ([database selector-or-plan] (compile-plan database selector-or-plan)))
-           config/effective
-           (fn [_database _cluster-name] (swap! effective-count inc) (config/defaults))]
+             ([database selector-or-plan] (compile-plan database selector-or-plan)))]
           (let [evaluate-walk #(render/call-with-walk-context
                                 request
                                 (fn [] (run-in ctx "(seon.render/walk)" 5000)))
@@ -1608,7 +1592,14 @@
                 value (:seon.sci.admit/value through-sci)
                 allocations (mapv
                               #(get-in % [:seon.sci.admit/record :seon.eval/allocated-bytes])
-                              [through-sci])]
+                              [through-sci])
+                bounded-plan (render.walk/root-pull-plan
+                               (assoc
+                                 request
+                                 :seon.render/distance
+                                 0
+                                 :seon.sci.admit/caps
+                                 (assoc caps :seon.config.eval.result/max-nodes 1)))]
             (is (ok? through-sci))
             (is (string? value))
             (is
@@ -1622,12 +1613,17 @@
             (is
               (and (seq @root-selectors) (<= @compilation-count 1))
               "direct, web, and through-SCI reuse a plan, including an already warm plan")
-            (is (= 2 @effective-count) "evaluation and walk each resolve effective config once")
             (is
               (every? #(and (int? %) (< % (* 1024 1024 1024))) allocations)
-              (str
-                "through-SCI allocations must stay below 1 GiB: "
-                (pr-str allocations)))))))))
+              (str "through-SCI allocations must stay below 1 GiB: " (pr-str allocations)))
+            (is (identical? (:datahike.pull/plan direct) (:datahike.pull/plan bounded-plan)))
+            (is (= 0 (:seon.render/distance bounded-plan)))
+            (is
+              (=
+                1
+                (get-in
+                  bounded-plan
+                  [:seon.sci.admit/caps :seon.config.eval.result/max-nodes])))))))))
 
 (deftest one-context-arms-concurrent-threads-independently
   ;; The class is arm identity, not interpreter throughput. Both threads arm

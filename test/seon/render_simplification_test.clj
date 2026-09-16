@@ -693,40 +693,48 @@
        (is (= (str "B:" fixture-b)
               (render-ai (request (support/fork-cluster-ctx connection)))))))))
 
-(deftest distance-spends-only-real-ref-hops-and-caps-win
+(deftest
+  distance-spends-only-real-ref-hops-and-caps-win
   (support/with-database
-   (fn [connection]
-     (db/transact!
-      connection
-      [[:db/add [:seon.ns/name fixture-a]
-        :seon.ns/requires [:seon.ns/name fixture-b]]])
-     (let [database (db/db connection)
-           ctx (support/fork-cluster-ctx connection)
-           request {:seon.db/db database
-                    :seon.sci.eval/ctx ctx
-                    :seon.render.walk/lookup [:seon.ns/name fixture-a]
-                    :seon.render/output :seon.render/ai
-                    :seon.sci.admit/caps caps
-                    :seon.sci.eval/time-limit-ms 2000
-                    :seon.config/on-core-error :panic}
-           at-zero (flat-units (walk/neighborhood
-                                (assoc request :seon.render/distance 0)))
-           at-one (flat-units (walk/neighborhood
-                               (assoc request :seon.render/distance 1)))
-           capped (flat-units
-                   (walk/neighborhood
-                    (assoc request
-                           :seon.render/distance 4
-                           :seon.sci.admit/caps
-                           (assoc caps
-                                  :seon.config.eval.result/max-nodes 1))))]
-       (is (= #{[:seon.ns/name fixture-a]}
-              (set (map :seon.render.walk/lookup at-zero))))
-       (is (contains? (set (map :seon.render.walk/lookup at-one))
-                      [:seon.ns/name fixture-b]))
-       (is (= #{[:seon.ns/name fixture-a]}
-              (set (map :seon.render.walk/lookup
-                        (remove :seon.error/value capped)))))))))
+    (fn [connection]
+      (db/transact!
+        connection
+        [[:db/add [:seon.ns/name fixture-a] :seon.ns/requires [:seon.ns/name fixture-b]]])
+      (let [database (db/db connection)
+            ctx (support/fork-cluster-ctx connection)
+            request {:seon.db/db database,
+                     :seon.sci.eval/ctx ctx,
+                     :seon.render.walk/lookup [:seon.ns/name fixture-a],
+                     :seon.render/output :seon.render/ai,
+                     :seon.sci.admit/caps caps,
+                     :seon.sci.eval/time-limit-ms 2000,
+                     :seon.config/on-core-error :panic}
+            at-zero (flat-units (walk/neighborhood (assoc request :seon.render/distance 0)))
+            at-one (flat-units (walk/neighborhood (assoc request :seon.render/distance 1)))
+            capped (flat-units
+                     (walk/neighborhood
+                       (assoc
+                         request
+                         :seon.render/distance
+                         4
+                         :seon.sci.admit/caps
+                         (assoc caps :seon.config.eval.result/max-nodes 1))))]
+        (is (= #{[:seon.ns/name fixture-a]} (set (map :seon.render.walk/lookup at-zero))))
+        (is (contains? (set (map :seon.render.walk/lookup at-one)) [:seon.ns/name fixture-b]))
+        (is (= #{[:seon.ns/name fixture-a]} (set (map :seon.render.walk/lookup capped))))
+        (is
+          (=
+            :seon.db/invalid-read
+            (get-in (first capped) [:seon.error/value :seon.error/kind])))
+        (is
+          (=
+            {:datahike/budget-exceeded true,
+             :datahike.budget/name :query-work,
+             :datahike.budget/allowed 1,
+             :datahike.budget/observed 2}
+            (get-in
+              (first capped)
+              [:seon.error/value :seon.error/data :seon.db/dependency-data])))))))
 
 (deftest old-slot-and-ref-markers-are-inert-renderer-output
   (support/with-database

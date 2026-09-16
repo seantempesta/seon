@@ -339,45 +339,37 @@
    additions))
 
 (defn root-pull-plan
-  "Acquire one immutable compiled pull plan for a schema generation and fit."
+  "Acquire a compiled pull plan by its schema and selector; retain caller bounds."
   {:malli/schema [:=> [:cat :seon.render.walk/acquisition-request] :map]}
-  [{database :seon.db/db
-    caps :seon.sci.admit/caps
-    ctx :seon.sci.eval/ctx
-    :as request}]
-  (let [projection (or (:seon.schema/projection request)
-                       (db/carried-projection database)
-                       (sci.kernel/context-projection ctx)
-                       (schema/current-projection))
+  [{database :seon.db/db, caps :seon.sci.admit/caps, ctx :seon.sci.eval/ctx, :as request}]
+  (let [projection (or
+                     (:seon.schema/projection request)
+                     (db/carried-projection database)
+                     (sci.kernel/context-projection ctx)
+                     (schema/current-projection))
         distance (long (get request :seon.render/distance 1))
         selector (root-selector database distance caps)
         cache (:seon.schema.projection/compiled projection)
-        cache-key [::root-pull-plan
+        cache-key [:seon.render.walk/root-pull-plan
                    (:seon.schema.projection/fingerprint projection)
-                   (DatabaseSchemaIdentity.
-                    (:schema (db/schema-database database)))
-                   distance
-                   caps]
-        candidate
-        (delay
-          {:seon.schema.projection/fingerprint
-           (:seon.schema.projection/fingerprint projection)
-           :seon.render/distance distance
-           :seon.sci.admit/caps caps
-           :seon.render.walk/selector selector
-           :datahike.pull/plan
-           ((requiring-resolve 'datahike.pull-api/compile-pull-plan)
-            database selector)})
-        acquired
-        (if cache
-          (get (swap! cache
-                      (fn [compiled]
-                        (if (contains? compiled cache-key)
-                          compiled
-                          (assoc compiled cache-key candidate))))
-               cache-key)
-          candidate)]
-    @acquired))
+                   (DatabaseSchemaIdentity. (:schema (db/schema-database database)))
+                   selector]
+        candidate (delay
+                    {:seon.schema.projection/fingerprint
+                     (:seon.schema.projection/fingerprint projection),
+                     :seon.render.walk/selector selector,
+                     :datahike.pull/plan
+                     ((requiring-resolve 'datahike.pull-api/compile-pull-plan)
+                       database
+                       selector)})
+        acquired (if cache
+                   (get
+                     (swap!
+                       cache
+                       #(if (contains? % cache-key) % (assoc % cache-key candidate)))
+                     cache-key)
+                   candidate)]
+    (assoc @acquired :seon.render/distance distance :seon.sci.admit/caps caps)))
 
 (defn- acquire-entity
   "Reuse one entity pull only while its recorded read evidence is current."
