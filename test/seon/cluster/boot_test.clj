@@ -1137,7 +1137,28 @@
                        (is (= (:seon.source/digest fork) (beta-digest))
                            "scheduled maintenance may advance beta's branch head, never its program")
                        (is (str/includes? (definition default) "[] 2"))
-                       (is (str/includes? (definition beta) "[] 1"))))
+                       (is (str/includes? (definition beta) "[] 1"))
+                       (let [held (:seon.store/store default)
+                             source-before (source/database held (:seon.source/commit-id published))
+                             cluster-before @connection
+                             phases (atom [])]
+                         (write-value! 3)
+                         (let [next-publication
+                               (binding [cluster/*source-progress!* #(swap! phases conj %)]
+                                 (cluster/refresh-source! root [(.getCanonicalPath path)] "default"))
+                               source-after (source/database held (:seon.source/commit-id next-publication))
+                               source-datoms (filter #(> (:tx %) (:max-tx source-before))
+                                                     (d/datoms (d/history source-after) :eavt))
+                               cluster-datoms (filter #(> (:tx %) (:max-tx cluster-before))
+                                                      (d/datoms (d/history @connection) :eavt))]
+                           (is (= (:seon.source/commit-id next-publication)
+                                  (adopted connection "default")))
+                           (is (some #(str/starts-with? % "incremental scalar publication") @phases))
+                           (is (<= 1 (- (:max-tx source-after) (:max-tx source-before)) 2))
+                           (is (< (count source-datoms) 2000) (str "source datoms: " (count source-datoms)))
+                           (is (< (count cluster-datoms) 500) (str "cluster datoms: " (count cluster-datoms)))
+                           (d/release-materialized-db source-after))
+                         (d/release-materialized-db source-before))))
                    (finally (cluster/stop! beta))))
                (finally (cluster/stop! default)))))
       (finally (delete-recursively! root)))))

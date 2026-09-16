@@ -657,6 +657,29 @@
                                    final-db (:seon.test.run/id next-run))))
                 (is (empty? (scratch-branches opened)))))))))))
 
+(deftest activation-seal-preserves-unchanged-facts
+  (test-support/with-database
+    (fn [connection]
+      (let [seal #'source/activation-seal-tx
+            requested #{'seon.cluster/derive-activation}
+            initial (seal connection digest-a requested cluster/derive-activation)]
+        (when (seq initial) (test-support/transacted! connection initial))
+        (let [before @connection
+              unchanged (seal connection digest-a requested cluster/derive-activation)]
+          (is (= [] unchanged))
+          (is (= (:max-tx before) (:max-tx @connection))
+              "an unchanged seal needs no transaction")
+          (let [changed (seal connection digest-b requested cluster/derive-activation)
+                report (test-support/transacted! connection changed)
+                datoms (filter #(> (:tx %) (:max-tx before))
+                               (d/datoms (d/history @connection) :eavt))]
+            (is (seq (:tx-data report)))
+            (is (= (inc (:max-tx before)) (:max-tx @connection)))
+            (is (< (count datoms) 2000) (str "seal datoms: " (count datoms)))
+            (is (= #{digest-b}
+                   (set (db/q '[:find [?digest ...]
+                                :where [_ :seon.source/digest ?digest]] @connection))))))))))
+
 (deftest incremental-source-refresh-includes-unreported-changes
   (let [changed (deref #'cluster/changed-source-paths)
         published {"/repo/src/a.clj" "a1"
