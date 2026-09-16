@@ -20,9 +20,8 @@ The candidate observation rewrite is not retained until this boundary is fixed.
 
 The relevant owner is `src/seon/turn.clj:1036` (`schema-attribute-change-tx`),
 called by deletion `row-tx` at `:1205`. It derives a projection diff and emits
-`:db.fn/retractEntity` for removed attributes. The exact reason the deletion
-produces no effective attribute removal still requires a probe; no cause is
-inferred solely from the failing assertion. `src/seon/turn.clj` was under
+`:db.fn/retractEntity` for removed attributes. The owning-seam probe below identifies why the deletion produces no effective
+attribute removal. `src/seon/turn.clj` was under
 concurrent edits and protected during this lane.
 
 Acceptance: the same real register/unregister turn removes the unused database

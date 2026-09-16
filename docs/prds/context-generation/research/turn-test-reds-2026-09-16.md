@@ -18,7 +18,8 @@ the archived deletion record, the retained canonical-fixture issue, and the
 schema-key refinement owner-ruling issue end to end. Read the class-mining
 structural-kill table, active roadmap entry and working edge, and turn PRD
 §§13–15. Read the batch-17 cold report and pre-wave baseline comparison.
-Applied data-oriented-clojure, repl, clojure-testing and datahike skills.
+Applied data-oriented-clojure, repl, clojure-testing, datahike,
+seon-flow-architecture and llm-providers skills.
 
 The fresh canonical baseline ran all **59** tests serially through
 `seon.test/run` in default's JVM: **189 passes, 76 failures, 31 errors**;
@@ -37,13 +38,14 @@ reforked or restarted. No paid provider requests were made.
 | Cause | Tests | Disposition | Recurring regression |
 |---|---|---|---|
 | Missing deletion target passed as nil to map-only definition comparison | `ns-unmap-retracts-the-owned-function-after-the-terminal-commit`, `qualified-dynamic-ns-unmap-is-durable-in-a-fresh-context`, `absent-foreign-ns-unmap-commits-and-mutates-the-run-sci-ctx`, `runtime-tests-install-run-redefine-and-delete-exactly` | Resolved in `ecdd61ffe` at `remaining-definition-facts`; before/after proof below | First test asserts never-existing identity, live definition, and surviving tombstone; other tests retain distinct SCI/fresh-acquisition observables |
-| Removed result codec and queries that mix system reads with submitted evaluations | prose/doc, alias reading, parse namespace, contracted redefinition, mixed plan, schema unregister, import-only unmap, cross-agent live call | Seven observation candidates verified; schema-unregister residual recorded below | Ordered, author-qualified evaluation query; exact saved text and existing durable/live effects |
-| Incomplete injected installation envelope | combined evaluation | Unrepaired: fixture returns the vector from `swap!`, violating the map result contract | Must retain terminal transaction observables or identify current coverage before retiring serialization assertions |
-| Incomplete environment/config construction | acquisition ordering, function case count, refused delivery | Unrepaired | Supply canonical projection/config compiler output |
-| Retired execution/storage assumptions | returned message effects, private definition storage, old generated-turn fixtures, crash intent, prompt refusal | Unrepaired; requires individual ruled-behavior evidence before disposition | Existing current owners must provide the proof |
-| Continuation/system-read interference in injected evaluator fixtures | whole-turn fixture, runaway count, opening prompt, streaming and generated failure traces | Unrepaired | Real SCI and explicit terminal boundaries |
-| Provider reasoning retention expectation | reasoning starvation, successful usage | Unrepaired | Explicit configured retention policy |
-| Schema refinement ownership | runtime schema key changes | Unrepaired; preserve existing unresolved owner ruling | No inferred policy change |
+| Removed result codec and queries mixing system reads with submitted evaluations | Ten named tests in slice 2; schema registration in slice 4 | Resolved at the shared `agent-evaluations` observation helper, `767a4238f` plus slice 4 | Ordered, author-qualified query; exact saved shown text and existing durable/live effects |
+| Incomplete injected installation envelope | combined evaluation; whole-turn transitions; real SCI end-to-end; defn/println | Resolved in `78b7ad4fb` by real evaluation at the fixture seam | Real terminal transaction, persistent private objects, declared definitions, output, and read evidence |
+| Incomplete environment/config construction | acquisition ordering; function case count; provider retention | Resolved in `78b7ad4fb` using carried projection and canonical configuration application | Fresh acquisition resolves actual durable source and contracts; configured cases are asserted |
+| Retired reader/no-evaluation and returned-value message delivery | unreadable/prose reply; successful send; refused send | Replaced in slice 4; two redundant obsolete tests deleted | Rejected replies retain evaluation and provider evidence; immediate send survives discarded return value |
+| Stale mid-batch projection during schema deletion | runtime schema unregister | Proven production residual at protected `seon.turn/row-tx`; issue open | Existing unused-attribute removal assertion retained; complete owning-seam trace below |
+| Performance bound | delimiter repair | Semantic candidate green; 6694.698498 ms exceeds unchanged 300 ms bound; candidate not retained | Existing performance assertion retained; phase attribution required |
+| Retired private storage, generated-turn, prompt, recovery and streaming assumptions | Remaining tests listed in final census | Unrepaired within this bounded assignment; no fallback or assertion weakening | Must verify current mechanism before changing each observable |
+| Schema refinement ownership | runtime schema key changes | Existing unresolved owner ruling preserved | No inferred policy change |
 
 ## Deletion seam evidence
 
@@ -178,3 +180,29 @@ still checked from its stored provider document at this snapshot's HEAD.
 The delimiter candidate's semantic assertions passed, but its existing
 300 ms bookkeeping assertion measured **6694.698498 ms**. It is not retained or
 weakened. This performance residual remains outside the landed fixture repair.
+
+The [complete passing before-edit results](turn-test-reds-before-edit-2026-09-16.edn)
+retain every final candidate's exact run identity and counts. These precede
+their corresponding main source edits; the schema registration candidate ran
+in the prior snapshot adoption group before it was written to the main file.
+
+### Slice 4 — current rejection and message protocols
+
+Four tests pass **53 assertions / 0 failures / 0 errors** before source edits
+and after snapshot adoption `6aa9f6b4-2c5c-5fdd-a216-040762f4c6d0`. Recorded
+runs 41533–41536; [complete results](turn-test-reds-protocol-after-adoption-2026-09-16.edn).
+Unreadable and prose-only replies both record exactly one error evaluation,
+retain successful provider-attempt evidence, expose the diagnostic in history,
+and close on the following `:close` transition. The old pure-prose test claiming
+no recorded evaluation is deleted; the parameterized rejection test covers it.
+
+Message delivery is an immediate write at `my.message/send`, including inside
+`do` when its return value is discarded. The successful-send test verifies the
+message transaction precedes evaluation settlement, both message endpoints,
+the reply chain and both agents' final state. The refusal test observes the
+real typed unknown-recipient value and its saved shown text, with no message
+written. The old returned-value/deferred-delivery transaction test is deleted
+and superseded by these two current regressions. Schema registration reads
+saved shown text and checks declaration provenance separately from the global
+unique identity attribute. No reader, messaging, or schema production behavior
+was changed in this slice.

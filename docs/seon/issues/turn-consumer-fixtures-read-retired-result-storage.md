@@ -262,3 +262,13 @@ This umbrella remains open: other turn consumers and unconverted tests remain,
 and the schema-unregister observation exposes a separate
 [installed-attribute residual](runtime-schema-unregister-retains-installed-attribute.md).
 No namespace/platform cold gate is claimed by these in-process results.
+
+Further turn-test slices on 2026-09-16: `78b7ad4fb` replaces incomplete
+evaluation/configuration fixtures with real SCI and canonical constructors
+(eight tests, 69 assertions). The current rejection/message/schema observation
+slice passes four tests and 53 assertions before and after snapshot adoption.
+Two retired-mechanism tests are superseded: pure-prose/no-evaluation by the
+parameterized rejected-reply regression; deferred returned-value delivery by
+the immediate-send and typed-refusal regressions. Exact runs and final
+namespace residuals remain in the same landing note. This class stays open
+until those remaining members are repaired and the cold gate passes.

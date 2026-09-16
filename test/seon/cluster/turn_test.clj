@@ -1023,7 +1023,7 @@
                "(vector :int {:min 0 :seon.db/index true}))\n"
                "(schema/register! ::label (vector :string {:min 1}))\n"
                "(seon.run/complete \"schemas committed\")")})]
-          (drive! cluster 10)
+          (drive-agent! cluster "agent-a" 2)
           (let [db @connection
                 persistent-row
                 (db/pull db '[*] [:seon.schema/key persistent-key])
@@ -1035,7 +1035,8 @@
                        [?schema :seon.schema/key ?schema-key]
                        [?schema :seon.schema/form _ ?schema-tx]
                        [?receipt :seon.cluster.eval/ordinal 1]
-                       [?receipt :seon.cluster.eval/result-edn _ ?receipt-tx]]
+                       [?receipt :seon.eval/shown _ ?receipt-tx]
+                       [?receipt :seon.cluster.eval/author :agent]]
                      db persistent-key)]
             (is (= "[:int {:min 0, :seon.db/index true}]"
                    (:seon.schema/form persistent-row))
@@ -1045,8 +1046,14 @@
             (is (= :agent
                    (:seon.schema.admission/source persistent-row)
                    (:seon.schema.admission/source value-row)))
-            (is (not (contains? persistent-row :seon.schema/ns))
-                "schema identity is global, never namespace-owned")
+            (is (= :db.unique/identity
+                   (get-in db [:schema :seon.schema/key :db/unique]))
+                "the schema key is its global identity")
+            (is (= 'my.agents.agent-a
+                   (:seon.ns/name
+                    (db/pull db [:seon.ns/name]
+                             (:db/id (:seon.schema/ns persistent-row)))))
+                "the namespace ref records where the global declaration was authored")
             (is (= 1 (count tx-pairs)))
             (is (every? (fn [[schema-tx receipt-tx]]
                           (= schema-tx receipt-tx))
@@ -1727,192 +1734,55 @@
           (is (str/includes? (:seon.eval/shown (second evaluations)) "two widgets"))
           (is (nil? (turn/next-agent-work database (request connection)))))))))
 
-(deftest a-pure-prose-reply-refuses-and-records-no-unsettleable-form
-  (with-cluster fake-evaluate
-    (fn [cluster]
-      (let [connection (:seon.db/connection cluster)]
-        (with-redefs [ai/complete
-                      (fn [_]
-                        {:seon.ai/text
-                         "I explained the result without another form."})]
-          (drive! cluster 10)
-          (is (empty?
-               (db/q '[:find [?source ...]
-                      :where
-                      [?agent :seon.agent/id "agent-a"]
-                      [?run :seon.turn/agent ?agent]
-                      [?form :seon.cluster.eval/run ?run]
-                      [?form :seon.cluster.eval/source ?source]]
-                     @connection))
-              "prose alone never becomes a recorded form")
-          (is (= (count (db/q '[:find [?form ...]
-                               :where
-                               [?agent :seon.agent/id "agent-a"]
-                               [?run :seon.turn/agent ?agent]
-                               [?form :seon.cluster.eval/run ?run]]
-                             @connection))
-                 (count (db/q '[:find [?receipt ...]
-                               :where
-                               [?agent :seon.agent/id "agent-a"]
-                               [?run :seon.turn/agent ?agent]
-                               [?receipt :seon.cluster.eval/run ?run]]
-                             @connection)))
-              "forms and receipts agree, which is the whole invariant")
-          (let [error (db/q '[:find ?message .
-                             :where
-                             [?agent :seon.agent/id "agent-a"]
-                             [?run :seon.turn/agent ?agent]
-                             [?error :seon.error/run ?run] [?error :seon.error/message ?message]]
-                           @connection)]
-            (is (string? error) "the run records WHY it settled nothing")
-            (is (str/includes? error "prose")
-                "and names what the reply carried instead of forms"))
-          (is (some? (db/q '[:find ?closed .
-                            :where
-                            [?agent :seon.agent/id "agent-a"]
-                            [?run :seon.turn/agent ?agent]
-                            [?run :seon.turn/closed-tx ?closed]]
-                          @connection))
-              "the run still closes — loudly, with its reason recorded")
-          (let [rendered
+
+(deftest an-unreadable-reply-is-a-settled-form-with-paid-attempt-evidence
+  (doseq [[reply-text error-kind hint]
+          [["{:a 1 :b}" :seon.sci.reader/unreadable "even number"]
+           ["I explained the result without another form."
+            :seon.cluster.reply/no-forms "prose"]]]
+    (with-cluster
+      (fn [cluster]
+        (let [connection (:seon.db/connection cluster)
+              usage {"prompt_tokens" 106 "completion_tokens" 12}]
+          (with-redefs [ai/complete
+                        (fn [_] {:seon.ai/text reply-text
+                                 :seon.ai/usage usage
+                                 :seon.ai/finish-reason "stop"})]
+            (is (= [:open :call :close]
+                   (mapv :seon.turn.work/situation
+                         (drive-agent! cluster "agent-a" 3)))))
+          (let [database (db/db connection)
+                evaluations (agent-evaluations database)
+                evaluation (first evaluations)
+                turn (db/pull database '[* {:seon.turn/attempts [*]}]
+                              (:db/id (:seon.cluster.eval/run evaluation)))
+                [attempt :as attempts] (:seon.turn/attempts turn)
+                rendered
                 (transcript/render-ai
-                 {:seon.db/db @connection
+                 {:seon.db/db database
                   :seon.agent/id "agent-a"
                   :seon.sci.eval/ctx (:seon.sci.eval/ctx cluster)
                   :seon.sci.eval/time-limit-ms 2000
                   :seon.config/on-core-error :panic
                   :seon.sci.admit/caps (:seon.sci.admit/caps cluster)})]
-            (is (not (str/includes?
-                      rendered
-                      "my.agents.agent-a=> ; I explained the result"))
-                "the prose is no longer replayed as an evaluated REPL line")))))))
-
-;;; THE CLASS: a complete, paid provider reply that could not be repaired used to
-;;; close through the pre-form refusal path. The attempt survived, but the run
-;;; had zero forms and zero receipts, so neither the reply nor its correctable
-;;; reader error reached the next prompt. The unreadable branch now atomically
-;;; freezes one exact-source form and starts its receipt, then settles that
-;;; receipt through the ordinary inline/blob result projection.
-(deftest an-unreadable-reply-is-a-settled-form-with-paid-attempt-evidence
-  (with-cluster
-    (fn [cluster]
-      (let [connection (:seon.db/connection cluster)
-            reply-text "{:a 1 :b}"
-            ;; The attempt's usage participates in the prompt calibration.
-            ;; Keep this fixture representative so the assertion below tests
-            ;; unreadable-reply history rather than manufacturing a
-            ;; 0.06-characters-per-token calibration that cannot admit the
-            ;; mandatory bootstrap transcript at any render distance.
-            usage {"prompt_tokens" 106
-                   "completion_tokens" 12}
-            reports
-            (with-redefs [ai/complete
-                          (fn [_]
-                            {:seon.ai/text reply-text
-                             :seon.ai/usage usage
-                             :seon.ai/finish-reason "stop"})]
-              (drive! cluster 10))
-            run-id
-            (db/q '[:find ?run-id .
-                    :in $ ?source
-                    :where
-                    [?form :seon.cluster.eval/source ?source]
-                    [?form :seon.cluster.eval/run ?run]
-                    [?run :seon.turn/id ?run-id]]
-                  @connection reply-text)
-            receipt
-            (db/q '[:find (pull ?receipt [*]) .
-                    :in $ ?run-id
-                    :where
-                    [?run :seon.turn/id ?run-id]
-                    [?receipt :seon.cluster.eval/run ?run]]
-                  @connection run-id)
-            ;; the receipt stores the admitted projection; read the value back
-            refusal (semantic-result
-                     (:seon.cluster.eval/result-edn receipt))
-            attempt
-            (db/q '[:find (pull ?attempt [*]) .
-                    :in $ ?run-id
-                    :where
-                    [?run :seon.turn/id ?run-id]
-                    [?run :seon.turn/attempts ?attempt]]
-                  @connection run-id)]
-        (testing "the unreadable outcome is one form with one receipt"
-          (is (= [:open :call]
-                 (vec (take 2 (mapv :seon.turn.work/situation reports))))
-              "the batched turn closes the run in its own step after the
-               single settlement transaction")
-          (is (= 1
-                 (db/q '[:find (count ?form) .
-                         :in $ ?run-id
-                         :where
-                         [?run :seon.turn/id ?run-id]
-                         [?form :seon.cluster.eval/run ?run]]
-                       @connection run-id)))
-          (is (= 1
-                 (db/q '[:find (count ?receipt) .
-                         :in $ ?run-id
-                         :where
-                         [?run :seon.turn/id ?run-id]
-                         [?receipt :seon.cluster.eval/run ?run]]
-                       @connection run-id)))
-          (is (some? (db/q '[:find ?closed .
-                            :in $ ?run-id
-                            :where
-                            [?run :seon.turn/id ?run-id]
-                            [?run :seon.turn/closed-tx ?closed]]
-                          @connection run-id))))
-        (testing "the receipt is the typed refusal and retains exact source"
-          (is (= :seon.sci.reader/unreadable
-                 (:seon.error/kind receipt)))
-          (is (string? (:seon.cluster.eval/error receipt)))
-          (is (true? (:seon.sci.reader/unreadable refusal)))
-          (is (= reply-text
-                 (get-in refusal
-                         [:seon.error/data :seon.sci.reader/text])))
-          (is (= :odd-map
-                 (get-in refusal
-                         [:seon.error/data :seon.sci.reader/error-kind])))
-          (is (= :seon.sci.reader/unreadable
-                 (db/q '[:find ?kind .
-                         :in $ ?run-id
-                         :where
-                         [?run :seon.turn/id ?run-id]
-                         [?form :seon.cluster.eval/run ?run]
-                         [?receipt :seon.cluster.eval/run ?run]
-                         [?receipt :seon.error/kind ?kind]]
-                       @connection run-id))
-              "the run is distinguishable by its own form/receipt facts"))
-        (testing "the already-paid provider attempt remains queryable"
-          (is (= usage
-                 (edn/read-string (:seon.ai.attempt/usage-edn attempt))))
-          (is (= "stop" (:seon.ai.attempt/finish-reason attempt)))
-          (is (not (contains? attempt :seon.ai.attempt/error))
-              "the provider succeeded; reading its complete text failed"))
-        (testing "the next prompt renders both correction inputs"
-          (db/transact!
-           connection
-           {:tx-data [{:seon.turn/id "run-after-unreadable" :seon.turn/agent [:seon.agent/id "agent-a"] :seon.turn/trigger [:seon.message/id "m-1"] :seon.turn/opened-tx "datomic.tx"}
-                      {:seon.agent/id "agent-a"
-                       }]})
-          (let [next-prompt
-                (:seon.cluster.prompt/text
-                 (prompt/prompt
-                  @connection
-                  {:seon.turn/id "run-after-unreadable"
-                   :seon.agent/id "agent-a"
-                   :seon.db/connection connection
-                   :seon.sci.admit/caps (:seon.sci.admit/caps cluster)
-                   :seon.sci.eval/ctx (:seon.sci.eval/ctx cluster)
-                   :seon.sci.eval/time-limit-ms 2000
-                   :seon.config/on-core-error :panic
-                   :seon.render/context-channel
-                   (:seon.render/context-channel cluster)}))]
-            (is (str/includes? next-prompt reply-text))
-            (is (str/includes? next-prompt
-                               (:seon.cluster.eval/error receipt))
-                "the agent sees the reader's own message for the form it
-                 could not repair (ruling 68: errors only when unrepairable)")))))))
+            (is (= 1 (count evaluations))
+                "every rejected reply leaves one terminal evaluation")
+            (is (= reply-text (:seon.cluster.eval/source evaluation)))
+            (is (= error-kind (:seon.error/kind evaluation)))
+            (is (str/includes? (:seon.cluster.eval/error evaluation) hint))
+            (is (str/includes? (:seon.eval/shown evaluation)
+                               (:seon.cluster.eval/error evaluation)))
+            (is (some? (:seon.turn/closed-tx turn)))
+            (is (= 1 (count attempts)))
+            (is (= usage (edn/read-string (:seon.ai.attempt/usage-edn attempt))))
+            (is (= "stop" (:seon.ai.attempt/finish-reason attempt)))
+            (is (not (contains? attempt :seon.ai.attempt/error))
+                "the provider succeeded; interpreting its reply failed")
+            (is (empty? (db/q '[:find ?error :where [?error :seon.error/id _]] database))
+                "an agent reader error is not a core fault")
+            (is (str/includes? rendered reply-text))
+            (is (str/includes? rendered (:seon.cluster.eval/error evaluation))
+                "the saved diagnostic reaches the agent history for correction")))))))
 
 (deftest a-completing-disposition-closes-in-the-terminal-transaction
   (with-cluster fake-evaluate
@@ -2613,162 +2483,78 @@
 ;;; ---------------------------------------------------------------------------
 
 (deftest a-turn-delivers-what-a-form-asks-to-send-and-still-finishes
-  ;; THE COMPOSITION QUESTION, answered by the fold rather than by a
-  ;; rule: a turn sends in one form and completes in another, because
-  ;; the loop reads EVERY form's value, not only the last.
   (with-cluster
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
             requests (atom [])]
-        (db/transact! connection [(agent-row "agent-b")])
-        ;; ONE ordered provider stub, two agents. Agent identity is a
-        ;; database fact, not stable prompt prose; render changes must not
-        ;; silently turn this into a prompt-format test.
+        (is (some? (:db-after (db/transact! connection [(agent-row "agent-b")]))))
         (with-redefs [ai/complete
                       (recording-completer
                        requests
                        [{:seon.ai/text
-                         (str "(seon.cluster.message/send \"agent-b\" "
-                              "\"please count the widgets\")\n"
+                         (str "(do (my.message/send {:my.message/to \"agent-b\" "
+                              ":my.message/content \"please count the widgets\"}) :sent)\n"
                               "(seon.run/complete \"asked agent-b\")")}
                         {:seon.ai/text
                          "(seon.run/complete \"there are three widgets\")"}
                         {:seon.ai/text
                          "(seon.run/complete \"accepted agent-b's answer\")"}])]
-          (drive! cluster 10)
-          (is (= 3 (count @requests))
-              "the outside, delegate, and reply triggers each make one call")
-          (testing "the message is a durable fact addressed to the peer —
-                    and the peer's completion answers back, derived from
-                    the trigger rather than remembered by the delegate"
-            (is (= #{["please count the widgets" "agent-b" "agent-a"]
-                     ["there are three widgets" "agent-a" "agent-b"]}
-                   (set (db/q '[:find ?content ?to-id ?from-id
-                               :where
-                               [?m :seon.message/content ?content]
-                               [?m :seon.message/to ?to]
-                               [?to :seon.agent/id ?to-id]
-                               [?m :seon.message/from ?from]
-                               [?from :seon.agent/id ?from-id]]
-                             @connection)))))
-          (testing "the run still completed — sending is not finishing"
-            (is (some? (db/q '[:find ?c . :where
-                              [_ :seon.turn/closed-tx ?c]]
-                            @connection))))
-          (testing "message and receipt rode ONE transaction"
-            ;; asked from the MESSAGE's transaction rather than by
-            ;; joining runs: agent-a has two runs by the time the
-            ;; delegate has answered, and a join on "a done receipt at
-            ;; ordinal 0" matches both of them.
-            (let [message-tx
-                  (db/q '[:find ?mtx . :where
-                         [?m :seon.message/content
-                          "please count the widgets" ?mtx]]
-                       @connection)]
-              (is (= [0 1]
-                     (db/q '[:find [?ordinal ...]
-                            :in $ ?tx
-                            :where
-                            [?r :seon.cluster.eval/result-edn _ ?tx]
-                            [?r :seon.cluster.eval/ordinal ?ordinal]]
-                          @connection message-tx))
-                  "the message and every receipt rode the one turn settlement
-                   transaction — no per-form durability window remains")))
-          (testing "and that transaction names the trigger it answers"
-            (is (= 1 (message/chain-depth
-                      @connection
-                      (db/q '[:find ?id . :where
-                             [?m :seon.message/content
-                              "please count the widgets"]
-                             [?m :seon.message/id ?id]]
-                           @connection)))
-                "the conversation's depth is walkable from committed refs
-                 alone — no hop counter anywhere")))))))
-
-(deftest delivery-rows-and-refusal-facts-share-the-terminal-transaction
-  ;; Characterization before delivery-rows extraction: one delivery result can
-  ;; contain both rails, and neither may be lost when their tx-data is named.
-  (with-cluster fake-evaluate
-    (fn [cluster]
-      (let [connection (:seon.db/connection cluster)
-            asked [(seon.cluster.message/send "agent-b" "delivered together")
-                   (seon.cluster.message/send "missing-agent" "refused together")]]
-        (db/transact! connection [(agent-row "agent-b")])
-        (with-redefs [ai/complete
-                      (fn [_]
-                        {:seon.ai/text "[:delivery-characterization]"})]
-          (with-redefs [injected-evaluation {:seon.sci.admit/value asked
-                                  :seon.cluster.eval/result-edn
-                                  (pr-str asked)}]
-            (is (= [:open :call]
-                   (mapv :seon.turn.work/situation
-                         (drive-agent! cluster "agent-a" 10))))
-            (let [terminal-txs
-                  (db/q '[:find [?tx ...]
-                         :where
-                         [?receipt :seon.cluster.eval/result-edn _ ?tx]
-                         [?message :seon.message/content
-                          "delivered together" ?tx]
-                         [?error :seon.error/kind
-                          :seon.message/unknown-recipient ?tx]]
-                       @connection)]
-              (is (= 1 (count terminal-txs))
-                  "the delivered row, refusal fact, and receipt commit together")
-              (is (= "agent-b"
-                     (db/q '[:find ?id .
-                            :where
-                            [?message :seon.message/content
-                             "delivered together"]
-                            [?message :seon.message/to ?agent]
-                            [?agent :seon.agent/id ?id]]
-                          @connection)))
-              (is (= "missing-agent"
-                     (get-in
-                      (semantic-result
-                       (db/q '[:find ?data .
+          (drive! cluster 10))
+        (let [database (db/db connection)
+              [message-id message-tx]
+              (db/q '[:find [?id ?tx]
+                      :where
+                      [?message :seon.message/content "please count the widgets" ?tx]
+                      [?message :seon.message/id ?id]] database)
+              settlement-tx
+              (db/q '[:find ?tx .
+                      :where
+                      [?evaluation :seon.cluster.eval/author :agent]
+                      [?evaluation :seon.eval/shown ":sent" ?tx]] database)]
+          (is (= 3 (count @requests)))
+          (is (= #{["please count the widgets" "agent-b" "agent-a"]
+                   ["there are three widgets" "agent-a" "agent-b"]}
+                 (set (db/q '[:find ?content ?to-id ?from-id
                               :where
-                              [?error :seon.error/kind
-                               :seon.message/unknown-recipient]
-                              [?error :seon.error/data-edn ?data]]
-                            @connection))
-                      [:seon.error/data :my.message/to]))))))))))
+                              [?message :seon.message/content ?content]
+                              [?message :seon.message/to ?to]
+                              [?to :seon.agent/id ?to-id]
+                              [?message :seon.message/from ?from]
+                              [?from :seon.agent/id ?from-id]] database))))
+          (is (int? message-tx))
+          (is (int? settlement-tx))
+          (is (< message-tx settlement-tx)
+              "send writes even when its return value is discarded inside do")
+          (is (= 1 (message/chain-depth database message-id)))
+          (is (nil? (turn/next-agent-work database (request connection "agent-a"))))
+          (is (nil? (turn/next-agent-work database (request connection "agent-b")))))))))
+
 
 (deftest a-refused-delivery-becomes-a-durable-error-fact
-  ;; The bound itself is proven exhaustively in the messaging suite's
-  ;; ping-pong simulation. What this proves is the SEAM: a refusal the
-  ;; delivery rule returns as a value reaches the error recorder and
-  ;; commits, rather than evaporating in the fold — the D3 lesson
-  ;; applied to the new value family. The dial is set to a value the
-  ;; schema calls invalid on purpose, because fail-closed is the
-  ;; behaviour under a misconfigured bound and it is the one refusal a
-  ;; single turn can reach.
   (with-cluster
     (fn [cluster]
-      (let [cluster (assoc cluster
-                           ;; nothing may be delivered at all
-                           :seon.config.message/max-chain 0)
-            connection (:seon.db/connection cluster)]
-        (db/transact! connection [(agent-row "agent-b")])
+      (let [connection (:seon.db/connection cluster)
+            source "(my.message/send {:my.message/to \"missing-agent\" :my.message/content \"hi\"})"
+            evaluate sci.eval/evaluate
+            actual-value (atom nil)]
         (with-redefs [ai/complete
                       (fn [_] {:seon.ai/text
-                               (str "(seon.cluster.message/send \"agent-b\" \"hi\")\n"
-                                    "(seon.run/complete \"tried\")")})]
-          (drive! cluster 10)
-          (is (empty? (db/q '[:find ?c :where
-                             [?m :seon.message/content ?c]
-                             [?m :seon.message/from _]]
-                           @connection))
-              "nothing was delivered")
-          (is (= #{:seon.message/no-limit}
-                 (set (db/q '[:find [?kind ...] :where
-                             [?e :seon.error/kind ?kind]]
-                           @connection)))
-              "and the refusal is a durable error fact with its own kind"))))))
-
-;;; ---------------------------------------------------------------------------
-;;; Custody precedes work — the surviving live-holder interleaving
-;;; (custody-revision-contracts-2026-07-28; probe P2)
-;;; ---------------------------------------------------------------------------
+                               (str source "\n(seon.run/complete \"tried\")")})
+                      sci.eval/evaluate
+                      (fn [request]
+                        (let [result (evaluate request)]
+                          (when (= source (:seon.cluster.eval/source request))
+                            (reset! actual-value (:seon.sci.admit/value result)))
+                          result))]
+          (drive-agent! cluster "agent-a" 2))
+        (let [database (db/db connection)
+              evaluations (agent-evaluations database)]
+          (is (= :seon.message/unknown-recipient (:seon.error/kind @actual-value)))
+          (is (= 2 (count evaluations)))
+          (is (str/includes? (:seon.eval/shown (first evaluations)) "missing-agent"))
+          (is (str/includes? (:seon.eval/shown (first evaluations)) "unknown-recipient"))
+          (is (empty? (db/q '[:find ?message :where [?message :seon.message/from _]] database)))
+          (is (nil? (turn/next-agent-work database (request connection)))))))))
 
 (deftest a-held-runs-paid-call-is-never-duplicated
   ;; P2, the lapsed-lease re-pay cycle, re-expressed as CUSTODY

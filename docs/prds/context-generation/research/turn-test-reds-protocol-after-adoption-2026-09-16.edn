@@ -1,0 +1,6 @@
+[
+#:seon.test{:fail-count 0, :pass-count 6, :run-at #inst "2026-09-16T01:55:31.870-00:00", :run #:db{:id 41535}, :run-basis-t 536871191, :error-count 0, :sym "seon.cluster.turn-test/a-refused-delivery-becomes-a-durable-error-fact"}
+#:seon.test{:fail-count 0, :pass-count 9, :run-at #inst "2026-09-16T01:55:24.148-00:00", :run #:db{:id 41534}, :run-basis-t 536871190, :error-count 0, :sym "seon.cluster.turn-test/a-turn-delivers-what-a-form-asks-to-send-and-still-finishes"}
+#:seon.test{:fail-count 0, :pass-count 28, :run-at #inst "2026-09-16T01:55:16.164-00:00", :run #:db{:id 41533}, :run-basis-t 536871189, :error-count 0, :sym "seon.cluster.turn-test/an-unreadable-reply-is-a-settled-form-with-paid-attempt-evidence"}
+#:seon.test{:fail-count 0, :pass-count 10, :run-at #inst "2026-09-16T01:55:37.703-00:00", :run #:db{:id 41536}, :run-basis-t 536871192, :error-count 0, :sym "seon.cluster.turn-test/runtime-schema-registration-commits-the-evaluated-form-and-attribute"}
+]
