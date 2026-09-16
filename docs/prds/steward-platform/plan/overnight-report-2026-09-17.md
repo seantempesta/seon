@@ -15,6 +15,18 @@ peer session (batches 30–57; ledger
 
 ## Broken first
 
+0. **A platform-tier gate wiped the checkout's store (11:17Z local 04:17).**
+   `data/store` (3.6 GB, the live default) became empty while a cold gate's
+   PLATFORM tier ran `seon.cluster.registry-test/reset-returns-a-cluster-to-source-state`
+   one minute earlier; the strong hypothesis is a fixture resolving its
+   root to the checkout instead of its isolated run root. Recovered by a
+   fourth refork (the day's recorded test results on default are lost;
+   data is disposable by ruling). ALL gates with the platform tier or
+   registry-test are HELD until the peer's read-only investigation names
+   the root resolution. Issue: `a-platform-tier-test-wiped-the-checkouts-store`
+   (blocker). Fix shape: root from the handed operator root, never cwd; a
+   sentinel regression; no destructive drill in the platform tier.
+
 1. **The store grows without collection.** `data/store` went 107 MB → 12 GB in
    eight hours with no periodic writer. The peer's measurement
    ([write-latency-vs-store-size](../../context-generation/research/write-latency-vs-store-size-2026-09-17.md))
