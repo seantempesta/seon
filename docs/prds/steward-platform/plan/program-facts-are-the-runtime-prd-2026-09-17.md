@@ -32,6 +32,27 @@ mechanism).
 
 ---
 
+
+## 0a. The mission this PRD serves (owner, 2026-09-16, verbatim intent)
+
+"The goal of Seon is to become the best software generation platform ever to
+exist and we are going to do it by designing a programming environment that
+is AI first, not human first. Fuck editing files and compiling code. The
+entire program graph is in the database and it's queryable and we know every
+function and call edge and what each input and output is and what tests
+exist and on and on. We need to leverage this to make it easy to refactor and
+impossible to cause certain software failures (like removing a function
+that's still in use, or allowing a function to be used if it's violating the
+schemas). Help me find all of these connections and make them unbreakable
+AND easy to teach agents how to refactor with the data."
+
+Every ruling below is a special case of this: a connection the graph knows
+is a connection the writer refuses to sever, and the refusal hands back the
+affected set, which is the data an agent refactors from. The inventory of
+those connections is
+[unbreakable-connections-2026-09-16.md](../research/unbreakable-connections-2026-09-16.md)
+(in progress).
+
 ## 1. The rulings (owner, 2026-09-17, in his words where they were words)
 
 R1. Agents author the shared cluster environment with pure Clojure forms,
