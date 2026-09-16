@@ -579,21 +579,8 @@
     (+ (System/nanoTime) (* 1000000 limit))))
 
 (def issue-done-query
-  "A nonempty issue test set is complete only on current verified run evidence."
-  '[:find ?subject . :in $ ?input :where
-    [(identity ?input) ?subject]
-    [?subject :seon.issue/id]
-    [?subject :seon.issue/tests _]
-    (not-join [?subject]
-      [?subject :seon.issue/tests ?test]
-      (not-join [?test]
-        [?test :seon.test/sym ?symbol]
-        [?test :seon.test/pass-count ?passes]
-        [(pos? ?passes)]
-        [?test :seon.test/fail-count 0]
-        [?test :seon.test/error-count 0]
-        [(seon.test/verified? $ ?symbol) ?verified]
-        [(true? ?verified)]))])
+  "The issue owner's completion query, shared with issue assignment."
+  @(requiring-resolve 'seon.issue/done-query))
 
 (defn- stale-issue-tests
   "The agent's open-issue tests whose reach closure changed or that never ran.
@@ -738,12 +725,13 @@
       []
       (let [deadline (query-deadline database agent-id)
             plan-entity (plan-eid database (agent-eid database agent-id))]
-        (into []
+        (conj (into []
               (mapcat (fn [eid]
                         (let [step (db/pull database step-selector eid)]
                           (when (query-satisfied? (done-query-result database step deadline))
                             (completion-tx database plan-entity eid)))))
-              steps)))))
+              steps)
+              [:db.fn/call (requiring-resolve 'seon.issue/exhaust-tx) agent-id])))))
 
 (defn- complete-step-call
   [database request]

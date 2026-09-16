@@ -1,5 +1,7 @@
 (ns seon.issue-settlement-test
   (:require [clojure.test :refer [deftest is]]
+            [clojure.string :as str]
+            [seon.eval]
             [clojure.core.async :as async]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
@@ -46,6 +48,9 @@
   (support/with-database
    (fn [connection]
      (support/seed-cluster! connection "issue-settlement")
+     (support/transacted! connection
+                          (agent/creation-tx {:seon.agent/id "root" :seon.ns/name 'my.agents.root
+                                              :seon.cluster/name "issue-settlement"}))
      (let [aid "issue-settlement-worker"
            namespace-name 'my.agents.issue-settlement
            test-symbol "my.agents.issue-settlement/success-test"
@@ -53,11 +58,13 @@
            _ (support/transacted! connection
                      (agent/creation-tx {:seon.agent/id aid :seon.ns/name namespace-name
                                          :seon.cluster/name "issue-settlement"}))
+           _ (support/transacted! connection
+                                 [{:seon.agent/id aid :seon.agent/settings
+                                   {:seon.config.run/max-episode-runs 2}}])
            ctx (support/fork-cluster-ctx connection)
            handle (support/cluster-handle
                    {:seon.db/connection connection :seon.cluster/name "issue-settlement"
                     :seon.sci.eval/ctx ctx :seon.db.process/id cluster/boot-process-identity})
-           routing (agent/routing)
            evidence (fn [test-symbol]
                       (db/pull (db/db connection)
                         '[:seon.test/pass-count :seon.test/fail-count :seon.test/error-count
@@ -78,18 +85,22 @@
                              (db/pull (db/db connection) [:seon.turn/closed-tx]
                                       [:seon.turn/id tid]))))
            ;; The ordinary close is the settlement under test, so the fixture
-           ;; drives the real turn transitions rather than a stand-in: submit
-           ;; a reply through the durable source path, then advance that
+           ;; drives the real turn transitions: open an ordinary turn, accept
+           ;; its virtual reply in the next transaction, then advance that
            ;; turn's own work until it carries a closed-tx. The pass bound is
            ;; LOUD — a turn that never closes names itself instead of hanging.
            close-ordinary-turn!
            (fn []
-             (let [submitted (turn/virtual-turn!
-                              {:seon.turn.loop/cluster handle :seon.agent/id aid
-                               :seon.agent/routing routing
-                               :seon.cluster.reply/text
-                               "(my.turn/complete {:my.turn/result \"settled\"})"})
-                   tid (:seon.turn/id submitted)]
+             (let [_ (when-not (turn/open-for-agent (db/db connection) [:seon.agent/id aid])
+                       (let [work (turn/next-agent-work (db/db connection) {:seon.agent/id aid})]
+                         (is (= :open (:seon.turn.work/situation work)) (pr-str work))
+                         (turn/turn {:seon.turn.loop/cluster handle :seon.turn.work/next work}
+                                    (java.util.Date.))))
+                   tid (turn/open-for-agent (db/db connection) [:seon.agent/id aid])
+                   submitted (support/transacted! connection
+                               (turn/plan-tx {:seon.turn/id tid
+                                              :seon.turn/reply "(+ 20 22)" :seon.turn/reply-size 9
+                                              :seon.turn/sources [{:seon.cluster.eval/source "(+ 20 22)"}]}))]
                (is (string? tid) (pr-str submitted))
                (loop [pass 0]
                  (cond
@@ -123,7 +134,7 @@
                  :seon.issue/title "Settle from test evidence"
                  :seon.issue/status :open :seon.issue/severity :cleanup
                  :seon.issue/problem "The SCI answer must be one."
-                 :seon.issue/agent [:seon.agent/id aid]
+                 :seon.issue/agent [:seon.agent/id aid] :seon.issue/budget 2
                  :seon.issue/tests #{[:seon.test/sym test-symbol]
                                      [:seon.test/sym steady-symbol]}}
                 {:seon.agent/id aid
@@ -148,6 +159,14 @@
                steady (evidence steady-symbol)
                red-run (run-id test-symbol)
                steady-run (run-id steady-symbol)]
+           (is (= :open (:seon.turn.work/situation
+                         (turn/next-agent-work (db/db connection) {:seon.agent/id aid}))))
+           (let [shown (:seon.eval/shown
+                        (last (filter #(str/includes? (:seon.cluster.eval/source % "") "my.issue/status")
+                                      (seon.eval/of-agent (db/db connection) aid))))]
+             (println {:seon.test/issue-status :failed :seon.eval/shown shown})
+             (is (str/includes? shown test-symbol) shown)
+             (is (str/includes? shown (:seon.test/failure-message red)) shown))
            (is (= 1 (:seon.test/fail-count red)) (pr-str red))
            (is (string? red-run))
            (is (string? (:seon.test/reach-digest red)))
@@ -159,6 +178,28 @@
            (is (= red-run (run-id test-symbol)))
            (is (= steady-run (run-id steady-symbol)))
            (is (nil? (:my.plan.item/completed-tx (step))))
+           (is (some? (:seon.issue/budget-exhausted-tx
+                        (db/pull (db/db connection) [:seon.issue/budget-exhausted-tx] issue-ref))))
+           (is (nil? (turn/next-agent-work (db/db connection) {:seon.agent/id aid})))
+           (let [status-count (fn []
+                                (count (filter #(str/includes? (:seon.cluster.eval/source % "") "my.issue/status")
+                                               (seon.eval/of-agent (db/db connection) aid))))
+                 before (status-count)]
+             (system-settle)
+             (is (= before (status-count)) "An unchanged system pass appends no second issue status."))
+           (let [messages (db/q '[:find [?text ...] :in $ ?aid :where
+                                   [?agent :seon.agent/id ?aid]
+                                   [?message :seon.message/from ?agent]
+                                   [?root :seon.agent/id "root"]
+                                   [?message :seon.message/to ?root]
+                                   [?message :seon.message/content ?text]] (db/db connection) aid)]
+             (is (= 1 (count messages)) (pr-str messages))
+             (is (str/includes? (first messages) "after 2 provider turns")))
+           (let [resumed (seon.issue/start! {:seon.db/connection connection
+                                           :seon.issue/id "settlement-fixture" :seon.issue/budget 4})]
+             (is (nil? (:seon.error/kind resumed)) (pr-str resumed))
+             (is (= aid (get-in resumed [:seon.issue/agent :seon.agent/id])))
+             (is (= 2 (turn/turns-left (db/db connection) aid))))
            ;; Editing one reached function makes exactly its test stale.
            (admit! connection ctx namespace-name
                    "(defn answer {:malli/schema [:=> [:cat] :int]} [] (throw (ex-info \"red\" {})))")
@@ -197,7 +238,13 @@
              (is (= steady-run (run-id steady-symbol)))
              (is (true? (tests/verified? (db/db connection) steady-symbol)))
              (is (some? completed))
-             (is (= completed resolved))))
+             (is (= completed resolved))
+             (let [shown (:seon.eval/shown
+                          (last (filter #(str/includes? (:seon.cluster.eval/source % "") "my.issue/status")
+                                        (seon.eval/of-agent (db/db connection) aid))))]
+               (println {:seon.test/issue-status :passed :seon.eval/shown shown})
+               (is (str/includes? shown (str test-symbol ": passed")) shown)
+               (is (str/includes? shown "resolved") shown))))
          (finally
            (doseq [k [:seon.cluster.wake/channel :seon.render/context-channel
                       :seon.turn.loop/completion]]

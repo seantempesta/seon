@@ -2113,6 +2113,16 @@
                                                 :seon.cluster.eval/ordinal)
                                           (vals latest))))))))
 
+(defn- issue-status-read? [database source]
+  (try
+    (let [form (edn/read-string (:seon.cluster.eval/source source))
+          issue-id (when (= 'my.issue/status (first form))
+                     (:seon.issue/id (second form)))]
+      (boolean (and issue-id
+                    (:seon.issue/agent
+                     (db/pull database [:seon.issue/agent] [:seon.issue/id issue-id])))))
+    (catch Exception _ false)))
+
 (defn- generated-read-fault [database source evaluation]
   (let [inert (wake/inert-attributes database)
         evidence (:seon.cluster.eval/read-evidence evaluation)
@@ -2150,7 +2160,7 @@
                                     (when-not (= :all attributes)
                                       (filter inert attributes)))))
                         evidence)]
-    (when (seq offending)
+    (when (and (seq offending) (not (issue-status-read? database source)))
       (error/diagnostic
        {:seon.error/kind ::generated-read-depends-on-turns
         :seon.error/message "A generated context read depends on the agent's own turn-taking."
@@ -2272,7 +2282,8 @@
                                   selected previews)
                   evaluated
                   (mapv (fn [source item]
-                          (if-let [previous (get latest (source-key source))]
+                          (if-let [previous (when-not (issue-status-read? database source)
+                                              (get latest (source-key source)))]
                             (let [evaluation (:seon.sci.eval/evaluation item)
                                   changed (db/diff
                                            {:seon.db.diff/before (:seon.repl/shown-value previous)
@@ -2726,45 +2737,50 @@
     0))
 
 (defn episode-runs
-  "The agent's ordinary turns taken since its latest outside wake.
-
-  Count turns with a provider attempt or a reply accepted after opening.
-  Generated openings and system replies frozen with their identity do not
-  consume this bound. An open turn alone is not a provider attempt.
-
-  DERIVED FROM `:t` AND NOTHING ELSE. Datahike stamps every datom with
-  its transaction, so a turn's own identity datom carries the basis it
-  projected from and a wake carries the moment it arrived. The count is
-  the turns whose own `:t` is at or after the anchor `outside-wake-t`
-  returns — no stored counter, no episode entity, and no reset code,
-  because an outside wake arriving IS the reset.
-
-  Measured at 0.115 ms against 0.134 ms for the run-trigger derivation
-  it replaces, same answer (prototype claim 4). The anchor moved: this
-  refills the bound the moment an outside wake ARRIVES, where the trigger
-  derivation refilled when one was ANSWERED."
+  "Count ordinary turns since issue assignment, or the latest outside wake.
+  Provider attempts and replies accepted after opening consume the bound.
+  An issue also spends a turn when an ordinary call closes before a provider
+  attempt. Generated openings and same-transaction system turns remain free.
+  Issue budgets are total across resumes; messages do not refill them."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        :seon.agent/id]
                   :seon.turn.work/episode-runs]}
   [db agent-id]
-  (or (db/q '[:find (count ?run) .
-              :in $ ?agent-id ?since
-              :where
-              [?agent :seon.agent/id ?agent-id]
-              [?run :seon.turn/agent ?agent]
-              [?run :seon.turn/id _ ?tx]
-              [(>= ?tx ?since)]
-              (or-join [?run ?tx]
-                [?run :seon.turn/attempts _]
-                (and [?run :seon.turn/reply-size _ ?reply-tx]
-                     [(> ?reply-tx ?tx)]))]
-            db agent-id (outside-wake-t db agent-id))
-      0))
+  (let [issue-t (db/q '[:find ?t . :in $ ?agent-id :where
+                         [?agent :seon.agent/id ?agent-id]
+                         [?issue :seon.issue/agent ?agent ?t]] db agent-id)
+        since (or issue-t (outside-wake-t db agent-id))
+        replies (db/q '[:find [?run ...] :in $ ?agent-id ?since :where
+                         [?agent :seon.agent/id ?agent-id]
+                         [?run :seon.turn/agent ?agent]
+                         [?run :seon.turn/id _ ?tx]
+                         [(>= ?tx ?since)]
+                         (or-join [?run ?tx]
+                           [?run :seon.turn/attempts _]
+                           (and [?run :seon.turn/reply-size _ ?reply-tx]
+                                [(> ?reply-tx ?tx)]))] db agent-id since)
+        closed (if issue-t
+                 (db/q '[:find [?run ...] :in $ ?agent-id ?since :where
+                          [?agent :seon.agent/id ?agent-id]
+                          [?run :seon.turn/agent ?agent]
+                          [?run :seon.turn/id _ ?tx]
+                          [(>= ?tx ?since)]
+                          [?run :seon.turn.work/situation :call]
+                          [?run :seon.turn/closed-tx ?closed]
+                          [(> ?closed ?tx)]] db agent-id since)
+                 [])]
+    (doseq [result [issue-t replies closed]]
+      (when (:seon.error/kind result)
+        (throw (ex-info (:seon.error/message result) result))))
+    (count (into (set replies) closed))))
 
 (defn- max-episode-runs
-  "Read the agent override, otherwise the branch's config singleton."
+  "Read the issue budget, otherwise the agent override or cluster default."
   [database agent-id]
-  (or (:seon.config.run/max-episode-runs (ai/agent-overlay database agent-id))
+  (or (db/q '[:find ?budget . :in $ ?id :where
+               [?agent :seon.agent/id ?id] [?issue :seon.issue/agent ?agent]
+               [?issue :seon.issue/budget ?budget]] database agent-id)
+      (:seon.config.run/max-episode-runs (ai/agent-overlay database agent-id))
       (db/q '[:find ?value .
               :where [?config :seon.config/cluster _]
                      [?config :seon.config.run/max-episode-runs ?value]]
@@ -2899,7 +2915,11 @@
                   [:maybe :seon.turn.work/next]]}
   [db {:keys [:seon.agent/id]}]
   (let [agent-id id
-        run (agent-run db agent-id)]
+        run (agent-run db agent-id)
+        issue (db/q '[:find (pull ?issue [:seon.issue/id :seon.issue/resolved-tx
+                                         :seon.issue/budget-exhausted-tx]) .
+                      :in $ ?agent-id :where [?agent :seon.agent/id ?agent-id]
+                      [?issue :seon.issue/agent ?agent]] db agent-id)]
     (cond
       ;; an open turn outranks any trigger: finishing what
       ;; is started is what makes the busy fence mean anything
@@ -2917,6 +2937,12 @@
          :seon.agent/id agent-id}
 
         :else nil)
+
+      issue
+      (when (and (not (:seon.issue/resolved-tx issue))
+                 (not (:seon.issue/budget-exhausted-tx issue))
+                 (pos? (turns-left db agent-id)))
+        {:seon.turn.work/situation :open :seon.agent/id agent-id})
 
       :else
       ;; ONE TURN FOR EVERY UNANSWERED WAKE. The turn's own transaction
@@ -4989,12 +5015,24 @@
                (let [request (update request :seon.turn.loop/cluster merge
                                      (ai/agent-overlay
                                       (db/db (:seon.db/connection cluster)) agent-id))]
-                 (case (:seon.turn.work/situation work)
-                   :open (open-turn request)
-                   :call (call-turn request)
-                   :generate (generate-turn request)
-                   :resume (resume-turn request)
-                   :close (close-turn request))))]
+                 (let [result (case (:seon.turn.work/situation work)
+                                :open (open-turn request)
+                                :call (call-turn request)
+                                :generate (generate-turn request)
+                                :resume (resume-turn request)
+                                :close (close-turn request))]
+                   (if (and (= :closed (:seon.turn.loop/outcome result))
+                              (not= :generate (:seon.turn.work/situation work))
+                              (db/q '[:find ?issue . :in $ ?id :where
+                                      [?agent :seon.agent/id ?id]
+                                      [?issue :seon.issue/agent ?agent]]
+                                    (db/db (:seon.db/connection cluster)) agent-id))
+                     (let [refreshed (system-turn {:seon.turn.loop/cluster cluster
+                                                  :seon.agent/id agent-id :seon.turn/write? true})]
+                       (if (:seon.error/kind refreshed)
+                         (report :error 0 refreshed)
+                         result))
+                     result))))]
     (if-let [projection-state (:seon.sci.eval/projection-state cluster)]
       (schema/call-with-projection-state projection-state pass)
       (pass))))

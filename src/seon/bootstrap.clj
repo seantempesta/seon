@@ -33,6 +33,9 @@
                 :where [?agent :seon.agent/id ?id]
                        [?agent :seon.agent/namespace ?namespace]
                        [?namespace :seon.ns/name ?name]] database agent-id)
+        issue? (some? (db/q '[:find ?issue . :in $ ?id :where
+                              [?agent :seon.agent/id ?id]
+                              [?issue :seon.issue/agent ?agent]] database agent-id))
         tools
         (db/q '[:find [?name ...]
                 :in $ [?name ...]
@@ -40,7 +43,8 @@
                        [?function :seon.fn/ns ?namespace]
                        [?function :seon.fn/private? false]
                        (not [?function :seon.fn/internal? true])]
-              database (instruction/toolkit-namespaces database))]
+              database (cond->> (instruction/toolkit-namespaces database)
+                         issue? (remove #{'my.shell 'my.edit}))) ]
     {:seon.help/lines
     [(str "The prompt shows your namespace " namespace-name
           " and is drawn for you. Send only ;; thinking comments and forms.")
@@ -57,7 +61,9 @@
      (str "A mistake returns :error data. Read the expected schema, offending value, and attribute candidates before retrying. Time is the transaction: a ref value \"datomic.tx\" names this write, for example (seon.db/transact! [{:my.note/id \"observation\" :my.note/agent [:seon.agent/id "
           (pr-str agent-id)
           "] :my.note/content \"Verified\" :my.note/about \"datomic.tx\"}]); pull :db/txInstant through that ref.")
-     "Each reply is one turn. (seon.turn/turns-left) reads your remaining turns; settings contain the configured limit. (my.agent/done) must be the last form of your reply; it ends your session early."
+     (if issue?
+       "Each reply is one turn. Your issue's tests or detector decide done. Continue while it is open and turns remain; the system reports the result after each turn and tells root when your budget is exhausted."
+       "Each reply is one turn. (seon.turn/turns-left) reads your remaining turns; settings contain the configured limit. (my.agent/done) must be the last form of your reply; it ends your session early.")
      (str "Tools: "
           (str/join ", " (sort tools)) ". Inspect one with dir.")]}))
 

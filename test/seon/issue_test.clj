@@ -10,6 +10,8 @@
             [seon.flow]
             [seon.id]
             [seon.issue]
+            [seon.issue.detect]
+            [seon.plan]
             [seon.turn]
             [seon.test-support]))
 
@@ -256,22 +258,72 @@
               issue-index (first (keep-indexed (fn [i s] (when (clojure.string/includes? s "my.issue/status") i)) sources))]
           (clojure.test/is (seq entries))
           (clojure.test/is (every? :seon.eval/shown entries))
-          (clojure.test/is (and issue-index (<= 0 plan-index) (< plan-index issue-index)) (pr-str sources))
+          (doseq [untaught ["my.shell" "my.edit" "my.turn/complete"]]
+            (clojure.test/is (not (clojure.string/includes?
+                                  (clojure.string/join "\n" (concat sources (map :seon.eval/shown entries)))
+                                  untaught))))
+          (clojure.test/is (and issue-index (<= 0 plan-index)) (pr-str sources))
           (clojure.test/is (empty? (keep :seon.cluster.eval/error entries)))
           (clojure.test/is (clojure.string/includes? (str (:seon.eval/shown (get entries issue-index))) test-name)))
-        (let [submitted (seon.turn/virtual-turn! (assoc request :seon.cluster.reply/text
-                           "(my.issue/status {:seon.issue/id \"issue-family-opening\"})"))
-              tid (:seon.turn/id submitted)]
-          (clojure.test/is (string? tid) (pr-str submitted))
-          (when tid
-           (seon.test-support/await-event! c ::issue-virtual-turn
-             (fn [d] (some? (:seon.turn/closed-tx (seon.db/pull d [:seon.turn/closed-tx] [:seon.turn/id tid])))))
-           (clojure.test/is (empty? (keep :seon.cluster.eval/error (seon.eval/of-agent (seon.db/db c) aid))))))
         (finally
          (seon.cluster.agent/disarm! request)
          (clojure.core.async/close! faults)
          (doseq [k [:seon.cluster.wake/channel :seon.render/context-channel :seon.turn.loop/completion]]
            (clojure.core.async/close! (get handle k))))))))))))
+
+(clojure.test/deftest detector-only-issue-starts-and-settles-from-its-subject
+  (seon.test-support/with-database
+   (fn [connection]
+     (seon.test-support/seed-cluster! connection "issue-family")
+     (let [detector "seon.issue.detect/public-without-doc"
+           subject (:seon.fn/sym
+                    (first (sort-by :seon.fn/sym
+                                    (seon.issue.detect/public-without-doc
+                                     (seon.db/db connection)
+                                     {:seon.fn.file/relative-root "src"}))))
+           generated (seon.issue/generate!
+                      {:seon.db/connection connection
+                       :seon.issue/detector detector :seon.issue/severity :cleanup})
+           issue-id (seon.db/q '[:find ?id . :in $ ?symbol ?detector
+                                :where [?function :seon.fn/sym ?symbol]
+                                [?detector-row :seon.fn/sym ?detector]
+                                [?issue :seon.issue/functions ?function]
+                                [?issue :seon.issue/detector ?detector-row]
+                                [?issue :seon.issue/id ?id]]
+                              (seon.db/db connection) subject detector)]
+       (clojure.test/is (string? subject))
+       (clojure.test/is (nil? (:seon.error/kind generated)) (pr-str generated))
+       (clojure.test/is (string? issue-id))
+       (let [started (seon.issue/start!
+                      {:seon.db/connection connection :seon.issue/id issue-id
+                       :seon.issue/budget 2 :seon.config.ai/no-provider true})
+             agent-id (seon.db/q '[:find ?id . :in $ ?issue-id
+                                  :where [?issue :seon.issue/id ?issue-id]
+                                  [?issue :seon.issue/agent ?agent]
+                                  [?agent :seon.agent/id ?id]]
+                                (seon.db/db connection) issue-id)]
+         (clojure.test/is (nil? (:seon.error/kind started)) (pr-str started))
+         (clojure.test/is (string? agent-id))
+         (clojure.test/is (empty? (:seon.issue/tests started)))
+         (clojure.test/is (false? (seon.issue/done? (seon.db/db connection)
+                                                   [:seon.issue/id issue-id])))
+         (seon.test-support/transacted!
+          connection [[:db.fn/call #'seon.plan/settle-call agent-id]])
+         (clojure.test/is (nil? (:seon.issue/resolved-tx
+                                (seon.db/pull (seon.db/db connection)
+                                              [:seon.issue/resolved-tx]
+                                              [:seon.issue/id issue-id]))))
+         (seon.test-support/transacted!
+          connection [[:db/add [:seon.fn/sym subject] :seon.fn/doc
+                       "Construct the declared buffer from its supplied fields."]])
+         (clojure.test/is (true? (seon.issue/done? (seon.db/db connection)
+                                                  [:seon.issue/id issue-id])))
+         (seon.test-support/transacted!
+          connection [[:db.fn/call #'seon.plan/settle-call agent-id]])
+         (clojure.test/is (some? (:seon.issue/resolved-tx
+                                 (seon.db/pull (seon.db/db connection)
+                                               [:seon.issue/resolved-tx]
+                                               [:seon.issue/id issue-id])))))))))
 
 (clojure.test/deftest issue-worker-creation-is-atomic
  (seon.test-support/with-database
@@ -290,7 +342,10 @@
                 :seon.ns/name 'my.agents.issue-worker :seon.config.ai/no-provider true}]
      (clojure.test/is (string? issue-id) (pr-str added))
      (clojure.test/is (= :seon.issue/not-a-test (:seon.error/kind (seon.issue/add! (assoc request :seon.issue/title "Invalid success ref" :seon.issue/tests #{[:seon.agent/id "issue-author"]})))))
-     (clojure.test/is (= :seon.issue/no-tests (:seon.error/kind (seon.issue/start! start))))
+     (let [refused (seon.issue/start! start)]
+       (clojure.test/is (= :seon.issue/no-tests (:seon.error/kind refused)))
+       (clojure.test/is (clojure.string/includes? (:seon.error/message refused) issue-id))
+       (clojure.test/is (clojure.string/includes? (:seon.error/message refused) ":seon.issue/detector")))
      (clojure.test/is (nil? (:seon.error/kind (seon.issue/tests! {:seon.db/connection c :seon.agent/id "issue-author"
                                                                :seon.issue/id issue-id :seon.issue/tests #{test-ref}}))))
      (let [started (seon.issue/start! start)

@@ -6,7 +6,6 @@
             [clojure.string :as str]
             [seon.db :as db]
             [seon.id :as id]
-            [seon.issue.opening :as opening]
             [seon.repl :as repl]
             [seon.schema.form :as schema.form]))
 
@@ -458,6 +457,29 @@
       (:seon.issue/problem subject) (assoc :seon.issue/problem (:seon.issue/problem subject))
       (seq cited) (assoc :seon.issue/namespaces cited))))
 
+(defn- detector-rows
+  "Read a detector through its program identity and derive its issue subjects."
+  [database request]
+  (let [detector (:seon.issue/detector request)
+        program (or (:db/id (db/pull database [:db/id] [:seon.fn/sym detector]))
+                    (refuse! :seon.issue/detector-unknown
+                             (str "No program entity names the detector " detector ".")))
+        detect (or (requiring-resolve (symbol detector))
+                   (refuse! :seon.issue/detector-unresolved
+                            (str "The detector " detector " resolves to no var.")))
+        subjects (if-let [root (:seon.fn.file/relative-root request)]
+                   (detect database {:seon.fn.file/relative-root root})
+                   (detect database))
+        _ (when (:seon.error/kind subjects)
+            (refuse! :seon.issue/detector-refused
+                     (str "The detector " detector " refused: " (:seon.error/message subjects))))
+        context {:detector detector :program program
+                 :severity (:seon.issue/severity request)
+                 :identities (set (db/identity-attributes database))
+                 :cites (citation-attributes database)
+                 :namespaces (into {} (db/q '[:find ?name ?e :where [?e :seon.ns/name ?name]] database))}]
+    (mapv #(subject-row database context %) subjects)))
+
 (defn generate
   "Derive issue facts for one detector's current subjects.
   The detector is an ordinary read resolved from its program entity; its
@@ -468,32 +490,25 @@
   the entity and its identity survive both."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        [:map [:seon.issue/detector :seon.fn/sym]
+                        [:seon.fn.file/relative-root {:optional true} :seon.fn.file/relative-root]
                         [:seon.issue/severity :seon.issue/severity]]]
                   :seon.db/tx-data]}
   [database request]
   (let [detector (:seon.issue/detector request)
-        program (or (:db/id (db/pull database [:db/id] [:seon.fn/sym detector]))
-                    (refuse! :seon.issue/detector-unknown
-                             (str "No program entity names the detector " detector ".")))
-        detect (or (requiring-resolve (symbol detector))
-                   (refuse! :seon.issue/detector-unresolved
-                            (str "The detector " detector " resolves to no var.")))
-        subjects (detect database)
-        _ (when (:seon.error/kind subjects)
-            (refuse! :seon.issue/detector-refused
-                     (str "The detector " detector " refused: " (:seon.error/message subjects))))
-        context {:detector detector :program program
-                 :severity (:seon.issue/severity request)
-                 :identities (set (db/identity-attributes database))
-                 :cites (citation-attributes database)
-                 :namespaces (into {} (db/q '[:find ?name ?e :where [?e :seon.ns/name ?name]] database))}
-        rows (mapv #(subject-row database context %) subjects)
+        program (:db/id (db/pull database [:db/id] [:seon.fn/sym detector]))
+        rows (detector-rows database request)
         yielded (into #{} (map :seon.issue/id) rows)
         stored (into {}
                      (map (fn [entity]
                             (let [row (db/pull database '[*] entity)] [(:seon.issue/id row) row])))
-                     (db/q '[:find [?e ...] :in $ ?detector :where [?e :seon.issue/detector ?detector]]
-                           database program))]
+                     (if-let [root (:seon.fn.file/relative-root request)]
+                       (db/q '[:find [?e ...] :in $ ?detector ?root :where
+                               [?e :seon.issue/detector ?detector]
+                               [?e :seon.issue/functions ?function]
+                               [?function :seon.fn/file ?file]
+                               [?file :seon.fn.file/relative-root ?root]] database program root)
+                       (db/q '[:find [?e ...] :in $ ?detector :where [?e :seon.issue/detector ?detector]]
+                             database program)))]
     (into (vec (mapcat
                 (fn [row]
                   (if-let [held (get stored (:seon.issue/id row))]
@@ -529,6 +544,7 @@
   A run whose facts the database already holds writes nothing at all."
   {:malli/schema [:=> [:cat [:map [:seon.db/connection :seon.db/connection]
                              [:seon.issue/detector :seon.fn/sym]
+                             [:seon.fn.file/relative-root {:optional true} :seon.fn.file/relative-root]
                              [:seon.issue/severity :seon.issue/severity]]]
                   [:or :map :seon.error/value]]}
   [{connection :seon.db/connection :as call}]
@@ -580,23 +596,28 @@
   [{database :seon.db/db issue-id :seon.issue/id}]
   (let [row (db/pull database '[:db/id :seon.issue/id :seon.issue/title :seon.issue/status :seon.issue/severity
                                   :seon.issue/problem :seon.issue/path :seon.issue/opened :seon.issue/commits
-                                  :seon.issue/agent :seon.issue/budget :seon.issue/resolved-tx
+                                  {:seon.issue/agent [:db/id :seon.agent/id]} :seon.issue/budget :seon.issue/resolved-tx
+                                  :seon.issue/budget-exhausted-tx
                                   :seon.issue/unresolved
-                                  {:seon.issue/detector [:seon.fn/sym]}
-                                  {:seon.issue/keys [:seon.schema/key]}
-                                  {:seon.issue/namespaces [:seon.ns/name]}
-                                  {:seon.issue/runs [:seon.test.run/id]}
-                                  {:seon.issue/issues [:seon.issue/id]}
-                                  {:seon.issue/files [:seon.issue.citation/row :seon.issue.citation/end-row
+                                  {:seon.issue/detector [:db/id :seon.fn/sym]}
+                                  {:seon.issue/keys [:db/id :seon.schema/key]}
+                                  {:seon.issue/namespaces [:db/id :seon.ns/name]}
+                                  {:seon.issue/runs [:db/id :seon.test.run/id]}
+                                  {:seon.issue/issues [:db/id :seon.issue/id]}
+                                  {:seon.issue/files [:db/id :seon.issue.citation/row :seon.issue.citation/end-row
                                                        {:seon.issue.citation/file [:seon.fn.file/relative-path]}]}
-                                  {:seon.issue/members [:seon.issue/id]}
-                                  {:seon.issue/tests [:seon.test/sym :seon.test/pass-count :seon.test/fail-count :seon.test/error-count
-                                                       {:seon.test/run [:seon.test.run/id :seon.test.run/basis-t]}]}
-                                  {:seon.issue/functions [:seon.fn/sym {:seon.fn/ns [:seon.ns/name]}]}
-                                  {:seon.issue/errors [:seon.error/signature {:seon.error/occurrences [:seon.error.occurrence/count]}]}]
+                                  {:seon.issue/members [:db/id :seon.issue/id]}
+                                  {:seon.issue/tests [:db/id :seon.test/sym :seon.test/pass-count :seon.test/fail-count :seon.test/error-count
+                                                       :seon.test/failure-message
+                                                       {:seon.test/run [:db/id :seon.test.run/id :seon.test.run/basis-t]}]}
+                                  {:seon.issue/functions [:db/id :seon.fn/sym {:seon.fn/ns [:db/id :seon.ns/name]}]}
+                                  {:seon.issue/errors [:db/id :seon.error/signature {:seon.error/occurrences [:seon.error.occurrence/count]}]}]
                      [:seon.issue/id issue-id])]
-    (if-not (:seon.issue/title row)
+    (cond
+      (:seon.error/kind row) row
+      (not (:seon.issue/title row))
       {:seon.error/kind :seon.issue/not-found :seon.error/message (str "No current issue " issue-id)}
+      :else
       (let [test-rows (mapv
                        (fn [test-value]
                          (let [state (cond
@@ -609,6 +630,10 @@
                            (assoc test-value :seon.issue.test/state state)))
                        (sort-by :seon.test/sym (:seon.issue/tests row)))]
         (cond-> (assoc row :seon.issue/tests test-rows
+                           :seon.issue/turns-remaining
+                           (if-let [agent-id (get-in row [:seon.issue/agent :seon.agent/id])]
+                             ((requiring-resolve 'seon.turn/turns-left) database agent-id) 0)
+                           :seon.issue/status (if (:seon.issue/resolved-tx row) :resolved (:seon.issue/status row))
                            :seon.issue/functions (mapv #(vector :seon.fn/sym (:seon.fn/sym %)) (:seon.issue/functions row))
                            :seon.issue/errors (mapv (fn [error]
                                                       (cond-> (dissoc error :seon.error/occurrences)
@@ -619,37 +644,34 @@
           (check-form row test-rows)
           (assoc :seon.issue/check-form (check-form row test-rows)))))))
 
-(defn- render-floor
-  "The floor opening: what decides done, named, plus the ordinary read."
-  [row named]
-  (str (if (and (empty? (:seon.issue/tests row)) (:seon.issue/detector row))
-         (if named
-           (str ";; My issue. Its detector decides done: it resolves on the run after\n"
-                ";; (" named " (seon.db/db)) stops naming this subject.\n")
-           ";; My issue. Its detector decides done: it resolves when the detector stops naming this subject.\n")
-         ";; My issue. Its tests define done; (my.test/check ...) runs them.\n")
-       (repl/source-text (list 'my.issue/status {:seon.issue/id (:seon.issue/id row)}))))
+(defn status-text
+  "Render the issue's current checks, failures, and remaining turn budget."
+  {:malli/schema [:=> [:cat :map] :string]}
+  [view]
+  (str "Issue " (:seon.issue/id view) ": "
+       (if (:seon.issue/resolved-tx view) "resolved" "still open")
+       (when (some? (:seon.issue/turns-remaining view))
+         (str "; " (:seon.issue/turns-remaining view) " turns remaining"))
+       (when (:seon.issue/budget-exhausted-tx view) "; budget exhausted")
+       ".\n" (:seon.issue/title view)
+       (when-let [form (:seon.issue/check-form view)]
+         (str "\nDone condition: " (repl/source-text form)))
+       (apply str
+              (for [test-row (:seon.issue/tests view)]
+                (str "\n" (:seon.test/sym test-row) ": "
+                     (case (:seon.issue.test/state test-row)
+                       :verified "passed" :red "failed" :unrun "not run" "not verified")
+                     (when-let [failure (:seon.test/failure-message test-row)]
+                       (str "\n" failure)))))))
 
 (defn render-ai
-  "Emit the ordinary read for this issue; what decides done is named.
-
-  An issue that carries tests renders through the candidate its worker is
-  dialled to (`:seon.config.render/issue-opening`); `:bare`, the default,
-  is the floor this function shipped with. A generated issue with no tests
-  keeps naming its detector here: no candidate covers that case yet."
-  {:malli/schema [:=> [:cat [:or :seon.issue/issue :seon.render/unit]] :seon.render/source]}
+  "Show the issue's status and exact verification form as one data block."
+  {:malli/schema [:=> [:cat [:or :seon.issue/issue :seon.render/unit]] :string]}
   [unit]
-  (let [row (or (:seon.render/value unit) unit)
-        named (detector-symbol row)
-        database (:seon.db/db unit)
-        dialled (when (and database (seq (:seon.issue/tests row)) (:seon.issue/id row))
-                  (opening/source database (:seon.issue/id row)))]
-    (if (string? dialled)
-      dialled
-      (render-floor row named))))
+  (status-text (or (:seon.render/value unit) unit)))
 
 (defn render-html
-  "Show the issue and current test outcomes as one block."
+  "Show the same issue status and verification forms on the agent page."
   {:malli/schema [:=> [:cat [:or :seon.issue/issue :seon.render/unit]] :seon.render/hiccup]}
   [unit]
   (let [row (or (:seon.render/value unit) unit)
@@ -657,14 +679,7 @@
                (status {:seon.db/db database :seon.issue/id (:seon.issue/id row)}) row)]
     [:section {:class "seon-family-entry seon-issue"}
      [:h3 (:seon.issue/title view)]
-     [:p (:seon.issue/problem view)]
-     [:p (str "Status: " (:seon.issue/status view))]
-     (when-let [form (:seon.issue/check-form view)]
-       [:p (str "Done when: " (pr-str form))])
-     (into [:ul] (map (fn [test-value]
-                       [:li (str (:seon.test/sym test-value) " — "
-                                 (get test-value :seon.issue.test/state :unrun))])
-                     (:seon.issue/tests view)))]))
+     [:pre {:style "white-space: pre-wrap"} (status-text view)]]))
 
 (defn- citation-pattern
   "The pull pattern that names every citation by its identity, never by entity."
@@ -733,7 +748,7 @@
                    (db/q '[:find [?e ...] :where [?e :seon.issue/path]] source))]
     (db/transact! connection [[:db.fn/call #'adopt-tx rows]])))
 
-(def done-query
+(def ^:private tests-done-query
   "Nonempty tests all have positive green results on their current reach digest."
   '[:find ?subject .
     :in $ ?input
@@ -751,6 +766,35 @@
         [(seon.test/verified? $ ?symbol) ?verified]
         [(true? ?verified)]))])
 
+(defn done?
+  "Whether the issue's tests verify, or its detector no longer names it."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/ref] :boolean]}
+  [database reference]
+  (let [row (db/pull database
+                     '[:seon.issue/id :seon.issue/tests :seon.issue/severity
+                       {:seon.issue/detector [:seon.fn/sym]}] reference)]
+    (cond
+      (seq (:seon.issue/tests row))
+      (let [result (db/q tests-done-query database reference)]
+        (when (:seon.error/kind result)
+          (throw (ex-info (:seon.error/message result) result)))
+        (boolean result))
+
+      (get-in row [:seon.issue/detector :seon.fn/sym])
+      (not-any? #(= (:seon.issue/id row) (:seon.issue/id %))
+                (detector-rows database
+                               {:seon.issue/detector (get-in row [:seon.issue/detector :seon.fn/sym])
+                                :seon.issue/severity (:seon.issue/severity row)}))
+
+      :else false)))
+
+(def done-query
+  "The issue's tests decide done when present; otherwise its detector does."
+  '[:find ?subject . :in $ ?input :where
+    [(identity ?input) ?subject]
+    [(seon.issue/done? $ ?subject) ?done]
+    [(true? ?done)]])
+
 (defn- require-test-refs! [database references]
   (doseq [reference references]
     (when-not (:seon.test/sym
@@ -758,7 +802,7 @@
                         (if (map? reference) (:db/id reference) reference)))
       (refuse! :seon.issue/not-a-test "Every success ref must identify a test."))))
 
-(defn start-tx
+(defn- create-tx
   "Create the assigned worker, its plan, and its opening in one writer decision."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        [:map [:seon.issue/id :seon.issue/id]
@@ -778,7 +822,9 @@
         cluster-name (db/q '[:find ?name . :where [_ :seon.cluster/name ?name]] database)]
     (when-not (:seon.issue/title row) (refuse! :seon.issue/not-found "The issue does not exist."))
     (when (:seon.issue/agent row) (refuse! :seon.issue/already-started "The issue already has a worker."))
-    (when-not (seq (:seon.issue/tests row)) (refuse! :seon.issue/no-tests "Starting an issue requires at least one test."))
+    (when-not (or (seq (:seon.issue/tests row)) (:seon.issue/detector row))
+      (refuse! :seon.issue/no-tests
+               (str "Issue " issue-id " requires :seon.issue/tests or :seon.issue/detector before starting.")))
     (require-test-refs! database (:seon.issue/tests row))
     (when-not namespace-name (refuse! :seon.issue/no-namespace "Supply a namespace or a function with a namespace."))
     (when-not cluster-name (refuse! :seon.issue/no-cluster "The database has no cluster identity."))
@@ -818,8 +864,77 @@
                        :seon.turn/starting-ns [:seon.ns/name namespace-name]
                        :seon.turn/trigger [:seon.issue/id issue-id]})))))
 
+(defn start-tx
+  "Start an issue, or resume its existing agent with a larger total budget."
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       [:map [:seon.issue/id :seon.issue/id]
+                        [:seon.issue/budget :seon.issue/budget]
+                        [:seon.ns/name {:optional true} :seon.ns/name]
+                        [:seon.agent/settings {:optional true} :seon.config/agent-overlay]
+                        [:seon.config.ai/no-provider {:optional true} :seon.config.ai/no-provider]]]
+                  :seon.db/tx-data]}
+  [database request]
+  (let [issue-id (:seon.issue/id request)
+        row (db/pull database '[:seon.issue/budget :seon.issue/resolved-tx
+                               :seon.issue/tests :seon.issue/detector
+                               {:seon.issue/agent [:seon.agent/id]}]
+                     [:seon.issue/id issue-id])
+        agent-id (get-in row [:seon.issue/agent :seon.agent/id])]
+    (if-not agent-id
+      (create-tx database request)
+      (do
+        (when-not (or (seq (:seon.issue/tests row)) (:seon.issue/detector row))
+          (refuse! :seon.issue/no-tests
+                   (str "Issue " issue-id " requires :seon.issue/tests or :seon.issue/detector before resuming.")))
+        (when (or (:seon.issue/resolved-tx row)
+                  (<= (:seon.issue/budget request) (:seon.issue/budget row 0)))
+          (refuse! :seon.issue/already-started
+                   (str "Issue " issue-id " requires a larger budget and must still be open to resume.")))
+        (let [cluster-name (db/q '[:find ?name . :where [_ :seon.cluster/name ?name]] database)
+              turn-id ((requiring-resolve 'seon.turn/next-id) database cluster-name agent-id)]
+          [{:seon.issue/id issue-id :seon.issue/budget (:seon.issue/budget request)}
+           [:db/retract [:seon.issue/id issue-id] :seon.issue/budget-exhausted-tx]
+           {:seon.agent/id agent-id
+             :seon.agent/settings (assoc ((requiring-resolve 'seon.ai/agent-overlay) database agent-id)
+                                        :seon.config.run/max-episode-runs (:seon.issue/budget request))}
+           [:db.fn/call (requiring-resolve 'seon.turn/open-call)
+            {:seon.turn/id turn-id :seon.turn/agent [:seon.agent/id agent-id]
+             :seon.turn/opened-tx "datomic.tx"}]])))))
+
+(defn exhaust-tx
+  "Record the first exhausted close and deliver its status to root atomically."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] :seon.db/tx-data]}
+  [database agent-id]
+  (let [issue-id (db/q '[:find ?id . :in $ ?agent-id :where
+                         [?agent :seon.agent/id ?agent-id]
+                         [?issue :seon.issue/agent ?agent]
+                         [?issue :seon.issue/id ?id]
+                         (not [?issue :seon.issue/resolved-tx])
+                         (not [?issue :seon.issue/budget-exhausted-tx])
+                         (not-join [?agent]
+                           [?turn :seon.turn/agent ?agent]
+                           (not [?turn :seon.turn/closed-tx]))] database agent-id)]
+    (if (and issue-id (zero? ((requiring-resolve 'seon.turn/turns-left) database agent-id)))
+      (let [view (status {:seon.db/db database :seon.issue/id issue-id})
+            spent ((requiring-resolve 'seon.turn/episode-runs) database agent-id)
+            limit (db/q '[:find ?limit . :where [?config :seon.config/cluster _]
+                           [?config :seon.config.message/max-chain ?limit]] database)
+            delivery ((requiring-resolve 'seon.cluster.message/delivery)
+                      database
+                      {:seon.agent/id agent-id :seon.config.message/max-chain limit
+                       :my.message/value
+                       {:seon.message/id (id/id [issue-id :budget-exhausted (:seon.issue/budget view)])
+                        :my.message/to "root" :my.message/about issue-id
+                        :my.message/content (str "Issue " issue-id " exhausted its budget after " spent
+                                                 " provider turns.\n" (status-text view))}})]
+        (when-let [failure (first (:seon.error/values delivery))]
+          (throw (ex-info (:seon.error/message failure) failure)))
+        (into [[:db/add [:seon.issue/id issue-id] :seon.issue/budget-exhausted-tx "datomic.tx"]]
+              (:seon.message/rows delivery)))
+      [])))
+
 (defn start!
-  "Assign an issue and open its worker atomically; returns the changed issue."
+  "Start or resume the same issue worker with a larger total budget atomically."
   {:malli/schema [:=> [:cat [:map [:seon.db/connection :seon.db/connection]
                              [:seon.issue/id :seon.issue/id]
                              [:seon.issue/budget :seon.issue/budget]

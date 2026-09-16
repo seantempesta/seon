@@ -55,13 +55,15 @@ copied into the database and do not define a second schedule.
 
 `my.issue/add!` authors a database issue; `my.issue/tests!` adds success
 tests. `seon.issue/start!` creates the worker, its plan and first turn in one
-transaction. It refuses missing tests and an existing assignment. The
+transaction. It requires tests or a detector and refuses an existing assignment. The
 agent's issue unit links to the referenced entities and their render pairs.
 
 Before plan settlement, the turn runs the worker's open-issue tests under
 one configured evaluation deadline. Completion requires current verified
-run facts and records the step's completion and `:seon.issue/resolved-tx`
-in the same transaction. The status read verifies the current reach digest.
+run facts when tests are present; otherwise the detector must no longer name
+the issue's subject. Settlement records the step's completion and
+`:seon.issue/resolved-tx` in the same transaction. The status read verifies
+the current reach digest.
 
 Database admission preserves a nonempty test set after first assignment,
 including after unassignment and through nested transaction functions.

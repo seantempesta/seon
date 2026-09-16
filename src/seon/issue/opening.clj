@@ -1,8 +1,8 @@
 (ns seon.issue.opening
   "Candidate AI openings for a worker's issue block, one per trial rendering.
 
-  The issue family declares ONE schema pair symbol, `seon.issue/render-ai`.
-  This namespace holds the candidate bodies it dispatches to and the dial
+  The agent identity renderer emits these ordinary generated read forms.
+  The issue schema's AI/HTML pair renders the resulting data. The dial
   that selects one: `:seon.config.render/issue-opening`, a per-agent config
   enum, read from the worker named by `:seon.issue/agent`. An issue with no
   worker, or a worker with no dial, renders `:bare` — the floor the family
@@ -40,6 +40,7 @@
   (let [row (db/pull database
                      '[:seon.issue/id :seon.issue/title :seon.issue/problem
                        {:seon.issue/agent [:seon.agent/id]}
+                       {:seon.issue/detector [:seon.fn/sym]}
                        {:seon.issue/tests [:seon.test/sym]}
                        {:seon.issue/functions
                         [:seon.fn/sym {:seon.fn/ns [:seon.ns/name]}
@@ -49,6 +50,7 @@
       (cond-> {:seon.issue/id (:seon.issue/id row)
        :seon.issue/title (:seon.issue/title row)
        :seon.issue/problem (:seon.issue/problem row)
+       :seon.issue/detector (get-in row [:seon.issue/detector :seon.fn/sym])
        :seon.test/syms (vec (sort (map :seon.test/sym (:seon.issue/tests row))))
        :seon.fn/syms (vec (sort (map :seon.fn/sym (:seon.issue/functions row))))
        :seon.ns/names (vec (sort (distinct (keep #(get-in % [:seon.fn/ns :seon.ns/name])
@@ -102,19 +104,6 @@
 (defn- block [& parts]
   (str (str/join "\n" (remove str/blank? parts)) "\n"))
 
-(defn- edit-recipe
-  "The exact editing call, as a comment: a write is never an emitted form."
-  [paths]
-  (comment-lines
-   (into ["Change source with the digest you just read:"
-          "  (my.edit/form! {:my.edit/path \"<path>\""
-          "                  :my.edit/expected-digest \"<the file's current digest>\""
-          "                  :my.edit/form {:my.edit.form/head 'defn"
-          "                                 :my.edit.form/name '<name>}"
-          "                  :my.edit/operation :replace"
-          "                  :my.edit/source \"<the whole new form>\"})"]
-         (map #(str "The file this issue is about: " %) paths))))
-
 ;;; ---------------------------------------------------------------------------
 ;;; The candidates
 ;;; ---------------------------------------------------------------------------
@@ -125,16 +114,15 @@
 
 (defmethod render-candidate :bare
   [_ {:seon.issue/keys [id]}]
-  (block ";; My issue. Make its tests pass."
+  (block ";; My issue. The system decides completion from the condition above."
          (repl/source-text (status-form id))))
 
 (defmethod render-candidate :plan-first
-  [_ {:seon.issue/keys [id] :seon.fn/keys [syms] paths :seon.fn.file/relative-paths}]
+  [_ {:seon.issue/keys [id] :seon.test/keys [syms]}]
   (block (comment-lines
           ["My plan's steps carry this issue; its tests decide done."
            "The one call that proves it finished:"])
          (commented-form (check-form syms))
-         (edit-recipe paths)
          (repl/source-text (status-form id))))
 
 (defmethod render-candidate :evidence-first
@@ -158,10 +146,9 @@
          (commented-form (function-pull-form (first fn-syms)))
          (comment-lines ["3. Read the file around the form:"])
          (commented-form (list 'my.fs/read {:my.fs/path (first paths)}))
-         (comment-lines ["4. Replace one form with (my.edit/form! ...), using that read's digest."
-                         "5. Make the edit live: the problem above names the adoption call."
-                         "6. Observe green:"])
-         (commented-form (check-form fn-syms))
+         (comment-lines ["4. Evaluate the corrected definition with its contract."
+                         "5. Observe the exact tests:"])
+         (commented-form (check-form syms))
          (comment-lines ["Every step is a call; nothing here is a summary of a call."])
          (comment-lines (map #(str "The file: " %) paths))
          ";; Start at step 1."
@@ -191,7 +178,7 @@
 
 (defmethod render-candidate :minimal-retrieval
   [_ {:seon.issue/keys [id]}]
-  (block ";; My issue. Make its tests pass."
+  (block ";; My issue. The system decides completion from the condition above."
          (comment-lines ["One hop more is available, but only if I ask for it:"])
          (commented-form (list 'seon.issue.opening/context
                                {:seon.issue/id id :seon.render/distance 2}))
@@ -207,7 +194,16 @@
                   [:or :seon.render/source :seon.error/value]]}
   [database issue-id]
   (if-let [link-row (links database issue-id)]
-    (render-candidate (candidate database issue-id) link-row)
+    (block
+     (comment-lines
+      (if (seq (:seon.test/syms link-row))
+        [(str "Done when these exact tests pass: " (str/join ", " (:seon.test/syms link-row)) ".")
+         "After each turn the system checks changed evidence and reports passed and failed tests."]
+        [(str "Done when (" (:seon.issue/detector link-row)
+              " (seon.db/db)) no longer names this issue's subject.")
+         "The system checks the detector after each turn and reports whether the issue is still open."]))
+     (render-candidate (if (seq (:seon.test/syms link-row))
+                         (candidate database issue-id) :bare) link-row))
     {:seon.error/kind :seon.issue/not-found
      :seon.error/message (str "No current issue " issue-id)}))
 

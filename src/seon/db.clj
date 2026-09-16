@@ -2980,7 +2980,8 @@
           changed-assignment? (and (:seon.db/active? prior)
                                    (not= (:seon.db/assignment prior)
                                          (:seon.db/assignment current)))]
-      (when (or (and active? (empty? (:seon.db/values current)))
+      (when (or (and active? (seq (:seon.db/values prior))
+                     (empty? (:seon.db/values current)))
                 (and active? (not authorized?) (or (seq removed) (seq erased) changed-assignment?))
                 (and (:seon.db/creator prior) changed-authority?)
                 (and (:seon.db/active? prior) (not authorized?) changed-authority?))

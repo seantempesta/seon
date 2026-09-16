@@ -201,7 +201,16 @@
          (:seon.repl/comment form)
          (when (= "root" (:seon.agent/id unit))
            "\n;; (seon.cluster.status/agents {}) shows agent work and turn accounting on demand.")
-         "\n" (repl/source-text (:seon.repl/form form)))))
+         "\n" (repl/source-text (:seon.repl/form form))
+         (when-let [database (:seon.db/db unit)]
+           (apply str
+                  (for [issue-id (sort (db/q '[:find [?issue-id ...] :in $ ?agent-id
+                                               :where [?agent :seon.agent/id ?agent-id]
+                                               [?issue :seon.issue/agent ?agent]
+                                               [?issue :seon.issue/id ?issue-id]]
+                                             database (:seon.agent/id unit)))]
+                    (str "\n\n" ((requiring-resolve 'seon.issue.opening/source)
+                                    database issue-id))))))))
 
 (defn render-id-ai
   "Read the identity concern from its identifying attribute."

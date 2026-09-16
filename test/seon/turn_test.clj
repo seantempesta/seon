@@ -37,6 +37,44 @@
           [?turn :seon.turn/agent ?agent]
           [?evaluation :seon.cluster.eval/run ?turn]] database agent-id))
 
+(deftest issue-budget-counts-a-call-that-closes-before-the-provider
+  (support/with-database
+   (fn [connection]
+     (support/seed-cluster! connection "issue-close-budget")
+     (doseq [aid ["issue-close-worker" "conversation-close-worker"]]
+       (support/transacted! connection
+                            (agent/creation-tx {:seon.agent/id aid
+                                                :seon.ns/name (symbol (str "my.agents." aid))
+                                                :seon.cluster/name "issue-close-budget"})))
+     (support/transacted! connection
+                          [{:seon.issue/id "issue-close-budget"
+                            :seon.issue/title "Bound a refused ordinary call"
+                            :seon.issue/problem "A call that closes before a provider still spends an issue turn."
+                            :seon.issue/status :open :seon.issue/severity :cleanup
+                            :seon.issue/detector [:seon.fn/sym "seon.issue.detect/public-without-doc"]
+                            :seon.issue/agent [:seon.agent/id "issue-close-worker"]
+                            :seon.issue/budget 2}])
+     (doseq [aid ["issue-close-worker" "conversation-close-worker"]]
+       (support/transacted! connection
+                            (turn/open-tx {:seon.turn/id aid :seon.turn/agent [:seon.agent/id aid]
+                                           :seon.turn/opened-tx "datomic.tx"}))
+       (support/transacted! connection (turn/close-tx {:seon.turn/id aid})))
+     (is (= 1 (turn/episode-runs (db/db connection) "issue-close-worker")))
+     (is (zero? (turn/episode-runs (db/db connection) "conversation-close-worker")))
+     (support/transacted! connection
+                          (into (turn/open-tx {:seon.turn/id "same-transaction-system"
+                                              :seon.turn/agent [:seon.agent/id "issue-close-worker"]
+                                              :seon.turn/opened-tx "datomic.tx"})
+                                (turn/close-tx {:seon.turn/id "same-transaction-system"})))
+     (is (= 1 (turn/episode-runs (db/db connection) "issue-close-worker")))
+     (support/transacted! connection
+                          (turn/open-tx {:seon.turn/id "second-closed-call"
+                                         :seon.turn/agent [:seon.agent/id "issue-close-worker"]
+                                         :seon.turn/opened-tx "datomic.tx"}))
+     (support/transacted! connection (turn/close-tx {:seon.turn/id "second-closed-call"}))
+     (is (zero? (turn/turns-left (db/db connection) "issue-close-worker")))
+     (is (nil? (turn/next-agent-work (db/db connection) {:seon.agent/id "issue-close-worker"}))))))
+
 (deftest generated-read-evidence-rejects-turn-activity
   (support/with-database
    (fn [connection]

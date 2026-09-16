@@ -10,7 +10,7 @@
              :tests     [:set {:seon.db/append-only-after :seon.issue/agent
                               :seon.db/retraction-authority :seon.issue/created-by
                               :seon.issue/cites [:seon.test/sym]
-                              :description "Success tests remain nonempty after first assignment. Only the creator may retract members; database admission enforces this after transaction expansion."} :seon.db/ref]
+                              :description "Once success tests exist, they remain nonempty after assignment. An issue may instead start with a detector and no tests. Only the creator may retract test members; database admission enforces this after transaction expansion."} :seon.db/ref]
              :errors    [:set {:seon.issue/cites [:seon.error/signature :seon.error/id]
                               :description "seon.error entities cited by signature or by error id."} :seon.db/ref]
              :keys      [:set {:seon.issue/cites [:seon.schema/key]
@@ -27,14 +27,16 @@
              :unresolved [:set {:description "Exact citation tokens that match no installed identity value: evidence that a note names a deleted symbol or a foreign coordinate, never a refusal."} [:string {:min 1}]]
              :commits   [:set [:string {:min 9 :max 9 :description "Nine-character Git commit citations; not Datahike source commit UUIDs."}]]
              :members   [:set {:description "A class note's member issues."} :seon.db/ref]
-             :agent     [:and {:description "The agent working it; asserted by start! in the transaction that creates the agent and opens its first turn. A LISTENED ATTRIBUTE: the assignment IS the worker's first wake, so the worker takes a turn about its issue without anyone sending it a message. Asserted exactly once — start! refuses an issue that already has a worker — and never retracted-and-reasserted. It is an OUTSIDE wake: the assignment comes from whoever started the issue, so it refills the worker's turn bound."
+             :agent     [:and {:description "The agent working it; asserted by start! in the transaction that creates the agent and opens its first turn. A LISTENED ATTRIBUTE: the assignment IS the worker's first wake, so the worker takes a turn about its issue without anyone sending it a message. Asserted exactly once and retained on resume. Its assertion anchors the total issue turn budget; later messages do not refill it."
                                :seon.db/index true
                                :seon.wake/listen true
                                :seon.wake/opens-turn? true} :seon.db/ref]
              :created-by [:and {:description "The author agent. Its first assertion is the enduring retraction authority, including after unassignment."} :seon.db/ref]
              :detector  [:and {:description "The detector function's program entity for a generated issue. With the subject's own identity value it is the issue's identity, so a detector run upserts its issues instead of duplicating them. Absent on an authored issue."} :seon.db/ref]
-             :budget    [:int {:min 1 :description "Provider turns for the worker; copied to its settings overlay at start."}]
-             :resolved-tx [:and {:description "The transaction recording that every test verified; absence means open. Written by settlement, never asserted by a model."} :seon.db/ref]
+             :budget    [:int {:min 1 :description "Total ordinary turns since assignment; start! resumes the same worker by increasing this budget and its settings overlay."}]
+             :turns-remaining [:int {:min 0 :description "Derived status data: remaining ordinary turns in the issue budget."}]
+             :budget-exhausted-tx [:and {:description "The transaction that exhausted the still-open issue budget and notified root. Absence means not exhausted; resume retracts this fact after increasing the budget."} :seon.db/ref]
+             :resolved-tx [:and {:description "The transaction recording that every cited test verified, or, with no tests, the detector stopped naming the issue's subject; absence means open. Written by settlement, never asserted by a model."} :seon.db/ref]
              :issue [:map {:seon.db/attributes true
                            :seon.render/units [:seon.issue/functions :seon.issue/tests :seon.issue/errors :seon.issue/members]
                            :seon.render/ai seon.issue/render-ai :seon.render/html seon.issue/render-html}
@@ -58,4 +60,5 @@
                      [:seon.issue/created-by {:optional true} :seon.issue/created-by]
                      [:seon.issue/detector {:optional true} :seon.issue/detector]
                      [:seon.issue/budget {:optional true} :seon.issue/budget]
+                     [:seon.issue/budget-exhausted-tx {:optional true} :seon.issue/budget-exhausted-tx]
                      [:seon.issue/resolved-tx {:optional true} :seon.issue/resolved-tx]]}
