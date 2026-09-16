@@ -47,6 +47,11 @@ peer session (batches 30–57; ledger
    One more finding from it, queued: a changed contract stayed armed with
    its PREVIOUS shape across three converged adoptions
    (`adoption-can-leave-a-changed-contract-armed-with-its-previous-shape`).
+   The custody fix over-reached in one direction — an AGENT's own deftest
+   run through `my.test/run` inside its evaluation also lost its cluster's
+   custody (the documented elided-arity affordance); fix lane running:
+   custody is handed as a value from the evaluation, a host in-process run
+   still has none (`an-agents-own-test-loses-its-clusters-custody`).
 
 0. **The checkout's store was deleted and re-created from genesis (10:17Z).**
    Actual cause (peer, `ccccea806`): `seon.cluster/operator-root` answered
