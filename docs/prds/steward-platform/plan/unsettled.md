@@ -569,3 +569,14 @@ Queue, in order:
   Live: reachability gate open 3.36 % → 100 %, zero scheduler key walks.
   Store reset proceeds the moment the cold-arming fix lands (a reset must
   not republish through the broken path).
+- 17:35Z stale-only settlement landed (`0c8f90630`): issue tests run only at
+  the settlement that CLOSES an ordinary turn (derived from the same facts
+  that emit close-tx; system turns and opening passes run none) and only
+  the STALE ones (`seon.test/stale` gained a named arity over a supplied
+  set: 6 ms for two symbols); the done-query still reads `verified?`.
+  issue-test 21,452 ms/error → 12,921 ms 8/0/0 within the 20 s backstop;
+  settlement test rewritten onto the real seam (virtual turn → next-agent-work
+  → turn), 32/0/0, with the three regressions (system turn runs none; a
+  close runs only stale; an unchanged closure completes from the record).
+  Adoption converged `6aaa25da`. Lane rule added: a new arity is not
+  callable in-process until adoption lands.
