@@ -1873,7 +1873,10 @@
   [root]
   (try
     (let [value (edn/read-string (slurp (source-artifact-file root)))]
-      (when (map? value) value))
+      (when (and (map? value)
+                 (map? (:seon.source/relative-file-digests value))
+                 (vector? (get-in value [:seon.fn/manifest :seon.fn.manifest/relative-roots])))
+        value))
     (catch Throwable _ nil)))
 
 (defn- write-source-artifact!
@@ -1911,14 +1914,17 @@
              (source/current store)]
     (let [database (source/database store commit-id)]
       (try
-        (when (= expected-digest
-                 (db/q '[:find ?digest .
-                         :where [_ :seon.source/digest ?digest]]
-                       database))
+        (let [digest (db/q '[:find ?digest .
+                                :where [_ :seon.source/digest ?digest]] database)]
+          (when (and digest (or (nil? expected-digest) (= expected-digest digest)))
           {:seon.source/branch branch
            :seon.source/commit-id commit-id
-           :seon.source/digest expected-digest
-           :seon.source/built? false})
+           :seon.source/digest digest
+           :seon.source/relative-file-digests
+           (into {} (db/q '[:find ?path ?digest
+                            :where [?file :seon.fn.file/relative-path ?path]
+                                   [?file :seon.fn.file/digest ?digest]] database))
+           :seon.source/built? false}))
         (finally
           (d/release-materialized-db database))))))
 
@@ -1969,22 +1975,14 @@
   (let [{source-digest :seon.source/digest
          snapshot :seon.source/snapshot
          manifest :seon.fn/manifest} (stable-manifest roots)
-        cached (read-source-artifact root)
-        unchanged
-        (when (and (= source-digest (:seon.source/digest cached))
-                   (= (:seon.source/relative-file-digests snapshot)
-                      (:seon.source/relative-file-digests cached))
-                   (= (:seon.source/commit-id cached)
-                      (:seon.source/commit-id (source/current store))))
-          (current-publication store source-digest))]
-    (if unchanged
-      unchanged
-      (let [_ (report-source-progress! "branch publication started")
-            published (publish-current-source! store source-digest manifest roots)
-            _ (report-source-progress! "branch publication complete")]
-        (write-source-artifact! root
-                                (source-artifact published manifest snapshot))
-        published))))
+        unchanged (current-publication store source-digest)
+        published (or unchanged
+                      (do (report-source-progress! "branch publication started")
+                          (let [result (publish-current-source! store source-digest manifest roots)]
+                            (report-source-progress! "branch publication complete")
+                            result)))]
+    (write-source-artifact! root (source-artifact published manifest snapshot))
+    published))
 
 (defn- changed-source-paths
   [published-file-digests current-file-digests reported-paths]
@@ -1998,7 +1996,7 @@
 (defn- incremental-source-refresh!
   [root store changed-paths roots]
   (let [cached (read-source-artifact root)
-        published (source/current store)
+        published (current-publication store nil)
         manifest (some-> (:seon.fn/manifest cached)
                          (assoc :seon.fn.manifest/root (:seon.fn/root roots)))
         expected-commit (:seon.source/commit-id published)]
@@ -2007,12 +2005,13 @@
                     (mapv (partial fs/relative-path (:seon.fn/root roots))
                           (:seon.fn/roots roots)))
                  expected-commit
-                 (= expected-commit (:seon.source/commit-id cached))
+                 (= (:seon.source/digest published) (:seon.source/digest cached))
                  (map? (:seon.source/relative-file-digests cached)))
-      (do (report-source-progress! "complete publication: missing or stale artifact")
+      (do (report-source-progress! "complete publication: manifest cache needs analysis")
           (full-source-refresh! root store roots))
       (let [snapshot-before (current-source-snapshot roots)
-            paths (changed-source-paths (:seon.source/relative-file-digests cached)
+            paths (changed-source-paths (merge (:seon.source/relative-file-digests cached)
+                                               (:seon.source/relative-file-digests published))
                                         (:seon.source/relative-file-digests snapshot-before)
                                         (map (partial fs/relative-path (:seon.fn/root roots)) changed-paths))
             known-functions (seon.fn/manifest-function-symbols manifest)

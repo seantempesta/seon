@@ -1165,7 +1165,11 @@
        (fn [_] {:seon.source/digest digest
                :seon.source/snapshot snapshot
                :seon.fn/manifest manifest})
-       #'cluster/read-source-artifact (fn [_] artifact)
+       #'cluster/read-source-artifact (fn [_] nil)
+       #'cluster/write-source-artifact!
+       (fn [_ rebuilt]
+         (is (= artifact rebuilt)
+             "an absent or old-shaped cache is re-derived without a publication"))
        #'source/current
        (fn [_] {:seon.source/branch source/current-branch
                 :seon.source/commit-id commit-id})
@@ -1176,7 +1180,7 @@
         (is (= expected (#'cluster/full-source-refresh!
                          "root" ::store (#'cluster/publication-roots))))
         (is (zero? @publications)
-            "matching artifact, file digests, live head, and database digest do not publish")))))
+            "the database digest owns currentness even without an artifact")))))
 
 (deftest invalid-cached-manifest-falls-back-before-incremental-analysis
   (let [commit-id (random-uuid)
@@ -1193,6 +1197,7 @@
     (with-redefs-fn
       {#'cluster/read-source-artifact (fn [_] malformed)
        #'source/current (fn [_] {:seon.source/commit-id commit-id})
+       #'cluster/current-publication (fn [_ _] {:seon.source/commit-id commit-id})
        #'cluster/full-source-refresh!
        (fn [_ _ _] (swap! full-builds inc) rebuilt)}
       (fn []
