@@ -22,12 +22,12 @@
   [f]
   (support/with-database
     (fn [connection]
-      (db/transact! connection
-                    [{:db/id "plan-ns"
-                      :seon.ns/name 'fixture.plan}
-                     {:seon.agent/id "alice"
-                      :seon.agent/namespace "plan-ns"}
-                     {:seon.agent/id "bob"}])
+      (support/transacted! connection
+                           [{:db/id "plan-ns"
+                             :seon.ns/name 'fixture.plan}
+                            {:seon.agent/id "alice"
+                             :seon.agent/namespace "plan-ns"}
+                            {:seon.agent/id "bob"}])
       (f connection))))
 
 (defn- add
@@ -208,9 +208,9 @@
   (with-plan
     (fn [connection]
       (add connection "ship" "Old title")
-      (db/transact! connection
-                    [{:db/id [:my.plan.item/id "ship"]
-                      :my.plan.item/title "New title"}])
+      (support/transacted! connection
+                           [{:db/id [:my.plan.item/id "ship"]
+                             :my.plan.item/title "New title"}])
       (is (= ["New title"]
              (mapv :my.plan.item/title
                    (:my.plan/steps (plan-of connection))))))))
@@ -249,8 +249,8 @@
       (add connection "grandchild" "Grandchild"
            {:my.plan/parent-step [:my.plan.item/id "child"]})
       (add connection "sibling" "Independent root")
-      (db/transact! connection
-                    [[:db.fn/retractEntity [:my.plan.item/id "root"]]])
+      (support/transacted! connection
+                           [[:db.fn/retractEntity [:my.plan.item/id "root"]]])
       (let [current (plan-of connection)]
         (is (= ["sibling"] (ids (:my.plan/steps current)))
             "component retraction removes the owned subtree and nothing else")
@@ -422,10 +422,10 @@
 (deftest a-second-agent-renders-through-the-same-defaults
   (with-plan
     (fn [connection]
-      (db/transact! connection
-                    (filterv :seon.call-preparation/key
-                             (:seon.config/initialization
-                              (config/compile-manifest {}))))
+      (support/transacted! connection
+                           (filterv :seon.call-preparation/key
+                                    (:seon.config/initialization
+                                     (config/compile-manifest {}))))
       (add connection "alice-work" "Alice work")
       (plan/add! {:my.plan.item/id "bob-work" :my.plan.item/title "Bob work"}
                  connection "bob")
@@ -497,13 +497,13 @@
 (deftest the-example-fixture-shape-installs-and-renders
   (support/with-database
     (fn [connection]
-      (db/transact! connection
-                    [{:seon.agent/id "juniper"}
-                     {:db/id [:seon.agent/id "juniper"]
-                      :seon.agent/plan
-                      {:my.plan/objective "Improve Juniper context inspection"
-                       :my.plan/current-step "step-render-plan"
-                       :my.plan/steps juniper-fixture-steps}}])
+      (support/transacted! connection
+                           [{:seon.agent/id "juniper"}
+                            {:db/id [:seon.agent/id "juniper"]
+                             :seon.agent/plan
+                             {:my.plan/objective "Improve Juniper context inspection"
+                              :my.plan/current-step "step-render-plan"
+                              :my.plan/steps juniper-fixture-steps}}])
       (let [current (plan/plan {:seon.db/db @connection
                                 :seon.agent/id "juniper"})
             ai (plan/render-plan-ai current)
@@ -551,6 +551,6 @@
         (is (not (contains? agent :my.plan/steps)))
         (is (not (contains? agent :my.plan/current-step)))
         (is (= "ship" (:my.plan.item/id (plan/current @connection "alice"))))
-        (db/transact! connection [[:db.fn/retractEntity [:seon.agent/id "alice"]]])
+        (support/transacted! connection [[:db.fn/retractEntity [:seon.agent/id "alice"]]])
         (is (nil? (db/pull @connection '[*] (:db/id component))))
         (is (nil? (db/pull @connection '[*] [:my.plan.item/id "ship"])))))))

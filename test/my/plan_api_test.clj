@@ -13,15 +13,15 @@
     (fn [connection]
       (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "plan-api"})
       (support/seed-cluster! connection "plan-api")
-      (db/transact! connection
-                    (agent/creation-tx {:seon.agent/id "plan-api"
-                                        :seon.ns/name 'my.agents.plan-api
-                                        :seon.cluster/name "plan-api"}))
-      (db/transact! connection
-                    [{:my.plan/agent [:seon.agent/id "plan-api"]
-                      :my.plan/steps [{:my.plan.item/id "existing"
-                                       :my.plan.item/title "Existing"
-                                       :my.plan.item/position 8}]}])
+      (support/transacted! connection
+                           (agent/creation-tx {:seon.agent/id "plan-api"
+                                               :seon.ns/name 'my.agents.plan-api
+                                               :seon.cluster/name "plan-api"}))
+      (support/transacted! connection
+                           [{:my.plan/agent [:seon.agent/id "plan-api"]
+                             :my.plan/steps [{:my.plan.item/id "existing"
+                                              :my.plan.item/title "Existing"
+                                              :my.plan.item/position 8}]}])
       (let [ctx (support/fork-cluster-ctx connection "plan-api")
             forked (sci.eval/fork-for-turn {:seon.sci.eval/ctx ctx
                                             :seon.db/db @connection

@@ -20,13 +20,13 @@
   [f]
   (support/with-database
     (fn [connection]
-      (db/transact! connection
-                    [{:seon.agent/id "alice"}
-                     {:seon.agent/id "bob"}])
+      (support/transacted! connection
+                           [{:seon.agent/id "alice"}
+                            {:seon.agent/id "bob"}])
       (let [before (db/basis-t @connection)]
-        (db/transact! connection
-                      [{:seon.message/id "m-1" :seon.message/to [:seon.agent/id "bob"] :seon.message/from [:seon.agent/id "alice"] :seon.message/content "First message" :seon.message/inbox [:seon.agent/id "bob"]}
-                       {:seon.message/id "m-2" :seon.message/to [:seon.agent/id "bob"] :seon.message/content (apply str (repeat 200 "x")) :seon.message/inbox [:seon.agent/id "bob"]}])
+        (support/transacted! connection
+                             [{:seon.message/id "m-1" :seon.message/to [:seon.agent/id "bob"] :seon.message/from [:seon.agent/id "alice"] :seon.message/content "First message" :seon.message/inbox [:seon.agent/id "bob"]}
+                              {:seon.message/id "m-2" :seon.message/to [:seon.agent/id "bob"] :seon.message/content (apply str (repeat 200 "x")) :seon.message/inbox [:seon.agent/id "bob"]}])
         (f connection before)))))
 
 (deftest ^{:seon.test/usage true} inbox-lists-this-agents-messages-newest-last
