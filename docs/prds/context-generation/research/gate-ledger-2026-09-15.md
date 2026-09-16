@@ -218,3 +218,23 @@ it refuses at its first with-database. Also: renderer-fn residual fixed
 `52044b4f4`; attempt-and-eval-facts re-run queued for the first batch after
 the hold.
 
+
+### 2026-09-16 04:20Z — default refused every publication; second refork
+
+`default` (pid 7595) had `:seon.test/reach-digest` installed as
+`:db.unique/identity` from an earlier bridge; the current bridge derives no
+uniqueness, and adoption's `declaration-changes` compares only the keys the
+new declaration carries, so the drop read as compatible. Every test with a
+changed reach digest then carried two identities and `seon.fn/index-tempids`
+refused the whole publication ("Program indexing found multiple entity
+identities."). Symptoms: hook "Publication did not finish within its declared
+bound", `bin/seon init --dev default --changed …` hanging, batch 25 results
+not recorded (`live-prepl-unavailable`). Issue:
+`docs/seon/issues/adoption-misses-a-dropped-uniqueness-on-an-installed-attribute.md`
+(fix handed to the steward session, which holds `src/seon/cluster.clj`).
+The steward session is reforking default; the recording-only platform tier
+runs after its message. Also landed: `86b4c8ff4` — the runner's confirmation
+test wrote `workers/` into the repository root when no test root property was
+set; `worker-parent` now refuses that state and `/build/` is ignored.
+Machine load at the time was Spotlight (`corespotlightd` 123%) and Backblaze
+(`bztransmit` 99%), not our JVMs.
