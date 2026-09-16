@@ -1109,6 +1109,10 @@
                      (is (= (:seon.source/digest fork) (beta-digest)))
                      (is (= (definition default) (definition beta)))
                      (is (str/includes? (definition beta) "[] 1"))
+                     (test-support/transacted!
+                      connection
+                      [{:db/id [:seon.cluster/name "default"]
+                        :seon.source/commit-id (random-uuid)}])
                      (write-value! 2)
                      (let [published (binding [cluster/*source-progress!* observe-page!]
                                        (cluster/refresh-source!
@@ -1126,6 +1130,10 @@
                                  (:seon.source/commit-id published)))
                        (is (= (:seon.source/commit-id published)
                               (adopted connection "default")))
+                       (is (= (:seon.source/commit-id published)
+                              (:seon.source/commit-id
+                               (edn/read-string
+                                (slurp (cluster/source-artifact-file root))))))
                        (is (= (:seon.source/digest fork) (beta-digest))
                            "scheduled maintenance may advance beta's branch head, never its program")
                        (is (str/includes? (definition default) "[] 2"))

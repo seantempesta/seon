@@ -2214,7 +2214,17 @@
         prior-commit (:seon.source/commit-id
                       (db/pull (db/db connection) [:seon.source/commit-id] cluster-ref))
         previous-database (if prior-commit
-                            (source/database held-store prior-commit)
+                            (try
+                              (source/database held-store prior-commit)
+                              (catch clojure.lang.ExceptionInfo failure
+                                (if (= :seon.cluster.source/source-absent
+                                       (:seon.cluster.source/rule (ex-data failure)))
+                                  (do
+                                    (report-source-progress!
+                                     (str "development source basis unavailable: " prior-commit
+                                          "; reconciling against the live cluster"))
+                                    (db/db connection))
+                                  (throw failure))))
                             (db/db connection))
         published-database (source/database held-store (:seon.source/commit-id published))
         forms (:seon.schema.projection/forms
