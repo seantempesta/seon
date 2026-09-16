@@ -166,14 +166,16 @@
         (.stop ^HttpServer server 0)
         (.shutdownNow ^java.util.concurrent.ExecutorService executor)))))
 
-(defn- config
-  "The COMPLETE effective config `seon.web.jvm`'s handlers declare, with this
-  suite's endpoint and bounds over it. A hand-rostered map of the eight
-  `:seon.config.web/*` dials this suite reads is a shape the declared
-  contract forbids."
+(defn- web-manifest
+  "This suite's `:seon.config.web/*` overlay, applied through the production
+  path.
+
+  It used to be `(assoc (seon-config/defaults) …)` written straight in as a
+  config ROW, which write admission refuses: only `compile-manifest` can
+  compute `:seon.config/applied-manifest-digest`, so the row landed nothing
+  and every dial below stayed at its shipped default."
   [base-url]
-  (assoc (seon-config/defaults)
-   :seon.config.web/timeout-ms 1000
+  {:seon.config.web/timeout-ms 1000
    :seon.config.web/max-response-bytes 4096
    :seon.config.web/max-inline-bytes 8
    :seon.config.web/max-redirects 3
@@ -181,7 +183,16 @@
    :seon.config.web/search-endpoint (str base-url "/search")
    :seon.config.web/search-api-key-variable "SERPER_API_KEY"
    :seon.config.web/search-result-projection
-   'seon.web.search/organic-results))
+   'seon.web.search/organic-results})
+
+(defn- config
+  "The COMPLETE effective config `seon.web.jvm`'s handlers declare, with this
+  suite's endpoint and bounds over it, handed DIRECTLY to a handler the way
+  production hands it. Database facts come from `web-manifest` instead: an
+  effective map written as a config ROW is refused, because only
+  `compile-manifest` can compute `:seon.config/applied-manifest-digest`."
+  [base-url]
+  (merge (seon-config/defaults) (web-manifest base-url)))
 
 (defn- exact-blob
   [connection digest size]
@@ -345,15 +356,18 @@
     (fn [connection]
       (with-server
         (fn [{:keys [base-url]}]
+          (support/apply-config! connection "default" (web-manifest base-url))
+          (support/apply-config!
+           connection "default"
+           (assoc (web-manifest base-url)
+                  :seon.config.web/max-inline-bytes 4096))
           (support/transacted!
                   connection
-                  [(merge (seon-config/defaults)
-                          {:seon.config/cluster "default"}
-                          (config base-url))
-                   {:seon.agent/id "web-agent"}
+                  [{:seon.agent/id "web-agent"}
                    {:seon.turn/id "web-receipt-run"
                     :seon.turn/agent
-                    [:seon.agent/id "web-agent"]}])
+                    [:seon.agent/id "web-agent"]
+                    :seon.turn/opened-tx "datomic.tx"}])
           (let [result
                 (with-redefs-fn
                   {(ns-resolve 'seon.web.jvm 'credential)
@@ -388,14 +402,11 @@
         (fn [{:keys [base-url]}]
           (support/transacted!
                   connection
-                  [(merge (seon-config/defaults)
-                          {:seon.config/cluster "default"}
-                          (config base-url)
-                          {:seon.config.web/max-inline-bytes 4096})
-                   {:seon.agent/id "web-agent"}
+                  [{:seon.agent/id "web-agent"}
                    {:seon.turn/id "web-receipt-run"
                     :seon.turn/agent
-                    [:seon.agent/id "web-agent"]}])
+                    [:seon.agent/id "web-agent"]
+                    :seon.turn/opened-tx "datomic.tx"}])
           (let [context (effect-context connection)
                 [text-result binary-result]
                 (binding [db/*conn* connection

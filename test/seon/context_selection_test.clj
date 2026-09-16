@@ -141,6 +141,7 @@
                             [:seon.turn/id "compact-before"]
                             :seon.cluster.eval/ordinal 0
                             :seon.cluster.eval/author :system
+                            :seon.cluster.eval/at closed-at
                             :seon.cluster.eval/source "(identity 1)"
                             :seon.cluster.eval/ns [:seon.ns/name 'compact.context]
                             :seon.eval/shown "1"}
@@ -149,6 +150,7 @@
                             [:seon.turn/id "compact-after"]
                             :seon.cluster.eval/ordinal 0
                             :seon.cluster.eval/author :system
+                            :seon.cluster.eval/at closed-at
                             :seon.cluster.eval/source "(identity 1)"
                             :seon.cluster.eval/ns [:seon.ns/name 'compact.context]
                             :seon.eval/shown "2"}])

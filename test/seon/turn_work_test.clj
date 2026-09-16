@@ -556,10 +556,12 @@
       (testing "a turn whose only attempt failed answers nothing"
         (support/transacted!
                 connection
+                ;; `:seon.error/at` is a REQUEST key seon.error/recording reads,
+                ;; not an installed attribute: the writer decides which datoms
+                ;; an occurrence gets.
                 [{:seon.error/id "provider-failure"
                   :seon.error/kind :seon.ai/no-credential
-                  :seon.error/message "no credential"
-                  :seon.error/at now}
+                  :seon.error/message "no credential"}
                  {:seon.turn/id "failed-run" :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx" :seon.turn/closed-tx "datomic.tx"}
                  (assoc (model-attempt "failed-run" now)
                         :seon.ai.attempt/error [:seon.error/id "provider-failure"])])

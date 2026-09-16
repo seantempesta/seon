@@ -178,6 +178,7 @@
                 :seon.fn/private? false
                 :seon.fn/spec "[:=> [:cat [:vector :int]] [:vector :int]]"}
                {:seon.test/sym (str namespace-name "/current-items-test")
+                :seon.schema.admission/source :core
                 :seon.test/ns [:seon.ns/name namespace-name]
                 :seon.test/source "(deftest current-items-test)"
                 :seon.test/usage true
@@ -256,6 +257,7 @@
                 :seon.fn/private? false
                 :seon.fn/spec "[:=> [:cat :int] :int]"}
                {:seon.test/sym "fixture.intent/target-usage"
+                :seon.schema.admission/source :core
                 :seon.test/ns [:seon.ns/name 'fixture.intent]
                 :seon.test/source
                 "(clojure.test/deftest target-usage (clojure.test/is (= 2 (target 1))))"
@@ -319,6 +321,13 @@
   (support/with-database
     (fn [connection]
       (support/seed-cluster! connection "missing-intent-budget")
+      ;; ABSENT IS A FACT, not a fixture that failed to write one:
+      ;; config/default.edn ships the dial, so the only way to observe the
+      ;; loud refusal is to retract it.
+      (support/transacted!
+       connection
+       [[:db/retract [:seon.config/cluster "missing-intent-budget"]
+         :seon.config.bootstrap/beyond-closure-token-budget]])
       (cluster/ensure-entity!
        connection cluster/boot-process-identity
        {:seon.agent/id agent-id
