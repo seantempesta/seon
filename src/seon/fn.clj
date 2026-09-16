@@ -1027,10 +1027,6 @@
      [?test :seon.test/sym]
      [?test :seon.test/subject ?subject]
      (function-reaches ?subject ?target)]
-    [(test-gates-symbol ?test ?target ?target-symbol)
-     (test-reaches ?test ?target)]
-    [(test-gates-symbol ?test ?target ?target-symbol)
-     [?test :seon.test/pending-subject ?target-symbol]]
     [(test-currently-failing ?test)
      [?test :seon.test/fail-count ?count]
      [(pos? ?count)]]
@@ -1041,20 +1037,48 @@
 (defn gate-set
   "Tests gating one function identity from one database value.
 
-  Includes direct and transitive call reachability, resolved explicit
-  subjects, and test-first rows whose pending subject names this identity."
+  Walk indexed incoming call edges once per reachable identity. Explicit
+  subjects terminate the walk; pending subjects match this symbol exactly.
+  The finite database graph bounds the work, including cycles."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.fn/sym]
                   [:vector :seon.test/sym]]}
   [database function-symbol]
-  (let [target (or (:db/id (db/pull database [:db/id]
-                                    [:seon.fn/sym function-symbol]))
-                   -1)]
-    (->> (db/q '[:find [?test-symbol ...]
-                 :in $ % ?target ?target-symbol
-                 :where
-                 (test-gates-symbol ?test ?target ?target-symbol)
-                 [?test :seon.test/sym ?test-symbol]]
-               database test-reach-rules target function-symbol)
+  (let [target (:db/id (db/pull database [:db/id]
+                               [:seon.fn/sym function-symbol]))
+        reached
+        (loop [pending (if target [target] [])
+               seen #{}
+               callers #{}]
+          (if-let [entity (peek pending)]
+            (if (seen entity)
+              (recur (pop pending) seen callers)
+              (let [incoming (mapv :e (db/datoms database :avet
+                                               :seon.fn/calls entity))]
+                (recur (into (pop pending) incoming)
+                       (conj seen entity)
+                       (into callers incoming))))
+            callers))
+        subjects (cond-> reached target (conj target))]
+    (->> (concat
+          (when (seq reached)
+            (db/q '[:find [?symbol ...]
+                    :in $ [?test ...]
+                    :where [?test :seon.test/sym ?symbol]]
+                  database reached))
+          (when (seq subjects)
+            (db/q '[:find [?symbol ...]
+                    :in $ [?subject ...]
+                    :where
+                    [?test :seon.test/subject ?subject]
+                    [?test :seon.test/sym ?symbol]]
+                  database subjects))
+          (db/q '[:find [?symbol ...]
+                  :in $ ?target-symbol
+                  :where
+                  [?test :seon.test/pending-subject ?target-symbol]
+                  [?test :seon.test/sym ?symbol]]
+                database function-symbol))
+         distinct
          sort
          vec)))
 

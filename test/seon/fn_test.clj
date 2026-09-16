@@ -1345,6 +1345,88 @@
         (is (= []
                (seon.fn/tests-reaching @connection "sample.reach/absent")))))))
 
+(deftest gate-set-walks-only-indexed-callers-once
+  (test-support/with-database
+    (fn [connection]
+      (transact-fixture!
+       connection
+       (into [{:seon.ns/name 'sample.gates :seon.ns/source "(ns sample.gates)"}]
+             (map (fn [s]
+                    {:seon.fn/sym s
+                     :seon.schema.admission/source :core
+                     :seon.fn/ns [:seon.ns/name 'sample.gates]
+                     :seon.fn/source (str "(defn " (name (symbol s)) " [] nil)")
+                     :seon.fn/arglists "([])"
+                     :seon.fn/private? false}))
+             ["sample.gates/a" "sample.gates/b" "sample.gates/unrelated"]))
+      (transact-fixture!
+       connection
+       [[:db/add [:seon.fn/sym "sample.gates/a"] :seon.fn/calls
+         [:seon.fn/sym "sample.gates/b"]]
+        [:db/add [:seon.fn/sym "sample.gates/b"] :seon.fn/calls
+         [:seon.fn/sym "sample.gates/a"]]
+        {:seon.test/sym "sample.gates/direct"
+         :seon.schema.admission/source :core
+         :seon.fn/calls [[:seon.fn/sym "sample.gates/a"]]}
+        {:seon.test/sym "sample.gates/subject"
+         :seon.schema.admission/source :core
+         :seon.test/subject [:seon.fn/sym "sample.gates/b"]}
+        {:seon.test/sym "sample.gates/pending"
+         :seon.schema.admission/source :core
+         :seon.test/pending-subject "sample.gates/a"}
+        {:seon.test/sym "sample.gates/future"
+         :seon.schema.admission/source :core
+         :seon.test/pending-subject "sample.gates/new"}])
+      (let [database (db/db connection)
+            queries (atom [])
+            scan-counts (atom [])
+            scans (atom [])
+            query db/q
+            datoms db/datoms
+            thread (Thread/currentThread)
+            symbols ["sample.gates/a" "sample.gates/b" "sample.gates/new"
+                     "sample.gates/unrelated" "sample.gates/absent"]
+            results
+            (with-redefs
+              [db/q (fn [& arguments]
+                      (when (identical? thread (Thread/currentThread))
+                        (swap! queries conj (first arguments)))
+                      (apply query arguments))
+               db/datoms (fn [& arguments]
+                           (when (identical? thread (Thread/currentThread))
+                             (swap! scans conj (vec (rest arguments))))
+                           (apply datoms arguments))]
+              (mapv (fn [s]
+                      (reset! scans [])
+                      (let [result (seon.fn/gate-set database s)]
+                        (swap! scan-counts conj (count @scans))
+                        (is (= (count @scans) (count (distinct @scans)))
+                            "a cycle never repeats an incoming-edge lookup")
+                        (is (every? #(= [:avet :seon.fn/calls] (subvec % 0 2))
+                                    @scans)
+                            "the walk reads indexed incoming edges only")
+                        result))
+                    symbols))]
+        (is (= [["sample.gates/direct" "sample.gates/pending" "sample.gates/subject"]
+                ["sample.gates/direct" "sample.gates/subject"]
+                ["sample.gates/future"] [] []]
+               results))
+        (is (= [3 3 0 1 0] @scan-counts)
+            "only the reachable identities are visited, once per requested gate set")
+        (is (<= (count @queries) (* 3 (count symbols)))
+            "each identity uses at most three nonrecursive selection queries")
+        (is (not-any? #(some #{'%} %) @queries)
+            "N definitions never repeat the graph-wide recursive derivation")
+        (transact-fixture!
+         connection
+         [[:db/retract [:seon.fn/sym "sample.gates/b"] :seon.fn/calls
+           [:seon.fn/sym "sample.gates/a"]]])
+        (is (= ["sample.gates/direct" "sample.gates/pending"]
+               (seon.fn/gate-set (db/db connection) "sample.gates/a"))
+            "edge removal is visible without updating any retained closure")
+        (is (= (first results) (seon.fn/gate-set database "sample.gates/a"))
+            "the old immutable value keeps its own reach")))))
+
 (deftest output-path-report-finds-the-shortest-bypass
   (test-support/with-database
     (fn [connection]

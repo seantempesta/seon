@@ -416,3 +416,188 @@ Hook `4078e361-ac23-4efe-a0a2-2f569978a21e` reported convergence to
 `6aaa3c2a-99ed-57e5-9d4c-ab5b225c18d3`; its automatic reaching check was
 unavailable because the cluster rejected the prepl operation. The cold
 snapshot result above is the execution proof for this follow-up.
+
+## Gate-set cost — 2026-09-16, lane gate-set-cost
+
+### Verdict and scope
+
+The graph-wide derivation is removed from `gate-set`. The unchanged 300 ms
+six-form assertion is **still red** in this JVM: 6,530.462375 ms before,
+390.081584 / 355.566790 / 441.423375 ms after; final reload 365.775334 ms.
+In the attributed window
+`gate-set` costs **0.864375 ms**, while two `db/transact!` calls cost
+**250.262166 ms**. This slice resolves the recursive gate lookup, not the
+remaining [turn bookkeeping issue](../../../seon/issues/turn-bookkeeping-exceeds-recorded-regression-bound.md).
+Do not claim a green turn or an adopted proof from these numbers.
+
+Read this research page, AGENTS.md, the three assigned wave-2 rule files,
+the gate/rule definitions, settlement call site, and `seon.test/check`
+end to end before implementation; loaded datahike, REPL, data-oriented
+Clojure, and testing skills. The assigned “22:40Z attribution” was absent
+from this page's 418-line starting version. The working-edge record at
+`docs/prds/steward-platform/plan/unsettled.md` instead labels its
+5,976 / 6,416 ms attribution 20:20Z. This lane independently reproduced
+the cost rather than relying on that timestamp.
+
+Only the production function `seon.fn/gate-set` changes. The private
+`test-reach-rules` value loses its two now-unused `test-gates-symbol`
+clauses; its other queries remain intact. `tests-reaching` remains because
+`seon.test/identity-tests`, fixture preparation, render callers, and tests
+still call it. No settlement or check call-shape change is needed.
+
+### Rotation, dependency ledger, and guarantee
+
+- Default has **1,755 tests**, only **160** with `:seon.test/reach`.
+  That attribute is historical tested-closure evidence, not a maintained
+  current closure. `seon.test.runner/record-tx` derives it from the tested
+  database value (`src/seon/test/runner.clj:1742–1758`).
+  Rewriting it at install time would corrupt its meaning.
+- `reach-digests` uses a separate incremental index of source, contract,
+  schema, and call dependencies (`src/seon/test/runner.clj:1425–1545`).
+  This slice neither reads its private cache nor introduces another cache.
+- Datahike already supplies indexed incoming edges: `db/datoms` with
+  `:avet :seon.fn/calls target` (`src/seon/db.clj:1881–1950`).
+  The existing `seon.test.selection/reaching-tests` uses the same reverse
+  direction over manifest edges (`src/seon/test/selection.clj:134–177`).
+- The “re-plan every call” attribution is too strong: the dependency caches
+  plans by query shape (`reference-code/datahike/src/datahike/query.cljc:3448–3472`).
+  The expensive repeated work here is recursive reach derivation; changing
+  its execution direction removes it without tuning a limit.
+
+For each requested identity, visit each incoming-call-reachable entity at
+most once, then select tests by calls, resolved subjects, and exact pending
+subject symbol. The finite immutable graph bounds traversal, including
+cycles. A subject edge terminates at a test; pending subjects do not
+silently become transitive call edges. A missing function still selects
+its pending-subject tests. The return remains a sorted, duplicate-free
+vector. The database value is the only authority.
+
+This rotates the suggested once-per-turn graph build further: there is
+**no graph-wide build at all**, even for one newly installed definition.
+N requests walk only their incoming subgraphs; no cross-request cache,
+stored derived membership, writer hook, or additional turn state exists.
+
+### Measurements on default
+
+PID **45917**, captured database basis **536871586**; source commit
+`6aaa5523-5055-5df1-bcd7-d944ce8a43fc`.
+The canonical fixture base realized successfully on a future outside the
+MCP/test bound and test loader. It was neither reset nor replaced.
+
+| Observation | Before ms | Candidate ms | Evidence |
+|---|---:|---:|---|
+| `gate-set "seon.id/id"` | 6753.094083 | 19.578709; armed 11.444833 | Exactly the same 1,001 tests |
+| New `my.agents.agent-a/repaired` identity | — | 1.080750 | Empty exact gate set |
+| `gate-set "seon.fn/gate-set"` | — | 4.168083 | 174 tests |
+| `check`, changed `seon.schema/commit-registration-delta!` | 5922.737292 | 5.417250 | Both select zero tests; selection-only proof |
+| Check's reported elapsed | 5917.882625 | 3.382333 | No tests or provenance invented |
+| All installed identities compared | — | 26008.902292 total | 4,879 identities, 1,002,483 reference pairs, zero differences |
+
+The final attributed six-form window also measured `analyze-forms`
+30.576625 ms (two calls), candidate evaluation 94.286334 ms, six ordinary
+SCI evaluations 63.144251 ms (excluded by the assertion), and
+`settle-batch!` 243.853833 ms inclusive. These are nested measurements,
+not additive independent phases. Two transactions dominate the remaining
+window; their internal cost has not been attributed by this bounded lane.
+
+### In-process regression evidence and adoption boundary
+
+Every run uses the canonical fixture, actual SCI, and armed contracts
+(1,062 registered / 1,062 instrumented). Test namespaces were explicitly
+reloaded through `seon.test/with-test-loader`; the base namespace was not
+reloaded. The candidate was evaluated, called with real data, and tested
+before production edits. Tests run serially on a future via:
+
+```clojure
+(seon.test/run
+ (#'seon.test/resolve-test
+  'seon.cluster.turn-test/delimiter-repair-is-span-local-and-precedes-intent)
+ (seon.operator/connection "default"))
+```
+
+| Run entity | Test | Pass / fail / error |
+|---|---|---|
+| 81837 | Original delimiter regression | 15 / 1 / 0; 6530.462375 ms |
+| 81840 | Existing calls/subjects reach regression | 6 / 0 / 0 |
+| 81841 | Candidate delimiter regression | 15 / 1 / 0; 390.081584 ms |
+| 81850 | Candidate indexed-walk class regression | 18 / 0 / 0 |
+| 81858 | Attributed delimiter regression | 15 / 1 / 0; 441.423375 ms |
+| 81861 | Final reloaded indexed-walk class regression | 19 / 0 / 0 |
+| 81863 | Final reloaded calls/subjects reach regression | 6 / 0 / 0 |
+| 81864 | Final reloaded delimiter regression | 15 / 1 / 0; 365.775334 ms |
+
+The class regression now also requires exact scan counts for five requested
+identities. It proves cycle termination, direct/transitive calls, subjects,
+pending absent identities, unrelated/absent functions, edge retraction, and
+old-database isolation. Delegates count only the invoking test thread.
+An initial fixture candidate was correctly refused for missing required
+function fields; those rows were completed before retaining the regression.
+
+Development publication is blocked by the concurrent `:seon.issue/agent`
+index declaration: default says it predates the incompatible schema change.
+The existing [adoption issue](../../../seon/issues/adoption-refuses-a-monotonic-index-addition-datahike-supports.md)
+records that boundary. The observed published head
+`6aaa599a-051f-5b32-994b-99df63a3c1dc` differed from default's adopted
+source above, and its indexed gate source was still old. No restart,
+refork, foreign-file edit, scratch cluster, test JVM, `bin/test`, or
+`bin/test-fast` was used. Live candidate proof is explicitly hot-loaded
+and re-armed; integration/adoption remains the orchestrator's boundary.
+
+### Reproduce the complete graph comparison
+
+Evaluate on a daemon future and poll later; do not force fixture construction
+inside a bounded MCP call. This compares the retained recursive reference
+relation once against every installed function's gate set:
+
+```clojure
+(future
+ (let [database (seon.db/db (seon.operator/connection "default"))
+       pairs (seon.db/q
+              '[:find ?symbol ?function :in $ %
+                :where (test-reaches ?test ?function)
+                       [?test :seon.test/sym ?symbol]]
+              database @#'seon.fn/test-reach-rules)
+       expected (reduce (fn [m [s f]] (update m f (fnil conj #{}) s))
+                        {} pairs)
+       pending (group-by first
+                (seon.db/q
+                 '[:find ?name ?symbol
+                   :where [?test :seon.test/pending-subject ?name]
+                          [?test :seon.test/sym ?symbol]]
+                 database))
+       identities (seon.db/q
+                   '[:find ?function ?symbol
+                     :where [?function :seon.fn/sym ?symbol]]
+                   database)]
+   {:gate-set-cost/identities (count identities)
+    :gate-set-cost/reference-pairs (count pairs)
+    :gate-set-cost/differences
+    (into []
+          (keep (fn [[f s]]
+                  (let [wanted (into (get expected f #{})
+                                     (map second (get pending s)))
+                        actual (set (seon.fn/gate-set database s))]
+                    (when (not= wanted actual)
+                      {:seon.fn/sym s
+                       :gate-set-cost/expected wanted
+                       :gate-set-cost/actual actual}))))
+          identities)}))
+```
+
+Gate request: `tmp/orchestrator/gate-requests/gate-set-cost.txt` contains
+`seon.fn-test`, `seon.cluster.turn-test`, `seon.test-support-test`, and
+`platform`. Focused clj-kondo reports **0 errors / 16 existing warnings**;
+`git diff --check` passes.
+
+The explicit final publication command,
+`bin/seon init --dev default --changed src/seon/fn.clj --changed test/seon/fn_test.clj`,
+exited 1 at the same `:seon.issue/agent` schema refusal. Its shell exited;
+all lane probe futures completed. The source-edit hooks also reported that
+refusal. Markdown's global hook reports 29 unrelated findings, including
+stale dependency gitlinks in `agents-md-audit-2026-09-15.md`; this lane does
+not edit those paths. No adopted or platform-green claim is made.
+
+After all final runs and the publication command completed, the final MCP
+source check returned `repl-unavailable`: default's advertisement was
+missing. The lane did not operate default. All numbers above belong to
+PID 45917; a later process requires its own adopted proof.
