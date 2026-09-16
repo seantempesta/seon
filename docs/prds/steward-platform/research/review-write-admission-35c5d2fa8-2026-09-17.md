@@ -84,3 +84,32 @@ question is answered by that fix.
 `:seon.schema.admission/source` (batch 105's refusal at `[47871 …]`) is not
 addressed by `b1508dc8a`; it is proven or refuted by the first cold gate on
 the converged base (batch 107 first).
+
+## Addendum — `2df9ecccc` + `16408995e` reviewed (orchestrator, 2026-09-16 22:05Z)
+
+Read: the diffs to `src/seon/error.clj`, `src/seon/turn.clj`, the four test
+namespaces, and the landing note's follow-up section; alongside the
+independent research note
+`evaluation-write-path-and-retired-identities-2026-09-16.md`.
+
+**Approved for gate (batch 108).** The refusal description is now derived
+structurally from the Malli schema tree (`schema-expectation` walks `:and`/
+`:or` children and honours declared `:error/message`), so a ref-typed key no
+longer reads "satisfying unknown error" — a root fix, not a string patch.
+Runtime deletion (`seon.turn/row-tx`'s deletion branch) now hands
+`exact-replacement-tx` an identity-only desired row, so the REPL deletion and
+the publication reconciliation produce the same retired shape; the two
+program-test expectations were changed to match. The batch-107 fixtures now
+create complete entities through the helpers, and the vanished-turn regression
+retracts the evaluation and its turn together, which is what the only real
+producer (the history-wipe fixture) does.
+
+**Not settled by this commit, deliberately:** what a retired `:seon.fn` row IS
+remains inferred from the absence of definition attributes, with a second
+validator selecting the retired arm when the ordinary one fails. The research
+note's Option B (a positive `:seon.fn/retired-tx` fact, `open?`-style, with the
+entity schema declaring both arms) is the recommendation put to the owner; it
+is a schema change and a reset. The third retirement path,
+`seon.cluster.source/mintable-identity`, still mints a row carrying
+`:seon.schema.admission/source` and `:seon.fn/ns` (a live-looking row for a
+name this database never defined) and is the remaining shape mismatch.
