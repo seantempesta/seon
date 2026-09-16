@@ -1,0 +1,24 @@
+; Replay each request individually with mcp__seon__eval_clj.
+; The first two use speculative Datahike values, not committed mutations.
+; The last records one canonical test result on default.
+[
+ {:root "/Users/sean/src/seon"
+  :cluster "default"
+  :mode "jvm"
+  :namespace "seon.db"
+  :timeout_ms 60000
+  :code "(let [connection (seon.operator/connection \"default\") database (db connection) issue (first (q '[:find [?e ...] :where [?e :seon.issue/agent]] database)) title (:seon.issue/title (pull database [:seon.issue/title] issue)) observed (volatile! nil) report (d/with database [[:db.fn/call (fn [before] [[:db/add issue :seon.issue/title \"issue-settlement speculative probe\"] [:db.fn/call (fn [after] (vreset! observed {:before-title (:seon.issue/title (d/pull before [:seon.issue/title] issue)) :after-title (:seon.issue/title (d/pull after [:seon.issue/title] issue)) :same-value? (identical? before after)}) [])]])]])] {:issue issue :original-title title :observation @observed :committed-title (:seon.issue/title (pull (db connection) [:seon.issue/title] issue))})"}
+ {:root "/Users/sean/src/seon"
+  :cluster "default"
+  :mode "jvm"
+  :namespace "seon.db"
+  :timeout_ms 60000
+  :code "(let [c (seon.operator/connection \"default\")\n      database (db c)\n      issue (first (q '[:find [?e ...] :where [?e :seon.issue/agent]] database))\n      snapshot (fn [database]\n                 (let [row (d/pull database '[:seon.issue/agent {:seon.issue/tests [:db/id]}] issue)]\n                   {:active? (boolean (:seon.issue/agent row))\n                    :tests (set (map :db/id (:seon.issue/tests row)))}))\n      accepts? (fn [prior final]\n                 (or (not (or (:active? prior) (:active? final)))\n                     (and (seq (:tests final))\n                          (clojure.set/subset? (:tests prior) (:tests final)))))\n      first-db (:db-after (d/with database [[:db.fn/retractAttribute issue :seon.issue/agent]]))\n      second-db (:db-after (d/with first-db [[:db.fn/retractAttribute issue :seon.issue/tests]]))]\n  {:issue issue\n   :before (snapshot database)\n   :after-first (snapshot first-db)\n   :after-second (snapshot second-db)\n   :first-accepted? (boolean (accepts? (snapshot database) (snapshot first-db)))\n   :second-accepted? (boolean (accepts? (snapshot first-db) (snapshot second-db)))\n   :committed (snapshot (db c))})"}
+ {:root "/Users/sean/src/seon"
+  :cluster "default"
+  :mode "jvm"
+  :namespace "user"
+  :timeout_ms 60000
+  :code "(seon.test/run (requiring-resolve 'seon.issue-test/issue-worker-creation-is-atomic) (seon.operator/connection \"default\"))"}
+]
+
