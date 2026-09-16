@@ -1,0 +1,41 @@
+#:seon.error.occurrence
+{:id [:string {:min 12 :max 12 :seon.db/identity true}]
+ :count [:int {:min 1}]
+ :first-at :inst
+ :last-at :inst
+ :process :seon.db/ref
+ :agent :seon.db/ref
+ :turn :seon.db/ref
+ :proc-fn :seon.db/ref
+ :data-blob :seon.db/ref
+ :message :string
+ :blob-digest [:and {:seon.db/identity true} :seon.blob/digest]
+ :blob [:map {:seon.db/attributes true}
+        [:seon.error.occurrence/blob-digest :seon.error.occurrence/blob-digest]
+        [:seon.error/data-blob :seon.error/data-blob]]
+ :occurrence
+ [:map {:seon.db/attributes true}
+  [:seon.error.occurrence/id :seon.error.occurrence/id]
+  [:seon.error.occurrence/count :seon.error.occurrence/count]
+  [:seon.error.occurrence/first-at :seon.error.occurrence/first-at]
+  [:seon.error.occurrence/last-at :seon.error.occurrence/last-at]
+  [:seon.error.occurrence/process :seon.error.occurrence/process]
+  [:seon.error.occurrence/agent {:optional true} :seon.error.occurrence/agent]
+  [:seon.error.occurrence/turn {:optional true} :seon.error.occurrence/turn]
+  [:seon.error.occurrence/proc-fn {:optional true} :seon.error.occurrence/proc-fn]
+  [:seon.error.occurrence/data-blob {:optional true} :seon.error.occurrence/data-blob]
+  [:seon.error.occurrence/message :seon.error.occurrence/message]
+  [:seon.error/process :seon.error/process]
+  [:seon.instrument/fn {:optional true} :seon.instrument/fn]
+  [:seon.error/proc {:optional true} :seon.error/proc]
+  [:seon.error/op {:optional true} :seon.error/op]
+  [:seon.error/cid {:optional true} :seon.error/cid]
+  [:seon.error/throwable-class {:optional true} :seon.error/throwable-class]
+  [:seon.error/data-edn :seon.error/data-edn]
+  [:seon.error/data-size {:optional true} :seon.error/data-size]
+  [:seon.error/capped? :seon.error/capped?]
+  [:seon.error/dropped-fault-count {:optional true} :seon.error/dropped-fault-count]
+  [:seon.error/dropped-fault-digest {:optional true} :seon.error/dropped-fault-digest]
+  [:seon.instrument/arm {:optional true} :seon.instrument/arm]
+  [:seon.instrument/expected {:optional true} :seon.instrument/expected]
+  [:seon.instrument/args {:optional true} :seon.instrument/args]]}

@@ -66,7 +66,8 @@
                :seon.error/notification]
               [:seon.agent/id {:optional true} :seon.agent/id]],
              :capped? :boolean,
-             :occurrences [:int {:min 1}],
+             :occurrences [:set {:seon.db/component true} :seon.db/ref],
+             :occurrence-count [:int {:min 1}],
              :reason
              [:enum
               :your-run
@@ -121,6 +122,7 @@
               [:seon.error/kind :seon.error/kind]
               [:seon.error/message :seon.error/message]
               [:seon.error/signature :seon.error/signature]
+              [:seon.error/occurrences {:optional true} :seon.error/occurrences]
               [:seon.error/fn {:optional true} :seon.error/fn]
               [:seon.error/frame {:optional true} :seon.error/frame]
               [:seon.error/exception-class {:optional true} :seon.error/exception-class]
