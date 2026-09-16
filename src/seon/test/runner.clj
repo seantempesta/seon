@@ -719,9 +719,10 @@
 
   Taken from `seon.fn/source-roots`, the declaration the manifest itself is
   built over, so namespace discovery keys on a root the program graph admits
-  rather than on a filename suffix."
+  rather than on a filename suffix. The declaration is a plain vector, so the
+  `delay` defers only the REFUSAL — reading it must never deref it."
   (delay
-    (let [roots @seon.fn/source-roots]
+    (let [roots seon.fn/source-roots]
       (or (some #{"test"} roots)
           (throw
            (ex-info

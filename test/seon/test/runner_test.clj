@@ -299,28 +299,53 @@
                  (#'runner/confirmation-vars [] #{"missing/test"})))))
 
 (deftest initialization-acquires-one-projection
+  ;; TWO call shapes, ONE acquisition between them. `arm/initialize-contracts!`
+  ;; is the acquiring seam: its two-argument arity asks
+  ;; `packaged-test-projection` exactly once and carries that same value
+  ;; through loading, arming and its returned arming value. The runner's own
+  ;; wrapper is the worker's shape — a worker already holds the projection its
+  ;; arming acquired, so it HANDS that value in and the seam acquires nothing.
+  ;; A second acquisition on either path would arm against a projection no
+  ;; caller holds (AGENTS §2.1).
   (test-support/preserving-instrumentation-state
    (fn []
-     (doseq [initialize [#'arm/initialize-contracts! #'runner/initialize-contracts!]]
-       (let [acquire @#'arm/packaged-test-projection
-             acquisitions (atom [])
-             initialized
+     (let [acquire @#'arm/packaged-test-projection
+           acquisitions (atom [])
+           counting
+           (fn [body]
              (with-redefs-fn
                {#'arm/packaged-test-projection
                 (fn [role]
                   (let [projection (acquire role)]
                     (swap! acquisitions conj projection)
                     projection))}
-               #(initialize "one-projection" ['seon.test.runner-test]))
-             program (#'arm/declared-program-namespaces)
-             armable (instrument/armable program)
-             installed (instrument/instrumented)]
-         (is (= 1 (count @acquisitions)) (str initialize))
-         (is (identical? (first @acquisitions)
-                         (:seon.test.runner/projection initialized)))
-         (is (seq armable) "An absent program cannot prove complete arming.")
-         (is (empty? (set/difference armable installed))
-             "Every armable program Var carries its real contract wrapper."))))))
+               body))
+           prove-armed!
+           (fn [label]
+             (let [program (#'arm/declared-program-namespaces)
+                   armable (instrument/armable program)]
+               (is (seq armable) "An absent program cannot prove complete arming.")
+               (is (empty? (set/difference armable (instrument/instrumented)))
+                   (str label ": every armable program Var carries its real "
+                        "contract wrapper."))))
+           acquired
+           (counting
+            #(arm/initialize-contracts! "one-projection" ['seon.test.runner-test]))]
+       (is (= 1 (count @acquisitions))
+           "the acquiring arity asks for exactly one projection")
+       (is (identical? (first @acquisitions)
+                       (:seon.test.runner/projection acquired))
+           "and hands that same value back in its arming value")
+       (prove-armed! "arm/initialize-contracts!")
+       (let [handed (:seon.test.runner/projection acquired)
+             worker (counting
+                     #(#'runner/initialize-contracts!
+                       "one-projection" ['seon.test.runner-test] handed))]
+         (is (= 1 (count @acquisitions))
+             "the worker shape acquires nothing of its own")
+         (is (identical? handed (:seon.test.runner/projection worker))
+             "it arms against the projection its caller already holds")
+         (prove-armed! "runner/initialize-contracts!"))))))
 
 (deftest executor-submissions-carry-the-callers-handed-projection
   ;; `on-caller-loader` pinned the submitting thread's CLASSLOADER and
@@ -667,14 +692,24 @@
    connection (schema/canonical-schema-rows {schema-key :string})))
 
 (defn- retract-schema-key!
-  "Retract one declaration's definition fact. The identity row survives as a
-  tombstone (ruling 47); the projection loses the key because its form is gone."
+  "Delete one declaration exactly as the deletion path deletes.
+
+  `seon.turn`'s deleted-identity transaction (`src/seon/turn.clj:1337`) pulls
+  the whole declaration and hands `seon.program/exact-replacement-tx` a desired
+  row of the identity ALONE: every owned attribute is retracted and the
+  identity row survives as a tombstone (ruling 47). The projection loses the
+  key because its form is gone.
+
+  Retracting `:seon.schema/form` by itself is what this fixture did before, and
+  the writer refused it: `:seon.schema.admission/source` survived, so the
+  whole-entity validator rebuilt a row missing its required form. The fixture
+  does not re-derive which attributes a schema declaration owns — deriving it
+  here would be a mirror the writer re-decides (AGENTS §2.1, §5 rule 8)."
   [connection schema-key]
-  (let [row (db/pull (db/db connection) [:db/id :seon.schema/form]
-                     [:seon.schema/key schema-key])]
+  (let [declaration (db/pull (db/db connection) '[*] [:seon.schema/key schema-key])]
     (test-support/transacted!
-     connection [[:db/retract (:db/id row) :seon.schema/form
-                  (:seon.schema/form row)]])))
+     connection
+     (program/exact-replacement-tx declaration {:seon.schema/key schema-key}))))
 
 (deftest ^{:seon.test/platform
            "Moving part: the live cluster projection an in-process run leaves behind."}

@@ -340,3 +340,56 @@ first thing a cold gate will exercise:**
    overlap intact. The read is a `slurp` of a file both base-preparation paths
    write before the coordinator is launched, so it cannot block, but the
    measured startup overlap is not proven by a fast iteration.
+
+## 2026-09-16 — cold gate batch 114: the three errors, at the root
+
+Batch 114 (log `tmp/orchestrator/gate-results/batch-114.log`, HEAD `63eb6deb9`
+region) ran 149 tests over eight namespaces: **0 failures, 3 errors, all three
+in `test/seon/test/runner_test.clj`.** Every one is now fixed at its own cause;
+none was the unverified item this note's previous section predicted.
+
+**Cause 1 — `seon.fn/source-roots` is a plain vector, not a deref-able**
+(`src/seon/fn.clj:27`). `test-source-root` (`src/seon/test/runner.clj:717`),
+added by this slice when the bare namespace set moved from `find test -name
+'*_test.clj'` to the indexed manifest, read it as `@seon.fn/source-roots`
+inside its own `delay`. The manifest read never reached the worker launch:
+`ClassCastException: PersistentVector cannot be cast to java.util.concurrent.Future`
+at `runner.clj:724`. The `delay` earns its place only because it defers the
+REFUSAL when no test root is declared — the declaration itself is already a
+value, so reading it must never deref it, and the docstring now says so.
+
+**Cause 2 — `initialize-contracts!` grew a third argument and the regression
+kept calling the two-argument form.** `bb6673af4` gave the worker its priming
+shape: `seon.test.arm/initialize-contracts!` keeps a two-arity that ACQUIRES
+(`src/seon/test/arm.clj:240-243`), and the runner's private wrapper
+(`src/seon/test/runner.clj:1706-1709`) is three-argument only, because a worker
+already holds the projection its arming acquired and HANDS it in
+(`src/seon/test/runner.clj:1783`). The old test looped both vars through one
+two-argument call, so it could only ever have exercised one of them. It now
+asserts the two shapes as what they are: the acquiring arity asks
+`packaged-test-projection` exactly once and returns that identical value; the
+worker shape, handed that value, acquires nothing and arms against it. No
+compatibility arity was added — a second acquisition on either path would arm
+against a projection no caller holds (AGENTS §2.1).
+
+**Cause 3 — the fixture deleted a declaration by retracting one attribute.**
+`retract-schema-key!` retracted `:seon.schema/form` alone, leaving
+`:seon.schema.admission/source` behind; the writer's whole-entity validator
+rebuilt the row from the resulting datoms and refused it —
+`Fixture write was refused … [48029 :seon.schema/form]: expected the required
+key :seon.schema/form`. `seon.test-support/transacted!` surfaced that refusal
+instead of letting the test read absence as behaviour, which is the helper
+doing its job. The fix is not a completed hand-written retraction: the fixture
+now deletes the way the authority deletes, handing the whole pulled declaration
+and a desired row of the identity ALONE to `seon.program/exact-replacement-tx`
+— byte-for-byte the deleted-identity transaction at `src/seon/turn.clj:1337`.
+Ownership is derived at the seam that owns it, so the fixture needs no mirror
+of which attributes a schema declaration carries (AGENTS §2.1, §5 rule 8).
+
+**Tally.** `bin/test-fast --paths src/seon/test/runner.clj
+test/seon/test/runner_test.clj -- seon.test.runner-test`, contracts armed
+(`registered=1100 instrumented=1100 program-armable=1095`, `mode=:panic`):
+**18 tests, 134 assertions, 0 failures, 0 errors.** That is a fast iteration on
+the gate's HEAD-plus-paths snapshot — it shares the worker's arming but not its
+isolation, retained run roots, platform tier, or recorded result facts. The
+cold-gate proof of this slice is still owed.
