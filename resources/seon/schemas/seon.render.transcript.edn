@@ -9,6 +9,12 @@
                           {:description
                            "The REPL entries of one run, as seon.render.transcript/history-entries derives them: form, printed value, and the exact bytes the run loop printed."}
                           :map],
+                         :pulled-transaction
+                         [:map
+                          {:description
+                           "A turn's opening or closing transaction as the history selector pulls it: the transaction entity, not the bare ref, because the heading states the instant it carries."}
+                          [:db/id :int]
+                          [:db/txInstant {:optional true} :inst]],
                          :run
                          [:map
                           {:description
@@ -18,10 +24,10 @@
                            :seon.render.transcript/entries]
                           [:seon.turn/opened-tx
                            {:optional true}
-                           :seon.turn/opened-tx]
+                           :seon.render.transcript/pulled-transaction]
                           [:seon.turn/closed-tx
                            {:optional true}
-                           :seon.turn/closed-tx]],
+                           :seon.render.transcript/pulled-transaction]],
                          :runs
                          [:vector
                           {:description
