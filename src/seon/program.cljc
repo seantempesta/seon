@@ -69,7 +69,7 @@
      :seon.fn/ast :seon.fn/calls :seon.fn/call-arities :seon.fn/pending-calls
      :seon.fn/keywords :seon.fn/writes :seon.fn/workload
      :seon.fn/doc-order :seon.fn/internal? :seon.fn/external-sink :seon.fn/projection-boundary
-     :seon.effect/capability
+     :seon.effect/capability :seon.fn/capability-fn
      :seon.schema.admission/source]}
    :seon.schema/key
    {:seon.program/identity-attribute :seon.schema/key
@@ -83,6 +83,33 @@
      :seon.fn/call-arities
      :seon.fn/keywords :seon.fn/writes :seon.fn/pending-calls :seon.test/usage :seon.test/subject :seon.test/fixture-observation
      :seon.schema.admission/source]}})
+
+(defn declaration-at
+  "The declaration whose `:seon.fn/form-span` contains `position`.
+
+  Spans are half-open UTF-8 byte offsets, so a position belongs to exactly
+  one declaration and `end` belongs to the next. THE ANSWER IS NEVER NIL:
+  \"no declaration contains this byte\" is a fact a caller must be able to
+  read and report, so it comes back as a flat
+  `:seon.program/no-declaration-at` value naming the position and the
+  spanned declarations examined. A merge that silently found nothing is
+  the absence-as-health defect this exists to prevent."
+  {:malli/schema
+   [:=> [:cat [:sequential :map] :seon.program/position]
+    [:or :map :seon.error/value]]}
+  [declarations position]
+  (let [spanned (filter :seon.fn/form-span declarations)]
+    (or (first (filter (fn [declaration]
+                         (let [[start end] (:seon.fn/form-span declaration)]
+                           (and (<= start position) (< position end))))
+                       spanned))
+        {:seon.program/no-declaration-at true
+         :seon.error/kind :seon.program/no-declaration-at
+         :seon.error/message
+         (str "No declaration span contains byte " position ".")
+         :seon.error/data
+         {:seon.program/position position
+          :seon.program/declarations-examined (count spanned)}})))
 
 (defn shape
   "The program shape owned by `identity-attribute`."

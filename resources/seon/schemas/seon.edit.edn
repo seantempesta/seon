@@ -3,6 +3,7 @@
               [:seon.edit/source :string]
               [:seon.edit/start [:int {:min 0}]]
               [:seon.edit/end [:int {:min 0}]]
+              [:seon.edit/form-span :seon.effect/form-span]
               [:my.edit/from-line :my.edit/from-line]
               [:my.edit/to-line :my.edit/to-line]
               [:my.edit/source-window :my.edit/source-window]

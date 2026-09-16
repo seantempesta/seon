@@ -1074,6 +1074,18 @@
                   [attribute declaration])))
         (dbi/-schema (schema-database database))))
 
+(defn attribute-installed?
+  "Whether `database` holds `attribute` as an installed declaration.
+
+  The database is the authority on what can be a datom: a projection may
+  map an attribute the bridge could store while this branch has never
+  installed it, and transacting that attribute refuses. Callers deciding
+  what to record ask here, never a roster."
+  {:malli/schema [:=> [:cat :seon.db/database-value :qualified-keyword]
+                  :boolean]}
+  [database attribute]
+  (boolean (get (installed-attribute-declarations database) attribute)))
+
 (defn- registered-attribute-candidates
   [declarations attribute]
   (let [same-namespace

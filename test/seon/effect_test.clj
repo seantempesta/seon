@@ -1,5 +1,6 @@
 (ns seon.effect-test
-  (:require [clojure.core.async :as async]
+  (:require [my.fs]
+            [clojure.core.async :as async]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [datahike.core :as datahike]
@@ -798,3 +799,95 @@
           (is (some? (:seon.turn/closed-tx
                       (db/pull (db/db connection) '[*]
                                [:seon.turn/id "effect-run"])))))))))
+
+;;; ---------------------------------------------------------------------------
+;;; A request is facts, not one opaque string
+;;; ---------------------------------------------------------------------------
+
+(defn- seed-effect-run!
+  [connection]
+  (transact-fixture!
+   connection
+   [(cluster-config 60000)
+    {:seon.agent/id "effect-agent"}
+    {:seon.turn/id "effect-run"
+     :seon.turn/agent [:seon.agent/id "effect-agent"]
+     :seon.turn/opened-tx "datomic.tx"}]))
+
+(defn- effect-receipt
+  [connection selector]
+  (db/pull (db/db connection) selector
+           [:seon.effect/id (id/digest 12 [:seon.effect/id "effect-run" 3 0])]))
+
+(defn- temporary-path
+  []
+  (let [directory (.toFile (java.nio.file.Files/createTempDirectory
+                            "seon-effect-facts"
+                            (into-array java.nio.file.attribute.FileAttribute [])))]
+    (.getCanonicalPath (java.io.File. directory "written.txt"))))
+
+(deftest effect-request-lands-declared-attributes
+  (test-support/with-database
+    (fn [connection]
+      (seed-effect-run! connection)
+      (let [path (temporary-path)
+            written
+            (binding [effect/*request-context* (request-context connection)]
+              (my.fs/write! {:my.fs/path path
+                             :my.fs/content {:my.fs/text "written\n"}
+                             :my.fs/precondition {:my.fs/expected-absence? true}}))
+            receipt (effect-receipt connection '[*])]
+        (is (nil? (:seon.error/kind written)) (pr-str written))
+        (testing "the request's declared keys are datoms on the effect"
+          (is (= path (:my.fs/path receipt))
+              (str "which path this effect touched must be a query, not a "
+                   "substring of :seon.effect/request-edn")))
+        (testing "the settled result's declared keys are datoms too"
+          (is (true? (:my.fs/created? receipt)))
+          (is (= (:my.fs/after-digest written) (:my.fs/after-digest receipt)))
+          (is (= (:my.fs/bytes-written written) (:my.fs/bytes-written receipt))))
+        (testing "the exact admitted text still rides its own attributes"
+          (is (string? (:seon.effect/request-edn receipt)))
+          (is (string? (:seon.effect/result-edn receipt))))
+        (.delete (java.io.File. path))
+        (.delete (.getParentFile (java.io.File. path)))))))
+
+(deftest effect-refs-its-evaluation-and-handler
+  (test-support/with-database
+    (fn [connection]
+      (seed-effect-run! connection)
+      (transact-fixture!
+       connection
+       [{:seon.cluster.eval/id (id/evaluation "effect-run" 3)
+         :seon.cluster.eval/run [:seon.turn/id "effect-run"]
+         :seon.cluster.eval/ordinal 3
+         :seon.cluster.eval/at (Date.)}])
+      (let [path (temporary-path)]
+        (binding [effect/*request-context* (request-context connection)]
+          (my.fs/write! {:my.fs/path path
+                         :my.fs/content {:my.fs/text "written\n"}
+                         :my.fs/precondition {:my.fs/expected-absence? true}}))
+        (let [receipt
+              (effect-receipt
+               connection
+               '[:seon.effect/id
+                 {:seon.effect/eval
+                  [:seon.cluster.eval/ordinal
+                   {:seon.cluster.eval/run
+                    [:seon.turn/id {:seon.turn/agent [:seon.agent/id]}]}]}
+                 {:seon.effect/capability-fn [:seon.fn/sym]}
+                 {:seon.effect/owner [:seon.fn/sym]}])]
+          (testing "agent, turn, evaluation and effect are one walk"
+            (is (= "effect-agent"
+                   (get-in receipt [:seon.effect/eval :seon.cluster.eval/run
+                                    :seon.turn/agent :seon.agent/id])))
+            (is (= 3 (get-in receipt [:seon.effect/eval
+                                      :seon.cluster.eval/ordinal]))))
+          (testing "the code that ran the request is a ref, not a symbol"
+            (is (= "my.fs/write!"
+                   (get-in receipt [:seon.effect/owner :seon.fn/sym])))
+            (is (= "seon.fs.jvm/write"
+                   (get-in receipt [:seon.effect/capability-fn
+                                    :seon.fn/sym]))))
+          (.delete (java.io.File. path))
+          (.delete (.getParentFile (java.io.File. path))))))))

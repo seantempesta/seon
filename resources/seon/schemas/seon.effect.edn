@@ -1,4 +1,39 @@
 #:seon.effect{:capability :qualified-symbol,
+              :capability-fn
+              [:and
+               {:description
+                "The function that executed this request: a ref to the handler's own `seon.fn` entity, so \"which code ran this effect\" is a join rather than a symbol to re-resolve."
+                :seon.db/index true}
+               :seon.db/ref],
+              :eval
+              [:and
+               {:description
+                "The evaluation this request was made from. `:seon.effect/run` and `:seon.effect/form-ordinal` are the two parts of exactly this evaluation's identity; they remain written only because `seon.turn` still reads them, and retire with that reader (issue effect-run-and-form-ordinal-duplicate-the-evaluation-ref)."
+                :seon.db/index true}
+               :seon.db/ref],
+              :file
+              [:and
+               {:description
+                "The indexed source file this effect wrote, by canonical absolute path. Absent when the written path is not part of the indexed program."
+                :seon.db/index true}
+               :seon.db/ref],
+              :form-span
+              [:tuple
+               {:description
+                "Half-open UTF-8 byte offsets of the region this effect wrote, in the file AFTER the write \u2014 the same unit as `:seon.fn/form-span`."}
+               :int :int],
+              :program
+              [:and
+               {:description
+                "The declaration whose span contains the region this effect wrote. Absent when no indexed declaration contains it."
+                :seon.db/index true}
+               :seon.db/ref],
+              :provenance
+              [:map
+               {:description
+                "Write-back provenance a capability handler reports to the effect writer. It never reaches the agent: `settle-value!` removes it from the handler's value exactly as it removes `:seon.blob/staged-writes`, and the writer derives `:seon.effect/program` from the file and span at the database that owns the declarations."}
+               [:seon.effect/file :my.fs/path]
+               [:seon.effect/form-span :seon.effect/form-span]],
               :content-blobs [:vector :seon.blob/digest],
               :background? :boolean,
               :disposition [:enum :interrupted],
@@ -15,7 +50,16 @@
               :duration-ms [:int {:min 0}],
               :id [:string {:min 1, :seon.db/identity true}],
               :interrupted-at :inst,
-              :open-request :seon.effect/receipt,
+              :arguments
+              [:map
+               {:description
+                "The admitted request or result map, handed to the writer beside the receipt so the writer can record the entries this branch installs as attributes. It is transaction-function input, never an entity map."}],
+              :open-request
+              [:map
+               [:seon.effect/receipt :seon.effect/receipt]
+               [:seon.effect/arguments
+                {:optional true}
+                :seon.effect/arguments]],
               :opened-at :inst,
               :ordinal [:int {:min 0}],
               :owner :seon.db/ref,
@@ -26,7 +70,16 @@
                 :seon.render/html seon.effect/render-html}
                [:seon.effect/id :seon.effect/id]
                [:seon.effect/run :seon.effect/run]
+               [:seon.effect/eval {:optional true} :seon.effect/eval]
                [:seon.effect/owner :seon.effect/owner]
+               [:seon.effect/capability-fn
+                {:optional true}
+                :seon.effect/capability-fn]
+               [:seon.effect/file {:optional true} :seon.effect/file]
+               [:seon.effect/form-span
+                {:optional true}
+                :seon.effect/form-span]
+               [:seon.effect/program {:optional true} :seon.effect/program]
                [:seon.effect/form-ordinal :seon.effect/form-ordinal]
                [:seon.effect/ordinal :seon.effect/ordinal]
                [:seon.effect/request-edn :seon.effect/request-edn]
@@ -93,7 +146,13 @@
                 {:optional true}
                 :seon.effect/result-size]
                [:seon.effect/duration-ms :seon.effect/duration-ms]
-               [:seon.effect/settled-at :seon.effect/settled-at]],
+               [:seon.effect/settled-at :seon.effect/settled-at]
+               [:seon.effect/arguments
+                {:optional true}
+                :seon.effect/arguments]
+               [:seon.effect/provenance
+                {:optional true}
+                :seon.effect/provenance]],
               :settled-at :inst,
               :to
               [:and

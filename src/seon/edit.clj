@@ -17,6 +17,17 @@
   [text]
   (alength (.getBytes ^String text java.nio.charset.StandardCharsets/UTF_8)))
 
+(defn- byte-span
+  "The half-open UTF-8 BYTE span of `[start end)` Java char indices.
+
+  `:seon.fn/form-span` addresses exact disk bytes, and these indices count
+  UTF-16 chars, so a file with one non-ASCII character above the edit
+  makes the two disagree. Converting here, once, is what keeps an edit's
+  recorded region joinable with the declaration spans the indexer wrote."
+  [^String text start end]
+  {:seon.edit/form-span [(utf8-bytes (subs text 0 start))
+                         (utf8-bytes (subs text 0 end))]})
+
 (defn- next-char-index
   [^String text index]
   (+ index (Character/charCount (.codePointAt text index))))
@@ -284,6 +295,7 @@
                 changed-start (:seon.edit/start candidate)
                 changed-end (:seon.edit/end candidate)]
             (merge candidate
+                   (byte-span candidate-source changed-start changed-end)
                    (line-range candidate-source changed-start changed-end)
                    (context-window candidate-source changed-start changed-end
                                    context-byte-limit))))))))
@@ -409,6 +421,7 @@
                 :seon.edit/start first-start
                 :seon.edit/end changed-end
                 :my.edit/replacements (count applied)}
+               (byte-span candidate-source first-start changed-end)
                (line-range candidate-source first-start changed-end)
                (context-window candidate-source first-start changed-end
                                context-byte-limit))))))
@@ -446,6 +459,7 @@
             (merge {:seon.edit/source candidate-source
                     :seon.edit/start start
                     :seon.edit/end changed-end}
+                   (byte-span candidate-source start changed-end)
                    (line-range candidate-source start changed-end)
                    (context-window candidate-source start changed-end
                                    context-byte-limit))))))))

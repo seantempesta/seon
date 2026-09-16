@@ -1,4 +1,10 @@
 #:seon.fn{:arglists :string,
+          :capability-fn
+          [:and
+           {:description
+            "The function that executes this capability's requests: a ref to the handler's own declaration, beside the `:seon.effect/capability` symbol the metadata carries."
+            :seon.db/index true}
+           :seon.db/ref],
           :file [:and {:description "Indexed source file shared by function and test declarations; absent on agent-admitted definitions."} :seon.db/ref],
           :form-span [:tuple {:description "Half-open UTF-8 byte offsets of this declaration's exact source within its indexed file."} :int :int],
           :internal? [:boolean {:description "Omit this implementation helper from the Tools summary; callability is unchanged."}],
@@ -115,7 +121,10 @@
             :seon.fn/projection-boundary]
            [:seon.effect/capability
             {:optional true}
-            :seon.effect/capability]],
+            :seon.effect/capability]
+           [:seon.fn/capability-fn
+            {:optional true}
+            :seon.fn/capability-fn]],
           :index-request
           [:map
            [:seon.db/connection

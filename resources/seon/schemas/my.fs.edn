@@ -1,14 +1,14 @@
-#:my.fs{:after-digest :my.fs/digest
+#:my.fs{:after-digest [:and #:seon.db{:index true} :my.fs/digest]
         :already-exists? :boolean
-        :before-digest :my.fs/digest
+        :before-digest [:and #:seon.db{:index true} :my.fs/digest]
         :byte [:int {:min 0, :max 255}]
         :byte-count [:int {:min 0}]
         :byte-offset [:int {:min 0}]
         :byte-size :my.fs/byte-count
         :bytes [:vector :my.fs/byte]
         :bytes-read :my.fs/byte-count
-        :bytes-written :my.fs/byte-count
-        :changed? :boolean
+        :bytes-written [:and #:seon.db{:index true} :my.fs/byte-count]
+        :changed? [:boolean #:seon.db{:index true}]
         :complete? :boolean
         :content
         [:and
@@ -25,7 +25,7 @@
             [:map [:my.fs/bytes :my.fs/bytes]]
             [:map [:seon.blob/digest :seon.blob/digest]]]}
           seon.fs/content?]]
-        :created? :boolean
+        :created? [:boolean #:seon.db{:index true}]
         :digest :seon.blob/digest
         :directory? :boolean
         :encoding [:enum :bytes :utf-8]
@@ -51,7 +51,7 @@
         :max-depth [:int {:min 0}]
         :max-results [:int {:min 1}]
         :modified-at :inst
-        :path [:string {:min 1}]
+        :path [:string {:min 1, :seon.db/index true}]
         :paths [:vector :my.fs/path]
         :pattern [:string {:min 1}]
         :precondition :my.fs/write-precondition

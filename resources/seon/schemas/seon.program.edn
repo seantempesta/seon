@@ -31,6 +31,15 @@
   [:seon.program/identity-attribute :seon.program/identity-attribute]
   [:seon.program/source-attribute :seon.program/source-attribute]
   [:seon.program/owned-attributes :seon.program/owned-attributes]]
+ :seon.program/position [:int {:min 0}]
+ :seon.program/no-declaration-at [:= true]
+ :seon.program/no-declaration-at-error
+ [:map {:seon.error/class true
+        :seon.render/ai seon.error/render-ai
+        :seon.render/html seon.error/render-html
+        :error/message "must name the position no declaration span contains"}
+  [:seon.program/no-declaration-at :seon.program/no-declaration-at]
+  [:seon.error/message :seon.error/message]]
  :seon.program/declaration-refused [:= true]
  :seon.program/declaration-refused-error
  [:map {:seon.error/class true

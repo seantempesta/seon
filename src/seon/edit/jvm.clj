@@ -1,6 +1,7 @@
 (ns seon.edit.jvm
   "Protected JVM handler for digest-fenced structural source edits."
-  (:require [seon.edit :as edit]
+  (:require [clojure.java.io :as io]
+            [seon.edit :as edit]
             [seon.fs.jvm :as fs.jvm]))
 
 (defn- flat-error
@@ -61,7 +62,17 @@
                              :my.edit/to-line
                              :my.edit/source-window
                              :my.edit/source-window-complete?
-                             :my.edit/replacements])))
+                             :my.edit/replacements])
+   ;; WHAT THIS EDIT WROTE, IN THE UNIT THE PROGRAM GRAPH USES. The exact
+   ;; changed region is computed to perform the edit and used to be
+   ;; dropped here, leaving human line numbers as the only trace; a merge
+   ;; then had to diff files to learn what a worker changed. The effect
+   ;; writer removes this key before the agent sees the result, exactly as
+   ;; it removes `:seon.blob/staged-writes`, and refs the indexed file and
+   ;; the declaration whose span contains it.
+   {:seon.effect/provenance
+    {:seon.effect/file (.getCanonicalPath (io/file (:my.edit/path request)))
+     :seon.effect/form-span (:seon.edit/form-span transformed)}}))
 
 (defn- edit
   {:malli/schema

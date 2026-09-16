@@ -17,6 +17,7 @@
             [seon.env :as env]
             [seon.flow :as flow]
             [seon.id :as id]
+            [seon.program :as program]
             [seon.sci.admit :as admit]
             [seon.sci.kernel :as kernel]
             [seon.schema :as schema]
@@ -199,21 +200,103 @@
           :seon.sci.admit/value value
           :seon.sci.admit/interrupt-fn (constantly nil))))
 
+(defn- declared-datoms
+  "The entries of `arguments` this database already holds as attributes.
+
+  A capability request and its result are validated maps of fully
+  namespaced keys, and the schema that validates them also says which of
+  those keys are facts: an attribute installed in this branch becomes a
+  datom on the effect entity, everything else stays in the canonical EDN
+  and the blob that already carry it. Nothing here is per-capability — a
+  capability declared tomorrow records its arguments the day its schema
+  marks them, with no writer change. Map-valued keys are left to the EDN:
+  no capability declares a component argument, and inventing a second
+  spelling for one here would be the per-capability mapping this replaces."
+  [database arguments]
+  (when (map? arguments)
+    (into {}
+          (filter (fn [[attribute value]]
+                    (and (qualified-keyword? attribute)
+                         (not (map? value))
+                         (db/attribute-installed? database attribute))))
+          arguments)))
+
+(defn- evaluation-eid
+  "The evaluation entity this request was made from, resolved at the writer.
+
+  The identity is `seon.id/evaluation` of the run and the form ordinal, so
+  nothing crosses the writer boundary that the writer cannot re-derive. A
+  host or fixture request made outside a recorded evaluation resolves to
+  nothing and records no ref; `:seon.effect/run` and
+  `:seon.effect/form-ordinal` still name it."
+  [database receipt]
+  (let [ordinal (:seon.effect/form-ordinal receipt)
+        turn-id (:seon.turn/id (db/pull database [:seon.turn/id]
+                                        (:seon.effect/run receipt)))]
+    (when (and turn-id (some? ordinal))
+      (:db/id (db/pull database [:db/id]
+                       [:seon.cluster.eval/id
+                        (id/evaluation turn-id ordinal)])))))
+
+(defn- capability-fn-eid
+  "The handler declaration that runs this request, read off its owner."
+  [database receipt]
+  (some-> (db/pull database [{:seon.fn/capability-fn [:db/id]}]
+                   (:seon.effect/owner receipt))
+          :seon.fn/capability-fn
+          :db/id))
+
 (defn open-call
   "Open one never-before-recorded effect identity inside the writer."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        :seon.effect/open-request]
                   [:vector :seon.schema/value]]}
   [database request]
-  (if (db/pull database [:db/id] [:seon.effect/id (:seon.effect/id request)])
-    (throw
-     (ex-info
-      "This effect identity was already recorded and will not be dispatched again."
-      {:seon.error/kind :seon.effect/already-recorded
-       :seon.error/message
-       "This effect request was already recorded and was not dispatched again."
-       :seon.error/data {:seon.effect/id (:seon.effect/id request)} :seon.effect/already-recorded true}))
-    [request]))
+  (let [receipt (:seon.effect/receipt request)]
+    (if (db/pull database [:db/id] [:seon.effect/id (:seon.effect/id receipt)])
+      (throw
+       (ex-info
+        "This effect identity was already recorded and will not be dispatched again."
+        {:seon.error/kind :seon.effect/already-recorded
+         :seon.error/message
+         "This effect request was already recorded and was not dispatched again."
+         :seon.error/data {:seon.effect/id (:seon.effect/id receipt)} :seon.effect/already-recorded true}))
+      (let [evaluation (evaluation-eid database receipt)
+            capability-fn (capability-fn-eid database receipt)]
+        [(cond-> (merge receipt
+                        (declared-datoms database
+                                         (:seon.effect/arguments request)))
+           evaluation (assoc :seon.effect/eval evaluation)
+           capability-fn (assoc :seon.effect/capability-fn capability-fn))]))))
+
+(defn- write-back-adds
+  "The write-back provenance a handler reported, resolved at the writer.
+
+  The span is a fact about this effect and is recorded whatever the path
+  is. The file ref and the declaration ref are answers only the program
+  graph can give, so they are derived HERE, against the database that owns
+  them, never pre-read on the handler's thread. A path outside the indexed
+  program records no file; a span inside no declaration records no
+  program, and `seon.program/declaration-at` names that position rather
+  than answering nil."
+  [database effect-eid provenance]
+  (let [span (:seon.effect/form-span provenance)
+        path (:seon.effect/file provenance)
+        file (when path
+               (db/pull database [:db/id] [:seon.fn.file/path path]))
+        declarations
+        (when (and file span)
+          (db/q '[:find [(pull ?declaration [:db/id :seon.fn/form-span]) ...]
+                  :in $ ?file
+                  :where [?declaration :seon.fn/file ?file]]
+                database (:db/id file)))
+        declaration (when (seq declarations)
+                      (program/declaration-at declarations (first span)))]
+    (cond-> []
+      span (conj [:db/add effect-eid :seon.effect/form-span span])
+      file (conj [:db/add effect-eid :seon.effect/file (:db/id file)])
+      (and declaration (not (:seon.error/kind declaration)))
+      (conj [:db/add effect-eid :seon.effect/program (:db/id declaration)]))))
 
 (defn settle-call
   "Settle one open effect receipt exactly once inside the writer."
@@ -237,14 +320,20 @@
 
       :else
       (cond->
-       [[:db/add (:db/id receipt) :seon.effect/result-edn
-         (:seon.effect/result-edn request)]
-        [:db/add (:db/id receipt) :seon.effect/result-size
-         (:seon.effect/result-size request)]
-        [:db/add (:db/id receipt) :seon.effect/duration-ms
-         (:seon.effect/duration-ms request)]
-        [:db/add (:db/id receipt) :seon.effect/settled-at
-         (:seon.effect/settled-at request)]]
+       (into [[:db/add (:db/id receipt) :seon.effect/result-edn
+               (:seon.effect/result-edn request)]
+              [:db/add (:db/id receipt) :seon.effect/result-size
+               (:seon.effect/result-size request)]
+              [:db/add (:db/id receipt) :seon.effect/duration-ms
+               (:seon.effect/duration-ms request)]
+              [:db/add (:db/id receipt) :seon.effect/settled-at
+               (:seon.effect/settled-at request)]]
+             (into (write-back-adds database (:db/id receipt)
+                                    (:seon.effect/provenance request))
+                   (map (fn [[attribute value]]
+                          [:db/add (:db/id receipt) attribute value]))
+                   (declared-datoms database
+                                    (:seon.effect/arguments request))))
         (:seon.effect/result-blob request)
         (conj [:db/add (:db/id receipt) :seon.effect/result-blob
                (:seon.effect/result-blob request)])
@@ -428,8 +517,15 @@
    (let [content-stages (if (map? raw-value)
                           (:seon.blob/staged-writes raw-value)
                           [])
+         ;; System-side keys a handler reports to the writer. They are
+         ;; removed from the value the agent sees for the same reason
+         ;; `:seon.blob/staged-writes` is: they address the database, not
+         ;; the caller.
+         provenance (when (map? raw-value)
+                      (:seon.effect/provenance raw-value))
          public-value (if (map? raw-value)
-                        (dissoc raw-value :seon.blob/staged-writes)
+                        (dissoc raw-value :seon.blob/staged-writes
+                                :seon.effect/provenance)
                         raw-value)
          admitted-result (admitted-value dials public-value)
          result (:seon.sci.admit/value admitted-result)
@@ -444,6 +540,9 @@
            :seon.effect/duration-ms
            (max 0 (- (.getTime settled-at) (.getTime opened-at)))}
           (:seon.effect/stored-result staged-result)
+          (when provenance {:seon.effect/provenance provenance})
+          (when (and (map? result) (nil? (:seon.error/kind result)))
+            {:seon.effect/arguments result})
           (when (seq content-stages)
             {:seon.effect/content-blobs
              (mapv :seon.blob/digest content-stages)}))]
@@ -659,7 +758,11 @@
                      opened
                      (db/transact!
                       connection
-                      [[:db.fn/call #'open-call open-request]])]
+                      [[:db.fn/call #'open-call
+                        (cond-> {:seon.effect/receipt open-request}
+                          (map? (:seon.sci.admit/value projected-request))
+                          (assoc :seon.effect/arguments
+                                 (:seon.sci.admit/value projected-request)))]])]
                  (if (:seon.error/kind opened)
                    opened
                    (letfn [(settled [outcome]

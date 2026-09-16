@@ -537,7 +537,12 @@
                    projection-boundary)
         (assoc :seon.fn/projection-boundary projection-boundary)
         capability-declared?
-        (assoc :seon.effect/capability capability))
+        (assoc :seon.effect/capability capability
+               ;; The same fact as a ref, so "which code runs this
+               ;; capability" is a join instead of a symbol every reader
+               ;; re-resolves. `assert-capability-contracts!` refuses a
+               ;; marker whose handler has no row, so this never dangles.
+               :seon.fn/capability-fn [:seon.fn/sym (str capability)]))
 
       :else nil)))
 
@@ -940,10 +945,12 @@
                               {::analyzer/filename path
                                ::analyzer/row row ::analyzer/col col
                                ::analyzer/end-row row ::analyzer/end-col col}))
-             declaration (first (filter (fn [entry]
-                                          (let [[start end] (:seon.fn/form-span entry)]
-                                            (<= start position (dec end))))
-                                        declarations))
+             ;; ONE containment rule, shared with the effect writer's
+             ;; write-back attribution: a finding outside every span is
+             ;; the typed refusal, and this caller reads it as a
+             ;; file-scoped finding rather than fabricating a function.
+             found (program/declaration-at declarations position)
+             declaration (when-not (:seon.error/kind found) found)
              program-identity (program/row-identity declaration)
              owner (if program-identity (symbol (second program-identity)) path)
              finding-type (::analyzer/type finding)]

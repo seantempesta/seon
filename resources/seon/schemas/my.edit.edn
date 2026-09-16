@@ -1,7 +1,8 @@
-{:my.edit/path :my.fs/path
- :my.edit/expected-digest :my.fs/digest
+{:my.edit/path [:and #:seon.db{:index true} :my.fs/path]
+ :my.edit/expected-digest [:and #:seon.db{:index true} :my.fs/digest]
  :my.edit/form :my.edit.form/selector
- :my.edit/operation [:enum :replace :insert-before :insert-after :delete]
+ :my.edit/operation
+ [:enum #:seon.db{:index true} :replace :insert-before :insert-after :delete]
  :my.edit/source :string
  :my.edit/form-request
  [:and
@@ -25,8 +26,8 @@
   [:my.edit/old-string :my.edit/old-string]
   [:my.edit/new-string :my.edit/new-string]
   [:my.edit/replace-all? {:optional true} :my.edit/replace-all?]]
- :my.edit/from-line [:int {:min 1}]
- :my.edit/to-line [:int {:min 1}]
+ :my.edit/from-line [:int {:min 1 :seon.db/index true}]
+ :my.edit/to-line [:int {:min 1 :seon.db/index true}]
  :my.edit/old-window :string
  :my.edit/new-window :string
  :my.edit/actual-window :my.edit/source-window
@@ -38,14 +39,14 @@
   [:my.edit/to-line :my.edit/to-line]
   [:my.edit/old-window :my.edit/old-window]
   [:my.edit/new-window :my.edit/new-window]]
- :my.edit/changed? :boolean
- :my.edit/before-digest :my.fs/digest
- :my.edit/after-digest :my.fs/digest
+ :my.edit/changed? [:boolean #:seon.db{:index true}]
+ :my.edit/before-digest [:and #:seon.db{:index true} :my.fs/digest]
+ :my.edit/after-digest [:and #:seon.db{:index true} :my.fs/digest]
  :my.edit/before-bytes :my.fs/byte-count
  :my.edit/after-bytes :my.fs/byte-count
  :my.edit/source-window :string
  :my.edit/source-window-complete? :boolean
- :my.edit/replacements [:int {:min 0}]
+ :my.edit/replacements [:int {:min 0 :seon.db/index true}]
  :my.edit/result
  [:map
   [:my.edit/path :my.edit/path]
