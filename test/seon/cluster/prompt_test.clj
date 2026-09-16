@@ -95,7 +95,17 @@
            contributions (:seon.context/contributions rendered)]
        (is (seq text))
        (is (str/includes? text "inspect this walk"))
-       (is (str/ends-with? text "turns left: 99 of 100"))
+       ;; THE OPENING DOES NOT SPEND THE BUDGET (turn PRD 14, ruled in
+       ;; 97d1f69e0). `episode-runs` counts a turn only when it carries a
+       ;; provider attempt, or a reply whose datom arrived LATER than the
+       ;; turn's own identity. This fixture plants exactly the two shapes
+       ;; that are not provider turns: `opening-history`, whose reply is
+       ;; frozen in the same transaction as its identity, and `walk-run`,
+       ;; open with neither attempt nor reply. Probed on the fixture:
+       ;; identity tx 536870925 = reply tx 536870925, zero attempts,
+       ;; `episode-runs` 0. An untouched budget is the ruled answer.
+       (is (str/ends-with? text "turns left: 100 of 100")
+           "neither the frozen opening nor an open turn spends a provider turn")
        (is (= :frame (:seon.render.block/name (last contributions))))
        (is (= text (apply str (map :seon.context.contribution/text contributions))))
        (is (= (range (count contributions))
