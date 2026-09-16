@@ -34,3 +34,13 @@ an index exception.
 
 Related: `one-lanes-intermediate-edit-refuses-adoption-for-every-lane`,
 `concurrent-publications-serialize-past-the-hook-bound`.
+
+## Update 2026-09-16 21:15Z
+
+The gate session reports no lane was editing `src/seon/fn.clj` at the time
+(its gate-set lane had committed `1d141d26a` and stopped before the refork).
+If the retry reproduces the same range, the cause is not a concurrent edit
+but a span computed from a different text than the one sliced — a cached
+analysis (the analyzer's shared cache, or spans carried on program rows from
+an earlier version) applied to the current file. That would make the
+defect deterministic and a blocker for adoption, not a race.
