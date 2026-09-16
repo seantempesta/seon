@@ -60,6 +60,19 @@ about the ctx, not about the value being rendered.
 Also dropped: the now-unused `ctx` destructuring in `selection` and
 `selection-inspection`.
 
+### What `request-profile` deliberately keeps
+
+`seon.render/request-profile` sits three lines below the new helper and asks
+a DIFFERENT question — which config facts the presentation profile comes
+from — with its own order: supplied projection, then the database's carried
+one, then `schema/handed-projection`, and a typed missing-projection refusal
+when none exists. It was NOT folded into `request-projection`, because that
+helper also answers from the SCI ctx: a request carrying a ctx but no
+projection would then derive a profile where the peer's `15a15e9c1`
+regression requires the refusal. Unifying the two needs that refusal's
+boundary decided first; the divergence is recorded here rather than resolved
+quietly.
+
 Built on the peer's `15a15e9c1` (one render profile per turn, carried on
 every evaluation request), which is untouched: `request-profile` keeps its
 own carried-profile short circuit and its typed missing-projection refusal.
