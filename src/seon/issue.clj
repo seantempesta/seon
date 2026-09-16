@@ -710,27 +710,33 @@
                              (for [[identity-attribute attribute] (citation-attributes database)
                                    :when (not= :seon.issue/files attribute)]
                                [attribute identity-attribute]))
+        citation-entities (into {} (map (juxt :v :e))
+                                (db/datoms database :avet :seon.issue.citation/id))
         adopted-citations
         (fn [row]
           (if-let [citations (seq (:seon.issue/files row))]
             (assoc row :seon.issue/files
                    (into #{} (map (fn [cited]
-                                    (-> (select-keys cited [:seon.issue.citation/id :seon.issue.citation/row
+                                    (or (get citation-entities (:seon.issue.citation/id cited))
+                                        (-> (select-keys cited [:seon.issue.citation/id :seon.issue.citation/row
                                                             :seon.issue.citation/end-row])
                                         (assoc :seon.issue.citation/file
                                                [:seon.fn.file/relative-path (get-in cited [:seon.issue.citation/file
-                                                                                  :seon.fn.file/relative-path])]))))
+                                                                                  :seon.fn.file/relative-path])])))))
                          citations))
             row))]
-    (into (mapv #(hash-map :seon.issue/id %) (sort ids))
+    (into (mapv #(hash-map :seon.issue/id %) (remove by-id (sort ids)))
           (concat
            (mapcat
             (fn [row]
               (let [row (reduce-kv
                          (fn [row attribute identity-attribute]
                            (if (get row attribute)
-                             (assoc row attribute (set (map #(vector identity-attribute (get % identity-attribute))
-                                                           (get row attribute)))) row))
+                             (assoc row attribute
+                                    (set (map (fn [cited]
+                                                (let [lookup [identity-attribute (get cited identity-attribute)]]
+                                                  (or (:db/id (db/pull database [:db/id] lookup)) lookup)))
+                                              (get row attribute)))) row))
                          (adopted-citations row) ref-attributes)
                     prior (get by-id (:seon.issue/id row))
                     desired row]

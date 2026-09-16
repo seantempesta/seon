@@ -363,3 +363,94 @@ committed. Own CLI shells and headless Chrome ended; own scratch was removed.
 No test JVM, gate, platform gate, restart, reset, or foreign-session operation
 was performed. PERSONAL REVIEW HOLD remains in force; orchestrator review
 must precede any gate, and the pending adopted-definition checks are explicit.
+
+
+## Follow-up review of `2d997b88f`: reference declaration and adoption delta
+
+Read [adoption write volume](adoption-write-volume-2026-09-17.md) end to end,
+including §2c, and re-read the current `replacement-tx`, `file-citations`,
+`citation-pattern`, `identity-row`, `adopt-tx`, `adopt!`, and canonical issue
+fixtures. The Datahike transaction owner
+`reference-code/datahike/src/datahike/db/transaction.cljc` supplies the
+mid-transaction database to `:db.fn/call`; this change stays inside that seam.
+The citation schema declares identity from `[issue-id path row end-row]`,
+and the existing indexer already reuses an existing citation entity by that
+identity. Adoption now follows the same rule.
+
+Changes:
+
+- The evaluation entity's `:seon.eval/origin` entry is plain `:seon.db/ref`.
+  The pulled-map alternative was removed. The writer's map-to-id
+  normalization in `recorded-evaluation` is unchanged.
+- `adopt-tx` resolves each ordinary citation lookup ref against its supplied
+  transaction database before comparing with prior pulled refs. Existing
+  file citations reuse their stable entity ids; new citations retain the
+  existing authored component map. Identity pre-assertions are emitted only
+  for issues not already indexed. No caller pre-read, cache, or new adoption
+  path was introduced.
+- The canonical regression `unchanged-issue-adoption-writes-no-issue-datoms`
+  indexes the same authored notes twice and adopts them through the existing
+  writer. `adopt!` reads the `:seon.issue/path` population; detector-generated
+  issues without that attribute would be a vacuous subject for this defect.
+  The regression requires functions, namespaces, keys, file spans, tests,
+  and member refs to be present, requires the second `adopt-tx` delta to be
+  literally empty, and verifies the committed report has no non-bookkeeping
+  datoms. It then changes a title and verifies that real change is adopted.
+  Datahike transaction bookkeeping may include `:db/txInstant`; no claim is
+  made that the enclosing transaction's `:max-tx` must remain unchanged.
+
+Live read-only comparison on default PID 53320, using one immutable database
+and the declared identity pull pattern (replay form in the committed probe):
+
+| Definition | Indexed issues | Transaction forms | Retraction forms |
+| --- | ---: | ---: | ---: |
+| Before the change | 1,723 | 5,946 | 3,017 |
+| Candidate `adopt-tx` | 1,723 | 0 | 0 |
+
+These are transaction FORM counts, not the number of datoms each retraction
+would remove. No issue facts were changed for this measurement. The candidate
+was evaluated in the live JVM before the source edit; this is a hot-reloaded
+Var proof, not a claim of completed development adoption.
+
+In-process verification attempted all eight prior regressions plus the new
+adoption regression, using the runner's test loader and three-argument
+`seon.test/run` with `:seon.test/remaining-ms 480000`. All NINE returned the
+same typed refusal; none executed a test body and none is counted as green:
+
+```text
+No function in this program declares :seon.fn/destroys, so an in-process run cannot tell whether a test deletes a filesystem path it did not create. Republish the program (bin/seon init --dev default), or declare the attribute in the owner's own metadata at its definition.
+```
+
+The returned values carry `:seon.error/kind :seon.test/unknown`,
+`:seon.test/unknown :seon.fn/destroys`, and `:seon.test/next-tier :none`.
+The loader initially saw the new fixture before its class-membership tag was
+corrected to the indexer's existing declaration; since the runner refused all
+bodies, neither version has an assertion result. The committed fixture is the
+corrected version and must be reloaded before the eventual run.
+
+A full JVM thread snapshot (`jcmd 53320 Thread.dump_to_file -format=json`)
+located the pre-test delay in `seon.test.runner/provenance` → `program-digest`
+→ `program-fact` → `seon.program/canonical-row` → `authored-shapes` →
+`seon.schema.edn/declaration-stamp`. The future subsequently completed with
+the nine refusals above. The same snapshot found a publication waiting at
+`datahike.gc-guard/acquire-reachability-permit!` through `registry/branch!`,
+and an existing collector waiting for its result. Those are observed stack
+boundaries, not a claim that this lane diagnosed or repaired the collector.
+No foreign session, collector, process, or source file was operated.
+
+
+The explicit publication client waited 309,555 ms for the existing operator
+lifecycle lock. Its last holder was PID 28397, publishing
+`test/seon/cluster/prompt_test.clj`. I ended ONLY my still-queued client,
+PID 27383 (exit 143), before it acquired that lock; the foreign holder and
+default were untouched. The edit hook's shared publication request remains
+queued. Final adoption and assertion verification are therefore pending.
+The completed test future has no running test bodies to clean up.
+
+Static verification: clj-kondo on `src/seon/issue.clj` and
+`test/seon/issue_test.clj` returned 0 errors and one existing shadowed-var
+warning outside the new regression. Path-scoped `git diff --check` passed.
+The shared tree's unrelated Markdown whitespace warning was left alone.
+Own scratch was removed and every own CLI shell ended. No gate, test JVM,
+restart, reset, or foreign-session operation was performed. STOPPED FOR
+PERSONAL REVIEW; the nine refused checks must run after adoption converges.

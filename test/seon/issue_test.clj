@@ -73,6 +73,55 @@
                            (seon.db/pull (seon.db/db connection) '[*] [:seon.issue/id "probe-member"])))
        (clojure.test/is (empty? (seon.issue/issues {:seon.db/db (seon.db/db connection)}))))))))
 
+(clojure.test/deftest unchanged-issue-adoption-writes-no-issue-datoms
+  (seon.test-support/with-database
+   (fn [source-connection]
+     (seon.test-support/with-database
+      (fn [connection]
+        (let [notes [{:seon.issue/path "docs/seon/issues/adoption-class.md"
+                      :seon.issue/text
+                      (str "---\ntype: issue\nstatus: open\nseverity: cleanup\n"
+                           "created: 2026-09-17\ntags: [issue, class/adoption, class-kill]\n---\n"
+                           "# Adoption class\nseon.issue/adopt-tx seon.issue "
+                           ":seon.issue/title src/seon/issue.clj:701 "
+                           "seon.issue-test/issue-worker-creation-is-atomic")}
+                     {:seon.issue/path "docs/seon/issues/adoption-member.md"
+                      :seon.issue/text
+                      (str "---\ntype: issue\nstatus: open\nseverity: cleanup\n"
+                           "created: 2026-09-17\ntags: [issue, class/adoption]\n---\n"
+                           "# Adoption member\nseon.issue/adopt!")}]
+              indexed (seon.issue/index! {:seon.db/connection source-connection
+                                         :seon.issue/notes notes})
+              first-adoption (seon.issue/adopt! connection (seon.db/db source-connection))]
+          (clojure.test/is (nil? (:seon.error/kind indexed)) (pr-str indexed))
+          (clojure.test/is (nil? (:seon.error/kind first-adoption)) (pr-str first-adoption))
+          (let [row (seon.db/pull (seon.db/db connection) '[*] [:seon.issue/id "adoption-class"])]
+            (doseq [attribute [:seon.issue/functions :seon.issue/namespaces :seon.issue/keys
+                               :seon.issue/files :seon.issue/tests :seon.issue/members]]
+              (clojure.test/is (seq (get row attribute)) (str "Missing adoption subject " attribute))))
+          (let [again (seon.issue/index! {:seon.db/connection source-connection :seon.issue/notes notes})
+                source (seon.db/db source-connection)
+                rows (mapv #(#'seon.issue/identity-row source %)
+                           (seon.db/q '[:find [?e ...] :where [?e :seon.issue/path]] source))
+                delta (seon.issue/adopt-tx (seon.db/db connection) rows)
+                report (seon.test-support/transacted! connection [[:db.fn/call #'seon.issue/adopt-tx rows]])]
+            (clojure.test/is (nil? (:seon.error/kind again)) (pr-str again))
+            (clojure.test/is (empty? delta) (pr-str delta))
+            (clojure.test/is (empty? (remove #(= :db/txInstant (:a %)) (:tx-data report)))
+                            (pr-str (:tx-data report))))
+          (let [changed (seon.issue/index!
+                         {:seon.db/connection source-connection
+                          :seon.issue/notes
+                          (mapv #(update % :seon.issue/text clojure.string/replace
+                                         "# Adoption member" "# Changed member") notes)})
+                adopted (seon.issue/adopt! connection (seon.db/db source-connection))]
+            (clojure.test/is (nil? (:seon.error/kind changed)) (pr-str changed))
+            (clojure.test/is (nil? (:seon.error/kind adopted)) (pr-str adopted))
+            (clojure.test/is (= "Changed member"
+                               (:seon.issue/title
+                                (seon.db/pull (seon.db/db connection) [:seon.issue/title]
+                                              [:seon.issue/id "adoption-member"])))))))))))
+
 (def ^:private converted-notes
   "The eight notes converted by hand in the R6 research page, with the citation
   shape each one proves the derived resolver must reach."

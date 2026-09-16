@@ -24,7 +24,7 @@
              [:seon.cluster.eval/read-basis-transaction
               {:optional true}
               :seon.db/basis-t]
-             [:seon.eval/origin {:optional true} [:or :seon.eval/origin [:map [:db/id :int]]]]
+             [:seon.eval/origin {:optional true} :seon.db/ref]
              [:seon.eval/renderer {:optional true} :seon.eval/renderer]
              [:seon.eval/renderer-fn {:optional true}
               [:or :seon.eval/renderer-fn [:map [:db/id :int]]]]

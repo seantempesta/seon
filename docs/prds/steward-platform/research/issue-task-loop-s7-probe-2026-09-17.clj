@@ -20,7 +20,8 @@
           {:seon.db/db database
            :seon.test.run/provenance (seon.test.runner/provenance database)
            :seon.test/remaining-ms 240000})))
-     '[seon.issue-test/issue-worker-creation-is-atomic
+     '[seon.issue-test/unchanged-issue-adoption-writes-no-issue-datoms
+       seon.issue-test/issue-worker-creation-is-atomic
        seon.issue-test/detector-only-issue-starts-and-settles-from-its-subject
        seon.issue-settlement-test/started-issue-tests-retain-historical-authority
        seon.issue-settlement-test/issue-settlement-runs-tests-and-derives-completion
@@ -95,3 +96,22 @@
    (seon.sci.kernel/context-projection (:seon.sci.eval/ctx handle))
    #(seon.turn/system-turn {:seon.turn.loop/cluster handle
                            :seon.agent/id "2393cac275ae" :seon.turn/write? false})))
+
+
+; Adoption review: use one immutable database and identity pull pattern.
+; Before the fix on PID 53320: 1723 issues, 5946 forms, 3017 retractions.
+; Candidate adopt-tx on the same unchanged population: 1723 issues, 0 forms.
+(def s7-adoption-delta
+  (future
+    (let [database (seon.db/db (seon.operator/connection "default"))
+          pattern (#'seon.issue/citation-pattern (#'seon.issue/citation-attributes database))
+          issues (seon.db/q '[:find [?e ...] :where [?e :seon.issue/path]] database)
+          rows (mapv #(seon.db/pull database pattern %) issues)
+          tx (seon.issue/adopt-tx database rows)]
+      {:seon.issue/count (count issues)
+       :seon.issue/forms (count tx)})))
+
+(if (realized? s7-adoption-delta) @s7-adoption-delta :running)
+
+; Run this additional regression via the same seon.test/run form above:
+; seon.issue-test/unchanged-issue-adoption-writes-no-issue-datoms
