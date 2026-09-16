@@ -586,3 +586,8 @@ Queue, in order:
   digest; instrument suite 27/132 green. Gates may resume. The store reset
   waits for the indexer lane's commit (its in-flight `seon.issue.edn`
   refuses publication and a reset republishes the tree).
+- 18:15Z batch 30 run A (`56f0a4ca8`): PLATFORM GREEN 86/579, cold workers
+  arm (`eeafb9dba` proven cold), and for the first time tonight the result
+  was RECORDED (no "persistent results NOT recorded") — the retention sweep
+  removal and the recorder fix together. Run B (eleven namespaces) in the
+  slot. Reset waits on the indexer commit and a clear test slot.
