@@ -444,3 +444,52 @@ launched and no destructive boot fixture was run in default. No new schema
 meaning changed in this follow-up, so it adds no reset requirement. All
 launched shells completed; this follow-up created no scratch root/worktree.
 The cold request includes boot-test and the relocated source-test namespace.
+
+## Batch 98: establish the regression's own baseline
+
+Read the `cloned-publication-analyzes-only-changed-files` block in
+`tmp/orchestrator/gate-results/batch-98.log`: 2 failures; the analyzer list
+contains 337 inputs in the first assertion and 338 in the second. This is not
+zero work attributable solely to relocation. Read-only examination of the
+retained root found the current run checkout and pool-1 checkout have equal
+`cluster/source-snapshot ["src" "test"]` values and zero changed paths. The
+cached publication artifact was no longer present in that retained root.
+Therefore this follow-up does not attribute the mismatch to any named test or
+claim the retained bytes prove the suspected earlier rewrite.
+
+The regression now calls `(cluster/refresh-source! root [])` on its own cloned
+published root BEFORE copying the worker checkout and BEFORE installing the
+analysis observer. That gives this test a publication and artifact for the
+current worker bytes, independent of the pooled fixture's earlier publication.
+The relocated no-op must preserve that baseline's exact commit as well as
+report `built? false` and ZERO analyzer inputs. The reported path and edited
+path assertions still require EXACTLY the one expected file. No tolerance,
+production behavior, shared worker file, or foreign retained root was changed.
+
+Only the boot regression and this landing note are owned by this follow-up.
+The destructive fixture is not run in default; its complete proof is queued
+for the cold gate. In-process checks exercise the existing real artifact
+relocation regression and reported-path selection unit, through the canonical
+three-argument runner, with test namespaces reloaded through its own loader.
+
+Adoption converged at source commit `6aaad49e-a55e-52ad-981d-4df826c4bb8f`,
+digest `40884038572031ee1da343735d44cfaeb49041117d51223c5bbc2ea6d941b14b`.
+The two post-adoption in-process results are **10 pass, 0 fail, 0 error**:
+
+- `seon.fn-test/relocated-artifacts-preserve-path-identity`: 5 pass;
+  result entity 51505, basis 536871147, at `2026-09-16T17:41:50Z`.
+- `seon.cluster.source-test/incremental-source-refresh-includes-unreported-changes`:
+  5 pass; result entity 51506, basis 536871149, at `2026-09-16T17:41:56Z`.
+
+Each test used the exact three-argument form recorded above with its symbol,
+explicit default connection/database/provenance, and remaining-ms 180000;
+runs were serial in one future, polled through short MCP evaluations. This
+proves artifact relocation and path selection, not the destructive cold test's
+complete publication baseline. The new cold assertion additionally requires
+its relocated refresh to preserve the exact freshly established commit.
+
+`git diff --check` passed; edit-hook lint found no errors and five existing
+shadowing warnings. Default remained PID 53320. No test JVM, scratch cluster,
+or worktree was created. Retained root inspection was read-only; every shell
+completed and the temporary adoption log was deleted. No RESET NEEDED is
+introduced by this test-only correction.

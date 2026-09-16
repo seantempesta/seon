@@ -1918,6 +1918,9 @@
            :seon.test/long "Copies the canonical checkout and publishes one file edit."}
   cloned-publication-analyzes-only-changed-files
   (let [root (published-root)
+        ;; A pooled worker's files need not match its cached published base.
+        ;; Establish this test's baseline before relocating or counting work.
+        baseline (cluster/refresh-source! root [])
         checkout (bare-root)
         directory (.getCanonicalPath (io/file checkout))
         original-roots (#'cluster/publication-roots)
@@ -1942,6 +1945,8 @@
         (fn []
           (let [unchanged (cluster/refresh-source! root [])]
             (is (false? (:seon.source/built? unchanged)))
+            (is (= (:seon.source/commit-id baseline)
+                   (:seon.source/commit-id unchanged)))
             (is (= [] @calls) "relocation alone analyzes no file"))
           (let [artifact-file (cluster/source-artifact-file root)
                 artifact (edn/read-string (slurp artifact-file))]
