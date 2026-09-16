@@ -416,3 +416,14 @@ fix resolves through the system classloader; regression
 A poisoned delay cannot be un-poisoned in place: default restarted. Queued
 for the next batch: seon.sci.eval-test. Follow-on issue filed by the steward
 (host-namespace! find-ns branch admits any already-loaded namespace).
+
+### 2026-09-16 13:20Z — config-apply-cost second slice (`5e5aa6293`)
+
+The batch-36 config/reconcile reds were refuted as a semantic regression:
+the fixtures' unchecked writes were being REFUSED by the stricter admission
+(rows the schema no longer admits) and the tests read the absence as a
+changed semantics; the lane fixed the fixture inputs, carried the database
+value through `seon.db/db` (the raw-deref class again), and restored the
+shipped `:seon.test/check-time-limit-ms` decision missing from
+`config/default.edn`. One authorised cold iteration: 27 tests / 128
+assertions green. Re-gated in batch 39 with the transcript second pass.
