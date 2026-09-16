@@ -591,3 +591,11 @@ Queue, in order:
   was RECORDED (no "persistent results NOT recorded") — the retention sweep
   removal and the recorder fix together. Run B (eleven namespaces) in the
   slot. Reset waits on the indexer commit and a clear test slot.
+- 18:30Z batch 30 B (`56f0a4ca8`): GREEN schedule, blob, registry,
+  data-shapes, instrument, issue-settlement, issue-test (`0c8f90630` proven
+  cold). RED (mine): seon.render.transcript-test 13 tests (~60 blocks; the
+  renderer-ref class + the stale tests listed earlier), seon.fn-test 4
+  (analyzer-facets' own regressions, never run in-process), web-debug 7
+  (known residual). Two Opus triage/fix agents: fn-test now (test-side,
+  commit promptly before the reset); transcript + web-debug after the
+  reset. fresh-operator-test 2 FAIL with the peer.
