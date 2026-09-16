@@ -623,25 +623,25 @@
                                            :seon.test/run-basis-t (:seon.test.run/basis-t next-run)
                                            :seon.test/run-at (:seon.test.run/at next-run))
                     conflicts (atom 0)
-                    refused
+                    recorded
                     (with-redefs [runner/commit-results!
                                   (fn [connection completed]
                                     (let [result (commit-results! connection completed)
                                           ordinal (when (= (:seon.test.run/id next-run)
                                                            (get-in completed [:seon.test.run/provenance :seon.test.run/id]))
                                                     (swap! conflicts inc))]
-                                      (when ordinal
+                                      (when (and ordinal (<= ordinal 3))
                                         (upsert opened
                                                 (:seon.source/commit-id (source/current opened))
                                                 (if (= 1 ordinal) digest-a digest-b) []))
                                       result))]
-                      (refusal #(source/record-results! opened next-completion)))
+                      (source/record-results! opened next-completion))
                     final-db (source/database opened
                                               (:seon.source/commit-id (source/current opened)))]
-                (is (= :stale-branch-head (:type refused)))
-                (is (= 2 @conflicts) "continued contention terminates after the one retry")
+                (is (= 1 (:seon.test/pass-count (first recorded))) (pr-str recorded))
+                (is (= 4 @conflicts) "three real competing publications still commit the evidence")
                 (is (= digest-b (db/q '[:find ?digest . :where [_ :seon.source/digest ?digest]]
                                      final-db)))
-                (is (nil? (db/q '[:find ?run . :in $ ?id :where [?run :seon.test.run/id ?id]]
-                                final-db (:seon.test.run/id next-run))))
+                (is (number? (db/q '[:find ?run . :in $ ?id :where [?run :seon.test.run/id ?id]]
+                                   final-db (:seon.test.run/id next-run))))
                 (is (empty? (scratch-branches opened)))))))))))

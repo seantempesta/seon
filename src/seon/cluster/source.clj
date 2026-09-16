@@ -13,7 +13,9 @@
             [seon.cluster.process :as cluster.process]
             [seon.cluster.registry :as registry]
             [seon.cluster.store :as store]
+            [seon.config :as config]
             [seon.db :as db]
+            [seon.error :as error]
             [seon.fn :as fn]
             [seon.program :as program]
             [seon.schema :as schema]
@@ -348,19 +350,43 @@
 
 (defn record-results!
   "Publish test evidence through the result writer on a private source branch.
-  One stale-head conflict rebases the same completion onto the new head once.
-  A second conflict refuses: the expected-head guard and original tested
-  fingerprint are preserved, and every attempt retires its scratch branch."
+  Rebase a stale attempt on the latest head until the declared test allowance
+  expires. Contention never changes the tested fingerprint; each attempt
+  retires its scratch branch. Expiry reports the bound and last conflict."
   {:malli/schema
    [:=> [:cat :seon.store/store :seon.test.run/completion]
     [:or :seon.test/results :seon.error/value]]}
   [held-store completion]
-  (try
-    (record-results-at-head! held-store completion)
-    (catch clojure.lang.ExceptionInfo failure
-      (if (= :stale-branch-head (:type (ex-data failure)))
-        (record-results-at-head! held-store completion)
-        (throw failure)))))
+  (let [head (database held-store (:seon.source/commit-id (current held-store)))
+        allowance (or (:seon.test/remaining-ms completion)
+                      (schema/call-with-projection
+                        (schema/projection-from-database head)
+                        #(:seon.test/check-time-limit-ms (config/defaults))))
+        deadline (+ (System/nanoTime) (* 1000000 allowance))]
+    (loop [attempt 1]
+      (let [outcome (try
+                      {::recorded (record-results-at-head! held-store completion)}
+                      (catch clojure.lang.ExceptionInfo failure
+                        (if (= :stale-branch-head (:type (ex-data failure)))
+                          {::conflict (ex-data failure)}
+                          (throw failure))))]
+        (if-let [conflict (::conflict outcome)]
+          (if (< (System/nanoTime) deadline)
+            (recur (inc attempt))
+            (error/diagnostic
+              {:seon.error/kind ::recording-expired
+               :seon.error/message "Test evidence publication exhausted its declared allowance while the source head changed."
+               :seon.error/diagnostic-layer :test
+               :seon.error/diagnostic-operation ::record-results!
+               :seon.error/diagnostic-member (:seon.test.run/id (:seon.test.run/provenance completion))
+               :seon.error/diagnostic-expected :committed-results
+               :seon.error/diagnostic-offending conflict
+               :seon.error/diagnostic-cause :seon.await/backstop-fired
+               :seon.error/diagnostic-evidence
+               {:seon.await/config-attribute (if (:seon.test/remaining-ms completion)
+                                               :seon.test/remaining-ms :seon.test/check-time-limit-ms)
+                :seon.await/config-value allowance :seon.test.runner/attempts attempt}}))
+          (::recorded outcome))))))
 
 (defn- index-issues!
   [connection source-digest]
