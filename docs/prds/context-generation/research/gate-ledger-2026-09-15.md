@@ -511,3 +511,18 @@ results; 500-result live send 261 ms); the read side is total
 file). Finding to carry: `requiring-resolve` returns nil for
 `seon.cluster/running-instances` inside the cluster where `ns-resolve`
 resolves it — caught only by the live send. Batch 46 is the recording proof.
+
+### 2026-09-16 18:40Z — adoption-identities `#{nil}` fixed (`bb46455fb`)
+
+`seon.cluster/changed-identities` used a per-call roster of three identity
+attributes where `seon.program/identity-attributes` declares six; every
+published file carries a `:seon.fn.file/path` digest row and one
+`:seon.lint/id` row per finding, which the roster read as nil. Now
+`adoption-identities` derives through `seon.program/row-identity` (the one
+authority) and keeps declaration identities only (including
+`:seon.schema/key`, which the roster silently dropped). Regression
+`seon.adoption-rows-test/adoption-identities-carry-no-nil-member` 5/0/0;
+live `init --dev default --changed src/seon/cluster.clj` exit 0, commit
+advanced. Noted for later: the write diagnostic says "expected a set, got a
+set" (seon.db admission should name the offending member); a scalar
+adoption recorded an empty identity set (possible under-recording).
