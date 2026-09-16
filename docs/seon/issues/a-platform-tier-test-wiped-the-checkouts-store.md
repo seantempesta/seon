@@ -130,6 +130,25 @@ Three platform tests reached a destructive owner and are now bulk-tier:
 `seon.test-support-test/simultaneous-fixture-bases-never-open-the-published-store`.
 No coverage was dropped and none was demoted to `:seon.test/long`.
 
+**The in-process half landed 2026-09-17**
+(`docs/prds/steward-platform/research/in-process-run-refuses-destructive-tests-2026-09-17.md`).
+The wipe was an in-process `seon.test/run`, so the prose rule ("those are
+cold-only", `tmp/orchestrator/wave2/repl-rule.txt`) is now a check at the one
+seam every in-process execution passes through. `seon.test/run` refuses a test
+whose `:seon.fn/calls` reach includes a member of the same
+`seon.test.runner/destructive-owners` set — no second list — when the operator
+root this JVM DECLARES is the development checkout it runs in; it executes
+nothing and commits nothing, and the typed
+`:seon.test/destructive-in-process` refusal names the test, the owner, the
+shortest call path, and the cold invocation that may run it. `seon.test/check`
+excludes the same tests from its in-process selection and reports them in
+`:seon.test/destructive-excluded` (also in its feedback line), and hands the
+declaration it holds to every run it starts. A `bin/test` worker, a lane's
+`--root` scratch JVM and `bin/test-fast` declare no development root and are
+untouched. An owner symbol with no program row refuses instead of admitting.
+Regressions: five in `seon.test-reaching-test`, 5/10/5/10/4 passes in process
+on pid 38993, 0 failures, 0 errors.
+
 Refuted while doing it: "destructive = reaches the delete admission seam"
 over-approximates to 42 of roughly 80 platform tests, because
 `seon.cluster.store/create-store!` admits unconditionally and every
