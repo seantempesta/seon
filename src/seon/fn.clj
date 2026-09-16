@@ -1260,60 +1260,70 @@
 
 (def ^:private request-symbol "seon.effect/request!")
 
-(def ^:private test-reach-rules
-  '[[(call-edge ?function ?target)
-     [?function :seon.fn/calls ?target]]
-    [(call-edge ?function ?target)
+(def ^:private declared-reference-rules
+  '[[(declared-edge ?caller ?target)
+     [?declaration :seon.fn/reference-to :seon.fn/sym]
+     [?declaration :seon.schema/key ?attribute]
+     [?caller ?attribute ?target]
+     [?caller :seon.fn/sym]
+     [?target :seon.fn/sym]]
+    [(declared-edge ?caller ?target)
      [?declaration :seon.fn/reference-to :seon.fn/sym]
      [?declaration :seon.schema/key ?attribute]
      [?holder ?attribute ?target]
+     (not [?holder :seon.fn/sym])
      [?target :seon.fn/sym]
-     [?function :seon.fn/keywords ?attribute]]
-    [(call-edge ?function ?target)
-     [?function :seon.fn/references ?target]]
-    [(call-edge ?test ?target)
-     [?file :seon.fn/unresolved-references ?symbol]
-     [?target :seon.fn/sym ?symbol]
-     [?test :seon.fn/file ?file]
-     [?test :seon.test/sym]]
-    [(tested ?target)
-     [?test :seon.test/sym]
-     (call-edge ?test ?target)]
-    [(tested ?target)
-     [?test :seon.test/sym]
-     [?test :seon.test/subject ?target]]
-    [(tested ?target)
-     (tested ?caller)
-     (call-edge ?caller ?target)]
-    [(test-currently-failing ?test)
-     [?test :seon.test/fail-count ?count]
-     [(pos? ?count)]]
-    [(test-currently-failing ?test)
-     [?test :seon.test/error-count ?count]
-     [(pos? ?count)]]
-    [(failing-function ?target)
-     (test-currently-failing ?test)
-     (call-edge ?test ?target)]
-    [(failing-function ?target)
-     (test-currently-failing ?test)
-     [?test :seon.test/subject ?target]]
-    [(failing-function ?target)
-     (failing-function ?caller)
-     (call-edge ?caller ?target)]])
+     [?caller :seon.fn/keywords ?attribute]]])
+
+(def ^:private test-reach-rules
+  (into declared-reference-rules
+    '[[(call-edge ?function ?target)
+       [?function :seon.fn/calls ?target]]
+      [(call-edge ?function ?target)
+       (declared-edge ?function ?target)]
+      [(call-edge ?function ?target)
+       [?function :seon.fn/references ?target]]
+      [(call-edge ?test ?target)
+       [?file :seon.fn/unresolved-references ?symbol]
+       [?target :seon.fn/sym ?symbol]
+       [?test :seon.fn/file ?file]
+       [?test :seon.test/sym]]
+      [(tested ?target)
+       [?test :seon.test/sym]
+       (call-edge ?test ?target)]
+      [(tested ?target)
+       [?test :seon.test/sym]
+       [?test :seon.test/subject ?target]]
+      [(tested ?target)
+       (tested ?caller)
+       (call-edge ?caller ?target)]
+      [(test-currently-failing ?test)
+       [?test :seon.test/fail-count ?count]
+       [(pos? ?count)]]
+      [(test-currently-failing ?test)
+       [?test :seon.test/error-count ?count]
+       [(pos? ?count)]]
+      [(failing-function ?target)
+       (test-currently-failing ?test)
+       (call-edge ?test ?target)]
+      [(failing-function ?target)
+       (test-currently-failing ?test)
+       [?test :seon.test/subject ?target]]
+      [(failing-function ?target)
+       (failing-function ?caller)
+       (call-edge ?caller ?target)]]))
 
 (defn- declared-reference-edges
-  "Attribute consumers reach function identities named by stored declarations.
-  The attribute's schema supplies the target identity; task/handler families
-  are not enumerated here. The writer's current facts decide each edge."
+  "A function declaration owns its declared function references. References
+  on data rows retain conservative attribute-consumer reach because those
+  rows do not identify a calling function. Keyword mentions never replace
+  the known owner of a function declaration."
   [database]
   (db/q '[:find ?caller ?target
+          :in $ %
           :where
-          [?declaration :seon.fn/reference-to :seon.fn/sym]
-          [?declaration :seon.schema/key ?attribute]
-          [?holder ?attribute ?target]
-          [?target :seon.fn/sym]
-          [?caller :seon.fn/keywords ?attribute]]
-        database))
+          (declared-edge ?caller ?target)]
+        database declared-reference-rules))
 
 (defn- gate-set-in
   "Walk one identity using the declaration relation acquired for this operation.

@@ -1,0 +1,138 @@
+WARNING: Using incubator modules: jdk.incubator.vector
+bin/test: PACKAGED TEST PROJECTION ACQUIRED at= 2026-09-16T21:10:25.431231Z pid= 47887 role= test-fast
+bin/test: CONTRACTS ARMED at= 2026-09-16T21:10:33.851490Z worker= test-fast mode= :panic namespaces= 1 program-namespaces= 107 registered= 1098 instrumented= 1098 program-armable= 1093
+bin/test: 2026-09-16T21:10:33.949049Z BEGIN namespace seon.fn-test
+
+Testing seon.fn-test
+bin/test: 2026-09-16T21:10:33.971404Z BEGIN test seon.fn-test/malformed-source-preserves-analysis-findings
+bin/test: 2026-09-16T21:10:34.136003Z END test seon.fn-test/malformed-source-preserves-analysis-findings
+bin/test: 2026-09-16T21:10:34.136166Z BEGIN test seon.fn-test/fixture-observations-survive-static-and-runtime-admission
+WARNING: reset! already refers to: #'clojure.core/reset! in namespace: seon.fresh-operator, being replaced by: #'seon.fresh-operator/reset!
+bin/test: 2026-09-16T21:11:47.023952Z END test seon.fn-test/fixture-observations-survive-static-and-runtime-admission
+bin/test: 2026-09-16T21:11:47.024068Z BEGIN test seon.fn-test/sci-evaluation-has-one-first-party-owning-namespace
+bin/test: 2026-09-16T21:11:47.088291Z END test seon.fn-test/sci-evaluation-has-one-first-party-owning-namespace
+bin/test: 2026-09-16T21:11:47.088410Z BEGIN test seon.fn-test/the-indexer-emits-no-attribute-the-program-row-schema-drops
+bin/test: 2026-09-16T21:11:47.201410Z END test seon.fn-test/the-indexer-emits-no-attribute-the-program-row-schema-drops
+bin/test: 2026-09-16T21:11:47.201567Z BEGIN test seon.fn-test/a-file-changed-after-capture-analyzes-to-the-captured-spans
+bin/test: 2026-09-16T21:11:47.214531Z END test seon.fn-test/a-file-changed-after-capture-analyzes-to-the-captured-spans
+bin/test: 2026-09-16T21:11:47.214685Z BEGIN test seon.fn-test/source-context-is-derived-once-per-file-population
+bin/test: 2026-09-16T21:11:47.276698Z END test seon.fn-test/source-context-is-derived-once-per-file-population
+bin/test: 2026-09-16T21:11:47.276810Z BEGIN test seon.fn-test/defining-forms-share-one-form-local-kondo-batch
+bin/test: 2026-09-16T21:11:47.362647Z END test seon.fn-test/defining-forms-share-one-form-local-kondo-batch
+bin/test: 2026-09-16T21:11:47.362742Z BEGIN test seon.fn-test/indexed-declarations-carry-exact-file-bytes
+bin/test: 2026-09-16T21:11:47.473912Z END test seon.fn-test/indexed-declarations-carry-exact-file-bytes
+bin/test: 2026-09-16T21:11:47.474001Z BEGIN test seon.fn-test/publication-refusals-preserve-the-entity-key-and-value
+2026-09-16T21:11:47.489566Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :transaction/validation-rejected, :cause "Transaction report validation rejected."}
+bin/test: 2026-09-16T21:11:47.493396Z END test seon.fn-test/publication-refusals-preserve-the-entity-key-and-value
+bin/test: 2026-09-16T21:11:47.493508Z BEGIN test seon.fn-test/ordinary-form-analysis-keeps-call-edges-without-a-declaration
+bin/test: 2026-09-16T21:11:47.717089Z END test seon.fn-test/ordinary-form-analysis-keeps-call-edges-without-a-declaration
+bin/test: 2026-09-16T21:11:47.717213Z BEGIN test seon.fn-test/blocking-analysis-keeps-the-fresh-branch-unpublished
+bin/test: 2026-09-16T21:11:47.847982Z END test seon.fn-test/blocking-analysis-keeps-the-fresh-branch-unpublished
+bin/test: 2026-09-16T21:11:47.848093Z BEGIN test seon.fn-test/static-findings-are-replaced-with-their-program-rows
+bin/test: 2026-09-16T21:11:48.071591Z END test seon.fn-test/static-findings-are-replaced-with-their-program-rows
+bin/test: 2026-09-16T21:11:48.071687Z BEGIN test seon.fn-test/call-arities-refine-exactly-the-stored-call-edges
+bin/test: 2026-09-16T21:11:48.126846Z END test seon.fn-test/call-arities-refine-exactly-the-stored-call-edges
+bin/test: 2026-09-16T21:11:48.126948Z BEGIN test seon.fn-test/implementation-bodies-contribute-edges-and-test-reach
+bin/test: 2026-09-16T21:11:48.356131Z END test seon.fn-test/implementation-bodies-contribute-edges-and-test-reach
+bin/test: 2026-09-16T21:11:48.356230Z BEGIN test seon.fn-test/writes-facet-names-every-attribute-a-declaration-transacts
+bin/test: 2026-09-16T21:11:48.418082Z END test seon.fn-test/writes-facet-names-every-attribute-a-declaration-transacts
+bin/test: 2026-09-16T21:11:48.418274Z BEGIN test seon.fn-test/keyword-usage-is-indexed-per-declaration
+bin/test: 2026-09-16T21:11:48.537021Z END test seon.fn-test/keyword-usage-is-indexed-per-declaration
+bin/test: 2026-09-16T21:11:48.537118Z BEGIN test seon.fn-test/static-index-preserves-the-jvm-row-contract
+bin/test: 2026-09-16T21:11:48.621544Z END test seon.fn-test/static-index-preserves-the-jvm-row-contract
+bin/test: 2026-09-16T21:11:48.621662Z BEGIN test seon.fn-test/an-attribute-declared-after-this-jvm-started-is-indexed-without-a-restart
+bin/test: 2026-09-16T21:11:48.750434Z END test seon.fn-test/an-attribute-declared-after-this-jvm-started-is-indexed-without-a-restart
+bin/test: 2026-09-16T21:11:48.750528Z BEGIN test seon.fn-test/the-walked-root-travels-with-its-file-relative-to-the-publication
+bin/test: 2026-09-16T21:11:48.902219Z END test seon.fn-test/the-walked-root-travels-with-its-file-relative-to-the-publication
+bin/test: 2026-09-16T21:11:48.902300Z BEGIN test seon.fn-test/indexing-uses-a-prebuilt-manifest-without-analysis
+bin/test: 2026-09-16T21:12:48.779465Z END test seon.fn-test/indexing-uses-a-prebuilt-manifest-without-analysis
+bin/test: 2026-09-16T21:12:48.779710Z BEGIN test seon.fn-test/declared-function-values-contribute-edges-without-arities
+DECLARATION-TRACE {:target "sample.call-declarations/handler", :selected 1580, :without-declared-or-file ["sample.call-declarations/reaches-declarations"], :callers #{["seon.fn/var-row" :seon.fn/capability-fn] ["seon.effect/capability-fn-eid" :seon.fn/capability-fn]}}
+
+FAIL in (declared-function-values-contribute-edges-without-arities) (fn_test.clj:2614)
+expected: (= ["sample.call-declarations/reaches-declarations"] (seon.fn/tests-reaching (clojure.core/deref connection) target))
+actual: (not (= ["sample.call-declarations/reaches-declarations"] ["my.agent-test/settings-are-one-owned-component-with-a-derived-render-pair" "my.agent-test/settings-updates-preserve-one-component-and-agent-isolation" "my.background-test/background-error-renderers-cover-every-declared-class" "my.background-test/background-macro-expands-one-direct-call" "my.background-test/poll-and-await-derive-terminal-presence-without-acknowledging" "my.edit-test/form-operation-relation-is-structural-and-open" "my.edit-test/public-entries-declare-resolvable-io-capabilities" "my.examples-test/public-docstring-examples-run-in-the-canonical-agent-context" "my.fs-test/public-entries-declare-resolvable-io-capabilities" "my.fs-test/relationship-predicates-require-one-declared-arm" "my.message-test/a-bad-argument-is-an-error-value-never-a-throw" "my.message-test/a-contract-forbidden-argument-is-a-value-the-agent-reads" "my.message-test/a-declination-is-an-ordinary-value" "my.message-test/a-message-is-an-ordinary-value" "my.message-test/delivery-preserves-the-returned-message-identity" "my.message-test/inbox-lists-this-agents-messages-newest-last" "my.message-test/read-pulls-one-admitted-message-row" "my.message-test/send-writes-and-handles-the-inbox-in-one-transaction" "my.message-test/the-error-value-is-the-registered-one" "my.note-test/add-upserts-current-content-by-identity" "my.note-test/forget-retracts-current-entity-and-history-keeps-content" "my.note-test/notes-is-agent-scoped-current-and-whole" "my.note-test/rebirth-renders-only-the-current-facts" "my.plan-api-test/item-and-plan-agree-on-state-depth-and-parent" "my.plan-api-test/plan-writes-use-one-request-map-and-return-the-changed-item" "my.plan-test/a-changed-title-is-an-ordinary-fact-update" "my.plan-test/a-plan-without-a-current-step-still-renders" "my.plan-test/a-refused-derivation-renders-a-typed-line-where-instructions-belong" "my.plan-test/a-second-agent-renders-through-the-same-defaults" "my.plan-test/an-empty-plan-renders-in-both-projections" "my.plan-test/compact-reads-and-writes-preserve-ownership-and-dependencies" "my.plan-test/completing-a-dependency-unblocks-the-dependent-step" {:seon.print/bound-by :seon.render.profile/max-children, :seon.print/elision-unit :children, :seon.print/omitted 1548, :seon.print/requery-refusal "the value has no result handle", :seon.render.data/next-offset 32, :seon.render.data/path [1 2], :seon.render.data/total 1580}]))
+DECLARATION-TRACE {:target "sample.call-declarations/step", :selected 1, :without-declared-or-file ["sample.call-declarations/reaches-declarations"], :callers #{}}
+DECLARATION-TRACE {:target "sample.call-declarations/render-target", :selected 1, :without-declared-or-file ["sample.call-declarations/reaches-declarations"], :callers #{}}
+DECLARATION-TRACE {:target "sample.call-declarations/task-target", :selected 1, :without-declared-or-file ["sample.call-declarations/reaches-declarations"], :callers #{}}
+bin/test: 2026-09-16T21:12:49.612512Z END test seon.fn-test/declared-function-values-contribute-edges-without-arities
+bin/test: 2026-09-16T21:12:49.612585Z BEGIN test seon.fn-test/settled-form-records-calls-across-every-program-namespace
+bin/test: 2026-09-16T21:12:50.819847Z END test seon.fn-test/settled-form-records-calls-across-every-program-namespace
+bin/test: 2026-09-16T21:12:50.819984Z BEGIN test seon.fn-test/output-path-report-finds-the-shortest-bypass
+bin/test: 2026-09-16T21:12:52.049786Z END test seon.fn-test/output-path-report-finds-the-shortest-bypass
+bin/test: 2026-09-16T21:12:52.049895Z BEGIN test seon.fn-test/indexing-refuses-an-already-populated-branch
+bin/test: 2026-09-16T21:13:33.443991Z END test seon.fn-test/indexing-refuses-an-already-populated-branch
+bin/test: 2026-09-16T21:13:33.444330Z BEGIN test seon.fn-test/a-span-past-the-captured-source-is-the-typed-refusal
+bin/test: 2026-09-16T21:13:33.468845Z END test seon.fn-test/a-span-past-the-captured-source-is-the-typed-refusal
+bin/test: 2026-09-16T21:13:33.469018Z BEGIN test seon.fn-test/settled-agent-form-has-static-index-edge-parity
+bin/test: 2026-09-16T21:13:33.770491Z END test seon.fn-test/settled-agent-form-has-static-index-edge-parity
+bin/test: 2026-09-16T21:13:33.770764Z BEGIN test seon.fn-test/program-population-store-uses-measured-index-fanout
+bin/test: 2026-09-16T21:13:33.773684Z END test seon.fn-test/program-population-store-uses-measured-index-fanout
+bin/test: 2026-09-16T21:13:33.773896Z BEGIN test seon.fn-test/parsed-contract-backfill-is-one-transaction-and-idempotent
+bin/test: 2026-09-16T21:13:45.194342Z END test seon.fn-test/parsed-contract-backfill-is-one-transaction-and-idempotent
+bin/test: 2026-09-16T21:13:45.195276Z BEGIN test seon.fn-test/contracted-rows-carry-queryable-facts-in-their-spec-transaction
+bin/test: 2026-09-16T21:13:45.395896Z END test seon.fn-test/contracted-rows-carry-queryable-facts-in-their-spec-transaction
+bin/test: 2026-09-16T21:13:45.396114Z BEGIN test seon.fn-test/indexing-resolves-its-declaration-world-once-per-operation
+bin/test: 2026-09-16T21:13:46.231348Z END test seon.fn-test/indexing-resolves-its-declaration-world-once-per-operation
+bin/test: 2026-09-16T21:13:46.231634Z BEGIN test seon.fn-test/publication-refuses-a-required-artifact-load-finding
+bin/test: 2026-09-16T21:13:46.371537Z END test seon.fn-test/publication-refuses-a-required-artifact-load-finding
+bin/test: 2026-09-16T21:13:46.371821Z BEGIN test seon.fn-test/static-index-and-runtime-admission-agree-on-analysis-facets
+bin/test: 2026-09-16T21:13:46.626370Z END test seon.fn-test/static-index-and-runtime-admission-agree-on-analysis-facets
+bin/test: 2026-09-16T21:13:46.626568Z BEGIN test seon.fn-test/analyze-form-refuses-an-unresolvable-namespace-reference
+bin/test: 2026-09-16T21:13:46.634739Z END test seon.fn-test/analyze-form-refuses-an-unresolvable-namespace-reference
+bin/test: 2026-09-16T21:13:46.634947Z BEGIN test seon.fn-test/publication-veto-is-exactly-the-cant-load-finding-classes
+bin/test: 2026-09-16T21:13:47.247Z END test seon.fn-test/publication-veto-is-exactly-the-cant-load-finding-classes
+bin/test: 2026-09-16T21:13:47.247226Z BEGIN test seon.fn-test/retired-program-identities-validate-as-retired-rows
+2026-09-16T21:13:47.290602Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :transaction/validation-rejected, :cause "Transaction report validation rejected."}
+2026-09-16T21:13:47.298711Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :transaction/validation-rejected, :cause "Transaction report validation rejected."}
+bin/test: 2026-09-16T21:13:47.404935Z END test seon.fn-test/retired-program-identities-validate-as-retired-rows
+bin/test: 2026-09-16T21:13:47.405214Z BEGIN test seon.fn-test/requires-resolve-totally
+bin/test: 2026-09-16T21:13:47.481174Z END test seon.fn-test/requires-resolve-totally
+bin/test: 2026-09-16T21:13:47.481454Z BEGIN test seon.fn-test/my-web-cascade-class-warns-without-vetoing-publication
+bin/test: 2026-09-16T21:13:47.647883Z END test seon.fn-test/my-web-cascade-class-warns-without-vetoing-publication
+bin/test: 2026-09-16T21:13:47.648116Z BEGIN test seon.fn-test/tests-reaching-follows-calls-and-explicit-subjects
+bin/test: 2026-09-16T21:13:50.496926Z END test seon.fn-test/tests-reaching-follows-calls-and-explicit-subjects
+bin/test: 2026-09-16T21:13:50.497094Z BEGIN test seon.fn-test/changed-file-planning-is-conservative-and-explicit
+bin/test: 2026-09-16T21:13:51.039684Z END test seon.fn-test/changed-file-planning-is-conservative-and-explicit
+bin/test: 2026-09-16T21:13:51.039806Z BEGIN test seon.fn-test/file-artifacts-and-manifests-are-byte-digested-and-deterministic
+bin/test: 2026-09-16T21:13:51.377286Z END test seon.fn-test/file-artifacts-and-manifests-are-byte-digested-and-deterministic
+bin/test: 2026-09-16T21:13:51.377469Z BEGIN test seon.fn-test/a-declaration-answers-its-source-root-through-its-file
+bin/test: 2026-09-16T21:13:51.390708Z END test seon.fn-test/a-declaration-answers-its-source-root-through-its-file
+bin/test: 2026-09-16T21:13:51.390877Z BEGIN test seon.fn-test/capability-indexing-refuses-every-malformed-declaration
+bin/test: 2026-09-16T21:13:52.302372Z END test seon.fn-test/capability-indexing-refuses-every-malformed-declaration
+bin/test: 2026-09-16T21:13:52.302642Z BEGIN test seon.fn-test/gate-set-returns-the-shape-its-contract-declares
+bin/test: 2026-09-16T21:13:52.548525Z END test seon.fn-test/gate-set-returns-the-shape-its-contract-declares
+bin/test: 2026-09-16T21:13:52.548714Z BEGIN test seon.fn-test/every-indexed-outward-path-crosses-its-total-render-projection
+bin/test: 2026-09-16T21:13:55.611576Z END test seon.fn-test/every-indexed-outward-path-crosses-its-total-render-projection
+bin/test: 2026-09-16T21:13:55.611807Z BEGIN test seon.fn-test/fixture-analysis-never-writes-the-checkouts-dependency-cache
+bin/test: 2026-09-16T21:13:59.105998Z END test seon.fn-test/fixture-analysis-never-writes-the-checkouts-dependency-cache
+bin/test: 2026-09-16T21:13:59.106220Z BEGIN test seon.fn-test/re-index-replaces-analysis-facets-exactly
+bin/test: 2026-09-16T21:13:59.613223Z END test seon.fn-test/re-index-replaces-analysis-facets-exactly
+bin/test: 2026-09-16T21:13:59.613445Z BEGIN test seon.fn-test/progress-observation-cannot-change-index-transaction-shapes
+bin/test: 2026-09-16T21:13:59.623650Z END test seon.fn-test/progress-observation-cannot-change-index-transaction-shapes
+bin/test: 2026-09-16T21:13:59.623967Z BEGIN test seon.fn-test/every-indexed-file-carries-the-root-the-indexer-walked
+bin/test: 2026-09-16T21:13:59.657984Z END test seon.fn-test/every-indexed-file-carries-the-root-the-indexer-walked
+bin/test: 2026-09-16T21:13:59.658262Z BEGIN test seon.fn-test/reference-selection-includes-resolved-and-reference-only-callers
+bin/test: 2026-09-16T21:14:02.561074Z END test seon.fn-test/reference-selection-includes-resolved-and-reference-only-callers
+bin/test: 2026-09-16T21:14:02.561312Z BEGIN test seon.fn-test/relocated-artifacts-preserve-path-identity
+bin/test: 2026-09-16T21:14:02.918235Z END test seon.fn-test/relocated-artifacts-preserve-path-identity
+bin/test: 2026-09-16T21:14:02.918554Z BEGIN test seon.fn-test/agent-source-reaches-the-evaluator-through-one-visible-path
+bin/test: 2026-09-16T21:14:03.089120Z END test seon.fn-test/agent-source-reaches-the-evaluator-through-one-visible-path
+bin/test: 2026-09-16T21:14:03.089411Z BEGIN test seon.fn-test/unresolved-call-shapes-preserve-reference-edges-and-reach
+bin/test: 2026-09-16T21:14:03.741795Z END test seon.fn-test/unresolved-call-shapes-preserve-reference-edges-and-reach
+bin/test: 2026-09-16T21:14:03.742034Z BEGIN test seon.fn-test/capability-metadata-is-one-program-graph-contract
+bin/test: 2026-09-16T21:14:03.915156Z END test seon.fn-test/capability-metadata-is-one-program-graph-contract
+bin/test: 2026-09-16T21:14:03.915380Z BEGIN test seon.fn-test/arity-mismatch-is-a-query-over-stored-call-sites
+bin/test: 2026-09-16T21:14:04.351103Z END test seon.fn-test/arity-mismatch-is-a-query-over-stored-call-sites
+bin/test: 2026-09-16T21:14:04.351379Z BEGIN test seon.fn-test/gate-set-walks-only-indexed-callers-once
+bin/test: 2026-09-16T21:14:05.080733Z END test seon.fn-test/gate-set-walks-only-indexed-callers-once
+bin/test: 2026-09-16T21:14:05.080940Z BEGIN test seon.fn-test/quoted-private-handler-symbol-is-indexed-as-the-runtime-symbol
+bin/test: 2026-09-16T21:14:05.262098Z END test seon.fn-test/quoted-private-handler-symbol-is-indexed-as-the-runtime-symbol
+bin/test: 2026-09-16T21:14:05.262345Z BEGIN test seon.fn-test/publication-is-first-party-only
+bin/test: 2026-09-16T21:14:05.423262Z END test seon.fn-test/publication-is-first-party-only
+bin/test: 2026-09-16T21:14:05.423707Z BEGIN test seon.fn-test/cross-file-implementations-keep-edges-or-widen
+bin/test: 2026-09-16T21:14:06.348960Z END test seon.fn-test/cross-file-implementations-keep-edges-or-widen
+bin/test: 2026-09-16T21:14:06.349841Z END namespace seon.fn-test
+
+Ran 58 tests containing 424 assertions.
+1 failures, 0 errors.

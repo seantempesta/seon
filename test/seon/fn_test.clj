@@ -2579,6 +2579,22 @@
                        :seon.schema.projection/forms forms})
             rows (:seon.fn.file/rows artifact)]
         (test-support/transacted! connection (seon.fn/reconcile-tx @connection rows []))
+        (let [database @connection
+              owner (:db/id (db/pull database [:db/id]
+                                     [:seon.fn/sym "sample.call-declarations/capability"]))
+              handler (:db/id (db/pull database [:db/id]
+                                       [:seon.fn/sym "sample.call-declarations/handler"]))
+              declared-only (:db-after (d/with database [[:db/retract owner :seon.fn/calls handler]]))]
+          (is (= #{[owner handler]}
+                 (set (filter #(= handler (second %))
+                              (#'seon.fn/declared-reference-edges declared-only))))
+              "the declaration's owner, not every mention of its attribute, reaches the handler")
+          (is (= #{[owner]}
+                 (db/q '[:find ?caller :in $ % ?target
+                         :where (call-edge ?caller ?target)]
+                       declared-only @#'seon.fn/test-reach-rules handler)))
+          (is (= ["sample.call-declarations/reaches-declarations"]
+                 (seon.fn/tests-reaching declared-only "sample.call-declarations/handler"))))
         (doseq [[caller target] [["capability" "handler"] ["graph" "step"]
                                  ["render-owner" "render-target"] ["task-owner" "task-target"]]]
           (let [caller (str "sample.call-declarations/" caller)

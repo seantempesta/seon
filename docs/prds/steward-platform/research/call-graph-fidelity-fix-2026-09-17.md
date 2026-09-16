@@ -1,7 +1,14 @@
+---
+type: research
+status: review-required
+tags: [program-graph, call-graph, test-selection]
+---
+
 # Call-graph fidelity implementation — 2026-09-17
 
 Status: committed for orchestrator review; adopted verification incomplete.
-No test JVM launched; default PID 53320 has not been stopped or restarted.
+Initial slice boundary: no test JVM launched; default PID 53320 was not
+stopped or restarted by this lane. Later authorized fast runs are recorded below.
 
 ## Grounding and dependency ledger
 
@@ -469,3 +476,95 @@ fixture runs. `git diff --check` passed; the measurement form passed a native
 Babashka reader check. No test JVM, gate, extra prepl evaluation, default
 restart, or scratch worktree was used. No schema changes; no reset required
 by this correction. STOP for orchestrator review before any gate.
+
+## Batch 106 follow-up — retain the declared reference's known owner
+
+Read the orchestrator review and its approval addendum end to end. Read the
+batch-106 failure at `tmp/orchestrator/gate-results/batch-106.log:273`, the
+declaration fixture, its complete regression, and both declaration consumers
+in `src/seon/fn.clj`. Additional seams inspected: schema reference declarations
+in `resources/seon/schemas/seon.fn.edn:4` and
+`resources/seon/schemas/seon.schedule.task.edn:3`, capability reference writing
+at `src/seon/fn.clj:693`, and the runtime owner lookup at
+`src/seon/effect.clj:242`. The original end-to-end authority/seam reads are
+listed above; this follow-up does not replace them.
+
+### Query attribution, not a selection-size inference
+
+The first canonical-fixture fast run reproduced **1,580 selected tests** for
+`sample.call-declarations/handler`; step, render-target, and task-target each
+selected exactly the fixture's one test. The historical declaration relation
+joined every `:seon.fn/capability-fn` keyword consumer to the handler stored on
+the fixture's capability owner. Its incoming callers included the indexer
+`seon.fn/var-row`, the metadata reader `seon.effect/capability-fn-eid`, and
+`seon.effect-test/every-capability-owner-accepts-its-own-request-at-the-door`.
+The first diagnostic query required `:seon.fn/sym` on callers and therefore
+omitted that test-only identity; the complete relation trace includes it.
+
+On the after-run fixture, the historical query and corrected query were both
+evaluated against **the same immutable database value**:
+
+| relation supplied to the existing indexed walk | selected tests |
+|---|---:|
+| historical declarations + calls + references + file references | 1,581 |
+| historical declarations + calls + references, file relation omitted | 1,429 |
+| calls + references + file references, declaration relation omitted | 1 |
+| corrected declarations + calls + references + file references | 1 |
+
+The extra test between the two canonical populations is exactly
+`seon.db-test/missing-reference-diagnostics-describe-the-declared-value`,
+added concurrently by the write-admission lane. No tests disappeared between
+those historical selections. This population difference is not a changed
+selection rule.
+
+Every one of the **1,580 extra tests** in the paired measurement has a stored
+relation-labelled path in
+[declared-owner-evidence.edn](call-graph-fidelity-review-evidence-2026-09-17/declared-owner-evidence.edn).
+`:extra-test-paths` maps each test to ordered indices into `:edges`; those
+edges give the caller, target, and relation at every step. No extra test is
+unattributed. The final invented edge into the handler is from `var-row` for
+955 paths, `capability-fn-eid` for 624, and the effect test for one. Of these
+representative shortest paths, 308 also traverse file uncertainty. Every path
+uses the erroneous declaration relation; removing file uncertainty alone
+leaves 1,428 extras. Calls and references are genuine preceding paths into
+those wrongly connected consumers, not the faulty relation themselves.
+
+The repeatable query is
+[declared-owner-trace.clj](call-graph-fidelity-review-evidence-2026-09-17/declared-owner-trace.clj).
+It accepts the existing regression's database after reconciliation, constructs
+no fixture, and uses the existing `gate-set-in` for each relation subtraction.
+It also records a graph path for each extra test. It ran through a temporary
+read-only diagnostic call inside that regression under `bin/test-fast`; the
+diagnostic call was removed from the test source. Edge interning in the saved
+evidence was checked to reconstruct the original paths exactly.
+
+### One-slice diff and verification boundary
+
+`declared-reference-rules` now derives a reference on a function declaration
+from **that function's identity** (`src/seon/fn.clj:1263`). References on data
+rows without a function identity keep conservative attribute-consumer reach,
+including schedule task declarations. Both Datalog and the indexed walk use
+the same relation. No attribute-name list or function-name classification was
+added. Calls and references still participate unconditionally; file-scoped
+widening and once-per-operation acquisition remain intact.
+
+The extended regression (`test/seon/fn_test.clj:2582`) uses `datahike.api/with`
+on the canonical fixture to remove only the explicit capability-to-handler
+call. It asserts the exact declared edge, exact Datalog edge, and sole selected
+test, proving that the owner declaration independently preserves reach.
+The existing mixed resolved/reference-caller regression also stays green.
+The issue record is
+[declared-function-references-lose-their-known-owner](../../../seon/issues/archive/declared-function-references-lose-their-known-owner.md).
+
+`SEON_TEST_ORCHESTRATOR=1 bin/test-fast seon.fn-test` was run twice, using the
+latest assignment's explicit authorization despite the older shared
+orchestrator-only marker. [Before](call-graph-fidelity-review-evidence-2026-09-17/declared-owner-before.log):
+**58 tests, 424 assertions, 1 failure, 0 errors**.
+[After](call-graph-fidelity-review-evidence-2026-09-17/declared-owner-after.log):
+**58 tests, 427 assertions, 0 failures, 0 errors**, exit 0. The after run
+included the read-only diagnostic call described above. `git diff --check`
+passed. No `bin/test`, prepl evaluation, default restart, worktree, or protected
+file edit was performed. This is fast-loop proof, not the orchestrator's cold
+gate or live adoption proof. The foreign batch-106 program-test tombstone
+failures remain with their assigned lane; no claim is made about them here.
+No schema/key meaning changes; **RESET NOT NEEDED**. Stop for review.
