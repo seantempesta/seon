@@ -1,9 +1,10 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [seon.error, seon.cluster, fault, blob, test, occurrence, class/stale-expectation]
 opened: 2026-09-17
+resolved: 2026-09-17
 ---
 
 # Fault-evidence tests pull a fault entity that no longer carries its evidence
@@ -62,16 +63,49 @@ what staging needs: `:seon.error/data-size` 372,256 against a 4,096-byte
 two schema resources. Neither failing test calls either `collect!`; the fault
 path they exercise does not reach them.
 
-## Wanted
+## Decision and resolution
 
-One decision by the owner of the occurrence model, then the tests follow it:
+> DECISION (orchestrator, 2026-09-17): the fault entity stays evidence-free —
+> the signature aggregates, the occurrence carries the evidence (`data-edn`,
+> `data-size` on its evidence map; the blob on
+> `:seon.error.occurrence/data-blob`). The two failing tests
+> `lossy-subthreshold-fault-evidence-is-retrievable` and
+> `oversized-fault-evidence-is-bounded-and-retrievable` are stale: they pull
+> `:seon.error/data-blob` off the fault entity and hand nil to `seon.blob/get`,
+> and they take `(first (fault-facts connection))` of an unordered query
+> result, which is how a model change became a nil instead of a named refusal.
 
-- if the fault entity is meant to stay evidence-free, both tests are stale and
-  must read the occurrence (`:seon.error.occurrence/data-blob` →
-  `:seon.error.occurrence/blob-digest`), asserting the CURRENT shape; or
-- if a fault is meant to answer for its own evidence, `error-row` is missing
-  those keys and the fix is at `src/seon/error.clj:1345`.
+Resolved in `bdda3cd5d`: `fault-facts` is replaced by `fault-evidence`, which
+finds the fault by its SIGNATURE (never an arbitrary member of an unordered
+result) and follows `:seon.error/occurrences` to the evidence, plus
+`occurrence-digest` and `published-blob-digests`. The blob read is guarded on
+`(string? digest)`, so a future model change fails the named assertion instead
+of throwing a contract refusal out of a read.
 
-Either way the test's `(first (fault-facts connection))` is worth replacing:
-it takes an arbitrary member of an unordered query result, which is how a
-model change turns into a nil rather than a named refusal.
+The storm assertion now states what the aggregating model promises: 500
+identical faults are one failure class, one occurrence counted 500, and one
+published blob row — the old `(= 500 (count facts))` counted fault entities
+that the signature model no longer mints.
+
+Proven live on `default` (pid 53320) against a speculative database built with
+`datahike.api/with` from the real `seon.error/commit-call` output on the tests'
+own oversized payload (nothing committed): the pull resolves, the fault's
+`:seon.error/id` equals the returned fact's id, there is exactly one
+occurrence, `occurrence-digest` yields the digest, inline is 306 bytes,
+`:seon.error/data-size` is 372,256, `:seon.error/capped?` is true, and
+`published-blob-digests` returns exactly one row. `seon.error/prepare` on the
+lossy payload likewise reports `capped?` true, 48,000 bytes of content and a
+305-byte face, so its blob is staged too.
+
+The two tests could NOT be run in process: `seon.test/run` returns the typed
+unknown
+
+```
+No function in this program declares :seon.fn/destroys, so an in-process run
+cannot tell whether a test deletes a filesystem path it did not create.
+```
+
+because the `:seon.fn/destroys` indexing (`src/seon/fn.clj:590`, `:686`) is an
+uncommitted working-tree edit that the published program does not yet carry.
+The storm count of 500 and the blob's survival across `registry/collect!`
+therefore remain for the cold gate (`tmp/orchestrator/gate-requests/fault-storage.txt`).
