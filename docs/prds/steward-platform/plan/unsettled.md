@@ -8,7 +8,7 @@
 - Candidate first slices (from the audits, unapproved): test-run
   provenance + results on `:current-src` (lane test-provenance running);
   `seon.cluster.message/unanswered` + `answered?` + `seon.test/verified?`;
-  the render request keys; `my.task` rows; `seon.program/source-files`.
+  the render request keys; `my.task` entities; `seon.program/source-files`.
 
 ## 2026-09-16 00:20Z — task prototype written for iteration
 
@@ -18,7 +18,7 @@
   worker agent plus its plan step); context via `:seon.render/units` on the
   task schema; no `writes` family.
 - [task-prototype-2026-09-16.md](task-prototype-2026-09-16.md): one `my.task`
-  family, `:my.task/agent` declared as the wake, two example rows as exact
+  family, `:my.task/agent` declared as the wake, two example entities as exact
   transaction data, the functions' contracts, the opening as the walk would
   draw it, six open questions. Nothing in `src/` yet.
 - Research lanes running: test-attribution-plan (cross-namespace red-test
@@ -27,7 +27,7 @@
 - 00:50Z owner: no wake attribute on the task; the focus is task definition →
   a running agent entity. Prototype revised: `start!` is `ensure-entity!`
   generalised (creation-tx + task agent ref + plan + `generated-run-tx` in one
-  transaction; the bootstrap's hard-coded task message becomes a task row).
+  transaction; the bootstrap's hard-coded task message becomes a task entity).
   Lanes launched since: reach-digest (per-test reach digest; probes first),
   cold-page-kills (approved plan, two slices). test-attribution plan landed
   (option 1 recommended; owner decision pending; its wake fact is now a
@@ -39,7 +39,7 @@
   G (platform defects), H (live proof ladder), five pending decisions.
   Owner rulings folded in: the chatting test is relative to the user's newest
   message; workers add tests, never remove (pending confirmation); batches on
-  forked clusters merged by exact row replacement; write-back by file span.
+  forked clusters merged by exact entity replacement; write-back by file span.
 - 01:20Z owner: data first — good schemas, solid names, linked in the graph;
   issues rot because unlinked and unassigned; namespace-centric.
   [namespace-data-model-2026-09-16.md](namespace-data-model-2026-09-16.md)
@@ -47,7 +47,7 @@
   (2/411), no test links to its subject (0 holders), faults name functions
   as strings, 240 issue notes link to code only in prose. Proposed:
   test subject/namespace-under-test/reach-digest, fn file/span, error fn
-  ref + steward, `seon.issue` rows indexed from notes, `seon.lint`,
+  ref + steward, `seon.issue` entities indexed from notes, `seon.lint`,
   eval elisions; the namespace view as one pull; landing order; four
   decisions. reach-digest beat 1 landed (`24d12bd48`): 39 s full pass,
   median closure 668 functions — must be incremental.
@@ -55,14 +55,14 @@
   class so occurrences roll into one agent's context); find every place with
   prose or unlinked data; never strings for symbols; refs everywhere.
   Data model §7 written: `seon.fault` (class, identity without process) +
-  `:seon.error/fault`/`fn`/`proc-fn` refs; the full 29-row list of prose,
+  `:seon.error/fault`/`fn`/`proc-fn` refs; the full 29-entity list of prose,
   EDN-text and string-named storage with verdict and writer seam.
 - 02:30Z owner: Clojure/Datahike terms only (no "fault"/"class"); the error
   entity is keyed by its signature = seon.id/id over a sorted map of
   {kind throwable-class fn frame}, process moves to `seon.error.occurrence`
-  component rows; ONE family for issues and tasks (`seon.issue`; the
+  component entities; ONE family for issues and tasks (`seon.issue`; the
   my.task prototype folds in). Data model §9; spec
   [issue-family-spec-2026-09-16.md](issue-family-spec-2026-09-16.md).
   Lanes launched: error-graph, issue-family; running: reach-digest (beat 2),
   attempt-and-eval-facts, program-provenance (corrected: file/span + lint
-  rows, no derived subject).
+  entities, no derived subject).

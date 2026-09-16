@@ -28,7 +28,7 @@ shape (Problem 159, Evidence 142, Acceptance 163, Owner 136; 156 commits,
              :opened    :inst
              :path      [:string {:min 1 :description "Repository path of the note whose sections are the prose; absent for database-authored issues."}]
              :problem   [:string {:min 1 :description "The Problem section, or the instructions to an agent."}]
-             :functions [:set {:description "Program rows the issue is about: cited qualified symbols resolved to :seon.fn rows at index time."} :seon.db/ref]
+             :functions [:set {:description "Program entities the issue is about: cited qualified symbols resolved to :seon.fn entities at index time."} :seon.db/ref]
              :tests     [:set {:description "The deftests whose verification resolves the issue (the Acceptance section as code). Workers add, never remove; the writer refuses an empty set on a started issue."} :seon.db/ref]
              :errors    [:set {:description "seon.error entities cited by signature."} :seon.db/ref]
              :commits   [:set :seon.source/commit-id]
@@ -59,7 +59,7 @@ steward (through `ns → steward`), "unassigned" (no function ref, or a
 namespace with no steward), "in flight" (agent present, no resolved-tx),
 "red" (a test in `tests` not verified). Tags are not stored: `render`,
 `schema`, `runtime` were prose classification; the function refs classify.
-`class/…` tags become `members` on the class note's row. `wave/…` tags are
+`class/…` tags become `members` on the class note's entity. `wave/…` tags are
 dropped (dated coordination, not facts).
 
 Accretion elsewhere: `resources/seon/schemas/seon.agent.edn` adds
@@ -69,22 +69,22 @@ Accretion elsewhere: `resources/seon/schemas/seon.agent.edn` adds
 
 | function | does |
 |---|---|
-| `seon.issue/index-tx` (db, notes) → tx-data | Pure. For each note: slug, title (first `#`), frontmatter `status`/`severity`/`created`, the Problem section text, cited `ns/sym` → `[:seon.fn/sym …]` refs that resolve to existing rows (unresolved symbols are reported, never stored as strings), cited `-test/` symbols → `:seon.test` refs, cited 64-hex signatures → `[:seon.error/signature …]`, cited 9-hex commits, `class/<x>` tag → `members` on the class row. Exact replacement per slug through the existing program-row replacement discipline; a note removed from the folder retracts its row's facts, the identity survives. |
-| `seon.issue/index!` | Runs at publication beside source indexing (`bin/seon init`, the hook's adoption) so rows follow the folder; replaces `script/seon/dev/issues.clj` and `bin/issues-index` in place (the index page becomes a query over rows; the checker becomes the indexer's own refusals). |
-| `seon.issue/start!` | One transaction function: `seon.cluster.agent/creation-tx` for a worker (id `seon.id/id` of `[issue-id]`, namespace = the issue's first function's namespace unless supplied), assert `:seon.issue/agent` and `budget` overlay, author the plan (objective = problem; one step with `subject` = the issue and `done-query` = every test verified), open the first turn with `seon.turn/generated-run-tx` (trigger = the issue). Refuses when `tests` is empty or an agent is already assigned. This is `seon.cluster/ensure-entity!` generalised; the bootstrap's hard-coded task becomes an issue row in a later slice. |
+| `seon.issue/index-tx` (db, notes) → tx-data | Pure. For each note: slug, title (first `#`), frontmatter `status`/`severity`/`created`, the Problem section text, cited `ns/sym` → `[:seon.fn/sym …]` refs that resolve to existing entities (unresolved symbols are reported, never stored as strings), cited `-test/` symbols → `:seon.test` refs, cited 64-hex signatures → `[:seon.error/signature …]`, cited 9-hex commits, `class/<x>` tag → `members` on the class entity. Exact replacement per slug through the existing program-entity replacement discipline; a note removed from the folder retracts its entity's facts, the identity survives. |
+| `seon.issue/index!` | Runs at publication beside source indexing (`bin/seon init`, the hook's adoption) so entities follow the folder; replaces `script/seon/dev/issues.clj` and `bin/issues-index` in place (the index page becomes a query over entities; the checker becomes the indexer's own refusals). |
+| `seon.issue/start!` | One transaction function: `seon.cluster.agent/creation-tx` for a worker (id `seon.id/id` of `[issue-id]`, namespace = the issue's first function's namespace unless supplied), assert `:seon.issue/agent` and `budget` overlay, author the plan (objective = problem; one step with `subject` = the issue and `done-query` = every test verified), open the first turn with `seon.turn/generated-run-tx` (trigger = the issue). Refuses when `tests` is empty or an agent is already assigned. This is `seon.cluster/ensure-entity!` generalised; the bootstrap's hard-coded task becomes an issue entity in a later slice. |
 | `seon.issue/status` | Read: the issue, each test's state (unrun/red/verified on the current reach digest via `seon.test/verified?` (db test) once lane reach-digest lands; interim: latest result green after the issue's start), each error's occurrence count, the completing calls. |
 | `seon.issue/render-ai` / `render-html` | AI: `;; My issue. Its tests define done; (my.test/check …) runs them.` + `(my.issue/status {:seon.issue/id …})`. HTML: the same as a block. |
-| `my.issue/add!`, `my.issue/tests!` | Agent surface: author an issue row; add tests to an issue (never remove). Call preparation supplies connection and agent. |
+| `my.issue/add!`, `my.issue/tests!` | Agent surface: author an issue entity; add tests to an issue (never remove). Call preparation supplies connection and agent. |
 
 Settlement (slice 2, lane reach-digest's `verified?` prerequisite): before
 `plan/settle-call`, run the open issue's tests in-process with
-`seon.test/run`; `done-query` reads the run rows; `resolved-tx` is written
+`seon.test/run`; `done-query` reads the run entities; `resolved-tx` is written
 when the step completes.
 
 ## 3. Regressions (canonical harness, armed)
 
 1. Indexing three real notes (one class note with members, one with a cited
-   test and commits, one with an unresolvable symbol) yields rows with the
+   test and commits, one with an unresolvable symbol) yields entities with the
    expected refs; the unresolvable symbol is reported, not stored.
 2. Re-indexing after editing a note's status replaces exactly that fact;
    removing the note retracts its facts and keeps the identity.
@@ -98,7 +98,7 @@ when the step completes.
 
 ## 4. Live proof on default
 
-Index the folder; `(count)` of issue rows, unresolved-symbol count,
+Index the folder; `(count)` of issue entities, unresolved-symbol count,
 `[:seon.ns/name seon.render.web]` pull showing its issues through
 `:seon.issue/_functions`; `start!` on one real issue with a real red test
 (the batch-12b `seon.fn-test` red, or one the owner names); the worker's

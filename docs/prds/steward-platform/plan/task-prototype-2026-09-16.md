@@ -23,14 +23,14 @@ no `writes` family; no `:type`/`:kind`; every key namespaced.
 
 Every attribute below that is not under `my.task` exists and is populated on
 default today (verified 2026-09-15 23:4xZ: `seon.test/verified?` live, 381
-`seon.test.run` rows with program digests, `done-query`/`subject` populated,
+`seon.test.run` entities with program digests, `done-query`/`subject` populated,
 `:seon.render/units` driving the opening, `:seon.wake/listen` on four
 attributes).
 
 ## 1. One family: `my.task`
 
-A row is a task. There is no template/instance split in the schema: a row with
-no `:my.task/agent` is unstarted; starting it asserts the agent. Copying a row
+A entity is a task. There is no template/instance split in the schema: a entity with
+no `:my.task/agent` is unstarted; starting it asserts the agent. Copying a entity
 for a new subject derives a new id and records `:my.task/from`.
 
 ```clojure
@@ -44,17 +44,17 @@ for a new subject derives a new id and records `:my.task/from`.
           :namespace
           [:and {:description "The namespace the work belongs to; the worker agent is assigned here."} :seon.db/ref]
           :subject
-          [:and {:description "Optional entity the task is about: a message, a function row, a test row, a fault."} :seon.db/ref]
+          [:and {:description "Optional entity the task is about: a message, a function entity, a test entity, a fault."} :seon.db/ref]
           :tests
           [:set {:min 1
-                 :description "The deftests that define success; :seon.test rows, owned by the program, never a component. All must be verified on the current program digest."}
+                 :description "The deftests that define success; :seon.test entities, owned by the program, never a component. All must be verified on the current program digest."}
            :seon.db/ref]
           :budget [:int {:min 1 :description "Provider turns the worker may spend; copied to its settings overlay at start."}]
           :agent
           [:and {:description "The agent working this task; asserted by start! in the same transaction that creates the agent and opens its first turn."}
            :seon.db/ref]
           :from
-          [:and {:description "The task row this one was copied from."} :seon.db/ref]
+          [:and {:description "The task entity this one was copied from."} :seon.db/ref]
           :task
           [:map {:seon.db/attributes true
                  :seon.render/units [:my.task/subject :my.task/tests :seon.message/_about]
@@ -95,7 +95,7 @@ assignment message, and `turn/generated-run-tx` opening a `:generate` turn);
 the armer arms the new agent on that commit and `next-agent-work` finds an
 open turn, which outranks any trigger. No wake, no schedule, no listener.
 
-## 2. Two rows as exact transaction data
+## 2. Two entities as exact transaction data
 
 **A code task, test-first.** The test exists and is red before the function
 does; `:seon.test/pending-subject` is the existing test-first shape
@@ -138,7 +138,7 @@ delivery fact; prose quality is not machine-verifiable and is not claimed.
   :my.task/budget 6}]
 ```
 
-The second row needs `seon.cluster.message/answered?` (audit B §1, not
+The second entity needs `seon.cluster.message/answered?` (audit B §1, not
 installed) and a deftest that reads the agent's own cluster database. The
 elided `(seon.db/db)` arity already resolves to the calling agent's cluster
 in SCI; whether the in-process runner binds the same custody when settlement
@@ -148,16 +148,16 @@ runs the test is open question 3 below.
 
 | function | contract | does |
 |---|---|---|
-| `my.task/start!` | `[:=> [:cat :my.task/start-request] [:or :my.task/started :seon.error/value]]` | The bootstrap's `ensure-entity!` generalised: ONE transaction function emits `seon.cluster.agent/creation-tx` for the worker (id derived from the task id, namespace = `:my.task/namespace`), asserts `:my.task/agent`, writes the settings overlay `max-episode-runs` = budget, authors the plan (objective = instructions; one step `{:my.plan.item/id <task id> :title <task title> :subject <task row> :done-query my.task/done-query}`), and opens the first turn with `turn/generated-run-tx` whose optional `:seon.turn/trigger` is the task row. The armer arms the agent on the commit; the agent's first system turn renders the opening in §4. The bootstrap's hard-coded `task-message` becomes an ordinary `my.task` row, which deletes a special case. |
+| `my.task/start!` | `[:=> [:cat :my.task/start-request] [:or :my.task/started :seon.error/value]]` | The bootstrap's `ensure-entity!` generalised: ONE transaction function emits `seon.cluster.agent/creation-tx` for the worker (id derived from the task id, namespace = `:my.task/namespace`), asserts `:my.task/agent`, writes the settings overlay `max-episode-runs` = budget, authors the plan (objective = instructions; one step `{:my.plan.item/id <task id> :title <task title> :subject <task entity> :done-query my.task/done-query}`), and opens the first turn with `turn/generated-run-tx` whose optional `:seon.turn/trigger` is the task entity. The armer arms the agent on the commit; the agent's first system turn renders the opening in §4. The bootstrap's hard-coded `task-message` becomes an ordinary `my.task` entity, which deletes a special case. |
 | `my.task/status` | `[:=> [:cat :my.task/status-request] [:or :my.task/status :seon.error/value]]` | Reads the task, its subject identity, and each test with `verified?` on the current program digest (`seon.test.runner/program-digest`, `src/seon/test/runner.clj:1358`), red/green/unrun, the failing assertions, and the exact completing calls. The form the render pair emits. |
-| `my.task/done-query` | a `:seon.db/query` value | Bound to `?subject` = the task row: true when every `:my.task/tests` member is verified on the current digest. Inputs are `$` and `?subject`, so the digest is derived inside the query from the source seal plus program facts, or the settlement supplies it as a third input (open question 2). |
-| `my.task/copy!` | `[:=> [:cat :my.task/copy-request] [:or :my.task/task :seon.error/value]]` | New row from an existing one with a new subject; id via `seon.id/id`; `:my.task/from` set. Tests are copied by reference unless the caller supplies new ones. |
+| `my.task/done-query` | a `:seon.db/query` value | Bound to `?subject` = the task entity: true when every `:my.task/tests` member is verified on the current digest. Inputs are `$` and `?subject`, so the digest is derived inside the query from the source seal plus program facts, or the settlement supplies it as a third input (open question 2). |
+| `my.task/copy!` | `[:=> [:cat :my.task/copy-request] [:or :my.task/task :seon.error/value]]` | New entity from an existing one with a new subject; id via `seon.id/id`; `:my.task/from` set. Tests are copied by reference unless the caller supplies new ones. |
 | `my.task/render-ai` / `render-html` | `[:=> [:cat :seon.render/unit] :seon.render/source]` / hiccup | AI emits `;; My task. …` plus `(my.task/status {:my.task/id "…"})`; HTML shows the same status as a block. |
 
 Settlement change (one line in the owning seam, `src/seon/turn.clj:2192`,
 `:3412`, `:3451`, `:4623`, currently under the n7 lane's edit): before
 `plan/settle-call`, run each test of the agent's open task steps in-process
-with `seon.test/run` under the existing bound; run rows carry provenance, so
+with `seon.test/run` under the existing bound; run entities carry provenance, so
 `done-query` reads facts the same settlement just wrote.
 
 ## 4. The worker's opening, as the walk would draw it
@@ -192,16 +192,16 @@ through `seon.cluster.message/render-ai`; a test through the test pair that
 audit A found missing and this prototype has to add). After the agent defines
 the function and runs `my.test/check`, the since-diff re-evaluates
 `(my.task/status …)` because its read evidence changed; the step completes at
-the settlement whose run rows made `done-query` true; the disposition ends the
+the settlement whose run entities made `done-query` true; the disposition ends the
 session.
 
 ## 5. What is deliberately absent
 
 - A `writes` declaration: the tests are the writes contract.
 - A separate instance entity: the worker agent plus its plan step is the
-  instance; `:my.task/agent` links them. Add an instance row only when one
+  instance; `:my.task/agent` links them. Add an instance entity only when one
   task must span agents.
-- A template kind or stamp: a row with no agent is a template by absence.
+- A template kind or stamp: a entity with no agent is a template by absence.
 - Triggers and scheduling, by the owner's ruling: `start!` is called by a
   human, by an agent (the steward chatting with a user spins up workers), or
   later by whatever detector or schedule we choose. Nothing in the task
@@ -212,14 +212,14 @@ session.
 
 1. **Who writes the tests for a communication task?** The prototype pre-authors
    one deftest per task. A human question arriving as a message has no task
-   row yet; the steward's session (or a listen on `:seon.message/inbox`)
+   entity yet; the steward's session (or a listen on `:seon.message/inbox`)
    would call `copy!` from a `message/answer` template with the message as
    subject, and the template's test is parametrised by subject. Is a test
    whose source is templated on the subject id acceptable, or should the
-   answered predicate take the subject from the task row at run time?
+   answered predicate take the subject from the task entity at run time?
 2. **Digest inside the done-query.** `done-query` receives `$` and `?subject`.
    The program digest is a derivation over the source seal plus changed program
-   rows (`runner.clj:1358`), not a stored fact. Options: (a) settlement supplies
+   entities (`runner.clj:1358`), not a stored fact. Options: (a) settlement supplies
    the digest as a third query input (accretion to the plan settlement
    contract); (b) store the digest on each `seon.test.run` (already) and let
    the query accept "the newest run for this test whose digest equals the
@@ -239,12 +239,12 @@ session.
    idle workers. Acceptable for the prototype?
 6. **The test pair.** `:seon.test` has no AI/HTML pair (audit A). The task
    block renders test state through `status`, so the pair is not needed for
-   the first proof; it is needed the moment a test row appears as a subject.
+   the first proof; it is needed the moment a test entity appears as a subject.
 
 ## 7. Live seams and boundaries
 
 Verified in the development JVM (default, read-only): `seon.test/verified?`
-returns `true` for `seon.sci.eval-test/one-unloadable-row-cannot-prevent-cold-acquisition`
+returns `true` for `seon.sci.eval-test/one-unloadable-entity-cannot-prevent-cold-acquisition`
 at run `99ec86db1bab` and `false` for an absent symbol; `seon.test/check`
 takes `{:seon.db/connection :seon.boot/cluster-name …}`; `seon.test/run`
 takes `[test-var connection]`; agent creation is
@@ -260,8 +260,8 @@ prototype touches is free: the new schema resource, `src/my/task.clj`,
 
 ## 8. First live proof (when approved)
 
-On the canonical fixture, then on default: transact the code-task rows;
+On the canonical fixture, then on default: transact the code-task entities;
 `start!`; read the worker's opening through `seon.render/acquire-context!`
 and record its bytes here; submit the function through a virtual turn;
-`my.test/check`; observe the step's `completed-tx` and the run row's digest;
+`my.test/check`; observe the step's `completed-tx` and the run entity's digest;
 then the same with the provider on, the cheapest model first.

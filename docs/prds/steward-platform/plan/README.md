@@ -14,19 +14,19 @@ tags: [plan, steward, roadmap]
 Owner (2026-09-16 01:05Z): "no fake tasks … index all the real tasks we need
 to achieve this level of self building and repair." This page is that index.
 It is the ONE ordered list for the steward platform; `unsettled.md` records
-what moved and when. Every row names the mechanism it builds on (file), what
+what moved and when. Every entity names the mechanism it builds on (file), what
 is genuinely missing, the proof that closes it, and its dependencies. Status:
 **landed** (commit), **in flight** (lane), **planned**, **decision**.
 
 ## The target loop, in one paragraph
 
-A task is a row: instructions, namespace, subject, a set of deftests that
+A task is a entity: instructions, namespace, subject, a set of deftests that
 define done, a budget. Starting it creates a worker agent entity with its
 first turn open, in the same transaction. The worker iterates until every
 test in the set is verified on the current reach digest; it may add tests,
 never remove them. Batches run on forked clusters, one per namespace; a
-finished batch merges its changed program rows into the shared branch, the
-merge gate runs exactly the tests whose reach changed, and approved rows are
+finished batch merges its changed program entities into the shared branch, the
+merge gate runs exactly the tests whose reach changed, and approved entities are
 written back to their files by exact span. Signals derived from facts open
 the tasks: red tests, untested and uncontracted functions, recurring faults,
 missing render pairs, ugly output, lint findings, indexed issues, and a
@@ -38,12 +38,12 @@ responsible for all of it. Triggers and scheduling plug in as callers of
 
 | # | Task | Builds on | Missing | Proof | Depends on | Status |
 |---|---|---|---|---|---|---|
-| A1 | `my.task` schema: id, title, instructions, namespace, subject, tests `[:set {:min 1} ref]`, budget, agent, from; entity map with units and pair | `resources/seon/schemas/*` population; `:seon.render/units` on `seon.agent.edn`; walk `declared-concerns` (`src/seon/render/walk.clj:88`) | the resource, the writer's empty-set refusal | fixture: transact the two rows in [task-prototype](task-prototype-2026-09-16.md) §2; pull and render | — | planned (slice 1) |
-| A2 | `my.task/start!`: creation-tx + agent ref + budget overlay + plan step + `generated-run-tx`, one transaction function | `seon.cluster/ensure-entity!` (`src/seon/cluster.clj:2259`), `bootstrap/seed-tx`, `turn/generated-run-tx` (`src/seon/turn.clj:728`) | the generalisation; the bootstrap's hard-coded task becomes a row | live: `start!` on default → armed worker, opening rendered with the task block | A1 | planned (slice 1) |
+| A1 | `my.task` schema: id, title, instructions, namespace, subject, tests `[:set {:min 1} ref]`, budget, agent, from; entity map with units and pair | `resources/seon/schemas/*` population; `:seon.render/units` on `seon.agent.edn`; walk `declared-concerns` (`src/seon/render/walk.clj:88`) | the resource, the writer's empty-set refusal | fixture: transact the two entities in [task-prototype](task-prototype-2026-09-16.md) §2; pull and render | — | planned (slice 1) |
+| A2 | `my.task/start!`: creation-tx + agent ref + budget overlay + plan step + `generated-run-tx`, one transaction function | `seon.cluster/ensure-entity!` (`src/seon/cluster.clj:2259`), `bootstrap/seed-tx`, `turn/generated-run-tx` (`src/seon/turn.clj:728`) | the generalisation; the bootstrap's hard-coded task becomes a entity | live: `start!` on default → armed worker, opening rendered with the task block | A1 | planned (slice 1) |
 | A3 | `my.task/status` and the AI/HTML pair: instructions, subject, each test red/green/unrun, exact completing calls | plan/message pairs as the pattern (`src/seon/plan.clj:1229`, `src/seon/cluster/message.clj:379`) | the pair, the `:seon.test` entity pair (audit A: absent) | the opening bytes in §4 of the prototype, recorded | A1 | planned (slice 1) |
 | A4 | Open test set: workers add test refs, retraction refused except by the creator; minimum one | `[:db.fn/call …]` writer decision (datahike skill) | the writer | regression: add succeeds, worker retract refused, creator retract allowed, empty refused | A1 | planned (slice 1) |
-| A5 | Settlement runs the task's tests in-process before `plan/settle-call`; done-query = every test verified on the current reach digest, digest supplied as a query input | `seon.plan/settle-call` (`src/seon/plan.clj:562`), `seon.test/run`, turn settlement seams (`src/seon/turn.clj:2192`, `:3412`, `:3451`, `:4623`) | the call and the third query input | live: the worker never calls complete; the step closes on the run row | A1, B1 | planned (slice 2) |
-| A6 | `my.task/copy!`: new row from a template row with a new subject; id via `seon.id/id`; `:my.task/from` | `seon.id` | the function | regression | A1 | planned (slice 4) |
+| A5 | Settlement runs the task's tests in-process before `plan/settle-call`; done-query = every test verified on the current reach digest, digest supplied as a query input | `seon.plan/settle-call` (`src/seon/plan.clj:562`), `seon.test/run`, turn settlement seams (`src/seon/turn.clj:2192`, `:3412`, `:3451`, `:4623`) | the call and the third query input | live: the worker never calls complete; the step closes on the run entity | A1, B1 | planned (slice 2) |
+| A6 | `my.task/copy!`: new entity from a template entity with a new subject; id via `seon.id/id`; `:my.task/from` | `seon.id` | the function | regression | A1 | planned (slice 4) |
 | A7 | Interim done-query for slice 1: latest result green with run basis after item creation | audit A `green-after?` lower bound | nothing new; replaced by A5 | — | A1 | planned (slice 1) |
 
 ## B. Test evidence: know what is tested and what must re-run
@@ -53,9 +53,9 @@ responsible for all of it. Triggers and scheduling plug in as callers of
 | B1 | Per-test reach digest recorded on every result; `verified?` (db, test) and `stale`; `check` selects by staleness; in-JVM runs as ordinary REPL commands | reach rules (`src/seon/fn.clj:790`), `record-tx` (`src/seon/test/runner.clj:1420`), `seon.test/run` | the digest, the arity, the selector | regressions named in the lane spec; live: second `check` with no edit executes zero tests | call-edge completeness (B3) | in flight: lane `reach-digest`, beat 1 probes |
 | B2 | Full run once per HEAD by the gate-owning session; later gates derive outstanding coverage and print existing reds | [suite-efficiency plan](../../context-generation/research/suite-efficiency-plan-2026-09-15.md) (`d64e304e8`) | admission-before-execution in `bin/test`; recorded reds surfaced per lane | a bare gate after a recorded full run executes only stale tests | B1 | planned; plan reviewed |
 | B3 | Call-edge completeness for agent-admitted definitions (Juniper's test lacked its edge) | n7 landing (`src/seon/fn.clj` runtime analysis returns core + `my.*` edges) | the regression on the Juniper shape inside B1 | B1's fourth regression | — | in flight within B1 |
-| B4 | Fixture-observation declarations published as program-row facts; the post-adoption check runs cheap reaching tests first and defers declared observations with their exact command | hook lane member 2, option 1 | the row facts, the deferral | hook feedback after an edit reaching the docstring-examples test arrives within the bound | — | in flight: lane `hook-publication-race` (resumed) |
+| B4 | Fixture-observation declarations published as program-entity facts; the post-adoption check runs cheap reaching tests first and defers declared observations with their exact command | hook lane member 2, option 1 | the entity facts, the deferral | hook feedback after an edit reaching the docstring-examples test arrives within the bound | — | in flight: lane `hook-publication-race` (resumed) |
 | B5 | In-process runner keeps the drift guarantee: a test mutating worker-global state is detected | runner drift detector | the same check on the in-process path | regression with the two batch-12b mutating tests | B1 | planned |
-| B6 | Program-digest provenance discrepancy on run rows | `runner/program-digest` (`:1358`) | one stable derivation | [issue](../../../seon/issues/recomputed-program-digest-disagrees-with-the-stored-run-digest.md) | — | open, friction after B1 |
+| B6 | Program-digest provenance discrepancy on run entities | `runner/program-digest` (`:1358`) | one stable derivation | [issue](../../../seon/issues/recomputed-program-digest-disagrees-with-the-stored-run-digest.md) | — | open, friction after B1 |
 
 ## C. Signals as facts: how a namespace knows it has problems
 
@@ -64,11 +64,11 @@ responsible for all of it. Triggers and scheduling plug in as callers of
 | C1 | red test | `:seon.test/fail-count`, `error-count`, runs | none | fix `T` (T itself) | derivable now |
 | C2 | public function without a reaching test | `seon.fn/functions-without-tests` (288) | none | test `F` (a reaching test the worker writes, then required) | derivable now |
 | C3 | incomplete contract (`:any`, `:some`, bare value, unguarded variadic) | `:seon.fn/spec`, schema-audit checker | expose the checker as a query function (`seon.fn/contract-findings`, audit A chain 4) | contract `F` (contract-complete predicate as a test) | planned |
-| C4 | recurring fault in my functions | `seon.error` rows, `:seon.instrument/fn` → ns → steward (`src/seon/error.clj:1095`) | none for detection; `:seon.test/error-signatures` for the regression link (audit A chain 2) | regression for signature `S` | planned |
+| C4 | recurring fault in my functions | `seon.error` entities, `:seon.instrument/fn` → ns → steward (`src/seon/error.clj:1095`) | none for detection; `:seon.test/error-signatures` for the regression link (audit A chain 2) | regression for signature `S` | planned |
 | C5 | unresolved or missing call | `:seon.fn/calls` to identity stubs | `:seon.fn/unresolved-calls` at the analyzer seam (audit A chain 5) | resolve `F`'s calls (caller's reaching tests) | planned |
-| C6 | entity schema without a render pair | schema rows, `:seon.render/ai` props | none | declare the pair (a render test on the fixture) | derivable now |
+| C6 | entity schema without a render pair | schema entities, `:seon.render/ai` props | none | declare the pair (a render test on the fixture) | derivable now |
 | C7 | ugly or elided output | `:seon.eval/shown` text; elision maps in memory | `:seon.eval/elisions` observation facts (audit B §4) | bound the render (render bound test) | planned |
-| C8 | lint findings | kondo in the hook; `:seon.fn.file/findings` as a value | store findings per row at index time | fix the finding (reaching tests green + finding gone) | planned |
+| C8 | lint findings | kondo in the hook; `:seon.fn.file/findings` as a value | store findings per entity at index time | fix the finding (reaching tests green + finding gone) | planned |
 | C9 | issues | 236 markdown notes, `bin/issues-index` | index frontmatter, namespace tags, status as facts at publication | the issue's own regression | planned (small side lane) |
 | C10 | duplicate behaviour, parallel code paths | nothing stored | candidate derivation: same output refs and overlapping calls, same keyword footprint; plus the recorded human judgments from `docs/seon/issues/` n11 class | dissolve `F` into `G` (both sets of reaching tests green, one identity retired) | decision: start from recorded judgments |
 | C11 | cross-namespace red-test attribution and steward alerts | [attribution plan](../research/test-attribution-plan-2026-09-15.md) option 1 | `:seon.test/stewards` on the result/adoption transaction | both stewards woken with T, F, R | decision (owner): later, as a caller of `start!` |
@@ -88,8 +88,8 @@ responsible for all of it. Triggers and scheduling plug in as callers of
 | # | Task | Builds on | Missing | Proof | Depends on | Status |
 |---|---|---|---|---|---|---|
 | E1 | One forked cluster per namespace batch; workers admit definitions there only | `bin/seon init NAME` forks the published commit; cluster = branch + agents | operator support for N batch clusters from one command; cleanup of finished ones | two clusters running two namespaces' workers concurrently | A, D3 | planned (slice 5) |
-| E2 | Changed program rows since the fork basis, as a pure projection | `seon.db/since`, `seon.program` row identities and exact source/spec | the projection | regression: edit three rows on a fork, projection returns exactly those | — | planned (slice 5) |
-| E3 | Merge writer into the shared branch: exact replacement through `seon.program`; a row changed on both sides since the fork basis refuses (no three-way merge in v1) | `seon.program/exact-replacement-tx` (`src/seon/program.cljc:840`), `:db.fn/call` | the writer and its conflict rule | regression: clean merge lands; conflicting identity refuses with both sources named | E2 | decision (owner): refusal rule acceptable? |
+| E2 | Changed program entities since the fork basis, as a pure projection | `seon.db/since`, `seon.program` entity identities and exact source/spec | the projection | regression: edit three entities on a fork, projection returns exactly those | — | planned (slice 5) |
+| E3 | Merge writer into the shared branch: exact replacement through `seon.program`; a entity changed on both sides since the fork basis refuses (no three-way merge in v1) | `seon.program/exact-replacement-tx` (`src/seon/program.cljc:840`), `:db.fn/call` | the writer and its conflict rule | regression: clean merge lands; conflicting identity refuses with both sources named | E2 | decision (owner): refusal rule acceptable? |
 | E4 | Merge gate: run exactly the tests whose reach digest changed on the shared branch | B1 | the invocation at merge | after a merge the gate executes only the affected tests | B1, E3 | planned (slice 5) |
 | E5 | Re-fork on refusal: the task re-forks from the new shared head and re-runs to green | E1, A5 | the operator step | live: a refused merge is re-forked and lands | E3 | planned |
 
@@ -97,8 +97,8 @@ responsible for all of it. Triggers and scheduling plug in as callers of
 
 | # | Task | Builds on | Missing | Proof | Depends on | Status |
 |---|---|---|---|---|---|---|
-| F1 | File and form-span provenance on every indexed program row | `seon.fn/build-artifact` knows path, rows, identities at index time (`src/seon/fn.clj:1182`); audit A: not durable on rows | `:seon.fn/file` ref and span attributes written at index and adoption | pull any function → its file and span; regression on the fixture | — | planned (slice 6) |
-| F2 | Exact write-back: replace the old form's bytes by the new source inside the owning file; append new definitions to the namespace's file; new namespaces as new files (`seon.program/source-files`, audits A/B) | `my.fs/write!` conditional writes (`src/my/fs.clj:59`), exact stored source | the pure assembly and the effect | the ordinary index run over the written files reproduces the merged rows byte for byte | F1, E3 | planned (slice 6) |
+| F1 | File and form-span provenance on every indexed program entity | `seon.fn/build-artifact` knows path, entities, identities at index time (`src/seon/fn.clj:1182`); audit A: not durable on entities | `:seon.fn/file` ref and span attributes written at index and adoption | pull any function → its file and span; regression on the fixture | — | planned (slice 6) |
+| F2 | Exact write-back: replace the old form's bytes by the new source inside the owning file; append new definitions to the namespace's file; new namespaces as new files (`seon.program/source-files`, audits A/B) | `my.fs/write!` conditional writes (`src/my/fs.clj:59`), exact stored source | the pure assembly and the effect | the ordinary index run over the written files reproduces the merged entities byte for byte | F1, E3 | planned (slice 6) |
 | F3 | Round-trip proof and commit: index the written files, gate the reaching tests, path-limited git commit by the operator | `bin/seon init`, B1 | the operator step | a worker-authored change lands in the repository with its tests | F2, E4 | planned (slice 6) |
 
 ## G. Platform defects in the way
