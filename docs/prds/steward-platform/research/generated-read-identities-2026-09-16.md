@@ -270,3 +270,53 @@ Documentation hook validation also reported twelve pre-existing dependency-pin
 citation findings in `docs/prds/context-generation/research/agents-md-audit-2026-09-15.md`.
 The owned probe script's initial missing-require and namespace/file-name
 findings were corrected. No production lint error remained in the owned slice.
+
+## Batch 19 triage — 2026-09-16
+
+Independent reds triage of the batch-19 named-namespace gate
+(`tmp/orchestrator/gate-results/batch-19/generated-read-identities.md`, run at
+02:32Z, gate base BEFORE `3f4f0cdf2`). Read that report, AGENTS.md, and the
+[error-graph note](error-graph-2026-09-16.md) end to end. No test JVM was
+launched: every verdict is `(seon.test/run #'<var> (seon.operator/connection
+"default") {…})` in default's own JVM, one test at a time, the complete
+returned value read, with the test namespace reloaded through `seon.test`'s own
+loader first. Default was never stopped, restarted or reforked. Counts are
+pass/fail/error assertions.
+
+### Verdict table
+
+| Namespace | Test | In-process at HEAD | Attribution | Fix |
+|---|---|---|---|---|
+| seon.loop-proof-test | virtual-loop-end-to-end | **229/0/0 green** | Not this lane. The two gate blocks both showed an elided `:seon.eval/shown` comparison; the gate base predates `3f4f0cdf2` (error-graph), whose reader conversions and steward derivation land the behaviour the assertions expect | none needed — green at HEAD |
+| seon.cluster.wake-test | a-fault-wakes-the-steward-of-the-failing-functions-namespace | **6/0/0 green** (twice) | Pre-existing at the gate base; resolved by `3f4f0cdf2`, which replaced the stored-steward assertions with the derived `error/fn → fn/ns → ns/steward` reader | none needed — green at HEAD |
+| seon.cluster.wake-test | a-fault-with-no-stewarded-function-asserts-no-steward | **does not exist at HEAD** | Deleted by `3f4f0cdf2` ("redundant stored-steward coverage was replaced by the real writer/wake test"); `git log -S` confirms the name exists only before that commit | none needed — the test is gone |
+
+No red in this file is attributable to `474234fb7`, `28c2f7021` or
+`bbf71fc2e`, and nothing in this lane's files was changed by the triage. The
+whole batch-19 selection for this lane is green at HEAD.
+
+### Verification hazard found and repaired
+
+The first in-process attempt at `virtual-loop-end-to-end` exceeded
+`mcp__seon__eval_clj`'s 30 s bound. The interrupt landed inside
+`cluster/populate-source!` and was cached by `seon.test-support/database-base`,
+a `delay` — so every subsequent in-process test in default's JVM, in every
+lane, reported that one stale `InterruptedException` instead of its own
+result. A second instance of the same cache appeared on the replacement JVM
+because default's classpath carries no `:test` alias dependencies, so
+`create-base`'s SCI acquisition cannot load `seon.dev.dependency-cache-test`
+(`clojure.tools.build.api`) or `seon.flow-test`
+(`clojure.core.async.flow-monitor` → `muuntaja.core`).
+
+Recovery: preload the `:test` classpath (`clojure -A:test -Spath`) into the
+loader, then rebuild the base delay inside the cluster's projection.
+225 of 226 test namespaces load from default's own classpath. Every verdict
+above was measured after that repair. Filed as
+[in-process test runs poison the shared fixture base](../../../seon/issues/in-process-test-runs-poison-the-shared-fixture-base.md);
+all test runs in this session were afterwards issued on their own daemon
+thread so no MCP bound can interrupt a fixture again.
+
+Separately, default pid 7595 died mid-session of a dev panic — "Agent \"root\"
+with no observable open turn did not publish turn completion within 600000 ms"
+— and was restarted by its owner as pid 53378. This lane neither stopped nor
+started it.

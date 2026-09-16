@@ -217,3 +217,62 @@ unconverged: stamp `6aa9fe1b-203b-5ca1-bea2-9047ea996105` versus published
 not a claim of whole-cluster adoption. `git diff --check` passed; the hook
 reported only existing shadow/redundant-let warnings after missing test
 requires were fixed. The orchestrator's serial gate remains external.
+
+## Batch 19 triage — 2026-09-16
+
+Independent reds triage of the batch-19 named-namespace gate
+(`tmp/orchestrator/gate-results/batch-19/attempt-and-eval-facts.md`, run at
+02:32Z), plus the batch-24 `seon.issue-test` row the coordinator added. Read
+that report, AGENTS.md and this landing note end to end. No test JVM was
+launched: every verdict is `(seon.test/run #'<var> (seon.operator/connection
+"default") {…})` in default's own JVM, one test at a time, complete returned
+value read, the test namespace reloaded through `seon.test`'s own loader
+first, and each run on its own daemon thread so no MCP bound can interrupt a
+fixture. Default was never stopped, restarted or reforked. Counts are
+pass/fail/error assertions.
+
+### Verdict table
+
+| Namespace | Test | In-process at HEAD | Attribution | Fix |
+|---|---|---|---|---|
+| seon.data-shapes-test | messages-and-turns-have-one-owning-edge-and-transaction-time | was 10/1/0 → **11/0/0 green** | `17dd75e89` authored `(is (= 8 (count (:seon.test/message-id probe))))`, but minted message ids have used `seon.id/id`'s default length of 12 since `c98d61b01` (2026-09-14) — the expectation was a stale mirror on the day it was written | FIXED `31173071d`: the length is derived from `(count (id/id))`, the one identity derivation, instead of restated |
+| seon.data-shapes-test | raw-plan-forms-preserve-the-component-and-use-transaction-time | was 0/0/1 → **8/0/0 green** | `17dd75e89`'s `plan-probe` applies the canonical Juniper plan through raw `d/with`, bypassing `seon.db/transact!`'s ONE encoding seam. `:my.plan.item/done-query` is `:seon.db/query`, installed as `:db.type/string`; the fixture authors a Datalog vector (`d31d31639`), so Datahike refused: *"value does not match schema definition. Must be conform to: string?"* | FIXED `31173071d`: the probe seed goes through `seon.schema.datahike/encode-transaction-in` with the database's projection, exactly as the writer does |
+| seon.cluster.status-test | routine-status-declares-unmeasured-store-size | **3/0/0 green** | Not this lane. `17dd75e89` touched only `:seon.cluster.status/provider-tokens` in this namespace. The gate's refusal was `snapshot` returning `[:seon.cluster.status/faults 0 0]` as a keyword — `(vec (sort-by first faults))` over a FLAT ERROR map yields MapEntry tuples keyed by `:seon.error/kind`. `3f4f0cdf2` (error-graph) rewrote that query onto occurrences and it now answers | none needed — green at HEAD |
+| seon.render.web-debug-test | turn-details-use-the-loop-opening-and-exact-segments | 3/0/1 — still red | The `:seon.eval/renderer-fn` class `17dd75e89` introduced: `seon.eval/of-agent` refuses its own return, *"at [0 :seon.eval/renderer-fn]: expected an integer, got a map"*, caller `seon.render.walk (walk.clj:887)`, 17 problems. `52044b4f4`'s admission IS present in both the live and the fixture projection — verified by reading `:seon.eval/entity`'s form from each: `[:seon.eval/renderer-fn {:optional true} [:or :seon.eval/renderer-fn [:map [:db/id :int]]]]`. The armed wrapper nevertheless applies the bare `:seon.db/ref` | LEFT. The schema fix is correct and installed; what remains is that the armed contract for `of-agent` does not use it. Owner: the renderer-fn class, [evaluation-reader-refuses-pulled-renderer-ref](../../../seon/issues/evaluation-reader-refuses-pulled-renderer-ref.md) |
+| seon.issue-test | issue-worker-opening-links-its-issue | 6/2/0 — still red | NOT this lane, and not a stale assertion. Probed the opening directly: every opening evaluation HAS a source and none has an error, but **the last one is appended and never evaluated**. Ordinals 0–2 (`(help)`, the identity pull, `(seon.plan/plan {})`) all carry `:seon.eval/shown`; ordinal 3, `(my.issue/status {:seon.issue/id "issue-family-opening"})`, carries source and no shown. Re-probed with `:seon.issue/budget` 8 instead of 1: identical, so it is not the episode cap. `seon.turn/generate-turn` appends form N then `resume-turn`s it, and the run closes with N appended but unevaluated | LEFT. Owner is the `seon.issue` opening contribution (`src/seon/issue.clj:257`, protected — held by the issue-family lane) meeting `seon.turn/generate-turn`. The assertion at `issue_test.clj:109` is RIGHT: an appended evaluation with neither shown nor error is absence-of-signal read as health |
+
+### Exact probe for the issue-test row
+
+```clojure
+;; seon.issue-test's own body, returning the evaluations instead of asserting
+[{:ord 0, :src "(help)",                                :shown? true}
+ {:ord 1, :src "(seon.db/pull '[…] [:seon.agent/id \"71c045b448dd\"])", :shown? true}
+ {:ord 2, :src "(seon.plan/plan {})",                   :shown? true}
+ {:ord 3, :src "(my.issue/status {:seon.issue/id \"issue-family-opening\"})", :shown? false}]
+```
+
+`:seon.issue/budget` becomes `:seon.config.run/max-episode-runs`
+(`src/seon/issue.clj:384`); budgets 1 and 8 produce the identical result, so
+the cap is not the cause.
+
+### Observed alongside, out of this triage's scope
+
+Running the rest of `seon.data-shapes-test` after the fixes: 
+`handling-an-outside-message-retains-its-budget-basis` 4/0/0,
+`provider-reasoning-is-retained-only-by-an-explicit-setting` 12/0/0,
+`attempt-usage-is-queryable` 3/0/0,
+`listen-patterns-retain-optional-entity-and-logical-value` 3/0/0,
+`a-system-turn-leaves-the-inbox-edge-unhandled` 2/0/0, but
+`attempt-settings-and-model-are-related-entities` 4/0/1 and
+`evaluation-renderer-is-a-program-reference` 11/0/1. Neither was in the
+batch-19 list and neither touches `plan-probe`; both are this lane's own
+tests and belong to the same renderer-fn/attempt surface.
+
+### Verification hazard
+
+The shared `seon.test-support/database-base` delay caches a failed
+construction permanently, so one interrupted or classpath-blocked force takes
+down in-process testing for every lane in default's JVM. Hit twice during this
+triage and repaired both times; filed as
+[in-process test runs poison the shared fixture base](../../../seon/issues/in-process-test-runs-poison-the-shared-fixture-base.md).
+Every verdict above was measured after the repair.
