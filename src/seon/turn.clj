@@ -414,6 +414,37 @@
                         (get-in recipient [:seon.message/inbox :db/id])]
                        [:db/add trigger :seon.message/read-tx "datomic.tx"]]))))
 
+(defn open-run-tx-call
+  "Emit run-dependent transaction data only while its run is present and open.
+
+  THE TERMINAL WRITER'S REFUSAL ARM MAY NOT REPEAT WHAT THE REFUSAL DENIED.
+  Its two run-dependent components — the receipt settlement and the close —
+  each assert through `receipt-run`/`require-open-run` that the run exists
+  and is open. When the first terminal commit refused for exactly that
+  reason (`::no-such-run`, `::run-closed`), handing them back unchanged makes
+  the second refusal IDENTICAL TO THE FIRST BY CONSTRUCTION, and `settle!`'s
+  last-resort throw then reports the RECORDING instead of the outcome.
+
+  Measured on `default` (pid 30138) at 2026-09-16T15:33:01Z: agent juniper's
+  turn `3f81dfc4c014` opened at `:t` 536870999 and its entity was retracted
+  whole at 536871000, one transaction later; `close-call` refused
+  `::no-such-run`, the refusal settlement re-issued the same close, refused
+  the same way, and the loop committed a
+  `:seon.turn.loop/terminal-refusal-settlement-refused` core fault instead of
+  the turn's real outcome.
+
+  The decision is the WRITER'S, not the caller's pre-read: a run that is gone,
+  or already closed, needs neither settlement nor close — the post-condition
+  the refusal arm wants already holds — and the error recording, which depends
+  on no run, commits either way. The ordinary `close-tx`/`receipt-settle-tx`
+  paths keep their strict refusals; the one-open-turn fence is untouched."
+  {:malli/schema [:=> [:cat :seon.db/database-value ::id
+                       :seon.store/transaction-data]
+                  :seon.store/transaction-data]}
+  [database run-id tx-data]
+  (let [run (current-run database run-id)]
+    (if (and run (open? run)) (vec tx-data) [])))
+
 (defn- plan-tx-for-author
   [author request]
   [[:db.fn/call #'plan-call
@@ -3636,10 +3667,19 @@
     {:seon.error/value value
      :seon.db/tx-data
      (into [] cat
-           [receipt-tx
+           [;; The run-dependent half is DECIDED AT THE WRITER
+            ;; (`open-run-tx-call`), not pre-read here: when the first
+            ;; terminal commit refused because the run is gone or already
+            ;; closed, re-issuing its settlement and close guarantees an
+            ;; identical second refusal. The error recording below depends on
+            ;; no run and always commits, so the fault says what actually
+            ;; happened instead of that the recording failed.
             (when run-id
-              (close-tx
-               {:seon.turn/id run-id :seon.db.process/id process :seon.turn/closed-tx "datomic.tx"}))
+              [[:db.fn/call #'open-run-tx-call run-id
+                (into (vec receipt-tx)
+                      (close-tx
+                       {:seon.turn/id run-id :seon.db.process/id process
+                        :seon.turn/closed-tx "datomic.tx"}))]])
             (:seon.db/tx-data recording)])}))
 
 (defn- settle-batch-refusal!
@@ -3670,11 +3710,18 @@
                       :seon.error/kind (:seon.error/kind value))))
          prepared)
         transaction
+        ;; Same writer decision as `refusal-terminal-data`: the batch's
+        ;; settlements and close each require the run to exist and be open,
+        ;; which is what the refused batch commit may itself have denied.
         {:tx-data
-         (into (receipt-settle-batch-tx receipts)
-               cat
-               [(close-tx {:seon.turn/id run-id :seon.db.process/id process :seon.turn/closed-tx "datomic.tx"})
-                (:seon.db/tx-data recording)])}
+         (into (if run-id
+                 [[:db.fn/call #'open-run-tx-call run-id
+                   (into (vec (receipt-settle-batch-tx receipts))
+                         (close-tx {:seon.turn/id run-id
+                                    :seon.db.process/id process
+                                    :seon.turn/closed-tx "datomic.tx"}))]]
+                 (vec (receipt-settle-batch-tx receipts)))
+               (:seon.db/tx-data recording))}
         outcome (db/transact! connection transaction)]
     (when (:seon.error/kind outcome)
       (throw
@@ -4094,6 +4141,20 @@
                    {:tx-data
                     [[:db.fn/call #'open-call open-request]]}))]
       (cond
+        ;; THE FENCE FIRING IS THE DESIGN, NOT A DEFECT. `::agent-already-running`
+        ;; means another opener already holds this agent's turn — exactly what
+        ;; the comment above says stops two openers. Turn PRD §3/§14: a wake
+        ;; arriving mid-turn has `:t` greater than the open turn's basis and
+        ;; opens the NEXT turn, answered by the `:t` rule; nothing is claimed,
+        ;; nothing is lost, and there is no second turn to open now. Recording
+        ;; it as a durable core fault made ordinary loop flow a defect report —
+        ;; and, because `:seon.error/steward` is a listened attribute, woke the
+        ;; steward with it. Measured on `default` 2026-09-16T15:32:57Z: one such
+        ;; fact for juniper and one for root at seed time, from a wake that met
+        ;; an open turn. The agent is released; the next kick opens the turn.
+        (= ::agent-already-running (:seon.turn/rule outcome))
+        (report :released 0)
+
         (:seon.error/kind outcome)
         (do
           ;; The open transaction formed no run, so settlement records the

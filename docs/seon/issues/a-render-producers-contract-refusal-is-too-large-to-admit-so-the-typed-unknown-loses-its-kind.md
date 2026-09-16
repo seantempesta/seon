@@ -71,3 +71,21 @@ Two candidates, both outside the render boundary:
 
 (1) is the smaller guarantee and deletes a failure mode rather than routing
 around it.
+
+## 2026-09-17 — the class boundary, measured
+
+The settlement-path sibling of this class was probed on `default` (pid 30138)
+and is a DIFFERENT cause: the terminal refusal fault at 2026-09-16T15:33:01Z
+carries the same `{:seon.sci.admit/reason :over-bound …}` shape inline, but
+there the marker is `seon.error/bounded-admission`'s designed cap with the
+whole 35090-byte evidence retained in the blob tier and `:seon.error/kind`
+intact on the signature row — no classification is lost, and the settlement
+refused for `:seon.turn/no-such-run`, not for size
+([research](../../prds/steward-platform/research/terminal-refusal-settlement-2026-09-17.md)).
+
+So this note's defect is specific to `seon.sci.kernel/invoke`'s result, where
+the refusal's `:seon.error/kind` is NOT kept beside the admitted value. Fix
+shape (1) — bounding the offending argument inside `seon.instrument`'s
+refusal — still deletes the failure mode rather than routing around it, and
+the fault-committer path is evidence that a bounded refusal plus a blob is
+enough for a reader.

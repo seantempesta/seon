@@ -178,6 +178,145 @@
        (is (= before (db/basis-t @connection)))
        (is (= 1 (count (evaluations @connection "busy"))))))))
 
+(deftest open-run-tx-call-emits-only-while-its-run-is-open
+  (testing "the writer, not a caller's pre-read, decides the run-dependent half"
+    (support/with-database
+     (fn [connection]
+       (checked-transact!
+        connection
+        [{:seon.agent/id "decider"}
+         {:seon.turn/id "still-open" :seon.turn/agent [:seon.agent/id "decider"]
+          :seon.turn/opened-tx "datomic.tx"}
+         {:seon.turn/id "already-closed" :seon.turn/agent [:seon.agent/id "decider"]
+          :seon.turn/opened-tx "datomic.tx" :seon.turn/closed-tx "datomic.tx"}])
+       (let [payload [[:db/add "probe" :seon.ns/name 'my.agents.decider]]
+             call (fn [run-id]
+                    (turn/open-run-tx-call (db/db connection) run-id payload))]
+         (is (= payload (call "still-open"))
+             "an open run still takes its settlement and close")
+         (is (= [] (call "already-closed"))
+             "a closed run needs no second close")
+         (is (= [] (call "never-existed"))
+             "a run that is gone already satisfies what the close wanted")
+         (checked-transact! connection [[:db.fn/retractEntity [:seon.turn/id "still-open"]]])
+         (is (= [] (call "still-open"))
+             "the decision is made against the writer's current database"))))))
+
+(deftest a-terminal-refusal-settles-when-its-run-has-vanished
+  (testing "the terminal writer records the outcome, never a fault about recording it"
+    (support/with-database
+     (fn [connection]
+       (config/apply! {:seon.db/connection connection
+                       :seon.boot/cluster-name "vanished-run"})
+       (support/seed-cluster! connection "vanished-run")
+       (checked-transact! connection
+                          (agent/creation-tx {:seon.agent/id "reader"
+                                              :seon.ns/name 'my.agents.reader
+                                              :seon.cluster/name "vanished-run"}))
+       (let [run-id "vanished"
+             evaluation-id (id/evaluation run-id 0)
+             _ (checked-transact!
+                connection
+                [{:seon.turn/id run-id
+                  :seon.turn/agent [:seon.agent/id "reader"]
+                  :seon.turn/starting-ns [:seon.ns/name 'my.agents.reader]
+                  :seon.turn/opened-tx "datomic.tx"}
+                 {:seon.cluster.eval/id evaluation-id
+                  :seon.cluster.eval/at (java.util.Date.)
+                  :seon.cluster.eval/run [:seon.turn/id run-id]
+                  :seon.cluster.eval/ordinal 0
+                  :seon.cluster.eval/author :system
+                  :seon.cluster.eval/ns [:seon.ns/name 'my.agents.reader]
+                  :seon.cluster.eval/source "(+ 1 1)"}])
+             handle (support/cluster-handle
+                     {:seon.env/environment (support/environment "vanished-run" connection)
+                      :seon.db/connection connection
+                      :seon.cluster/name "vanished-run"
+                      :seon.db.process/id cluster/boot-process-identity
+                      :seon.sci.eval/ctx (support/fork-cluster-ctx connection)})
+             ;; The turn entity disappears under the running loop — measured
+             ;; on `default` 2026-09-16T15:33:01Z, where the live fixture's
+             ;; history wipe retracted a turn one transaction after it opened.
+             _ (checked-transact! connection
+                                  [[:db.fn/retractEntity [:seon.turn/id run-id]]])
+             refusal {:seon.error/kind :seon.turn/refused
+                      :seon.turn/transition `turn/close-call
+                      :seon.turn/rule :seon.turn/no-such-run
+                      :seon.turn/refused :seon.turn/no-such-run
+                      :seon.error/message "run transition refused: no-such-run"}
+             settlement (#'turn/settle!
+                         {:seon.turn.loop/cluster handle
+                          :seon.turn.loop/now (java.util.Date.)
+                          :seon.agent/id "reader"
+                          :seon.turn/id run-id
+                          :seon.cluster.eval/ordinal 0
+                          :seon.error/value refusal})
+             database (db/db connection)
+             kinds (set (db/q '[:find [?kind ...]
+                                :where [?error :seon.error/kind ?kind]] database))]
+         ;; The class: a settlement whose run-dependent half can no longer
+         ;; apply must still commit the durable outcome. Re-issuing the close
+         ;; that just refused made the second refusal identical by
+         ;; construction and threw into the agent's flow proc.
+         (is (map? settlement) (pr-str settlement))
+         (is (nil? (:seon.error/kind (:seon.turn.loop/outcome settlement)))
+             (pr-str settlement))
+         (is (contains? kinds :seon.turn/refused)
+             "the refusal the loop actually met is the durable fact")
+         (is (not (contains? kinds
+                             :seon.turn.loop/terminal-refusal-settlement-refused))
+             "no core fault about the recording replaces the outcome")
+         (is (nil? (:db/id (db/pull database [:db/id] [:seon.turn/id run-id])))
+             "nothing resurrects the retracted turn"))))))
+
+(deftest a-wake-meeting-an-open-turn-releases-without-a-fault
+  (testing "the one-open-turn fence firing is ordinary loop flow, not a defect"
+    (support/with-database
+     (fn [connection]
+       (config/apply! {:seon.db/connection connection
+                       :seon.boot/cluster-name "busy-agent"})
+       (support/seed-cluster! connection "busy-agent")
+       (checked-transact! connection
+                          (agent/creation-tx {:seon.agent/id "reader"
+                                              :seon.ns/name 'my.agents.reader
+                                              :seon.cluster/name "busy-agent"}))
+       (checked-transact!
+        connection
+        [{:seon.turn/id "already-running"
+          :seon.turn/agent [:seon.agent/id "reader"]
+          :seon.turn/starting-ns [:seon.ns/name 'my.agents.reader]
+          :seon.turn/opened-tx "datomic.tx"}])
+       (let [handle (support/cluster-handle
+                     {:seon.env/environment (support/environment "busy-agent" connection)
+                      :seon.db/connection connection
+                      :seon.cluster/name "busy-agent"
+                      :seon.db.process/id cluster/boot-process-identity
+                      :seon.sci.eval/ctx (support/fork-cluster-ctx connection)})
+             reported (atom [])
+             _ (#'turn/open-turn
+                {:seon.turn.loop/cluster handle
+                 :seon.turn.loop/work {:seon.agent/id "reader"}
+                 :seon.turn.loop/now (java.util.Date.)
+                 :seon.turn.loop/report (fn [& arguments] (swap! reported conj (vec arguments)))})
+             database (db/db connection)
+             refusals (db/q '[:find [?error ...]
+                              :where [?error :seon.error/kind :seon.turn/refused]]
+                             database)]
+         ;; Turn PRD §3/§14: a wake arriving while a turn is open has `:t`
+         ;; greater than that turn's basis and opens the NEXT turn, answered
+         ;; by the `:t` rule. Nothing is claimed and nothing is lost, so the
+         ;; fence firing is the design — not a durable core fault that also
+         ;; wakes the steward through `:seon.error/steward`.
+         (is (= [[:released 0]] @reported) (pr-str @reported))
+         (is (empty? refusals) (pr-str refusals))
+         (is (= "already-running"
+                (db/q '[:find ?id . :where
+                        [?agent :seon.agent/id "reader"]
+                        [?turn :seon.turn/agent ?agent]
+                        [?turn :seon.turn/id ?id]
+                        (not [?turn :seon.turn/closed-tx _])] database))
+             "the open turn is untouched and the fence still holds"))))))
+
 (defn- virtual-turn-fixture []
   (support/with-database
    (fn [connection]
