@@ -549,3 +549,10 @@ Queue, in order:
   (mark the write seam on `seon.db/transact!` var metadata). Also seen:
   two concurrent `init --dev default` runs produced "instrumentation did not
   restore contracts (registered 1090, instrumented 0)" once — reported.
+- 16:40Z arming-includes-referenced-schemas landed (`98b5f2afe`,
+  `1c98259ba`): a wrapper's identity now includes the schema definitions its
+  contract references, so a projection change re-arms exactly the affected
+  wrappers; class regression 8 assertions; live `of-agent` accepts pulled
+  renderer refs; the ledger selector keeps renderer `:db/id`. Residual: seven
+  web-debug fixture/budget failures (Opus fixer after the reset). Launching
+  issue-indexer-resolver (Opus) into the freed slot.
