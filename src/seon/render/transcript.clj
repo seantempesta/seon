@@ -1848,18 +1848,20 @@
 (defn- fault-problems
   "Detect delivered core faults and turns whose trigger points at a fault fact."
   [database agent-id rows]
-  (let [messages (db/q '[:find ?mid ?error :in $ ?agent-id
+  (let [messages (db/q '[:find ?mid ?error (sum ?count) :with ?occurrence :in $ ?agent-id
                          :where [?a :seon.agent/id ?agent-id] [?m :seon.message/to ?a]
-                                [?m :seon.message/about ?f] [?f :seon.error/id ?error]
-                                [?m :seon.message/id ?mid]] database agent-id)]
+                                [?m :seon.message/about ?f] [?f :seon.error/signature ?error]
+                                [?m :seon.message/id ?mid]
+                                [?f :seon.error/occurrences ?occurrence]
+                                [?occurrence :seon.error.occurrence/count ?count]] database agent-id)]
     (if (:seon.error/kind messages)
       [(assoc (finding :faults "Fault delivery" []) ::unknown 1)
        (assoc (finding :fault-turns "Turns opened by faults" []) ::unknown 1)]
       (let [fault-message-ids (set (map first messages))
             triggered (filter #(fault-message-ids (get-in % [:seon.turn/trigger :seon.message/id])) rows)]
         [(finding :faults "Fault notifications delivered"
-                  (for [[mid _] messages]
-                    {::message mid ::detail "Delivered core fault"
+                  (for [[mid signature count] messages]
+                    {::message mid ::detail (str "Error " signature "; occurrences: " count)
                      ::turn (first (filter #(= mid (get-in % [:seon.turn/trigger :seon.message/id])) rows))}))
          (finding :fault-turns "Turns opened by faults"
                   (map #(hash-map ::turn % ::detail "The trigger message references a core fault.") triggered))]))))

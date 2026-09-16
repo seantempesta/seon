@@ -27,8 +27,8 @@
   hide the point — that the three shapes do NOT share a key set and the
   normalizer must be total over all of them anyway.
 
-  Nothing here needs a database, a cluster, a store, or sci: the whole
-  unit under test is pure."
+  Normalization is pure. Writer and reader regressions use the canonical
+  database fixture under armed contracts."
   (:require [clojure.core.async.flow :as-alias flow]
             [clojure.edn :as edn]
             [clojure.string :as str]
@@ -38,11 +38,117 @@
             [clojure.test.check.properties :as prop]
             [seon.config :as config]
             [seon.error :as error]
-            [seon.render.walk :as walk]
+            [seon.problems]
+            [seon.cluster.status]
+            [seon.render.transcript]
             [seon.schema :as schema]
             [seon.sci.admit :as admit]
             [seon.test-support :as test-support]
             [seon.db :as db]))
+
+(declare commit-request)
+
+(deftest error-identity-and-occurrences-are-owned-by-the-writer
+  (test-support/with-database
+    (fn [connection]
+      (let [failure (doto (ex-info "same error" {})
+                      (.setStackTrace (into-array StackTraceElement
+                                                 [(StackTraceElement. "my.error_graph$raise" "invokeStatic" "error_graph.clj" 42)])))
+            at (java.util.Date.)
+            later (java.util.Date. (inc (.getTime at)))
+            request (fn [agent process instant]
+                      (commit-request failure {:seon.agent/id agent :seon.turn/id "error-graph-turn"
+                                               :seon.error/process process :seon.error/at instant
+                                               :seon.config.error/recurrence-limit 100}))
+            _ (is (:db-after (db/transact! connection
+                                          [[:db/add "error-graph-cluster" :seon.cluster/name "error-graph"]
+                                           {:seon.agent/id "error-graph-a"}
+                                           {:seon.agent/id "error-graph-b"}
+                                           {:seon.agent/id "error-graph-steward"}
+                                           {:seon.ns/name 'my.error-graph
+                                            :seon.ns/steward [:seon.agent/id "error-graph-steward"]}
+                                           {:seon.turn/id "error-graph-turn" :seon.turn/agent [:seon.agent/id "error-graph-a"] :seon.turn/opened-tx "datomic.tx"}])))
+            a (error/recording (db/db connection) (request "error-graph-a" "error-graph-process-1" at))
+            b (error/recording (db/db connection) (request "error-graph-b" "error-graph-process-1" at))
+            read-error #(db/pull (db/db connection)
+                                 '[* {:seon.error/fn [:seon.fn/sym {:seon.fn/ns [:seon.ns/name {:seon.ns/steward [:seon.agent/id]}]}]}
+                                   {:seon.error/occurrences [* {:seon.error.occurrence/agent [:seon.agent/id]}]}]
+                                 (:seon.error/ref a))]
+        (is (= (:seon.error/ref a) (:seon.error/ref b)))
+        (is (not= (:seon.error.occurrence/ref a) (:seon.error.occurrence/ref b)))
+        (let [written (db/transact! connection (:seon.db/tx-data a))] (is (:db-after written) (pr-str (dissoc written :db-before :db-after)) ))
+        (is (:db-after (db/transact! connection (:seon.db/tx-data b))))
+        (let [row (read-error)]
+          (is (= 1 (count (db/q '[:find ?e :where [?e :seon.error/signature]] (db/db connection)))))
+          (is (= [1 1] (sort (map :seon.error.occurrence/count (:seon.error/occurrences row)))))
+          (is (= "my.error-graph/raise" (get-in row [:seon.error/fn :seon.fn/sym])))
+          (is (= 'my.error-graph (get-in row [:seon.error/fn :seon.fn/ns :seon.ns/name])))
+          (is (= "error-graph-steward" (get-in row [:seon.error/fn :seon.fn/ns :seon.ns/steward :seon.agent/id])))
+          (is (= "error-graph-steward" (error/steward (db/db connection) row)))
+          (is (nil? (:seon.error/steward row))))
+        (let [again (error/recording (db/db connection) (request "error-graph-a" "error-graph-process-1" later))]
+          (is (:db-after (db/transact! connection (:seon.db/tx-data again))))
+          (let [row (db/pull (db/db connection) '[*] (:seon.error.occurrence/ref again))]
+            (is (= 2 (:seon.error.occurrence/count row)))
+            (is (= at (:seon.error.occurrence/first-at row)))
+            (is (= later (:seon.error.occurrence/last-at row)))))
+        (let [restarted (error/recording (db/db connection)
+                                       (dissoc (request "error-graph-a" "error-graph-process-2" later) :seon.turn/id))]
+          (is (= (:seon.error/ref a) (:seon.error/ref restarted)))
+          (is (:db-after (db/transact! connection (:seon.db/tx-data restarted))))
+          (is (= 1 (count (db/q '[:find ?e :where [?e :seon.error/signature]] (db/db connection))))))
+        (let [before (db/db connection)
+              first-call (error/recording before (request "error-graph-a" "error-graph-process-1" later))
+              second-call (error/recording before (request "error-graph-a" "error-graph-process-1" later))]
+          (is (:db-after (db/transact! connection (into (:seon.db/tx-data first-call) (:seon.db/tx-data second-call)))))
+          (is (= 4 (:seon.error.occurrence/count (db/pull (db/db connection) '[*] (:seon.error.occurrence/ref a))))))
+        (let [row (read-error)
+              database (db/db connection)
+              summary (first (#'seon.problems/error-signatures database))
+              unit {:seon.db/db database :seon.render/value [:seon.agent/id "error-graph-steward"]}
+              read-form (:seon.repl/form (error/faults-form unit))]
+          (is (= 6 (:seon.error/occurrence-count (error/latest-fact row))))
+          (is (= 6 (:seon.problems/occurrences summary)))
+          (is (= 6 (get (into {} (:seon.cluster.status/faults (seon.cluster.status/snapshot {:seon.db/db database :seon.db/connection connection})))
+                        (second (:seon.error/ref a)))))
+          (is (str/includes? (pr-str (#'seon.render.transcript/fault-problems database "error-graph-steward" [])) "occurrences: 6"))
+          (is (str/includes? (error/log-line (error/notice {:seon.error/fact (:seon.error/fact summary) :seon.error/occurrence-count 6})) "occurrences=6"))
+          (is (str/includes? (error/render-ai row) "Occurrences: 6"))
+          (is (str/includes? (pr-str (error/render-html row)) "Open"))
+          (is (= 1 (count (db/q (second (second read-form)) database (last read-form)))))
+          (is (str/includes? (pr-str (error/render-faults-html [:seon.agent/id "error-graph-steward"] database)) "same error"))
+          (is (= 6 (:seon.render.transcript/count (first (#'seon.render.transcript/fault-problems database "error-graph-steward" [])))))
+          (is (:db-after (db/transact! connection [[:db/add (:seon.error/ref a) :seon.error/resolved-tx "datomic.tx"]])))
+          (is (str/includes? (pr-str (error/render-html (read-error))) "Resolved"))
+          (is (schema/valid-candidate-value? :seon.error/fact (:seon.error/fact (first (#'seon.problems/error-signatures (db/db connection)))))))
+        (let [flat (error/recording (db/db connection)
+                                  (commit-request {:seon.error/kind :seon.error/unclassified
+                                                   :seon.error/message "flat error"
+                                                   :seon.error/data {:seon.error/diagnostic-operation 'seon.id/valid?}} {}))]
+          (is (:seon.error/ref flat))
+          (is (= [:seon.fn/sym "seon.id/valid?"] (:seon.error/fn (:seon.error/fact flat))))
+          (is (not (contains? (:seon.error/fact flat) :seon.error/exception-class)))
+          (is (:db-after (db/transact! connection (:seon.db/tx-data flat)))))))))
+
+(deftest dropped-fault-counts-accumulate-in-the-occurrence
+  (test-support/with-database
+    (fn [connection]
+      (doseq [n [3 5]]
+        (let [request (commit-request {:seon.error/kind :seon.flow/fault-channel-overflow
+                                       :seon.error/message "dropped deliveries"} {})
+              fact (assoc (error/normalize request)
+                          :seon.error/dropped-fault-count n
+                          :seon.error/dropped-fault-digest (apply str (repeat 64 "a")))
+              result (db/transact! connection
+                                  (error/commit-tx (db/db connection) (assoc request :seon.error/fact fact)))]
+          (is (:db-after result))))
+      (let [database (db/db connection)
+            row (first (db/q '[:find [(pull ?o [*]) ...]
+                              :where [?e :seon.error/kind :seon.flow/fault-channel-overflow]
+                                     [?e :seon.error/occurrences ?o]] database))]
+        (is (= 2 (:seon.error.occurrence/count row)))
+        (is (= 8 (:seon.error/dropped-fault-count row)))
+        (is (= (apply str (repeat 64 "a")) (:seon.error/dropped-fault-digest row)))))))
 
 (deftest error-class-recognition-uses-the-active-registry
   (let [projection (schema/build-projection (schema/registered-schemas))]
@@ -884,7 +990,8 @@
       (let [source (transform-error (ex-info "the same bug" {}))
             outcomes (mapv (fn [_] (commit! connection source {})) (range 6))
             [facts messages] (last outcomes)]
-        (is (= 6 facts) "every occurrence is still evidence")
+        (is (= 1 facts) "one entity represents the repeated error")
+        (is (= 6 (db/q '[:find (sum ?n) . :where [_ :seon.error.occurrence/count ?n]] (db/db connection))))
         (is (= {"root" 3} messages)
             "two ordinary escalations, one final message at the limit, then
              silence")))))

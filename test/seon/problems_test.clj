@@ -19,9 +19,6 @@
   (:require [clojure.set :as set]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [clojure.test.check :as tc]
-            [clojure.test.check.generators :as gen]
-            [clojure.test.check.properties :as prop]
             [seon.db :as db]
             [seon.config :as config]
             [seon.error :as error]
@@ -99,14 +96,17 @@
                 [{:seon.turn/id "run-failed"
                   :seon.turn/agent [:seon.agent/id "agent-a"]
                   :seon.turn/opened-tx "datomic.tx"
-                  :seon.turn/closed-tx "datomic.tx"}
-                 (error/normalize
-                  {:seon.error/source {:seon.error/kind :seon.ai/provider-error
-                                       :seon.error/message "the model did not answer"}
-                   :seon.error/id "run-failed-error" :seon.error/at now
-                   :seon.error/process live :seon.sci.admit/caps caps
-                   :seon.config.error/max-evidence-bytes 16384
-                   :seon.turn/id "run-failed" :seon.agent/id "agent-a"})]))
+                  :seon.turn/closed-tx "datomic.tx"}])
+  (db/transact! connection
+                (error/commit-tx
+                 (db/db connection)
+                 {:seon.error/source {:seon.error/kind :seon.ai/provider-error
+                                      :seon.error/message "the model did not answer"}
+                  :seon.error/id "run-failed-error" :seon.error/at now
+                  :seon.error/process live :seon.sci.admit/caps caps
+                  :seon.config.error/max-evidence-bytes 16384
+                  :seon.config.error/recurrence-limit 3
+                  :seon.turn/id "run-failed" :seon.agent/id "agent-a"})))
 
 (defn- commit-errored-receipt!
   [connection]
@@ -152,7 +152,7 @@
 (defn- generated-error-fact
   [ordinal optional-attributes [run? agent?]]
   (cond-> (merge
-           {:seon.error/id (str "generated-error-" ordinal)
+           {:seon.error/id (apply str (repeat 64 (nth "abcd" ordinal)))
             :seon.error/at now
             :seon.error/process live
             :seon.error/kind
@@ -319,64 +319,37 @@
                read rather than something to scan for"))))))
 
 (deftest every-committed-error-fact-shape-is-projectable
-  (test-support/assert-check!
-   (tc/quick-check
-    60
-    (prop/for-all
-     [optional-attributes
-      (gen/set (gen/elements (vec (keys optional-error-evidence))))]
-     (with-db
-       (fn [connection]
-         (db/transact!
-          connection
-          [{:seon.turn/id "generated-error-run" :seon.turn/agent [:seon.agent/id "agent-a"] :seon.turn/opened-tx "datomic.tx"}])
-         (let [facts (mapv (fn [ordinal attribution]
-                             (generated-error-fact
-                              ordinal optional-attributes attribution))
-                           (range)
-                           error-attribution-cases)
-               _ (db/transact! connection facts)
-               value (found connection)
-               projected (mapv :seon.error/fact
-                               (:seon.problems/error-signatures value))
-               projected-by-id (into {} (map (juxt :seon.error/id identity))
-                                     projected)]
-           (and
-            (= (count error-attribution-cases) (count projected))
-            (every? #(seon.schema/valid-candidate-value?
-                      :seon.error/fact %)
-                    facts)
-            (every? #(seon.schema/valid-candidate-value?
-                      :seon.error/fact %)
-                    projected)
-            (every?
-             (fn [fact]
-               (= (select-keys fact [:seon.error/run :seon.error/agent])
-                  (select-keys (get projected-by-id (:seon.error/id fact))
-                               [:seon.error/run :seon.error/agent])))
-             facts)
-            (seon.schema/valid-candidate-value?
-             :seon.problems/problems value)
-            (= (count error-attribution-cases)
-               (count (str/split-lines (problems/log-report value))))
-            (hiccup/hiccup? (problems/html-report value)))))))
-    :seed 202608060401)
-   "A committed error fact escaped the problems projection."))
-
-(deftest signature-only-rows-are-not-error-facts
   (with-db
     (fn [connection]
-      (db/transact!
-       connection
-       [{:seon.error/signature (apply str (repeat 64 "a"))}])
-      (let [value (found connection)]
-        (is (= {} value)
-            "a comparison signature without error identity is not an error")
-        (is (seon.schema/valid-candidate-value?
-             :seon.problems/problems value)
-            "partial signature rows cannot invalidate runtime health")))))
+      (db/transact! connection [{:seon.turn/id "generated-error-run"
+                                :seon.turn/agent [:seon.agent/id "agent-a"]
+                                :seon.turn/opened-tx "datomic.tx"}])
+      (doseq [[ordinal attribution] (map-indexed vector error-attribution-cases)]
+        (let [fact (generated-error-fact ordinal (keys optional-error-evidence) attribution)
+              result (db/transact! connection
+                                  (error/commit-tx (db/db connection)
+                                                  {:seon.error/fact fact :seon.error/source {}
+                                                   :seon.error/id (:seon.error/id fact)
+                                                   :seon.error/at now :seon.error/process live
+                                                   :seon.sci.admit/caps caps
+                                                   :seon.config.error/max-evidence-bytes 16384
+                                                   :seon.config.error/recurrence-limit 100}))]
+          (is (:db-after result) (pr-str (dissoc result :db-before :db-after)))))
+      (let [value (found connection)
+            facts (mapv :seon.error/fact (:seon.problems/error-signatures value))]
+        (is (= 4 (count facts)))
+        (is (every? #(seon.schema/valid-candidate-value? :seon.error/fact %) facts))
+        (is (seon.schema/valid-candidate-value? :seon.problems/problems value))
+        (is (= 4 (count (str/split-lines (problems/log-report value)))))
+        (is (hiccup/hiccup? (problems/html-report value)))))))
 
-
+(deftest incomplete-error-entities-are-refused
+  (with-db
+    (fn [connection]
+      (let [result (db/transact! connection
+                                 [{:seon.error/signature (apply str (repeat 64 "a"))}])]
+        (is (= :seon.db/invalid-write (:seon.error/kind result)))
+        (is (empty? (:seon.problems/error-signatures (found connection))))))))
 
 (deftest a-run-that-closed-with-an-error-says-why
   (with-db

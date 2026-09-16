@@ -202,19 +202,18 @@
             inside (wake/inside-attributes database)]
         (is (= #{:seon.message/inbox
                  :seon.effect/to
-                 :seon.error/steward
                  :seon.schedule.fire/agent}
                listened)
-            "the four families that wake an agent, derived from their
+            "the families that wake an agent, derived from their
              own declarations")
-        (is (= #{:seon.message/inbox :seon.effect/to :seon.error/steward}
+        (is (= #{:seon.message/inbox :seon.effect/to}
                opening)
             "a schedule firing surfaces in the next context; it never
              pays for a model call by itself")
         (is (= #{:seon.message/from
                  :seon.message/about
                  :seon.effect/to
-                 :seon.error/steward}
+                }
                inside)
             "and the population's own activity never refills the turn
              bound it spends")
@@ -330,96 +329,37 @@
             "and registration refuses rather than routing into silence")))))
 
 (deftest a-fault-wakes-the-steward-of-the-failing-functions-namespace
-  ;; THE CLASS: a fault used to reach an agent only by minting a MESSAGE,
-  ;; which put faults and instructions in one family and forced an
-  ;; `:seon.message/about` carve-out to keep an agent in an error
-  ;; loop from resetting its own bound with its own failures.
-  ;;
-  ;; The fault fact now routes itself: `:seon.error/steward` is decided
-  ;; INSIDE the committing transaction from the failing function's
-  ;; namespace, and it is a listened attribute. THERE IS NO
-  ;; SELF-EXCLUSION — a fault in an agent's own code wakes that agent
-  ;; like any other, and the turn bound is what stops the loop, because
-  ;; the steward ref is a declared INSIDE wake and never refills what it
-  ;; spends.
   (test-support/with-database
     (fn [connection]
-      (db/transact!
-       connection
-       [{:seon.agent/id "agent-a"}
-        {:seon.ns/name 'my.agents.agent-a
-         :seon.ns/steward [:seon.agent/id "agent-a"]}
-        {:seon.fn/sym "my.agents.agent-a/broken"
-         :seon.schema.admission/source :core
-         :seon.fn/ns [:seon.ns/name 'my.agents.agent-a]}])
-      (let [recipient (agent-eid connection)
-            mailbox (async/chan (async/sliding-buffer 1))
-            {:keys [key]} (route-probe! connection mailbox)]
+      (db/transact! connection [{:seon.agent/id "agent-a"}
+                               {:seon.ns/name 'my.agents.agent-a
+                                :seon.ns/steward [:seon.agent/id "agent-a"]}])
+      (let [mailbox (async/chan (async/sliding-buffer 1))
+            {:keys [key]} (route-probe! connection mailbox)
+            recording (error/recording
+                       (db/db connection)
+                       {:seon.error/source
+                        {:seon.error/kind :seon.instrument/contract-violated
+                         :seon.error/message "the function violated its contract"
+                         :seon.error/data {:seon.instrument/fn "my.agents.agent-a/broken"
+                                           :seon.instrument/arm :input}}
+                        :seon.error/id "fault-wake" :seon.error/at (Date.)
+                        :seon.error/process "wake-test-process"
+                        :seon.sci.admit/caps result-caps
+                        :seon.config.error/max-evidence-bytes 4096
+                        :seon.config.error/recurrence-limit 3
+                        :seon.agent/id "agent-a"})]
         (try
-          (db/transact!
-           connection
-           (error/commit-tx
-            (db/db connection)
-            ;; A CONTRACT VIOLATION is the fault class that records the
-            ;; failing function today (`projected-instrument-data`);
-            ;; every other class carries a proc, not a function, so it
-            ;; resolves no steward. That gap is at the fault seam, not
-            ;; in this routing.
-            {:seon.error/source
-             {:seon.error/kind :seon.instrument/contract-violated
-              :seon.error/message "the agent's own function violated its contract"
-              :seon.error/data
-              {:seon.instrument/fn "my.agents.agent-a/broken"
-               :seon.instrument/arm :input}}
-             :seon.error/id "fault-1"
-             :seon.error/at (Date.)
-             :seon.error/process "wake-test-process"
-             :seon.sci.admit/caps result-caps
-             :seon.config.error/max-evidence-bytes 4096
-             :seon.config.error/recurrence-limit 3
-             ;; the fault is ABOUT agent-a's own code AND happened to it
-             :seon.agent/id "agent-a"}))
-          (is (= recipient
-                 (:db/id (:seon.error/steward
-                          (db/pull (db/db connection)
-                                   [{:seon.error/steward [:db/id]}]
-                                   [:seon.error/id "fault-1"]))))
-              "function -> namespace -> :seon.ns/steward, decided inside
-               the commit and merged onto the fact's own tempid")
-          (is (some? (test-support/await-event! mailbox "steward wake"))
-              "and asserting it woke the steward")
-          (is (contains? (wake/inside-attributes (db/db connection))
-                         :seon.error/steward)
-              "as an INSIDE wake: it spends the turn bound and never
-               refills it, which is what terminates the loop")
+          (is (:db-after (db/transact! connection (:seon.db/tx-data recording))))
+          (let [fact (db/pull (db/db connection) '[*] (:seon.error/ref recording))]
+            (is (= "agent-a" (error/steward (db/db connection) fact)))
+            (is (nil? (:seon.error/steward fact))))
+          (is (some? (test-support/await-event! mailbox "derived steward notification")))
+          (is (contains? (wake/inside-attributes (db/db connection)) :seon.message/about))
+          (is (not (contains? (wake/wake-attributes (db/db connection)) :seon.error/steward)))
           (finally
-            (wake/unlisten! {:seon.cluster.wake/connection connection
-                             :seon.cluster.wake/key key})))))))
-
-(deftest a-fault-with-no-stewarded-function-asserts-no-steward
-  ;; ABSENCE IS THE STATE, and a fault whose function nothing stewards
-  ;; is still recorded. The recorder may never be destroyed by the
-  ;; routing it could not resolve.
-  (test-support/with-database
-    (fn [connection]
-      (db/transact! connection [{:seon.agent/id "agent-a"}])
-      (db/transact!
-       connection
-       (error/commit-tx
-        (db/db connection)
-        {:seon.error/source (ex-info "nobody owns this" {})
-         :seon.error/id "fault-2"
-         :seon.error/at (Date.)
-         :seon.error/process "wake-test-process"
-         :seon.sci.admit/caps result-caps
-         :seon.config.error/max-evidence-bytes 4096
-         :seon.config.error/recurrence-limit 3}))
-      (let [fact (db/pull (db/db connection)
-                          [:seon.error/id :seon.error/steward]
-                          [:seon.error/id "fault-2"])]
-        (is (= "fault-2" (:seon.error/id fact)) "the fact is committed")
-        (is (nil? (:seon.error/steward fact))
-            "with no steward key at all")))))
+            (wake/unlisten! {:seon.cluster.wake/connection connection :seon.cluster.wake/key key})
+            (async/close! mailbox)))))))
 
 (deftest render-wake-intersects-the-current-published-interest
   (with-connection

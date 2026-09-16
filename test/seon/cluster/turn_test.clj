@@ -1587,7 +1587,8 @@
         (testing "and WHY is readable from the database"
           (is (re-find #"DEEPSEEK_API_KEY"
                        (db/q '[:find ?e . :where
-                              [?error :seon.error/run _] [?error :seon.error/message ?e]] @connection))))
+                              [?error :seon.error/occurrences ?occurrence]
+                                 [?occurrence :seon.error.occurrence/turn _] [?error :seon.error/message ?e]] @connection))))
         (testing "so the agent's next prompt tells it what happened"
           ;; the NEXT prompt belongs to the next held run: open it the
           ;; way the loop does — the run carries the trigger and the
@@ -3031,13 +3032,13 @@
               (db/pull @connection
                        [:seon.turn.work/situation
                         :seon.turn/closed-tx
-                        {:seon.error/_run [:seon.error/message]}]
+                        {:seon.error.occurrence/_turn [:seon.error.occurrence/message]}]
                        [:seon.turn/id run-id])]
           (is (= :error (:seon.turn.loop/outcome report)))
           (is (not= :call (:seon.turn.work/situation run-state)))
           (is (some? (:seon.turn/closed-tx run-state)))
           (is (= (:seon.error/message failure)
-                 (-> run-state :seon.error/_run first :seon.error/message))))))))
+                 (-> run-state :seon.error.occurrence/_turn first :seon.error.occurrence/message))))))))
 
 (deftest generated-phase-failures-converge-through-one-terminal-exit
   (with-cluster fake-evaluate
@@ -3106,7 +3107,8 @@
                             :in $ ?run-id
                             :where
                             [?run :seon.turn/id ?run-id]
-                            [?error :seon.error/run ?run]]
+                            [?error :seon.error.occurrences ?occurrence]
+                            [?occurrence :seon.error.occurrence/turn ?run]]
                           @connection run-id))))))
           :seed 2026080601)
          "Every injected phase failure must settle once, close once, and record
@@ -3131,7 +3133,8 @@
               signatures (db/q '[:find ?signature
                                  :where
                                  [?error :seon.error/signature ?signature]
-                                 [?error :seon.error/run _]]
+                                 [?error :seon.error/occurrences ?occurrence]
+                                 [?occurrence :seon.error.occurrence/turn _]]
                                db)]
           (is (seq faults)
               "the escalation dial is on: a supervisor does hear about a

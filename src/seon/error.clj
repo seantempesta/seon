@@ -13,9 +13,9 @@
   THIS NAMESPACE DOES NOT TRANSACT. It normalizes, it projects, and it
   returns TRANSACTION DATA. Cause-chain reading lives in the lower
   `seon.error.refusal` leaf so `seon.db` does not acquire this namespace's
-  rendering dependencies. Its two callers commit through the one boundary:
+  rendering dependencies. Callers commit through the one boundary:
   `seon.cluster/commit-fault!` for Throwables off flow's error channel,
-  and the run loop for a refused transaction.
+  the turn loop for a refused transaction, and maintenance settlement.
 
   WHY ONE NORMALIZER. The quarry grew three independent bounding rules
   and two hand-maintained blame lists because every catch site formatted
@@ -101,9 +101,9 @@
   the canonically ordered identity attributes (kind, Throwable class, function, frame) — deliberately WITHOUT the
   message, because a message carrying an id, a path or a timestamp
   makes every occurrence unique and recurrence undetectable, which is
-  exactly the derived count the escalation rule needs
-  (`(count faults with this signature since this process started)`).
-  Nothing increments; recurrence is a query.
+  exactly the count the escalation rule needs. One transaction function
+  increments the occurrence count; recurrence sums those counts through
+  occurrence process refs. The error identity contains no process identity.
 
   ATTRIBUTION IS THE CALLER'S, and the reason is exactness rather than
   convenience. The flow error map does not carry the agent: the loop's
@@ -275,7 +275,7 @@
   (when-let [^StackTraceElement frame (when failure (first (.getStackTrace ^Throwable failure)))]
     (when-let [file (.getFileName frame)]
       [(symbol (.getClassName frame)) (symbol (.getMethodName frame))
-       file (.getLineNumber frame)])))
+       file (long (.getLineNumber frame))])))
 
 (defn- signature
   "Identity of what failed, independent of process, agent, turn and message."
@@ -540,7 +540,10 @@
         projected-source (:seon.sci.admit/value admitted)
         instrument-data (projected-instrument-data projected-source)
         flow? (map? source)
-        function (or (:seon.instrument/fn instrument-data)
+        operation (get-in (if failure (refusal failure) source)
+                          [:seon.error/data :seon.error/diagnostic-operation])
+        function (or (when (qualified-symbol? operation) operation)
+                     (:seon.instrument/fn instrument-data)
                      (stack-failing-function failure))
         frame (top-frame failure)
         signature (signature error-kind class-name function frame)
@@ -666,7 +669,7 @@
   transaction, which is why the reason is derived here and never stored
   on the entity."
   {:malli/schema [:=> [:cat :seon.error/notice-request] :seon.error/notice]}
-  [{:seon.error/keys [fact reason occurrence occurrences notification-limit
+  [{:seon.error/keys [fact reason occurrence occurrence-count notification-limit
                       notification]
     agent-id :seon.agent/id}]
   (let [presentation (if (= :seon.instrument/contract-violated
@@ -680,7 +683,7 @@
              :seon.render/ai presentation}
       reason (assoc :seon.error/reason reason)
       occurrence (assoc :seon.error/occurrence occurrence)
-      occurrences (assoc :seon.error/occurrences occurrences)
+      occurrence-count (assoc :seon.error/occurrence-count occurrence-count)
       notification-limit (assoc :seon.error/notification-limit notification-limit)
       notification (assoc :seon.error/notification notification)
       agent-id (assoc :seon.agent/id agent-id))))
@@ -1162,7 +1165,7 @@
                            throwable-class proc op cid run basis-t]} fact
         source (fact-source fact)
         data (flat-data fact)
-        aggregate? (:seon.error/occurrences notice)]
+        aggregate? (:seon.error/occurrence-count notice)]
     (str/join
      " "
      (remove
@@ -1257,7 +1260,9 @@
             :where [?function :seon.fn/ns ?namespace]
                    [?namespace :seon.ns/steward ?agent]
                    [?agent :seon.agent/id ?id]]
-          database function)))
+          database (if (map? function)
+                     (or (:db/id function) [:seon.fn/sym (:seon.fn/sym function)])
+                     function))))
 
 (defn- recurrence
   [database signature process]
@@ -1322,6 +1327,10 @@
                                   :seon.error.occurrence/last-at at
                                   :seon.error.occurrence/process [:seon.db.process/id process]
                                   :seon.error.occurrence/message (:seon.error/message fact)})
+                     (:seon.error/dropped-fault-count fact)
+                     (assoc :seon.error/dropped-fault-count
+                            (+ (or (:seon.error/dropped-fault-count old) 0)
+                               (:seon.error/dropped-fault-count fact)))
                      agent-id (assoc :seon.error.occurrence/agent [:seon.agent/id agent-id])
                      turn-id (assoc :seon.error.occurrence/turn [:seon.turn/id turn-id])
                      digest (assoc :seon.error.occurrence/data-blob
@@ -1383,6 +1392,11 @@
                 function (conj (program/canonical-row
                                 (cond-> {:seon.fn/sym (str function)}
                                   namespace-name (assoc :seon.fn/ns [:seon.ns/name namespace-name])))))
+         rows (into [identity-row]
+                    (mapcat (fn [row]
+                              (let [tempid (pr-str (program/row-identity row))]
+                                (map (fn [[attribute value]] [:db/add tempid attribute value]) row))))
+                    (rest rows))
          tx (conj rows [:db.fn/call #'commit-call
                         (assoc request :seon.error/fact fact :seon.error.occurrence/id occurrence-id)])]
      {:seon.error/fact fact
@@ -1420,12 +1434,39 @@
     :seon.render/distance
     :seon.render/value})
 
+(defn latest-fact
+  "Project an error's latest occurrence for the existing diagnostic renderers."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [error]
+  (if (some #(not (map? %)) (:seon.error/occurrences error))
+    (assoc (dissoc error :seon.error/occurrences) :seon.error/message "Occurrence evidence was not acquired.")
+    (if-let [occurrence (last (sort-by :seon.error.occurrence/last-at
+                                    (:seon.error/occurrences error)))]
+    (cond-> (merge (dissoc error :seon.error/occurrences)
+                   (select-keys occurrence [:seon.error/process :seon.error/data-edn
+                                            :seon.error/data-size :seon.error/capped?
+                                            :seon.error/throwable-class :seon.error/proc
+                                            :seon.error/op :seon.error/cid
+                                            :seon.instrument/fn :seon.instrument/arm
+                                            :seon.instrument/expected :seon.instrument/args])
+                   {:seon.error/at (:seon.error.occurrence/last-at occurrence)
+                    :seon.error/message (:seon.error.occurrence/message occurrence)
+                    :seon.error/occurrence-count
+                    (reduce + 0 (map :seon.error.occurrence/count (:seon.error/occurrences error)))})
+      (map? (:seon.error/fn error))
+      (assoc :seon.error/fn [:seon.fn/sym (get-in error [:seon.error/fn :seon.fn/sym])])
+      (:seon.error.occurrence/agent occurrence)
+      (assoc :seon.error/agent (:seon.error.occurrence/agent occurrence))
+      (:seon.error.occurrence/turn occurrence)
+      (assoc :seon.error/run (:seon.error.occurrence/turn occurrence)))
+    error)))
+
 (defn- rendered-error-value
   [unit]
   (let [value (if (map? (:seon.render/value unit))
                 (:seon.render/value unit)
                 unit)]
-    (render.value/transacted value)))
+    (render.value/transacted (if (map? value) (latest-fact value) value))))
 
 (defn- class-properties
   [forms schema-key]
@@ -1515,16 +1556,18 @@
   [unit]
   (let [value (rendered-error-value unit)
         source (when (:seon.error/data-edn value) (fact-source value))]
-    (or (refusal-text unit (or source value) (:seon.error/data (or source value)))
+    (str (or (refusal-text unit (or source value) (:seon.error/data (or source value)))
         (:seon.error/message (or source value))
-        "Error evidence is unavailable.")))
+        "Error evidence is unavailable.")
+         (when-let [n (:seon.error/occurrence-count value)]
+           (str " Occurrences: " n ".")))))
 
 (defn render-html
   "Render one fault's kind, message, time, function, turn, and evidence link."
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The total error render boundary receives a raw error, an acquired entity or a render unit and must describe unrecognized values without refusing them.", :gen/elements [nil false 0 "" :k [] {}]}]] :seon.render/hiccup]}
   [unit]
-  (let [value (if (map? (:seon.render/value unit))
-                (:seon.render/value unit) unit)
+  (let [value (if (map? (:seon.render/value unit)) (:seon.render/value unit) unit)
+        value (if (map? value) (latest-fact value) value)
         turn (:seon.error/run value)
         turn-ref (if (map? turn)
                    (if-let [id (:seon.turn/id turn)]
@@ -1544,8 +1587,18 @@
           [[:time {:class "seon-error-at" :datetime instant :title instant
                    :data-text (str "new Date('" instant "').toLocaleString()")}
             (if (inst? at) (.format (java.text.SimpleDateFormat. "MMM d, HH:mm:ss") at) instant)]]))
-      (when-let [function (:seon.instrument/fn value)]
-        [[:p {:class "seon-error-function"} "Function: " (str function)]])
+      (when-let [function (:seon.error/fn value)]
+        (let [reference (if (map? function)
+                          [:seon.fn/sym (:seon.fn/sym function)] function)]
+          [[:p {:class "seon-error-function"}
+            [:a {:href (render.route/path :seon.render.route/data {}
+                                           {:entity (pr-str reference)})}
+             (str "Function: " (if (vector? reference) (second reference) reference))]]]))
+      (when-let [n (:seon.error/occurrence-count value)]
+        [[:p {:class "seon-error-occurrences"} (str "Occurrences: " n)]])
+      (when (:seon.error/signature value)
+        [[:p {:class "seon-error-resolution"}
+          (if (:seon.error/resolved-tx value) "Resolved" "Open")]])
       (when turn-ref
         [[:p {:class "seon-error-run"}
           [:a {:href (render.route/path :seon.render.route/data {}
@@ -1557,7 +1610,7 @@
 
 (defn- fault-order
   [fault]
-  [(if-let [at (:seon.error/at fault)] (- (.getTime ^java.util.Date at)) 0)
+  [(if-let [at (:seon.error/at (latest-fact fault))] (- (.getTime ^java.util.Date at)) 0)
    (str (:seon.error/id fault))])
 
 (defn- run-identity
@@ -1586,23 +1639,23 @@
     (get value (:seon.render.walk/attribute unit) value)))
 
 (defn faults-form
-  "Read repair work for root, or for an agent with a routed fault."
+  "Read errors whose function namespace is assigned to this agent."
   {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :seon.render/form]]}
   [unit]
-  (let [agent (faults-input unit)
-        row (db/pull (:seon.db/db unit)
-                     '[:seon.agent/id {:seon.error/_steward [:seon.error/id]}]
-                     agent)]
-    (if (or (= "root" (:seon.agent/id row))
-            (seq (:seon.error/_steward row))
-            (:seon.error/kind row))
-      {:seon.repl/comment ";; I should inspect faults routed to me as steward; fixing them is my job."
+  (let [row (db/pull (:seon.db/db unit) [:seon.agent/id] (faults-input unit))]
+    (when-let [agent-id (:seon.agent/id row)]
+      {:seon.repl/comment "Inspect errors in the namespaces assigned to me."
        :seon.repl/form
        (list 'seon.db/q
              (list 'quote
-                   [:find [(list 'pull '?f [:seon.error/kind :seon.error/message :seon.instrument/fn]) '...]
-                    :where ['?f :seon.error/steward agent]]))}
-      nil)))
+                   '[:find [(pull ?error [* {:seon.error/fn [:db/id :seon.fn/sym]}
+                                           {:seon.error/occurrences [*]}]) ...]
+                     :in $ ?id
+                     :where [?agent :seon.agent/id ?id]
+                            [?namespace :seon.ns/steward ?agent]
+                            [?function :seon.fn/ns ?namespace]
+                            [?error :seon.error/fn ?function]])
+             agent-id)})))
 
 (defn render-faults-ai
   "Emit the steward's read, or render already acquired fault entities."
@@ -1623,11 +1676,16 @@
   ([faults database]
   (let [acquired? (and (sequential? faults) (not (keyword? (first faults))))
         row (when-not acquired?
-              (db/pull database '[{:seon.error/_steward [* {:seon.error/run [:seon.turn/id]}]}]
-                       faults))
+              (db/q '[:find [(pull ?error [* {:seon.error/fn [:db/id :seon.fn/sym]}
+                                             {:seon.error/occurrences [* {:seon.error.occurrence/turn [:seon.turn/id]}]}]) ...]
+                      :in $ ?agent
+                      :where [?namespace :seon.ns/steward ?agent]
+                             [?function :seon.fn/ns ?namespace]
+                             [?error :seon.error/fn ?function]]
+                    database faults))
         references (cond acquired? faults
                          (:seon.error/kind row) [row]
-                         :else (:seon.error/_steward row))
+                         :else row)
         entities (fault-entities
                   (mapv #(if (map? %) %
                              (db/pull database '[* {:seon.error/run [:db/id :seon.turn/id]}] %))

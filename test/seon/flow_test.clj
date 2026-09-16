@@ -248,7 +248,8 @@
   (or (db/q
        '[:find (sum ?count) .
          :where
-         [?drop :seon.error/kind :seon.flow/fault-channel-overflow]
+         [?error :seon.error/kind :seon.flow/fault-channel-overflow]
+         [?error :seon.error/occurrences ?drop]
          [?drop :seon.error/dropped-fault-count ?count]]
        database)
       0))
@@ -258,11 +259,12 @@
   (db/q
    '[:find ?count ?digest ?proc ?message
      :where
-     [?drop :seon.error/kind :seon.flow/fault-channel-overflow]
+     [?error :seon.error/kind :seon.flow/fault-channel-overflow]
+     [?error :seon.error/occurrences ?drop]
      [?drop :seon.error/dropped-fault-count ?count]
      [?drop :seon.error/dropped-fault-digest ?digest]
      [?drop :seon.error/proc ?proc]
-     [?drop :seon.error/message ?message]]
+     [?drop :seon.error.occurrence/message ?message]]
    database))
 
 (deftest production-launcher-wedges-degrade-capacity-by-exactly-n
@@ -992,7 +994,7 @@
             {:seon.config.error/recurrence-limit 3
              :seon.config.error/max-evidence-bytes inline-ceiling
              :seon.config.eval.result/blob-threshold inline-ceiling}}))]
-    (testing "132 equal faults produce 132 facts and one whole stderr face"
+    (testing "132 equal faults produce one error with count 132 and one stderr face"
       (test-support/with-database
         (fn [connection]
           (configure! connection)
@@ -1021,23 +1023,26 @@
                   (db/q '[:find ?error ?signature ?message ?capped? ?data-edn
                           :where
                           [?error :seon.error/signature ?signature]
-                          [?error :seon.error/message ?message]
-                          [?error :seon.error/capped? ?capped?]
-                          [?error :seon.error/data-edn ?data-edn]]
+                          [?error :seon.error/occurrences ?occurrence]
+                          [?occurrence :seon.error.occurrence/message ?message]
+                          [?occurrence :seon.error/capped? ?capped?]
+                          [?occurrence :seon.error/data-edn ?data-edn]]
                         @connection)
                   [_error signature message capped? data-edn] (first facts)
                   recurrence
-                  (db/q '[:find (count ?error) .
+                  (db/q '[:find (sum ?count) . :with ?occurrence
                           :in $ ?signature ?process
                           :where
                           [?error :seon.error/signature ?signature]
-                          [?error :seon.error/process ?process]]
+                          [?error :seon.error/occurrences ?occurrence]
+                          [?occurrence :seon.error/process ?process]
+                          [?occurrence :seon.error.occurrence/count ?count]]
                         @connection signature "process-1")
                   lines (str/split-lines (str stderr-writer))]
-              (is (= 132 (count facts))
-                  "every equal envelope owns a durable fact")
+              (is (= 1 (count facts))
+                  "every equal delivery updates the same occurrence")
               (is (= 132 recurrence)
-                  "recurrence is the query-derived count of those facts")
+                  "recurrence sums the occurrence counts")
               (is (= 132 (::sut/committed final-state)))
               (is (= 1 (::sut/panicked final-state)))
               (is (= 1 (count (::sut/seen-signatures final-state))))
@@ -1097,7 +1102,7 @@
               (is (contains? signature-set
                              (:seon.error/signature durable-fact)))
               (is (= 2 (count signature-set)))
-              (is (= 3 fact-count)
+              (is (= 2 fact-count)
                   "the rebuilt proc commits the repeated occurrence too")
               (is (= signature-set (::sut/seen-signatures final-state)))
               (is (= 2 (::sut/committed final-state)))
@@ -1109,7 +1114,7 @@
                    (db/q '[:find ?message .
                            :where
                            [?error :seon.error/throwable-class "java.lang.IllegalStateException"]
-                           [?error :seon.error/message ?message]]
+                           [?error :seon.error.occurrence/message ?message]]
                          @connection))))))
 
     (testing "a dead writer still emits each signature only once"
@@ -1411,8 +1416,8 @@
                (::channel transactions)
                ::retained-core-faults-committed
                #(<= (inc fault-buffer-capacity)
-                    (db/q '[:find (count ?error) .
-                            :where [?error :seon.error/id]]
+                    (db/q '[:find (sum ?count) . :with ?occurrence
+                            :where [?occurrence :seon.error.occurrence/count ?count]]
                           (:db-after %))))
               (is (= 3 (committed-overflow-count @connection)))
               (let [[drop-count digest proc message]

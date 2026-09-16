@@ -10,7 +10,7 @@
                         :my.note/_agent
                         :seon.agent/namespace
                         :seon.agent/runtime
-                        :seon.error/_steward],
+                        :seon.error/of-steward],
                        :seon.render/ai
                        seon.cluster.agent/render-identity-ai,
                        :seon.render/html

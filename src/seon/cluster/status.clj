@@ -56,10 +56,13 @@
     (let [cluster (db/q '[:find (pull ?c [:seon.cluster/name :seon.source/commit-id]) .
                           :where [?c :seon.cluster/name]] database)
           heap (.getHeapMemoryUsage (ManagementFactory/getMemoryMXBean))
-          faults (db/q '[:find ?signature (count ?f)
+          faults (db/q '[:find ?signature (sum ?count)
+                         :with ?o
                          :in $ ?boot
                          :where [?f :seon.error/signature ?signature]
-                         [?f :seon.error/at ?at] [(compare ?at ?boot) ?order]
+                         [?f :seon.error/occurrences ?o]
+                         [?o :seon.error.occurrence/count ?count]
+                         [?o :seon.error.occurrence/last-at ?at] [(compare ?at ?boot) ?order]
                          [(>= ?order 0)]] database (boot-time))]
       (if-not (:seon.cluster/name cluster)
         (unknown "This database has no cluster identity.")
@@ -128,8 +131,9 @@
                last-turn (last (sort-by #(inst-ms (get-in % [:seon.turn/closed-tx :db/txInstant]))
                                        (filter :seon.turn/closed-tx turns)))
                fault-blobs (db/q '[:find [?digest ...] :in $ ?a
-                                   :where [?f :seon.error/agent ?a]
-                                   [?f :seon.error/data-blob ?digest]] database (:db/id agent))
+                                   :where [?o :seon.error.occurrence/agent ?a]
+                                   [?o :seon.error.occurrence/data-blob ?b]
+                                   [?b :seon.error.occurrence/blob-digest ?digest]] database (:db/id agent))
                digests (set (concat (keep :seon.turn/reply-blob turns)
                                     (keep :seon.ai.attempt/reasoning-blob (mapcat :seon.turn/attempts turns))
                                     fault-blobs))

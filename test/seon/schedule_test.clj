@@ -324,7 +324,7 @@
           (is (= 1 (count-with @connection :seon.maintenance.receipt/error)))
           (is (= 1 (count-with @connection :seon.error/id)))
           (is (= 1 (count-with @connection :seon.message/id)))
-          (let [[evaluation-id error-id task nominal]
+          (let [[_evaluation-id error-id task nominal]
                 (first (db/q '[:find ?evaluation-id ?error-id ?task ?nominal
                         :where
                         [?evaluation :seon.maintenance.receipt/id ?evaluation-id]
@@ -335,9 +335,11 @@
                         [?task-row :seon.schedule.task/id ?task]
                         [?fire :seon.schedule.fire/nominal-at ?nominal]]
                              @connection))]
-            (is (id/valid? 12 error-id))
-            (is (= error-id (id/digest 12 [:seon.schedule/maintenance-error
-                                         evaluation-id])))
+            (is (id/valid? 64 error-id))
+            (is (= 1 (db/q '[:find (sum ?count) . :where
+                              [?error :seon.error/id ?id]
+                              [?error :seon.error/occurrences ?occurrence]
+                              [?occurrence :seon.error.occurrence/count ?count]] (db/db connection))))
             (is (= task-id task))
             (is (inst? nominal)))
           (is (= expected-kind

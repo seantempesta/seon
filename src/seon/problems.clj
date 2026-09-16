@@ -82,7 +82,7 @@
   [pulled identity-attribute]
   (cond
     (not (map? pulled)) pulled
-    (contains? pulled identity-attribute)
+    (and (not= :db/id identity-attribute) (contains? pulled identity-attribute))
     [identity-attribute (get pulled identity-attribute)]
     (contains? pulled :db/id) (:db/id pulled)
     :else pulled))
@@ -95,34 +95,31 @@
     (update :seon.error/run restore-error-ref :seon.turn/id)
 
     (contains? pulled :seon.error/agent)
-    (update :seon.error/agent restore-error-ref :seon.agent/id)))
+    (update :seon.error/agent restore-error-ref :seon.agent/id)
+    (:seon.error/resolved-tx pulled)
+    (update :seon.error/resolved-tx restore-error-ref :db/id)
+    (:seon.error/issue pulled)
+    (update :seon.error/issue restore-error-ref :db/id)
+    (:seon.error/regressions pulled)
+    (update :seon.error/regressions #(into #{} (map (fn [r] (restore-error-ref r :db/id))) %))))
 
 (defn- error-signatures
-  "Every committed error, grouped by signature, worst-recurring first."
-  [db]
+  "Errors ordered by the sum of their occurrence counts."
+  [database]
   (->> (db/q '[:find [(pull ?error
-                             [*
-                              {:seon.error/run
-                               [:db/id :seon.turn/id]
-                               :seon.error/agent
-                               [:db/id :seon.agent/id]}]) ...]
-              :where
-              ;; Membership is the declared error identity, not any row
-              ;; that happens to carry a signature. Signature-only rows
-              ;; are comparison evidence, not committed error facts.
-              [?error :seon.error/id _]
-              [?error :seon.error/signature _]]
-            db)
-       (map restore-error-fact)
-       (group-by :seon.error/signature)
-       (mapv (fn [[signature facts]]
-               (let [latest (last (sort-by (comp inst-ms :seon.error/at) facts))]
-                 {:seon.error/signature signature
-                  :seon.error/kind (:seon.error/kind latest)
-                  :seon.problems/occurrences (count facts)
-                  :seon.error/fact latest})))
-       (sort-by (juxt (comp - :seon.problems/occurrences)
-                      :seon.error/signature))
+                            [* {:seon.error/fn [:db/id :seon.fn/sym]}
+                             {:seon.error/occurrences
+                              [* {:seon.error.occurrence/turn [:db/id :seon.turn/id]}
+                                 {:seon.error.occurrence/agent [:db/id :seon.agent/id]}]}]) ...]
+                :where [?error :seon.error/signature]] database)
+       (mapv (fn [row]
+               (let [fact (restore-error-fact (error/latest-fact row))]
+                 {:seon.error/signature (:seon.error/signature row)
+                  :seon.error/kind (:seon.error/kind row)
+                  :seon.problems/occurrences (reduce + 0 (map :seon.error.occurrence/count
+                                                            (:seon.error/occurrences row)))
+                  :seon.error/fact fact})))
+       (sort-by (juxt (comp - :seon.problems/occurrences) :seon.error/signature))
        vec))
 
 (defn- failed-runs
@@ -131,8 +128,8 @@
               :where
               [?run :seon.turn/id ?id]
               [?run :seon.turn/closed-tx _]
-              [?error-fact :seon.error/run ?run]
-              [?error-fact :seon.error/message ?error]
+              [?occurrence :seon.error.occurrence/turn ?run]
+              [?occurrence :seon.error.occurrence/message ?error]
               [?run :seon.turn/agent ?agent]
               [?agent :seon.agent/id ?agent-id]]
             db)
@@ -564,7 +561,7 @@
         (for [entry (:seon.problems/error-signatures found)]
           (error/log-line
            (error/notice {:seon.error/fact (:seon.error/fact entry)
-                          :seon.error/occurrences
+                          :seon.error/occurrence-count
                           (:seon.problems/occurrences entry)})))
 
         (for [entry (:seon.problems/failed-runs found)]

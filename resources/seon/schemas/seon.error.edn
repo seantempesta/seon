@@ -34,14 +34,6 @@
               [:out :seon.schema/value]],
              :class [:= true],
              :evidence [:tuple [:enum :seon.error/id] :seon.error/id],
-             :steward-request
-             [:map
-              {:description
-               "What `steward-call` needs to route one fault inside the committing transaction."}
-              [:seon.error/id :seon.error/id]
-              [:seon.instrument/fn
-               {:optional true}
-               :seon.instrument/fn]],
              :value
              [:map
               [:seon.error/kind :seon.error/kind]
@@ -55,9 +47,9 @@
               [:seon.error/occurrence
                {:optional true}
                :seon.error/occurrence]
-              [:seon.error/occurrences
+              [:seon.error/occurrence-count
                {:optional true}
-               :seon.error/occurrences]
+               :seon.error/occurrence-count]
               [:seon.error/notification-limit
                {:optional true}
                :seon.error/notification-limit]
@@ -216,17 +208,15 @@
              [:map
               [:seon.error/fact :seon.error/fact]
               [:seon.error/data-content :seon.error/data-content]],
-             :steward
+             :steward :seon.db/ref,
+             :of-steward
              [:and
               {:description
-               "The agent this fault is ROUTED TO for repair: the steward of the namespace of the function that failed (:seon.instrument/fn -> :seon.fn/ns -> :seon.ns/steward), decided inside the committing transaction. A LISTENED ATTRIBUTE: asserting it wakes that agent. Distinct from :seon.error/agent, which is the agent this fault happened TO. Also an INSIDE wake — a fault is the population's own activity and never resets the steward's turn bound; the bound is what stops a fault about an agent's own code looping.",
-               :seon.db/index true,
+               "Errors derived through function, namespace and namespace steward refs. Notifications wake the steward through the existing message relation; no error stores its steward.",
+               :seon.render/derived true,
                :seon.render/ai seon.error/render-faults-ai,
                :seon.render/html seon.error/render-faults-html,
-               :seon.render/form seon.error/faults-form,
-               :seon.wake/listen true,
-               :seon.wake/opens-turn? true,
-               :seon.wake/inside true}
+               :seon.render/form seon.error/faults-form}
               :seon.db/ref],
              :data-content :string,
              :occurrence [:int {:min 1}],
@@ -249,9 +239,9 @@
               [:seon.error/occurrence
                {:optional true}
                :seon.error/occurrence]
-              [:seon.error/occurrences
+              [:seon.error/occurrence-count
                {:optional true}
-               :seon.error/occurrences]
+               :seon.error/occurrence-count]
               [:seon.error/notification-limit
                {:optional true}
                :seon.error/notification-limit]

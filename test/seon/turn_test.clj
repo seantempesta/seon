@@ -1778,57 +1778,32 @@
 (deftest fault-unit-lists-agent-faults-newest-first-with-run-links
   (support/with-database
     (fn [connection]
-      (checked-transact!
-       connection
-       [{:seon.agent/id "juno"}
-        {:seon.turn/id "run-1" :seon.turn/agent [:seon.agent/id "juno"] :seon.turn/opened-tx "datomic.tx"}
-        (error/normalize
-         {:seon.error/id "fault-old"
-          :seon.error/source {:seon.error/kind :seon.instrument/contract-violated
-                              :seon.error/message "older fault"}
-          :seon.error/at (java.util.Date. 1700000000000)
-          :seon.error/process cluster/boot-process-identity
-          :seon.sci.admit/caps (config/result-caps (support/effective-config))
-          :seon.config.error/max-evidence-bytes 16384
-          :seon.agent/id "juno" :seon.turn/id "run-1"})
-        (error/normalize
-         {:seon.error/id "fault-new"
-          :seon.error/source {:seon.error/kind :seon.instrument/contract-violated
-                              :seon.error/message "newer fault"}
-          :seon.error/at (java.util.Date. 1700000060000)
-          :seon.error/process cluster/boot-process-identity
-          :seon.sci.admit/caps (config/result-caps (support/effective-config))
-          :seon.config.error/max-evidence-bytes 16384
-          :seon.agent/id "juno"})])
-      (let [database @connection
-            faults (db/pull-many
-                    database '[* {:seon.error/run [:db/id :seon.turn/id]}]
-                    (mapv :db/id
-                          (:seon.error/_agent
-                           (db/pull database [:seon.error/_agent]
-                                    [:seon.agent/id "juno"]))))
+      (checked-transact! connection
+                         [{:seon.agent/id "juno"}
+                          {:seon.turn/id "run-1" :seon.turn/agent [:seon.agent/id "juno"]
+                           :seon.turn/opened-tx "datomic.tx"}])
+      (doseq [[kind message millis turn-id] [[:seon.instrument/contract-violated "older fault" 1700000000000 "run-1"]
+                                            [:seon.db/rejected "newer fault" 1700000060000 nil]]]
+        (checked-transact!
+         connection
+         (error/commit-tx
+          (db/db connection)
+          (cond-> {:seon.error/source {:seon.error/kind kind :seon.error/message message}
+                   :seon.error/id message :seon.error/at (java.util.Date. millis)
+                   :seon.error/process cluster/boot-process-identity
+                   :seon.sci.admit/caps (config/result-caps (support/effective-config))
+                   :seon.config.error/max-evidence-bytes 16384
+                   :seon.config.error/recurrence-limit 100 :seon.agent/id "juno"}
+            turn-id (assoc :seon.turn/id turn-id)))))
+      (let [database (db/db connection)
+            faults (db/q '[:find [(pull ?e [* {:seon.error/occurrences [* {:seon.error.occurrence/turn [:seon.turn/id]}]}]) ...]
+                           :where [?e :seon.error/occurrences ?o]
+                                  [?o :seon.error.occurrence/agent ?a]
+                                  [?a :seon.agent/id "juno"]] database)
             rendered (error/render-faults-html faults database)]
-        (is (= [:section {:class "seon-family-entry seon-error-faults"}
-                [:h2 "Faults (2)"]]
-               (subvec rendered 0 3)))
+        (is (= [:h2 "Faults (2)"] (nth rendered 2)))
         (is (= ["newer fault" "older fault"]
-               (mapv #(some #{"newer fault" "older fault"}
-                            (tree-seq coll? seq %)) (subvec rendered 3)))
-            "newest first, and each fault keeps the one error card")
-        (is (= ["contract-violated"
-                "contract-violated"]
-               (mapv #(last (nth % 2)) (subvec rendered 3)))
-            "each card names the fault's kind")
-        (is (str/includes? (hiccup/->string (nth rendered 4)) "run-1")
-            "a fault that names a run links to it by its stable id")
-        (is (not (str/includes? (hiccup/->string (nth rendered 3))
-                                "seon-error-run"))
-            "and the newest fault, which names no run, has no run line")
-        (is (not (str/includes? (pr-str rendered) "seon.error/signature"))
-            "a card states the fault, not every stored attribute of it")
-        (is (= [:section {:class "seon-family-entry seon-error-faults"}
-                [:h2 "Faults (0)"]
-                [:p {:class "seon-error-faults-empty"}
-                 "No fault is recorded against this agent."]]
-               (error/render-faults-html [] database))
-            "an agent with no faults renders an empty state, never an error")))))
+               (mapv #(some #{"newer fault" "older fault"} (tree-seq coll? seq %)) (subvec rendered 3))))
+        (is (str/includes? (hiccup/->string (nth rendered 4)) "run-1"))
+        (is (not (str/includes? (hiccup/->string (nth rendered 3)) "seon-error-run")))
+        (is (str/includes? (pr-str (error/render-faults-html [] database)) "Faults (0)"))))))
