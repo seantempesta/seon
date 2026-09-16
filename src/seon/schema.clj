@@ -538,7 +538,8 @@
   "Canonical byte-comparison string for ordinary projection data.
 
    This is the portable content oracle used by projection fingerprints and by
-   the preprocessed-base composition proof. Runtime objects are rejected."
+   the preprocessed-base composition proof. It encodes every EDN literal,
+   including instants, uuids and characters; runtime objects are rejected."
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Canonical projection encoding handles heterogeneous EDN data, including nil, literals and nested collections; unsupported runtime objects are reported as noncanonical projection data.", :gen/elements [nil false 0 "" :k [] {}]}]] :string]}
   [value]
   (cond
@@ -549,6 +550,15 @@
     (symbol? value) (framed "y" (str value))
     (string? value) (framed "s" value)
     (number? value) (framed "d" (str value))
+    ; EDN literals `seon.db/stable-value` admits as stable read data
+    ; (`src/seon/db.clj:422-424`). Rejecting them made every read result
+    ; carrying a `:db/instant` or a commit id undigestable, so the agent
+    ; history's retained read could never prove itself current and ANY
+    ; commit re-walked it (2026-09-16). Their tags are new, so no
+    ; fingerprint that encoded before this change encodes differently.
+    (inst? value) (framed "i" (str (inst-ms value)))
+    (uuid? value) (framed "u" (str value))
+    (char? value) (framed "c" (str value))
     (vector? value) (canonical-coll-string "v" value)
     (set? value) (canonical-coll-string
                    "t" (sort (map canonical-data-string value)))
