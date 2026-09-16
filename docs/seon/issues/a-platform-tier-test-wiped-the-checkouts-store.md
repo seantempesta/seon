@@ -109,11 +109,33 @@ fixture, or lane JVM can spell the developer's `data/store` at all.
    `:seon.test/long` or run only under an explicit isolated root, and the
    tier's selection checker fails when one is declared `:seon.test/platform`.
 
-(1) and (2) landed above. (3) — the platform tier declaring no destructive
-drill — is NOT part of this fix: the tier selection checker is a separate
-slice, tracked here as the remaining item. The gate hold is now the
-orchestrator's call: the root the wipe travelled through is closed, and the
-class regression names it.
+(1) and (2) landed in `ccccea806`.
+
+**(3) landed 2026-09-17** (`docs/prds/steward-platform/research/platform-tier-no-destructive-drill-2026-09-17.md`).
+`seon.test.runner/destructive-owners` declares the three functions that
+delete a filesystem path they did not create —
+`seon.test-support/populate-published-root!`,
+`seon.test-support/populate-published-operator-root!` and
+`seon.operator/cleanup-root-under-lock!` — and
+`destructive-owner-rows` RESOLVES each against the program graph, refusing
+when one does not, so a rename cannot leave the checker walking to nothing.
+`verify-platform-tier-carries-no-destructive-drill!` runs inside
+`run-coordinator!` before the first platform task is dispatched: it derives
+the reach from `:seon.fn/calls` and refuses the run, naming each offending
+test and its call path to the owner. Metadata drift cannot bypass it.
+
+Three platform tests reached a destructive owner and are now bulk-tier:
+`seon.cluster.cohost-boot-test/a-second-cluster-boots-under-the-first-cluster-s-instrumentation`,
+`seon.test-runner-test/consecutive-cache-invocations-reuse-the-published-base`,
+`seon.test-support-test/simultaneous-fixture-bases-never-open-the-published-store`.
+No coverage was dropped and none was demoted to `:seon.test/long`.
+
+Refuted while doing it: "destructive = reaches the delete admission seam"
+over-approximates to 42 of roughly 80 platform tests, because
+`seon.cluster.store/create-store!` admits unconditionally and every
+`open-store!` reaches it. The admission seam is the safety `ccccea806`
+added, not the hazard. Regression:
+`seon.test.runner-test/the-platform-tier-declares-no-destructive-drill`.
 
 ## Verdict 2026-09-17 11:40Z (peer research `fbd9c0cd9`)
 
