@@ -209,3 +209,28 @@ regression again passed **3 assertions, 0 failures/errors**, run **68282**, in
 [test-result recording](../../../seon/issues/test-result-recording-walks-datoms-on-failed-live-tests.md),
 and the oversized publication explanation is recorded on the existing
 [operator diagnostic issue](../../../seon/issues/init-failure-dumps-entire-prepl-event-history.md).
+
+### Final default boundary — RESET NEEDED
+
+A final ordinary `bin/seon init --dev default --changed src/seon/fn.clj`
+finished with exit **1** after acquiring the lifecycle lock. It reached
+incremental publication and then refused development schema declarations:
+
+```clojure
+{:seon.boot/attribute :seon.error/signature
+ :seon.boot/installed {:db/ident :seon.error/signature
+                       :db/valueType :db.type/string
+                       :db/cardinality :db.cardinality/one :db/index true}
+ :seon.boot/current {:db/ident :seon.error/signature
+                    :db/valueType :db.type/string
+                    :db/cardinality :db.cardinality/one
+                    :db/unique :db.unique/identity}}
+```
+
+This is the concurrent error-occurrence schema slice (`2320dc1a9`), outside
+this lane's owned files. Default was neither stopped nor reforked. The owner
+must batch that reset before the requested default pull can be proven. The
+lane's implementation commit remains `3402913f3`; documentation follow-up
+`7ee2c4c08` records the earlier evidence. The isolated namespace/platform gate
+remains requested, not run. The manual operator command exited and no owned
+background shell remains; the lane's candidate scratch directory was removed.
