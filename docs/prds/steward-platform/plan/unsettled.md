@@ -1063,6 +1063,17 @@ now serves both. **Orchestrator-only marker REMOVED (23:00Z):** it blocked
 slots stay as the load cap. Gate commands still pass
 `SEON_TEST_ORCHESTRATOR=1` harmlessly.
 
+**Batch-110 triage landed** (`c60980f3e`, note `batch-110-triage-2026-09-16.md`):
+nine distinct failing tests, not 38. The stale "ended without
+my.turn/complete" assertion replaced with the ruled behaviour (T2 / decision
+8b); dead `undisposed-run-text` + `:run` arm hunk recorded for
+`transcript.clj` (held). Both `seon.issue-test` reds and
+`started-issue-tests-retain-historical-authority` are the retired-identity
+class — HAND TO `retirement-is-a-fact` ON ITS RESUME: the fix must cover the
+`removed` arm of BOTH `index-tx` (issue.clj:410-420) and `adopt-tx`
+(:756-757). `success-test` is the fixture's deliberate failing test leaking
+into the log as a FAIL line (reporting smell, recorded).
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
