@@ -146,6 +146,7 @@
             [clojure.test.check.generators :as gen]
             [malli.core :as m]
             [malli.error :as me]
+            [seon.call-preparation :as call-preparation]
             [seon.db :as db]
             [seon.id :as id]
             [seon.error.refusal :as error.refusal]
@@ -159,6 +160,12 @@
             [seon.schema.form :as schema.form]
             [seon.sci.admit :as admit])
   (:import [java.nio.charset StandardCharsets]))
+
+;;; LOAD-CYCLE BOUNDARY. `seon.sci.eval` requires `seon.error` transitively,
+;;; so this namespace cannot require it back. One resolution, realized at
+;;; first use, instead of a `requiring-resolve` on every call (AGENTS §2.1).
+(defonce ^:private sci-eval-docstring-parts
+  (delay (requiring-resolve 'seon.sci.eval/docstring-parts)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schemas — resources/seon/schema.edn
@@ -823,7 +830,7 @@
                         :where [?f :seon.fn/sym ?sym] [?f :seon.fn/spec ?spec]]
                       database (str operation))
             position (:seon.sci.reader/argument-index evidence)
-            supplied ((requiring-resolve 'seon.call-preparation/supplied-map-entries)
+            supplied (call-preparation/supplied-map-entries
                       database (str operation))
             supplied-keys (into #{} (map #(nth % 2)) (when (vector? supplied) supplied))
             container (first (:seon.sci.reader/containers evidence))
@@ -939,7 +946,7 @@
                         (when (string? doc)
                           (not-empty
                            (:example
-                            ((requiring-resolve 'seon.sci.eval/docstring-parts) doc)))))))]
+                            (@sci-eval-docstring-parts doc)))))))]
     (when (and operation (seq problems))
       (str/join
        "\n"
