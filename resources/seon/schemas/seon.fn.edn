@@ -11,6 +11,9 @@
           :arities [:vector #:seon.db{:component true} :seon.db/ref],
           :ast [:and #:seon.db{:component true} :seon.db/ref],
           :calls [:set :seon.db/ref],
+          :pending-calls
+          [:set {:description "Analyzer-observed call targets whose program identity is not yet admitted. The declaration writer resolves them when that identity arrives."}
+           [:string {:min 1}]],
           :external-sink
           [:enum :ai-visible-text :html-response :codec-storage],
           :doc [:string #:seon.search{:index :text}],
@@ -43,6 +46,7 @@
            [:seon.fn/macro? {:optional true} :seon.fn/macro?]
            [:seon.fn/spec {:optional true} :seon.fn/spec]
            [:seon.fn/calls {:optional true} :seon.fn/calls]
+           [:seon.fn/pending-calls {:optional true} :seon.fn/pending-calls]
            [:seon.fn/keywords {:optional true} :seon.fn/keywords]
            [:seon.fn/arities {:optional true} :seon.fn/arities]
            [:seon.fn/ast {:optional true} :seon.fn/ast]

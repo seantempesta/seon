@@ -518,14 +518,22 @@
 (defn- runtime-analysis-batch
   "Run the analyzer once for an ordered batch of submitted forms.
 
-  Every form gets its own synthesized real namespace form and exact source row
-  span. No population or function-stub prelude is constructed. Analyzer
-  entries are projected back to those spans below, so one form never acquires
-  another form's facts."
+  Existing declarations supply the same namespace context as admission lint.
+  Every form retains its exact source row span, excluding context declarations.
+  Unknown unqualified usages retain the analyzer's calling namespace until
+  the writer can resolve their target identity."
   [database requests]
-  (let [{:keys [source spans]}
+  (let [namespace-names (vec (distinct (map :namespace-name requests)))
+        available-functions
+        (db/q '[:find [(pull ?f [:seon.fn/sym :seon.fn/arglists :seon.fn/private?]) ...]
+                :in $ [?name ...]
+                :where [?n :seon.ns/name ?name]
+                       [?f :seon.fn/ns ?n] [?f :seon.fn/sym _]]
+              database namespace-names)
+        prelude (analyzer/program-prelude available-functions)
+        {:keys [source spans]}
         (loop [remaining requests
-               source ""
+               source (if (seq prelude) (str prelude "\n") "")
                spans []]
           (if-let [{:keys [namespace-name form-source]} (first remaining)]
             (let [namespace-row
@@ -552,7 +560,15 @@
             {:source source :spans spans}))
         analysis
         (with-in-str source
-          (analyzer/analyze {::analyzer/paths ["-"]}))]
+          (analyzer/analyze {::analyzer/paths ["-"]}))
+        analysis
+        (update analysis ::analyzer/var-usages
+                (fn [usages]
+                  (mapv (fn [usage]
+                          (if (= :clj-kondo/unknown-namespace (::analyzer/to usage))
+                            (assoc usage ::analyzer/to (::analyzer/from usage))
+                            usage))
+                        usages)))]
     {:seon.fn/analysis analysis
      :seon.fn/source-spans spans
      :seon.fn/function-rows
@@ -585,8 +601,7 @@
         (cond-> (into #{} (map :seon.fn/sym) function-rows)
           program-symbol (conj program-symbol))
         calls-by-caller
-        (call-targets-by-caller analysis first-party-functions
-                                first-party-functions)
+        (call-targets-by-caller analysis first-party-functions)
         used-keywords (keywords-by-holder analysis)
         program-facts
         (when program-symbol
@@ -601,10 +616,15 @@
                             (test-subject (::analyzer/meta definition)))]
             (cond-> {}
               (::analyzer/macro definition) (assoc :seon.fn/macro? true)
-              (seq (get calls-by-caller program-symbol))
+              (seq (filter first-party-functions (get calls-by-caller program-symbol)))
               (assoc :seon.fn/calls
                      (into #{}
-                           (map (fn [target] [:seon.fn/sym target]))
+                           (comp (filter first-party-functions)
+                                 (map (fn [target] [:seon.fn/sym target])))
+                           (get calls-by-caller program-symbol)))
+              (seq (remove first-party-functions (get calls-by-caller program-symbol)))
+              (assoc :seon.fn/pending-calls
+                     (into #{} (remove first-party-functions)
                            (get calls-by-caller program-symbol)))
               (keyword-values used-keywords qualified)
               (assoc :seon.fn/keywords

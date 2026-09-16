@@ -66,7 +66,7 @@
      :seon.fn/doc :seon.fn/private? :seon.fn/macro? :seon.fn/spec
      :seon.test/subject
      :seon.fn/arities
-     :seon.fn/ast :seon.fn/calls :seon.fn/keywords :seon.fn/workload
+     :seon.fn/ast :seon.fn/calls :seon.fn/pending-calls :seon.fn/keywords :seon.fn/workload
      :seon.fn/doc-order :seon.fn/internal? :seon.fn/external-sink :seon.fn/projection-boundary
      :seon.effect/capability
      :seon.schema.admission/source]}
@@ -79,7 +79,7 @@
     :seon.program/source-attribute :seon.test/source
     :seon.program/owned-attributes
     [:seon.test/sym :seon.test/ns :seon.test/source :seon.fn/file :seon.fn/form-span :seon.fn/calls
-     :seon.fn/keywords :seon.test/usage :seon.test/subject :seon.test/fixture-observation
+     :seon.fn/keywords :seon.fn/pending-calls :seon.test/usage :seon.test/subject :seon.test/fixture-observation
      :seon.schema.admission/source]}})
 
 (defn shape

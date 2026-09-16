@@ -315,7 +315,14 @@
       ;; contain.
       (list operation function-name '[& arguments] nil))))
 
-(defn- program-prelude
+(defn program-prelude
+  "Render the supplied program declarations as kondo namespace context."
+  {:malli/schema
+   [:=> [:cat [:vector [:map
+                       [:seon.fn/sym :seon.fn/sym]
+                       [:seon.fn/arglists {:optional true} :seon.fn/arglists]
+                       [:seon.fn/private? {:optional true} :seon.fn/private?]]]]
+    :string]}
   [available-functions]
   (->> available-functions
        (group-by #(some-> (:seon.fn/sym %) symbol namespace symbol))

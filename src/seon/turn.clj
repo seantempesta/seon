@@ -1168,7 +1168,7 @@
     false))
 
 (def ^:private program-relation-attributes
-  [:seon.fn/calls :seon.fn/keywords
+  [:seon.fn/calls :seon.fn/pending-calls :seon.fn/keywords
    :seon.test/subject :seon.test/pending-subject])
 
 (defn- relation-assertions
@@ -1177,6 +1177,8 @@
         (concat
          (map (fn [target] [:db/add entity :seon.fn/calls target])
               (:seon.fn/calls row))
+         (map (fn [target] [:db/add entity :seon.fn/pending-calls target])
+              (:seon.fn/pending-calls row))
          (map (fn [used] [:db/add entity :seon.fn/keywords used])
               (:seon.fn/keywords row))
          (when-let [subject (:seon.test/subject row)]
@@ -1184,20 +1186,25 @@
          (when-let [pending-subject (:seon.test/pending-subject row)]
            [[:db/add entity :seon.test/pending-subject pending-subject]]))))
 
-(defn- pending-subject-resolution-tx
+(defn- pending-relation-resolution-tx
   [db identity identity-value existing]
   (when (= :seon.fn/sym identity)
     (let [target (or (:db/id existing) (str "sym:" identity-value))]
-      (into []
-            (mapcat (fn [test-eid]
-                      [[:db/retract test-eid :seon.test/pending-subject
-                        identity-value]
-                       [:db/add test-eid :seon.test/subject target]]))
-            (db/q '[:find [?test ...]
-                    :in $ ?subject
-                    :where
-                    [?test :seon.test/pending-subject ?subject]]
-                  db identity-value)))))
+      (into [] cat
+            [(into []
+                   (mapcat (fn [test-eid]
+                             [[:db/retract test-eid :seon.test/pending-subject identity-value]
+                              [:db/add test-eid :seon.test/subject target]]))
+                   (db/q '[:find [?test ...] :in $ ?subject
+                           :where [?test :seon.test/pending-subject ?subject]]
+                         db identity-value))
+             (into []
+                   (mapcat (fn [caller]
+                             [[:db/retract caller :seon.fn/pending-calls identity-value]
+                              [:db/add caller :seon.fn/calls target]]))
+                   (db/q '[:find [?caller ...] :in $ ?symbol
+                           :where [?caller :seon.fn/pending-calls ?symbol]]
+                         db identity-value))]))))
 
 (defn- row-tx
   "Validate and exact-upsert one reader-produced durable declaration."
@@ -1319,6 +1326,28 @@
                {:seon.schema.admission/source :agent}))
 
               nil)
+            ; Decide target existence at the writer, including earlier batch rows.
+            unresolved-calls
+            (into #{}
+                  (comp (filter #(and (vector? %) (= :seon.fn/sym (first %))))
+                        (remove #(or (= [identity identity-value] %)
+                                     (:db/id (db/pull db [:db/id] %))))
+                        (map second))
+                  (:seon.fn/calls row))
+            pending-calls (into (set (:seon.fn/pending-calls row)) unresolved-calls)
+            resolved-pending
+            (into #{} (filter #(or (= [identity identity-value] [:seon.fn/sym %])
+                                  (:db/id (db/pull db [:db/id] [:seon.fn/sym %]))))
+                  pending-calls)
+            row (cond-> (dissoc row :seon.fn/pending-calls)
+                  (seq pending-calls)
+                  (assoc :seon.fn/pending-calls (into #{} (remove resolved-pending) pending-calls))
+                  (or (seq (:seon.fn/calls row)) (seq resolved-pending))
+                  (assoc :seon.fn/calls
+                         (into (into #{} (remove #(and (vector? %)
+                                                      (unresolved-calls (second %))))
+                                     (:seon.fn/calls row))
+                               (map #(vector :seon.fn/sym %)) resolved-pending)))
             relation-row (select-keys row program-relation-attributes)
             base-row (apply dissoc row program-relation-attributes)
             schema-declarations
@@ -1355,7 +1384,7 @@
                  (program/exact-replacement-tx existing base-row))
                (relation-assertions [identity identity-value]
                                     relation-row)
-               (pending-subject-resolution-tx
+               (pending-relation-resolution-tx
                 db identity identity-value existing)))))))
 
 (def ^:private receipt-terminal-attributes
