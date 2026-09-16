@@ -526,7 +526,13 @@
                         :seon.test/run-at (:seon.test.run/at run)
                         :seon.test.runner/results
                         [{:seon.test/sym test-symbol :seon.test/pass-count 1
-                          :seon.test/fail-count 0 :seon.test/error-count 0}]}
+                          :seon.test/fail-count 1 :seon.test/error-count 0
+                          :seon.test.failure/reports
+                          [{:seon.test.failure/type :fail
+                            :seon.test.failure/expected "(= 1 2)"
+                            :seon.test.failure/actual "(not (= 1 2))"
+                            :seon.test.failure/reported-file "id_test.clj"
+                            :seon.test.failure/line 42}]}]}
             recorded (source/record-results! opened completion)
             recorded-commit (:seon.source/commit-id (source/current opened))
             rebuilt (publish opened digest-a population {:seon.fn/manifest manifest})
@@ -543,8 +549,25 @@
                               [?test :seon.test/run ?run]
                               [?run :seon.test.run/program-digest ?digest]]
                      rebuilt-db test-symbol)))
-        (is (= run (dissoc (db/pull rebuilt-db '[*]
+        (is (= (assoc run :seon.test.run/branch :current-src
+                         :seon.test.run/tested-branch (:seon.test.run/branch run))
+               (dissoc (db/pull rebuilt-db '[*]
                                     [:seon.test.run/id (:seon.test.run/id run)]) :db/id)))
+        (let [selector [:seon.test/reach-unknown
+                        {:seon.test/failures
+                         [:seon.test.failure/id :seon.test.failure/type
+                          :seon.test.failure/expected :seon.test.failure/actual
+                          :seon.test.failure/line :seon.test.failure/seen-count
+                          :seon.test.failure/last-seen-at
+                          {:seon.test.failure/file [:seon.fn.file/path]}
+                          {:seon.test.failure/first-run [:seon.test.run/id]}
+                          {:seon.test.failure/last-run [:seon.test.run/id]}]}]
+              before (db/pull (source/database opened recorded-commit) selector
+                              [:seon.test/sym test-symbol])
+              after (db/pull rebuilt-db selector [:seon.test/sym test-symbol])]
+          (is (string? (:seon.test/reach-unknown before)))
+          (is (= 1 (count (:seon.test/failures before))))
+          (is (= before after) "rebuilding carries membership diagnostics and component evidence"))
         (is (= #{recorded-commit} (d/parent-commit-ids rebuilt-db))
             "the latest published evidence is the parent, not the older :db base")
         (let [changed (upsert opened (:seon.source/commit-id rebuilt) digest-b [])
