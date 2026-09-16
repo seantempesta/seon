@@ -1500,6 +1500,22 @@ the now-free schema seam (RESET NEEDED). Wake-matchers landed `ede929f0b`
 fault-path refusal → fix lane launched (string into symbol-typed
 `:seon.error/exception-class`, db.clj:2398).
 
+**Incremental publication LANDED** (`2dd9a4970` R2/R3: `:seon.source/change-class`
+gains `:program`; each changed input runs only its owner; issue notes and
+`.md` out of source-roots/source-file?; `5e54c9ae1` R4: packaged population
+memoised on resource-url+declaration-stamp, 31 → 1.6 ms; `2ee83761d` note +
+issue `incremental-population-owners-accrete-but-never-retract`). Reviewed:
+the R4 memo is a keyed cache invalidated by the stamp, acceptable; R7 hunk
+recorded against config.clj. 19/1,083/0/0 fast; cold gate owed. Its
+hook-log "after" table is blocked by the `seon.search/handle?` publication
+refusal. Foreign red at HEAD, proven: `seon.cluster.source-test` 1F/9E, the
+source seal refused `:transaction/validation-rejected` at source.clj:81 —
+handed to the environment continuation as likely the same predicate. Docs
+landed `dd2f2f493` (skills) `b77cd4688` (AGENTS.md); program-graph note's
+sweep row corrected `dbb40efcf`. Last queued continuation launched: bin/test
+preparation bounds. Editors: no-default, tier-0, environment, fault-path,
+bin/test bounds + codex integrator.
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
