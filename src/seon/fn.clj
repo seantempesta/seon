@@ -1261,19 +1261,16 @@
 (def ^:private request-symbol "seon.effect/request!")
 
 (def ^:private test-reach-rules
-  '[[(resolved-edge ?function ?target)
+  '[[(call-edge ?function ?target)
      [?function :seon.fn/calls ?target]]
-    [(resolved-edge ?function ?target)
+    [(call-edge ?function ?target)
      [?declaration :seon.fn/reference-to :seon.fn/sym]
      [?declaration :seon.schema/key ?attribute]
      [?holder ?attribute ?target]
      [?target :seon.fn/sym]
      [?function :seon.fn/keywords ?attribute]]
     [(call-edge ?function ?target)
-     (resolved-edge ?function ?target)]
-    [(call-edge ?function ?target)
-     [?function :seon.fn/references ?target]
-     (not-join [?target] (resolved-edge ?resolved ?target))]
+     [?function :seon.fn/references ?target]]
     [(call-edge ?test ?target)
      [?file :seon.fn/unresolved-references ?symbol]
      [?target :seon.fn/sym ?symbol]
@@ -1320,9 +1317,8 @@
 
 (defn- gate-set-in
   "Walk one identity using the declaration relation acquired for this operation.
-  Resolved incoming calls take precedence; references are the fallback when
-  that target has no resolved incoming caller. File uncertainty selects only
-  tests owned by that file."
+  Calls and references both contribute incoming callers, including when a
+  target has resolved calls. File uncertainty selects only its file's tests."
   [database incoming-declared incoming-file function-symbol]
   (let [row (db/pull database [:db/id] [:seon.fn/sym function-symbol])]
     (if (:seon.error/kind row)
@@ -1335,9 +1331,7 @@
                   (recur (pop pending) seen callers)
                   (let [calls (db/datoms database :avet :seon.fn/calls entity)
                         declared (get incoming-declared entity)
-                        references (when (and (not (:seon.error/kind calls))
-                                              (empty? calls) (empty? declared))
-                                     (db/datoms database :avet :seon.fn/references entity))
+                        references (db/datoms database :avet :seon.fn/references entity)
                         refusal (some #(when (:seon.error/kind %) %) [calls references])]
                     (if refusal
                       refusal

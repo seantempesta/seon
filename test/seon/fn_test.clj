@@ -1461,6 +1461,8 @@
                                       ("sample.gates/a" "sample.gates/b")
                                       [[:avet :seon.fn/calls (:db/id (db/pull database [:db/id] [:seon.fn/sym "sample.gates/a"]))]
                                        [:avet :seon.fn/calls (:db/id (db/pull database [:db/id] [:seon.fn/sym "sample.gates/b"]))]
+                                       [:avet :seon.fn/references (:db/id (db/pull database [:db/id] [:seon.fn/sym "sample.gates/a"]))]
+                                       [:avet :seon.fn/references (:db/id (db/pull database [:db/id] [:seon.fn/sym "sample.gates/b"]))]
                                        [:avet :seon.fn/calls (:db/id (db/pull database [:db/id] [:seon.test/sym "sample.gates/direct"]))]
                                        [:avet :seon.fn/references (:db/id (db/pull database [:db/id] [:seon.test/sym "sample.gates/direct"]))]]
                                       "sample.gates/unrelated"
@@ -1468,14 +1470,14 @@
                                        [:avet :seon.fn/references (:db/id (db/pull database [:db/id] [:seon.fn/sym s]))]]
                                       []))
                                (set @scans))
-                            "references are scanned only at a target with no resolved incoming call")
+                            "both indexed edge attributes are scanned for every reached identity")
                         result))
                     symbols))]
         (is (= [["sample.gates/direct" "sample.gates/pending" "sample.gates/subject"]
                 ["sample.gates/direct" "sample.gates/subject"]
                 ["sample.gates/future"] [] []]
                results))
-        (is (= [4 4 0 2 0] @scan-counts)
+        (is (= [6 6 0 2 0] @scan-counts)
             "only the reachable identities are visited, once per requested gate set")
         (is (<= (count @queries) (* 5 (count symbols)))
             "each identity uses at most five nonrecursive selection queries")
@@ -2655,7 +2657,8 @@
             rows (vec (mapcat :seon.fn.file/rows artifacts))
             tx (seon.fn/reconcile-tx database rows [])
             projected (:db-after (d/with database tx))
-            expected {"sample.scoped-target/target" ["sample.scoped-tests/direct"]
+            expected {"sample.scoped-target/target" ["sample.scoped-tests/direct"
+                                                      "sample.scoped-tests/indirect"]
                       "sample.scoped-reference/target" ["sample.scoped-tests/fallback"]
                       "sample.scoped-file/target" ["sample.scoped-uncertain/local-test"]
                       "sample.scoped-missing/absent" []}
@@ -2675,14 +2678,14 @@
                             [?target :seon.fn/sym "sample.scoped-target/target"]
                             [?caller :seon.fn/references ?target]
                             [?caller :seon.test/sym ?symbol]] projected)))
-            "the excluded reference really is stored")
+            "the separate reference-only caller really is stored")
         (is (= #{"sample.scoped-tests/direct"}
                (set (db/q '[:find [?symbol ...]
                             :where
                             [?target :seon.fn/sym "sample.scoped-target/target"]
                             [?caller :seon.fn/calls ?target]
                             [?caller :seon.test/sym ?symbol]] projected)))
-            "the resolved incoming caller takes precedence")
+            "the resolved caller coexists with the reference-only caller")
         (is (= expected selected))
         (is (= 1 @queries) "one declaration relation per bulk operation")
         (doseq [[target tests] expected]
@@ -2703,7 +2706,7 @@
             (is (= tests (selection/reaching-tests artifacts (if path [path] [])))))))
       (finally (test-support/delete-recursively! root)))))
 
-(deftest reference-selection-is-a-scoped-fallback
+(deftest reference-selection-includes-resolved-and-reference-only-callers
   (test-support/with-database
     (fn [connection] (assert-scoped-reference-selection (db/db connection)))))
 

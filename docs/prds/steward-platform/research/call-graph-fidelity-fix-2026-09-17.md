@@ -410,3 +410,62 @@ reference it suppresses: **16 pass / 0 fail / 0 error**. All lane futures
 finished; temporary bindings, the isolated worktree, named scratch, and the
 nine fixture directories created by these unit invocations were removed.
 The retained batch-105 root and foreign files were untouched.
+
+## Orchestrator correction — references always contribute reach
+
+The orchestrator rejected the reference fallback in `3f0be21ed`. The earlier
+fallback claims and associated green assertions above describe that rejected
+policy, not the current guarantee. A resolved caller never suppresses another
+caller's uncertain reference.
+
+`gate-set-in` now scans both `:seon.fn/calls` and `:seon.fn/references` for
+every visited identity and unions both with declared and file-scoped incoming
+edges (`src/seon/fn.clj:1318`). The Datalog relation has direct clauses for
+all four sources; the negative join and its intermediate resolved-edge rule
+are gone (`src/seon/fn.clj:1263`). The manifest selector likewise unions
+calls and references (`src/seon/test/selection.clj:123`). The detector's
+explanation now states that both contribute (`src/seon/issue/detect.clj:237`).
+
+The existing fixture has two distinct callers of the same target: the
+`direct` test calls it, while the `indirect` test references it through
+`partial` (`test/fixtures/call_graph_fidelity/scoped.edn:4`). The extended
+`reference-selection-includes-resolved-and-reference-only-callers` regression
+asserts both tests are selected, retains assertions that both edge facts are
+stored, and checks database/Datalog/manifest parity (`test/seon/fn_test.clj:2649`).
+The indexed-walk regression now requires both exact AVET scans at each visited
+identity, including the cycle: counts `[6 6 0 2 0]` (`test/seon/fn_test.clj:1403`).
+File-local widening and one declaration acquisition per bulk operation remain.
+
+### Single read-only measurement and verification boundary
+
+Before any prepl use, `bin/seon status` reported the replacement default PID
+**41413 alive**, generation `0feea9b2-6557-43eb-9b2a-553599147c57`. This lane
+did not operate the restart. Exactly one read-only evaluation followed. It
+compiled the historical and proposed owner forms into local closures, without
+replacing runtime Vars, loading test namespaces, or committing database facts.
+Both received the same default database at basis **536871817**:
+
+| bulk selection, 1,202 candidates | milliseconds |
+|---|---:|
+| historical 3f0be21ed fallback | 8,876.878375 |
+| calls plus references | 8,449.030708 |
+| earlier recorded sample, old PID/basis | 7,517.955584 |
+
+The paired after time is 4.8% lower; the after time is **12.4% higher than the
+previous 7.52-second observation** across different JVMs/bases. These single
+samples do not establish a performance improvement. Crucially, this default
+value has **zero reference facts**: zero selections widened and zero tests
+were lost. The additional cost of traversing populated references is therefore
+**unmeasured**, not asserted cheap; fidelity is retained regardless of that
+future measurement.
+
+The repeatable form and exact returned numbers are
+[reference-union-measure.clj](call-graph-fidelity-review-evidence-2026-09-17/reference-union-measure.clj)
+and [reference-union-measurement.json](call-graph-fidelity-review-evidence-2026-09-17/reference-union-measurement.json).
+The proposed indexed walk compiled and ran in that evaluation. The extended
+regressions and Datalog/manifest behavior have **not been executed** in this
+follow-up: the one-read-only-evaluation restriction excludes test loading and
+fixture runs. `git diff --check` passed; the measurement form passed a native
+Babashka reader check. No test JVM, gate, extra prepl evaluation, default
+restart, or scratch worktree was used. No schema changes; no reset required
+by this correction. STOP for orchestrator review before any gate.

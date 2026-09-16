@@ -1,0 +1,12 @@
+{
+  "pid": 41413,
+  "lost-tests": 0,
+  "widened": 0,
+  "before-ms": 8876.878375,
+  "after-ms": 8449.030708,
+  "candidates": 1202,
+  "basis": 536871817,
+  "before-error": null,
+  "after-error": null,
+  "reference-facts": 0
+}
