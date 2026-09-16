@@ -93,7 +93,7 @@
      (let [opened
            (store/open-store! (assoc store-request :seon.store/dir dir))]
        (try
-         (db/transact! (:seon.store/connection-object opened) probe-schema)
+         (test-support/transacted! (:seon.store/connection-object opened) probe-schema)
          (let [report
                (db/transact! (:seon.store/connection-object opened)
                              [[:db/add "payload-schema" :seon.schema/key
@@ -161,9 +161,9 @@
             content "the current non-temporal result"
             digest (blob/put! connection content)]
         (try
-          (db/transact! connection
-                      [{:seon.registry.test/marker "current blob"
-                        :seon.registry.test/payload-blob digest}])
+          (test-support/transacted! connection
+                                  [{:seon.registry.test/marker "current blob"
+                                    :seon.registry.test/payload-blob digest}])
           (finally
             (d/release connection)))
         (registry/collect! opened)

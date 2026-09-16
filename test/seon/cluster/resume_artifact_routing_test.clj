@@ -31,34 +31,34 @@
 (deftest resume-artifacts-stay-red-and-are-excluded-from-owner-routing
   (test-support/with-database
    (fn [connection]
-     (db/transact!
-      connection
-      [{:seon.ns/name 'my.gen.planner}
-       {:seon.ns/name 'my.gen.alpha}
-       {:seon.agent/id "planner"
-        :seon.agent/namespace [:seon.ns/name 'my.gen.planner]}
-       {:seon.agent/id "alpha"
-        :seon.agent/namespace [:seon.ns/name 'my.gen.alpha]}
-       {:seon.turn/id run-id :seon.turn/agent [:seon.agent/id "planner"] :seon.turn/opened-tx "datomic.tx"}])
-     (db/transact!
-      connection
-      ;; ONE ENTITY PER (run, ordinal): the frozen source and the terminal
-      ;; facts are the same evaluation.
-      [{:seon.cluster.eval/id "resume-receipt-0"
-        :seon.problems/id "resume-problem-0"
-        :seon.cluster.eval/run [:seon.turn/id run-id]
-        :seon.cluster.eval/ordinal 0
-        :seon.cluster.eval/source "(def prefix-def 1)"
-        :seon.cluster.eval/ns [:seon.ns/name 'my.gen.alpha]
-        :seon.cluster.eval/at now
-        :seon.cluster.eval/interrupted-at now}
-       {:seon.cluster.eval/id "resume-receipt-1"
-        :seon.problems/id "resume-problem-1"
-        :seon.cluster.eval/run [:seon.turn/id run-id]
-        :seon.cluster.eval/ordinal 1
-        :seon.cluster.eval/source "prefix-def"
-        :seon.cluster.eval/ns [:seon.ns/name 'my.gen.alpha]
-        :seon.cluster.eval/at now}])
+     (test-support/transacted!
+                  connection
+                  [{:seon.ns/name 'my.gen.planner}
+                   {:seon.ns/name 'my.gen.alpha}
+                   {:seon.agent/id "planner"
+                    :seon.agent/namespace [:seon.ns/name 'my.gen.planner]}
+                   {:seon.agent/id "alpha"
+                    :seon.agent/namespace [:seon.ns/name 'my.gen.alpha]}
+                   {:seon.turn/id run-id :seon.turn/agent [:seon.agent/id "planner"] :seon.turn/opened-tx "datomic.tx"}])
+     (test-support/transacted!
+                  connection
+                  ;; ONE ENTITY PER (run, ordinal): the frozen source and the terminal
+                  ;; facts are the same evaluation.
+                  [{:seon.cluster.eval/id "resume-receipt-0"
+                    :seon.problems/id "resume-problem-0"
+                    :seon.cluster.eval/run [:seon.turn/id run-id]
+                    :seon.cluster.eval/ordinal 0
+                    :seon.cluster.eval/source "(def prefix-def 1)"
+                    :seon.cluster.eval/ns [:seon.ns/name 'my.gen.alpha]
+                    :seon.cluster.eval/at now
+                    :seon.cluster.eval/interrupted-at now}
+                   {:seon.cluster.eval/id "resume-receipt-1"
+                    :seon.problems/id "resume-problem-1"
+                    :seon.cluster.eval/run [:seon.turn/id run-id]
+                    :seon.cluster.eval/ordinal 1
+                    :seon.cluster.eval/source "prefix-def"
+                    :seon.cluster.eval/ns [:seon.ns/name 'my.gen.alpha]
+                    :seon.cluster.eval/at now}])
      (is (nil?
           (problems/form-problem
            @connection
@@ -66,16 +66,16 @@
             :seon.cluster.eval/ordinal 1
             :seon.sci.eval/evaluation failed}))
          "one X2 clause prevents process-history breakage becoming owner blame")
-     (db/transact! connection
-                 [[:db/add [:seon.cluster.eval/id "resume-receipt-1"]
-                   :seon.cluster.eval/result-edn
-                   (:seon.cluster.eval/result-edn failed)]
-                  [:db/add [:seon.cluster.eval/id "resume-receipt-1"]
-                   :seon.cluster.eval/error
-                   (:seon.cluster.eval/error failed)]
-                  [:db/add [:seon.cluster.eval/id "resume-receipt-1"]
-                   :seon.error/kind
-                   :seon.sci.eval/evaluation-failed]])
+     (test-support/transacted! connection
+                             [[:db/add [:seon.cluster.eval/id "resume-receipt-1"]
+                               :seon.cluster.eval/result-edn
+                               (:seon.cluster.eval/result-edn failed)]
+                              [:db/add [:seon.cluster.eval/id "resume-receipt-1"]
+                               :seon.cluster.eval/error
+                               (:seon.cluster.eval/error failed)]
+                              [:db/add [:seon.cluster.eval/id "resume-receipt-1"]
+                               :seon.error/kind
+                               :seon.sci.eval/evaluation-failed]])
      (let [delivery
            (message/delivery
             @connection

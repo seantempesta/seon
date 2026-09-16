@@ -15,20 +15,20 @@
   [body]
   (test-support/with-database
    (fn [connection]
-     (db/transact! connection
-                 [{:seon.agent/id "alice"}
-                  {:seon.agent/id "bob"}
-                  {:seon.error/id "failure-17"}
-                  {:seon.turn/id "red-run" :seon.turn/agent [:seon.agent/id "alice"] :seon.turn/opened-tx "datomic.tx"}
-                  {:seon.cluster.eval/id "receipt-17"
-                   :seon.cluster.eval/run
-                   [:seon.turn/id "red-run"]
-                   :seon.cluster.eval/ordinal 0
-                   :seon.cluster.eval/at now
-                   :seon.error/kind :seon.sci.eval/evaluation-failed
-                   :seon.cluster.eval/error
-                   "Unable to resolve symbol: missing-dependency"
-                   :seon.cluster.eval/source "(missing-dependency)"}])
+     (test-support/transacted! connection
+                             [{:seon.agent/id "alice"}
+                              {:seon.agent/id "bob"}
+                              {:seon.error/id "failure-17"}
+                              {:seon.turn/id "red-run" :seon.turn/agent [:seon.agent/id "alice"] :seon.turn/opened-tx "datomic.tx"}
+                              {:seon.cluster.eval/id "receipt-17"
+                               :seon.cluster.eval/run
+                               [:seon.turn/id "red-run"]
+                               :seon.cluster.eval/ordinal 0
+                               :seon.cluster.eval/at now
+                               :seon.error/kind :seon.sci.eval/evaluation-failed
+                               :seon.cluster.eval/error
+                               "Unable to resolve symbol: missing-dependency"
+                               :seon.cluster.eval/source "(missing-dependency)"}])
      (body connection))))
 
 (defn- request
@@ -43,7 +43,7 @@
            rows (:seon.message/rows delivery)]
        (is (empty? (:seon.error/values delivery)))
        (is (= 1 (count rows)))
-       (db/transact! connection rows)
+       (test-support/transacted! connection rows)
        (is (= "failure-17"
               (db/q '[:find ?failure-id .
                      :where
@@ -75,8 +75,8 @@
             (assoc (request "assignment-run" "repair this")
                    :my.message/value
                    (seon.cluster.message/send "bob" "repair this" "receipt-17")))
-           _ (db/transact! connection
-                         (:seon.message/rows assignment))
+           _ (test-support/transacted! connection
+                                     (:seon.message/rows assignment))
            red-before
            (:seon.problems/errored-receipts
             (problems/problems
@@ -89,7 +89,7 @@
            rows (:seon.message/rows declination)]
        (is (empty? (:seon.error/values declination)))
        (is (= 1 (count rows)))
-       (db/transact! connection rows)
+       (test-support/transacted! connection rows)
        (testing "the reply shape joins the assigned owner back to the problem"
          (is (= 1
                 (db/q '[:find (count ?declination) .

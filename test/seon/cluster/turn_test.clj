@@ -506,11 +506,11 @@
   (with-cluster
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)]
-        (db/transact! connection
-                    [{:seon.ns/name 'my.agents.agent-a}
-                     {:seon.agent/id "agent-a"
-                      :seon.agent/namespace
-                      [:seon.ns/name 'my.agents.agent-a]}])
+        (test-support/transacted! connection
+                                [{:seon.ns/name 'my.agents.agent-a}
+                                 {:seon.agent/id "agent-a"
+                                  :seon.agent/namespace
+                                  [:seon.ns/name 'my.agents.agent-a]}])
         (with-redefs
           [ai/complete
            (fn [_]
@@ -563,11 +563,11 @@
           (drive-agent! cluster "agent-a" 2))
         (is (false? (sci.eval/committed-row? (db/db connection) deletion))
             "a live definition cannot be reported deleted")
-        (db/transact! connection
-                      [{:seon.message/id "delete-obsolete"
-                        :seon.message/to [:seon.agent/id "agent-a"]
-                        :seon.message/inbox [:seon.agent/id "agent-a"]
-                        :seon.message/content "Remove obsolete."}])
+        (test-support/transacted! connection
+                                  [{:seon.message/id "delete-obsolete"
+                                    :seon.message/to [:seon.agent/id "agent-a"]
+                                    :seon.message/inbox [:seon.agent/id "agent-a"]
+                                    :seon.message/content "Remove obsolete."}])
         (with-redefs [ai/complete
                       (fn [_]
                         {:seon.ai/text
@@ -914,9 +914,9 @@
                                 [:seon.fn/source]
                                 [:seon.fn/sym "seon.config/defaults"])))
                     "commit-first leaves the program row unchanged")
-                (db/transact!
-                 connection
-                 [{:seon.message/id "peer-follow-up" :seon.message/to [:seon.agent/id "agent-a"] :seon.message/from [:seon.agent/id "peer"] :seon.message/content "Try again after reading the error." :seon.message/inbox [:seon.agent/id "agent-a"]}])
+                (test-support/transacted!
+                             connection
+                             [{:seon.message/id "peer-follow-up" :seon.message/to [:seon.agent/id "agent-a"] :seon.message/from [:seon.agent/id "peer"] :seon.message/content "Try again after reading the error." :seon.message/inbox [:seon.agent/id "agent-a"]}])
                 (let [next-reports (drive-agent! cluster "agent-a" 10)]
                   (if next-turn?
                     (do
@@ -1076,7 +1076,7 @@
             (is (not (contains? (:schema db) value-key))
                 "a value schema does not invent a Datahike attribute")
             (when (contains? (:schema db) persistent-key)
-              (db/transact! connection [{persistent-key 7}])
+              (test-support/transacted! connection [{persistent-key 7}])
               (is (= 7
                      (db/q '[:find ?value .
                             :in $ ?attribute
@@ -1348,13 +1348,13 @@
                            (swap! replies subvec 1)
                            reply)})]
           (drive-agent! cluster "agent-a" 2)
-          (db/transact!
-           connection
-           [{:seon.ns/name 'my.agents.agent-b}
-            (assoc (agent-row "agent-b")
-                   :seon.agent/namespace
-                   [:seon.ns/name 'my.agents.agent-b])
-            {:seon.message/id "m-agent-b" :seon.message/to [:seon.agent/id "agent-b"] :seon.message/content "call the published function" :seon.message/inbox [:seon.agent/id "agent-b"]}])
+          (test-support/transacted!
+                       connection
+                       [{:seon.ns/name 'my.agents.agent-b}
+                        (assoc (agent-row "agent-b")
+                               :seon.agent/namespace
+                               [:seon.ns/name 'my.agents.agent-b])
+                        {:seon.message/id "m-agent-b" :seon.message/to [:seon.agent/id "agent-b"] :seon.message/content "call the published function" :seon.message/inbox [:seon.agent/id "agent-b"]}])
           (drive-agent! cluster "agent-b" 2)
           (is (some #(str/includes? % "42")
                     (db/q '[:find [?result ...]
@@ -1386,13 +1386,13 @@
                            (or (first before)
                                "(seon.run/complete \"recovered\")")}))]
           (drive-agent! cluster "agent-a" 2)
-          (db/transact!
-           connection
-           [{:seon.ns/name 'my.agents.agent-b}
-            (assoc (agent-row "agent-b")
-                   :seon.agent/namespace
-                   [:seon.ns/name 'my.agents.agent-b])
-            {:seon.message/id "m-contract-agent-b" :seon.message/to [:seon.agent/id "agent-b"] :seon.message/content "violate the published contract" :seon.message/inbox [:seon.agent/id "agent-b"]}])
+          (test-support/transacted!
+                       connection
+                       [{:seon.ns/name 'my.agents.agent-b}
+                        (assoc (agent-row "agent-b")
+                               :seon.agent/namespace
+                               [:seon.ns/name 'my.agents.agent-b])
+                        {:seon.message/id "m-contract-agent-b" :seon.message/to [:seon.agent/id "agent-b"] :seon.message/content "violate the published contract" :seon.message/inbox [:seon.agent/id "agent-b"]}])
           (drive-agent! cluster "agent-b" 2)
           (let [evaluations
                 (db/q '[:find [(pull ?evaluation
@@ -1466,9 +1466,9 @@
           (is (nil? (sci.core/resolve (:seon.sci.eval/ctx cluster)
                                      (symbol function-sym)))
               "the refused definition never enters the shared base")
-          (db/transact!
-           connection
-           [{:seon.message/id "m-agent-a-after-refusal" :seon.message/to [:seon.agent/id "agent-a"] :seon.message/content "call the refused definition" :seon.message/inbox [:seon.agent/id "agent-a"]}])
+          (test-support/transacted!
+                       connection
+                       [{:seon.message/id "m-agent-a-after-refusal" :seon.message/to [:seon.agent/id "agent-a"] :seon.message/content "call the refused definition" :seon.message/inbox [:seon.agent/id "agent-a"]}])
           (drive-agent! cluster "agent-a" 2)
           (is (= (pr-str (seon.run/complete "42"))
                  (:seon.eval/shown (last (agent-evaluations @connection))))
@@ -1634,39 +1634,39 @@
             ;; A genuinely red form: SCI throws, and ruling 67/68 make that
             ;; a flat error result on the eval — never a routed problem.
             unbound-source "(inc \"x\")"]
-        (db/transact!
-         connection
-         [{:seon.ns/name 'my.gen.planner}
-          {:seon.ns/name 'my.gen.alpha}
-          {:seon.agent/id "agent-b"
-           :seon.agent/namespace [:seon.ns/name 'my.gen.alpha]}
-          {:seon.agent/id "agent-a"
-           :seon.agent/namespace [:seon.ns/name 'my.gen.planner]}
-          {:seon.message/id "route-goal" :seon.message/to [:seon.agent/id "agent-a"] :seon.message/content "Generate the program." :seon.message/inbox [:seon.agent/id "agent-a"]}])
-        (db/transact!
-         connection
-         [{:seon.turn/id route-run :seon.turn/agent [:seon.agent/id "agent-a"] :seon.turn/trigger [:seon.message/id "route-goal"] :seon.turn/opened-tx "datomic.tx"}])
-        (db/transact!
-         connection
-         (into
-          ;; ONE ENTITY PER (run, ordinal): the frozen source and namespace
-          ;; ride the evaluation the start mints. There is no twin row to
-          ;; assert beside it.
-          [{:seon.agent/id "agent-a"
-            }]
-          cat
-          [(turn/receipt-start-tx
-            {:seon.turn/id route-run
-             :seon.cluster.eval/ordinal 0
-             :seon.cluster.eval/at now
-             :seon.cluster.eval/source unbound-source
-             :seon.cluster.eval/ns [:seon.ns/name 'my.gen.alpha]})
-           (turn/receipt-start-tx
-            {:seon.turn/id route-run
-             :seon.cluster.eval/ordinal 1
-             :seon.cluster.eval/at now
-             :seon.cluster.eval/source "42"
-             :seon.cluster.eval/ns [:seon.ns/name 'my.gen.alpha]})]))
+        (test-support/transacted!
+                     connection
+                     [{:seon.ns/name 'my.gen.planner}
+                      {:seon.ns/name 'my.gen.alpha}
+                      {:seon.agent/id "agent-b"
+                       :seon.agent/namespace [:seon.ns/name 'my.gen.alpha]}
+                      {:seon.agent/id "agent-a"
+                       :seon.agent/namespace [:seon.ns/name 'my.gen.planner]}
+                      {:seon.message/id "route-goal" :seon.message/to [:seon.agent/id "agent-a"] :seon.message/content "Generate the program." :seon.message/inbox [:seon.agent/id "agent-a"]}])
+        (test-support/transacted!
+                     connection
+                     [{:seon.turn/id route-run :seon.turn/agent [:seon.agent/id "agent-a"] :seon.turn/trigger [:seon.message/id "route-goal"] :seon.turn/opened-tx "datomic.tx"}])
+        (test-support/transacted!
+                     connection
+                     (into
+                      ;; ONE ENTITY PER (run, ordinal): the frozen source and namespace
+                      ;; ride the evaluation the start mints. There is no twin row to
+                      ;; assert beside it.
+                      [{:seon.agent/id "agent-a"
+                        }]
+                      cat
+                      [(turn/receipt-start-tx
+                        {:seon.turn/id route-run
+                         :seon.cluster.eval/ordinal 0
+                         :seon.cluster.eval/at now
+                         :seon.cluster.eval/source unbound-source
+                         :seon.cluster.eval/ns [:seon.ns/name 'my.gen.alpha]})
+                       (turn/receipt-start-tx
+                        {:seon.turn/id route-run
+                         :seon.cluster.eval/ordinal 1
+                         :seon.cluster.eval/at now
+                         :seon.cluster.eval/source "42"
+                         :seon.cluster.eval/ns [:seon.ns/name 'my.gen.alpha]})]))
         (let [report
               (turn/turn
                {:seon.turn.loop/cluster cluster
@@ -2953,26 +2953,26 @@
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
             run-id "generated-fixed-point"]
-        (db/transact!
-         connection
-         (turn/generated-run-tx
-          @connection
-          {:seon.agent/id "agent-a" :seon.turn/id run-id :seon.db.process/id process :seon.turn/opened-tx "datomic.tx" :seon.turn/starting-ns [:seon.ns/name 'my.agents.agent-a]}))
-        (db/transact!
-         connection
-         (turn/append-generated-tx
-          {:seon.turn/id run-id
-           :seon.db.process/id process
-           :seon.cluster.eval/at now
-           :seon.cluster.eval/ordinal 0
-           :seon.cluster.eval/source "(help)"
-           :seon.ns/name 'my.agents.agent-a}))
-        (db/transact!
-         connection
-         (turn/receipt-settle-tx
-          {:seon.turn/id run-id
-           :seon.cluster.eval/ordinal 0
-           :seon.eval/shown "{:introduced 'my.turn}"}))
+        (test-support/transacted!
+                     connection
+                     (turn/generated-run-tx
+                      @connection
+                      {:seon.agent/id "agent-a" :seon.turn/id run-id :seon.db.process/id process :seon.turn/opened-tx "datomic.tx" :seon.turn/starting-ns [:seon.ns/name 'my.agents.agent-a]}))
+        (test-support/transacted!
+                     connection
+                     (turn/append-generated-tx
+                      {:seon.turn/id run-id
+                       :seon.db.process/id process
+                       :seon.cluster.eval/at now
+                       :seon.cluster.eval/ordinal 0
+                       :seon.cluster.eval/source "(help)"
+                       :seon.ns/name 'my.agents.agent-a}))
+        (test-support/transacted!
+                     connection
+                     (turn/receipt-settle-tx
+                      {:seon.turn/id run-id
+                       :seon.cluster.eval/ordinal 0
+                       :seon.eval/shown "{:introduced 'my.turn}"}))
         (let [request {:seon.agent/id "agent-a"
                        :seon.db.process/id process}
               generated (turn/next-agent-work @connection request)
@@ -3009,26 +3009,26 @@
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
             run-id "generated-membership-failure"]
-        (db/transact!
-         connection
-         (turn/generated-run-tx
-          @connection
-          {:seon.agent/id "agent-a" :seon.turn/id run-id :seon.db.process/id process :seon.turn/opened-tx "datomic.tx" :seon.turn/starting-ns [:seon.ns/name 'my.agents.agent-a]}))
-        (db/transact!
-         connection
-         (turn/append-generated-tx
-          {:seon.turn/id run-id
-           :seon.db.process/id process
-           :seon.cluster.eval/at now
-           :seon.cluster.eval/ordinal 0
-           :seon.cluster.eval/source "(help)"
-           :seon.ns/name 'my.agents.agent-a}))
-        (db/transact!
-         connection
-         (turn/receipt-settle-tx
-          {:seon.turn/id run-id
-           :seon.cluster.eval/ordinal 0
-           :seon.eval/shown "{:introduced 'my.turn}"}))
+        (test-support/transacted!
+                     connection
+                     (turn/generated-run-tx
+                      @connection
+                      {:seon.agent/id "agent-a" :seon.turn/id run-id :seon.db.process/id process :seon.turn/opened-tx "datomic.tx" :seon.turn/starting-ns [:seon.ns/name 'my.agents.agent-a]}))
+        (test-support/transacted!
+                     connection
+                     (turn/append-generated-tx
+                      {:seon.turn/id run-id
+                       :seon.db.process/id process
+                       :seon.cluster.eval/at now
+                       :seon.cluster.eval/ordinal 0
+                       :seon.cluster.eval/source "(help)"
+                       :seon.ns/name 'my.agents.agent-a}))
+        (test-support/transacted!
+                     connection
+                     (turn/receipt-settle-tx
+                      {:seon.turn/id run-id
+                       :seon.cluster.eval/ordinal 0
+                       :seon.eval/shown "{:introduced 'my.turn}"}))
         (let [request {:seon.agent/id "agent-a"
                        :seon.db.process/id process}
               generated (turn/next-agent-work @connection request)
@@ -3063,7 +3063,7 @@
             sequence-number (atom 0)
             cluster (assoc cluster :seon.config.error/escalate-to "root")
             run-phases (schema/enum-members :seon.turn.loop/phase)]
-        (db/transact! connection [(agent-row "root")])
+        (test-support/transacted! connection [(agent-row "root")])
         (test-support/assert-check!
          (tc/quick-check
           24
@@ -3078,11 +3078,11 @@
                            (str "injected " (name failed-phase) " failure")
                            :seon.error/data {:seon.turn.loop/phase
                                              failed-phase}}]
-              (db/transact!
-               connection
-               [{:seon.turn/id run-id :seon.turn/agent [:seon.agent/id "agent-a"] :seon.turn/opened-tx "datomic.tx"}
-                {:seon.agent/id "agent-a"
-                 }])
+              (test-support/transacted!
+                           connection
+                           [{:seon.turn/id run-id :seon.turn/agent [:seon.agent/id "agent-a"] :seon.turn/opened-tx "datomic.tx"}
+                            {:seon.agent/id "agent-a"
+                             }])
               (when evaluation?
                 (db/transact!
                  connection
@@ -3214,8 +3214,8 @@
           (turn/turn {:seon.turn.loop/cluster cluster
                               :seon.turn.work/next work}
                              (Date.)))
-        (db/transact! connection
-                      [{:seon.message/id "m-2" :seon.message/to [:seon.agent/id "agent-a"] :seon.message/content "message B" :seon.message/inbox [:seon.agent/id "agent-a"]}])
+        (test-support/transacted! connection
+                                  [{:seon.message/id "m-2" :seon.message/to [:seon.agent/id "agent-a"] :seon.message/content "message B" :seon.message/inbox [:seon.agent/id "agent-a"]}])
         (with-redefs [ai/complete
                       (recording-completer
                        requests
@@ -3453,9 +3453,9 @@
             cluster (assoc cluster :seon.turn.loop/stream-channel
                            stream-channel)]
         ;; a second agent with a trigger of its own
-        (db/transact! connection
-                    [(agent-row "agent-b")
-                     {:seon.message/id "m-b" :seon.message/to [:seon.agent/id "agent-b"] :seon.message/content "count the sprockets" :seon.message/inbox [:seon.agent/id "agent-b"]}])
+        (test-support/transacted! connection
+                                [(agent-row "agent-b")
+                                 {:seon.message/id "m-b" :seon.message/to [:seon.agent/id "agent-b"] :seon.message/content "count the sprockets" :seon.message/inbox [:seon.agent/id "agent-b"]}])
         ;; NOBODY reads the conn for the whole run: every offer must
         ;; still return immediately, which is what sliding-1 buys
         (let [offer-results (atom [])

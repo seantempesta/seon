@@ -37,7 +37,7 @@
 
 (defn populate!
   [{:keys [:seon.db/connection :seon.source/digest]}]
-  (db/transact! connection probe-schema)
+  (test-support/transacted! connection probe-schema)
   (db/transact! connection
               [{:seon.source.test/marker digest}]))
 
@@ -47,7 +47,7 @@
 
 (defn populate-from-data!
   [{:keys [:seon.db/connection :seon.source.test/marker]}]
-  (db/transact! connection probe-schema)
+  (test-support/transacted! connection probe-schema)
   (db/transact! connection [{:seon.source.test/marker marker}]))
 
 (defn populate-blocked!
@@ -223,12 +223,12 @@
         (testing "a complete publication never trusts digest equality alone"
           (let [connection (store/open-branch! opened source/current-branch)]
             (try
-              (db/transact! connection
-                          [[:db/retract
-                            [:seon.source.test/marker digest-b]
-                            :seon.source.test/marker
-                            digest-b]
-                           {:seon.source.test/marker "stale-row"}])
+              (test-support/transacted! connection
+                                      [[:db/retract
+                                        [:seon.source.test/marker digest-b]
+                                        :seon.source.test/marker
+                                        digest-b]
+                                       {:seon.source.test/marker "stale-row"}])
               (finally
                 (d/release connection))))
           (let [again (publish opened digest-b)
@@ -491,11 +491,11 @@
     (fn [connection]
       (let [ctx (sci.eval/build-base-ctx)
             identity [:seon.fn/sym "source-deletion-probe/value"]]
-        (db/transact! connection
-                      [{:seon.ns/name 'source-deletion-probe}
-                       {:seon.fn/sym (second identity)
-                        :seon.fn/ns [:seon.ns/name 'source-deletion-probe]
-                        :seon.schema.admission/source :core}])
+        (test-support/transacted! connection
+                                  [{:seon.ns/name 'source-deletion-probe}
+                                   {:seon.fn/sym (second identity)
+                                    :seon.fn/ns [:seon.ns/name 'source-deletion-probe]
+                                    :seon.schema.admission/source :core}])
         (sci/eval-string* ctx "(ns source-deletion-probe) (defn value [] 1)")
         (is (= 1 (sci/eval-string* ctx "(source-deletion-probe/value)")))
         (is (= 1 (:seon.sci.eval/installed

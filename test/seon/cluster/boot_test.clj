@@ -203,7 +203,7 @@
               {:seon.schema.projection/forms forms}
               (schema/canonical-database-attributes forms)))]
         (try
-          (db/transact! connection declarations)
+          (test-support/transacted! connection declarations)
           (let [source-digest (apply str (repeat 64 "a"))]
             (db/transact!
              connection
@@ -714,8 +714,8 @@
                  outcome))
              turn/next-agent-work
              (fn [_db _request]
-               (db/transact! connection
-                                [{:seon.agent/id "root"}])
+               (test-support/transacted! connection
+                                            [{:seon.agent/id "root"}])
                nil)
              flow/stop
              (fn [graph]
@@ -827,10 +827,10 @@
                          :where [?source :seon.source/digest _]]
                        @connection)]
               (await-bootstrap! connection "root")
-              (db/transact!
-               connection
-               [[:db.fn/retractAttribute source-eid :seon.source/digest]
-                {:db/id source-eid :seon.source/digest stale-digest}])
+              (test-support/transacted!
+                           connection
+                           [[:db.fn/retractAttribute source-eid :seon.source/digest]
+                            {:db/id source-eid :seon.source/digest stale-digest}])
               (let [program-transactions
                     (db/q '[:find ?symbol ?tx
                            :where
@@ -880,12 +880,12 @@
           (is (pos? (db/q '[:find (count ?function) .
                            :where [?function :seon.fn/sym]]
                          @connection))))
-        (db/transact!
-         connection
-         (mapv (fn [eid] [:db.fn/retractEntity eid])
-               (db/q '[:find [?function ...]
-                      :where [?function :seon.fn/sym]]
-                    @connection)))
+        (test-support/transacted!
+                     connection
+                     (mapv (fn [eid] [:db.fn/retractEntity eid])
+                           (db/q '[:find [?function ...]
+                                  :where [?function :seon.fn/sym]]
+                                @connection)))
         (cluster/stop! instance))
       (let [failure (start-refusal request)
             refused-instance (:seon.boot/instance (ex-data failure))
@@ -1144,11 +1144,11 @@
       (let [instance (cluster/start! {:seon.boot/cluster-name cluster-name
                                       :seon.boot/root root})
             connection (:seon.boot/cluster-connection instance)]
-        (db/transact!
-         connection
-         {:tx-data
-          [{:seon.config/cluster cluster-name
-            :seon.config.flow.compute/queue-depth 1}]})
+        (test-support/transacted!
+                     connection
+                     {:tx-data
+                      [{:seon.config/cluster cluster-name
+                        :seon.config.flow.compute/queue-depth 1}]})
         (cluster/stop! instance))
       (with-redefs-fn
         {#'seon.flow/start-work-launcher!
@@ -1466,8 +1466,8 @@
             (str "the refork target must be exactly claimed: "
                  (pr-str claim)))
         (try
-          (db/transact! (:seon.boot/cluster-connection instance)
-                        [{:seon.message/id "history-refork-destroys"}])
+          (test-support/transacted! (:seon.boot/cluster-connection instance)
+                                    [{:seon.message/id "history-refork-destroys"}])
           (let [result (operator/refork!
                         {:seon.operator/repository-root repository-root
                          :seon.operator/managed-root managed-root
@@ -1715,8 +1715,8 @@
             connection (:seon.boot/cluster-connection instance)
             now (java.util.Date.)]
         (await-bootstrap! connection "root")
-        (db/transact! connection [{:seon.agent/id "alice"}
-                                  {:seon.agent/id "bob"}])
+        (test-support/transacted! connection [{:seon.agent/id "alice"}
+                                              {:seon.agent/id "bob"}])
         ;; the CONTROL, seeded in the same generation and identical
         ;; except for how it ends: a run that closed the ordinary way.
         ;; Without it, "recovery marked the run" proves nothing — the
@@ -1724,19 +1724,19 @@
         ;; close were the SAME facts (whole-system-arc observer,
         ;; 2026-08-08: `945f3226` closed by recovery with no marker
         ;; anywhere durable, so the honesty claim died with its JVM)
-        (db/transact! connection
-                    [{:seon.turn/id "run-clean" :seon.turn/agent [:seon.agent/id "bob"] :seon.turn/opened-tx "datomic.tx" :seon.turn/closed-tx "datomic.tx"}])
-        (db/transact! connection
-                    [{:seon.turn/id "run-crashed" :seon.turn/agent [:seon.agent/id "alice"] :seon.turn/opened-tx "datomic.tx"}
-                     {:seon.agent/id "alice"
-                      }
-                     ;; dangling = started with no terminal fact —
-                     ;; running IS that absence, there is no status
-                     {:seon.cluster.eval/id "e-0"
-                      :seon.cluster.eval/run [:seon.turn/id "run-crashed"]
-                      :seon.cluster.eval/ordinal 0
-                      :seon.cluster.eval/source "(+ 1 1)"
-                      :seon.cluster.eval/at now}])
+        (test-support/transacted! connection
+                                [{:seon.turn/id "run-clean" :seon.turn/agent [:seon.agent/id "bob"] :seon.turn/opened-tx "datomic.tx" :seon.turn/closed-tx "datomic.tx"}])
+        (test-support/transacted! connection
+                                [{:seon.turn/id "run-crashed" :seon.turn/agent [:seon.agent/id "alice"] :seon.turn/opened-tx "datomic.tx"}
+                                 {:seon.agent/id "alice"
+                                  }
+                                 ;; dangling = started with no terminal fact —
+                                 ;; running IS that absence, there is no status
+                                 {:seon.cluster.eval/id "e-0"
+                                  :seon.cluster.eval/run [:seon.turn/id "run-crashed"]
+                                  :seon.cluster.eval/ordinal 0
+                                  :seon.cluster.eval/source "(+ 1 1)"
+                                  :seon.cluster.eval/at now}])
         (cluster/stop! instance))
 
       ;; the next boot must settle it, with no lease wait

@@ -18,22 +18,22 @@
   [body]
   (test-support/with-database
    (fn [connection]
-     (db/transact!
-      connection
-      [{:seon.ns/name 'my.gen.planner}
-       {:seon.ns/name 'my.gen.alpha}
-       {:seon.agent/id "planner"
-        :seon.agent/namespace [:seon.ns/name 'my.gen.planner]}
-       {:seon.agent/id "alpha"
-        :seon.agent/namespace [:seon.ns/name 'my.gen.alpha]}
-       {:seon.agent/id "root"}
-       {:seon.message/id "goal" :seon.message/to [:seon.agent/id "root"] :seon.message/content "Generate the program." :seon.message/inbox [:seon.agent/id "root"]}])
-     (db/transact!
-      connection
-      [{:seon.message/id "planner-goal" :seon.message/to [:seon.agent/id "planner"] :seon.message/from [:seon.agent/id "root"] :seon.message/caused-by [:seon.message/id "goal"] :seon.message/content "Generate the program." :seon.message/inbox [:seon.agent/id "planner"]}])
-     (db/transact!
-      connection
-      [{:seon.turn/id run-id :seon.turn/agent [:seon.agent/id "planner"] :seon.turn/trigger [:seon.message/id "planner-goal"] :seon.turn/opened-tx "datomic.tx"}])
+     (test-support/transacted!
+                  connection
+                  [{:seon.ns/name 'my.gen.planner}
+                   {:seon.ns/name 'my.gen.alpha}
+                   {:seon.agent/id "planner"
+                    :seon.agent/namespace [:seon.ns/name 'my.gen.planner]}
+                   {:seon.agent/id "alpha"
+                    :seon.agent/namespace [:seon.ns/name 'my.gen.alpha]}
+                   {:seon.agent/id "root"}
+                   {:seon.message/id "goal" :seon.message/to [:seon.agent/id "root"] :seon.message/content "Generate the program." :seon.message/inbox [:seon.agent/id "root"]}])
+     (test-support/transacted!
+                  connection
+                  [{:seon.message/id "planner-goal" :seon.message/to [:seon.agent/id "planner"] :seon.message/from [:seon.agent/id "root"] :seon.message/caused-by [:seon.message/id "goal"] :seon.message/content "Generate the program." :seon.message/inbox [:seon.agent/id "planner"]}])
+     (test-support/transacted!
+                  connection
+                  [{:seon.turn/id run-id :seon.turn/agent [:seon.agent/id "planner"] :seon.turn/trigger [:seon.message/id "planner-goal"] :seon.turn/opened-tx "datomic.tx"}])
      (body connection))))
 
 (defn- form-row
@@ -102,10 +102,10 @@
 (deftest parse-time-owner-wins-and-absence-falls-back-to-the-author
   (with-routing-database
    (fn [connection]
-     (db/transact!
-      connection
-      [(receipt-row 0 {})
-       (dissoc (receipt-row 1 {}) :seon.cluster.eval/ns)])
+     (test-support/transacted!
+                  connection
+                  [(receipt-row 0 {})
+                   (dissoc (receipt-row 1 {}) :seon.cluster.eval/ns)])
      (let [failed (evaluation-error "boom")
            attributed
            (problems/form-problem
@@ -130,16 +130,16 @@
 (deftest an-author-owned-red-form-remains-unsettled-without-self-assignment
   (with-routing-database
    (fn [connection]
-     (db/transact!
-      connection
-      [(dissoc
-        (receipt-row
-         0
-         {:seon.cluster.eval/result-edn
-          (pr-str {:seon.error/kind :probe/self-owned-red})
-          :seon.cluster.eval/error "self-owned red"
-          :seon.error/kind :probe/self-owned-red})
-        :seon.cluster.eval/ns)])
+     (test-support/transacted!
+                  connection
+                  [(dissoc
+                    (receipt-row
+                     0
+                     {:seon.cluster.eval/result-edn
+                      (pr-str {:seon.error/kind :probe/self-owned-red})
+                      :seon.cluster.eval/error "self-owned red"
+                      :seon.error/kind :probe/self-owned-red})
+                    :seon.cluster.eval/ns)])
      (let [problem
            (problems/form-problem
             @connection
@@ -171,14 +171,14 @@
 (deftest historical-reds-are-outside-the-live-attempt-chain
   (with-routing-database
    (fn [connection]
-     (db/transact!
-      connection
-      [{:seon.turn/id "historical-run" :seon.turn/agent [:seon.agent/id "planner"] :seon.turn/opened-tx "datomic.tx"}
-       {:seon.cluster.eval/id "historical-form"
-        :seon.cluster.eval/run [:seon.turn/id "historical-run"]
-        :seon.cluster.eval/ordinal 0
-        :seon.cluster.eval/source "(my.store/get :obsolete)"
-        :seon.cluster.eval/ns [:seon.ns/name 'my.gen.alpha]}])
+     (test-support/transacted!
+                  connection
+                  [{:seon.turn/id "historical-run" :seon.turn/agent [:seon.agent/id "planner"] :seon.turn/opened-tx "datomic.tx"}
+                   {:seon.cluster.eval/id "historical-form"
+                    :seon.cluster.eval/run [:seon.turn/id "historical-run"]
+                    :seon.cluster.eval/ordinal 0
+                    :seon.cluster.eval/source "(my.store/get :obsolete)"
+                    :seon.cluster.eval/ns [:seon.ns/name 'my.gen.alpha]}])
      (is (nil?
           (problems/form-problem
            @connection
@@ -195,25 +195,25 @@
 (deftest every-form-has-exactly-one-of-the-seven-derived-states
   (with-routing-database
    (fn [connection]
-     (db/transact!
-      connection
-      (into
-       [(form-row 0)]
-       [(receipt-row 1 {})
-        (receipt-row 2 {:seon.cluster.eval/result-edn "2"})
-        (receipt-row 3 {:seon.cluster.eval/result-edn
-                        (pr-str {:seon.error/kind :probe/red})
-                        :seon.cluster.eval/error "red 3"
-                        :seon.error/kind :probe/red})
-        (receipt-row 4 {:seon.cluster.eval/result-edn
-                        (pr-str {:seon.error/kind :probe/red})
-                        :seon.cluster.eval/error "red 4"
-                        :seon.error/kind :probe/red})
-        (receipt-row 5 {:seon.cluster.eval/result-edn "5"})
-        (receipt-row 6 {:seon.cluster.eval/result-edn
-                        (pr-str {:seon.error/kind :probe/red})
-                        :seon.cluster.eval/error "red 6"
-                        :seon.error/kind :probe/red})]))
+     (test-support/transacted!
+                  connection
+                  (into
+                   [(form-row 0)]
+                   [(receipt-row 1 {})
+                    (receipt-row 2 {:seon.cluster.eval/result-edn "2"})
+                    (receipt-row 3 {:seon.cluster.eval/result-edn
+                                    (pr-str {:seon.error/kind :probe/red})
+                                    :seon.cluster.eval/error "red 3"
+                                    :seon.error/kind :probe/red})
+                    (receipt-row 4 {:seon.cluster.eval/result-edn
+                                    (pr-str {:seon.error/kind :probe/red})
+                                    :seon.cluster.eval/error "red 4"
+                                    :seon.error/kind :probe/red})
+                    (receipt-row 5 {:seon.cluster.eval/result-edn "5"})
+                    (receipt-row 6 {:seon.cluster.eval/result-edn
+                                    (pr-str {:seon.error/kind :probe/red})
+                                    :seon.cluster.eval/error "red 6"
+                                    :seon.error/kind :probe/red})]))
      (assign! connection 3)
      (assign! connection 5)
      (assign! connection 6)
@@ -239,9 +239,9 @@
        (is (schema/valid-candidate-value?
             :seon.turn.work/plan-settlement settlement))
        (testing "closing the run cannot falsely settle its plan"
-         (db/transact! connection
-                     [[:db/add [:seon.turn/id run-id]
-                       :seon.turn/closed-tx now]])
+         (test-support/transacted! connection
+                                 [[:db/add [:seon.turn/id run-id]
+                                   :seon.turn/closed-tx now]])
          (is (false?
               (:seon.turn.work/settled?
                (turn/plan-settlement @connection run-id)))))))))

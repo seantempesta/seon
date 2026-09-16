@@ -39,7 +39,7 @@
 (defn- with-connection [body]
   (test-support/with-database
     (fn [connection]
-      (db/transact! connection [{:seon.agent/id "agent-a"}])
+      (test-support/transacted! connection [{:seon.agent/id "agent-a"}])
       (body connection))))
 
 (defn- agent-eid
@@ -100,7 +100,7 @@
       (let [mailbox (async/chan (async/sliding-buffer 1))
             {:keys [render search key]} (route-probe! connection mailbox)]
         (try
-          (db/transact! connection (message-tx "m-1"))
+          (test-support/transacted! connection (message-tx "m-1"))
           (is (some? (test-support/await-event! mailbox "mailbox wake"))
               "a message to this agent reaches ITS mailbox")
           (let [report (test-support/await-event! search
@@ -110,7 +110,7 @@
                 "the same listener forwards the exact committed basis"))
           (testing "a commit of attributes only a TURN writes wakes no
                     mailbox — the trap that would spin an idle cluster"
-            (db/transact! connection (run-tx "run-1"))
+            (test-support/transacted! connection (run-tx "run-1"))
             (is (nil? (async/poll! mailbox))))
           (testing "a transaction instant is in EVERY report and routes
                     nowhere by itself"
@@ -237,13 +237,13 @@
       (let [mailbox (async/chan (async/sliding-buffer 1))
             {:keys [armer key]} (route-probe! connection mailbox)]
         (try
-          (db/transact! connection [{:seon.agent/id "agent-b"}])
+          (test-support/transacted! connection [{:seon.agent/id "agent-b"}])
           (is (nil? (async/poll! armer))
               "creating an agent asserts no listened attribute, so it
                wakes nobody by itself")
-          (db/transact!
-           connection
-           [{:seon.message/id "m-to-b" :seon.message/to [:seon.agent/id "agent-b"] :seon.message/content "hello" :seon.message/inbox [:seon.agent/id "agent-b"]}])
+          (test-support/transacted!
+                       connection
+                       [{:seon.message/id "m-to-b" :seon.message/to [:seon.agent/id "agent-b"] :seon.message/content "hello" :seon.message/inbox [:seon.agent/id "agent-b"]}])
           (is (some? (test-support/await-event! armer "armer wake"))
               "the armer derives (agents in facts) − (armed set)")
           (is (nil? (async/poll! mailbox))
@@ -278,7 +278,7 @@
        :seon.wake/listen true
        :seon.wake/opens-turn? true}]}
     (fn [connection]
-      (db/transact! connection [{:seon.agent/id "agent-a"}])
+      (test-support/transacted! connection [{:seon.agent/id "agent-a"}])
       (let [recipient (agent-eid connection)
             mailbox (async/chan (async/sliding-buffer 1))
             {:keys [key]} (route-probe! connection mailbox)]
@@ -287,7 +287,7 @@
                          ::notice)
               "the derived set learned the new attribute from its own
                declaration")
-          (db/transact! connection [{::notice recipient}])
+          (test-support/transacted! connection [{::notice recipient}])
           (is (some? (test-support/await-event! mailbox "declared wake"))
               "and a datom on it woke the agent it points at")
           (finally
@@ -331,9 +331,9 @@
 (deftest a-fault-wakes-the-steward-of-the-failing-functions-namespace
   (test-support/with-database
     (fn [connection]
-      (db/transact! connection [{:seon.agent/id "agent-a"}
-                               {:seon.ns/name 'my.agents.agent-a
-                                :seon.ns/steward [:seon.agent/id "agent-a"]}])
+      (test-support/transacted! connection [{:seon.agent/id "agent-a"}
+                                           {:seon.ns/name 'my.agents.agent-a
+                                            :seon.ns/steward [:seon.agent/id "agent-a"]}])
       (let [mailbox (async/chan (async/sliding-buffer 1))
             {:keys [key]} (route-probe! connection mailbox)
             recording (error/recording
@@ -372,19 +372,19 @@
                           interest counting-render)]
         (try
           (testing "an irrelevant commit completes without a render wake"
-            (db/transact! connection (run-tx "irrelevant-run"))
+            (test-support/transacted! connection (run-tx "irrelevant-run"))
             ;; Datahike delivers the transaction report only after the
             ;; listener returns. `poll!` is therefore an ordering assertion,
             ;; not a timing verdict about a possibly pending callback.
             (is (nil? (async/poll! render))))
           (testing "one intersecting report offers exactly one wake"
-            (db/transact! connection (message-tx "relevant-message"))
+            (test-support/transacted! connection (message-tx "relevant-message"))
             (is (some? (test-support/await-event! render "render wake")))
             (is (nil? (async/poll! render))
                 "several matching datoms still produce one report wake"))
           (testing "the cold `:all` sentinel accepts every changed attribute"
             (reset! interest :all)
-            (db/transact! connection (run-tx "cold-run"))
+            (test-support/transacted! connection (run-tx "cold-run"))
             (is (some? (test-support/await-event! render
                                                    "cold render wake")))
             (is (nil? (async/poll! render))))
@@ -559,7 +559,7 @@
           [commits (gen/vector (gen/elements [:message :agent :run]) 1 8)]
           (test-support/with-database
             (fn [connection]
-              (db/transact! connection [{:seon.agent/id "agent-a"}])
+              (test-support/transacted! connection [{:seon.agent/id "agent-a"}])
               (let [recipient-eid (agent-eid connection)
                     mailbox (async/chan 64)
                     channels {recipient-eid mailbox}
@@ -638,6 +638,6 @@
         (is (nil? (wake/unlisten! request)) "removing an absent listener
                                              is a no-op, because stop may
                                              arrive after a release")
-        (db/transact! connection (message-tx "m-after"))
+        (test-support/transacted! connection (message-tx "m-after"))
         (is (nil? (async/poll! mailbox))
             "nothing is delivered after unlisten")))))

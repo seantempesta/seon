@@ -21,7 +21,8 @@
             [seon.db :as db]
             [seon.error :as error]
             [seon.schema :as schema]
-            [seon.schema.datahike :as schema.datahike]))
+            [seon.schema.datahike :as schema.datahike]
+            [seon.test-support :as support]))
 
 (def ^:private schema-delta (schema/begin-registration-delta))
 
@@ -86,7 +87,7 @@
         _ (d/create-database configuration)
         connection (d/connect configuration)]
     (try
-      (db/transact! connection (schema.datahike/malli->datahike-schema attributes))
+      (support/transacted! connection (schema.datahike/malli->datahike-schema attributes))
       (body connection)
       (finally
         (d/release connection)
@@ -149,10 +150,10 @@
         _ (d/create-database configuration)
         connection (d/connect configuration)]
     (try
-      (db/transact!
-       connection
-       [(schema.datahike/malli->datahike-attr-in
-         fixture-projection ::mixed-value)])
+      (support/transacted!
+              connection
+              [(schema.datahike/malli->datahike-attr-in
+                fixture-projection ::mixed-value)])
       (body connection)
       (finally
         (d/release connection)

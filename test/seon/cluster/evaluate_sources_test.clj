@@ -17,32 +17,32 @@
   (support/with-database
    (fn [connection]
      (support/seed-cluster! connection "preview-batch")
-     (db/transact! connection
-                   [(:seon.config/desired-row
-                     (config/compile-manifest
-                      {:seon.boot/cluster-name "preview-batch"
-                       :seon.config/manifest {}}))])
-     (db/transact! connection
-                   (agent/creation-tx
-                    {:seon.agent/id "preview-batch-agent"
-                     :seon.ns/name 'my.agents.preview-batch
-                     :seon.cluster/name "preview-batch"}))
+     (support/transacted! connection
+                          [(:seon.config/desired-row
+                            (config/compile-manifest
+                             {:seon.boot/cluster-name "preview-batch"
+                              :seon.config/manifest {}}))])
+     (support/transacted! connection
+                          (agent/creation-tx
+                           {:seon.agent/id "preview-batch-agent"
+                            :seon.ns/name 'my.agents.preview-batch
+                            :seon.cluster/name "preview-batch"}))
      ;; THE RUN AND ITS EVALUATION ROWS EXIST BEFORE ANY FORM RUNS, exactly
      ;; as the turn's one intent commit makes them: a handle is the stored
      ;; evaluation's durable identity, so a form can only name an earlier value
      ;; when that value's evaluation actually persisted.
-     (db/transact! connection
-                   [{:seon.turn/id "preview-run" :seon.turn/agent [:seon.agent/id "preview-batch-agent"] :seon.turn/opened-tx "datomic.tx"}])
-     (db/transact! connection
-                   (into []
-                         (map (fn [ordinal]
-                                {:seon.cluster.eval/id
-                                 (turn/receipt-identity "preview-run" ordinal)
-                                 :seon.cluster.eval/run
-                                 [:seon.turn/id "preview-run"]
-                                 :seon.cluster.eval/ordinal ordinal
-                                 :seon.cluster.eval/at (java.util.Date.)}))
-                         (range 7)))
+     (support/transacted! connection
+                          [{:seon.turn/id "preview-run" :seon.turn/agent [:seon.agent/id "preview-batch-agent"] :seon.turn/opened-tx "datomic.tx"}])
+     (support/transacted! connection
+                          (into []
+                                (map (fn [ordinal]
+                                       {:seon.cluster.eval/id
+                                        (turn/receipt-identity "preview-run" ordinal)
+                                        :seon.cluster.eval/run
+                                        [:seon.turn/id "preview-run"]
+                                        :seon.cluster.eval/ordinal ordinal
+                                        :seon.cluster.eval/at (java.util.Date.)}))
+                                (range 7)))
      (my.agent/settings! {:seon.config.eval/time-limit-ms 1700}
                          connection "preview-batch-agent")
      (let [database @connection
@@ -221,16 +221,16 @@
   (support/with-database
    (fn [connection]
      (support/seed-cluster! connection "profile-once")
-     (db/transact! connection
-                   [(:seon.config/desired-row
-                     (config/compile-manifest
-                      {:seon.boot/cluster-name "profile-once"
-                       :seon.config/manifest {}}))])
-     (db/transact! connection
-                   (agent/creation-tx
-                    {:seon.agent/id "profile-once-agent"
-                     :seon.ns/name 'my.agents.profile-once
-                     :seon.cluster/name "profile-once"}))
+     (support/transacted! connection
+                          [(:seon.config/desired-row
+                            (config/compile-manifest
+                             {:seon.boot/cluster-name "profile-once"
+                              :seon.config/manifest {}}))])
+     (support/transacted! connection
+                          (agent/creation-tx
+                           {:seon.agent/id "profile-once-agent"
+                            :seon.ns/name 'my.agents.profile-once
+                            :seon.cluster/name "profile-once"}))
      (let [database @connection
            base (support/fork-cluster-ctx connection)
            forked (sci.eval/fork-for-turn

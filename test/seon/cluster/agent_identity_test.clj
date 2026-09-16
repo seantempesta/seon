@@ -17,13 +17,13 @@
   [body]
   (test-support/with-database
     (fn [connection]
-      (db/transact!
-       connection
-       (into [{:seon.cluster/name cluster-name}]
-             (agent/creation-tx
-              {:seon.agent/id agent-id
-               :seon.ns/name namespace-name
-               :seon.cluster/name cluster-name})))
+      (test-support/transacted!
+                   connection
+                   (into [{:seon.cluster/name cluster-name}]
+                         (agent/creation-tx
+                          {:seon.agent/id agent-id
+                           :seon.ns/name namespace-name
+                           :seon.cluster/name cluster-name})))
       (body connection))))
 
 (deftest identity-renders-from-current-database-facts
@@ -37,9 +37,9 @@
         (is (str/includes? (pr-str html) agent-id))
         (is (str/includes? (pr-str html) (str namespace-name)))
         (is (str/includes? (pr-str html) "Steward"))
-        (db/transact! connection
-                      [[:db/add [:seon.cluster/name cluster-name]
-                        :seon.cluster/name "renamed-cluster"]])
+        (test-support/transacted! connection
+                                  [[:db/add [:seon.cluster/name cluster-name]
+                                    :seon.cluster/name "renamed-cluster"]])
         (is (str/includes? (agent/whoami {:seon.db/db @connection :seon.agent/id agent-id})
                            "Cluster   renamed-cluster")
             "the result follows the supplied database, not a captured identity")))))
@@ -61,11 +61,11 @@
 (deftest identity-map-and-omitted-arguments-use-the-same-function
   (with-agent
     (fn [connection]
-      (db/transact! connection
-                    (filterv :seon.call-preparation/key
-                             (:seon.config/initialization
-                              (config/compile-manifest {}))))
-      (db/transact! connection [{:seon.agent/id "supplied"}])
+      (test-support/transacted! connection
+                                (filterv :seon.call-preparation/key
+                                         (:seon.config/initialization
+                                          (config/compile-manifest {}))))
+      (test-support/transacted! connection [{:seon.agent/id "supplied"}])
       (let [database @connection
             indexed (db/pull database
                              '[:seon.fn/sym

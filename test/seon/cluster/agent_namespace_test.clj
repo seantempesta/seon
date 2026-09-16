@@ -16,12 +16,12 @@
   (test-support/with-database
     (fn [connection]
       (test-support/seed-cluster! connection "test")
-      (db/transact!
-       connection
-       (agent/creation-tx
-        {:seon.agent/id "alice"
-         :seon.cluster/name "test"
-         :seon.ns/name 'my.agents.alice}))
+      (test-support/transacted!
+                   connection
+                   (agent/creation-tx
+                    {:seon.agent/id "alice"
+                     :seon.cluster/name "test"
+                     :seon.ns/name 'my.agents.alice}))
       (is (= "alice" (agent/steward-of @connection 'my.agents.alice)))
       (is (nil? (agent/steward-of @connection 'my.agents.nobody)))
       (is (= 'my.agents.alice
@@ -36,17 +36,17 @@
   (test-support/with-database
     (fn [connection]
       (test-support/seed-cluster! connection "test")
-      (db/transact!
-       connection
-       (agent/creation-tx
-        {:seon.agent/id "alice"
-         :seon.cluster/name "test"
-         :seon.ns/name 'my.agents.alice}))
-      (db/transact! connection
-                  [{:seon.ns/name 'my.agents.reassigned}
-                   {:seon.agent/id "alice"
-                    :seon.agent/namespace
-                    [:seon.ns/name 'my.agents.reassigned]}])
+      (test-support/transacted!
+                   connection
+                   (agent/creation-tx
+                    {:seon.agent/id "alice"
+                     :seon.cluster/name "test"
+                     :seon.ns/name 'my.agents.alice}))
+      (test-support/transacted! connection
+                              [{:seon.ns/name 'my.agents.reassigned}
+                               {:seon.agent/id "alice"
+                                :seon.agent/namespace
+                                [:seon.ns/name 'my.agents.reassigned]}])
       (is (= 'my.agents.reassigned
              (db/q '[:find ?name .
                     :where
@@ -65,12 +65,12 @@
   (test-support/with-database
     (fn [connection]
       (test-support/seed-cluster! connection "test")
-      (db/transact!
-       connection
-       (agent/creation-tx
-        {:seon.agent/id "alice"
-         :seon.cluster/name "test"
-         :seon.ns/name 'my.agents.shared}))
+      (test-support/transacted!
+                   connection
+                   (agent/creation-tx
+                    {:seon.agent/id "alice"
+                     :seon.cluster/name "test"
+                     :seon.ns/name 'my.agents.shared}))
       (let [result
             (db/transact!
              connection
@@ -102,27 +102,27 @@
   (test-support/with-database
     (fn [connection]
       (test-support/seed-cluster! connection "test")
-      (db/transact! connection
-                  [{:seon.ns/name 'example.unowned
-                    :seon.ns/source "(ns example.unowned)"
-                    :seon.schema.admission/source :agent}
-                   {:seon.ns/name 'example.assigned
-                    :seon.ns/source "(ns example.assigned)"
-                    :seon.schema.admission/source :agent}
-                   {:seon.ns/name 'example.owned
-                    :seon.ns/source "(ns example.owned)"
-                    :seon.schema.admission/source :agent}
-                   {:seon.agent/id "owner"
+      (test-support/transacted! connection
+                              [{:seon.ns/name 'example.unowned
+                                :seon.ns/source "(ns example.unowned)"
+                                :seon.schema.admission/source :agent}
+                               {:seon.ns/name 'example.assigned
+                                :seon.ns/source "(ns example.assigned)"
+                                :seon.schema.admission/source :agent}
+                               {:seon.ns/name 'example.owned
+                                :seon.ns/source "(ns example.owned)"
+                                :seon.schema.admission/source :agent}
+                               {:seon.agent/id "owner"
 
-                    :seon.agent/namespace
-                    [:seon.ns/name 'example.owned]}
-                   {:seon.agent/id "worker"
+                                :seon.agent/namespace
+                                [:seon.ns/name 'example.owned]}
+                               {:seon.agent/id "worker"
 
-                    :seon.agent/namespace
-                    [:seon.ns/name 'example.assigned]}])
-      (db/transact! connection
-                  [[:db/add [:seon.ns/name 'example.owned] :seon.ns/steward
-                    [:seon.agent/id "owner"]]])
+                                :seon.agent/namespace
+                                [:seon.ns/name 'example.assigned]}])
+      (test-support/transacted! connection
+                              [[:db/add [:seon.ns/name 'example.owned] :seon.ns/steward
+                                [:seon.agent/id "owner"]]])
       (let [value (found connection)
             log-line (problems/log-report value)]
         (is (= [{:seon.ns/name 'example.assigned}

@@ -213,9 +213,9 @@
     (config/apply! {:seon.db/connection connection
                     :seon.boot/cluster-name cluster-name})
     (support/seed-cluster! connection cluster-name)
-    (db/transact! connection
-                  [{:seon.ns/name 'seon.cluster.mcp-test
-                    :seon.ns/source "(ns seon.cluster.mcp-test)"}])
+    (support/transacted! connection
+                         [{:seon.ns/name 'seon.cluster.mcp-test
+                           :seon.ns/source "(ns seon.cluster.mcp-test)"}])
     (swap! running-instances assoc cluster-name
            (running-instance connection cluster-name))
     (try
@@ -463,10 +463,10 @@
               (schema.datahike/malli->datahike-attr
                :seon.dev.mcp.artifact/digest)))
             "the direct digest root derives Datahike noHistory")
-        (db/transact!
-         connection
-         [[:db.fn/retractEntity
-           [:seon.dev.mcp.artifact/id artifact-id]]])
+        (support/transacted!
+                connection
+                [[:db.fn/retractEntity
+                  [:seon.dev.mcp.artifact/id artifact-id]]])
         (is (empty?
              (db/q
               '[:find [?digest ...]

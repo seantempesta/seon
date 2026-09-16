@@ -140,9 +140,9 @@
       (let [opened (store/open-store! {:seon.store/dir dir})]
         (is (seon.schema/valid-candidate-value? :seon.store/store opened))
         (is (true? (:seon.store/created? opened)))
-        (db/transact! (:seon.store/connection-object opened) probe-schema)
-        (db/transact! (:seon.store/connection-object opened)
-                    [{:seon.store.test/marker "survives"}])
+        (test-support/transacted! (:seon.store/connection-object opened) probe-schema)
+        (test-support/transacted! (:seon.store/connection-object opened)
+                                [{:seon.store.test/marker "survives"}])
         (is (nil? (store/release-store! opened)))
         ;; A SECOND RELEASE IS REFUSED, not quietly repeated: the declared
         ;; contract requires a live unreleased store held by this process
@@ -245,10 +245,10 @@
       (let [opened (store/open-store! {:seon.store/dir dir})
             connection (:seon.store/connection-object opened)]
         (try
-          (db/transact! connection probe-schema)
+          (test-support/transacted! connection probe-schema)
           (let [basis (:max-tx @connection)]
-            (db/transact! connection
-                        [{:seon.store.test/marker "after-basis"}])
+            (test-support/transacted! connection
+                                    [{:seon.store.test/marker "after-basis"}])
             (is (store/database-value? (db/history @connection)))
             (is (store/database-value? (db/as-of @connection basis)))
             (is (store/database-value? (db/since @connection basis))))
@@ -267,13 +267,13 @@
             main (:seon.store/connection-object opened)
             branch :non-temporal-test]
         (try
-          (db/transact! main probe-schema)
+          (test-support/transacted! main probe-schema)
           (d/branch! main :db branch)
           (let [connection (store/open-branch! opened branch)]
             (try
               (is (false? (get-in @connection [:config :keep-history?])))
-              (db/transact! connection
-                          [{:seon.store.test/marker "current-reads-work"}])
+              (test-support/transacted! connection
+                                      [{:seon.store.test/marker "current-reads-work"}])
               (is (= #{["current-reads-work"]}
                      (db/q '[:find ?marker
                             :where [_ :seon.store.test/marker ?marker]]
@@ -293,7 +293,7 @@
       (let [opened (store/open-store! {:seon.store/dir dir})
             connection (:seon.store/connection-object opened)]
         (try
-          (db/transact! connection probe-schema)
+          (test-support/transacted! connection probe-schema)
           (testing "Integer values commit from entity maps and datom vectors"
             (let [outcome
                   (db/transact!
@@ -354,10 +354,10 @@
       (let [a (store/open-store! {:seon.store/dir dir-a})
             b (store/open-store! {:seon.store/dir dir-b})]
         (try
-          (db/transact! (:seon.store/connection-object a) probe-schema)
-          (db/transact! (:seon.store/connection-object b) probe-schema)
-          (db/transact! (:seon.store/connection-object a)
-                      [{:seon.store.test/marker "only-a"}])
+          (test-support/transacted! (:seon.store/connection-object a) probe-schema)
+          (test-support/transacted! (:seon.store/connection-object b) probe-schema)
+          (test-support/transacted! (:seon.store/connection-object a)
+                                  [{:seon.store.test/marker "only-a"}])
           (is (= #{"only-a"} (markers a)))
           (is (= #{} (markers b)) "stores share nothing")
           (finally
@@ -376,9 +376,9 @@
     (try
       ;; a complete store with one durable marker...
       (let [victim (store/open-store! {:seon.store/dir dir})]
-        (db/transact! (:seon.store/connection-object victim) probe-schema)
-        (db/transact! (:seon.store/connection-object victim)
-                    [{:seon.store.test/marker "pre-window"}])
+        (test-support/transacted! (:seon.store/connection-object victim) probe-schema)
+        (test-support/transacted! (:seon.store/connection-object victim)
+                                [{:seon.store.test/marker "pre-window"}])
         (store/release-store! victim))
       ;; ...manufactured into the mid-genesis state Datahike can leave
       ;; behind on a first-create kill: :db present, :branches missing
@@ -390,7 +390,7 @@
         (try
           (is (true? (:seon.store/created? repaired))
               "mid-genesis means nothing durable existed — recreate")
-          (db/transact! (:seon.store/connection-object repaired) probe-schema)
+          (test-support/transacted! (:seon.store/connection-object repaired) probe-schema)
           (is (= #{} (markers repaired))
               "the recreated store is empty")
           (finally

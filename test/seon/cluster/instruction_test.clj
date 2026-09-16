@@ -82,13 +82,13 @@
          (instruction/seed-rows)))
   (test-support/with-database
     (fn [connection]
-      (db/transact!
-       connection
-       [{:seon.cluster.instruction/id :getting-started
-         :seon.cluster.instruction/text "Owner revision."}])
-      (db/transact! connection
-                  (#'cluster/instruction-row-changes
-                   @connection (instruction/seed-rows)))
+      (test-support/transacted!
+                   connection
+                   [{:seon.cluster.instruction/id :getting-started
+                     :seon.cluster.instruction/text "Owner revision."}])
+      (test-support/transacted! connection
+                              (#'cluster/instruction-row-changes
+                               @connection (instruction/seed-rows)))
       (is (= #{:getting-started}
              (set
               (db/q '[:find [?id ...]
@@ -120,17 +120,17 @@
             removed (first (sort computed))]
         (is (seq computed) "The canonical corpus must expose a toolkit.")
         (is (= computed (cluster-toolkit @connection "toolkit")))
-        (db/transact!
-         connection
-         (cond-> [{:seon.ns/name 'my.stale.toolkit}
-                  {:seon.cluster/name "toolkit"
-                   :seon.cluster/toolkit
-                   [:seon.ns/name 'my.stale.toolkit]}]
-           removed
-           (conj [:db/retract
-                  [:seon.cluster/name "toolkit"]
-                  :seon.cluster/toolkit
-                  [:seon.ns/name removed]])))
+        (test-support/transacted!
+                     connection
+                     (cond-> [{:seon.ns/name 'my.stale.toolkit}
+                              {:seon.cluster/name "toolkit"
+                               :seon.cluster/toolkit
+                               [:seon.ns/name 'my.stale.toolkit]}]
+                       removed
+                       (conj [:db/retract
+                              [:seon.cluster/name "toolkit"]
+                              :seon.cluster/toolkit
+                              [:seon.ns/name removed]])))
         (is (not= computed (cluster-toolkit @connection "toolkit")))
         (cluster/ensure-cluster-entity!
          connection "toolkit" "instruction-test-process")

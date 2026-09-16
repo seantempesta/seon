@@ -162,13 +162,13 @@
                                          :where [_ :seon.test/sym ?s]]
                                        (db/db connection))))]
        (is (some? test-sym) "the canonical population carries test entities")
-       (db/transact! connection
-                     [{:seon.issue/id issue-id
-                       :seon.issue/title "Verify the assignment wakes its worker"
-                       :seon.issue/status :open
-                       :seon.issue/severity :blocker
-                       :seon.issue/problem "The worker must turn on assignment."
-                       :seon.issue/tests #{[:seon.test/sym test-sym]}}])
+       (support/transacted! connection
+                            [{:seon.issue/id issue-id
+                              :seon.issue/title "Verify the assignment wakes its worker"
+                              :seon.issue/status :open
+                              :seon.issue/severity :blocker
+                              :seon.issue/problem "The worker must turn on assignment."
+                              :seon.issue/tests #{[:seon.test/sym test-sym]}}])
        (testing "the assignment attribute is declared a turn-opening wake"
          (let [database (db/db connection)]
            (is (contains? (wake/wake-attributes database) :seon.issue/agent))

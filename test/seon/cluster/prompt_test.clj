@@ -62,18 +62,18 @@
       (support/seed-cluster! connection "prompt-walk")
       (config/apply! {:seon.db/connection connection
                       :seon.boot/cluster-name "prompt-walk"})
-      (db/transact! connection
-                  (agent/creation-tx
-                   {:seon.agent/id "walker"
-                    :seon.cluster/name "prompt-walk"
-                    :seon.ns/name 'my.agents.walker}))
-      (db/transact! connection
-                  [{:seon.message/id "walk-message" :seon.message/to [:seon.agent/id "walker"] :seon.message/content "inspect this walk" :seon.message/inbox [:seon.agent/id "walker"]}])
+      (support/transacted! connection
+                         (agent/creation-tx
+                          {:seon.agent/id "walker"
+                           :seon.cluster/name "prompt-walk"
+                           :seon.ns/name 'my.agents.walker}))
+      (support/transacted! connection
+                         [{:seon.message/id "walk-message" :seon.message/to [:seon.agent/id "walker"] :seon.message/content "inspect this walk" :seon.message/inbox [:seon.agent/id "walker"]}])
       (let [ctx (support/fork-cluster-ctx connection)]
         (record-evaluation! connection ctx "opening-history"
                             "(seon.db/pull [:seon.message/content] [:seon.message/id \"walk-message\"])")
-      (db/transact! connection
-                  [{:seon.turn/id "walk-run" :seon.turn/agent [:seon.agent/id "walker"] :seon.turn/trigger [:seon.message/id "walk-message"] :seon.turn/opened-tx "datomic.tx"}])
+      (support/transacted! connection
+                         [{:seon.turn/id "walk-run" :seon.turn/agent [:seon.agent/id "walker"] :seon.turn/trigger [:seon.message/id "walk-message"] :seon.turn/opened-tx "datomic.tx"}])
         (body connection ctx)))))
 
 (defn- request
@@ -111,8 +111,8 @@
    (fn [connection ctx]
      (let [before (:seon.cluster.prompt/text
                    (prompt/prompt @connection (request connection ctx)))]
-       (db/transact! connection
-                     [{:seon.message/id "later" :seon.message/to [:seon.agent/id "walker"] :seon.message/content "not evaluated yet" :seon.message/inbox [:seon.agent/id "walker"]}])
+       (support/transacted! connection
+                            [{:seon.message/id "later" :seon.message/to [:seon.agent/id "walker"] :seon.message/content "not evaluated yet" :seon.message/inbox [:seon.agent/id "walker"]}])
        (let [after (:seon.cluster.prompt/text
                     (prompt/prompt @connection (request connection ctx)))]
          (is (= before after) "a stored observation changes only through a later evaluation")
@@ -151,7 +151,7 @@
      (let [before (:seon.cluster.prompt/text
                    (prompt/prompt @connection
                                   (request connection ctx)))]
-       (db/transact! connection [])
+       (support/transacted! connection [])
        (let [after (:seon.cluster.prompt/text
                     (prompt/prompt @connection
                                    (request connection ctx)))]
@@ -180,9 +180,9 @@
 (deftest prompt-budget-is-informational-and-does-not-compact
   (planted
    (fn [connection ctx]
-     (db/transact! connection
-                   [{:seon.agent/id "walker"
-                     :seon.agent/settings {:seon.config.ai/prompt-token-budget 3}}])
+     (support/transacted! connection
+                          [{:seon.agent/id "walker"
+                            :seon.agent/settings {:seon.config.ai/prompt-token-budget 3}}])
      (let [distances (atom [])
            acquire (fn [render-request]
                      (let [distance (:seon.render/distance render-request)]
@@ -252,14 +252,14 @@
      (let [model (db/q '[:find ?model . :where [_ :seon.config.ai/model ?model]] @connection)
            foreign (assoc-in (recorded-usage-tx model 99 9000 1000)
                              [0 :seon.turn/agent] [:seon.agent/id "other"])]
-       (db/transact! connection
-                     (agent/creation-tx {:seon.agent/id "other"
-                                         :seon.cluster/name "prompt-walk"
-                                         :seon.ns/name 'my.agents.other}))
-       (db/transact! connection
-                     [{:seon.agent/id "walker"
-                       :seon.agent/settings {:seon.config.ai/chars-per-token-prior 4.5}}])
-       (db/transact! connection foreign)
+       (support/transacted! connection
+                            (agent/creation-tx {:seon.agent/id "other"
+                                                :seon.cluster/name "prompt-walk"
+                                                :seon.ns/name 'my.agents.other}))
+       (support/transacted! connection
+                            [{:seon.agent/id "walker"
+                              :seon.agent/settings {:seon.config.ai/chars-per-token-prior 4.5}}])
+       (support/transacted! connection foreign)
        (is (= 9.0 (:seon.ai.tokens/chars-per-token
                     (prompt/agent-calibration @connection "other" model))))
        (is (= 4.5 (:seon.ai.tokens/chars-per-token
@@ -269,7 +269,7 @@
          (db/transact! connection
                        (recorded-usage-tx model ordinal
                                           (if (< ordinal 2) 6400 2800) 1000)))
-       (db/transact! connection (recorded-usage-tx model 100 10000 0))
+       (support/transacted! connection (recorded-usage-tx model 100 10000 0))
        (let [calibration (prompt/agent-calibration @connection "walker" model)
              rendered (prompt/prompt @connection (dissoc (request connection ctx) :seon.turn/id))]
          (is (= :seon.ai.tokens/observed (:seon.ai.tokens/basis calibration)))
@@ -291,9 +291,9 @@
      (let [model (db/q '[:find ?model .
                          :where [_ :seon.config.ai/model ?model]]
                        @connection)]
-       (db/transact! connection
-                     [{:seon.agent/id "walker"
-                       :seon.agent/settings {:seon.config.ai/prompt-token-budget 100}}])
+       (support/transacted! connection
+                            [{:seon.agent/id "walker"
+                              :seon.agent/settings {:seon.config.ai/prompt-token-budget 100}}])
        (testing "with no recorded usage the measured prior is named"
          (let [calibration (prompt/model-calibration @connection model)]
            (is (= :seon.ai.tokens/shipped-prior

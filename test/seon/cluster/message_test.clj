@@ -53,9 +53,9 @@
   [body]
   (test-support/with-database
     (fn [connection]
-      (db/transact! connection
-                  [{:seon.agent/id "alice"}
-                   {:seon.agent/id "bob"}])
+      (test-support/transacted! connection
+                              [{:seon.agent/id "alice"}
+                               {:seon.agent/id "bob"}])
       (body connection))))
 
 (deftest message-render-resolves-supported-agent-ref-shapes
@@ -99,9 +99,9 @@
     (fn [connection]
       (config/apply! {:seon.db/connection connection
                      :seon.boot/cluster-name "message-test"})
-      (db/transact!
-       connection
-       [{:seon.message/id "message-1" :seon.message/from [:seon.agent/id "alice"] :seon.message/to [:seon.agent/id "bob"] :seon.message/content "hello" :seon.message/inbox [:seon.agent/id "bob"]}])
+      (test-support/transacted!
+                   connection
+                   [{:seon.message/id "message-1" :seon.message/from [:seon.agent/id "alice"] :seon.message/to [:seon.agent/id "bob"] :seon.message/content "hello" :seon.message/inbox [:seon.agent/id "bob"]}])
       (let [source (message/render-ai {:seon.message/id "message-1"})
             planned (turn/planned-sources source 'my.agents.alice 4096)
             evaluated
@@ -127,10 +127,10 @@
     (fn [connection]
       (config/apply! {:seon.db/connection connection
                      :seon.boot/cluster-name "message-test"})
-      (db/transact!
-       connection
-       [{:seon.message/id "message-older" :seon.message/from [:seon.agent/id "alice"] :seon.message/to [:seon.agent/id "bob"] :seon.message/content "older" :seon.message/inbox [:seon.agent/id "bob"]}
-        {:seon.message/id "message-newer" :seon.message/to [:seon.agent/id "bob"] :seon.message/content "newer" :seon.message/inbox [:seon.agent/id "bob"]}])
+      (test-support/transacted!
+                   connection
+                   [{:seon.message/id "message-older" :seon.message/from [:seon.agent/id "alice"] :seon.message/to [:seon.agent/id "bob"] :seon.message/content "older" :seon.message/inbox [:seon.agent/id "bob"]}
+                    {:seon.message/id "message-newer" :seon.message/to [:seon.agent/id "bob"] :seon.message/content "newer" :seon.message/inbox [:seon.agent/id "bob"]}])
       (let [ctx (test-support/fork-cluster-ctx connection "message-test")
             evaluate-form
             (fn [source]
@@ -193,10 +193,10 @@
 (deftest inbox-unit-renders-both-projections-of-the-same-messages
   (with-database
     (fn [connection]
-      (db/transact!
-       connection
-       [{:seon.message/id "inbox/2" :seon.message/from [:seon.agent/id "alice"] :seon.message/to [:seon.agent/id "bob"] :seon.message/content "second" :seon.message/inbox [:seon.agent/id "bob"]}
-        {:seon.message/id "inbox/1" :seon.message/from [:seon.agent/id "alice"] :seon.message/to [:seon.agent/id "bob"] :seon.message/content "first" :seon.message/inbox [:seon.agent/id "bob"]}])
+      (test-support/transacted!
+                   connection
+                   [{:seon.message/id "inbox/2" :seon.message/from [:seon.agent/id "alice"] :seon.message/to [:seon.agent/id "bob"] :seon.message/content "second" :seon.message/inbox [:seon.agent/id "bob"]}
+                    {:seon.message/id "inbox/1" :seon.message/from [:seon.agent/id "alice"] :seon.message/to [:seon.agent/id "bob"] :seon.message/content "first" :seon.message/inbox [:seon.agent/id "bob"]}])
       (let [database @connection
             reverse-value
             (:seon.message/_inbox
@@ -244,10 +244,10 @@
 (deftest message-html-separates-attribution-time-and-authored-content
   (with-database
     (fn [connection]
-      (db/transact! connection [{:db/id "datomic.tx" :db/txInstant now}
-                                {:seon.message/id "message-1"
-                                 :seon.message/to [:seon.agent/id "bob"]
-                                 :seon.message/content "first line\nsecond line"}])
+      (test-support/transacted! connection [{:db/id "datomic.tx" :db/txInstant now}
+                                            {:seon.message/id "message-1"
+                                             :seon.message/to [:seon.agent/id "bob"]
+                                             :seon.message/content "first line\nsecond line"}])
       (let [database @connection
             rendered
             (message/render-html
@@ -273,8 +273,8 @@
   "Commit one message from OUTSIDE the agent population — a human's.
   No `from`, and no triggering transaction: the head of a chain."
   [connection id to content]
-  (db/transact! connection
-              [{:seon.message/id id :seon.message/to [:seon.agent/id to] :seon.message/content content :seon.message/inbox [:seon.agent/id to]}])
+  (test-support/transacted! connection
+                          [{:seon.message/id id :seon.message/to [:seon.agent/id to] :seon.message/content content :seon.message/inbox [:seon.agent/id to]}])
   id)
 
 (defn- deliver!
@@ -486,9 +486,9 @@
   (let [population (subvec agent-ids 0 population-size)]
     (test-support/with-database
       (fn [connection]
-        (db/transact! connection
-                    (mapv (fn [id] {:seon.agent/id id})
-                          population))
+        (test-support/transacted! connection
+                                (mapv (fn [id] {:seon.agent/id id})
+                                      population))
         (second
          (reduce
           (fn [[model valid?] [command-index command]]
@@ -574,8 +574,8 @@
   (with-database
     (fn [connection]
       (ask! connection "m-0" "alice" "hello")
-      (db/transact! connection
-                  [{:seon.turn/id "r-1" :seon.turn/agent [:seon.agent/id "alice"] :seon.turn/trigger [:seon.message/id "m-0"] :seon.turn/opened-tx "datomic.tx"}])
+      (test-support/transacted! connection
+                              [{:seon.turn/id "r-1" :seon.turn/agent [:seon.agent/id "alice"] :seon.turn/trigger [:seon.message/id "m-0"] :seon.turn/opened-tx "datomic.tx"}])
       (is (= "m-0" (message/trigger @connection "r-1"))
           "the cause is an ordinary run fact")
       (is (nil? (message/trigger @connection "no-such-run"))))))
@@ -587,11 +587,11 @@
         _ (d/create-database configuration)
         connection (d/connect configuration)]
     (try
-      (db/transact!
-       connection
-       (schema.datahike/malli->datahike-schema
-        (schema/canonical-database-attributes)))
-      (db/transact! connection [{:seon.agent/id "alice"}])
+      (test-support/transacted!
+                   connection
+                   (schema.datahike/malli->datahike-schema
+                    (schema/canonical-database-attributes)))
+      (test-support/transacted! connection [{:seon.agent/id "alice"}])
       (ask! connection "m-0" "alice" "hello")
       (let [report
             (db/transact!

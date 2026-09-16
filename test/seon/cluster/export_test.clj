@@ -71,14 +71,14 @@
     (.mkdirs (.getParentFile (io/file dir)))
     (let [opened (store/open-store! {:seon.store/dir dir})]
       (try
-        (db/transact! (:seon.store/connection-object opened) probe-schema)
-        (db/transact! (:seon.store/connection-object opened)
-                    {:tx-data [{:seon.export.test/marker "on-main"}]})
+        (test-support/transacted! (:seon.store/connection-object opened) probe-schema)
+        (test-support/transacted! (:seon.store/connection-object opened)
+                                {:tx-data [{:seon.export.test/marker "on-main"}]})
         (d/branch! (:seon.store/connection-object opened) :db other-branch)
         (let [connection (store/open-branch! opened other-branch)]
           (try
-            (db/transact! connection
-                        {:tx-data [{:seon.export.test/marker "on-branch"}]})
+            (test-support/transacted! connection
+                                    {:tx-data [{:seon.export.test/marker "on-branch"}]})
             (finally
               (d/release connection))))
         (body {:root root :store opened})
@@ -120,8 +120,8 @@
                   (finally
                     (d/release connection)))))
             (testing "the export is writable — a copy, not a read-only image"
-              (db/transact! (:seon.store/connection-object exported)
-                          {:tx-data [{:seon.export.test/marker "post-export"}]})
+              (test-support/transacted! (:seon.store/connection-object exported)
+                                      {:tx-data [{:seon.export.test/marker "post-export"}]})
               (is (= #{"on-main" "post-export"}
                      (markers (:seon.store/connection-object exported)))))
             (finally
@@ -266,7 +266,7 @@
         (let [dir (str root "/half/store")]
           (.mkdirs (.getParentFile (io/file dir)))
           (let [opened (store/open-store! {:seon.store/dir dir})]
-            (db/transact! (:seon.store/connection-object opened) probe-schema)
+            (test-support/transacted! (:seon.store/connection-object opened) probe-schema)
             (store/release-store! opened))
           ;; the first-create kill window, manufactured exactly as B1's
           ;; own suite manufactures it

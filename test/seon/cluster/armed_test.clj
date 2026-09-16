@@ -299,10 +299,10 @@
            ;; completed, then a message commits before arm! returns.
            ;; Boot must already have registered the routing listener.
            (test-support/await-event! primed "boot arm prime")
-           (db/transact!
-            (:seon.db/connection
-             (:seon.turn.loop/cluster request))
-            [{:seon.message/id "boot-window-message" :seon.message/to [:seon.agent/id "root"] :seon.message/content "answer during boot" :seon.message/inbox [:seon.agent/id "root"]}])
+           (test-support/transacted!
+                        (:seon.db/connection
+                         (:seon.turn.loop/cluster request))
+                        [{:seon.message/id "boot-window-message" :seon.message/to [:seon.agent/id "root"] :seon.message/content "answer during boot" :seon.message/inbox [:seon.agent/id "root"]}])
            entry))
        ai/complete
        (fn [_request]
