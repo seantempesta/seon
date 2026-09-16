@@ -15,7 +15,7 @@
             [seon.turn]
             [seon.test-support]))
 
-(clojure.test/deftest indexed-issues-replace-facts-and-retain-identities
+(clojure.test/deftest indexed-issues-replace-facts-and-retract-removed-notes
  (seon.test-support/with-database
   (fn [connection]
    (let [wanted #{"class-classification-is-inferred-from-hand-lists.md"
@@ -69,8 +69,8 @@
                           :seon.issue/notes (mapv #(update % :seon.issue/text clojure.string/replace "status: open" "status: resolved") selected)})
        (clojure.test/is (= :resolved (:seon.issue/status (seon.db/pull (seon.db/db connection) '[*] [:seon.issue/id "probe-member"]))))
        (seon.issue/index! {:seon.db/connection connection :seon.issue/notes []})
-       (clojure.test/is (= {:db/id (:db/id member) :seon.issue/id "probe-member"}
-                           (seon.db/pull (seon.db/db connection) '[*] [:seon.issue/id "probe-member"])))
+       (clojure.test/is (nil? (seon.db/pull (seon.db/db connection) '[*]
+                                          [:seon.issue/id "probe-member"])))
        (clojure.test/is (empty? (seon.issue/issues {:seon.db/db (seon.db/db connection)}))))))))
 
 (clojure.test/deftest unchanged-issue-adoption-writes-no-issue-datoms

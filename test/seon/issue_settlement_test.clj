@@ -320,7 +320,9 @@
           (is (= :seon.db/retention-refused
                  (:seon.error/kind (write creator [[:db/retract issue :seon.issue/tests b]]))))
           (is (= #{"my.agents.retention/b"} (tests-now)))
-          (is (:db-after (db/transact! connection [[:db.fn/call #'seon.issue/adopt-tx []]])))
+          (is (= :seon.db/retention-refused
+                 (:seon.error/kind
+                  (db/transact! connection [[:db.fn/call #'seon.issue/adopt-tx []]]))))
           (is (= #{"my.agents.retention/b"} (tests-now)))
           (is (= "retention-creator"
                  (get-in (db/pull (db/db connection)

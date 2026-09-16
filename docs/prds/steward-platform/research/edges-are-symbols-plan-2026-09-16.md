@@ -571,3 +571,42 @@ continuation does not own `src/seon/test.clj`, `bin/test-check`,
 by the no-default-cluster lane) and did not commit them. The rerun overlays the
 untracked resource read-only via `--paths` so the snapshot loads; the fix
 belongs to that lane's own path-limited publication.
+
+### Issue-deletion seam — measured result
+
+`bin/test-fast --paths test/seon/issue_deletion_test.clj test/seon/issue_test.clj
+test/seon/issue_settlement_test.clj resources/seon/schemas/seon.test.check.edn --
+seon.issue-deletion-test seon.issue-test seon.issue-settlement-test` at HEAD
+`61f0332e6` (exit 0 from the wrapper; the suite reports its own tally):
+**13 tests, 239 assertions, 1 failure, 1 error** — both foreign, neither in
+this seam's assertions.
+
+Green here: `removed-notes-retract-entities-and-components-through-both-writers`
+and `removed-started-note-refuses-atomically-through-both-writers` both ran
+complete with no failure, as did the rewritten
+`indexed-issues-replace-facts-and-retract-removed-notes` deletion assertion
+(`test/seon/issue_test.clj:72`) and the settlement refusal expectation
+(`test/seon/issue_settlement_test.clj:323`). Deletion is therefore a
+retraction through both writers, the component citations cascade, the cited
+file's noncomponent ref survives, `as-of` still answers the pre-deletion row,
+repeating the deletion writes no datom beyond `:db/txInstant`, and a started
+issue's removal refuses `:seon.db/retention-refused` atomically for both.
+
+The two reds are pre-existing at HEAD and outside this seam:
+
+1. `issue_test.clj:65` — `seon.issue/render-ai` no longer emits
+   `"(my.issue/status"`. `65986edf7` rewrote the render onto `status-view`
+   without updating the expectation. Filed as
+   [the-issue-ai-render-no-longer-teaches-its-requery-form](../../../seon/issues/the-issue-ai-render-no-longer-teaches-its-requery-form.md);
+   deliberately NOT weakened here, because whether the status render must
+   always carry a runnable form is the render owner's call.
+2. `issue_settlement_test.clj:210` — `nth not supported on this type:
+   PersistentArrayMap` at `src/seon/cluster/wake.clj:422`. Already owned and
+   in flight: `docs/prds/steward-platform/research/batch-113-wake-matchers-2026-09-16.md`
+   describes the same stack, and `src/seon/cluster/wake.clj` holds that
+   lane's uncommitted fix. No second note filed.
+
+The first attempt at this gate refused to initialize for the `check-request`
+resource boundary recorded above; the rerun overlays that untracked resource
+read-only. `clj-kondo` over the three owned files: 0 errors, 1 warning
+(`issue_test.clj:409` shadowed `agent`, pre-existing).
