@@ -36,8 +36,8 @@ reforked or restarted. No paid provider requests were made.
 
 | Cause | Tests | Disposition | Recurring regression |
 |---|---|---|---|
-| Missing deletion target passed as nil to map-only definition comparison | `ns-unmap-retracts-the-owned-function-after-the-terminal-commit`, `qualified-dynamic-ns-unmap-is-durable-in-a-fresh-context`, `absent-foreign-ns-unmap-commits-and-mutates-the-run-sci-ctx`, `runtime-tests-install-run-redefine-and-delete-exactly` | Candidate at `remaining-definition-facts`; verification pending | First test asserts never-existing identity, live definition, and surviving tombstone; other tests retain distinct SCI/fresh-acquisition observables |
-| Removed result codec and queries that mix system reads with submitted evaluations | prose/doc, alias reading, parse namespace, contracted redefinition, mixed plan, schema unregister, import-only unmap, cross-agent live call | Candidate test observations; verification pending | Ordered, author-qualified evaluation query; exact saved text and existing durable/live effects |
+| Missing deletion target passed as nil to map-only definition comparison | `ns-unmap-retracts-the-owned-function-after-the-terminal-commit`, `qualified-dynamic-ns-unmap-is-durable-in-a-fresh-context`, `absent-foreign-ns-unmap-commits-and-mutates-the-run-sci-ctx`, `runtime-tests-install-run-redefine-and-delete-exactly` | Resolved in `ecdd61ffe` at `remaining-definition-facts`; before/after proof below | First test asserts never-existing identity, live definition, and surviving tombstone; other tests retain distinct SCI/fresh-acquisition observables |
+| Removed result codec and queries that mix system reads with submitted evaluations | prose/doc, alias reading, parse namespace, contracted redefinition, mixed plan, schema unregister, import-only unmap, cross-agent live call | Seven observation candidates verified; schema-unregister residual recorded below | Ordered, author-qualified evaluation query; exact saved text and existing durable/live effects |
 | Incomplete injected installation envelope | combined evaluation | Unrepaired: fixture returns the vector from `swap!`, violating the map result contract | Must retain terminal transaction observables or identify current coverage before retiring serialization assertions |
 | Incomplete environment/config construction | acquisition ordering, function case count, refused delivery | Unrepaired | Supply canonical projection/config compiler output |
 | Retired execution/storage assumptions | returned message effects, private definition storage, old generated-turn fixtures, crash intent, prompt refusal | Unrepaired; requires individual ruled-behavior evidence before disposition | Existing current owners must provide the proof |
@@ -86,7 +86,7 @@ and other test files. None is changed by this lane.
 
 ## Verification and landing
 
-Pending. Gate request will name `seon.cluster.turn-test` and
+Final cold gate pending. Gate request will name `seon.cluster.turn-test` and
 `seon.sci.eval-test`; the orchestrator owns the final namespace/platform gate.
 
 ### Slice 1 — deletion presence (landed source, 01:31 UTC)
@@ -108,3 +108,35 @@ adoption succeeded and supplied the after-edit proof. Default remained alive.
 The other 11 observation candidates produced ten green tests and one residual
 schema-unregister assertion: its Datahike attribute remains installed after
 its program definition disappears. No weakening of that assertion is retained.
+
+
+The [exact fresh-base probe](turn-test-reds-probe-2026-09-16.clj) is preserved.
+It uses the canonical `create-base`/`close-base!` owners, scoped fixture delays,
+real `seon.test/run` and recorded results. The snapshot root is explicitly
+named in the script, not inferred from a global database. Before the isolated
+runs, the complete `:test` classpath from `clojure -Spath -A:test` was added to
+an owned DynamicClassLoader; its context loader was installed only around the
+serial future and restored in `finally`. This was necessary for fresh SCI
+acquisition to load `seon.dev.dependency-cache-test` and its tools.build
+ dependency. The first four-test candidate had three green tests and one
+classpath setup error before this correction; it is not the final verdict.
+
+
+### Slice 2 — current evaluation observations
+
+Ten tests pass **32 assertions / 0 failures / 0 errors** before source edits
+and again after editing, on the adopted snapshot definitions. Recorded runs:
+41339–41344, 41349–41352. The [complete after-edit results](turn-test-reds-observations-after-edit-2026-09-16.edn)
+name every test. They cover prose/doc, aliases, parse-time namespaces,
+contracted redefinition, mixed private/durable definitions, import removal,
+cross-agent calls, red-form continuation, cross-agent contract refusal, and a
+bounded nonterminating evaluation.
+
+The single observation helper queries actual agent-authored evaluations in
+turn/ordinal order and throws if its query returns a typed refusal. Saved
+`:seon.eval/shown` is compared as text, never decoded as an obsolete print
+node. The error-data codec is unchanged. The namespace assertion now compares
+all three expected namespaces instead of comparing a row's namespace with
+itself. One-reply fixtures execute the two transitions they intend; they no
+longer accidentally drive later continuation turns. No production continuation
+or reader behavior changed.

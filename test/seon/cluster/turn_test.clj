@@ -1,14 +1,9 @@
 (ns seon.cluster.turn-test
-  "Coverage for the turn's four situations (N3, package 2).
+  "Turn integration on canonical databases and real SCI contexts.
 
-  Author-written rather than orchestrator-sealed: `turn` and `step` are
-  the two functions the sealed loop suite does not reach, because a
-  full turn needs the guarded eval that the `seon.sci.eval` adoption
-  will bring. The evaluator is INJECTED as a qualified symbol, so this
-  drives every branch now with a fake one and the adoption plugs in
-  without touching a line here. The model call is stubbed for the same
-  reason the sealed AI suite has no network: a suite that needs a paid
-  call is a suite nobody runs."
+  Provider replies are supplied locally. Deliberate failure injection uses
+  the production evaluation envelope; observations distinguish agent-authored
+  evaluations from generated system reads."
   (:require [clojure.core.async :as async]
             [clojure.core.async.flow :as flow.core]
             [clojure.edn :as edn]
@@ -344,6 +339,24 @@
                          :seon.turn.work/next work}
                         (:seon.turn.work/now request)))))))))
 
+(defn- drive-agent!
+  "Run one agent's passes until that agent is idle, or `limit` is reached."
+  [cluster agent-id limit]
+  (let [connection (:seon.db/connection cluster)]
+    (loop [passes 0
+           reports []]
+      (let [request (request connection agent-id)
+            work (turn/next-agent-work @connection request)]
+        (if (or (nil? work) (>= passes limit))
+          reports
+          (recur (inc passes)
+                 (conj reports
+                       (turn/turn
+                        {:seon.turn.loop/cluster cluster
+                         :seon.turn.work/next work}
+                        (:seon.turn.work/now request)))))))))
+
+
 (deftest a-prose-prefixed-contracted-defn-settles-and-doc-answers
   (with-cluster
     (fn [cluster]
@@ -363,7 +376,7 @@
              "(doc my.agents.agent-a/largest)\n"
              "(seon.run/complete \"built largest\")")]
         (with-redefs [ai/complete (fn [_] {:seon.ai/text source})]
-          (let [reports (drive! cluster 10)
+          (let [reports (drive-agent! cluster "agent-a" 2)
                 row (db/pull @connection
                              '[:seon.fn/sym :seon.fn/spec :seon.fn/doc]
                              [:seon.fn/sym "my.agents.agent-a/largest"])
@@ -371,7 +384,8 @@
                 (db/q '[:find ?output .
                         :where
                         [?receipt :seon.cluster.eval/ordinal 1]
-                        [?receipt :seon.cluster.eval/output ?output]]
+                        [?receipt :seon.eval/shown ?output]
+                        [?receipt :seon.cluster.eval/author :agent]]
                       @connection)]
             (is (= [:open :call]
                    (mapv :seon.turn.work/situation reports)))
@@ -381,22 +395,6 @@
                    (:seon.fn/doc row)))
             (is (str/includes? doc-output "my.agents.agent-a/largest"))))))))
 
-(defn- drive-agent!
-  "Run one agent's passes until that agent is idle, or `limit` is reached."
-  [cluster agent-id limit]
-  (let [connection (:seon.db/connection cluster)]
-    (loop [passes 0
-           reports []]
-      (let [request (request connection agent-id)
-            work (turn/next-agent-work @connection request)]
-        (if (or (nil? work) (>= passes limit))
-          reports
-          (recur (inc passes)
-                 (conj reports
-                       (turn/turn
-                        {:seon.turn.loop/cluster cluster
-                         :seon.turn.work/next work}
-                        (:seon.turn.work/now request)))))))))
 
 (deftest function-install-reads-the-case-count-from-cluster-facts
   (with-cluster
@@ -594,22 +592,13 @@
                "(def x {:my.agents.agent-a/value 42 "
                ":my.agents.agent-a/extra :ignored})\n"
                "(durable x)")})]
-          (drive! cluster 10)
-          (testing "all forms leave inert receipt history"
+          (drive-agent! cluster "agent-a" 2)
+          (testing "every submitted form leaves its own saved evaluation"
             (is (= 3
-                   (count
-                    (db/q '[:find ?receipt
-                           :where
-                           [?receipt :seon.cluster.eval/result-edn _]]
-                         @connection)))))
+                   (count (agent-evaluations (db/db connection))))))
           (testing "installation derives from db-after before the next form"
-            (is (= 43
-                   (semantic-result
-                    (db/q '[:find ?result .
-                          :where
-                          [?receipt :seon.cluster.eval/ordinal 2]
-                          [?receipt :seon.cluster.eval/result-edn ?result]]
-                         @connection)))))
+            (is (= "43"
+                   (:seon.eval/shown (nth (agent-evaluations (db/db connection)) 2)))))
           (testing "only the contracted defn enters the program graph"
             (is (=
                  "[:=> [:cat [:map [:my.agents.agent-a/value :int]]] :int]"
@@ -678,18 +667,11 @@
                "(require (if true '[clojure.set :as sets] "
                "'[clojure.string :as sets]))\n"
                "{:x ::sets/after-dynamic-require}")})]
-          (drive! cluster 10)
+          (drive-agent! cluster "agent-a" 2)
           (let [results
-                (into {}
-                      (map (fn [[ordinal result-edn]]
-                             [ordinal (semantic-result result-edn)]))
-                      (db/q '[:find ?ordinal ?result
-                             :where
-                             [?receipt :seon.cluster.eval/ordinal ?ordinal]
-                             [?receipt :seon.cluster.eval/result-edn ?result]]
-                           @connection))]
-            (is (= {:x :clojure.string/after-alias} (get results 1)))
-            (is (= {:x :clojure.set/after-dynamic-require} (get results 3))
+                (mapv :seon.eval/shown (agent-evaluations (db/db connection)))]
+            (is (= "{:x :clojure.string/after-alias}" (get results 1)))
+            (is (= "{:x :clojure.set/after-dynamic-require}" (get results 3))
                 "later sources are read only after prior namespace effects")))))))
 
 (deftest qualified-dynamic-ns-unmap-is-durable-in-a-fresh-context
@@ -752,14 +734,9 @@
            (fn [request]
              (reset! evaluated-ctx (:seon.sci.eval/ctx request))
              (original-evaluate request))]
-          (drive! cluster 10)
-          (is (nil?
-               (semantic-result
-                (db/q '[:find ?result .
-                        :where
-                        [?receipt :seon.cluster.eval/ordinal 1]
-                        [?receipt :seon.cluster.eval/result-edn ?result]]
-                     @connection)))
+          (drive-agent! cluster "agent-a" 2)
+          (is (= "nil"
+               (:seon.eval/shown (nth (agent-evaluations (db/db connection)) 1)))
               "the next form sees the committed import removal")
           (is (nil?
                (:val
@@ -775,7 +752,7 @@
                 import-mask
                 (some #(when (= 'String (:seon.ns.import/local %)) %)
                       (:seon.ns/imports namespace-row))
-                fresh (sci.eval/cluster-ctx @connection)]
+                fresh (sci.eval/cluster-ctx (db/db connection) connection)]
             (is (= {:seon.ns.import/local 'String}
                    (dissoc import-mask :db/id))
                 "the database stores the import mask as ordinary data")
@@ -1040,14 +1017,9 @@
                "(defn ^{:malli/schema [:=> [:cat :int] :int]} f "
                "[x] (inc x))\n"
                "(f 1)")})]
-          (drive! cluster 10)
-          (is (= 2
-                 (semantic-result
-                  (db/q '[:find ?result .
-                        :where
-                        [?receipt :seon.cluster.eval/ordinal 2]
-                        [?receipt :seon.cluster.eval/result-edn ?result]]
-                       @connection)))
+          (drive-agent! cluster "agent-a" 2)
+          (is (= "2"
+                 (:seon.eval/shown (nth (agent-evaluations (db/db connection)) 2)))
               "in-ns governs the later definition and call")
           (is (some?
                (db/q '[:find ?fn .
@@ -1055,18 +1027,10 @@
                       :where
                       [?fn :seon.fn/sym ?sym]]
                     @connection "my.gen.alpha/f")))
-          (is (empty?
-               (db/q '[:find ?form
-                      :where
-                      [?form :seon.cluster.eval/run ?run]
-                      [?form :seon.cluster.eval/ordinal ?ordinal]
-                      [?form :seon.cluster.eval/ns ?parsed-ns]
-                      [?receipt :seon.cluster.eval/run ?run]
-                      [?receipt :seon.cluster.eval/ordinal ?ordinal]
-                      [?receipt :seon.cluster.eval/ns ?evaluated-ns]
-                      [(not= ?parsed-ns ?evaluated-ns)]]
-                    @connection))
-              "parse/eval divergence is a direct fact query, never silent"))))))
+          (is (= ['my.agents.agent-a 'my.gen.alpha 'my.gen.alpha]
+                 (mapv #(get-in % [:seon.cluster.eval/ns :seon.ns/name])
+                       (agent-evaluations (db/db connection))))
+              "each submitted source records the namespace in which it was read"))))))
 
 (deftest contracted-redefinition-exactly-replaces-the-row
   (with-cluster
@@ -1082,14 +1046,9 @@
                "(defn ^{:malli/schema [:=> [:cat :int] :int]} f "
                "[x] (+ x 2))\n"
                "(f 1)")})]
-          (drive! cluster 10)
-          (is (= 3
-                 (semantic-result
-                  (db/q '[:find ?result .
-                        :where
-                        [?receipt :seon.cluster.eval/ordinal 2]
-                        [?receipt :seon.cluster.eval/result-edn ?result]]
-                       @connection))))
+          (drive-agent! cluster "agent-a" 2)
+          (is (= "3"
+                 (:seon.eval/shown (nth (agent-evaluations (db/db connection)) 2))))
           (let [row (db/pull @connection
                             '[*]
                             [:seon.fn/sym "my.agents.agent-a/f"])]
@@ -1471,7 +1430,7 @@
                          (let [reply (first @replies)]
                            (swap! replies subvec 1)
                            reply)})]
-          (drive! cluster 10)
+          (drive-agent! cluster "agent-a" 2)
           (db/transact!
            connection
            [{:seon.ns/name 'my.agents.agent-b}
@@ -1479,11 +1438,12 @@
                    :seon.agent/namespace
                    [:seon.ns/name 'my.agents.agent-b])
             {:seon.message/id "m-agent-b" :seon.message/to [:seon.agent/id "agent-b"] :seon.message/content "call the published function" :seon.message/inbox [:seon.agent/id "agent-b"]}])
-          (drive! cluster 10)
+          (drive-agent! cluster "agent-b" 2)
           (is (some #(str/includes? % "42")
                     (db/q '[:find [?result ...]
                            :where
-                           [_ :seon.cluster.eval/result-edn ?result]]
+                           [?evaluation :seon.eval/shown ?result]
+                           [?evaluation :seon.cluster.eval/author :agent]]
                          @connection))
               "the second agent used the same live cluster program graph"))))))
 
@@ -1500,22 +1460,6 @@
                "strict [x] x)\n"
                "(seon.run/complete \"published\")")
               "(my.agents.agent-a/strict \"wrong\")"])]
-        (db/transact!
-         connection
-         [(merge {:seon.config/cluster "turn-test"
-                  :seon.config/on-core-error :panic
-                  :seon.config.ai/endpoint "http://127.0.0.1:1/v1"
-                  :seon.config.ai/model "probe"
-                  :seon.config.ai/max-tokens 32
-                  :seon.config.ai/api-key-variable "SEON_AI_TEST_KEY"
-                  :seon.config.ai/timeout-ms 200
-                  :seon.config.ai.retry/base-delay-ms 1
-                  :seon.config.ai.retry/multiplier 2.0
-                  :seon.config.ai.retry/jitter-fraction 0.0
-                  :seon.config.ai.retry/maximum-delay-ms 1
-                  :seon.config.ai.retry/maximum-retries 0
-                  :seon.config.ai.retry/maximum-total-delay-ms 0}
-                 (:seon.sci.admit/caps cluster))])
         (with-redefs [ai/complete
                       (fn [_]
                         (let [[before _]
@@ -1524,7 +1468,7 @@
                           {:seon.ai/text
                            (or (first before)
                                "(seon.run/complete \"recovered\")")}))]
-          (drive-agent! cluster "agent-a" 10)
+          (drive-agent! cluster "agent-a" 2)
           (db/transact!
            connection
            [{:seon.ns/name 'my.agents.agent-b}
@@ -1532,19 +1476,19 @@
                    :seon.agent/namespace
                    [:seon.ns/name 'my.agents.agent-b])
             {:seon.message/id "m-contract-agent-b" :seon.message/to [:seon.agent/id "agent-b"] :seon.message/content "violate the published contract" :seon.message/inbox [:seon.agent/id "agent-b"]}])
-          (drive-agent! cluster "agent-b" 10)
-          (let [receipts
-                (db/q '[:find [(pull ?receipt
+          (drive-agent! cluster "agent-b" 2)
+          (let [evaluations
+                (db/q '[:find [(pull ?evaluation
                                    [:seon.error/kind
-                                    :seon.cluster.eval/result-edn]) ...]
+                                    :seon.eval/shown]) ...]
                        :where
-                       [?receipt :seon.cluster.eval/id _]
-                       [?receipt :seon.error/kind
+                       [?evaluation :seon.cluster.eval/id _]
+                       [?evaluation :seon.error/kind
                         :seon.instrument/contract-violated]]
                      @connection)]
-            (is (= 1 (count receipts)))
+            (is (= 1 (count evaluations)))
             (is (str/includes?
-                 (:seon.cluster.eval/result-edn (first receipts))
+                 (:seon.eval/shown (first evaluations))
                                "my.agents.agent-a/strict")
                 "the second agent crossed the one live context-install seam")))))))
 
@@ -1777,20 +1721,20 @@
 
 (deftest a-real-evaluation-that-runs-away-is-stopped-and-recorded
   ;; the loop's honest failure path, end to end: an agent writes an
-  ;; infinite loop, the boundary stops it, and the receipt says so
+  ;; infinite loop, the boundary stops it, and the evaluation says so
   (with-cluster
     (fn [cluster]
       (let [cluster (assoc cluster
-                           ;; a short leash for the runaway case
+                           ;; A bounded execution for the deliberately nonterminating source.
                            :seon.config.eval/time-limit-ms 300)
             connection (:seon.db/connection cluster)]
         (with-redefs [ai/complete
                       (fn [_] {:seon.ai/text "(loop [] (recur))"})]
-          (drive! cluster 6)
+          (drive-agent! cluster "agent-a" 2)
           (is (= 1 (count (db/q '[:find [?at ...] :where
                                  [_ :seon.cluster.eval/interrupted-at ?at]]
                                @connection)))
-              "the receipt records its cut instant, and the fold moved on")
+              "the evaluation records its cut instant, and the fold moved on")
           (is (re-find #"(?i)time"
                        (db/q '[:find ?error . :where
                               [_ :seon.cluster.eval/error ?error]]
@@ -1858,9 +1802,7 @@
               "the batch evaluated the sibling after the red form")
           (is (string? (:seon.cluster.eval/error (first receipts)))
               "the red form settles as a flat error on its own eval")
-          (is (= 42 (:seon.print/value
-                     (edn/read-string
-                      (:seon.cluster.eval/result-edn (second receipts)))))
+          (is (= "42" (:seon.eval/shown (second receipts)))
               "the sibling in the other namespace still ran and settled")
           (is (empty?
                (db/q '[:find ?assignment

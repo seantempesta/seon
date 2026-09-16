@@ -1,0 +1,12 @@
+[
+#:seon.test{:fail-count 0, :pass-count 4, :run-at #inst "2026-09-16T01:32:58.916-00:00", :run #:db{:id 41339}, :run-basis-t 536871098, :error-count 0, :sym "seon.cluster.turn-test/a-prose-prefixed-contracted-defn-settles-and-doc-answers"}
+#:seon.test{:fail-count 0, :pass-count 2, :run-at #inst "2026-09-16T01:34:19.433-00:00", :run #:db{:id 41352}, :run-basis-t 536871111, :error-count 0, :sym "seon.cluster.turn-test/a-real-evaluation-that-runs-away-is-stopped-and-recorded"}
+#:seon.test{:fail-count 0, :pass-count 5, :run-at #inst "2026-09-16T01:34:04.805-00:00", :run #:db{:id 41350}, :run-basis-t 536871109, :error-count 0, :sym "seon.cluster.turn-test/a-red-form-routes-to-its-namespace-owner-and-the-fold-continues"}
+#:seon.test{:fail-count 0, :pass-count 1, :run-at #inst "2026-09-16T01:33:54.200-00:00", :run #:db{:id 41349}, :run-basis-t 536871106, :error-count 0, :sym "seon.cluster.turn-test/another-agent-calls-the-live-cluster-definition-without-reinstall"}
+#:seon.test{:fail-count 0, :pass-count 2, :run-at #inst "2026-09-16T01:34:07.552-00:00", :run #:db{:id 41351}, :run-basis-t 536871110, :error-count 0, :sym "seon.cluster.turn-test/another-agent-sees-a-flat-contract-violation-after-live-install"}
+#:seon.test{:fail-count 0, :pass-count 5, :run-at #inst "2026-09-16T01:33:26.783-00:00", :run #:db{:id 41342}, :run-basis-t 536871103, :error-count 0, :sym "seon.cluster.turn-test/contracted-redefinition-exactly-replaces-the-row"}
+#:seon.test{:fail-count 0, :pass-count 3, :run-at #inst "2026-09-16T01:33:15.715-00:00", :run #:db{:id 41341}, :run-basis-t 536871102, :error-count 0, :sym "seon.cluster.turn-test/evaluation-follows-the-readers-parse-time-namespace"}
+#:seon.test{:fail-count 0, :pass-count 4, :run-at #inst "2026-09-16T01:33:49.926-00:00", :run #:db{:id 41344}, :run-basis-t 536871105, :error-count 0, :sym "seon.cluster.turn-test/import-only-ns-unmap-installs-exactly-after-its-context-commit"}
+#:seon.test{:fail-count 0, :pass-count 4, :run-at #inst "2026-09-16T01:33:39.115-00:00", :run #:db{:id 41343}, :run-basis-t 536871104, :error-count 0, :sym "seon.cluster.turn-test/mixed-plan-publishes-only-the-contracted-function"}
+#:seon.test{:fail-count 0, :pass-count 2, :run-at #inst "2026-09-16T01:33:11.349-00:00", :run #:db{:id 41340}, :run-basis-t 536871101, :error-count 0, :sym "seon.cluster.turn-test/reply-reading-follows-evaluated-alias-and-dynamic-require-state"}
+]

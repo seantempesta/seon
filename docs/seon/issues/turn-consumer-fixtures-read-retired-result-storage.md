@@ -246,3 +246,19 @@ The four selected tests, including the independent fn graph census, pass
 18 assertions / 0 failures / 0 errors in default against newly constructed
 canonical populations and fresh SCI contexts. Exact runs and complete refusal
 values are in [the N7 landing](../../prds/context-generation/research/n7-eval-call-edges-2026-09-15.md).
+
+## Turn-test-reds — 2026-09-16
+
+The namespace baseline is now recorded from a fresh canonical population:
+59 tests, 189 passing assertions, 76 failures and 31 errors. Four deletion
+members are repaired at the production presence seam in `ecdd61ffe` and pass
+19 assertions before/after isolated adoption. Ten additional consumer tests
+now query author-qualified ordered evaluations and saved shown text; all ten
+pass 32 assertions before and after editing. The error-data codec remains
+separate. The [landing and complete values](../../prds/context-generation/research/turn-test-reds-2026-09-16.md)
+name every member and exact boundary.
+
+This umbrella remains open: other turn consumers and unconverted tests remain,
+and the schema-unregister observation exposes a separate
+[installed-attribute residual](runtime-schema-unregister-retains-installed-attribute.md).
+No namespace/platform cold gate is claimed by these in-process results.
