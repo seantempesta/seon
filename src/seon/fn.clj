@@ -6,6 +6,7 @@
             [clojure.string :as str]
             [clojure.walk :as walk]
             [seon.db :as db]
+            [seon.error :as error]
             [seon.fn.analyzer :as analyzer]
             [seon.fn.schema-shape :as schema-shape]
             [seon.id :as id]
@@ -946,7 +947,7 @@
              (if-let [namespace-name (:seon.ns/name namespace-row)]
                (assoc request :namespace-name namespace-name
                               :form-source source)
-               ((requiring-resolve 'seon.error/diagnostic)
+               (error/diagnostic
                 {:seon.error/kind ::namespace-unresolvable
                  :seon.error/message
                  (str "Cannot analyze the form because its namespace reference "
