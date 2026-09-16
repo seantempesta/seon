@@ -140,3 +140,45 @@ the linked entities render themselves through their own pairs.
 
 Order of landing: P1 → P2 → P3/P4 (can proceed on the interim done-query) →
 P5/P6 → P8/P10. P2 and P5 launch the moment their files are free.
+
+## 7. Generated issues and their identity (owner, 2026-09-16 04:50Z)
+
+Owner: "when we farm issues by detecting schemas without renders, missing
+generator functions for generative testing, missing docstrings, or whatever
+we come up with, we need good identity functions so we don't create
+duplicate issues."
+
+- **Identity = detector + stable subject identity**, hashed by the one
+  identity function over a canonically ordered map:
+  `(seon.id/id (into (sorted-map) {:seon.issue/detector 'seon.issue/missing-render-pair :seon.schema/key :seon.issue/issue}))`.
+  `:seon.issue/id` is a Datahike identity, so every run upserts the same
+  entity: no duplicates by construction.
+- **Stable subject identities only**: schema key, function symbol, test
+  symbol, error signature, file path. Never an entity id (reforks change
+  them), never message text. The subject is ALSO stored as a ref
+  (`functions`, `tests`, `errors`, `:seon.issue/schema`) for querying.
+- **`:seon.issue/detector`** is a ref to the detector function's program
+  entity. Detectors are contracted functions `db → subjects`, each subject
+  carrying its identity attribute and value (the generator refuses bare
+  entity ids). First detectors: entity schema without a render pair (3 on
+  default today of 28 declared entity maps); public function without a
+  docstring; contract without a generator where `seon.test.accretion/generatable?`
+  says one is needed; public function without a reaching test (288);
+  contract containing `:any`/`:some`; recurring error without a regression.
+- **Ownership of attributes**: the generator writes status, the required
+  test refs and the function refs on every run; `problem` only when absent
+  (a human's edit survives). When the detector stops yielding a subject the
+  run asserts `resolved-tx`; if it reappears the run retracts it; history
+  keeps both.
+- **Responsible namespace**: the subject's own namespace — for a schema key
+  its keyword namespace (a `:seon.ns/name` entity exists for all three
+  current hits), for a function its `:seon.fn/ns`; fallback for a family
+  with no namespace entity: the functions whose `:seon.fn/keywords` use the
+  family's keys. The steward derives from there.
+- **The required test** each detector attaches is red until the finding is
+  gone: e.g. `seon.render/selection` selects a declared pair for a fixture
+  entity of that shape and both projections render totally.
+- Function: `seon.issue/generate` (db, detector-fn) → tx-data, called by
+  hand first, later by schedule or on adoption; identity as above; one
+  regression per detector on the canonical harness proving idempotence
+  (two runs, one entity) and resolution/re-open.
