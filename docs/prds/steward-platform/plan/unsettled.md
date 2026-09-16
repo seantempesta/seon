@@ -322,3 +322,14 @@ Queue, in order:
   membership refs written per result and replaced per run (never a digest
   per reached function). Lane `reach-closure-facts` (astra — runner
   recording + provenance) queued behind the refork.
+- 10:25Z program-provenance batch-19 triage (Opus, `35889c232`,
+  `d47ebcc3e`): all 11 reds reproduce and are green in-process; two real
+  defects fixed at the analyzer (`exact-form-span` column clamp; lint
+  row/col coerced to long), four fixtures admit the emitted file entities as
+  publication does, five were pre-existing fixture/expectation staleness.
+  METHOD RULE added to tmp/orchestrator/wave2/repl-rule.txt: test/ is not on
+  default's classpath; reload the test namespace through seon.test's loader
+  before an in-process run or you get false greens. New evidence on
+  `declaration-settlement-consumes-invalid-read-as-ref` (row-tx built
+  retractions from a `q` refusal map). Adoption converged at
+  `6aaa1292…`. Next Opus triage: generated-read-identities + attempt files.
