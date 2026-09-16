@@ -1003,7 +1003,7 @@ Reading (a) matches "adding is free, omitted keys are left unchanged"
 (CLAUDE.md §3, datahike skill). Not decided here; the admission owner and
 the owner rule.
 
-### 2026-09-16 07:10 — batch 68 boot-test triage: attribution corrected
+### 2026-09-16 07:05 — batch 68 boot-test triage: attribution corrected
 
 The dominant class (8 of 12 reds) was NOT `ccccea806` or `fe44a981b`:
 `seon.cluster/stop!`'s `:seon.boot/instance` contract demanded LIVE
@@ -1026,7 +1026,7 @@ Date) for agent root on default (blocker issue). Landing note:
 `batch-68-boot-test-reds-2026-09-16.md` (`868d7b992`). Batch 71 adds
 seon.cluster.store-test and seon.cluster-test.
 
-### 2026-09-16 07:25 — the io-prepl drop: a required dial without its decision killed the connection seam
+### 2026-09-16 07:07 — the io-prepl drop: a required dial without its decision killed the connection seam
 
 The steward found the prepl drop the batch-68 triage thread met: every
 io-prepl connection thread on default died at connect with
