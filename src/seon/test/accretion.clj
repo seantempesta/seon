@@ -13,6 +13,13 @@
             [seon.schema :as schema]
             [seon.sci.kernel :as kernel]))
 
+;;; LOAD-CYCLE BOUNDARY. `seon.test` requires `seon.test.accretion`
+;;; transitively, so this namespace cannot require it back. One resolution,
+;;; realized at first use, instead of a `requiring-resolve` on every call
+;;; (AGENTS §2.1).
+(defonce ^:private test-failure-message
+  (delay (requiring-resolve 'seon.test/failure-message)))
+
 (defn generatable?
   "True when Malli can construct a generator for `schema` with `options`."
   {:malli/schema
@@ -222,7 +229,7 @@
       :seon.test.accretion/failure-shape shape
       :seon.test/sym (:seon.test/sym result)
       :seon.test.accretion/expected-actual
-      ((requiring-resolve 'seon.test/failure-message) result)}
+      (@test-failure-message result)}
       (seq (:seon.test/failing-assertions result))
       (assoc :seon.test/failing-assertions
              (:seon.test/failing-assertions result)))))
