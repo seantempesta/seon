@@ -113,3 +113,14 @@
   `:seon.test/reach-digest` through full publication (queued until
   issue-family frees the file). HEAD publishes again (`ff48a4110`);
   ledger line written; gate session pinged.
+- 05:30Z error-graph landed (`45998fdbf` identity, `2320dc1a9` occurrences,
+  `2066b8c20`/`3f4f0cdf2` one writer + derived steward + readers,
+  `94019d1f1` evidence): live one error / occurrence count 2 / fn ref;
+  class regression 38/0/0. Residual: `:seon.error.occurrence/proc-fn`
+  declared but absent until a proc → step-function fact exists (issue
+  `flow-error-proc-has-no-declared-step-function-ref`). Legacy pre-writer
+  row 43542 (no occurrences) retracted on default by the orchestrator.
+  Batch 19: named 355/82/23 across five lanes (resumed each on its file;
+  entity-pairs green); platform 84/13 red in seon.cluster.source-test,
+  attributed to issue-family's indexing inside publication (`a7d1e115e`) —
+  lane stopped/resumed with it first. issue-settlement (P5/P6) launched.
