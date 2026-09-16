@@ -8,6 +8,7 @@
             [seon.db :as db]
             [seon.fn.analyzer :as analyzer]
             [seon.fn.schema-shape :as schema-shape]
+            [seon.id :as id]
             [seon.program :as program]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
@@ -105,14 +106,17 @@
 (defn- source-context
   [file]
   (let [source-bytes (Files/readAllBytes (.toPath ^java.io.File file))
-        text (String. source-bytes StandardCharsets/UTF_8)]
+        text (String. source-bytes StandardCharsets/UTF_8)
+        line-starts (into [0] (keep-indexed (fn [i c] (when (= \newline c) (inc i)))) text)]
     {:bytes source-bytes
+     :seon.fn.file/digest (sha-256 source-bytes)
      :text text
-     :line-starts
-     (loop [matcher (re-matcher #"\n" text) starts [0]]
-       (if (.find matcher)
-         (recur matcher (conj starts (inc (.start matcher))))
-         starts))}))
+     :line-starts line-starts
+     ::byte-line-starts
+     (vec (reductions + 0
+                      (map (fn [[start end]]
+                             (alength (.getBytes (subs text start end) StandardCharsets/UTF_8)))
+                           (partition 2 1 line-starts))))}))
 
 (defn- source-contexts
   [files]
@@ -140,6 +144,18 @@
     (subs text
           (+ (nth line-starts (dec row)) (dec col))
           (+ (nth line-starts (dec end-row)) (dec end-col)))))
+
+(defn- exact-form-span
+  [contexts entry]
+  (let [{:keys [text line-starts] ::keys [byte-line-starts]} (get contexts (::analyzer/filename entry))
+        offset (fn [row col]
+                 (+ (nth byte-line-starts (dec row))
+                    (alength (.getBytes
+                              (subs text (nth line-starts (dec row))
+                                    (+ (nth line-starts (dec row)) (dec col)))
+                              StandardCharsets/UTF_8))))]
+    [(offset (::analyzer/row entry) (::analyzer/col entry))
+     (offset (::analyzer/end-row entry) (::analyzer/end-col entry))]))
 
 (defn- read-jvm-form [source]
   (binding [*read-eval* false]
@@ -350,6 +366,8 @@
         qualified (symbol (str namespace-name) (str (::analyzer/name entry)))
         metadata (::analyzer/meta entry)
         source (exact-source contexts entry)
+        file [:seon.fn.file/path (::analyzer/filename entry)]
+        span (exact-form-span contexts entry)
         external-sink (:seon.fn/external-sink metadata)
         projection-boundary (:seon.fn/projection-boundary metadata)
         capability-declared? (contains? metadata :seon.effect/capability)
@@ -367,7 +385,9 @@
       (::analyzer/test entry)
       (cond-> {:seon.test/sym (str qualified)
                :seon.test/ns [:seon.ns/name namespace-name]
-               :seon.test/source source}
+               :seon.test/source source
+               :seon.fn/file file
+               :seon.fn/form-span span}
         (find metadata :seon.test/fixture-observation)
         (assoc :seon.test/fixture-observation (:seon.test/fixture-observation metadata))
         (true? (:seon.test/usage metadata))
@@ -386,6 +406,8 @@
       (cond-> {:seon.fn/sym (str qualified)
                :seon.fn/ns [:seon.ns/name namespace-name]
                :seon.fn/source source
+               :seon.fn/file file
+               :seon.fn/form-span span
                :seon.fn/arglists (str "(" (str/join " " (::analyzer/arglist-strs entry)) ")")
                :seon.fn/private? (boolean (::analyzer/private entry))}
         (true? (:seon.fn/internal? metadata)) (assoc :seon.fn/internal? true)
@@ -764,9 +786,41 @@
      (concat (::analyzer/namespace-definitions analysis)
              (::analyzer/var-definitions analysis)))))
 
+(defn- lint-rows
+  [file context rows findings]
+  (let [path (.getCanonicalPath ^java.io.File file)
+        declarations (filter :seon.fn/form-span rows)]
+    (mapv
+     (fn [finding]
+       (let [row (::analyzer/row finding)
+             col (::analyzer/col finding)
+             position (first (exact-form-span
+                              {path context}
+                              {::analyzer/filename path
+                               ::analyzer/row row ::analyzer/col col
+                               ::analyzer/end-row row ::analyzer/end-col col}))
+             declaration (first (filter (fn [entry]
+                                          (let [[start end] (:seon.fn/form-span entry)]
+                                            (<= start position (dec end))))
+                                        declarations))
+             program-identity (program/row-identity declaration)
+             owner (if program-identity (symbol (second program-identity)) path)
+             finding-type (::analyzer/type finding)]
+         (cond-> {:seon.lint/id (id/id [owner finding-type row col])
+                  :seon.lint/file [:seon.fn.file/path path]
+                  :seon.lint/type finding-type
+                  :seon.lint/level (::analyzer/level finding)
+                  :seon.lint/message (::analyzer/message finding)
+                  :seon.lint/row row :seon.lint/col col}
+           program-identity (assoc :seon.lint/fn program-identity))))
+     findings)))
+
 (defn- artifact
   [file context rows findings]
   (let [canonical-path (.getCanonicalPath ^java.io.File file)
+        rows (into (into [{:seon.fn.file/path canonical-path
+                          :seon.fn.file/digest (:seon.fn.file/digest context)}] rows)
+                   (lint-rows file context rows findings))
         canonical-rows
         (mapv #(cond-> (assoc (program/canonical-row %)
                               :seon.schema.admission/source :core)
@@ -775,7 +829,7 @@
               rows)]
     (cond->
      {:seon.fn.file/path canonical-path
-      :seon.fn.file/digest (sha-256 (:bytes context))
+      :seon.fn.file/digest (:seon.fn.file/digest context)
       :seon.fn.file/rows canonical-rows
       :seon.fn.file/identities
       (->> canonical-rows
@@ -1963,7 +2017,7 @@
                          (db/q '[:find [?entity ...] :in $ ?attribute
                                  :where [?entity ?attribute]]
                                database attribute))))
-          program/identity-attributes)))
+          (filter #(get (:schema database) %) program/identity-attributes))))
 
 (defn index!
   "Populate one fresh source scratch branch from static analysis.
@@ -2011,12 +2065,19 @@
                                    [?entity ?attribute ?value]
                                    [?entity :seon.schema.admission/source :core]]
                                  previous-database attribute))))
-                   program/identity-attributes)
+                   (filter #(get (:schema previous-database) %)
+                           program/identity-attributes))
+             projection (schema/handed-projection)
              report
              (require-committed!
               (db/transact!
                connection
-               (cond-> {:tx-data [[:db.fn/call reconcile-tx rows previous-identities]]}
+               (cond-> {:tx-data
+                        [[:db.fn/call
+                          (fn [database]
+                            (schema/call-with-projection
+                             projection
+                             #(reconcile-tx database rows previous-identities)))]]}
                  process (assoc :tx-meta {:seon.db/process process})))
               :seon.fn/population)
              changed-entities (into #{} (map :e) (:tx-data report))
@@ -2029,7 +2090,8 @@
                              (when (not=
                                     (normalized-index-row
                                      previous-database
-                                     (db/pull previous-database '[*] identity)
+                                     (when (get (:schema previous-database) (first identity))
+                                       (db/pull previous-database '[*] identity))
                                      previous-identity-attributes)
                                     (normalized-index-row
                                      (:db-after report) row

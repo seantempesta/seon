@@ -441,3 +441,25 @@
              (is (= plan (:datahike.read/dependency-plan forward-evidence)))
              (is (= plan
                     (:datahike.read/dependency-plan reversed-evidence))))))))))
+
+(deftest fixed-tuples-derive-native-ordered-storage
+  (support/with-database
+    {::support/extra-schema
+     [{:db/ident ::position :db/valueType :db.type/tuple
+       :db/cardinality :db.cardinality/one
+       :db/tupleTypes [:db.type/long :db.type/long]}]}
+    (fn [connection]
+      (let [forms (assoc (schema/registered-schemas) ::position [:tuple :int :int])
+            projection (schema/declaration-projection forms)
+            derived (schema.datahike/malli->datahike-attr-in projection ::position)]
+        (is (= {:db/ident ::position :db/valueType :db.type/tuple
+                :db/cardinality :db.cardinality/one
+                :db/tupleTypes [:db.type/long :db.type/long]} derived))
+        (schema/call-with-projection
+         projection
+         (fn []
+           (let [report (db/transact! connection [{:seon.ns/name 'sample.tuple ::position [9 2]}])]
+             (is (:db-after report))
+             (when (:db-after report)
+               (is (= [9 2] (::position (db/pull (:db-after report) [::position]
+                                                [:seon.ns/name 'sample.tuple]))))))))))))

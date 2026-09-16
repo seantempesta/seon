@@ -64,7 +64,8 @@
    :inst :db.type/instant
    :uuid :db.type/uuid
    :symbol :db.type/symbol
-   :qualified-symbol :db.type/symbol})
+   :qualified-symbol :db.type/symbol
+   :tuple :db.type/tuple})
 
 (defn form-head
   "The head of one Malli form.
@@ -262,6 +263,10 @@
              :db/cardinality (if secondary?
                                :db.cardinality/one
                                (form->cardinality-in projection resolved))}
+      (= :tuple (form-head (resolve-datahike-form-in projection value-form)))
+      (assoc :db/tupleTypes
+             (mapv #(form->datahike-value-type-in projection %)
+                   (form-children (resolve-datahike-form-in projection value-form))))
       secondary? (assoc :db.secondary/only true)
       (:seon.db/identity props) (assoc :db/unique :db.unique/identity)
       (:seon.db/unique props) (assoc :db/unique :db.unique/value)

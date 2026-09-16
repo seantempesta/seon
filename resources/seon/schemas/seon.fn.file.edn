@@ -1,5 +1,9 @@
-{:seon.fn.file/path [:string {:min 1}]
- :seon.fn.file/digest :seon.source/digest
+{:seon.fn.file/path [:string {:min 1 :seon.db/identity true}]
+ :seon.fn.file/digest [:string {:min 64 :max 64}]
+ :seon.fn.file/file
+ [:map {:seon.db/attributes true}
+  [:seon.fn.file/path :seon.fn.file/path]
+  [:seon.fn.file/digest :seon.fn.file/digest]]
  :seon.fn.file/rows :seon.program/rows
  :seon.fn.file/identities [:vector :seon.program/identity]
  :seon.fn.file/findings [:vector :map]

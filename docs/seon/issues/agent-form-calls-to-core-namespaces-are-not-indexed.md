@@ -179,3 +179,14 @@ trusting reach-based reuse, verify the n7 repaired analyzer on a freshly
 admitted Juniper-shaped test, and separately decide how historical test rows
 are reanalyzed. Exact source, measurements, and reproducible probe:
 [reach-digest beat 1](../../prds/steward-platform/research/reach-digest-2026-09-16.md).
+
+## Program-provenance baseline — 2026-09-16
+
+A second read-only MCP JVM pull confirmed the historical Juniper test still
+has only `clojure.core/=`, `clojure.core/let`, and `clojure.test/is` refs; its
+stored source calls `largest-customer` without an edge. The owner's subsequent
+scope correction withdrew inferred subjects, so this lane neither backfills
+that edge nor masks it with a subject. The direct-call namespace query returned
+22 tests for `seon.plan`, 114 for `seon.turn`, and 35 for
+`seon.cluster.message`. Exact query and scope:
+[program provenance](../../prds/steward-platform/research/program-provenance-2026-09-16.md).

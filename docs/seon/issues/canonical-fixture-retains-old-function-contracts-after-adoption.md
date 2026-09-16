@@ -62,3 +62,15 @@ row. The previously blocked regression passed 12 assertions (run 67062), then
 already retained base across adoption, not a stale contract in newly populated
 fixtures. No fixture source or contract was changed. Explicit fresh namespace
 initialization does not satisfy the automatic-refresh acceptance above.
+
+## Program-provenance observation — 2026-09-16
+
+The same retained-base boundary applies to schema accretion. The new file and
+lint identity families are present in the published source schema, while the
+canonical branch still validates `:seon.program/identity-attribute` against the
+old four-member enum. `seon.fn-test/indexed-declarations-carry-exact-file-bytes`
+recorded run 68215 (0 assertions, 1 error) at `seon.program/shape` before its
+assertions; the lint replacement test met the same boundary. No fixture global
+was replaced. See the
+[program-provenance landing](../../prds/steward-platform/research/program-provenance-2026-09-16.md)
+for the exact forms and publication boundary.

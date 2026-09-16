@@ -10,7 +10,8 @@
 
 (def identity-attributes
   "Program-row identity attributes in deterministic admission order."
-  [:seon.ns/name :seon.fn/sym :seon.schema/key :seon.test/sym])
+  [:seon.ns/name :seon.fn/sym :seon.schema/key :seon.test/sym
+   :seon.fn.file/path :seon.lint/id])
 
 #?(:clj
    (defn base-context-injected-symbols
@@ -37,7 +38,19 @@
 
 (def shapes
   "Program-row shapes keyed by their database identity attribute."
-  {:seon.ns/name
+  {:seon.fn.file/path
+   {:seon.program/identity-attribute :seon.fn.file/path
+    :seon.program/source-attribute :seon.fn.file/digest
+    :seon.program/owned-attributes
+    [:seon.fn.file/path :seon.fn.file/digest :seon.schema.admission/source]}
+   :seon.lint/id
+   {:seon.program/identity-attribute :seon.lint/id
+    :seon.program/source-attribute :seon.lint/message
+    :seon.program/owned-attributes
+    [:seon.lint/id :seon.lint/fn :seon.lint/file :seon.lint/type
+     :seon.lint/level :seon.lint/message :seon.lint/row :seon.lint/col
+     :seon.schema.admission/source]}
+   :seon.ns/name
    {:seon.program/identity-attribute :seon.ns/name
     :seon.program/source-attribute :seon.ns/source
     :seon.program/owned-attributes
@@ -48,7 +61,7 @@
    {:seon.program/identity-attribute :seon.fn/sym
     :seon.program/source-attribute :seon.fn/source
     :seon.program/owned-attributes
-    [:seon.fn/sym :seon.fn/ns :seon.fn/source :seon.fn/arglists
+    [:seon.fn/sym :seon.fn/ns :seon.fn/source :seon.fn/file :seon.fn/form-span :seon.fn/arglists
      :seon.fn/arglists-override?
      :seon.fn/doc :seon.fn/private? :seon.fn/macro? :seon.fn/spec
      :seon.test/subject
@@ -65,7 +78,7 @@
    {:seon.program/identity-attribute :seon.test/sym
     :seon.program/source-attribute :seon.test/source
     :seon.program/owned-attributes
-    [:seon.test/sym :seon.test/ns :seon.test/source :seon.fn/calls
+    [:seon.test/sym :seon.test/ns :seon.test/source :seon.fn/file :seon.fn/form-span :seon.fn/calls
      :seon.fn/keywords :seon.test/usage :seon.test/subject :seon.test/fixture-observation
      :seon.schema.admission/source]}})
 
@@ -764,6 +777,8 @@
   (let [event (assoc event :seon.schema.admission/source admission-source)
         candidate
         (cond
+          (:seon.fn.file/path event) event
+          (:seon.lint/id event) event
           (:seon.ns/name event) event
           (and (:seon.fn/sym event)
                (or (= :all function-policy)

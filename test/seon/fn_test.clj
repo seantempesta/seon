@@ -1556,3 +1556,79 @@
                                       (db/pull @connection [:seon.test/fixture-observation]
                                                [:seon.test/sym (str namespace-name "/" name)])))))))))))
       (finally (test-support/delete-recursively! root)))))
+
+(defn- with-provenance-file [relative-path source body]
+  (let [root (fixture-root)]
+    (try
+      (let [file (write-source! root relative-path source)]
+        (test-support/with-database
+          (fn [connection]
+            (body connection file (seon.fn/rows {:seon.fn/roots [(.getPath root)]})))))
+      (finally (test-support/delete-recursively! root)))))
+
+(deftest indexed-declarations-carry-exact-file-bytes
+  (with-provenance-file
+    "sample/provenance.clj"
+    (str "(ns sample.provenance (:require [clojure.test :refer [deftest is]]))\n"
+         "; Unicode before the forms: café 🪴\n"
+         "(defn chosen [x] x)\n(deftest example (is (= 1 (chosen 1))))\n")
+    (fn [connection file rows]
+      (let [declarations (filter #(or (:seon.fn/source %) (:seon.test/source %)) rows)
+            bytes (java.nio.file.Files/readAllBytes (.toPath file))]
+        (is (= 2 (count declarations)))
+        (doseq [row declarations]
+          (let [[start end :as span] (:seon.fn/form-span row)]
+            (is (= [:seon.fn.file/path (.getCanonicalPath file)] (:seon.fn/file row)))
+            (is (= 2 (count span)))
+            (when (= 2 (count span))
+              (is (= (or (:seon.fn/source row) (:seon.test/source row))
+                     (String. (java.util.Arrays/copyOfRange bytes (int start) (int end))
+                              java.nio.charset.StandardCharsets/UTF_8))))
+            (is (= (:seon.fn/file row)
+                   (:seon.fn/file (program/declaration-row row :all :core))))))
+        (let [report (db/transact! connection (seon.fn/reconcile-tx (db/db connection) rows []))]
+          (is (:db-after report) (pr-str (select-keys report [:seon.error/kind :seon.error/message])))
+          (when (:db-after report)
+            (doseq [row declarations]
+              (is (= (.getCanonicalPath file)
+                     (get-in (db/pull (:db-after report)
+                                      [{:seon.fn/file [:seon.fn.file/path]}]
+                                      (program/row-identity row))
+                             [:seon.fn/file :seon.fn.file/path]))))))))))
+
+(deftest static-findings-are-replaced-with-their-program-rows
+  (with-provenance-file
+    "sample/lint.clj" "(ns sample.lint)\n(defn chosen [unused] 1)\n"
+    (fn [connection file rows]
+      (let [findings (filter :seon.lint/id rows)
+            finding (first findings)]
+        (is (= 1 (count findings)))
+        (is (= :unused-binding (:seon.lint/type finding)))
+        (is (= [:seon.fn/sym "sample.lint/chosen"] (:seon.lint/fn finding)))
+        (let [report (db/transact! connection (seon.fn/reconcile-tx (db/db connection) rows []))]
+          (is (:db-after report) (pr-str (select-keys report [:seon.error/kind :seon.error/message])))
+          (when (:db-after report)
+            (is (= {:seon.lint/fn {:seon.fn/sym "sample.lint/chosen"}}
+                   (db/pull (:db-after report) [{:seon.lint/fn [:seon.fn/sym]}]
+                            [:seon.lint/id (:seon.lint/id finding)])))
+            (spit file "(ns sample.lint)\n(defn chosen [used] used)\n")
+            (let [artifact (seon.fn/build-artifact
+                            {:seon.fn.file/path (.getCanonicalPath file)
+                             :seon.fn.file/first-party-functions ["sample.lint/chosen"]})
+                  corrected (:seon.fn.file/rows artifact)
+                  corrected-report
+                  (db/transact! connection
+                                (seon.fn/reconcile-tx (db/db connection) corrected
+                                                      (mapv program/row-identity rows)))]
+              (is (empty? (filter :seon.lint/id corrected)))
+              (is (:db-after corrected-report))
+              (when (:db-after corrected-report)
+                (is (empty? (db/q '[:find ?e :in $ ?file
+                                    :where [?e :seon.lint/file ?f]
+                                    [?f :seon.fn.file/path ?file]]
+                                  (:db-after corrected-report) (.getCanonicalPath file))))
+                (is (= {:seon.lint/id (:seon.lint/id finding)}
+                       (db/pull (:db-after corrected-report)
+                                [:seon.lint/id :seon.lint/type :seon.lint/fn]
+                                [:seon.lint/id (:seon.lint/id finding)]))
+                    "only the stable identity survives exact replacement")))))))))
