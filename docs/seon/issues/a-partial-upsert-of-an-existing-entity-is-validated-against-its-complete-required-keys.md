@@ -42,7 +42,24 @@ form.
 3. A declared "update" form (`{:seon.db/update true …}`) that validates
    only the supplied keys' shapes. Cost: a second write grammar.
 
-## Related
+## F2 research — 2026-09-17
+
+[Write-admission research](../../prds/steward-platform/research/write-admission-2026-09-17.md)
+reproduced the map refusal against a live schedule with its required zone,
+and observed no admission error for the equivalent incomplete raw add or
+transaction-function output. The dependency writer rejects a thrown
+transaction function before commit, but a per-map merge alone does not cover
+later datoms, cardinality-many additions, resolved tempids, nested function
+output or retained program identities. The note recommends a final-report
+validation seam in Datahike and records three options for the required
+cross-owner design decision. No production fix has landed; status stays open.
+
+The existing in-process refusal regression passed 6/0/0 on default, run
+80770, with an explicitly unavailable reach digest. This is not the requested
+F2 atomicity/parity regression or a cold gate. The note carries exact evidence
+and the remaining acceptance work.
+
+## Related investigations
 
 `write-admission-validated-partial-maps-against-every-schema`,
 `fixtures-that-ignore-a-refused-transaction-read-absence-as-behaviour`.

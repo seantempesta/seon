@@ -1,0 +1,305 @@
+---
+type: research
+status: design decision required before implementation
+created: 2026-09-17
+tags: [write-admission, schema, datahike, seon.db]
+---
+
+# F2 — validate the resulting entity at the writer
+
+## Finding
+
+The partial-map refusal is real. Raw adds and transaction-function output
+receive less Malli validation. Moving the existing whole-map check into a
+transaction function fixes the simple schedule update, but **a per-map merge
+does not meet F2 for the complete admitted transaction grammar**. The correct
+subject is the logical entity after all operations, with Datahike's own
+resolved entity ids and attempted datoms. Recommend exposing that final
+report to one Seon validator before the writer admits it to commit. This is
+a dependency-seam change, not the small map-only change originally proposed.
+
+No production source was edited. AGENTS.md §2.5's owner design gate applies
+to this cross-owner change. The three options below were presented before
+production edits; implementation remains pending that decision. The issue
+remains open; this is not an implementation landing or a green gate.
+
+## Grounding and dependency ledger
+
+Read the requested PRD §1e F2 and §4b first, then owner-decisions Part 1.3
+and decision 6, batch B §6 including the exact refusal, the open issue,
+AGENTS.md §§0–5 and 7 supplied in the assignment, and
+`tmp/orchestrator/wave2/repl-rule.txt` end to end. Read the program-facts PRD
+end to end. Read the complete admission section from `write-entity-schemas`
+through `transact-call`, including recursive reference validation, retention
+snapshots/checks, and the before/after transaction functions. Read Datahike's
+`db/transaction.cljc` and `writer.cljc` end to end, the schedule seed's whole
+function/docstring, Malli's map explainer, and the bridge's transaction codec.
+Applied data-oriented-clojure, datahike, repl, and clojure-testing skills.
+
+Point-in-time source observations during research: Seon HEAD
+`12e462289edf73b096ba6d8572c567f5fbcf5d62`; Datahike checkout
+`49ea59331dff86caaa587ada215f85f4d322d7dd`; Malli checkout
+`3517a3cd9271b2083780ac7be1725493905bca2e`. Other lanes changed HEAD and
+protected files while this read-only source investigation ran. Line references
+below are those opened in that investigation.
+
+| Mechanism | Dependency source | Existing first-party use |
+|---|---|---|
+| Identity upsert, including conflicting identities, ref tempids and composite tuples | `reference-code/datahike/src/datahike/db/transaction.cljc:640–716`, `:956–981` | `src/seon/db.clj:3036` passes native transaction data to Datahike |
+| Transaction functions receive the current transient database and splice returned operations | same file `:1152–1153`, `:1230–1240`, `:1306–1307` | `src/seon/schedule.clj:72–109`; `src/seon/db.clj:3003–3015` |
+| Attempted versus effective datoms, resolved entity ids | same file `:586–625`, `:1242–1259` | transaction report returned by `src/seon/db.clj:3049–3051` |
+| Writer rejects thrown operations before commit admission | `reference-code/datahike/src/datahike/writer.cljc:148–218` | `src/seon/db.clj:3052–3064`; `src/seon/error/refusal.clj:4–26` |
+| Required map keys inspect the supplied value, not a database | `reference-code/malli/src/malli/core.cljc:1291–1299` | `src/seon/db.clj:2874–2887` |
+| Logical/storage codec, including nested transaction functions | `src/seon/schema/datahike.clj:455–543`, `:560–576` | `src/seon/db.clj:3038–3040` |
+
+Archaeology also found an earlier instance of the proposed before/after
+construction failing because the captured transaction database has transient
+indexes: [the resolved issue-test guard investigation](../../../seon/issues/archive/issue-test-guard-before-value-and-activation-are-not-stable.md).
+Its proposed final-report alternative explicitly says not to re-evaluate
+transaction functions to discover their effects. The current retention owner
+materializes small immutable membership maps instead (`db.clj:2926–2970`).
+
+## (a) Current validation by grammar
+
+The armed outer contract admits vectors of maps or operation vectors, or a
+map carrying such a `:tx-data` vector and optional `:tx-meta` map
+(`resources/seon/schemas/seon.store.edn:34–43`). It is a container contract,
+not a contract for each entity or operation's arguments.
+
+| Input | Seon validation today | Remaining dependency validation |
+|---|---|---|
+| Entity map | Every supplied attribute, installed attribute check, recursive reference maps/lookup values, cardinality normalization; then every attribute-bearing entity schema selected by a required identity present in this map | Native schema declarations, value storage types, nil rejection, reference/tempid resolution, uniqueness, upsert conflicts, tuple rules |
+| `[:db/add e a v]` | The entity lookup reference's attribute/value, then the supplied attribute value; cardinality-many validates one member, not the resulting collection | Native add/value/reference/uniqueness rules |
+| `[:db.fn/call f ...]` | No `write-error` pass over its output. The codec wraps explicit vector calls recursively and validates logical EDN-backed slots while encoding them; it does not validate native slots or whole entities | Executes `f`, processes all returned native operations, and propagates throws |
+| CAS, retract, retractAttribute, retractEntity and other admitted operation vectors | No branch in `write-error`; no resulting-entity check | Native syntax, storage-type, CAS, tuple, schema and reference rules |
+
+Sources: `db.clj:2680–2699`, `:2751–2831`, `:2849–2911`;
+`schema/datahike.clj:483–523`; Datahike `transaction.cljc:35–53`,
+`:735–778`, `:983–1005`, `:1053–1170`, `:1269–1317`.
+
+The map's schema is selected only from identity attributes actually supplied
+as map keys (`db.clj:2851–2858`). A map with only `:db/id` and a changed field
+also avoids the entity-schema pass. A raw add never checks required sibling
+keys or collection-wide constraints. A function returning a native string
+that satisfies Datahike's string type but violates Malli's `:min` can bypass
+even the native attribute's Malli restriction. These are distinct paths of
+the same incomplete-admission class, not acceptable update interfaces.
+
+## Exact sighting and live reproduction
+
+Batch B §6 records these bytes from batch 67:
+
+```text
+ERROR in (root-owned-portfolio-initializes-as-queryable-schedule-facts) (test_support.clj:250)
+Uncaught exception, not in assertion.
+expected: nil
+actual: clojure.lang.ExceptionInfo: Fixture write was refused at the write: seon.db/transact! refused transaction data at [0 :seon.schedule/zone-id]: expected the required key :seon.schedule/zone-id with a string, got a map missing :seon.schedule/zone-id. Fix: Supply :seon.schedule/zone-id with a string. Offending row 0: #:seon.schedule{:id "root/maintenance/footprint-schedule", :expression "7 4 * * *"}.
+```
+
+MCP JVM read-only reproduction on default, PID 53320, returned:
+
+```clojure
+;; Existing entity, read through seon.db/pull:
+{:db/id 47232
+ :seon.schedule/id "root/maintenance/footprint-schedule"
+ :seon.schedule/expression "0 2 * * *"
+ :seon.schedule/zone-id "UTC"}
+
+;; write-error on the partial map:
+{:seon.error/kind :seon.db/invalid-write
+ :seon.db/attribute :seon.schedule/zone-id
+ :seon.db/path [0 :seon.schedule/zone-id]
+ :seon.db/offending :seon.error/unknown}
+;; write-error on [[:db/add -1 :seon.schedule/id "f2-incomplete"]]: nil
+;; write-error on a call returning [{:seon.schedule/id "f2-incomplete"}]: nil
+```
+
+The nils above mean **no admission failure**, not successful transactions;
+these were read-only calls of the admission function, not committed writes.
+The map refusal's complete message matched the quoted text through the fix
+sentence. The fixture adds the final “Offending row” sentence. Raw MCP output
+was retrievable under digest
+`b1ff3cbf82e87c319419424b8c6747e76ffd12b7a64e737816b5a3f7e05c957e`
+(6,668 bytes); the adjacent committed probe records the exact executable form.
+
+## (b) What validating all inputs requires
+
+Keep early per-attribute checks, including recursively supplied reference
+maps. Validate every attempted add's logical value, including function output,
+CAS and idempotent assertions. For every identity-bearing entity those
+operations affect, validate its **resulting logical entity**, including
+required keys and full cardinality-many collection constraints. The outcome
+must be independent of whether equivalent facts came from a map, datoms or
+a transaction function. Mixed transactions are one unit: later operations may
+complete an entity, and any invalid final entity aborts every earlier write.
+Retractions must not be an alternate route to an incomplete retained entity.
+
+Do not merely pull `'[*]` and hand storage strings to Malli. Decode EDN-backed
+attributes through the existing bridge, normalize references and collections
+through the existing write normalization, and use the explicitly carried
+projection. Do not make a temporary invalid prefix of a valid transaction fail
+as though it were the final entity. Do not replay `f` to discover its output.
+
+Schema correctness is part of F2. The function entity schema requires
+`:seon.fn/ns` and `:seon.schema.admission/source`
+(`resources/seon/schemas/seon.fn.edn:99–110`), while retained identities may
+have had definition facts removed by design. A default query found ten
+function identities without `:seon.fn/ns`, including
+`"seon.issue.opening/edit-recipe"` and
+`"seon.operator/documented-request-keys"`. This query establishes missing
+required attributes, not the provenance of every one of the ten. A stored
+tombstone needs an explicitly valid schema alternative derived from its
+attributes; do not make the normal definition keys optional to admit it, and
+do not exempt raw datoms. Coordinate this with the protected program/schema
+owners before enforcing the new invariant on publication.
+
+## (c) Is the proposed merged-map transaction function easy and correct?
+
+**For the single scalar schedule upsert: yes. For the full F2 contract: no.**
+The schedule precedent is sound: its function/docstring says absence is
+decided by the serial writer (`schedule.clj:72–78`). A transaction function
+may resolve a scalar identity with the same AVET seek as `upsert-eid`, pull
+its existing attributes, merge the supplied scalar changes, and throw a
+diagnostic if that value fails. Malli uses `(find x key)` and emits
+`::missing-key` for a missing non-optional key (`core.cljc:1294–1299`).
+Moving the check corrects what value Malli sees; weakening Malli does not.
+
+That construction alone is insufficient because:
+
+1. Later maps/datoms may complete or invalidate the same entity. A per-map
+   check sees a prefix, not the final state. Required-key checks after each
+   individual add would reject normal multi-datom creation.
+2. Cardinality-many map entries are additions. Ordinary `merge` replaces
+   the supplied collection; Datahike's `explode` emits an add per member
+   (`transaction.cljc:739–772`). The merged map is not generally the entity
+   Datahike will store.
+3. Native identity resolution also handles multiple conflicting identities,
+   reference tempids and composite tuple identities (`:640–716`). Copying
+   only the first AVET lookup is not equivalent to that authority.
+4. A trailing transaction function receives only `db`, not the reducer's
+   `:tempids` or attempted `:tx-data` (`:1152–1153`). Those values already
+   exist on the report (`:586–625`, `:1238`, `:1289–1300`). Rebuilding them
+   in Seon is a second transactor. Scanning history is insufficient for
+   non-temporal stores, no-history attributes, idempotent assertions and
+   purges. Capturing the transient `db` does not freeze a before snapshot.
+5. Function output and other native operations need the same admission.
+   The existing codec wrapper is not such a check. A final report seam
+   naturally sees their resolved datoms without executing functions twice.
+
+### Throwing rejects the transaction, not only the failing operation
+
+`writing.cljc:872–890` calls `(core/with old tx-data tx-meta)` before
+`complete-db-update`; `core.cljc:127–140` enters the reducer. Its transaction
+function branch does not catch the exception. In `writer.cljc:148–183`,
+the `try` around `(apply op-fn old args)` catches the exception, delivers it
+to the callback, and returns `:error`. The deciding code is:
+
+```clojure
+;; writer.cljc:201–218, intervening queue-pressure/shutdown handling omitted
+(not= res :error)
+(do
+  ...
+  (if (>! commit-queue [res callback])
+    (recur (:db-after res))
+    ...))
+:else
+(recur old)
+```
+
+The error path neither enqueues a report nor advances `old`. The separate
+commit loop reads only `commit-queue` and calls `w/commit!` before resetting
+the connection (`writer.cljc:234–283`). Thus a validation exception prevents
+this transaction's datoms from being committed, including operations already
+processed within it. This guarantee concerns database transactions; arbitrary
+external side effects performed by a user transaction function are not undone.
+No such side effect is needed for admission.
+
+## (d) Cost and flat refusal
+
+The earlier **one AVET seek plus one pull per identity-bearing map** estimate
+is correct for a simple scalar identity that resolves. It is not the cost of
+general grammar parity: multiple identities need additional seeks, nested
+entities need their own validation, and a literal merge misrepresents many
+values. The recommended final-report seam needs no Seon upsert lookup: use
+Datahike's resolved ids, deduplicate attempted/changed entity ids, and pull
+each surviving subject once. Validate attempted logical values separately
+so an invalid idempotent input cannot disappear from an effective-datom-only
+report. Cost is proportional to attempted datoms plus affected entity sizes;
+no timing claim is made before implementation/profiling.
+
+Construct the refusal with `seon.error/diagnostic`, including identity,
+attribute, offending value (typed missing value where absent), logical entity
+and applicable schema. Throw `(ex-info (:seon.error/message failure) failure)`.
+`transact-call` already reads the throwable chain via
+`error.refusal/refusal` (`db.clj:3052–3054`). If the result carries
+`:seon.error/kind`, it returns that exact flat value (`:3056–3059`);
+dependency-classified `:error` uses `rejected-value` (`:3061–3064`).
+Do not return a refusal map from a transaction function: Datahike expects
+transaction data there. Do not write an error fact and commit partial data.
+
+## (e) Three concrete options
+
+1. **Constrain the grammar to independently complete entity operations.**
+   Guarantee: merged scalar upserts can use local transaction functions and
+   full validation, with unsupported composition explicitly refused. Cost:
+   inventory and change callers of raw creation datoms, nested operations,
+   temporary retractions and transaction functions. Give up existing
+   transaction composition. Small admission implementation, substantial caller
+   breakage; not recommended for the requested parity guarantee.
+2. **Expose final reducer report validation (recommended).** Guarantee:
+   every grammar shares the same final-entity check before commit; attempted
+   values remain validated, including no-ops. Cost: a small explicit callback
+   seam in the maintained Datahike fork, forwarded through its transaction
+   API, Seon's validator/codec integration, and canonical rollback/parity
+   regressions. Give up a Seon-only diff; requires dependency-owner review.
+   Hand the callback its report and projection as values. It must run after
+   tuple/retraction/function expansion and before the report is accepted by
+   the writer, with no additional execution of transaction functions.
+3. **Final transaction-function scan and input wrapping.** Guarantee: a full
+   final scan can validate all surviving identity-bearing entities, with
+   recursive wrapping also validating attempted inputs. Cost: database-wide
+   work per write, output wrapping across every callable grammar, and schema
+   correction for existing tombstones. Give up changed-entity-bounded work;
+   no dependency edit, but materially more work on the ordinary write path.
+
+Reject pre-read-only merging, caller pull/merge, weakening required keys and
+datom exceptions: none provides F2's guarantee. The original conditional
+implementation instruction is not satisfied by pretending option 2 is just
+the proposed per-map transaction function. Ask for the cross-owner change
+before production edits, as AGENTS.md §2.5 requires.
+
+## Verification and landing boundary
+
+`bin/seon status` and MCP both observed default alive at PID 53320. No
+default stop/restart, test JVM, `bin/test`, `bin/test-fast`, scratch cluster,
+worktree, provider call or protected-file edit occurred.
+
+Reloaded only `seon.db-test` through `#'seon.test/with-test-loader`, then ran
+`seon.db-test/transaction-wrappers-cannot-hide-a-classified-refusal` through
+the exact three-argument `seon.test/run` pattern, on a future with 180000 ms
+and `seon.test.runner/provenance`. Result: **6 pass, 0 fail, 0 error**;
+run entity **80770**, basis **536871723**, run-at
+`2026-09-16T19:36:24Z` (machine clock; task/document date remains 2026-09-17).
+The test includes a real turn transaction refusal but also an existing mocked
+wrapper case; it is not a new F2 rollback regression. No claim is made that it
+measured `:max-tx` atomicity. The dependency control-flow proof above establishes
+where rejection occurs; the requested final implementation must add the
+explicit before/after `:max-tx` regression on the canonical fixture.
+
+The recorded result additionally says
+`"Reach digest unavailable: Reach rows unavailable."` Its log names
+`:seon.fn/references` as absent from the live schema. This is a verification
+boundary, not a claim of a verified reach digest or a reason to alter the
+other lane's schema. The research continued from direct source and live
+admission observations.
+
+Pending: owner decision, implementation, canonical F2 regressions, all
+non-destructive reaching tests and issue sighting tests, adopted-definition
+proof, issue resolution, and orchestrator review before a cold gate. No gate
+request is submitted for an unimplemented fix. All commands completed; the
+test future completed and its `user/f2-baseline-run` Var was removed. No
+filesystem scratch was created. The retained probe passes clj-kondo with
+0 errors and 0 warnings (21 ms); `git diff --check` passed. The edit hook
+reported 30 Markdown errors in historical files, including obsolete gitlink
+citations in `docs/prds/context-generation/research/agents-md-audit-2026-09-15.md`;
+the feedback was elided, so this is not a complete Markdown-clean claim.
