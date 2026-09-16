@@ -79,3 +79,12 @@ refs against `{:db/id n}` and therefore retracts and re-asserts ~7,270
 datoms per adoption (measured: 166,808 retractions vs 14,572 assertions
 across 24 adoptions) — compare resolved identities so an unchanged issue
 writes zero datoms; regression counts datoms per re-adoption.
+
+## Addendum — `2ed13625e` (2026-09-17 21:40Z): approved for the gate
+
+Both follow-ups landed: `:seon.eval/origin` is a plain `:seon.db/ref`;
+`adopt-tx` resolves every citation through the `:seon.issue.citation/id` AVET
+index to its entity id (and lookup refs to ids before comparison), and omits
+issues already present, so an unchanged issue writes nothing. Regression in
+`issue_test.clj` (+49). Gate: `seon.issue-test seon.issue-settlement-test
+seon.turn-test seon.turn-loop-test` when a slot frees.
