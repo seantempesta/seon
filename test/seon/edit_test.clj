@@ -259,9 +259,7 @@
         artifact (fn/build-artifact
                   {:seon.fn.file/path (.getCanonicalPath file)
                    :seon.fn.file/first-party-functions []})
-        report (db/transact! connection (:seon.fn.file/rows artifact))]
-    (when-not (:db-after report)
-      (throw (ex-info "Indexed fixture transaction was refused." report)))
+        _ (test-support/transacted! connection (:seon.fn.file/rows artifact))]
     {:file file :path (.getCanonicalPath file) :artifact artifact}))
 
 (defn- write-back-request-context
@@ -290,21 +288,17 @@
   the agent is not the one under test. `compile-manifest` fills the declared
   defaults, exactly as `bin/seon config apply` does in production."
   [connection]
-  (let [report
-        (db/transact!
-         connection
-         [(:seon.config/desired-row
-           (config/compile-manifest
-            {:seon.boot/cluster-name "default"
-             :seon.config/manifest
-             {:seon.config.effect.background/time-limit-ms 60000}}))
-          {:seon.agent/id "edit-agent"}
-          {:seon.turn/id "edit-run"
-           :seon.turn/agent [:seon.agent/id "edit-agent"]
-           :seon.turn/opened-tx "datomic.tx"}])]
-    (when-not (:db-after report)
-      (throw (ex-info "Write-back fixture transaction was refused." report)))
-    report))
+  (test-support/transacted!
+   connection
+   [(:seon.config/desired-row
+     (config/compile-manifest
+      {:seon.boot/cluster-name "default"
+       :seon.config/manifest
+       {:seon.config.effect.background/time-limit-ms 60000}}))
+    {:seon.agent/id "edit-agent"}
+    {:seon.turn/id "edit-run"
+     :seon.turn/agent [:seon.agent/id "edit-agent"]
+     :seon.turn/opened-tx "datomic.tx"}]))
 
 (defn- effect-of
   [connection ordinal]

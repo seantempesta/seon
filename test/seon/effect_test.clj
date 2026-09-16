@@ -107,11 +107,9 @@
   request)
 
 (defn- transact-fixture!
+  "One fixture write path: `seon.test-support/transacted!` proves the report."
   [connection tx-data]
-  (let [report (db/transact! connection tx-data)]
-    (when-not (:db-after report)
-      (throw (ex-info "Effect fixture transaction was refused." report)))
-    report))
+  (test-support/transacted! connection tx-data))
 
 (defn- install-arm-probe!
   [connection]

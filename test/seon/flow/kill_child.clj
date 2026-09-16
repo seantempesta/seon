@@ -1,7 +1,7 @@
 (ns seon.flow.kill-child
   "Child JVM used only by the Flow process-death standing proof."
   (:require [datahike.api :as d]
-            [seon.db :as db])
+            [seon.test-support :as support])
   (:import [java.nio.file Files Path StandardOpenOption]))
 
 (def ^:private durable-schema
@@ -26,10 +26,10 @@
          :keep-history? true}
         _ (d/create-database configuration)
         connection (d/connect configuration)]
-    (db/transact! connection durable-schema)
+    (support/transacted! connection durable-schema)
     ;; This is the admitted, committed half of a step. The parent kills the
     ;; process after this report and before any terminal transaction.
-    (db/transact!
+    (support/transacted!
      connection
      [{:seon.flow.kill/id "durable-step"
        :seon.flow.kill/count 1}])
