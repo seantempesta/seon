@@ -565,3 +565,10 @@ pre-existing reds noted for cold verification: `analyzer-test/
 ordered-forms-use-existing-context-and-original-row-numbers` and
 `fn-test/keyword-usage-is-indexed-per-declaration`'s database assertions
 (likely the un-adopted default). Batch 51.
+
+### 2026-09-16 22:10Z — analyzer-test prelude drift fixed (`3d2384dfb`)
+
+The synthetic prelude in `ordered-forms-use-existing-context-and-original-row-numbers`
+named the retired `seon.run/complete`; it passed only through the stale
+shared kondo cache. Now `seon.turn/open?` (declared as an available-function
+row in the prelude); assertions untouched; 7/0/0 in-process. Batch 53.
