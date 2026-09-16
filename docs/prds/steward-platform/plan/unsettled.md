@@ -563,3 +563,9 @@ Queue, in order:
   reset is held behind the fix. Arming lane resumed: predicate functions
   ride the projection or the identity avoids compiling predicates;
   regression for cold arming.
+- 17:25Z retention-sweep landed (`5a10f5dfa`, evidence `af0359703`):
+  automatic byte-budget retention, its dial, schemas, test and schedule seed
+  removed; default's per-minute row retired; weekly reachability GC stays.
+  Live: reachability gate open 3.36 % → 100 %, zero scheduler key walks.
+  Store reset proceeds the moment the cold-arming fix lands (a reset must
+  not republish through the broken path).
