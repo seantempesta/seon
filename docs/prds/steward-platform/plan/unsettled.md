@@ -514,3 +514,13 @@ Queue, in order:
   Load cap full with arming (astra), analyzer-facets and the stale-only
   settlement fixer (Opus) plus the peer's retention-sweep lane; the two
   issue.clj lanes wait for a slot.
+- 15:45Z Peer's decision on the retention sweep (option 1, dissolution law;
+  FLAGGED FOR THE OWNER, reversible by one revert): delete automatic
+  byte-budget blob retention (retention.clj, its schema/dial, the per-minute
+  schedule seed) and rely on the existing weekly reachability GC
+  (`seon.operator/collect!` → datahike gc-storage with referenced blobs),
+  plus a retirement transaction for the seeded cron row on default. Caveat:
+  the weekly collect! also holds the exclusive permit for a full key walk
+  (Sunday 03:00 UTC), so the 72 GB / 380k-key store question (peer's
+  research pending) still matters. analyzer-facets probes paused until that
+  lane commits (est. 1–2 h).
