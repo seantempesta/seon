@@ -601,3 +601,105 @@ After all final runs and the publication command completed, the final MCP
 source check returned `repl-unavailable`: default's advertisement was
 missing. The lane did not operate default. All numbers above belong to
 PID 45917; a later process requires its own adopted proof.
+
+## `request-profile` landing — 2026-09-16
+
+Lane `request-profile`, live `default` PID **95853**, branch `steward-platform`.
+Read end to end first: this page, `docs/seon/issues/request-profile-is-derived-64-times-per-turn.md`,
+AGENTS.md §0, §2.1, §2.4, §2.5, and `tmp/orchestrator/wave2/repl-rule.txt`. No
+test JVM was launched, and `default` was never stopped, restarted or reforked.
+
+### The 64 calls were not 64 derivations — and the derivations had one owner
+
+`seon.render/request-profile` (`src/seon/render.clj:70`) already returned a
+carried `:seon.render/profile` before deriving, so the open question was which
+callers fail to carry one. Two paths were measured by wrapping the var with a
+counter through `alter-var-root` inside one evaluation (restored in the same
+`finally`), classifying each call as carried or derived:
+
+| Path (live `default`) | calls | derived | derive ms | carried ms |
+|---|---:|---:|---:|---:|
+| `seon.cluster.prompt/prompt`, agent `root`, cold render cache | 146 | **1** | 3.2 | 0.26 |
+| `seon.turn/evaluate-sources`, six forms, agent `root` | 12 | **6** | **14.7** | — |
+
+The prompt path is already correct: `seon.render.web/derive-context!`
+(`src/seon/render/web.clj:2407`) derives once and every one of the 145 further
+calls reads the carried value for 0.26 ms in total.
+
+The whole derivation cost belonged to ONE seam, `seon.turn/evaluate-sources`
+(`src/seon/turn.clj:4472` before the change), which derived the profile inside
+the source loop — **once per form**. Six forms, 14.7 ms: that is exactly the
+15 ms this page recorded against 64 calls. The count was a red herring; the
+derivation count is the observable.
+
+### The change
+
+`evaluate-sources` now derives the profile ONCE, before the loop, from the same
+basis it already captures for `ai/agent-overlay`, and carries it on every
+evaluation request. `request-profile` is unchanged: a carried profile short
+-circuits, an absent one still derives, and a request with neither a profile
+nor a projection still returns the typed `::render/missing-projection` refusal
+(§2.4). No cache, no atom, no second mechanism.
+
+| Six-form `evaluate-sources`, agent `root`, live `default` | before | after |
+|---|---:|---:|
+| `request-profile` calls | 12 | 7 |
+| derivations | 6 | **1** |
+| ms inside derivations | 14.7 / 14.5 | 2.40 / 2.39 |
+| whole `evaluate-sources` | 48.8 / 48.6 ms | 30.2 / 28.6 ms |
+
+### In-process regressions (PID 95853, `seon.test/run` on daemon threads)
+
+- `seon.cluster.evaluate-sources-test/one-turn-derives-the-render-profile-exactly-once`
+  (new, the class regression): **3 pass, 0 fail, 0 error**. It asserts the
+  derivation count itself — six forms, exactly one derivation — plus the shown
+  text of all six evaluations, so the profile cannot be dropped to make the
+  count pass.
+- `seon.cluster.turn-test/delimiter-repair-is-span-local-and-precedes-intent`:
+  15 pass, **1 fail** — the 300 ms bookkeeping assertion. Successive runs in
+  this JVM measured **954 → 913 → 488 → 477 → 393 ms**, still falling. The
+  bound was NOT loosened. This JVM is the shared `default` development cluster
+  under several concurrent lanes, so it is not the idle JVM (PID 53378) where
+  this page measured ~100 ms; the remainder is not attributed to this change,
+  which only ever removes 12.3 ms of derivation from that window.
+- `seon.cluster.evaluate-sources-test/ordered-evaluation-retains-one-explicit-basis-without-publication`:
+  24 pass, **9 fail**, all downstream of one
+  `:seon.turn/agent-already-running` refusal. **Exonerated by probe**: re-run
+  with `request-profile` forced to ignore any carried profile — the exact
+  pre-change behaviour — it fails identically (24 pass, 9 fail, same refusal).
+  The failure is independent of this change and belongs to the run-transition
+  path this lane did not touch.
+
+The orchestrator's batched gate is the proof; `tmp/orchestrator/gate-requests/request-profile.txt`
+names the namespaces.
+
+### Where the remaining bookkeeping ms are, on PID 95853
+
+One run of the same deftest with the phase wrappers of this page re-armed
+(pure delegates via `alter-var-root`, restored in the same future). The
+bookkeeping assertion reported **408.5 ms**. The counters below span the WHOLE
+deftest — three `with-cluster` blocks, six `turn` calls — and the
+instrumentation is process-global, so the live cluster's own work on other
+threads is included. They are attribution, not a window total:
+
+| Phase | calls | ms |
+|---|---:|---:|
+| `seon.db/transact!` | 28 | **6,344** |
+| `seon.turn/turn` | 6 | 3,934 |
+| `seon.turn/evaluate-sources` | 27 | 1,973 |
+| `seon.sci.eval/evaluate` | 35 | 1,698 |
+| `seon.cluster.prompt/prompt` | 3 | 740 |
+| `seon.turn/settle-batch!` | 3 | 268 |
+| `seon.render/request-profile` | 373 | 125 |
+| `seon.turn/gate-function-install` | 35 | 123 |
+| `seon.fn/analyze-forms` | 4 | 54 |
+| `seon.ai/agent-overlay` | 53 | 52 |
+| `seon.turn/evaluation-terminal-data` | 11 | 10 |
+| `seon.plan/run-issue-tests!` | 3 | 1 |
+
+`seon.db/transact!` averages **227 ms a call** here, against the **3–4 ms** this
+page measured on the same in-memory fixture base in the idle PID 53378. That
+gap — two orders of magnitude on the one phase with the largest share — is the
+whole remainder, and it tracks the load on this shared JVM, not the turn
+algorithm. Profile derivation is no longer a term in it: 2.4 ms per six-form
+turn, one derivation. The 300 ms bound stands unchanged.

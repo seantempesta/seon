@@ -8,6 +8,7 @@
 
             [seon.config :as config]
             [seon.db :as db]
+            [seon.render :as render]
             [seon.sci.admit :as admit]
             [seon.sci.eval :as sci.eval]
             [seon.test-support :as support]))
@@ -179,4 +180,78 @@
                       (:seon.turn/refused refused)))
                (is (nil? (db/pull @connection [:my.plan.item/id]
                                   [:my.plan.item/id "must-rollback"]))))))
+         (finally (async/close! channel)))))))
+
+(deftest one-turn-derives-the-render-profile-exactly-once
+  ;; THE CLASS: fetch-at-call-time inside a loop (2.1). `evaluate-sources`
+  ;; used to derive the cluster's agent render profile once PER FORM, which
+  ;; measured 14.7 ms of a 48.8 ms six-form evaluation on the live `default`
+  ;; cluster (2026-09-16). The profile is the turn's presentation policy, so
+  ;; it is derived once where the evaluation requests are built and CARRIED
+  ;; on every one of them. The observable is the derivation count, not the
+  ;; elapsed time: a carried profile never reaches the derivation branch.
+  (support/with-database
+   (fn [connection]
+     (support/seed-cluster! connection "profile-once")
+     (db/transact! connection
+                   [(:seon.config/desired-row
+                     (config/compile-manifest
+                      {:seon.boot/cluster-name "profile-once"
+                       :seon.config/manifest {}}))])
+     (db/transact! connection
+                   (agent/creation-tx
+                    {:seon.agent/id "profile-once-agent"
+                     :seon.ns/name 'my.agents.profile-once
+                     :seon.cluster/name "profile-once"}))
+     (let [database @connection
+           base (support/fork-cluster-ctx connection)
+           forked (sci.eval/fork-for-turn
+                   {:seon.sci.eval/ctx base
+                    :seon.db/db database
+                    :seon.db/connection connection
+                    :seon.agent/id "profile-once-agent"})
+           defaults (config/defaults)
+           channel (async/chan 1)
+           cluster (merge defaults
+                          {:seon.db/connection connection
+                           :seon.cluster/name "profile-once"
+                           :seon.db.process/id "profile-once-test"
+                           :seon.sci.eval/ctx base
+                           :seon.cluster.wake/channel channel
+                           :seon.render/context-channel channel
+                           :seon.turn.loop/completion channel
+                           :seon.sci.admit/caps (config/result-caps defaults)
+                           :seon.config.eval/time-limit-ms 2000
+                           :seon.config/on-core-error :panic})
+           sources (mapv (fn [ordinal]
+                           {:seon.cluster.eval/source (str "(+ 1 " ordinal ")")})
+                         (range 6))
+           derivations (atom 0)
+           carried (atom [])
+           request-profile render/request-profile]
+       (try
+         (let [outcomes
+               (with-redefs
+                 [render/request-profile
+                  (fn [request]
+                    (when-not (contains? request :seon.render/profile)
+                      (swap! derivations inc))
+                    (request-profile request))]
+                 (turn/evaluate-sources
+                  {:seon.turn.loop/cluster cluster
+                   :seon.db/db database
+                   :seon.sci.eval/ctx (:seon.sci.eval/ctx forked)
+                   :seon.agent/id "profile-once-agent"
+                   :seon.cluster.eval/ordinal 0
+                   :seon.ns/name 'my.agents.profile-once
+                   :seon.cluster.reply/sources sources}))]
+           (reset! carried
+                   (mapv #(get-in % [:seon.sci.eval/evaluation :seon.eval/shown])
+                         outcomes))
+           (is (= 6 (count outcomes)))
+           (is (= ["1" "2" "3" "4" "5" "6"] @carried)
+               "every form still renders its shown text under the profile")
+           (is (= 1 @derivations)
+               (str "six forms derived the render profile " @derivations
+                    " times; one turn derives it once")))
          (finally (async/close! channel)))))))

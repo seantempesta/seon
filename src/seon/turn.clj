@@ -4440,7 +4440,17 @@
     sources :seon.cluster.reply/sources
     starting-namespace :seon.ns/name}]
   (let [connection (:seon.db/connection cluster)
-        cluster (merge cluster (ai/agent-overlay (or snapshot (db/db connection)) agent-id))]
+        basis (or snapshot (db/db connection))
+        cluster (merge cluster (ai/agent-overlay basis agent-id))
+        ;; ONE DERIVATION PER TURN (2.1). The render profile is the turn's
+        ;; presentation policy, not a per-form question, so it is derived
+        ;; here — where the evaluation requests are built — and CARRIED on
+        ;; every one of them; `render/request-profile` returns a carried
+        ;; profile without re-deriving. Deriving it inside the loop cost
+        ;; 14.7 ms of a 48.8 ms six-form `evaluate-sources` on `default`
+        ;; (2026-09-16), one config-effective derivation per form.
+        profile (render/request-profile
+                 {:seon.db/db basis :seon.agent/id agent-id})]
     (loop [remaining (seq sources)
            ordinal first-ordinal
            namespace-name starting-namespace
@@ -4469,10 +4479,7 @@
                         :seon.turn/id run-id})
                              :seon.db/db database
                              :seon.db/connection connection
-                             :seon.render/profile
-                             (render/request-profile
-                              {:seon.db/db database
-                               :seon.agent/id agent-id}))
+                             :seon.render/profile profile)
                 handle (assoc :seon.repl/handle handle))
               evaluation
               (binding [db/*read-evidence-sink* captured]
