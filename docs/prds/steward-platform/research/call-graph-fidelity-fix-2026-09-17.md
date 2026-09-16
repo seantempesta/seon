@@ -265,3 +265,148 @@ lane, then re-run `seon.fn-test`, `seon.program-test`, `seon.fn.analyzer-test`,
 `seon.test-reaching-test` and the derived reaching tests. The interim table
 must be re-measured after successful adoption. No existing key changed
 meaning; **no schema RESET NEEDED from this implementation**.
+
+## Batch 105 review follow-up — one slice
+
+Read the orchestrator review end to end and every fn-test failure block in
+`tmp/orchestrator/gate-results/batch-105.log:370–560`. Re-read the complete
+REPL rule and performance issue. The original authority/seam reads above
+still apply. Additional dependency ledger: kondo's parser initializes
+`reader/*reader-exceptions*` to nil (`reference-code/clj-kondo/parser/clj_kondo/impl/rewrite_clj/reader.clj:15`),
+its unmatched opening delimiter path swaps it (`reference-code/clj-kondo/parser/clj_kondo/impl/rewrite_clj/parser/core.clj:121`), and
+`analyze-input` binds a fresh atom (`reference-code/clj-kondo/src/clj_kondo/impl/analyzer.clj:4454–4461`).
+Our secondary Var-quote parse omitted that binding. This was not a cancelled
+future or another lane's defect.
+
+One review slice changes the existing owners:
+
+- `src/seon/fn.clj:347`: kondo's macro fact excludes a usage from runtime
+  calls and arities. First-party macro dependencies remain references
+  (`:353`). The static-index regression checks every macro-marked usage in
+  its source, including defining macros, and checks the retained reference.
+- `src/seon/fn/analyzer.clj:362`: bind the parser's error collector at the
+  secondary parse. `build-manifest` rejects blocking analysis before building
+  rows (`src/seon/fn.clj:1958`); malformed-source unit evidence preserves the
+  syntax findings. The original fresh-branch-unpublished regression remains.
+- `src/seon/fn.clj:1263,1321`: resolved incoming calls (including declared
+  dispatch) take precedence. References participate only when that target
+  has no resolved incoming caller. Unknown identities match only explicit
+  pending subjects. File references join to tests in that file. The coverage
+  rules and manifest selector use the same policy
+  (`src/seon/test/selection.clj:123`).
+- `src/seon/fn.clj:1371`: `gate-sets` acquires declaration and file-reference
+  relations once per operation and hands them to each indexed walk. The
+  detector uses that bulk owner (`src/seon/issue/detect.clj:280`). No retained
+  cache or new execution machinery.
+- `test/seon/fn_test.clj:1403`: assert the exact AVET scan set, including the
+  references scan only at unresolved incoming targets. The new scoped fixture
+  (`test/fixtures/call_graph_fidelity/scoped.edn`) asserts exact database,
+  Datalog-rule and manifest selections, file-local widening, missing identity,
+  and one declaration acquisition per bulk request (`:2647`).
+
+All nine batch-105 failing tests belong to this lane's earlier changes:
+`call-arities-refine-exactly-the-stored-call-edges`,
+`capability-metadata-is-one-program-graph-contract`,
+`defining-forms-share-one-form-local-kondo-batch`,
+`file-artifacts-and-manifests-are-byte-digested-and-deterministic`, and
+`static-index-preserves-the-jvm-row-contract` share the macro classification
+root. `declared-function-values-contribute-edges-without-arities` and
+`tests-reaching-follows-calls-and-explicit-subjects` share global widening.
+`gate-set-walks-only-indexed-callers-once` needs the exact scoped scan contract.
+`blocking-analysis-keeps-the-fresh-branch-unpublished` is the parser binding.
+No foreign commit is blamed for those failures.
+
+### Verification and boundary
+
+The new forms were evaluated in default before snapshot edits and exercised
+through the existing test loader. Four original pure regressions passed
+57 assertions, zero failures/errors: call-arities, capability metadata,
+file artifact determinism, and static row contract. The strengthened static
+regression plus malformed-source test and scoped selection checks then passed
+48 assertions. The final Datalog-rule parity extension passed all 14 scoped
+assertions. These overlap; they are not a summed suite count.
+
+The scoped body used `datahike.api/with` on the held default database value
+with its carried projection. This is actual complete program data, **not a
+successful acquisition of the canonical test fixture**: that fixture reported
+unrealized and was not forced or rebuilt. The checked-in deftest obtains its
+database through `test-support/with-database`. The pure checks are not a claim
+of armed, recorded, or adopted integration proof.
+
+An exact three-argument `seon.test/run` attempt for the call-arities regression,
+resolved through the existing loader with `remaining-ms 180000`, was refused
+before the body: `:seon.test/unknown`, missing `:seon.fn/destroys` declarations.
+The user's complete-publication write-admission boundary remains external to
+this slice. No test JVM, gate, restart, manual fixture rebuild, or foreign
+session operation was used.
+
+Still requiring the cold gate: complete `seon.fn-test`, `seon.program-test`,
+`seon.fn.analyzer-test`, `seon.test-reaching-test`, the original fresh-branch
+unpublished assertion, canonical write admission, S1's
+`indexed-and-evaluated-declarations-are-the-same-entities`, and every affected
+reach-selected test. The orchestrator must review this diff before any gate.
+
+Implementation and unit verification used isolated HEAD snapshot `19ee62479`
+while `src/seon/fn.clj` and `test/seon/fn_test.clj` were concurrently modified.
+The write-admission lane then landed `b1508dc8a`; this lane applied only its
+own disjoint patch to the shared tree, preserving that diagnostic and
+publication-refusal regression. No schema key changes meaning;
+**RESET NEEDED: no**. Re-index/adoption is needed to replace old graph facts.
+
+### Ten-function measurement
+
+The review names four functions; the other six below exercise the changed
+indexing, declaration, dispatch, and selection seams. All held-value samples
+use default basis **536871803**. That value contains **0 references and 0
+file unresolved references**, so the scoped policy alone leaves these ten
+counts unchanged. The analyzed snapshot produces **1,642 references and 317
+file unresolved references**. Comparing both policies over that SAME
+read-only graph projection isolates the widening fix:
+
+| function | held before → after | projected old policy → scoped policy |
+|---|---:|---:|
+| seon.id/digest | 1184 → 1184 | 1852 → 1385 |
+| seon.print/emit | 1207 → 1207 | 1852 → 1382 |
+| seon.fs.jvm/read | 1016 → 1016 | 1852 → 1061 |
+| seon.db/q | 1220 → 1220 | 1852 → 1419 |
+| seon.fn/build-manifest | 979 → 979 | 1852 → 1024 |
+| seon.fn/source-rows | 335 → 335 | 1852 → 339 |
+| seon.fn.analyzer/analyze | 1026 → 1026 | 1852 → 1071 |
+| seon.program/canonical-row | 1027 → 1027 | 1852 → 1382 |
+| seon.effect/request! | 18 → 18 | 1852 → 18 |
+| seon.test.selection/reaching-tests | 3 → 3 | 4 → 4 |
+
+These are not after-adoption numbers. Complete `datahike/with` reconciliation
+was refused because held default declares `:seon.render/ai` as string while
+current source declares symbol (`seon.plan/format-plan-ai` was the offending
+value). The measurement therefore projected only graph/identity datoms from
+`reconcile-tx`'s own transaction, preserving the held schema. It did not
+commit anything or substitute for publication. Central functions still select
+large closures; this slice does not claim minimal semantic dependencies.
+
+Held-value per-call milliseconds before → after, in table order:
+190.075→195.287, 22.829→18.980, 15.757→18.119, 31.867→25.770,
+14.113→13.193, 6.543→5.953, 16.176→14.513, 16.543→14.336,
+1.394→1.172, 1.084→0.928. These are individual observations in a shared JVM,
+not statistical benchmarks. The graph-only `with` projection has different
+read costs (163–196 ms per scoped call); its timings are not adoption costs.
+
+The whole population now has **1,202 candidates**, rather than the performance
+issue's earlier 1,196. On the same held value, old single-function loop:
+**9,041.292 ms**; final bulk walk: **7,517.956 ms**; detector:
+**7,044.122 ms**, **166 subjects**. The declaration relation is acquired once
+per bulk operation, asserted independently of elapsed time.
+
+After applying the disjoint patch to main and reloading `seon.fn-test` through
+the existing loader, the final unit pass was **85 assertions / 0 failures /
+0 errors**: five pure deftests plus the scoped selection body on the held
+value. The fixture-owning wrapper was not claimed executed. Raw counts,
+selection digests, timings, the recorded refusal, and a repeatable read-only
+measurement form are in
+[call-graph-fidelity-review-evidence-2026-09-17](call-graph-fidelity-review-evidence-2026-09-17/measurements.edn).
+
+The final scoped check also asserts the stored resolved call and the stored
+reference it suppresses: **16 pass / 0 fail / 0 error**. All lane futures
+finished; temporary bindings, the isolated worktree, named scratch, and the
+nine fixture directories created by these unit invocations were removed.
+The retained batch-105 root and foreign files were untouched.

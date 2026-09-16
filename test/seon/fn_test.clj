@@ -1,8 +1,11 @@
 (ns seon.fn-test
-  (:require [clojure.java.io :as io]
+  (:require [clojure.edn :as edn]
+            [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [seon.cluster.store :as store]
+            [datahike.api :as d]
+            [seon.test.selection :as selection]
             [seon.db :as db]
             [seon.error :as error]
             [seon.turn :as turn]
@@ -436,11 +439,21 @@
         (is (nil? (:seon.fn/spec
                    (get by-id [:seon.fn/sym "sample.core/sample-macro"])))
             "macro rows do not claim runtime function contracts")
-        (is (= #{[:seon.fn/sym "clojure.string/trim"]
-                 [:seon.fn/sym "sample.core/sample-macro"]}
+        (is (= #{[:seon.fn/sym "clojure.string/trim"]}
                (:seon.fn/calls
                 (get by-id [:seon.fn/sym "sample.core/helper"])))
-            "macro calls remain first-party graph edges")
+            "macro expansion is not a runtime call")
+        (is (contains? (set (:seon.fn/references
+                             (get by-id [:seon.fn/sym "sample.core/helper"])))
+                       [:seon.fn/sym "sample.core/sample-macro"])
+            "macro expansion retains a dependency without a runtime arity")
+        (let [usages (::analyzer/var-usages
+                      (analyzer/analyze {::analyzer/paths [(.getCanonicalPath (io/file root "sample/core.clj"))]}))
+              macros (filter ::analyzer/macro usages)]
+          (is (seq macros))
+          (doseq [usage macros]
+            (is (nil? (#'seon.fn/call-target usage))
+                (pr-str (select-keys usage [::analyzer/to ::analyzer/name])))))
         (is (= "(defrecord Pair [left right])"
                (:seon.fn/source
                 (get by-id [:seon.fn/sym "sample.core/map->Pair"]))))
@@ -1444,19 +1457,28 @@
                         (swap! scan-counts conj (count @scans))
                         (is (= (count @scans) (count (distinct @scans)))
                             "a cycle never repeats an incoming-edge lookup")
-                        (is (every? #(= [:avet :seon.fn/calls] (subvec % 0 2))
-                                    @scans)
-                            "the walk reads indexed incoming edges only")
+                        (is (= (set (case s
+                                      ("sample.gates/a" "sample.gates/b")
+                                      [[:avet :seon.fn/calls (:db/id (db/pull database [:db/id] [:seon.fn/sym "sample.gates/a"]))]
+                                       [:avet :seon.fn/calls (:db/id (db/pull database [:db/id] [:seon.fn/sym "sample.gates/b"]))]
+                                       [:avet :seon.fn/calls (:db/id (db/pull database [:db/id] [:seon.test/sym "sample.gates/direct"]))]
+                                       [:avet :seon.fn/references (:db/id (db/pull database [:db/id] [:seon.test/sym "sample.gates/direct"]))]]
+                                      "sample.gates/unrelated"
+                                      [[:avet :seon.fn/calls (:db/id (db/pull database [:db/id] [:seon.fn/sym s]))]
+                                       [:avet :seon.fn/references (:db/id (db/pull database [:db/id] [:seon.fn/sym s]))]]
+                                      []))
+                               (set @scans))
+                            "references are scanned only at a target with no resolved incoming call")
                         result))
                     symbols))]
         (is (= [["sample.gates/direct" "sample.gates/pending" "sample.gates/subject"]
                 ["sample.gates/direct" "sample.gates/subject"]
                 ["sample.gates/future"] [] []]
                results))
-        (is (= [3 3 0 1 0] @scan-counts)
+        (is (= [4 4 0 2 0] @scan-counts)
             "only the reachable identities are visited, once per requested gate set")
-        (is (<= (count @queries) (* 3 (count symbols)))
-            "each identity uses at most three nonrecursive selection queries")
+        (is (<= (count @queries) (* 5 (count symbols)))
+            "each identity uses at most five nonrecursive selection queries")
         (is (not-any? #(some #{'%} %) @queries)
             "N definitions never repeat the graph-wide recursive derivation")
         (transact-fixture!
@@ -2620,4 +2642,79 @@
                                       (seon.fn/reconcile-tx @connection (:seon.fn.file/rows partial) []))
             (is (contains? (set (seon.fn/tests-reaching @connection target))
                            "sample.cross-implementation/unrelated")))))
+      (finally (test-support/delete-recursively! root)))))
+
+(defn- assert-scoped-reference-selection [database]
+  (let [root (fixture-root)]
+    (try
+      (doseq [[path source] (edn/read-string
+                            (slurp (io/resource "test/fixtures/call_graph_fidelity/scoped.edn")))]
+        (write-source! root path source))
+      (let [manifest (seon.fn/build-manifest {:seon.fn/roots [(.getPath root)]})
+            artifacts (:seon.fn.manifest/artifacts manifest)
+            rows (vec (mapcat :seon.fn.file/rows artifacts))
+            tx (seon.fn/reconcile-tx database rows [])
+            projected (:db-after (d/with database tx))
+            expected {"sample.scoped-target/target" ["sample.scoped-tests/direct"]
+                      "sample.scoped-reference/target" ["sample.scoped-tests/fallback"]
+                      "sample.scoped-file/target" ["sample.scoped-uncertain/local-test"]
+                      "sample.scoped-missing/absent" []}
+            queries (atom 0)
+            thread (Thread/currentThread)
+            derive-edges @#'seon.fn/declared-reference-edges
+            selected (with-redefs-fn
+                       {#'seon.fn/declared-reference-edges
+                        (fn [db]
+                          (when (identical? thread (Thread/currentThread))
+                            (swap! queries inc))
+                          (derive-edges db))}
+                       #(seon.fn/gate-sets projected (keys expected)))]
+        (is (= #{"sample.scoped-tests/indirect"}
+               (set (db/q '[:find [?symbol ...]
+                            :where
+                            [?target :seon.fn/sym "sample.scoped-target/target"]
+                            [?caller :seon.fn/references ?target]
+                            [?caller :seon.test/sym ?symbol]] projected)))
+            "the excluded reference really is stored")
+        (is (= #{"sample.scoped-tests/direct"}
+               (set (db/q '[:find [?symbol ...]
+                            :where
+                            [?target :seon.fn/sym "sample.scoped-target/target"]
+                            [?caller :seon.fn/calls ?target]
+                            [?caller :seon.test/sym ?symbol]] projected)))
+            "the resolved incoming caller takes precedence")
+        (is (= expected selected))
+        (is (= 1 @queries) "one declaration relation per bulk operation")
+        (doseq [[target tests] expected]
+          (is (= tests (seon.fn/tests-reaching projected target)))
+          (is (= (set tests)
+                 (set (db/q '[:find [?caller-symbol ...]
+                              :in $ % ?target-symbol
+                              :where
+                              [?target :seon.fn/sym ?target-symbol]
+                              (call-edge ?caller ?target)
+                              [?caller :seon.test/sym ?caller-symbol]]
+                            projected (var-get (ns-resolve 'seon.fn 'test-reach-rules)) target)))
+              "coverage rules use the same scoped incoming relation")
+          (let [path (some (fn [artifact]
+                             (when (some #(= target (:seon.fn/sym %))
+                                         (:seon.fn.file/rows artifact))
+                               (:seon.fn.file/relative-path artifact))) artifacts)]
+            (is (= tests (selection/reaching-tests artifacts (if path [path] [])))))))
+      (finally (test-support/delete-recursively! root)))))
+
+(deftest reference-selection-is-a-scoped-fallback
+  (test-support/with-database
+    (fn [connection] (assert-scoped-reference-selection (db/db connection)))))
+
+(deftest malformed-source-preserves-analysis-findings
+  (let [root (fixture-root)]
+    (try
+      (let [file (write-source! root "broken/core.clj" "(ns broken.core)\n(defn broken [")
+            analysis (analyzer/analyze {::analyzer/paths [(.getCanonicalPath file)]})
+            refusal (try (seon.fn/build-manifest {:seon.fn/roots [(.getPath root)]})
+                         nil (catch clojure.lang.ExceptionInfo failure (ex-data failure)))]
+        (is (some #(= :syntax (::analyzer/type %)) (::analyzer/findings analysis)))
+        (is (= :seon.fn/index-refused (:seon.error/kind refusal)))
+        (is (seq (:seon.fn/findings refusal))))
       (finally (test-support/delete-recursively! root)))))

@@ -48,3 +48,18 @@ Found by the first-task-detector lane, 2026-09-17
 ([landing note](../../prds/steward-platform/research/first-task-detectors-2026-09-17.md)).
 `src/seon/fn.clj` was another lane's file at the time, so this is filed rather
 than fixed.
+
+## Review follow-up implementation, 2026-09-17
+
+`seon.fn/gate-sets` (`src/seon/fn.clj:1371`) now acquires declared dispatch
+and unresolved-file relations once per supplied operation. The detector
+hands its candidate population to that owner (`src/seon/issue/detect.clj:280`).
+No process cache is added. The exact-selection fixture counts one declaration
+query for four requested symbols (`test/seon/fn_test.clj:2647`).
+
+At held default basis 536871803, the current population has 1,202 candidates,
+not the earlier 1,196. Previous single-function loop: 9,041.292 ms;
+final bulk operation: 7,517.956 ms; detector: 7,044.122 ms / 166 subjects.
+These are hot-loaded, read-only measurements, not an adopted or cold proof.
+The issue remains open pending the orchestrator's gate; see the
+[landing note](../../prds/steward-platform/research/call-graph-fidelity-fix-2026-09-17.md).

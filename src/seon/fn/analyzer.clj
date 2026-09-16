@@ -4,6 +4,7 @@
             [clj-kondo.impl.cache :as kondo.cache]
             [clj-kondo.impl.core :as kondo.core]
             [clj-kondo.impl.utils :as kondo.utils]
+            [clj-kondo.impl.rewrite-clj.reader :as kondo.reader]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [cognitect.transit :as transit]
@@ -364,7 +365,8 @@
         (comp (filter #(= :var (:tag %)))
               (map #(assoc (meta %) :filename filename)))
         (tree-seq (comp seq :children) :children
-                  (kondo.utils/parse-string-all source))))
+                  (binding [kondo.reader/*reader-exceptions* (atom [])]
+                    (kondo.utils/parse-string-all source)))))
 
 (defn analyze
   "Analyze captured source text, complete source roots, or individual files.

@@ -346,7 +346,8 @@
 
 (defn- call-target
   [usage]
-  (when (or (contains? usage ::analyzer/arity) (::analyzer/var-quote usage))
+  (when (and (not (::analyzer/macro usage))
+             (or (contains? usage ::analyzer/arity) (::analyzer/var-quote usage)))
     (usage-symbol usage)))
 
 (defn- references-by-caller
@@ -361,7 +362,8 @@
       (let [caller (usage-caller usage)
             target (usage-symbol usage)]
         (if (and target (first-party-functions target)
-                 (or (not (contains? usage ::analyzer/arity))
+                 (or (::analyzer/macro usage)
+                     (not (contains? usage ::analyzer/arity))
                      (not (declared-callers caller))))
           (update references (when (declared-callers caller) caller)
                   (fnil conj #{}) target)
@@ -1259,16 +1261,24 @@
 (def ^:private request-symbol "seon.effect/request!")
 
 (def ^:private test-reach-rules
-  '[[(call-edge ?function ?target)
+  '[[(resolved-edge ?function ?target)
      [?function :seon.fn/calls ?target]]
-    [(call-edge ?function ?target)
-     [?function :seon.fn/references ?target]]
-    [(call-edge ?function ?target)
+    [(resolved-edge ?function ?target)
      [?declaration :seon.fn/reference-to :seon.fn/sym]
      [?declaration :seon.schema/key ?attribute]
      [?holder ?attribute ?target]
      [?target :seon.fn/sym]
      [?function :seon.fn/keywords ?attribute]]
+    [(call-edge ?function ?target)
+     (resolved-edge ?function ?target)]
+    [(call-edge ?function ?target)
+     [?function :seon.fn/references ?target]
+     (not-join [?target] (resolved-edge ?resolved ?target))]
+    [(call-edge ?test ?target)
+     [?file :seon.fn/unresolved-references ?symbol]
+     [?target :seon.fn/sym ?symbol]
+     [?test :seon.fn/file ?file]
+     [?test :seon.test/sym]]
     [(tested ?target)
      [?test :seon.test/sym]
      (call-edge ?test ?target)]
@@ -1308,52 +1318,37 @@
           [?caller :seon.fn/keywords ?attribute]]
         database))
 
-(defn gate-set
-  "Tests gating one function identity from one database value.
-
-  Walk indexed incoming call edges once per reachable identity. Explicit
-  subjects terminate the walk; pending subjects match this symbol exactly.
-  The finite database graph bounds the work, including cycles. A refused
-  database read is returned as the flat value it is: concatenating an
-  error map would splice its entries into the selection."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.fn/sym]
-                  [:or [:vector :seon.test/sym] :seon.error/value]]}
-  [database function-symbol]
+(defn- gate-set-in
+  "Walk one identity using the declaration relation acquired for this operation.
+  Resolved incoming calls take precedence; references are the fallback when
+  that target has no resolved incoming caller. File uncertainty selects only
+  tests owned by that file."
+  [database incoming-declared incoming-file function-symbol]
   (let [row (db/pull database [:db/id] [:seon.fn/sym function-symbol])]
     (if (:seon.error/kind row)
       row
       (let [target (:db/id row)
-            declared (declared-reference-edges database)
-            incoming-declared (group-by second (when-not (:seon.error/kind declared) declared))
             walked
-            (loop [pending (if target [target] [])
-                   seen #{}
-                   callers #{}]
+            (loop [pending (if target [target] []) seen #{} callers #{}]
               (if-let [entity (peek pending)]
                 (if (seen entity)
                   (recur (pop pending) seen callers)
                   (let [calls (db/datoms database :avet :seon.fn/calls entity)
-                        references (db/datoms database :avet :seon.fn/references entity)
-                        refusal (some #(when (:seon.error/kind %) %) [calls references])
-                        edges (when-not refusal (concat calls references))]
+                        declared (get incoming-declared entity)
+                        references (when (and (not (:seon.error/kind calls))
+                                              (empty? calls) (empty? declared))
+                                     (db/datoms database :avet :seon.fn/references entity))
+                        refusal (some #(when (:seon.error/kind %) %) [calls references])]
                     (if refusal
                       refusal
-                      (let [incoming (into (mapv :e edges)
-                                           (map first (get incoming-declared entity)))]
+                      (let [incoming (into (into (mapv :e (concat calls references)) declared)
+                                           (get incoming-file entity))]
                         (recur (into (pop pending) incoming)
-                               (conj seen entity)
-                               (into callers incoming))))))
+                               (conj seen entity) (into callers incoming))))))
                 callers))]
-        (if (or (:seon.error/kind declared) (:seon.error/kind walked))
-          (if (:seon.error/kind declared) declared walked)
+        (if (:seon.error/kind walked)
+          walked
           (let [subjects (cond-> walked target (conj target))
-                unresolved (when (seq subjects)
-                             (db/q '[:find [?file ...]
-                                     :in $ [?function ...]
-                                     :where
-                                     [?function :seon.fn/sym ?symbol]
-                                     [?file :seon.fn/unresolved-references ?symbol]]
-                                   database subjects))
                 by-edge (when (seq walked)
                           (db/q '[:find [?symbol ...]
                                   :in $ [?test ...]
@@ -1362,25 +1357,57 @@
                 by-subject (when (seq subjects)
                              (db/q '[:find [?symbol ...]
                                      :in $ [?subject ...]
-                                     :where
-                                     [?test :seon.test/subject ?subject]
+                                     :where [?test :seon.test/subject ?subject]
                                      [?test :seon.test/sym ?symbol]]
                                    database subjects))
                 by-pending (db/q '[:find [?symbol ...]
                                    :in $ ?target-symbol
-                                   :where
-                                   [?test :seon.test/pending-subject ?target-symbol]
+                                   :where [?test :seon.test/pending-subject ?target-symbol]
                                    [?test :seon.test/sym ?symbol]]
                                  database function-symbol)]
-            (or (some #(when (:seon.error/kind %) %)
-                      [unresolved by-edge by-subject by-pending])
-                (when (or (nil? target) (seq unresolved))
-                  (let [tests (db/q '[:find [?test ...] :where [_ :seon.test/sym ?test]] database)]
-                    (if (:seon.error/kind tests) tests (vec (sort tests)))))
-                (->> (concat by-edge by-subject by-pending)
-                     distinct
-                     sort
-                     vec))))))))
+            (or (some #(when (:seon.error/kind %) %) [by-edge by-subject by-pending])
+                (vec (sort (set (concat by-edge by-subject by-pending)))))))))))
+
+(defn gate-sets
+  "Select tests for several identities in one immutable database value.
+  Acquire schema-declared dispatch edges once and hand them to each indexed
+  walk. No relation is cached beyond this operation."
+  {:malli/schema
+   [:=> [:cat :seon.db/database-value [:sequential :seon.fn/sym]]
+    [:or [:map-of :seon.fn/sym [:vector :seon.test/sym]] :seon.error/value]]}
+  [database function-symbols]
+  (let [declared (declared-reference-edges database)
+        file-references
+        (db/q '[:find ?test ?target
+                :where
+                [?file :seon.fn/unresolved-references ?symbol]
+                [?target :seon.fn/sym ?symbol]
+                [?test :seon.fn/file ?file]
+                [?test :seon.test/sym]] database)
+        refusal (some #(when (:seon.error/kind %) %) [declared file-references])]
+    (if refusal
+      refusal
+      (let [incoming (fn [edges]
+                       (reduce (fn [m [caller target]]
+                                 (update m target (fnil conj #{}) caller)) {} edges))
+            declared-incoming (incoming declared)
+            file-incoming (incoming file-references)]
+        (reduce (fn [results function-symbol]
+                  (let [selected (gate-set-in database declared-incoming file-incoming function-symbol)]
+                    (if (:seon.error/kind selected)
+                      (reduced selected)
+                      (assoc results function-symbol selected))))
+                {} (distinct function-symbols))))))
+
+(defn gate-set
+  "Tests gating one function identity. Unknown identities match only an
+  explicitly pending subject; unresolved file references select that file's
+  tests. Use gate-sets when one operation asks about several identities."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.fn/sym]
+                  [:or [:vector :seon.test/sym] :seon.error/value]]}
+  [database function-symbol]
+  (let [result (gate-sets database [function-symbol])]
+    (if (:seon.error/kind result) result (get result function-symbol))))
 
 (defn tests-reaching
   "Compatibility spelling for the shared gate-set derivation."
@@ -1928,6 +1955,7 @@
         analysis (analyzer/analyze
                   {::analyzer/sources (update-vals contexts :text)})
         first-party-functions (first-party-function-symbols analysis)
+        _ (assert-clean-analysis! analysis first-party-functions)
         findings-by-file
         (group-by ::analyzer/filename
                   (publication-findings analysis first-party-functions))
@@ -1952,7 +1980,6 @@
          directory
          (mapv (partial fs/relative-path directory) roots)
          artifacts)]
-    (assert-clean-analysis! analysis first-party-functions)
     manifest))
 
 (defn- row-by-identity

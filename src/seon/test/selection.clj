@@ -122,10 +122,11 @@
 
 (defn- row-edges
   "Identity pairs `[caller called]` this row contributes."
-  [row]
+  [resolved-targets row]
   (let [callers (row-identities row)]
     (for [caller callers
-          called (concat (:seon.fn/calls row) (:seon.fn/references row)
+          called (concat (:seon.fn/calls row)
+                         (remove resolved-targets (:seon.fn/references row))
                          (when-let [subject (:seon.test/subject row)]
                            [subject]))
           :when (vector? called)]
@@ -138,7 +139,9 @@
   repository-relative paths. Seeds are every identity DEFINED in a changed
   file — a require-only edit changes no function body yet must still select
   that namespace's dependents — and the walk follows `:seon.fn/calls` and
-  `:seon.test/subject` edges backwards to their callers."
+  `:seon.test/subject` edges backwards to their callers. References participate
+  only where no resolved call enters their target. Unresolved file references
+  select tests from that file."
   {:malli/schema [:=> [:cat
                        [:vector [:map
                                  [:seon.fn.file/relative-path [:string {:min 1}]]]]
@@ -153,11 +156,12 @@
                           (mapcat :seon.fn.file/rows)
                           (mapcat row-identities))
                     artifacts)
+        resolved-targets (into #{} (mapcat :seon.fn/calls) rows)
         callers-of (reduce
                     (fn [index [caller called]]
                       (update index called (fnil conj #{}) caller))
                     {}
-                    (mapcat row-edges rows))
+                    (mapcat (partial row-edges resolved-targets) rows))
         reached (loop [reached seeds
                        frontier seeds]
                   (if (empty? frontier)
@@ -168,15 +172,17 @@
                                       (remove reached))
                                 frontier)]
                       (recur (into reached next-frontier) next-frontier))))]
-    (if (some (fn [row]
-                (some #(contains? reached [:seon.fn/sym %])
-                      (:seon.fn/unresolved-references row))) rows)
-      (vec (sort (keep :seon.test/sym rows)))
-    (->> reached
-         (keep (fn [[attribute value]]
-                 (when (= :seon.test/sym attribute) value)))
-         sort
-         vec))))
+    (let [by-file (mapcat
+                   (fn [artifact]
+                     (let [file-rows (:seon.fn.file/rows artifact)]
+                       (when (some (fn [row]
+                                     (some #(contains? reached [:seon.fn/sym %])
+                                           (:seon.fn/unresolved-references row))) file-rows)
+                         (keep :seon.test/sym file-rows)))) artifacts)]
+      (->> (concat by-file
+                   (keep (fn [[attribute value]]
+                           (when (= :seon.test/sym attribute) value)) reached))
+           distinct sort vec))))
 
 (defn- basis-file
   "The recorded green-basis artifact below one checkout root.

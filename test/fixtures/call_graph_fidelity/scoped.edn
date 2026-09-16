@@ -1,0 +1,6 @@
+{"sample/scoped_target.clj" "(ns sample.scoped-target)\n(defn target [] :target)"
+ "sample/scoped_reference.clj" "(ns sample.scoped-reference)\n(defn target [] :reference)"
+ "sample/scoped_file.clj" "(ns sample.scoped-file)\n(defn target [] :file)"
+ "sample/scoped_tests.clj" "(ns sample.scoped-tests (:require [clojure.test :refer [deftest is]] [sample.scoped-target :as target] [sample.scoped-reference :as reference]))\n(deftest direct (is (= :target (target/target))))\n(deftest indirect (is (fn? (partial target/target))))\n(deftest fallback (is (fn? (partial reference/target))))"
+ "sample/scoped_uncertain.clj" "(ns sample.scoped-uncertain (:require [clojure.test :refer [deftest is]] [sample.scoped-file :as target]))\n(def task target/target)\n(deftest local-test (is (fn? task)))"
+ "sample/scoped_unrelated.clj" "(ns sample.scoped-unrelated (:require [clojure.test :refer [deftest is]]))\n(deftest unrelated (is true))"}
