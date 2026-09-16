@@ -253,13 +253,23 @@
 
 
 
-   {::label "row 10 — closed run, answered trigger: idle"
+   {::label "row 10 — closed run, answered trigger, completed: idle"
+    ;; IDLE NEEDS THE DISPOSITION. A closed provider reply CONTINUES unless
+    ;; its turn carries one (`src/seon/turn.clj:2845`; the `:open` arm admits
+    ;; "continuation of the latest closed provider reply"), so a fixture that
+    ;; closes without recording what the last form decided derives `:open`,
+    ;; not idle. The disposition is the fact `my.turn/complete` leaves
+    ;; (`src/seon/turn.clj:3512`).
     ::build (fn [connection]
               (add-trigger! connection)
               (open-run! connection {:planned? true
                                      :triggered? true})
               (terminal-receipt! connection 0)
               (terminal-receipt! connection 1)
+              (support/transacted!
+               connection
+               [[:db/add [:seon.turn/id run-id]
+                 :seon.turn/disposition :completed]])
               (close-run! connection))
     ::expect nil}
 

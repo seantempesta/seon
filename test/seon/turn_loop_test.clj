@@ -1250,7 +1250,7 @@
                                {:seon.message/id "m-1" :seon.message/to [:seon.agent/id "agent-a"] :seon.message/content "go" :seon.message/inbox [:seon.agent/id "agent-a"]}])
       (body connection))))
 
-(defn- commit-run! [connection {:keys [planned? receipts closed?]}]
+(defn- commit-run! [connection {:keys [planned? receipts closed? completed?]}]
   ;; OPEN THROUGH THE WRITER. Since ae0e54841 the agent's open turn is read
   ;; through its runtime component (seon.turn/open-for-agent), and only
   ;; `open-call` writes that edge — an authored {:seon.turn/id …} row leaves
@@ -1271,6 +1271,9 @@
                   closed?
                   (conj [:db/add [:seon.turn/id "run-1"]
                          :seon.turn/closed-tx "datomic.tx"])
+                  completed?
+                  (conj [:db/add [:seon.turn/id "run-1"]
+                         :seon.turn/disposition :completed])
                   closed?
                   (conj {:seon.ai.attempt/id "closed-attempt"
                          :seon.turn/_attempts [:seon.turn/id "run-1"]
@@ -1381,15 +1384,23 @@
 (deftest kill-positions-per-agent-test
   (doseq [[row state expected]
           [["1 — trigger only" nil :open]
-           ["2-4 — claimed, no plan, custody died" {} nil]
+           ;; A claimed, unplanned turn is THE ONE PAID CALL, not yet made:
+           ;; `open-call` writes `:seon.turn.work/situation :call` at open
+           ;; (`src/seon/turn.clj:377`), so a turn with no situation is a
+           ;; state the writer cannot produce. seon.turn-work-test's totality
+           ;; table has said `:call` for this row all along; this one still
+           ;; expected the pre-writer nil.
+           ["2-4 — claimed, no plan: the one paid call" {} :call]
            ["5 — planned, no receipts" {:planned? true} :resume]
            ["8 — one terminal receipt"
             {:planned? true :receipts [[0 :done]]} :resume]
            ["9 — every receipt terminal, run open"
             {:planned? true
              :receipts [[0 :done] [1 :done]]} :close]
-           ["10 — closed"
-            {:planned? true :closed? true
+           ;; Idle needs the disposition: a closed provider reply CONTINUES
+           ;; unless its turn carries one (`src/seon/turn.clj:2845`).
+           ["10 — closed and completed"
+            {:planned? true :closed? true :completed? true
              :receipts [[0 :done] [1 :done]]} nil]]]
     (with-database
       (fn [connection]
