@@ -143,40 +143,73 @@
                [identity-attribute (derived-shape forms identity-attribute)]))
         identity-attributes))
 
-(defonce ^:private !declared-shapes (atom nil))
+#?(:clj (defonce ^:private !authored-shapes (atom nil)))
 
-(defn- process-shapes
-  "The shapes derived once in this process from the AUTHORED resources.
+(defn- authored-shapes
+  "The shapes the AUTHORED declaration resources currently define.
 
   The program row families are this program's own structure, so the authority
   is the declaration resources and not whichever projection happens to be
   active: a cluster whose stored schema predates a declaration must still index
-  by it — the exact scope the literal table this replaced had. Only a SUCCESS
-  is remembered, because a cached refusal would outlive the reload that fixes
-  the declaration and report a healthy population as broken forever."
+  by it — the exact scope the literal table this replaced had.
+
+  THE CACHE KEY IS THE RESOURCES' OWN STAMP, never the process. A
+  process-lifetime snapshot made an attribute declared after this JVM started
+  invisible to `canonical-row`, so `bin/seon init --dev` adopted a declaration
+  the next `seon.fn/artifact` then silently stripped
+  (`program-shapes-cache-strips-attributes-declared-after-the-jvm-started`);
+  keying by `seon.schema.edn/declaration-stamp` makes that edit a MISS BY
+  CONSTRUCTION. Only a SUCCESS is remembered, because a cached refusal would
+  outlive the reload that fixes the declaration and report a healthy
+  population as broken forever."
   []
-  (or @!declared-shapes
-      (reset! !declared-shapes
-              (shapes-in #?(:clj ((requiring-resolve
-                                   'seon.schema.edn/packaged-forms))
-                            :cljs (schema/registered-schemas))))))
+  #?(:clj
+     (let [stamp ((requiring-resolve 'seon.schema.edn/declaration-stamp))
+           cached @!authored-shapes]
+       (if (= stamp (:seon.program/declaration-stamp cached))
+         (:seon.program/shapes cached)
+         (let [derived (shapes-in ((requiring-resolve
+                                    'seon.schema.edn/packaged-forms)))]
+           (reset! !authored-shapes
+                   {:seon.program/declaration-stamp stamp
+                    :seon.program/shapes derived})
+           derived)))
+     :cljs (shapes-in (schema/registered-schemas))))
+
+(defonce ^:private !supplied-shapes (atom nil))
+
+(defn- supplied-shapes
+  "The shapes one supplied population defines, derived once per population.
+
+  [[shapes-in]] is pure, so the LAST population's derivation is reusable
+  exactly while the caller hands back the same immutable map — the case an
+  operation that resolved its population once and asks per row (the indexer
+  over 90 000 rows) is in. A different population is a different object and
+  derives again; nothing here can answer for a population it was not handed."
+  [forms]
+  (let [cached @!supplied-shapes]
+    (if (identical? forms (:seon.program/forms cached))
+      (:seon.program/shapes cached)
+      (let [derived (shapes-in forms)]
+        (reset! !supplied-shapes {:seon.program/forms forms
+                                  :seon.program/shapes derived})
+        derived))))
 
 (defn shapes
   "Program-row shapes keyed by their database identity attribute.
 
-  The no-argument arity answers from the AUTHORED declaration resources,
-  resolved once in this process (see [[process-shapes]]) — the same static
-  scope the literal table it replaced had, and the reason a per-row caller
-  never re-resolves a population that costs a complete resource merge. A
-  caller holding the operation's own population hands it over."
+  The no-argument arity answers from the AUTHORED declaration resources as
+  they are NOW (see [[authored-shapes]]). A caller holding the operation's own
+  population hands it over; resolve that population ONCE per operation and
+  pass the same map to every row, which costs one identity check."
   {:malli/schema
    [:function
     [:=> [:cat]
      [:map-of :seon.program/identity-attribute :seon.program/shape]]
     [:=> [:cat :map]
      [:map-of :seon.program/identity-attribute :seon.program/shape]]]}
-  ([] (process-shapes))
-  ([forms] (shapes-in forms)))
+  ([] (authored-shapes))
+  ([forms] (supplied-shapes forms)))
 
 (defn declaration-at
   "The declaration whose `:seon.fn/form-span` contains `position`.
@@ -984,14 +1017,10 @@
   ([current desired] (changed-attributes-in (shapes) current desired))
   ([forms current desired] (changed-attributes-in (shapes-in forms) current desired)))
 
-(defn exact-replacement-tx
-  "Replace one declaration row using current values and component-aware retraction."
-  {:malli/schema
-   [:=> [:cat [:map [:db/id :int]] :map]
-    [:vector :seon.schema/value]]}
-  [current desired]
+(defn- exact-replacement-tx-in
+  [row-shapes current desired]
   (let [entity-id (:db/id current)
-        changed (changed-attributes current desired)]
+        changed (changed-attributes-in row-shapes current desired)]
     (into
      []
      (concat
@@ -1007,6 +1036,22 @@
                   (first value) value)]))
            (sort (filter #(contains? current %) changed)))
       [(assoc desired :db/id entity-id)]))))
+
+(defn exact-replacement-tx
+  "Replace one declaration row using current values and component retraction.
+
+  The three-argument arity carries the operation's own declaration population,
+  exactly as [[canonical-row]] and [[changed-attributes]] do, so a caller that
+  resolved it once never asks a process global what its own operation already
+  decided."
+  {:malli/schema
+   [:function
+    [:=> [:cat [:map [:db/id :int]] :map] [:vector :seon.schema/value]]
+    [:=> [:cat :map [:map [:db/id :int]] :map] [:vector :seon.schema/value]]]}
+  ([current desired]
+   (exact-replacement-tx-in (shapes) current desired))
+  ([forms current desired]
+   (exact-replacement-tx-in (shapes forms) current desired)))
 
 (defn deletion-row
   "Typed identities removed by one explicit REPL deletion event.

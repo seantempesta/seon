@@ -1041,8 +1041,22 @@
            program-identity (assoc :seon.lint/fn program-identity))))
      findings)))
 
+(defn- declaration-forms
+  "The declaration population ONE indexing operation owns program rows by.
+
+  Resolved once and handed to every row: `seon.program`'s per-row questions
+  answer from the population their caller holds (AGENTS.md 2.1), and a
+  population the request supplies — an adoption's own projection, a
+  regression's extra schema — decides ownership instead of anything this
+  process cached. With none supplied the AUTHORED resources answer, which is
+  the one classpath merge per operation the fallback advisory names as its
+  floor."
+  [request]
+  (or (:seon.schema.projection/forms request)
+      (schema.edn/packaged-forms)))
+
 (defn- artifact
-  [file root context rows findings]
+  [forms file root context rows findings]
   (let [canonical-path (.getCanonicalPath ^java.io.File file)
         file-row (cond-> {:seon.fn.file/path canonical-path
                           :seon.fn.file/digest (:seon.fn.file/digest context)}
@@ -1050,7 +1064,7 @@
         rows (into (into [file-row] rows)
                    (lint-rows file context rows findings))
         canonical-rows
-        (mapv #(cond-> (assoc (program/canonical-row %)
+        (mapv #(cond-> (assoc (program/canonical-row forms %)
                               :seon.schema.admission/source :core)
                  (:seon.fn/calls %)
                  (update :seon.fn/calls set))
@@ -1572,11 +1586,12 @@
            [:seon.fn.file/path [:string {:min 1}]]
            [:seon.fn.file/first-party-functions
             [:vector [:string {:min 1}]]]
-           [:seon.fn/roots {:optional true} :seon.fn/roots]]]
+           [:seon.fn/roots {:optional true} :seon.fn/roots]
+           [:seon.schema.projection/forms {:optional true} :map]]]
     :seon.fn.file/artifact]}
   [{path :seon.fn.file/path
     known-functions :seon.fn.file/first-party-functions
-    roots :seon.fn/roots}]
+    roots :seon.fn/roots :as request}]
   (let [file (rooted-file path)]
     (when-not (source-file? file)
       (throw (ex-info "A file artifact requires one existing Clojure file."
@@ -1592,7 +1607,8 @@
                 (first-party-function-symbols analysis))
           findings (publication-findings analysis first-party-functions)]
       (assert-clean-analysis! analysis first-party-functions)
-      (artifact file
+      (artifact (declaration-forms request)
+                file
                 (containing-root (or roots source-roots) file)
                 (get contexts canonical-path)
                 (get (analysis-rows-by-file analysis first-party-functions
@@ -1675,10 +1691,12 @@
   "Build deterministic artifacts for the complete first-party program."
   {:malli/schema
    [:=> [:cat [:map
-              [:seon.fn/roots :seon.fn/roots]]]
+              [:seon.fn/roots :seon.fn/roots]
+              [:seon.schema.projection/forms {:optional true} :map]]]
     :seon.fn.manifest/manifest]}
   [request]
-  (let [roots (:seon.fn/roots request)
+  (let [forms (declaration-forms request)
+        roots (:seon.fn/roots request)
         files (source-files roots)
         contexts (source-contexts files)
         analysis (analyzer/analyze
@@ -1691,7 +1709,8 @@
         (analysis-rows-by-file analysis first-party-functions contexts)
         artifacts
         (mapv (fn [file]
-                (artifact file
+                (artifact forms
+                          file
                           (containing-root roots file)
                           (get contexts (.getCanonicalPath ^java.io.File file))
                           (get rows-by-file
@@ -2243,7 +2262,7 @@
 
 (defn- normalized-index-row
   "Compare stored refs by identity and anonymous components by their values."
-  [database row identity-attributes]
+  [forms database row identity-attributes]
   (let [entity (memoize #(db/pull database '[*] %))
         row-identity
         (fn [row]
@@ -2274,7 +2293,7 @@
                 (vector? value) (mapv normalize-value value)
                 (set? value) (into #{} (map normalize-value) value)
                 :else value))]
-      (normalize-map (program/canonical-row row)))))
+      (normalize-map (program/canonical-row forms row)))))
 
 (defn reconcile-tx
   "Replace source definitions while retaining identities and agent facts.
@@ -2283,10 +2302,17 @@
   The current writer database decides their exact replacement, so a concurrent
   agent transaction cannot make an earlier read authoritative."
   {:malli/schema
-   [:=> [:cat :seon.db/database-value [:vector :map]
+   [:function
+    [:=> [:cat :seon.db/database-value [:vector :map]
           :seon.fn.file/identities]
-    [:vector :seon.schema/value]]}
-  [database rows previous-identities]
+     [:vector :seon.schema/value]]
+    [:=> [:cat :seon.db/database-value [:vector :map]
+          :seon.fn.file/identities :map]
+     [:vector :seon.schema/value]]]}
+  ([database rows previous-identities]
+   (reconcile-tx database rows previous-identities
+                 (schema.edn/packaged-forms)))
+  ([database rows previous-identities forms]
   (let [identity-attributes (db/identity-attributes database)
         desired-identities (into #{} (map program/row-identity) rows)
         removed (remove desired-identities previous-identities)
@@ -2300,15 +2326,18 @@
                (fn [row]
                  (let [current (db/pull database '[*] (program/row-identity row))
                        normalized-current
-                       (normalized-index-row database current identity-attributes)
+                       (normalized-index-row forms database current
+                                             identity-attributes)
                        normalized-desired
-                       (normalized-index-row database row identity-attributes)]
+                       (normalized-index-row forms database row
+                                             identity-attributes)]
                    (when (not= normalized-current normalized-desired)
                      {:seon.program/row row
                       :seon.fn/retractions
                       (if-let [entity-id (:db/id current)]
                         (vec (butlast
                               (program/exact-replacement-tx
+                               forms
                                (assoc normalized-current :db/id entity-id)
                                normalized-desired)))
                         [])}))))
@@ -2321,7 +2350,7 @@
     (into (into (into (into [] (mapcat :seon.fn/retractions) changes)
                           identity-operations)
                     entities)
-          keyword-operations)))
+          keyword-operations))))
 
 (defn- published-index-rows
   "Read compiled rows with portable program refs and complete owned components."
@@ -2369,7 +2398,8 @@
      previous-database :seon.source/previous-database
      source-database :seon.source/database :as request}
     progress!]
-   (let [rows (if source-database
+   (let [forms (declaration-forms request)
+         rows (if source-database
                 (published-index-rows source-database)
                 (desired-rows request progress!))
          _ (assert-one-row-per-identity! rows)
@@ -2408,7 +2438,8 @@
                           (fn [database]
                             (schema/call-with-projection
                              projection
-                             #(reconcile-tx database rows previous-identities)))]]}
+                             #(reconcile-tx database rows previous-identities
+                                            forms)))]]}
                  process (assoc :tx-meta {:seon.db/process process})))
               :seon.fn/population)
              changed-entities (into #{} (map :e) (:tx-data report))
@@ -2420,12 +2451,13 @@
                            (let [identity (program/row-identity row)]
                              (when (not=
                                     (normalized-index-row
+                                     forms
                                      previous-database
                                      (when (get (:schema previous-database) (first identity))
                                        (db/pull previous-database '[*] identity))
                                      previous-identity-attributes)
                                     (normalized-index-row
-                                     (:db-after report) row
+                                     forms (:db-after report) row
                                      current-identity-attributes))
                                identity))))
                    rows)
