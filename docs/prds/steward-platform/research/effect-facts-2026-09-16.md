@@ -345,3 +345,37 @@ db-backed in-process runs. What is measured here is the projection refusal and
 its repair (`build-base-ctx` with and without a bound state) and the schema
 history that refutes the narrowing hypothesis. The contract-arming claim and
 every fixture repair are proven by the next cold gate.
+
+## Both repairs measured live on `default` after adoption
+
+```clojure
+;; 1. the detached frame, through the real private function on a future
+;;    (the prepl thread itself has no projection, so the future inherits none)
+{:carried     :ok
+ :not-carried :seon.schema/missing-projection}
+
+;; 2. my.edit/form! on a path outside :seon.config.fs/roots, through a
+;;    virtual turn — before this commit the same call answered
+;;    :seon.effect/handler-failed with only {:seon.fn/sym "my.edit/form!"}
+{:kind       :my.fs/path-refused
+ :message    "The path is outside every declared filesystem root."
+ :names-path true}
+```
+
+Probe entities retracted by id list; probe directories removed.
+
+## Foreign breakage met while adopting (not this lane's)
+
+The second adoption reloaded and instrumented cleanly and then refused at the
+cluster population transaction:
+
+```
+seon.db/transact! refused transaction data at [1 :seon.test/adoption-identities]:
+expected a set, got a set … :seon.db/offending #{nil}
+```
+
+`:seon.test/adoption-identities` is the test-runner lane's attribute, and its
+`init --dev default --changed src/seon/test/runner.clj` held the operator
+lifecycle lock immediately before this one (pid 64390). A `#{nil}` ref set is
+that lane's to fix; reported, not worked around. It did not block either proof
+above, both of which ran against the reloaded code.
