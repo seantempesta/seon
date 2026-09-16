@@ -90,9 +90,12 @@ Both defects are fixed at the one selection seam and reported, never silent:
 
 Four regressions in `test/seon/test_reaching_test.clj`. Landing note:
 [check-excludes-long-tests-2026-09-17](../../prds/steward-platform/research/check-excludes-long-tests-2026-09-17.md).
-The regressions are UNRUN — in-process runs on `default` were paused before they
-could be exercised; the batched gate is their first proof, so this note stays
-open until it is green.
+All four regressions are GREEN in process on `default` pid 63433 (test namespace
+hot-reloaded through `seon.test`'s own loader, daemon thread): 1, 8, 4 and 15
+assertions, no failures or errors. Batch 69 B2's one cold red was the expiry
+fixture's tuned 3000 ms allowance — the bound fired before the first trivial run
+returned and the check reported that honestly — now derived from one measured
+complete check. This note stays open until a cold gate confirms it.
 
 Remaining mirror: `seon.test.runner/long-reason` (`src/seon/test/runner.clj:622`)
 still reads the marker off Var metadata rather than the row it now indexes.
