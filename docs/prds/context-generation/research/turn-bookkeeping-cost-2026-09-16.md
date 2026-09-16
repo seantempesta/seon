@@ -1154,3 +1154,15 @@ hot-loaded, re-armed live-JVM measurement (`seon.instrument/apply!` reported
 below. The orchestrator's batched gate owns the integration proof;
 the namespaces are `seon.cluster.turn-test`, `seon.turn-test`,
 `seon.cluster.prompt-test`, and `platform`.
+
+**Adoption: refused on a foreign reference.** `bin/seon init --dev default
+--changed src/seon/turn.clj --changed test/seon/cluster/turn_test.clj
+--changed test/seon/cluster/prompt_test.clj` reached program rows and then
+refused: `The rebuilt source could not preserve test evidence`, naming
+`[:seon.test/sym "seon.render-simplification-test/nested-ai-values-retain-data-and-html-uses-declared-faces"]`.
+That is the same foreign namespace whose worker-global instrumentation drift
+appeared in the batched-declaration run above; this lane edited no file under
+`test/seon/render_simplification_test.clj` and did not operate another lane's
+process. **There is no adopted proof**; all numbers here are hot-loaded and
+re-armed live-JVM measurements. Worth its own owner: publication currently
+refuses on a stale test identity left by another lane's in-flight edit.
