@@ -235,3 +235,19 @@ Queue, in order:
    last-seen as replaced attributes, history for the timeline; never one
    entity per event unless the event has its own identity.
 6. Then the issue-context trials (Opus) on the arglists issue.
+- 08:55Z R4 detectors-and-standards landed (`190c4802f`). Live subjects:
+  D1 entity map without pair 51/76; D2 public fn without docstring 39/1,137;
+  D3 without reaching test 303; D4 permissive contract positions **0**
+  (audit A's 205/179 is STALE — the schema owner marks stored permissive
+  slots justified; a detector copying it would open 179 false issues);
+  D5 non-generatable contract schema 205; D6 recurring error without
+  regression 3 (needs `:seon.test/error-signatures` — not yet a detector);
+  D7 test without a first-party direct call 135; D8 namespace without
+  steward 431 (a decision, not 431 issues); D9 expensive test without
+  observation **0** (the runner's derivation, not the naive reach: 54/54).
+  First run of the five fact-complete detectors would mint 733 issues in
+  176 namespaces. ORCHESTRATOR DECISION (owner asleep): option B — first
+  generator run = D1 + D2 (90 issues), after excluding component-only
+  schemas from D1; lane `issue-generator` (Opus) launches once
+  issue-settlement releases seon.issue.edn (needs `:seon.issue/detector`,
+  `:seon.issue/schema`). R2 (structured test failures) launched.
