@@ -148,6 +148,16 @@
  ; last remote attempt, while making a missing internal event finite.
  ; Unit: milliseconds without turn completion after disarm requests stop.
  :seon.config.agent/turn-completion-backstop-ms 600000
+
+ ; A REFUSED TURN WRITE IS NEVER RETRIED WITHOUT BOUND. On 2026-09-17 every
+ ; turn write on `default` was refused by one projection failure and the turn
+ ; proc re-fired its own wake each time; each refused attempt still flushed
+ ; dirty index leaves, so the store grew 2.5 GB -> 19 GB (~1 GB a minute) with
+ ; nothing committed. Three consecutive refusals are enough to distinguish a
+ ; racing writer from a refusal re-firing cannot change; past it the proc
+ ; parks the agent and commits ONE fault naming the refusal.
+ ; Unit: consecutive refused durable turn writes for one agent.
+ :seon.config.agent/write-refusal-bound 3
  :seon.config.agent/show-all-settings :seon.config/absent
 
  ; THE FILESYSTEM CAPABILITY. These are policy facts shared by every agent,

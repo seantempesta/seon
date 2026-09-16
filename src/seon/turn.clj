@@ -4102,7 +4102,7 @@
                     :seon.turn.loop/now now
                     :seon.agent/id agent-id
                     :seon.error/value outcome})
-          (report :error 0))
+          (report :error 0 outcome))
 
         :else
         (report :released 0)))))
@@ -4185,13 +4185,19 @@
                                   :seon.turn/id run-id
                                   :seon.ai/partial snapshot})))
           fail!
-          (fn [failure]
-            (settle! {:seon.turn.loop/cluster cluster
-                      :seon.turn.loop/now now
-                      :seon.agent/id agent-id
-                      :seon.turn/id run-id
-                      :seon.error/value failure})
-            (report :error 0))
+          ;; `refusal?` distinguishes a REFUSED DURABLE WRITE from a provider
+          ;; or reader failure: only the former feeds the proc's consecutive
+          ;; write-refusal bound, because only the former re-fires against a
+          ;; writer that keeps flushing dirty index leaves.
+          (fn fail!
+            ([failure] (fail! failure false))
+            ([failure refusal?]
+             (settle! {:seon.turn.loop/cluster cluster
+                       :seon.turn.loop/now now
+                       :seon.agent/id agent-id
+                       :seon.turn/id run-id
+                       :seon.error/value failure})
+             (report :error 0 (when refusal? failure))))
           freeze!
           (fn [completion]
             ;; ONE INTENT COMMIT. The raw reply and every result-less eval row
@@ -4238,7 +4244,7 @@
                    connection (:seon.blob/staged-writes staged-reply)
                    #(db/transact! connection {:tx-data intent-tx}))]
               (cond
-                (:seon.error/kind outcome) (fail! outcome)
+                (:seon.error/kind outcome) (fail! outcome true)
                 (and (:seon.error/kind prepared) (not no-forms?)) (fail! prepared)
                 (empty? sources) (report :released 0)
                 :else
@@ -4425,7 +4431,7 @@
                 ;; The attempt already owns the fault. Closing must not
                 ;; turn that same occurrence into another fault entity.
                 (if (:seon.error/kind closed)
-                  (fail! closed)
+                  (fail! closed true)
                   (report :error 0))))))))))
 
 (defn- evaluation-entity-id
@@ -4745,7 +4751,9 @@
                 last-prepared (peek prepared)]
             (if (or (:seon.error/kind outcome)
                     (:refused-outcome settlement))
-              (report :error (count gated))
+              (report :error (count gated)
+                      (or (:refused-outcome settlement)
+                          (when (:seon.error/kind outcome) outcome)))
               (do
                 ((requiring-resolve 'seon.sci.eval/install-evaluated-rows!)
                  {:seon.sci.eval/ctx base-ctx
@@ -4776,7 +4784,7 @@
       (do (settle! {:seon.turn.loop/cluster cluster :seon.turn.loop/now now
                      :seon.agent/id (:seon.agent/id work)
                      :seon.error/value outcome})
-          (report :error 0))
+          (report :error 0 outcome))
       (report :closed 0))))
 
 (defn- generate-turn
@@ -4830,7 +4838,7 @@
                       :seon.agent/id agent-id
                       :seon.turn/id run-id
                       :seon.error/value terminal})
-            (report :error 0))
+            (report :error 0 terminal))
           (report :closed 0)))
 
       :else
@@ -4860,7 +4868,7 @@
                       :seon.agent/id agent-id
                       :seon.turn/id run-id
                       :seon.error/value appended})
-            (report :error 0))
+            (report :error 0 appended))
           (resume-turn
            (assoc request :seon.turn.loop/work
                   (assoc work
@@ -4895,13 +4903,23 @@
    now]
   (let [agent-id (:seon.agent/id work)
         run-id (:seon.turn/id work)
-        report (fn [outcome forms-run]
-                 (cond-> {:seon.agent/id agent-id
-                          :seon.turn.work/situation
-                          (:seon.turn.work/situation work)
-                          :seon.turn.loop/forms-run forms-run
-                          :seon.turn.loop/outcome outcome}
-                   run-id (assoc :seon.turn/id run-id)))
+        report (fn report
+                 ([outcome forms-run] (report outcome forms-run nil))
+                 ;; THE PASS NAMES ITS REFUSED WRITE. A turn whose durable
+                 ;; transaction was refused reports the refusal value itself,
+                 ;; because the proc's bound (`step`) counts CONSECUTIVE
+                 ;; refused writes for this agent and must name the refusal in
+                 ;; the one fault it commits. A provider or agent failure is
+                 ;; not a write refusal and carries no refusal here.
+                 ([outcome forms-run refusal]
+                  (cond-> {:seon.agent/id agent-id
+                           :seon.turn.work/situation
+                           (:seon.turn.work/situation work)
+                           :seon.turn.loop/forms-run forms-run
+                           :seon.turn.loop/outcome outcome}
+                    run-id (assoc :seon.turn/id run-id)
+                    (:seon.error/kind refusal)
+                    (assoc :seon.turn.loop/refusal refusal))))
         request {:seon.turn.loop/cluster cluster
                  :seon.turn.loop/work work
                  :seon.turn.loop/now now
@@ -5011,6 +5029,93 @@
        (turn-completion-backstop-failure
         agent-id run-id timeout-ms :seon.agent/turn-start :seon.agent/turn-permit
         [:seon.turn.loop/completion])))))
+
+(defn write-refusal-bound
+  "Consecutive refused turn writes this agent may make before the proc parks.
+
+  A DECLARED dial (`:seon.config.agent/write-refusal-bound`), not a tuned
+  constant: the observable event it stands in for is \"this agent's durable
+  write is refused and re-firing cannot change that\". The per-agent overlay
+  wins over the cluster's effective config, exactly as the turn completion
+  allowance resolves."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.cluster/name
+                       :seon.agent/id]
+                  :seon.config.agent/write-refusal-bound]}
+  [database cluster-name agent-id]
+  (or (:seon.config.agent/write-refusal-bound (ai/agent-overlay database agent-id))
+      (:seon.config.agent/write-refusal-bound (config/effective database cluster-name))
+      ;; ABSENCE IS NEVER "no bound". A cluster whose config singleton predates
+      ;; this dial would otherwise read as healthy and re-fire forever, which
+      ;; is the exact failure class this bound exists to end.
+      (throw
+       (ex-info
+        (str "Cluster " (pr-str cluster-name)
+             " declares no :seon.config.agent/write-refusal-bound, so a "
+             "refused turn write for agent " (pr-str agent-id)
+             " has no bound. Apply the config manifest.")
+        {:seon.error/kind :seon.config/required-absent
+         :seon.config/required-absent :seon.config.agent/write-refusal-bound
+         :seon.cluster/name cluster-name
+         :seon.agent/id agent-id}))))
+
+(defn write-refusal-error
+  "Describe the repeated write refusal that parked one agent's turn proc."
+  {:malli/schema [:=> [:cat :seon.agent/id [:maybe :seon.turn/id]
+                       :seon.error/value [:int {:min 1}]
+                       :seon.config.agent/write-refusal-bound]
+                  :seon.error/value]}
+  [agent-id run-id refusal refusals bound]
+  (error/diagnostic
+   (cond->
+    {:seon.error/kind :seon.turn.loop/write-refusals-exhausted
+     :seon.error/message
+     (str "Agent " (pr-str agent-id)
+          (if run-id (str " turn " (pr-str run-id)) " with no open turn")
+          " had " refusals " consecutive turn writes refused (bound "
+          bound "); the turn proc is parked and will not re-fire. Latest "
+          "refusal: " (:seon.error/message refusal))
+     :seon.agent/id agent-id
+     :seon.turn.loop/write-refusals refusals
+     :seon.config.agent/write-refusal-bound bound
+     :seon.error/diagnostic-layer :seon.agent/agent-graph
+     :seon.error/diagnostic-operation :seon.turn.loop/step
+     :seon.error/diagnostic-member :seon.turn.loop/refusal
+     :seon.error/diagnostic-expected :seon.turn.loop/committed-write
+     :seon.error/diagnostic-offending (:seon.error/kind refusal)
+     :seon.error/diagnostic-cause
+     (or (:seon.error/message refusal) :seon.error/unknown)
+     :seon.error/diagnostic-evidence
+     (cond-> {:seon.agent/id agent-id
+              :seon.turn.loop/write-refusals refusals
+              :seon.config.agent/write-refusal-bound bound
+              :seon.error/kind (:seon.error/kind refusal)}
+       run-id (assoc :seon.turn/id run-id))}
+     run-id (assoc :seon.turn/id run-id))))
+
+(defn- offer-write-refusal-fault!
+  "Commit ONE fault for a bound that fired, through the cluster's committer.
+
+  §2.3: the bound firing IS the bug report. It names the refusal, the agent,
+  the consecutive count and the declared bound; the proc stops re-firing, so
+  the storm that filled the store a gigabyte a minute becomes one durable
+  fact on the problems surface."
+  [cluster agent-id run-id refusal refusals bound]
+  (let [diagnostic (write-refusal-error agent-id run-id refusal refusals bound)
+        failure (ex-info (:seon.error/message diagnostic) diagnostic)
+        fault-channel (:seon.agent/fault-channel cluster)
+        fault (cond->
+               {::flow/pid :seon.agent/turn
+                ::flow/status :running
+                ::flow/op :seon.turn.loop/write-refusals-exhausted
+                ::flow/ex failure
+                :seon.agent/id agent-id}
+                run-id (assoc :seon.turn/id run-id))]
+    (when-not (and fault-channel (async/offer! fault-channel fault))
+      (binding [*out* *err*]
+        (println "SEON CORE FAULT (agent write refusals exhausted):"
+                 (:seon.error/message diagnostic))
+        (flush)))
+    diagnostic))
 
 (defn- offer-turn-backstop-fault!
   [{:seon.agent/keys [fault-channel agent-id timeout-ms expected] armed-run :seon.agent/run-id}]
@@ -5126,7 +5231,14 @@
   ([state _input _message]
    (let [cluster (:seon.turn.loop/cluster state)
          completion (:seon.turn.loop/completion cluster)]
-     (if-some [turn-bound (await-turn-permit! state)]
+     (if (:seon.turn.loop/parked state)
+       ;; PARKED. The declared write-refusal bound already fired and committed
+       ;; its one fault; a later wake must not resurrect the storm. Re-arming
+       ;; the agent (disarm/arm) builds a fresh proc with fresh state, which
+       ;; is the one way out — deliberately, so a park is visible until
+       ;; someone acts on the committed fault.
+       [state nil]
+       (if-some [turn-bound (await-turn-permit! state)]
        (let [backstop (arm-turn-completion-backstop! turn-bound)
              cluster (assoc cluster :seon.turn.loop/await-part
                             (:seon.turn.loop/await-part backstop))
@@ -5156,7 +5268,19 @@
                                    :seon.turn.work/next next}
                                   now)
                           _ (when-let [opened (:seon.turn/id report)]
-                              (reset! (:seon.agent/run-id turn-bound) opened))]
+                              (reset! (:seon.agent/run-id turn-bound) opened))
+                          refusal (:seon.turn.loop/refusal report)
+                          ;; THE PROC'S OWN SERIALIZING STATE, and nothing
+                          ;; more: how many of this agent's turn writes were
+                          ;; refused in a row. A committed write resets it.
+                          refusals (if refusal
+                                     (inc (long (:seon.turn.loop/write-refusals state 0)))
+                                     0)
+                          bound (when refusal
+                                  (write-refusal-bound
+                                   (db/db connection)
+                                   (:seon.cluster/name cluster) agent-id))
+                          parked? (boolean (and refusal bound (>= refusals bound)))]
                ;; Run closure is an armer wake because first-agent
                ;; supervision is derived from closed-run and root-idle facts.
                ;; The signal is disposable: the armer re-derives the complete
@@ -5170,7 +5294,16 @@
                ;; self-rewake into this agent's OWN mailbox, coalescing on
                ;; its (sliding-buffer 1): it cannot recurse, because the pass
                ;; is only re-entered after this transform returns
-                      (when (more-agent-work? (db/db connection) request)
+                      ;; A PARKED AGENT NEVER RE-FIRES. The wake is the only
+                      ;; thing that made the refused write repeat, so the
+                      ;; bound removes exactly it — no retry, no sleep, no
+                      ;; tuned backoff.
+                      (when parked?
+                        (offer-write-refusal-fault!
+                         cluster agent-id (:seon.turn/id report)
+                         refusal refusals bound))
+                      (when (and (not parked?)
+                                 (more-agent-work? (db/db connection) request))
                         (async/offer!
                          (:seon.cluster.wake/channel cluster) :seon.agent/wake))
                       ;; THE PASS REPORTS THE RUN IT TURNED, not whatever
@@ -5179,8 +5312,16 @@
                       ;; made the ping state disagree with the report in
                       ;; exactly that ordinary case.
                       [(let [run-id (:seon.turn/id report)]
-                         (cond-> (dissoc state :seon.turn/id)
-                           run-id (assoc :seon.turn/id run-id)))
+                         (cond-> (dissoc state :seon.turn/id
+                                         :seon.turn.loop/write-refusals)
+                           run-id (assoc :seon.turn/id run-id)
+                           (pos? refusals)
+                           (assoc :seon.turn.loop/write-refusals refusals)
+                           parked?
+                           (assoc :seon.turn.loop/parked
+                                  (write-refusal-error
+                                   agent-id (:seon.turn/id report)
+                                   refusal refusals bound))))
                 ;; flow's own report channel: observation, never a dependency
                        {::flow/report [report]}])))]
            (vreset! succeeded? true)
@@ -5200,4 +5341,4 @@
                 (:seon.agent/id state)
                 :seon.agent/turn-completion-undeliverable
                 (:seon.agent/id state)}))))))
-       [state nil]))))
+       [state nil])))))

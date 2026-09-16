@@ -1876,3 +1876,95 @@
         (is (str/includes? (hiccup/->string (nth rendered 4)) "run-1"))
         (is (not (str/includes? (hiccup/->string (nth rendered 3)) "seon-error-run")))
         (is (str/includes? (pr-str (error/render-faults-html [] database)) "Faults (0)"))))))
+
+;;; ---------------------------------------------------------------------------
+;;; The declared write-refusal bound
+;;; ---------------------------------------------------------------------------
+
+(defn- refusal-config-row
+  [cluster-name bound]
+  (:seon.config/desired-row
+   (config/compile-manifest
+    {:seon.boot/cluster-name cluster-name
+     :seon.config/manifest
+     {:seon.config.agent/turn-completion-backstop-ms
+      (* 1000 support/event-backstop-seconds)
+      :seon.config.agent/write-refusal-bound bound}})))
+
+(deftest a-refused-turn-write-is-bounded-and-commits-exactly-one-fault
+  ;; THE STORM, AS A REGRESSION. On 2026-09-17 every turn write on `default`
+  ;; was refused and the turn proc re-fired its own wake each time; each
+  ;; refused attempt still flushed dirty index leaves, so the store grew ~1 GB
+  ;; a minute with nothing committed. The proof is transaction COUNT from the
+  ;; database — not a log line: past the declared bound the agent is parked,
+  ;; further wakes transact nothing at all, and the bound firing is ONE
+  ;; committed fault naming the refusal, the agent, the count and the bound.
+  (support/with-database
+    (fn [connection]
+      (let [cluster-name (db/q '[:find ?name . :where [_ :seon.cluster/name ?name]]
+                               (db/db connection))
+            agent-id "bounded-write-refusals"
+            bound 2
+            fault-channel (async/chan 8)
+            completion (async/chan 1)]
+        (checked-transact! connection
+                           [{:seon.agent/id agent-id}
+                            (refusal-config-row cluster-name bound)])
+        (async/>!! completion :seon.agent/ready)
+        (let [cluster (assoc (support/cluster-handle
+                              {:seon.db/connection connection
+                               :seon.cluster/name cluster-name
+                               :seon.db.process/id
+                               (db/q '[:find ?id . :where [_ :seon.db.process/id ?id]]
+                                     (db/db connection))})
+                             :seon.turn.loop/completion completion
+                             :seon.agent/fault-channel fault-channel
+                             :seon.agent/turn-backstop-state (atom nil))
+              wake-channel (:seon.cluster.wake/channel cluster)
+              ;; A REAL refused durable write: closing a turn that is not a
+              ;; fact. The refusal comes back through `seon.db/transact!`
+              ;; exactly as the projection failure did, so the bound is armed
+              ;; against the shape it must actually catch.
+              pass!
+              (fn [state]
+                (with-redefs [turn/next-agent-work
+                              (fn [& _]
+                                {:seon.turn.work/situation :close
+                                 :seon.agent/id agent-id
+                                 :seon.turn/id "no-such-turn"})
+                              turn/more-agent-work? (fn [& _] true)]
+                  (first (turn/step state :seon.agent/episode ::wake))))
+              initial {:seon.agent/id agent-id
+                       :seon.turn.loop/cluster cluster}
+              parked (reduce (fn [state _] (pass! state))
+                             initial
+                             (range bound))]
+          (is (some? (:seon.turn.loop/parked parked))
+              "the agent is parked once the declared bound is reached")
+          (is (= :seon.turn.loop/write-refusals-exhausted
+                 (:seon.error/kind (:seon.turn.loop/parked parked))))
+          (is (= bound (:seon.turn.loop/write-refusals
+                        (:seon.turn.loop/parked parked))))
+          (is (= bound (:seon.config.agent/write-refusal-bound
+                        (:seon.turn.loop/parked parked))))
+          (is (nil? (async/poll! wake-channel))
+              "a parked proc offers no self-rewake")
+          (let [fault (support/await-event! fault-channel ::write-refusal-fault)]
+            (is (= :seon.turn.loop/write-refusals-exhausted
+                   (:seon.error/kind (ex-data (::flow/ex fault)))))
+            (is (= agent-id (:seon.agent/id fault)))
+            (is (str/includes? (ex-message (::flow/ex fault))
+                               (str bound)))
+            (is (nil? (async/poll! fault-channel))
+                "the bound fires exactly once, never once per attempt"))
+          ;; THE MEASUREMENT THAT MATTERS: the store stops growing.
+          (let [before (:max-tx (db/db connection))
+                after-state (reduce (fn [state _] (pass! state))
+                                    parked
+                                    (range 5))]
+            (is (= before (:max-tx (db/db connection)))
+                "a parked agent transacts nothing on any later wake")
+            (is (some? (:seon.turn.loop/parked after-state))
+                "the park survives every later wake")
+            (is (nil? (async/poll! fault-channel))
+                "a parked agent commits no further faults")))))))
