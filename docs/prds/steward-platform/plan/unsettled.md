@@ -124,3 +124,9 @@
   entity-pairs green); platform 84/13 red in seon.cluster.source-test,
   attributed to issue-family's indexing inside publication (`a7d1e115e`) —
   lane stopped/resumed with it first. issue-settlement (P5/P6) launched.
+- 05:45Z attempt-and-eval-facts: the missing renderer facts were a platform
+  regression from `563034709` (n1 render substitution disabled AI pair
+  selection); fixed `cecfaf428`, live turn shows symbol + ref on a paired
+  evaluation and neither on a plain map; 94 assertions in-process. Lane
+  resumed on its batch-19 file. Batch 20 (error-graph, 12 ns) running on
+  `cecfaf428` by the gate session.
