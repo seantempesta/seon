@@ -524,3 +524,12 @@ Queue, in order:
   (Sunday 03:00 UTC), so the 72 GB / 380k-key store question (peer's
   research pending) still matters. analyzer-facets probes paused until that
   lane commits (est. 1–2 h).
+- 16:00Z Store research (peer, `cfef57241`): default's store is 71.6 GB /
+  382k files, 93 % copy-on-write index leaves, ≥93 % (~67 GB) unreachable;
+  nothing runs GC in practice; the per-minute maintenance rows retain
+  ~1.5 MB / ~50 files each; 292 files/min live now. PLAN: `bin/seon reset
+  --force` (down, destroy, republish, refork; pre-authorised by the
+  disposable-data rule) right after retention-sweep commits (so the
+  per-minute seed cannot be reseeded) and when my two active lanes have
+  committed (a reset republishes the working tree); then reseed Juniper,
+  lift analyzer-facets' pause, and the peer records the platform tier.
