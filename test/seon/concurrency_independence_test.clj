@@ -18,13 +18,11 @@
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
             [seon.turn :as turn]
-
-
             [seon.config :as config]
             [seon.db :as db]
             [seon.eval.drive :as drive]
+            [seon.id :as id]
             [seon.render.transcript :as transcript]
-            [seon.schema :as schema]
             [seon.test-support :as test-support])
   (:import [java.util Date UUID]
            [java.util.concurrent CountDownLatch]))
@@ -33,18 +31,13 @@
 
 (def ^:private rows-per-agent 3)
 (def ^:private form-count 6)
-(def ^:private send-ordinal 4)
 (def ^:private test-git-sha (apply str (repeat 40 "a")))
 (def ^:private scenario-sizes [5 5 5 10 10 10])
-
-(defn- digest-value
-  [value]
-  (schema/sha-256 [(.getBytes (pr-str value) "UTF-8")]))
 
 (defn- await-channel!
   "Return the next published value, or refuse a closed event source."
   [event-source event]
-  (or (async/<!! event-source)
+  (or (test-support/await-event! event-source event)
       (throw
        (ex-info "The test channel closed before its required event."
                 {::event event}))))
@@ -90,9 +83,14 @@
                                     :seon.boot/root root})]
       (try
         (await-bootstrap (:seon.boot/cluster-connection instance))
-        (body instance)
+        (let [root-entry (agent/armed (:seon.agent/routing instance) "root")
+              graph (:seon.flow/graph root-entry)]
+          (flow/pause-proc graph :seon.agent/mailbox)
+          (is (= :paused (::flow/status (flow/ping-proc graph :seon.agent/mailbox))))
+          (body instance))
         (finally
-          (cluster/stop! instance))))))
+          (cluster/stop! instance)
+          (test-support/delete-recursively! root))))))
 
 (defn- initial-spec
   [scenario index now]
@@ -114,9 +112,7 @@
      ::function-name function-name
      ::function-qualified (str namespace-name "/" function-name)
      ::row-ids row-ids
-     ::rows rows
-     ::outbound-message-id
-     (str run-id "-" send-ordinal "-message-0")}))
+     ::rows rows}))
 
 (defn- plan-sources
   [spec]
@@ -137,8 +133,8 @@
          (str "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
               function-name " [x] (+ x " (+ 1000 (::index spec)) "))")
          (str "(" function-name " 1)")
-         (str "(seon.cluster.message/send " (pr-str next-agent-id) " "
-              (pr-str (::payload spec)) ")")
+         (str "(my.message/send "
+              (pr-str {:my.message/to next-agent-id :my.message/content (::payload spec)}) ")")
          (str "(seon.run/complete "
               (pr-str (str "complete|" agent-id "|")) ")")]]
     (mapv (fn [source]
@@ -153,13 +149,10 @@
     (mapv
      (fn [index spec]
        (let [next-spec (nth initial (mod (inc index) agent-count))
-             previous-spec (nth initial (mod (dec index) agent-count))
              payload (str "ring|" scenario "|" (::agent-id spec)
                           "|to|" (::agent-id next-spec) "|")
              planned (assoc spec
                             ::next-agent-id (::agent-id next-spec)
-                            ::incoming-message-id
-                            (::outbound-message-id previous-spec)
                             ::payload payload)]
          (assoc planned ::sources (plan-sources planned))))
      (range agent-count)
@@ -178,7 +171,7 @@
                     :seon.cluster/name cluster-name}))
                 specs)
         result
-        (db/transact!
+        (test-support/transacted!
          connection
          {:tx-data (into [] creation-tx)})]
     (is (not (:seon.error/kind result))
@@ -210,7 +203,6 @@
         database @connection
         process (get-in instance [:seon.turn.loop/cluster
                                   :seon.db.process/id])
-        now (Date.)
         run-tx
         (mapcat
          (fn [spec]
@@ -219,7 +211,7 @@
             {:seon.agent/id (::agent-id spec) :seon.turn/id (::run-id spec) :seon.db.process/id process :seon.turn/opened-tx "datomic.tx" :seon.turn/starting-ns [:seon.ns/name (::namespace spec)] :seon.turn/sources (::sources spec)}))
          specs)
         result
-        (db/transact!
+        (test-support/transacted!
          connection
          {:tx-data (into [] run-tx)
           :tx-meta {:seon.db/process
@@ -245,28 +237,45 @@
              work-item))
          specs)
         start (CountDownLatch. 1)
+        evaluating (CountDownLatch. (count work-items))
+        begun (atom #{})
         completed (async/chan (count work-items))]
     (doseq [work-item work-items]
       (future
-        (.await start)
+        (test-support/await-event! start "concurrent turn release")
         (async/>!!
          completed
          (try
            {:seon.turn.loop/report
-            (turn/turn {:seon.turn.loop/cluster handle
+            (turn/turn {:seon.turn.loop/cluster
+                        (assoc handle :seon.turn.loop/await-part
+                               (fn [expected _work-ms]
+                                 (when (= :seon.sci.eval/evaluation expected)
+                                   (async/>!! completed
+                                              {::evaluation-started
+                                               (:seon.agent/id work-item)})
+                                   (swap! begun conj (:seon.agent/id work-item))
+                                   (.countDown evaluating)
+                                   (test-support/await-event!
+                                    evaluating "all agents entered real evaluation"))))
                         :seon.turn.work/next work-item}
                        (Date.))}
            (catch Throwable failure
              {:seon.turn.loop/failure failure})))))
     (.countDown start)
-    (dotimes [_ (count work-items)]
-      (let [outcome
-            (await-channel! completed "concurrent planned fold")
-            report (:seon.turn.loop/report outcome)]
-        (is (nil? (:seon.turn.loop/failure outcome))
-            (some-> (:seon.turn.loop/failure outcome) Throwable->map pr-str))
-        (is (= :closed (:seon.turn.loop/outcome report)))
-        (is (= form-count (:seon.turn.loop/forms-run report)))))))
+    (loop [remaining (count work-items)]
+      (when (pos? remaining)
+        (let [outcome (await-channel! completed "concurrent fold evaluation or completion")]
+          (if (::evaluation-started outcome)
+            (recur remaining)
+            (let [report (:seon.turn.loop/report outcome)]
+              (is (nil? (:seon.turn.loop/failure outcome))
+                  (some-> (:seon.turn.loop/failure outcome) Throwable->map pr-str))
+              (is (= :closed (:seon.turn.loop/outcome report)))
+              (is (= form-count (:seon.turn.loop/forms-run report)))
+              (recur (dec remaining)))))))
+    (is (= (set (map ::agent-id specs)) @begun)
+        "every agent entered evaluation before any could complete its first form")))
 
 (defn- await-runs-closed
   [connection run-ids]
@@ -328,7 +337,7 @@
               (mapcat
                (fn [spec]
                  (map (fn [ordinal]
-                        [(pr-str [(::run-id spec) ordinal])
+                        [(id/evaluation (::run-id spec) ordinal)
                          (::run-id spec)
                          (::agent-id spec)
                          ordinal])
@@ -348,27 +357,6 @@
                         [:seon.turn/id (::run-id spec)])]
       (is (= (::run-id spec) (:seon.turn/id turn)))
       (is (inst? (test-support/turn-closed-at database (::run-id spec)))))))
-
-(defn- assert-concurrent-progress!
-  [database specs]
-  (let [run-ids (mapv ::run-id specs)
-        rows
-        (db/q '[:find ?run-id ?receipt-tx ?close-tx
-                :in $ [?run-id ...]
-                :where
-                [?run :seon.turn/id ?run-id]
-                [?run :seon.turn/closed-tx _ ?close-tx]
-                [?receipt :seon.cluster.eval/run ?run]
-                [?receipt :seon.eval/shown _ ?receipt-tx]]
-              database run-ids)
-        first-close (apply min (map #(nth % 2) rows))
-        begun-before-first-close
-        (into #{}
-              (comp (filter #(< (nth % 1) first-close))
-                    (map first))
-              rows)]
-    (is (= (set run-ids) begun-before-first-close)
-        "facts show every run committed progress before the first run closed")))
 
 (defn- assert-owned-rows!
   [database specs]
@@ -530,13 +518,37 @@
                 :my.turn/result (str "complete|" (::agent-id spec) "|")}
                completion))))))
 
+(defn- with-message-identities
+  [database specs]
+  (let [outbound
+        (into {}
+              (map (fn [spec]
+                     (let [ids (db/q '[:find [?id ...]
+                                       :in $ ?from ?to ?content
+                                       :where
+                                       [?sender :seon.agent/id ?from]
+                                       [?recipient :seon.agent/id ?to]
+                                       [?message :seon.message/from ?sender]
+                                       [?message :seon.message/to ?recipient]
+                                       [?message :seon.message/content ?content]
+                                       [?message :seon.message/id ?id]]
+                                     database (::agent-id spec)
+                                     (::next-agent-id spec) (::payload spec))]
+                       (is (= 1 (count ids)) "one committed ring message per sender")
+                       [(::agent-id spec) (first ids)])))
+              specs)]
+    (mapv (fn [spec]
+            (let [previous (first (filter #(= (::agent-id spec) (::next-agent-id %)) specs))]
+              (assoc spec
+                     ::outbound-message-id (get outbound (::agent-id spec))
+                     ::incoming-message-id (get outbound (::agent-id previous)))))
+          specs)))
+
 (defn- run-scenario!
   [instance scenario agent-count]
   (let [connection (:seon.boot/cluster-connection instance)
         specs (scenario-specs scenario agent-count (Date.))
         run-ids (mapv ::run-id specs)
-        process (get-in instance [:seon.turn.loop/cluster
-                                  :seon.db.process/id])
         started (System/nanoTime)]
     (create-scenario-agents! instance specs)
     (pause-scenario-mailboxes! instance specs)
@@ -544,11 +556,11 @@
     (fold-scenario-runs! instance specs)
     (await-runs-closed connection run-ids)
     (let [elapsed-ms (/ (double (- (System/nanoTime) started)) 1000000.0)
-          database @connection]
+          database @connection
+          specs (with-message-identities database specs)]
       (testing (str scenario " with N=" agent-count)
         (assert-receipts! database specs)
         (assert-closed! database specs)
-        (assert-concurrent-progress! database specs)
         (assert-owned-rows! database specs)
         (assert-rows! database specs)
         (assert-ring! database specs)
@@ -603,14 +615,15 @@
                      "(seon.run/complete \"unexpected model call\")"})]
       (with-cluster
         (fn [instance]
-          (let [timings
+          (let [calls-before @model-calls
+                timings
                 (mapv (fn [index agent-count]
                         (run-scenario! instance
                                        (str "s" index "-n" agent-count)
                                        agent-count))
                       (range)
                       scenario-sizes)]
-            (is (empty? @model-calls)
-                "all work came from system-authored plans, never a provider")
+            (is (= calls-before @model-calls)
+                "scenario work came from system-authored plans, never a provider")
             (println "concurrency-independence timings"
                      (pr-str timings))))))))

@@ -36,6 +36,22 @@
 
 (declare unit)
 
+(deftest absent-bootstrap-trigger-does-not-pin-another-agents-message
+  (support/with-database
+   (fn [connection]
+     (support/transacted!
+      connection
+      [{:seon.agent/id agent-id}
+       {:seon.agent/id peer-id}
+       {:seon.message/id "unrelated-bootstrap-message"
+        :seon.message/to [:seon.agent/id peer-id]
+        :seon.message/content "Only the peer should see this."}])
+     (is (= "Only the peer should see this."
+            (:seon.message/content
+             (db/pull @connection [:seon.message/content]
+                      [:seon.message/id "unrelated-bootstrap-message"]))))
+     (is (= "" (transcript/render-ai (unit connection)))))))
+
 ;;; `admitted-top-level-string-is-terminal-text` lived here while the
 ;;; transcript re-rendered a stored PRINT NODE into agent-visible text
 ;;; through its own private `bounded-result`. The shown-text cut
@@ -48,25 +64,15 @@
 ;;; and at this namespace's own boundary by
 ;;; `historical-shown-text-keeps-its-original-elision` below.
 
-(deftest selected-run-keeps-status-outside-agent-visible-text
-  ;; STATUS CANNOT LEAK INTO AGENT-VISIBLE TEXT BECAUSE THE TURN CONCERN
-  ;; EMITS NONE. The turn's evaluations reach the agent through the prompt
-  ;; (`seon.repl/text`), so this pair's AI arm is empty by construction
-  ;; rather than by a composition that has to keep the two apart
-  ;; (`src/seon/render/transcript.clj:783`). The composition this test used
-  ;; to assert — a `seon-run-transcript` section wrapping a status article
-  ;; and a transcript section — is the retired second grammar.
+(deftest selected-run-requires-its-database-in-both-projections
   (let [unit {:seon.turn/id "selected-run"
               :seon.turn/agent {:seon.agent/id "selected-agent"}
               :seon.sci.admit/caps caps}]
-    (is (= "" (transcript/render-run-ai unit)))
-    (is (= "" (transcript/render-run-ai (assoc unit :seon.db/db ::database))))
-    ;; AN UNAVAILABLE OBSERVATION IS THE TYPED UNKNOWN, never silence: no
-    ;; database means the HTML arm refuses and names what was missing.
-    (let [refusal (transcript/render-run-html unit)]
-      (is (= :seon.render.transcript/selected-run-unavailable
-             (:seon.error/kind refusal)))
-      (is (str/includes? (:seon.error/message refusal) "selected run")))))
+    (doseq [render [transcript/render-run-ai transcript/render-run-html]]
+      (let [refusal (render unit)]
+        (is (= :seon.render.transcript/selected-run-unavailable
+               (:seon.error/kind refusal)))
+        (is (str/includes? (:seon.error/message refusal) "selected run"))))))
 
 (deftest durable-history-entries-never-invent-executions
   (let [history (ns-resolve 'seon.render.transcript 'history)

@@ -22,7 +22,6 @@
             [seon.render.block :as block]
             [seon.render.route :as route]
             [seon.render.value :as value]
-            [seon.render.walk :as walk]
             [seon.repl :as repl]
             [seon.schema.form :as schema.form]
             [seon.sci.admit :as admit])
@@ -134,10 +133,12 @@
 (defn- bootstrap-task-message-eid
   [db agent-id]
   (db/q '[:find ?message .
-          :in $ ?message-id
+          :in $ ?turn-id
           :where
-          [?message :seon.message/id ?message-id]]
-        db (bootstrap/task-message-id db agent-id)))
+          [?turn :seon.turn/id ?turn-id]
+          [?turn :seon.turn/trigger ?message]
+          [?message :seon.message/id]]
+        db (bootstrap/run-id agent-id)))
 
 (defn- candidate-entity-ids
   [db agent-id limit]
@@ -428,38 +429,16 @@
        (assoc :seon.render.call/id [::history-value value])))
     (pr-str value)))
 
-(defn- rendered-family
-  [unit family-unit distance]
-  (let [db (:seon.db/db unit)
-        owner (walk/owning-namespace db family-unit)
-        rendered (render/render-call
-                  (cond-> (assoc unit
-                                 :seon.render/value family-unit
-                                 :seon.render/output :seon.render/ai
-                                 :seon.render.call/id
-                                 [::history-entity (:db/id family-unit)]
-                                 :seon.render/distance distance)
-                    owner (assoc :seon.render/namespace owner)))
-        output (if (:seon.error/kind rendered)
-                 ;; A REFUSAL IS NOT A RENDERED STRING. The refusal value has
-                 ;; no renderer of its own here, so it crosses the value
-                 ;; floor like any other un-rendered value.
-                 (floor-text unit rendered)
-                 rendered)]
-    ;; AND THE RENDERED STRING GOES OUT WHOLE. Re-admitting a declared AI
-    ;; renderer's own output as a scalar node and fitting it again was a
-    ;; SECOND clipping spot (AGENTS.md 2.4): the character cut landed inside
-    ;; a REPL session's bytes and replaced a whole entry with a coordinate-less
-    ;; elision. Every value inside `rendered` was already bounded once, by the
-    ;; value renderer, under this same profile.
-    output))
-
 (defn- message-text
   [unit entry _detail]
   (let [entity (cond-> (::entity entry)
                  (::content entry)
                  (assoc :seon.message/content (::content entry)))
-        sentence (rendered-family unit entity 1)
+        ; History already holds the message facts. The source renderer emits
+        ; a read form for a future evaluation; the terminal formatter shows
+        ; the content here without executing or fitting that source again.
+        sentence (str (message/render-ai entity) "\n"
+                      (message/format-ai (assoc entity :seon.db/db (:seon.db/db unit))))
         extra (cond-> {}
                 (::about entry)
                 (assoc :seon.message/about (::about entry))
@@ -492,13 +471,13 @@
 (defn- emission
   "One transcript entry as the REPL emission `seon.repl` renders.
 
-  The transcript owns the BOUNDING — the render unit's floor, its elision
-  root, and its print options are what keep a value inside this call's
-  budget — and `seon.repl` owns the GRAMMAR. The already-bounded value text
-  travels as the node, so the one generator never re-derives what this call
-  already decided, and the page, the history unit and the prompt read the
-  same bytes because they read the same function."
-  [unit entry]
+  `seon.repl` owns the GRAMMAR and the value renderer owned the BOUNDING,
+  once, at evaluation time. The already-bounded shown text travels as the
+  node, so the page, the history unit and the prompt read the same bytes
+  because they read the same function. This entry takes no render unit
+  precisely because it re-decides nothing: the second clipping spot that
+  needed the unit's floor and print options is deleted."
+  [entry]
   (let [handle (entry-handle entry)]
     (cond-> {:seon.cluster.eval/source (::source entry)
              :seon.ns/name (or (::namespace entry) 'user)}
@@ -533,8 +512,8 @@
   with the same argument. `repl/text` already emits a prompt line and no
   response when nothing has settled — absence of a terminal fact IS running —
   so the distinction the two arms encoded is one the generator derives."
-  [unit entry _detail]
-  (repl/text (emission unit entry)))
+  [_unit entry _detail]
+  (repl/text (emission entry)))
 
 (defn- undisposed-run-text
   "The run's own `:seon.render/ai`, with no grammar of its own.
@@ -783,7 +762,7 @@
     :seon.error/diagnostic-evidence identities}))
 
 (defn render-run-ai
-  "Render the selected turn's state and evaluations without selecting other turns."
+  "Render only the selected turn's state and evaluations."
   {:malli/schema [:=> [:cat :seon.render/unit]
                   [:or :string :seon.error/value]]}
   [unit]
@@ -852,7 +831,7 @@
            (let [entry (cond-> entry
                          (nil? (::namespace entry))
                          (assoc ::namespace namespace-name))
-                 emitted (emission unit entry)]
+                 emitted (emission entry)]
              {:seon.render.history/call-id
               [:seon.render.transcript/entry (::kind entry) (::id entry)]
               :seon.render.history/basis-transaction
