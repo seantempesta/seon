@@ -102,8 +102,8 @@ Two budgets exist in config today (`config/default.edn`, read live on
 
 | dial | value | what it is declared to bound |
 |---|---|---|
-| `:seon.config.render.agent/token-budget` (line 91) | 1024 estimated tokens | one shown result, in the value renderer |
-| `:seon.config.ai/prompt-token-budget` (line 387) | 32768 estimated tokens | the whole prompt sent to the provider |
+| `:seon.config.render.agent/token-budget` (line 91) | 15000 estimated tokens (was 1024 until the owner's ruling at 09:45Z) | one shown result, in the value renderer |
+| `:seon.config.ai/prompt-token-budget` (line 387) | 1000000 estimated tokens (was 32768) | the whole prompt sent to the provider |
 
 Decision 7 is about which of these actually cuts the history today (the wrong
 one does), and decision 8b is about one line of text the history used to
