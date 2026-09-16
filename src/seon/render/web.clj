@@ -59,6 +59,7 @@
             [seon.config :as config]
             [seon.context :as context]
             [seon.db :as db]
+            [seon.error :as error]
             [seon.oversight :as oversight]
             [seon.render :as render]
             [seon.render.block :as block]
@@ -87,6 +88,13 @@
 ;;; ---------------------------------------------------------------------------
 ;;; Schemas — resources/seon/schema.edn
 ;;; ---------------------------------------------------------------------------
+
+
+;;; LOAD-CYCLE BOUNDARY. `seon.cluster` requires `seon.render.web`, so this
+;;; namespace cannot require it back. One resolution, realized at first use,
+;;; instead of a `requiring-resolve` on every call (AGENTS §2.1).
+(defonce ^:private cluster-ensure-entity!
+  (delay (requiring-resolve 'seon.cluster/ensure-entity!)))
 
 (defn server?
   "True for an http-kit server object.
@@ -685,7 +693,7 @@
 
 (defn- debug-diagnostic
   [kind message operation member expected offending cause evidence]
-  ((requiring-resolve 'seon.error/diagnostic)
+  (error/diagnostic
    {kind true
     :seon.error/kind kind
     :seon.error/message message
@@ -1934,12 +1942,12 @@
 (defn- acquire-root
   [request call-id]
   (let [pull-plan
-        ((requiring-resolve 'seon.render.walk/root-pull-plan) request)
+        (render.walk/root-pull-plan request)
         request (assoc request :seon.render.walk/root-pull-plan pull-plan)
         captured (atom [])
         acquisition
         (binding [db/*read-evidence-sink* captured]
-          ((requiring-resolve 'seon.render.walk/root-acquisition) request))]
+          (render.walk/root-acquisition request))]
     [acquisition
      {:seon.render.call/static-evidence
       {:seon.render.call/producer 'seon.render.walk/root-acquisition
@@ -2972,7 +2980,7 @@
   ;; Any agent assigned to the namespace evaluates there; stewardship only
   ;; routes that namespace's faults and requests.
   (or (first (cluster.agent/assigned-to (db/db connection) namespace-name))
-      (let [ensure! (requiring-resolve 'seon.cluster/ensure-entity!)
+      (let [ensure! @cluster-ensure-entity!
             result (ensure!
                     connection process
                     {:seon.agent/id (str namespace-name)
