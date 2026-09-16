@@ -208,13 +208,49 @@ were fixed: it now supplies every declared input the turn proc names — the
 handle's SCI ctx, its IO executor, the completion allowance and the bound —
 instead of the handful it happens to read.
 
+## Batch 73 and the reset JVM (pid 88182)
+
+Batch 73 cold returned three reds in this lane's files. All three were FIXTURE
+defects; none was in the shipped code. Fixed in `b7c7edf5e` and `006e7e450`
+and proven in process on the reset JVM, which has no stale armed wrapper:
+
+| run | result |
+|---|---|
+| `seon.turn-test/a-refused-turn-write-is-bounded-and-commits-exactly-one-fault` | 14 assertions, 0 fail, 0 error |
+| `seon.schema-usage-guard-test/unregister-stages-removal-in-the-evaluation-delta` | 5, 0, 0 |
+| `seon.schema-usage-guard-test/generic-schema-deletion-refuses-committed-dependencies` | 8, 0, 0 |
+| `seon.schema-usage-guard-test/schema-removal-refuses-schema-and-function-dependencies` | 4, 0, 0 |
+
+**Class 2 is proven.** The earlier in-process failures on pid 74930 were the
+stale armed contract masking two ordinary test bugs: the regression read the
+fault through `::flow/ex`, which in `seon.turn-test` aliases `seon.flow` while
+the fault carries core.async.flow's own `:clojure.core.async.flow/ex`; and it
+polled the wake mailbox without draining what the passes below the bound had
+legitimately offered.
+
+**The guard suite's reds were one disease, twice.** A projection built from a
+bare `{probe-key form}` map is not a smaller world but a broken one: every
+instrumented `seon.schema` call made against it has to compile its OWN
+contract out of a population holding one probe key. And a fixture that writes
+a declaration ROW without advancing its projection hands the writer a world
+its own facts contradict — which is the write storm's disease exactly, one
+layer down. Both now go through one seam.
+
+**Class 1 proved itself in production conditions, unplanned.** The class-2
+run's two reported errors were the new drift check and restore acting on a
+REAL foreign leak: `:example/order` and `:example/order-row` —
+`context_blocks_fixture`'s registrations — were sitting in `default`'s own
+schema projection. They were named by key and restored. Before this commit
+the check would have said nothing. Filed as
+[context-blocks-fixture-leaks-example-schema-keys-into-the-live-cluster](../../../seon/issues/context-blocks-fixture-leaks-example-schema-keys-into-the-live-cluster.md).
+
 ## Verification boundary
 
 - The two class-1 regressions are proven in process, against adopted
   definitions, on pid 74930.
-- The class-2 regression is proven only as far as the refused write firing;
-  its assertions are blocked by the stale armed contract on the live cluster.
-  A cold `bin/test` worker arms from the file and is the proof.
+- The class-2 regression is proven in process on pid 88182 (14 assertions),
+  after the reset cleared the stale armed contract. The three guard-suite
+  regressions are proven there too.
 - The isolated proof is the orchestrator's batched gate; the request is at
   `tmp/orchestrator/gate-requests/write-storm.txt`.
 - **Not gated by this lane:** every other live cluster or fixture root needs
