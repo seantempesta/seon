@@ -609,3 +609,9 @@ Queue, in order:
   `program-shapes-mirror-the-schema-row-maps-by-hand` (derive owned
   attributes from the declared row map, or a drift checker). The edit was
   written from the shell; adoption rides the reset.
+
+### 2026-09-16 06:05Z — reach-closure-facts launched
+
+- The gate session released `src/seon/test/runner.clj`, `script/seon/fresh_operator.clj` and `bin/test` (recorder `7c7395c8a` committed; latency lane made no source change). `reach-closure-facts` (astra, hard) launched against `tmp/orchestrator/wave3/reach-closure-facts.md` plus a reset warning: default will be reset once tonight; the lane waits for `bin/seon status` rather than restarting anything.
+- Store reset still waits on the issue-indexer-resolver Opus lane's commit (dirty `seon.issue.edn` refuses publication) and on `tmp/test-slots/slot-1` (peer batch 31) clearing.
+- Peer: `seon.fn-test` re-run on `7cfe02790` joins the batch after 31; one peer Opus lane still holds `test/seon/dev/fresh_operator_test.clj`.
