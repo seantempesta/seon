@@ -37,7 +37,15 @@
        (is (= :seon.db/invalid-write (:seon.error/kind diagnostic)) (pr-str result))
        (is (:seon.schema/form diagnostic))
        (is (= 42 (:seon.db/offending diagnostic)))
-       (is (str/starts-with? shown "Expected:") shown)
+       ;; §2.4's refusal grammar: the shown text names the layer and member
+       ;; that refused, the expected shape, and the offending value. The
+       ;; legacy two-line "Expected:/Got:" form survives in no producer —
+       ;; seon.db/render-rejection-ai delegates to seon.error/render-ai —
+       ;; and reaches an agent only as already-saved shown text, asserted
+       ;; at the end of this test.
+       (is (str/starts-with? shown "seon.db/transact! refused") shown)
+       (is (str/includes? shown "expected a string") shown)
+       (is (str/includes? shown "42") shown)
        (is (< (alength (.getBytes shown "UTF-8")) 300) shown)
        (is (= shown response))
        (is (= 'seon.db/render-rejection-ai (:seon.eval/renderer result)))

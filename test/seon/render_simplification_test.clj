@@ -1,7 +1,6 @@
 (ns seon.render-simplification-test
   "Behavioral gates for ruling #50's minimal render model."
-  (:require [clojure.edn]
-            [clojure.string :as str]
+  (:require [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [malli.core :as m]
             [sci.core :as sci]
@@ -483,7 +482,7 @@
                     "a helper program change invalidates its caller"))))))))))
 
 (deftest
-  nested-ai-values-retain-data-and-html-uses-declared-faces
+  nested-values-render-their-declared-faces
   (support/with-database
     (fn [connection]
       (let [database (db/db connection)
@@ -496,11 +495,21 @@
                       {:probe/database database, :probe/report report})
             ai (render-ai request)
             html (hiccup/->string (render-html request))]
-        (is (str/includes? ai (str ":t " (db/basis-t database))))
-        (doseq [attribute (keys report)]
-          (is (str/includes? ai (pr-str attribute))))
-        (is (str/includes? html "Committed transaction"))
-        (is (not (str/includes? html "datahike.db.TxReport")))
+        ;; A declared pair shapes a nested value in BOTH projections:
+        ;; `cecfaf428` removed the `(not ai?)` guard `563034709` had added
+        ;; to `seon.render.value/value-node*`, because that guard left
+        ;; settlement with no selected renderer. Structural printing is the
+        ;; explicit `:seon.render.value/structural?` option, not the AI
+        ;; default.
+        (is (str/includes? ai "database"))
+        (is (str/includes? ai "basis transaction"))
+        (is (not (str/includes? ai "#datahike.db.DB")))
+        (doseq [rendered [ai html]]
+          (is
+            (str/includes?
+              rendered
+              (if (= rendered ai) "Wrote 0 facts on 0 entities." "Committed transaction")))
+          (is (not (str/includes? rendered "datahike.db.TxReport"))))
         (let [first-producer 'seon.render-simplification.fixture-ambiguous/first-ai
               second-producer 'seon.render-simplification.fixture-ambiguous/second-ai
               matches [{:seon.schema/key :fixture.render/second,
@@ -526,9 +535,7 @@
                                              {:fixture.render/ambiguous true}}))))
               ambiguous-ai (render-with-ambiguity render-ai)
               ambiguous-html (hiccup/->string (render-with-ambiguity render-html))]
-          (is (= {:probe/nested {:fixture.render/ambiguous true}}
-                 (clojure.edn/read-string ambiguous-ai)))
-          (doseq [rendered [ambiguous-html]]
+          (doseq [rendered [ambiguous-ai ambiguous-html]]
             (is (str/includes? rendered "seon.render/ambiguous"))
             (is
               (<
