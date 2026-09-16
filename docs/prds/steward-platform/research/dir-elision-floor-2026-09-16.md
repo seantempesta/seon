@@ -309,3 +309,55 @@ test. Measured after:
 ;;     :seon.agent/settings :seon.agent/runtime :seon.message/inbound-content]
 (declared-entity-units projection database "ordinary value") ;; => []
 ```
+
+
+## Batch 70 — the reds are not frozen elision expectations
+
+The dispatch read these as 45 assertions frozen on the retired elision text.
+They are not, and the two namespaces it named are not elision failures at all:
+
+- `seon.cluster.agent-identity-test/identity-map-and-omitted-arguments-use-the-same-function`
+  (5) fails on `(= "identity-root" nil)` for `:my.agent/id`, a missing
+  `:my.agent/namespace`, `:my.agent/steward` and `:my.agent/turns-left`. An
+  agent identity/dials change, no elision in the assertions.
+- `seon.context-selection-test/selection-references-terminal-evaluations-in-writer-decided-order`
+  (15) fails on writer refusals — `:datahike/write-rejected
+  {:kind :seon.context/selection-refused, :cause "Context selection refused:
+  no-such-agent."}` — and on `:seon.context/no-such-agent` arriving where
+  `:seon.context/no-such-run` was expected. The same agent-identity family.
+
+**No test outside this lane's four files asserts elision text at all.**
+`rg` over `test/` for `:seon.print/elision-unit`, a `:characters` literal or
+`:seon.ai.tokens/estimate` finds only `value_test`, `print_test`, `web_test`
+and `transcript_test` — all already updated here and all green cold in batch
+57.
+
+The real elision-shaped reds are in `seon.concurrency-independence-test`
+(199), and they are CONTENT assertions, not presentation ones:
+`(is (str/includes? rendered (::payload incoming)))`. A/B in one JVM, same
+input (2,075 characters, ~640-token budget):
+
+| `seon.print` | result |
+|---|---|
+| `bb33b93fa~1` (pre-slice) | `omitted 2075`, `next-offset 0`, **no prefix** |
+| HEAD | `omitted 1051`, `next-offset 1024`, 1,024-character prefix |
+
+A whole-omission elision contains no payload, so those assertions could not
+have passed before this slice either. The floor strictly increased what they
+can see. **Nothing was changed for batch 70**: relaxing them would hide a real
+defect, and no assertion among them executes a requery form against the
+coordinates, so no mechanism bug in the floor is implicated.
+
+### The mechanism bug that IS there, filed not fixed
+
+`seon.render.transcript/render-ai` carries `seon.render/request-profile` — the
+VALUE render profile — and renders the whole history through
+`seon.render.value/render-ai` (`src/seon/render/transcript.clj:1893`,
+`src/seon/render/transcript.clj:425`). The walk emits the history as one
+string, so an over-budget history is cut at a CHARACTER OFFSET: mid-form,
+mid-message, `:seon.render.data/path []`, nothing naming which turns were
+lost. It should be cut BY EVALUATION, oldest first, and judged against the
+prompt's own `:seon.config.ai/prompt-token-budget`
+(`src/seon/cluster/prompt.clj:232`) rather than the bound for one result.
+Filed as
+[the-agents-history-is-cut-as-one-string-by-the-value-budget](../../../seon/issues/the-agents-history-is-cut-as-one-string-by-the-value-budget.md).
