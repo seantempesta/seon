@@ -1,11 +1,24 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: friction
 tags: [issue, render, agent, class/n1, wave/strict-repl-display]
 ---
 
 # Give an elision one representation, and make it the value
+
+## Disposition — 2026-09-15, n1-render-substitution
+
+`563034709` deletes the value renderer's English AI tail and HTML paragraph.
+After adoption, rendering the same prepared value with truncated? true or
+false returns identical bytes. The class regression verifies real profile
+cuts carry their counts, coordinates, and executable requery forms
+(run eid 67228: 68 assertions, zero failures/errors).
+
+This compound note is superseded by the precise remaining owner:
+[database-diff-renderer-appends-prose-elision](../database-diff-renderer-appends-prose-elision.md).
+`seon.db/render-diff-ai` still emits its English tail; no claim is made
+that that seam was fixed. [Landing evidence](../../../prds/context-generation/research/n1-render-substitution-2026-09-15.md).
 
 ## Problem
 
@@ -42,7 +55,7 @@ The prose tail is `seon.print/render-elision-ai`
 same sentence at `src/seon/db.clj:1666`.
 
 Full walk and counts:
-[results-as-data audit](../../prds/context-generation/research/results-as-data-audit-2026-08-14.md).
+[results-as-data audit](../../../prds/context-generation/research/results-as-data-audit-2026-08-14.md).
 
 ## Owner
 

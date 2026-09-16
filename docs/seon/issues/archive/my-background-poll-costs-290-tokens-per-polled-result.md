@@ -1,11 +1,31 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: friction
 tags: [issue, render, effect, class/n1, wave/capability-surface]
 ---
 
 # `my.background/poll` costs ~290 tokens per polled result
+
+## Disposition — 2026-09-15, n1-render-substitution
+
+The old eight-ref call and requirement for a prose descriptor are superseded.
+Today's poll takes one ref and returns a narrow attribute map. That map
+does not match the complete `:seon.effect/receipt` pair: the September 16
+verification's full-effect face was not an actual poll result.
+
+`563034709` removes AI pair substitution for all result maps, including
+complete effect entities. The real poll regression stores canonical
+agent/turn/effect entities and evaluates `my.background/poll` in fresh SCI
+contexts. Payloads of 8,000 and 80,000 characters both cost **130 estimated
+tokens**, retaining effect identity and duration with a payload-local
+elision. Post-adoption run eid 67231: 15 assertions, zero failures/errors.
+
+The direct `seon.effect/render-ai` block API still inlines payload prose;
+that explicit block surface remains outside this result-path claim and is
+recorded in [the N1 umbrella](../class-outward-values-bypass-total-render-contract.md).
+The result-path fix follows the current attribute-map/profile law.
+[Exact forms, bytes, and boundaries](../../../prds/context-generation/research/n1-render-substitution-2026-09-15.md).
 
 ## Problem
 
@@ -25,7 +45,7 @@ the generic render floor.
 
 Tool-exercise lane, 2026-08-07, cluster `tools` in an isolated operator root.
 Report:
-[tool-exercise-2026-08-08.md](../../prds/sci-execution-runtime/research/tool-exercise-2026-08-08.md).
+[tool-exercise-2026-08-08.md](../../../prds/sci-execution-runtime/research/tool-exercise-2026-08-08.md).
 
 ```text
 one poll of 8 refs, pending:  2,833 estimated tokens (11,334 characters)

@@ -7,6 +7,22 @@ tags: [issue, render, class/n1, class-kill, wave/class-kill-queue]
 
 # Make outward values unable to bypass one total render contract
 
+## Result substitution slice — 2026-09-15
+
+`563034709` removes block-pair substitution on the AI result-map path and
+deletes the duplicate value-renderer elision prose. Default's function,
+config, and turn pulls now render as bounded attribute maps; the turn is
+nonempty. Four focused tests pass after adoption: 109 assertions, no
+failures/errors. The three assigned member notes are archived with their
+individual verdicts.
+
+The class remains open: operator/logging members remain, the
+[database diff prose residual](database-diff-renderer-appends-prose-elision.md)
+is explicit, and direct `seon.effect/render-ai` block calls still inline
+payloads. The scoped result renderer cannot close those external leaves.
+The orchestrator batch and platform gates are pending.
+[Landing note and exact evidence](../../prds/context-generation/research/n1-render-substitution-2026-09-15.md).
+
 ## Problem
 
 Outward values can reach agents, operators, MCP, and the web UI through

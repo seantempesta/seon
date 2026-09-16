@@ -1,11 +1,25 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, render, agent, class/n1, wave/strict-repl-display, wave/live-drive-render]
 ---
 
 # An entity pull must return its attributes, not a summary sentence
+
+## Resolution — 2026-09-15, n1-render-substitution
+
+`563034709` removes AI block selection from the structural value renderer.
+Read-only real SCI evaluations on default now render function/config/turn
+pulls as attribute maps (851 / 540 / 296 estimated tokens); the turn is no
+longer empty. All three preserve the actual pulled result. The canonical
+class regression also checks a full effect entity, counts and executable
+elision requery forms. Post-adoption run eid 67228: 68 assertions, zero
+failures/errors. Explicit block calls remain separately verified.
+
+[Exact evidence and gate boundary](../../../prds/context-generation/research/n1-render-substitution-2026-09-15.md).
+The batched orchestrator gate is pending; this closure records the structural
+change and live proof, not an unrun full gate.
 
 ## Problem
 
@@ -98,11 +112,11 @@ through `seon.render/project-node*` (`src/seon/render.clj:445-495`).
 
 A re-narration can also lie about WHICH entity it describes, which a data
 result structurally cannot — see
-[a-run-history-entry-can-name-a-different-run-than-its-form-pulled](archive/a-run-history-entry-can-name-a-different-run-than-its-form-pulled.md),
+[a-run-history-entry-can-name-a-different-run-than-its-form-pulled](a-run-history-entry-can-name-a-different-run-than-its-form-pulled.md),
 corroborated three more times in this capture.
 
 Full walk and counts:
-[results-as-data audit](../../prds/context-generation/research/results-as-data-audit-2026-08-14.md).
+[results-as-data audit](../../../prds/context-generation/research/results-as-data-audit-2026-08-14.md).
 
 ## Owner
 

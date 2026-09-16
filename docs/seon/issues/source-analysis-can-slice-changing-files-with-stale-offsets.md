@@ -7,6 +7,14 @@ tags: [issue, source, operator, class/p1, wave/publication-velocity]
 
 # Source analysis can slice changing files with stale offsets
 
+N1 render substitution, 2026-09-15 23:50Z: hook publication
+`89f8cf19-a0d4-413c-9c5e-58c6e160170f` failed with
+`Range [44072, 45681) out of bounds for length 45615` at
+`seon.fn/exact-source` (fn.clj:140), through analysis-rows-by-file and
+cluster/stable-manifest. The diagnostic did not name the affected file.
+The next ordinary publication converged; default was never restarted.
+See [the landing note](../../prds/context-generation/research/n1-render-substitution-2026-09-15.md).
+
 Core-functions follow-up, 2026-09-14: development publication on default
 again failed at `seon.fn/exact-source:142`, this time with
 `IndexOutOfBoundsException` from `PersistentVector/nth`. The trace continues

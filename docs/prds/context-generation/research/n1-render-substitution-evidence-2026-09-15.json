@@ -1,0 +1,103 @@
+{
+  "fn": {
+    "form": "(let [connection (seon.operator/connection \"default\")\n      database (seon.db/db connection)\n      instance (#'seon.cluster/mcp-instance \"default\")\n      base-ctx (:seon.sci.eval/ctx instance)\n      ctx (:seon.sci.eval/ctx\n            (seon.sci.eval/fork-for-turn\n              {:seon.sci.eval/ctx base-ctx :seon.db/db database\n               :seon.agent/id \"juniper\"}))\n      effective (#'seon.cluster/mcp-effective \"default\" {})\n      lookup [:seon.fn/sym \"seon.db/q\"]\n      raw (seon.db/pull database '[*] lookup)\n      started (System/nanoTime)\n      result (seon.sci.eval/evaluate\n               {:seon.cluster.eval/source\n                (pr-str (list 'seon.db/pull (list 'quote '[*]) lookup))\n                :seon.sci.eval/ctx ctx :seon.db/db database\n                :seon.render/profile (seon.render/agent-render-profile effective)\n                :seon.repl/handle 'result/en1probe\n                :seon.sci.admit/caps (seon.config/result-caps effective)\n                :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms effective)\n                :seon.config/on-core-error :record})\n      shown (:seon.eval/shown result)]\n  {:probe/lookup lookup :probe/raw-characters (count (pr-str raw))\n   :probe/shown-characters (count shown)\n   :probe/shown-tokens (seon.ai.tokens/estimate shown)\n   :probe/milliseconds (/ (- (System/nanoTime) started) 1e6)\n   :probe/unchanged-value? (= raw (:seon.sci.admit/value result))\n   :probe/error (:seon.cluster.eval/error result)\n   :probe/shown shown})",
+    "events": [
+      {
+        "tag": "ret",
+        "val": {
+          "seon.dev.mcp/value": {
+            "probe/error": null,
+            "probe/lookup": [
+              "seon.fn/sym",
+              "seon.db/q"
+            ],
+            "probe/milliseconds": 301.34625,
+            "probe/raw-characters": 9655,
+            "probe/shown": "{:db/id 4912, :seon.fn/arglists \"([query-or-database & arguments])\", :seon.fn/arities [{:db/id 23049, :seon.fn.arity/argument-count 2, :seon.fn.arity/arguments [{:db/id 23046, :seon.fn.argument/binding {:db/id 23045, :seon.fn.binding/form \"query-or-database\", :seon.fn.binding/shape :symbol, :seon.print/elision {:seon.print/bound-by :seon.render.profile/token-budget, :seon.print/elision-unit :children, :seon.print/omitted 1, :seon.print/requery-form (seon.print/value-at result/en1probe [:seon.fn/arities 0 :seon.fn.arity/arguments 0 :seon.fn.argument/binding]), :seon.render.data/next-offset 3, :seon.render.data/path [:seon.fn/arities 0 :seon.fn.arity/arguments 0 :seon.fn.argument/binding], :seon.render.data/total 4}}, :seon.fn.argument/index 0, :seon.print/elision {:seon.print/bound-by :seon.render.profile/token-budget, :seon.print/elision-unit :children, :seon.print/omitted 5, :seon.print/requery-form (seon.print/value-at result/en1probe [:seon.fn/arities 0 :seon.fn.arity/arguments 0]), :seon.render.data/next-offset 3, :seon.render.data/path [:seon.fn/arities 0 :seon.fn.arity/arguments 0], :seon.render.data/total 8}} {:db/id 23048, :seon.fn.argument/binding {:db/id 23047, :seon.fn.binding/form \"arguments\", :seon.fn.binding/shape :symbol, :seon.print/elision {:seon.print/bound-by :seon.render.profile/token-budget, :seon.print/elision-unit :children, :seon.print/omitted 1, :seon.print/requery-form (seon.print/value-at result/en1probe [:seon.fn/arities 0 :seon.fn.arity/arguments 1 :seon.fn.argument/binding]), :seon.render.data/next-offset 3, :seon.render.data/path [:seon.fn/arities 0 :seon.fn.arity/arguments 1 :seon.fn.argument/binding], :seon.render.data/total 4}}, :seon.fn.argument/index 1, :seon.print/elision {:seon.print/bound-by :seon.render.profile/token-budget, :seon.print/elision-unit :children, :seon.print/omitted 7, :seon.print/requery-form (seon.print/value-at result/en1probe [:seon.fn/arities 0 :seon.fn.arity/arguments 1]), :seon.render.data/next-offset 3, :seon.render.data/path [:seon.fn/arities 0 :seon.fn.arity/arguments 1], :seon.render.data/total 10}}], :seon.print/elision {:seon.print/bound-by :seon.render.profile/token-budget, :seon.print/elision-unit :children, :seon.print/omitted 10, :seon.print/requery-form (seon.print/value-at result/en1probe [:seon.fn/arities 0]), :seon.render.data/next-offset 3, :seon.render.data/path [:seon.fn/arities 0], :seon.render.data/total 13}}], :seon.print/elision {:seon.print/bound-by :seon.render.profile/token-budget, :seon.print/elision-unit :children, :seon.print/omitted 10, :seon.print/requery-form (seon.print/value-at result/en1probe []), :seon.render.data/next-offset 3, :seon.render.data/path [], :seon.render.data/total 13}}",
+            "probe/shown-characters": 2725,
+            "probe/shown-tokens": 851,
+            "probe/unchanged-value?": true
+          },
+          "seon.dev.mcp/windowed?": false
+        },
+        "ns": "user",
+        "ms": 313
+      }
+    ]
+  },
+  "config": {
+    "form": "(let [connection (seon.operator/connection \"default\")\n      database (seon.db/db connection)\n      instance (#'seon.cluster/mcp-instance \"default\")\n      base-ctx (:seon.sci.eval/ctx instance)\n      ctx (:seon.sci.eval/ctx\n            (seon.sci.eval/fork-for-turn\n              {:seon.sci.eval/ctx base-ctx :seon.db/db database\n               :seon.agent/id \"juniper\"}))\n      effective (#'seon.cluster/mcp-effective \"default\" {})\n      lookup [:seon.config/cluster \"default\"]\n      raw (seon.db/pull database '[*] lookup)\n      started (System/nanoTime)\n      result (seon.sci.eval/evaluate\n               {:seon.cluster.eval/source\n                (pr-str (list 'seon.db/pull (list 'quote '[*]) lookup))\n                :seon.sci.eval/ctx ctx :seon.db/db database\n                :seon.render/profile (seon.render/agent-render-profile effective)\n                :seon.repl/handle 'result/en1probe\n                :seon.sci.admit/caps (seon.config/result-caps effective)\n                :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms effective)\n                :seon.config/on-core-error :record})\n      shown (:seon.eval/shown result)]\n  {:probe/lookup lookup :probe/raw-characters (count (pr-str raw))\n   :probe/shown-characters (count shown)\n   :probe/shown-tokens (seon.ai.tokens/estimate shown)\n   :probe/milliseconds (/ (- (System/nanoTime) started) 1e6)\n   :probe/unchanged-value? (= raw (:seon.sci.admit/value result))\n   :probe/error (:seon.cluster.eval/error result)\n   :probe/shown shown})",
+    "events": [
+      {
+        "tag": "ret",
+        "val": {
+          "seon.dev.mcp/value": {
+            "probe/error": null,
+            "probe/lookup": [
+              "seon.config/cluster",
+              "default"
+            ],
+            "probe/milliseconds": 25.876333,
+            "probe/raw-characters": 3460,
+            "probe/shown": "{:db/id 38774, :seon.config.agent/turn-completion-backstop-ms 600000, :seon.config.ai.backup/model \"deepseek/deepseek-v4-flash-20260731\", :seon.config.ai.retry/base-delay-ms 500, :seon.config.ai.retry/jitter-fraction 0.25, :seon.config.ai.retry/maximum-delay-ms 4000, :seon.config.ai.retry/maximum-retries 2, :seon.config.ai.retry/maximum-total-delay-ms 3000, :seon.config.ai.retry/multiplier 2.0, :seon.config.ai/api-key-variable \"DEEPSEEK_API_KEY\", :seon.config.ai/chars-per-token-prior 3.2, :seon.config.ai/endpoint \"https://api.deepseek.com/chat/completions\", :seon.config.ai/max-tokens 65536, :seon.config.ai/model \"deepseek-flash\", :seon.config.ai/prompt-token-budget 32768, :seon.config.ai/stop [\"#:seon.repl\"], :seon.config.ai/thinking :disabled, :seon.config.ai/timeout-ms 180000, :seon.config.blob/max-bytes 536870912, :seon.config.bootstrap/beyond-closure-token-budget 1024, :seon.config.db/keep-history? true, :seon.config.effect.background/time-limit-ms 600000, :seon.config.effect/long-call-ms 2000, :seon.config.error/escalate-to \"root\", :seon.config.error/max-evidence-bytes 16384, :seon.config.error/recurrence-limit 3, :seon.config.eval.result/blob-threshold 4096, :seon.config.eval.result/max-bytes 8388608, :seon.config.eval/time-limit-ms 30000, :seon.config/applied-manifest-digest \"e93ac823e73382700f3fac553141d9d069e6b8e532947d111cdbbbbc2a1cc8d9\", :seon.config/cluster \"default\", :seon.config/on-core-error :panic, :seon.print/elision {:seon.print/bound-by :seon.render.profile/max-children, :seon.print/elision-unit :children, :seon.print/omitted 48, :seon.print/requery-form (seon.print/value-at result/en1probe []), :seon.render.data/next-offset 32, :seon.render.data/path [], :seon.render.data/total 80}}",
+            "probe/shown-characters": 1731,
+            "probe/shown-tokens": 540,
+            "probe/unchanged-value?": true
+          },
+          "seon.dev.mcp/windowed?": false
+        },
+        "ns": "user",
+        "ms": 38
+      }
+    ]
+  },
+  "turn": {
+    "form": "(let [connection (seon.operator/connection \"default\")\n      database (seon.db/db connection)\n      instance (#'seon.cluster/mcp-instance \"default\")\n      base-ctx (:seon.sci.eval/ctx instance)\n      ctx (:seon.sci.eval/ctx\n            (seon.sci.eval/fork-for-turn\n              {:seon.sci.eval/ctx base-ctx :seon.db/db database\n               :seon.agent/id \"juniper\"}))\n      effective (#'seon.cluster/mcp-effective \"default\" {})\n      lookup [:seon.turn/id \"62febc6305ee\"]\n      raw (seon.db/pull database '[*] lookup)\n      started (System/nanoTime)\n      result (seon.sci.eval/evaluate\n               {:seon.cluster.eval/source\n                (pr-str (list 'seon.db/pull (list 'quote '[*]) lookup))\n                :seon.sci.eval/ctx ctx :seon.db/db database\n                :seon.render/profile (seon.render/agent-render-profile effective)\n                :seon.repl/handle 'result/en1probe\n                :seon.sci.admit/caps (seon.config/result-caps effective)\n                :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms effective)\n                :seon.config/on-core-error :record})\n      shown (:seon.eval/shown result)]\n  {:probe/lookup lookup :probe/raw-characters (count (pr-str raw))\n   :probe/shown-characters (count shown)\n   :probe/shown-tokens (seon.ai.tokens/estimate shown)\n   :probe/milliseconds (/ (- (System/nanoTime) started) 1e6)\n   :probe/unchanged-value? (= raw (:seon.sci.admit/value result))\n   :probe/error (:seon.cluster.eval/error result)\n   :probe/shown shown})",
+    "events": [
+      {
+        "tag": "ret",
+        "val": {
+          "seon.dev.mcp/value": {
+            "probe/error": null,
+            "probe/lookup": [
+              "seon.turn/id",
+              "62febc6305ee"
+            ],
+            "probe/milliseconds": 49.279417,
+            "probe/raw-characters": 4722,
+            "probe/shown": "{:db/id 45587, :seon.turn.work/situation :call, :seon.turn/agent #:db{:id 42034}, :seon.turn/attempts [{:db/id 45673, :seon.ai.attempt/at #inst \"2026-09-15T19:42:44.563-00:00\", :seon.ai.attempt/finish-reason \"stop\", :seon.ai.attempt/id \"c943e0941245\", :seon.ai.attempt/ordinal 0, :seon.print/elision {:seon.print/bound-by :seon.render.profile/token-budget, :seon.print/elision-unit :children, :seon.print/omitted 4, :seon.print/requery-form (seon.print/value-at result/en1probe [:seon.turn/attempts 0]), :seon.render.data/next-offset 5, :seon.render.data/path [:seon.turn/attempts 0], :seon.render.data/total 9}}], :seon.turn/closed-tx #:db{:id 536871565}, :seon.print/elision {:seon.print/bound-by :seon.render.profile/token-budget, :seon.print/elision-unit :children, :seon.print/omitted 6, :seon.print/requery-form (seon.print/value-at result/en1probe []), :seon.render.data/next-offset 5, :seon.render.data/path [], :seon.render.data/total 11}}",
+            "probe/shown-characters": 948,
+            "probe/shown-tokens": 296,
+            "probe/unchanged-value?": true
+          },
+          "seon.dev.mcp/windowed?": false
+        },
+        "ns": "user",
+        "ms": 61
+      }
+    ]
+  },
+  "poll": {
+    "form": "(do\n  (support/with-database\n   (fn [connection]\n     (support/seed-cluster! connection \"poll-render\")\n     (let [configuration (support/effective-config)\n           profile (render/agent-render-profile configuration)\n           observations\n           (mapv\n            (fn [size]\n              (let [payload (.repeat \"x\" size)\n                    written (db/transact! connection\n                              [{:seon.agent/id \"poll-render\"}\n                               {:seon.turn/id \"poll-render-turn\"\n                                :seon.turn/agent [:seon.agent/id \"poll-render\"]\n                                :seon.turn/opened-tx (db/basis-t (db/db connection))}\n                               {:seon.effect/id \"poll-render-effect\"\n                                :seon.effect/run [:seon.turn/id \"poll-render-turn\"]\n                                :seon.effect/owner [:seon.fn/sym \"seon.db/q\"]\n                                :seon.effect/form-ordinal 0 :seon.effect/ordinal 0\n                                :seon.effect/opened-at (java.util.Date. 0)\n                                :seon.effect/request-edn \"{}\"\n                                :seon.effect/result-edn payload\n                                :seon.effect/duration-ms 12}])\n                    ctx (support/fork-cluster-ctx connection \"poll-render\")\n                    result (evaluation/evaluate\n                             {:seon.cluster.eval/source\n                              \"(my.background/poll {:my.background/result [:seon.effect/id \\\"poll-render-effect\\\"]})\"\n                              :seon.sci.eval/ctx ctx :seon.db/db (db/db connection)\n                              :seon.render/profile profile\n                              :seon.repl/handle 'result/e0123456789ab\n                              :seon.sci.admit/caps (config/result-caps configuration)\n                              :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms configuration)\n                              :seon.config/on-core-error :panic})\n                    shown (:seon.eval/shown result)\n                    parsed (edn/read-string shown)]\n                (is (:db-after written) (pr-str written))\n                (is (nil? (:seon.cluster.eval/error result)) (pr-str result))\n                (is (= \"poll-render-effect\" (:seon.effect/id parsed)) shown)\n                (is (= 12 (:seon.effect/duration-ms parsed)))\n                (is (= size (get-in parsed [:seon.effect/result-edn :seon.print/omitted])))\n                (is (= payload (get-in result [:seon.sci.admit/value :seon.effect/result-edn])))\n                (is (< (seon.ai.tokens/estimate shown) (:seon.render.profile/token-budget profile)))\n                (seon.ai.tokens/estimate shown)))\n            [8000 80000])]\n       {:probe/payload-characters [8000 80000] :probe/shown-tokens observations}))))",
+    "events": [
+      {
+        "tag": "ret",
+        "val": {
+          "seon.dev.mcp/value": {
+            "probe/payload-characters": [
+              8000,
+              80000
+            ],
+            "probe/shown-tokens": [
+              130,
+              130
+            ]
+          },
+          "seon.dev.mcp/windowed?": false
+        },
+        "ns": "seon.render.value-test",
+        "ms": 2714
+      }
+    ]
+  }
+}
