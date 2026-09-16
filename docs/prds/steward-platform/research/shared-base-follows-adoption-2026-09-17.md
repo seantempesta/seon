@@ -107,13 +107,17 @@ Nothing was restarted, reforked, or rebuilt by hand; no test JVM was launched.
    loader AFTER reloading the namespace through it:
 
    - `seon.test-support-test/the-publication-key-derives-from-the-published-head`
-     — 7 pass / 0 fail / 1 error. The single error is the worker-drift
-     detector reporting two re-armed `seon.test-support` contracts
-     (`effective-config`, `transacted!`), caused by the probe's own explicit
-     `(require 'seon.test-support :reload)`; it is not produced by the test and
-     does not occur in a cold worker.
+     — 7 pass / 0 fail / 0 error.
    - `seon.test-support-test/the-shared-base-follows-the-published-commit`
      — 11 pass / 0 fail / 0 error.
+
+   Both were re-run against the exact committed bytes after the
+   single-construction bound landed, and both stayed green. An earlier pass of
+   the first one also reported one worker-drift error — two re-armed
+   `seon.test-support` contracts (`effective-config`, `transacted!`) — caused
+   by the probe's own explicit `(require 'seon.test-support :reload)`; it is
+   not produced by the test and did not recur once the reload preceded the
+   run's own snapshot.
    - `seon.test-support-test/a-refused-fixture-write-is-reported-at-the-write`
      — 9 pass / 0 fail, **67389.731625 ms**, the branched-fixture path end to
      end under the new holds. That single run is the whole point: the head had

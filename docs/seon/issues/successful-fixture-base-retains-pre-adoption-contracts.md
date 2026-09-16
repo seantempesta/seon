@@ -94,7 +94,7 @@ most one construction now runs at a time.
 Regressions: `seon.test-support-test/the-shared-base-follows-the-published-commit`
 (11 assertions) and
 `seon.test-support-test/the-publication-key-derives-from-the-published-head`
-(8 assertions).
+(7 assertions).
 
 The acceptance this note originally stated — a regression that adopts an
 accreted arity and calls it through a fresh canonical fixture — cannot run in a
