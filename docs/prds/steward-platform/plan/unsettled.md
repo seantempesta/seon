@@ -615,3 +615,10 @@ Queue, in order:
 - The gate session released `src/seon/test/runner.clj`, `script/seon/fresh_operator.clj` and `bin/test` (recorder `7c7395c8a` committed; latency lane made no source change). `reach-closure-facts` (astra, hard) launched against `tmp/orchestrator/wave3/reach-closure-facts.md` plus a reset warning: default will be reset once tonight; the lane waits for `bin/seon status` rather than restarting anything.
 - Store reset still waits on the issue-indexer-resolver Opus lane's commit (dirty `seon.issue.edn` refuses publication) and on `tmp/test-slots/slot-1` (peer batch 31) clearing.
 - Peer: `seon.fn-test` re-run on `7cfe02790` joins the batch after 31; one peer Opus lane still holds `test/seon/dev/fresh_operator_test.clj`.
+
+### 2026-09-16 06:35Z — indexer landed; reset gated on batch 32
+
+- issue-indexer-resolver (Opus) landed `75996a9e6` `7d47d77b7` `827b0521a` `da0309344`: one derived citation resolver (declarations as `:seon.issue/cites` Malli properties read back from schema rows ∩ identity attributes), `seon.issue.citation` components for `path:line`, unresolved tokens as evidence, `opened` from one bounded git read. Live on default: issues 0→150, files 0→1,836 citations, namespaces 0→1,459, keys 0→1,745; re-index emits 0 retractions; `bin/issues-index --check` exit 1→0. Not gated in process (default's fixture base predates the schema) — gate request handed to the peer. Note: [issue-indexer-resolver](../research/issue-indexer-resolver-2026-09-16.md).
+- reach-closure-facts (astra) already landed slices 1–2: `bbbfafaf1` (`:seon.test/reach` closure refs per run) and `1086a7b80` (`seon.test/changed-since-green` + test pair links).
+- Reset of default waits for slot-1 (peer batch 32) and the peer's read-only bookkeeping research probes to finish; tree is clean, so publication is no longer refused.
+- Peer batch 31 on `34c5a9535`: seon.turn-test green; seon.cluster.turn-test down to 3 distinct reds (bookkeeping 5.6 s, lost-model-call diagnostic, attempt-traces exchange bound); turn-test class 44→3.
