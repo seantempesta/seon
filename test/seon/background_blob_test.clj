@@ -59,15 +59,14 @@
               :seon.schema.admission/source :core
               :seon.schema/form
               (pr-str [:map [:seon.background-blob-test/size :int]])}
-             {:seon.fn/sym "seon.background-blob-test/binary-capability"
-              :seon.schema.admission/source :core
-              :seon.fn/spec
-              (pr-str [:=> [:cat :seon.background-blob-test/request]
-                       :seon.blob/octet-array])
-              :seon.fn/workload :io
-              :seon.effect/capability
-              (symbol (str (ns-name (:ns handler-meta)))
-                      (str (:name handler-meta)))}])))
+             (merge (support/program-fn-row 'seon.background-blob-test/binary-capability)
+                    {:seon.fn/spec
+                     (pr-str [:=> [:cat :seon.background-blob-test/request]
+                              :seon.blob/octet-array])
+                     :seon.fn/workload :io
+                     :seon.effect/capability
+                     (symbol (str (ns-name (:ns handler-meta)))
+                             (str (:name handler-meta)))})])))
 
 (defn- exact-bytes
   [connection digest size chunk-size]
