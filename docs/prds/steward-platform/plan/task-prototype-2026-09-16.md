@@ -43,8 +43,7 @@ for a new subject derives a new id and records `:my.task/from`.
            :seon.db/ref]
           :budget [:int {:min 1 :description "Provider turns the worker may spend; copied to its settings overlay at start."}]
           :agent
-          [:and {:seon.wake/listen true :seon.wake/opens-turn? true
-                 :description "The agent working this task. Asserting it IS the wake: the worker's first turn opens on this datom."}
+          [:and {:description "The agent working this task; asserted by start! in the same transaction that creates the agent and opens its first turn."}
            :seon.db/ref]
           :from
           [:and {:description "The task row this one was copied from."} :seon.db/ref]
@@ -76,11 +75,17 @@ Why `{:min 1}` is not enough: Datahike has no minimum-cardinality facet (the
 bridge derives only one/many, `src/seon/schema/datahike.clj:194`), so the
 writer refuses an empty set inside its transaction function as well.
 
-Why `:my.task/agent` is the wake: the four listened attributes today are all
-"a ref whose value is the agent to wake" (`src/seon/cluster/wake.clj:92`).
-Starting a task is asserting that ref; no message has to be manufactured to
-start a session, and answeredness derives from the datom's `:t` exactly as it
-does for a message.
+Why `:my.task/agent` is NOT a wake (owner, 2026-09-16 00:50Z: "the wake
+attribute I'm not wild about; focus on going from task definition to a
+running agent entity rather than waking and scheduling"): starting a task
+does not route a datom to an existing agent; it CREATES the agent entity with
+its first turn already open. That is the bootstrap's own path today:
+`seon.cluster/ensure-entity!` (`src/seon/cluster.clj:2259`) runs one
+transaction function that emits `creation-tx` (agent, namespace, empty plan,
+settings, runtime) plus `bootstrap/seed-tx` (namespace requires, the
+assignment message, and `turn/generated-run-tx` opening a `:generate` turn);
+the armer arms the new agent on that commit and `next-agent-work` finds an
+open turn, which outranks any trigger. No wake, no schedule, no listener.
 
 ## 2. Two rows as exact transaction data
 
@@ -135,7 +140,7 @@ runs the test is open question 3 below.
 
 | function | contract | does |
 |---|---|---|
-| `my.task/start!` | `[:=> [:cat :my.task/start-request] [:or :my.task/started :seon.error/value]]` | Picks or creates the worker agent in `:my.task/namespace` (`seon.cluster.agent/creation-tx`, `src/seon/cluster/agent.clj:121`, plus arming through the existing wake-to-unrouted-agent path), asserts `:my.task/agent`, writes the worker's settings overlay `max-episode-runs` = budget, and authors its plan: objective = instructions, one step `{:my.plan.item/id <task id>, :title <task title>, :subject <task row>, :done-query my.task/done-query}`. One transaction; the agent ref is the wake. |
+| `my.task/start!` | `[:=> [:cat :my.task/start-request] [:or :my.task/started :seon.error/value]]` | The bootstrap's `ensure-entity!` generalised: ONE transaction function emits `seon.cluster.agent/creation-tx` for the worker (id derived from the task id, namespace = `:my.task/namespace`), asserts `:my.task/agent`, writes the settings overlay `max-episode-runs` = budget, authors the plan (objective = instructions; one step `{:my.plan.item/id <task id> :title <task title> :subject <task row> :done-query my.task/done-query}`), and opens the first turn with `turn/generated-run-tx` whose optional `:seon.turn/trigger` is the task row. The armer arms the agent on the commit; the agent's first system turn renders the opening in §4. The bootstrap's hard-coded `task-message` becomes an ordinary `my.task` row, which deletes a special case. |
 | `my.task/status` | `[:=> [:cat :my.task/status-request] [:or :my.task/status :seon.error/value]]` | Reads the task, its subject identity, and each test with `verified?` on the current program digest (`seon.test.runner/program-digest`, `src/seon/test/runner.clj:1358`), red/green/unrun, the failing assertions, and the exact completing calls. The form the render pair emits. |
 | `my.task/done-query` | a `:seon.db/query` value | Bound to `?subject` = the task row: true when every `:my.task/tests` member is verified on the current digest. Inputs are `$` and `?subject`, so the digest is derived inside the query from the source seal plus program facts, or the settlement supplies it as a third input (open question 2). |
 | `my.task/copy!` | `[:=> [:cat :my.task/copy-request] [:or :my.task/task :seon.error/value]]` | New row from an existing one with a new subject; id via `seon.id/id`; `:my.task/from` set. Tests are copied by reference unless the caller supplies new ones. |
@@ -173,7 +178,7 @@ my.agents.root=> ;; My task. Its tests define done; (my.test/check {:seon.test/c
           :turns-left 12}
 ```
 
-The block is comment, form, result, like every other block. The subject and
+The block is comment, form, result, like every other block. The agent id `root-total-amount` is derived from the task id; the namespace is the task's. The subject and
 tests then render through their own pairs via the task's units (a message
 through `seon.cluster.message/render-ai`; a test through the test pair that
 audit A found missing and this prototype has to add). After the agent defines
@@ -189,11 +194,10 @@ session.
   instance; `:my.task/agent` links them. Add an instance row only when one
   task must span agents.
 - A template kind or stamp: a row with no agent is a template by absence.
-- A trigger family: manual = a human or agent calls `start!`; watch = an
-  existing `:seon.runtime/listens` pattern or listened attribute on the
-  steward, whose session then calls `start!`; schedule = a
-  `seon.schedule.task` whose function calls `start!`. The task row itself
-  wakes its worker.
+- Triggers and scheduling, by the owner's ruling: `start!` is called by a
+  human, by an agent (the steward chatting with a user spins up workers), or
+  later by whatever detector or schedule we choose. Nothing in the task
+  family listens or fires.
 - A metrics registry or problem family (audits A and B).
 
 ## 6. Open questions to iterate

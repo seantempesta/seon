@@ -24,3 +24,11 @@
 - Research lanes running: test-attribution-plan (cross-namespace red-test
   attribution and steward alerts as the task trigger), suite-efficiency-plan,
   cold-page-plan; fix lane hook-publication-race.
+- 00:50Z owner: no wake attribute on the task; the focus is task definition →
+  a running agent entity. Prototype revised: `start!` is `ensure-entity!`
+  generalised (creation-tx + task agent ref + plan + `generated-run-tx` in one
+  transaction; the bootstrap's hard-coded task message becomes a task row).
+  Lanes launched since: reach-digest (per-test reach digest; probes first),
+  cold-page-kills (approved plan, two slices). test-attribution plan landed
+  (option 1 recommended; owner decision pending; its wake fact is now a
+  separate question from starting a task).
