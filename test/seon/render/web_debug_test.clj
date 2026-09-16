@@ -261,28 +261,31 @@
                              (attempt "panel-attempt-1" 5000 0 5000) nil)
                  (seed-turn! :call "(inc 123)" [repeated]
                              (attempt "panel-attempt-2" 6000 0 6000) nil)
-                 ;; THE FACT'S IDENTITY IS THE SIGNATURE `normalize` DERIVES
-                 ;; from the failure's canonical attributes — the request's
-                 ;; own `:seon.error/id` is the notification id, not the
-                 ;; fact's (`src/seon/error.clj:562`). A fixture that pointed
-                 ;; `:seon.message/about` at the request id was naming an
-                 ;; entity this transaction never creates, and the whole
-                 ;; transaction was rejected for it. Derive the ref from the
-                 ;; fact rather than remembering a name for it.
-                 (let [fault (error/normalize
-                              {:seon.error/source {:seon.error/kind :seon.debug/panel-fixture
-                                                   :seon.error/message "Known fixture fault."}
-                               :seon.error/id "panel-fault" :seon.error/at (java.util.Date.)
-                               :seon.error/process cluster/boot-process-identity
-                               :seon.sci.admit/caps (config/result-caps (support/effective-config))
-                               :seon.config.error/max-evidence-bytes
-                               (:seon.config.error/max-evidence-bytes (support/effective-config))})]
+                 ;; A FAULT IS RECORDED BY ITS OWNER. `seon.error/normalize`
+                 ;; returns the in-memory FACT, which is not transaction data:
+                 ;; `:seon.error/at` is declared on the fact and is not an
+                 ;; installed attribute, so transacting the fact verbatim is
+                 ;; refused — by a RETURNED error value, with nothing in the
+                 ;; log. `seon.error/recording` is the seam that projects the
+                 ;; fact into rows (`src/seon/error.clj:1369`) and hands back
+                 ;; the ref to point at. The fault lands first so the message
+                 ;; can name an entity that already exists.
+                 (let [recorded (error/recording @connection
+                                  {:seon.error/source {:seon.error/kind :seon.debug/panel-fixture
+                                                       :seon.error/message "Known fixture fault."}
+                                   :seon.error/id "panel-fault" :seon.error/at (java.util.Date.)
+                                   :seon.error/process cluster/boot-process-identity
+                                   :seon.sci.admit/caps (config/result-caps (support/effective-config))
+                                   :seon.config.error/recurrence-limit
+                                   (:seon.config.error/recurrence-limit (support/effective-config))
+                                   :seon.config.error/max-evidence-bytes
+                                   (:seon.config.error/max-evidence-bytes (support/effective-config))})]
+                   (is (:db-after (db/transact! connection (:seon.db/tx-data recorded))))
                    (is (:db-after
                         (db/transact! connection
-                          [fault
-                           {:seon.message/id "panel-fault-message" :seon.message/to [:seon.agent/id "juniper"]
+                          [{:seon.message/id "panel-fault-message" :seon.message/to [:seon.agent/id "juniper"]
                             :seon.message/content "A known fixture fault was delivered."
-                            :seon.message/about [:seon.error/id (:seon.error/id fault)]}]))))
+                            :seon.message/about (:seon.error/ref recorded)}]))))
                  (seed-turn! :call "" [] (attempt "panel-attempt-3" 7100 7000 100)
                              [:seon.message/id "panel-fault-message"])
                  (let [after (snapshot)
