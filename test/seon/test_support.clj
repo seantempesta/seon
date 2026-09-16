@@ -191,7 +191,11 @@
         available (:seon.test-support/available before)]
     (if (seq available)
       (peek available)
-      (keyword "seon.test-support.fixture" (str (:seon.test-support/next before))))))
+      ;; `pr-str` emits this keyword into every diagnostic that transports a
+      ;; live connection roster, and `clojure.edn/read-string` refuses a
+      ;; keyword whose name begins with a digit. The name must round-trip.
+      (keyword "seon.test-support.fixture"
+               (str "fixture-" (:seon.test-support/next before))))))
 
 (defn- release-branch!
   [branch]

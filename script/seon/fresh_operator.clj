@@ -941,11 +941,28 @@
 
 (declare prepl-eval! terminal-value)
 
+(defn- read-prepl-reply
+  "Read one prepl terminal value as EDN, or refuse carrying the offending text.
+
+  A reply this operator cannot read is a typed diagnostic naming the reply,
+  never an unreadable value silently downgraded to absence of signal."
+  [advertisement reply]
+  (try
+    (edn/read-string reply)
+    (catch Throwable error
+      (fail!
+       "The live process answered with a prepl reply this operator cannot read."
+       {:seon.error/kind :seon.fresh-operator/prepl-reply-unreadable
+        :seon.fresh-operator/advertisement advertisement
+        :seon.fresh-operator/reply reply
+        :seon.error/message (ex-message error)}))))
+
 (defn- prepl-value!
   ([advertisement form]
    (prepl-value! advertisement form (operator-silence-backstop-ms {})))
   ([advertisement form timeout-ms]
-   (edn/read-string
+   (read-prepl-reply
+    advertisement
     (terminal-value (prepl-eval! advertisement form timeout-ms)))))
 
 (defn- process-matches-advertisement?
@@ -1365,26 +1382,29 @@
     truth)))
 
 (defn live-root-value!
-  "Evaluate one form in the process holding an operator root."
+  "Evaluate one form in the process holding an operator root.
+
+  The send is the authority. Process records and advertisements choose WHICH
+  transport to address; nothing pre-reads the very socket this send exercises,
+  so an unrelated census payload or an unrelated load spike can never decide
+  that a live process is unreachable. A refused or silent send raises its own
+  typed diagnostic naming the advertisement and the cause. Only a root with no
+  live advertised transport at all answers `:live-process? false`, which is the
+  caller's signal to take the held-store path."
   [root form]
   (let [truth (cluster-truth
-               root {:seon.fresh-operator/read-offline-roster? false})
-        live-rows (filterv #(and (:seon.fresh-operator/operator-root? %)
-                                 (:seon.fresh-operator/process-alive? %))
-                           truth)]
-    (if-let [anchor (select-anchor truth)]
+               root {:seon.fresh-operator/read-offline-roster? false
+                     :seon.fresh-operator/probe-jvms? false})]
+    (if-let [advertisement
+             (some
+              (fn [row]
+                (when (and (:seon.fresh-operator/operator-root? row)
+                           (:seon.fresh-operator/process-alive? row))
+                  (:seon.fresh-operator/transport-advertisement row)))
+              truth)]
       {:seon.fresh-operator/live-process? true
-       :seon.fresh-operator/value
-       (prepl-value! (:seon.fresh-operator/transport-advertisement anchor)
-                     form)}
-      (if (seq live-rows)
-        (fail!
-         "A live operator process holds the store but its prepl is unavailable."
-         {:seon.error/kind :seon.fresh-operator/live-prepl-unavailable
-          :seon.fresh-operator/root (.getCanonicalPath (io/file root))
-          :seon.fresh-operator/processes
-          (mapv :seon.fresh-operator/process live-rows)})
-        {:seon.fresh-operator/live-process? false}))))
+       :seon.fresh-operator/value (prepl-value! advertisement form)}
+      {:seon.fresh-operator/live-process? false})))
 
 (defn- named-cluster-row
   [truth name]
@@ -2122,7 +2142,8 @@
                   (assoc (ex-data error)
                          :seon.fresh-operator/name name)
                   error))))
-            start-result (edn/read-string (terminal-value start-events))
+            start-result (read-prepl-reply
+                          anchor-ad (terminal-value start-events))
             _ (when (= :sweep-in-progress
                        (:seon.error/kind start-result))
                 (throw (ex-info (:seon.error/message start-result)
@@ -2263,7 +2284,8 @@
                   "run `bin/seon start` first.")
              {:seon.fresh-operator/root root}))
         outcome
-        (edn/read-string
+        (read-prepl-reply
+         (:seon.fresh-operator/transport-advertisement anchor)
          (terminal-value
           (prepl-eval!
            (:seon.fresh-operator/transport-advertisement anchor)
@@ -2493,7 +2515,8 @@
         result
         (cond
           anchor
-          (edn/read-string
+          (read-prepl-reply
+           (:seon.fresh-operator/transport-advertisement anchor)
            (terminal-value
             (prepl-eval!
              (:seon.fresh-operator/transport-advertisement anchor)
@@ -2837,7 +2860,7 @@
     (when events
       (let [value (terminal-value events)]
         (when-not (#{"stopped" "released-reservation"}
-                   (some-> value edn/read-string clojure.core/name))
+                   (some-> value (->> (read-prepl-reply ad)) clojure.core/name))
           (fail! "The live JVM did not own the advertised cluster."
                  {:seon.fresh-operator/name name
                   :seon.fresh-operator/result value}))

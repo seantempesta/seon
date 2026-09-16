@@ -141,3 +141,103 @@ run, no cluster was stopped or reforked, and no source file was edited. The
 30000 ms silence of batch 26A was not reproduced live; it is attributed to the
 same probe from its logged error kind, phase, and backstop attribute
 (`tmp/orchestrator/gate-results/batch-26/platform.log:804-805`).
+
+## Landing note — 2026-09-16, lane `recording-pre-read`
+
+The plan above is implemented. REPL-driven throughout: every form was evaluated
+against the live `default` cluster (pid 53378) or an isolated load-only probe
+JVM before the file changed.
+
+### Files touched (bytes after the change)
+
+| File | Bytes | Change |
+|---|---|---|
+| `script/seon/fresh_operator.clj` | 129271 | +44 / −23 lines |
+| `test/seon/dev/fresh_operator_test.clj` | 90819 | +127 lines |
+| `test/seon/test_support.clj` | 30948 | +6 / −2 lines |
+
+1. **The pre-read is dissolved.** `live-root-value!` no longer calls
+   `select-anchor`. It asks `cluster-truth` for the root with
+   `{:read-offline-roster? false :probe-jvms? false}` — so no JVM snapshot probe
+   is taken at all — and sends the form to the transport advertisement of the
+   first operator-root row whose process is alive. The send is the authority:
+   its own refusal or silence is the diagnostic. A root with no live advertised
+   transport still answers `{:seon.fresh-operator/live-process? false}`, which is
+   the caller's held-store path. The
+   `:seon.fresh-operator/live-prepl-unavailable` refusal and its `live-rows`
+   derivation are deleted; the kind had no other reference in `src`, `test`,
+   `script`, `resources`, or `bin`.
+2. **Every prepl reply parse is total.** New private `read-prepl-reply`
+   (`script/seon/fresh_operator.clj:944`) refuses with
+   `:seon.fresh-operator/prepl-reply-unreadable`, carrying the advertisement and
+   the offending reply verbatim, instead of throwing a bare reader exception that
+   an outer `catch` downgrades to `reachable? false`. It now backs `prepl-value!`
+   and the four other prepl-reply seams: start (`start-result`), export, `init`,
+   and `stop`. The remaining `edn/read-string` calls in the namespace read config
+   manifests or prefixed stdout lines from launched child processes, not prepl
+   replies.
+3. **The unreadable identifier is gone at its source.**
+   `test/seon/test_support.clj:194` now mints
+   `:seon.test-support.fixture/fixture-N`. `test/seon/schema/datahike_test.clj:327`
+   still constructs `:seon.test-support.fixture/0` by hand on purpose — it is the
+   regression for reader-inexpressible identifiers surviving the Datahike EDN
+   attribute round-trip, and is unaffected.
+
+### Live numbers (isolated probe JVM, `-M:probe` with `script` on the path)
+
+Against a disposable root whose advertised socket answers a healthy census
+snapshot containing `:seon.test-support.fixture/0`:
+
+```
+:OLD-census-verdict [#:seon.fresh-operator{:reachable? false}] :OLD-anchor false
+:NEW-live-root-value-ms 120 :value #:seon.fresh-operator{:live-process? true,
+                                                         :value {:recorded? true}}
+```
+
+The old census verdict still reproduces on the unchanged `cluster-truth`
+default; the recording path no longer consults it.
+
+Against the live `default` cluster, three consecutive sends of the recorder's
+own `live-root-value!` path:
+
+```
+:DEFAULT-live-root-value-ms 110 :value #:seon.fresh-operator{:live-process? true, :value #:seon.dev.probe{:pid 53378}}
+:DEFAULT-live-root-value-ms 112 :value ...
+:DEFAULT-live-root-value-ms 113 :value ...
+```
+
+110-113 ms, matching the MCP bridge against the same JVM. The prior refusal
+reproduced in 268 ms and never sent the form.
+
+### In-process test runs (live `default` JVM, no test JVM)
+
+Namespace reloaded through `seon.test`'s own loader first
+(`(with-test-loader #(require 'seon.dev.fresh-operator-test :reload))`), then:
+
+```clojure
+(seon.test/run (#'seon.test/resolve-test 'seon.dev.fresh-operator-test/<test>)
+               (seon.operator/connection "default"))
+```
+
+| Test | pass | fail | error |
+|---|---|---|---|
+| `live-root-value-sends-through-the-transport-without-a-census-pre-read` | 5 | 0 | 0 |
+| `unreadable-prepl-replies-are-typed-diagnostics-not-silence` | 2 | 0 | 0 |
+| `fixture-branch-keywords-round-trip-through-clojure-edn` | 1 | 0 | 0 |
+
+3481 ms for all three. The first test stands up a real loopback prepl whose
+census snapshot reply carries `:seon.test-support.fixture/0` and whose ordinary
+reply is readable; it asserts the recording value comes back, that no form
+containing `datahike.connections` was ever sent, and that the last form sent is
+the recording form. Its second `testing` block asserts the no-advertisement root
+still answers `{:live-process? false}`. On the pre-fix code the same setup
+produced `:OLD-anchor false`, i.e. the `live-prepl-unavailable` refusal.
+
+### Verification boundary
+
+No test JVM was launched; `bin/test` and `bin/test-fast` were not run. No cluster
+was started, stopped, reforked, or reset. Files outside the three owned paths
+were not modified. clj-kondo over the three files: 0 errors (70 pre-existing
+warnings of the namespace's existing `Shadowed var` / `reset!` classes). The
+orchestrator's batched gate is the proof; the request is
+`tmp/orchestrator/gate-requests/gate-recording.txt`.

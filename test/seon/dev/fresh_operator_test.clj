@@ -1945,3 +1945,130 @@
         (deref holder 30000 :abandoned)
         (delete-recursively! held-root)
         (delete-recursively! other-root)))))
+
+(defn- unreadable-branch-roster-prepl
+  "One prepl server whose census snapshot reply is deliberately unreadable.
+
+  A live development JVM holds fixture connections, and `pr-str` emits their
+  branch keywords into the snapshot reply. The recording send's own reply
+  stays ordinary readable EDN."
+  [forms]
+  (let [server (ServerSocket. 0 1 (java.net.InetAddress/getLoopbackAddress))
+        served
+        (future
+          (try
+            (loop []
+              (with-open [socket (.accept server)
+                          reader (io/reader socket)
+                          writer (io/writer socket)]
+                (let [form (.readLine ^java.io.BufferedReader reader)]
+                  (swap! forms conj form)
+                  (.write
+                   writer
+                   (str (pr-str
+                         {:tag :ret
+                          :val
+                          (if (str/includes? (str form) "datahike.connections")
+                            ;; `clojure.edn` refuses a keyword whose name
+                            ;; begins with a digit; `pr-str` emits one anyway.
+                            (str "{:seon.fresh-operator/branch-connections "
+                                 "#{:cluster-default "
+                                 ":seon.test-support.fixture/0}}")
+                            (pr-str
+                             {:seon.dev.fresh-operator-test/recorded? true}))})
+                        "\n"))
+                  (.flush writer)))
+              (recur))
+            (catch Throwable _ nil)))]
+    {:seon.dev.fresh-operator-test/server server
+     :seon.dev.fresh-operator-test/served served}))
+
+(deftest live-root-value-sends-through-the-transport-without-a-census-pre-read
+  ;; The recorder used to gate on a census snapshot of the very socket it was
+  ;; about to use. A healthy JVM holding a connection whose branch keyword
+  ;; `clojure.edn` cannot read made that snapshot throw, the row was marked
+  ;; unreachable, and a live process was reported prepl-unavailable — absence
+  ;; of signal read as ill health. The send is the authority now.
+  (let [root (fresh-root)
+        name "recording-anchor"
+        child (start-disposable-process!)
+        forms (atom [])
+        {server :seon.dev.fresh-operator-test/server
+         served :seon.dev.fresh-operator-test/served}
+        (unreadable-branch-roster-prepl forms)]
+    (try
+      (let [directory (io/file root "data" "clusters" name)
+            record (child-process-record root child)
+            advertisement
+            {:seon.boot/cluster-name name
+             :seon.boot/pid (.pid child)
+             :seon.boot/start-instant (process-start-date child)
+             :seon.boot/prepl-host "127.0.0.1"
+             :seon.boot/prepl-port (.getLocalPort server)}
+            _ (.mkdirs directory)
+            _ (operator-private-value 'write-process-record! (str root) record)
+            _ (spit (io/file directory "prepl.edn") (pr-str advertisement))
+            started (System/nanoTime)
+            outcome
+            (operator-private-outcome
+             'live-root-value! (str root)
+             (pr-str '(seon.test.runner/commit-persistent-results!)))
+            elapsed-ms (quot (- (System/nanoTime) started) 1000000)]
+        (testing "the live transport answers and its value is the recording"
+          (is (= {:seon.fresh-operator/live-process? true
+                  :seon.fresh-operator/value
+                  {:seon.dev.fresh-operator-test/recorded? true}}
+                 (:seon.dev.fresh-operator-test/value outcome))
+              (pr-str outcome)))
+        (testing "no census snapshot of the recording socket is taken"
+          ;; Process identity census (`:seon.operator/process-census`) may
+          ;; address the socket to CHOOSE it. What must never happen is the
+          ;; JVM snapshot whose roster payload this server cannot express.
+          (is (not-any? #(str/includes? (str %) "datahike.connections")
+                        @forms)
+              (pr-str @forms))
+          (is (str/includes? (str (peek @forms))
+                             "commit-persistent-results!")
+              (pr-str @forms)))
+        (testing "choosing the advertisement is not a wait"
+          (is (< elapsed-ms 20000) (str elapsed-ms " ms"))))
+      (finally
+        (.close server)
+        (try (deref served 1000 nil) (catch Throwable _ nil))
+        (when (.isAlive child)
+          (.destroyForcibly child)
+          (.waitFor child 10 TimeUnit/SECONDS))
+        (delete-recursively! root))))
+  (testing "a root with no live advertised transport takes the store path"
+    (let [root (fresh-root)]
+      (try
+        (is (= {:seon.fresh-operator/live-process? false}
+               (operator-private-value
+                'live-root-value! (str root) (pr-str '(+ 1 2)))))
+        (finally
+          (delete-recursively! root))))))
+
+(deftest unreadable-prepl-replies-are-typed-diagnostics-not-silence
+  (let [outcome
+        (operator-private-outcome
+         'read-prepl-reply
+         {:seon.boot/prepl-host "127.0.0.1" :seon.boot/prepl-port 1}
+         "{:branch :seon.test-support.fixture/0}")]
+    (is (= :seon.fresh-operator/prepl-reply-unreadable
+           (:seon.error/kind (:seon.dev.fresh-operator-test/data outcome)))
+        (pr-str outcome))
+    (is (= "{:branch :seon.test-support.fixture/0}"
+           (:seon.fresh-operator/reply
+            (:seon.dev.fresh-operator-test/data outcome)))
+        "the refusal carries the offending reply verbatim")))
+
+(deftest fixture-branch-keywords-round-trip-through-clojure-edn
+  ;; Every fixture connection's branch keyword is transported by `pr-str` into
+  ;; operator diagnostics. An identifier `pr-str` emits and `clojure.edn`
+  ;; refuses is a latent defect in every one of them.
+  (let [branch (#'test-support/acquire-branch!)]
+    (try
+      (is (= branch (edn/read-string (pr-str branch)))
+          (str "the minted fixture branch must read back: " (pr-str branch)))
+      (finally
+        (#'test-support/release-branch! branch)))))
