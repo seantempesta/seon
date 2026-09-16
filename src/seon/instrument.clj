@@ -322,7 +322,12 @@
                :seon.error/expected arglists
                :seon.error/expected-description "the declared arglists"
                :seon.error/offending (:arity data)
-               :seon.error/actual-description "an argument count of"
+               ;; the count belongs IN the sentence: the message reads
+               ;; "got <actual-description>.", so a bare prefix rendered
+               ;; "got an argument count of." and the reader had to go
+               ;; find the number in the diagnostic's offending field
+               :seon.error/actual-description (str "an argument count of "
+                                                   (:arity data))
                :seon.error/fix "Call one of the declared arglists."}]
              (mapv
               (fn [problem]
