@@ -1,11 +1,20 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, config, schema, test, class/n7, wave/config-derivation]
 ---
 
 # Give config-dial discovery one explicit authority
+
+## Resolution — 2026-09-16
+
+Removed the remaining composite-builder prefix arm. The packaged old union
+and declared property populations are identical (94 dials; 89 prefix-matched,
+zero prefix-only). The regression proves a prefixed nondial stays out and a
+declared dial outside that prefix enters. Fast snapshot verification:
+16 tests / 52 assertions, zero failures/errors, armed contracts. See
+[the landing note](../../../prds/steward-platform/research/no-default-cluster-fallback-2026-09-16.md).
 
 ## Problem
 

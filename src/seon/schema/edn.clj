@@ -32,9 +32,8 @@
   [identity definition]
   (and
    (qualified-keyword? identity)
-   (or (str/starts-with? (namespace identity) "seon.config.")
-       (true? (:seon.config/dial
-               (schema.form/attr-form-properties definition))))))
+   (true? (:seon.config/dial
+           (schema.form/attr-form-properties definition)))))
 
 (defn- config-dial-entries
   [forms]

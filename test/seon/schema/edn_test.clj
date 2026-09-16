@@ -23,6 +23,29 @@
 ;;; The loader
 ;;; ---------------------------------------------------------------------------
 
+(deftest config-dials-are-declared-independent-of-their-names
+  (let [forms (schema.edn/packaged-forms)
+        declared? (fn [[_ definition]]
+                    (true? (:seon.config/dial
+                            (schema.form/attr-form-properties definition))))
+        declared (into #{} (comp (filter declared?) (map key)) forms)
+        old-population
+        (into #{}
+              (comp (filter (fn [[identity :as entry]]
+                              (or (and (qualified-keyword? identity)
+                                       (str/starts-with? (namespace identity) "seon.config."))
+                                  (declared? entry))))
+                    (map key))
+              forms)
+        entries #(into #{} (map first)
+                       (schema.form/map-entries (:seon.config/manifest %)))
+        synthetic (schema.edn/derive-config-forms
+                   {:seon.config.synthetic/not-a-dial :boolean
+                    :example/declared [:boolean {:seon.config/dial true}]})]
+    (is (seq declared))
+    (is (= old-population declared (entries forms)))
+    (is (= #{:example/declared} (entries synthetic)))))
+
 (defn- with-temporary-resources
   [files f]
   (let [fixture-id (str (random-uuid))
@@ -354,7 +377,8 @@
          (fn []
            (schema/register!
             scratch
-            [:boolean {:seon.config/default false
+            [:boolean {:seon.config/dial true
+                       :seon.config/default false
                        :seon.config/per-agent true}])))
         (let [forms @(:seon.schema.delta/candidate-forms delta)]
           (testing "the public registration producer derives every contract"
