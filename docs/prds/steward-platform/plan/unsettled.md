@@ -1470,6 +1470,36 @@ check it; authored patterns escape the `:avet` refusal. The log carries
 `:added`, `:tx` and tx-meta datoms (whose `:e` is the tx id) that no
 pattern can reach today. Deferred by ruling.
 
+**OWNER PLAN ~00:45Z (verbatim intent, THE sequence):** "find these
+failures and we will mine the easy ones for issues and we will run live
+agents once you get shit stabilized and if the agents can fix things
+reliably we will persist the changes to disk and keep iterating." Mission
+recorded in program-facts PRD section 0a and memory
+(`feedback_ai_first_unbreakable_program_graph_2026_09_16`). Order: (1) the
+unbreakable-connections inventory (research running: every connection the
+graph knows, the failure severing it causes, impossible/detected/silent
+today, the invariant at the write, the agent refactoring operation and the
+refusal payload); (2) detectors mine the easy failures as issues; (3)
+stabilize (the continuations + gates); (4) live agents on those issues;
+(5) reliable fixes persist to disk (write-back, deferred until then);
+(6) iterate.
+
+**Deletion research REVISED under the owner's call-edge direction**
+(`2871e77e1`): two admissible behaviours only — cascade for containment,
+REFUSE for every other connection; symbol edges survive G2 for the opposite
+reason (only a value lets the final-report check tell a repaired caller from
+a swept one — retract-entity's sweep erases the evidence from :db-after);
+implementable in `seon.db/write-report-error` with no fork change; the
+alarm is half-built (`seon.fn/assert-clean-analysis!` refuses unresolved-var
+at publication, one scope short); three origins: SCI evaluation refuses
+mid-turn; incremental publication refuses and the cluster stays on its
+previous commit; complete republish must NOT fire (fresh branch). Test
+reach reported, never refused. Codex integrator resumed to implement it on
+the now-free schema seam (RESET NEEDED). Wake-matchers landed `ede929f0b`
+(two declared datom shapes, one accessor); its pre-existing red is the
+fault-path refusal → fix lane launched (string into symbol-typed
+`:seon.error/exception-class`, db.clj:2398).
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
