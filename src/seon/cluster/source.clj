@@ -144,7 +144,7 @@
        (into (sorted-map) (map (juxt :path :digest)) entries)})))
 
 (defn digest
-  "The source-tree digest of the declared roots."
+  "Return the source-tree digest of the declared roots."
   {:malli/schema [:=> [:cat :seon.source/digest-request]
                   :seon.source/digest]}
   [request]
