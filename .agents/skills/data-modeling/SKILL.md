@@ -31,9 +31,47 @@ facets (`src/seon/schema/datahike.clj:232`).
 The bridge's type, cardinality, and property owners are
 `src/seon/schema/datahike.clj:123`, `:205`, and `:232`.
 
-The two added rows are one rule. A `:seon.db/ref` asserts a relation
-between two ENTITIES; what an analyzer knows is a NAME appearing in text,
-and a name denotes itself. And `#{}` stores nothing — `explode` emits one
+## The one question that decides a ref: statement or token?
+
+Before declaring any `:seon.db/ref`, ask what the fact MEANS to the writer
+that produced it.
+
+- **A STATEMENT ABOUT A LIVING ENTITY.** The referrer asserts a relation to
+  something that must exist. Either the target CONTAINS the referrer —
+  `:seon.db/component true`, and it dies with its parent — or they are peers,
+  and the fact becomes false when the target goes. A peer's deletion policy is
+  already declared, by required-ness: a required ref in the referrer's entity
+  map REFUSES the deletion, an optional one lets it SWEEP silently. That is
+  not a separate mechanism; see the datahike skill for the writer chain.
+- **AN OBSERVATION OF A TOKEN.** The writer saw a NAME — in source text, in
+  metadata, in a note, in a report — and a name denotes itself. Whether
+  anything by that name exists is a SEPARATE, derivable question. Store the
+  VALUE (`:qualified-symbol`, `:qualified-keyword`, the path string), never a
+  ref. Then deleting the named entity touches no observer's datom, and "names
+  something with no row" is one `not-join` clause instead of an
+  impossibility.
+
+The tell for a misfiled token is machinery that exists only to survive a
+rename or a republish: a `:seon.fn/reference-to` annotation whose whole job is
+telling a reader how to recover the name from a ref
+(`resources/seon/schemas/seon.fn.edn:4`), a preservation pass that strips and
+re-resolves refs across a publication
+(`src/seon/cluster/source.clj:471-477`), a sibling attribute storing the same
+name as a value beside the ref. Every one of those is a name-observation
+wearing a ref.
+
+**A function with live callers is not deletable until the callers are fixed**
+(owner, 2026-09-16). Call edges being VALUES is what makes the edges survive
+the retraction; it is not permission to drop the function silently. The
+retraction and the repair belong in one transaction, or the deletion refuses
+and hands the agent the breaking call graph to fix first. "Every connection is
+important. Retraction shouldn't be allowed until a fix is also proffered …
+STOP AGENTS from breaking things until a fix is in place." That contract binds
+the three deletion origins equally: an SCI evaluation, an edit-hook file
+deletion, and a complete republish.
+
+The second rule in the table is the other half of the same reading. `#{}`
+stores nothing — `explode` emits one
 datom per member (`transaction.cljc:739-770`, `:718-737`), so "found
 nothing" and "never ran" are the same bytes unless the looking is its own
 datom. If a reader will ever need to distinguish them, declare the event.
