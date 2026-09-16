@@ -67,6 +67,31 @@
 (def ^:private default-agent-profile
   (agent-render-profile (config/defaults)))
 
+(defn request-projection
+  "The schema projection one render request asks its selection questions of.
+
+  PRECEDENCE — THE ORDER `seon.db` READS ALREADY USE (law 2.1): the
+  projection CARRIED BY the request's database value first
+  (`seon.db/carried-projection`, `src/seon/db.clj:981`; values carry it at
+  `src/seon/db.clj:141`), then a projection supplied on the request, and only
+  when neither is present the acquired SCI context's projection.
+
+  Selection asked the ctx alone until 2026-09-16, which is that precedence
+  inverted: the value being rendered was pulled from the database value, and
+  every declaration question — which shapes it matches, whether a producer's
+  output satisfies the output schema — was answered by a copy held somewhere
+  else. It also made \"what would this render as under projection P\"
+  unanswerable without mutating shared ctx state. A request with no database,
+  no supplied projection and no ctx has nothing declared, and nothing is
+  selected."
+  {:malli/schema [:=> [:cat :map] [:maybe :seon.schema/projection]]}
+  [request]
+  (or (let [database (:seon.db/db request)]
+        (when (and database (not (:seon.error/kind database)))
+          (db/carried-projection database)))
+      (:seon.schema/projection request)
+      (some-> (:seon.sci.eval/ctx request) sci.kernel/context-projection)))
+
 (defn request-profile
   "Return the profile carried by one request, deriving it once when absent."
   {:malli/schema [:=> [:cat :map]
@@ -238,7 +263,7 @@
     :as request}]
   (if-not namespace-name
     []
-    (let [projection (sci.kernel/context-projection ctx)
+    (let [projection (request-projection request)
           argument (producer-argument request)
           symbols (sci.kernel/public-functions-in ctx namespace-name)]
       (into []
@@ -529,15 +554,14 @@
   {:malli/schema
    [:=> [:catn [::request :seon.render/selection-request]]
     :seon.render/selection]}
-  [{ctx :seon.sci.eval/ctx
-    output :seon.render/output
+  [{output :seon.render/output
     :as request}]
   (let [profile (request-profile request)]
     (if (:seon.error/kind profile)
       (finish-selection [] profile selection-stage-order)
       (let [request (assoc request :seon.render/profile profile)
             value (render-value request)
-            projection (sci.kernel/context-projection ctx)
+            projection (request-projection request)
             output-schema (case output
                             :seon.render/ai :seon.render/ai
                             :seon.render/html :seon.render/hiccup
@@ -558,8 +582,7 @@
   {:malli/schema
    [:=> [:catn [::request :seon.render/selection-request]]
     :seon.render/selection]}
-  [{ctx :seon.sci.eval/ctx
-    output :seon.render/output
+  [{output :seon.render/output
     :as request}]
   (let [decision (selection request)
         profile (request-profile request)]
@@ -567,7 +590,7 @@
       decision
       (let [request (assoc request :seon.render/profile profile)
             value (render-value request)
-            projection (sci.kernel/context-projection ctx)
+            projection (request-projection request)
             output-schema (case output
                             :seon.render/ai :seon.render/ai
                             :seon.render/html :seon.render/hiccup
@@ -609,7 +632,7 @@
 (defn- call-static-evidence
   [request decision selected]
   (let [
-        projection (sci.kernel/context-projection (:seon.sci.eval/ctx request))
+        projection (request-projection request)
         argument (invocation-argument-evidence projection request selected)]
     {:seon.render/selection decision
      :seon.render.call/producer selected
@@ -815,7 +838,7 @@
   [request selected output rendered]
   {:seon.render.cost/shape-key
    (cost-shape-key
-    (sci.kernel/context-projection (:seon.sci.eval/ctx request))
+    (request-projection request)
     request selected output)
    :seon.render.cost/profile
    (get-in request [:seon.render/profile :seon.render.profile/id])
@@ -964,7 +987,7 @@
     on-core-error :seon.config/on-core-error
     :as request}
    selected]
-  (let [projection (sci.kernel/context-projection ctx)
+  (let [projection (request-projection request)
         ;; RECORD WHAT IS RENDERING. A producer may hand its own value
         ;; to another producer — the value floor is the common case —
         ;; so the producers already on this chain travel with the
@@ -1050,16 +1073,16 @@
 
 (defn- project-node*
   [request output path node value]
-  ;; A RENDER UNIT NEED NOT CARRY A CTX. `:seon.render/unit` declares none —
-  ;; the floor's own entry points take a bare value — and
-  ;; `seon.sci.kernel/context-projection` declares one, so reading the key
+  ;; A RENDER UNIT NEED NOT CARRY A CTX OR A DATABASE. `:seon.render/unit`
+  ;; declares neither — the floor's own entry points take a bare value — and
+  ;; `seon.sci.kernel/context-projection` declares a ctx, so reading the key
   ;; unguarded turned every ctx-less floor render into a thrown contract
-  ;; violation at the one boundary §2.4 requires a value from. No ctx means
-  ;; no declared-producer projection, which `registered-layout` in
+  ;; violation at the one boundary §2.4 requires a value from.
+  ;; `request-projection` is total over that: no projection anywhere means no
+  ;; declared-producer projection, which `registered-layout` in
   ;; `seon.render.value` already says the same way, and which the selection
   ;; below already treats as "nothing declared".
-  (let [projection (some-> (:seon.sci.eval/ctx request)
-                           sci.kernel/context-projection)
+  (let [projection (request-projection request)
         ;; A PRODUCER IS NEVER RE-ENTERED INSIDE ITS OWN WALK. A
         ;; producer that renders its value THROUGH the floor —
         ;; `seon.ai/attempt-html` calls `render.value/render-html` for
@@ -1166,8 +1189,7 @@
 
 (defn- raw-output
   [request output selected]
-  (let [projection (sci.kernel/context-projection
-                    (:seon.sci.eval/ctx request))
+  (let [projection (request-projection request)
         rendered (invoked request output selected)
         ;; Optional source/observation contracts declare absence explicitly.
         ;; An ordinary text renderer returning nil has violated its contract.
@@ -1308,8 +1330,7 @@
     (if (:seon.error/kind profile)
       profile
       (let [request (assoc request :seon.render/profile profile)
-            projection (sci.kernel/context-projection
-                        (:seon.sci.eval/ctx request))
+            projection (request-projection request)
             rendered (invoke-producer request :seon.render/form
                                       :seon.render/form)]
         (if (valid-projection? projection :seon.render/form rendered)
@@ -1420,8 +1441,7 @@
                     ;; takes the attribute's value, not the unit map.
                     source-output?
                     (and (= output :seon.render/ai)
-                         (let [projection (sci.kernel/context-projection
-                                           (:seon.sci.eval/ctx request))]
+                         (let [projection (request-projection request)]
                            (source-producer?
                             projection selected
                             [(render-invocation-argument projection request

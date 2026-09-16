@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, render, class/p1, schema-projection]
 ---
@@ -51,3 +51,28 @@ surface: render-selection
 
 Found by the `sci-pull` lane, 2026-09-16; see
 [its landing note](../../prds/steward-platform/research/sci-pull-restart-sentence-2026-09-16.md).
+
+## Resolved 2026-09-16 — `seon.render/request-projection`
+
+Selection now derives its projection at one place,
+`seon.render/request-projection` (`src/seon/render.clj:70`), in the order
+`seon.db` reads already use: the projection carried by the request's database
+value, then a projection supplied on the request, then — only when neither is
+present — the acquired SCI context's. The docstring states that order. Every
+selection seam that holds the request calls it; `call-cache-evidence` and
+`retained-program-current?` keep reading the ctx, because they ask whether a
+retained call still matches the CONTEXT, not what the rendered value declares.
+
+The helper is total, so the `some->` ctx guard `project-node*` needed for
+ctx-less floor renders dissolved into it.
+
+Acceptance met by
+`test/seon/render_simplification_test.clj/selection-asks-the-handed-database-value-s-projection`:
+one entity, one ctx, two database values carrying projections that differ in
+exactly one declared pair, two different selections
+(`seon.plan/render-item-ai` vs the floor), and the ctx still declaring the
+pair afterwards. The second projection is derived through
+`seon.schema/matching-shapes-in`, not hand-rostered.
+
+Landing note:
+[render-selection-projection-2026-09-16](../../prds/steward-platform/research/render-selection-projection-2026-09-16.md).

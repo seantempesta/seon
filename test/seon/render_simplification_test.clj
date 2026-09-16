@@ -971,3 +971,52 @@
          (is (= 1 (count messages)))
          (is (boolean
               (some #(str/includes? % "renderer") messages))))))))
+
+(defn- without-declared-ai-pairs
+  "The same projection with every AI pair this value's shapes declare removed.
+
+  Derived from the projection's own matching shapes, never a hand-written
+  roster: whatever declares an AI pair for this value is what is removed."
+  [projection value]
+  (reduce (fn [acc shape-key]
+            (update-in acc [:seon.schema.projection/shape-rows shape-key]
+                       dissoc :seon.render/ai))
+          projection
+          (map :seon.schema/key (schema/matching-shapes-in projection value))))
+
+(deftest selection-asks-the-handed-database-value-s-projection
+  ;; §2.1: a database value carries the projection its rows were read under
+  ;; (src/seon/db.clj:141) and reads use it before any supplied one
+  ;; (src/seon/db.clj:950). Selection asked the SCI ctx alone, so the same
+  ;; value read from two worlds selected the same producer, and "what would
+  ;; this render as under projection P" could only be asked by mutating the
+  ;; shared ctx.
+  (support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           ctx (support/fork-cluster-ctx connection)
+           value {:my.plan.item/id "selection-projection"
+                  :my.plan.item/title "Probe"}
+           declared (db/carried-projection database)
+           undeclared (without-declared-ai-pairs declared value)
+           other-database (vary-meta database assoc
+                                     :seon.schema/projection undeclared)
+           request (assoc (render-request database ctx nil value)
+                          :seon.render/output :seon.render/ai)
+           select (fn [db] (:seon.render.selection/selected
+                            (selection (assoc request :seon.db/db db))))]
+       (is (some? declared)
+           "the fixture database value carries its projection")
+       (is (not= (get-in declared [:seon.schema.projection/shape-rows
+                                   :my.plan.item/item :seon.render/ai])
+                 (get-in undeclared [:seon.schema.projection/shape-rows
+                                     :my.plan.item/item :seon.render/ai]))
+           "the two projections differ in exactly one declared pair")
+       (is (= 'seon.plan/render-item-ai (select database)))
+       (is (= 'seon.render.value/render-ai (select other-database))
+           "the handed database value's projection decides, not the ctx")
+       (is (= 'seon.plan/render-item-ai
+              (get-in (kernel/context-projection ctx)
+                      [:seon.schema.projection/shape-rows
+                       :my.plan.item/item :seon.render/ai]))
+           "and the ctx still declares the pair — nothing was mutated")))))
