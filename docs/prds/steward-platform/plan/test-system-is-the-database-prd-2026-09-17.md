@@ -39,6 +39,33 @@ deletes. Read the parent PRD's §1b–§1d and §4b (lane rules) first, then
 
 ---
 
+## 0b. Reframing ruled 2026-09-17 14:30Z (owner): the cluster's JVM is the host
+
+- **The primary host for tests is the cluster's own JVM, in process**, through
+  the one run function with that cluster's custody: agent-authored tests run
+  in SCI, first-party tests run as the loaded code, overridden identities load
+  by provenance exactly as the agents' contexts do (parent PRD S3). An agent
+  writing a test in its REPL sees and runs it the same way the batch gate
+  will, because they are the same function on the same facts.
+- **Isolated worker JVMs are the exception**, for the tier that must not run
+  inside a live JVM — the platform / destructive / boot tier — and for gating a
+  checkout snapshot that is not the loaded state. Those tests run the
+  platform itself and need not be runnable for most updates agents make; they
+  run separately. When a worker runs, it acquires the named cluster's program
+  from that cluster's facts by provenance, not from files alone.
+- **One base code for the platform is an accepted limitation for now:** the
+  platform tier runs the checkout snapshot's `src` and `test`; agents' work
+  lives as program facts and reaches the platform's own source only through
+  the gated write-back (parent PRD S5).
+- Consequences for the stages: stage 2's resolution is by identity from facts
+  on both hosts (already stated); stage 3's claims are for the in-process
+  host first (an in-process executor is a process record too), and the
+  isolated-worker custody question reduces to the destructive tier, where an
+  immutable snapshot is the right answer because those tests destroy what
+  they run on. The stage-0 review's two amendments stand (counts on the
+  member; report entities only for failures and errors, keyed by signature;
+  the platform marker with a reason).
+
 ## 1. Principles that decide every design question below
 
 P1. **One function per concern, called from both hosts.** Selection,
