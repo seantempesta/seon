@@ -1,11 +1,16 @@
 ---
 type: research
-status: decision-required
+status: implemented
 date: 2026-09-16
 tags: [blob, storage, bounded-execution, exclusive-sweep]
 ---
 
 # Retention sweep: root inventory and deletion authority
+
+Owner selected option 1; implementation `5a10f5dfa` is complete. The final
+landing below supersedes the initial decision request and its pending status.
+
+## Initial investigation, before the owner decision
 
 The defect is confirmed on default PID 53378. No production change has been
 made. The proposed move of reference derivation outside the sweep permit is
@@ -155,7 +160,7 @@ interrupt a sweep already running; allow that invocation to settle first.
    [:seon.schedule/id "root/maintenance/blob-retention-schedule"]]])
 ```
 
-This transaction is provided, **not executed**. No stop, refork, restart, root
+At the investigation checkpoint this transaction was provided, **not executed**. No stop, refork, restart, root
 reset, or task mutation was performed by this lane.
 
 ## Verification boundary and follow-up regression
@@ -197,3 +202,156 @@ it preserves executable evidence as required by AGENTS.md §4.
 | `docs/seon/issues/blob-retention-sweep-starves-every-roster-writer.md` | 5553 |
 | `docs/prds/context-generation/research/retention_sweep_probe_2026_09_16.clj` | 2550 |
 | `tmp/orchestrator/gate-requests/retention-sweep.txt` | 197 |
+
+## Final landing — option 1, 2026-09-16
+
+Implementation commit **`5a10f5dfa`** removes automatic byte-budget retention.
+The owner explicitly chose the existing reachability collector and accepted
+loss of oldest-first byte-budget enforcement. No root catalog, new GC path,
+compatibility shim, dependency modification, or replacement timer was added.
+
+Deleted `src/seon/blob/retention.clj`, its test namespace, its schema resource,
+and `resources/seon/schemas/seon.config.blob.edn`. Removed the dial/default,
+minute schedule seed, and unused handler-request key. Kept `seon.blob.edn`
+and `src/seon/blob.clj` unchanged. The remaining weekly compact task retains
+`seon.operator/collect!` → `registry/collect!` → `datahike.api/gc-storage`,
+with schema-derived historical/current blob references extending the mark.
+
+The requested recursive reference scan over `src test resources config
+ docs/seon/architecture AGENTS.md .agents .claude script bin` returned **zero
+matches** for `blob\.retention|blob/max-bytes|blob-retention`.
+The implementation diff is **31 insertions / 177 deletions**, seven files.
+
+### Default retirement and live before/after
+
+Executed the exact retirement transaction in the earlier section through
+`seon.db/transact!` and `(seon.operator/connection "default")`. The transaction
+succeeded; a following attempt to turn a Datom into a vector threw in the
+probe's reporting code. A separate pull verified entity 43303 retained its
+identity, owner, and function ref but **no task-to-schedule link**. Root's
+active schedule query returned exactly the five remaining tasks, including
+weekly compact. This preserves prior firing evidence instead of retracting
+history. The schedule entity can remain inert without an attached task.
+
+The [executable removal proof](retention_sweep_removal_proof_2026_09_16.clj)
+records the transaction, bounded sample, and in-process test forms.
+
+| Live default PID 53378 | Before | After |
+|---|---:|---:|
+| Observation duration | 60,422.284833 ms | 90,360.562125 ms |
+| Admitted samples | 4 / 119 | 178 / 178 |
+| Gate open | **3.3613445%** | **100%** |
+| Sweep-in-progress samples | 115 | 0 |
+| Retention firing count across after interval | — | **51 → 51** |
+| Scheduler calls to `konserve.core/keys` across after interval | — | **0** |
+
+Sampling began after a nonqueuing permit probe confirmed the earlier sweep
+had released. It used `try-reachability-permit!` in blob mode and immediately
+released every admitted permit. A temporary transparent wrapper counted
+`k/keys` invocations with a `seon.schedule$` JVM stack frame; it delegated all
+calls unchanged and restored the original Var root in `finally`. This is
+finite live observation, not a promise that weekly native GC never holds the
+gate. The old 70.308-second retention walk no longer has an execution path;
+there is no replacement `reclaim!` to time.
+
+`config/default.edn` no longer provides the dial. Clusters newly forked or
+reforked from the resulting publication have neither a retention seed nor a
+live byte-budget declaration/default. Other existing sovereign clusters were
+not changed or reforked by this lane; they require the same retirement
+transaction or the orchestrator's refork. Default was updated in place and
+never stopped, restarted, or reforked.
+
+### REPL and test evidence
+
+Before editing source, evaluated the portfolio without the removed task and
+`execution-context` without the removed key in the live JVM. A representative
+`execution-context` call returned the ordinary operator/config request without
+the byte dial; the portfolio contained five tasks. Evaluated the new class
+regression through `seon.test`'s loader and ran it before editing its file.
+The first attempted test form used the fixture as a macro; corrected it to
+its real `(with-database (fn [connection] ...))` signature before any test run.
+
+Every recorded test below used the canonical entry point, from a future so
+an MCP request timeout could not interrupt fixture-base initialization:
+
+```clojure
+(seon.test/run (#'seon.test/resolve-test 'namespace/test-name)
+               (seon.operator/connection "default"))
+```
+
+| Test / stage | Pass | Fail | Error | Stored run entity |
+|---|---:|---:|---:|---:|
+| `seon.schedule-test/root-maintenance-seed-is-complete-and-has-no-minute-task`, before file edit | 6 | 0 | 0 | 52273 |
+| Same test, exact edited source form re-evaluated through the test loader | 6 | 0 | 0 | 53851 |
+| Same test, full namespace reload after adoption | 6 | 0 | 0 | 53854 |
+| `seon.schedule-test/one-nominal-fire-calls-the-handler-once-without-a-turn`, after adoption | 12 | 0 | 0 | 53855 |
+| `seon.cluster.registry-test/blob-lifetime-follows-schema-derived-history-reachability` | 2 | 0 | 0 | 53849 |
+| `seon.cluster.registry-test/non-temporal-collection-marks-current-blob-references` | 1 | 0 | 0 | 53850 |
+
+The class regression asserts nonempty declared tasks, exact equality between
+seeded database rows and declarations (including function, cron and zone),
+absence of an every-minute task, continued native collection, and idempotent
+seeding. It uses `test-support/with-database`, the canonical populated fixture.
+The existing registry tests use real file stores: historical references keep
+bytes alive until their last referencing branch is retired; current references
+keep blobs alive when history is disabled. Neither regression was rewritten.
+
+The final full namespace reload was
+`(#'seon.test/with-test-loader #(require 'seon.schedule-test :reload))`;
+registry tests were likewise reloaded through the same loader. The final four
+unique tests passed **21 assertions / 0 failures / 0 errors**. No test JVM,
+`bin/test`, or `bin/test-fast` was launched. The hook's automatic selector
+reported zero selected tests; that was not counted as proof.
+
+### Adoption, checks, and exact boundary
+
+An initial whole-namespace reload encountered the old config contract still
+requiring the removed key. During that window, the changed test and the two
+changed schedule forms were read from their exact files and re-evaluated
+through the appropriate existing namespaces/loader. That was a hot-Var proof,
+not a claim of converged adoption.
+
+The first queued hook reported operator exit 124. Explicit
+`bin/seon init --dev default --changed src/seon/schedule.clj` waited behind an
+existing publication's lifecycle lock (last observed wait 102,541 ms), then
+exited **0**, completing schema, program, loaded-definition, SCI, and JVM
+instrumentation adoption. No foreign process/session/file was operated.
+Published head and default's adopted source both became
+**`6aaa25da-35e2-5a96-892d-cf6554f5ce68`**. The default database then reported
+no schema form for the removed dial, no `:seon.fn/source` for the removed
+reclaimer, five active root tasks, and no schedule link on the retired task.
+The post-adoption test namespace reload completed and the tests passed.
+**No RESET NEEDED.**
+
+`clj-kondo` over schedule, its test, and the removal proof: **0 errors,
+0 warnings**, 51 ms. `git diff --check` passed. The repository-wide Markdown
+hook still reports the previously recorded unrelated citation errors; this
+lane did not edit their owners. The orchestrator's batched gate is pending;
+`tmp/orchestrator/gate-requests/retention-sweep.txt` contains the four existing
+namespaces `seon.schedule-test`, `seon.blob-test`,
+`seon.cluster.registry-test`, `seon.dev.fresh-operator-test`, plus `platform`.
+The deleted retention test namespace is not requested.
+
+Extra paths beyond the initial exclusive list: `config/default.edn` and the
+config schema deletion were explicitly authorized by the option-1 decision;
+the removal proof preserves executable evidence; the issue moved into
+`docs/seon/issues/archive/` under the issue lifecycle rule. Protected paths
+were left untouched. The implementation commit and this evidence are separate
+path-limited commits. All lane futures completed; temporary probe Vars were
+removed and the key-enumeration wrapper restored. The operator command exited;
+no scratch cluster root, worktree, or extra JVM was created. Fixture stores
+were released and cleaned by their tests.
+
+### Final file bytes (2026-09-16)
+
+| File | Bytes after removal |
+|---|---:|
+| `config/default.edn` | 33183 |
+| `src/seon/schedule.clj` | 33930 |
+| `test/seon/schedule_test.clj` | 19475 |
+| `src/seon/blob/retention.clj` | deleted |
+| `test/seon/blob/retention_test.clj` | deleted |
+| `resources/seon/schemas/seon.blob.retention.edn` | deleted |
+| `resources/seon/schemas/seon.config.blob.edn` | deleted |
+| `docs/prds/context-generation/research/retention_sweep_removal_proof_2026_09_16.clj` | 3201 |
+| `docs/seon/issues/archive/blob-retention-sweep-starves-every-roster-writer.md` | 6714 |

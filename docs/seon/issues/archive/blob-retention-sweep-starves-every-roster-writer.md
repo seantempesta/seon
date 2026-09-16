@@ -1,11 +1,30 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, storage, blob-storage, store-perf, bounded-execution, exclusive-sweep, wave/exclusive-sweep, wave/store-perf]
 ---
 
 # The once-a-minute blob retention sweep starves every roster writer
+
+Resolved by `5a10f5dfa` (2026-09-16), owner-selected option 1: delete the
+automatic byte-budget retention mechanism and retain the existing native
+reachability GC. The source/schema/config/test path and minute seed are gone;
+default's existing task-to-schedule link was retracted through `seon.db`.
+The weekly `root/maintenance/compact` task still calls `seon.operator/collect!`.
+
+Live default PID 53378: gate admission rose from 4/119 (3.36%) to 178/178
+(100%) over 90,360.562125 ms; retention fires stayed 51 → 51 and the scheduler
+called `konserve.core/keys` zero times. Post-adoption seed and ordinary-firing
+tests passed 18 assertions; existing historical/current blob GC tests passed
+3 assertions. The orchestrator gate remains requested, not claimed green.
+Native whole-store GC still holds its own sweep permit during deliberate or
+weekly maintenance; this resolution removes the recurring retention cause,
+not the dependency's general permit-wait semantics.
+
+Full [landing and exact proof](../../../prds/context-generation/research/retention-sweep-2026-09-16.md).
+
+The sections below preserve the original incident and pre-decision evidence.
 
 ## Problem
 
@@ -110,7 +129,7 @@ retired, while physical bytes remain. Datahike already owns whole-store GC,
 but its Konserve sweep also enumerates keys and does not enforce this byte
 budget. No production change or schedule retirement was made.
 
-The [decision and exact live evidence](../../prds/context-generation/research/retention-sweep-2026-09-16.md)
+The [decision and exact live evidence](../../../prds/context-generation/research/retention-sweep-2026-09-16.md)
 record three options under the AGENTS.md §2.5 cross-owner design gate.
 The issue remains open. Acceptance for a query-based replacement must include
 complete root inventory after branch retirement, zero enumeration/permit under
