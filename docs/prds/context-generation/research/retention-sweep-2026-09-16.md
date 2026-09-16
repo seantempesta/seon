@@ -355,3 +355,58 @@ were released and cleaned by their tests.
 | `resources/seon/schemas/seon.config.blob.edn` | deleted |
 | `docs/prds/context-generation/research/retention_sweep_removal_proof_2026_09_16.clj` | 3201 |
 | `docs/seon/issues/archive/blob-retention-sweep-starves-every-roster-writer.md` | 6714 |
+
+## Batch 30 follow-up — 2026-09-16
+
+The orchestrator reports cold `seon.schedule-test`, `seon.blob-test`, and
+`seon.cluster.registry-test` green, and platform green with results recorded.
+The named gate actually snapshotted `d2cf09d1a`, according to
+`tmp/orchestrator/gate-results/batch-30/named.md` (launch HEAD was
+`56f0a4ca8`); both include retention removal `5a10f5dfa`. Retained root:
+`tmp/test-runs/run.bI3xVy`. The operator lifecycle test returned false at
+lines 1145 and 1160. Its second assertion compares adoption commit IDs,
+not config maps.
+
+**Verified independent cause; stop boundary reached.** Both exact assertion
+forms read raw `@connection` through `seon.db/pull`. On default PID 53378,
+MCP JVM session `retention-sweep`, this returns a flat
+`:seon.schema/missing-projection` error, not an entity. Selecting expected
+keys from that error gives **0 keys versus 77 expected**. Reading a source
+commit ID from the same error gives nil. Both raw-pull forms and the same
+projection refusal exist in `5a10f5dfa^`; the retention commit changed none
+of those owners. No production code or assertion was changed.
+
+Holding the `[:*]` selector unchanged and using `(seon.db/db connection)`
+returns the stored entity. Its exact desired-versus-stored diff is:
+
+```clojure
+{:seon.config/applied-manifest-digest
+ {:expected "d86c39ca18732e5e5c0299366dbeabfcb9e41102a0f138668b07c0c1d777380e"
+  :actual   "6a15ad6347a09296721cc97477ebcb47017509776cd3f25324e12863fb1b6d6a"}}
+```
+
+All **76 other desired keys match**. The removed dial is absent from the
+compiler's desired row. Recomputing the digest of current effective config
+with only `:seon.config.blob/max-bytes 536870912` restored produces exactly
+`6a15ad6347a09296721cc97477ebcb47017509776cd3f25324e12863fb1b6d6a`.
+Thus default's recorded digest is from its pre-removal config application;
+this lane did not config-apply or otherwise mutate its config. That expected
+live historical difference is not evidence that fresh `config apply` loses
+an attribute. The compiler and `apply-compiled!` still construct and reconcile
+the entire desired row (`src/seon/config.clj:398`, `:454`).
+
+For completeness, default's correctly read adopted commit was
+`6aaa2969-773b-581f-97c0-4c773523c0a7` while the published head was
+`6aaa2c37-2e5e-5207-a259-4160de394da8`. Concurrent publication means the
+corrected adoption comparison also differed at that observation. This is a
+boundary on inference: the retained cold root was not reopened, so its
+underlying config/commit states beyond the reproduced raw-pull failure are
+not claimed. The stop instruction takes precedence over rerunning the
+110-second test or repairing a foreign owner.
+
+Filed [the separate operator proof issue](../../../seon/issues/fresh-operator-config-proof-pulls-an-unprojected-database.md).
+The [read-only probe](retention_batch30_probe_2026_09_16.clj) preserves both
+map reads and the digest reconstruction. No test JVM or in-process test
+was launched in this follow-up. The gate request retains the existing
+namespaces and records the batch-30 status and separate red. All protected
+files and unrelated issue-schema edits were preserved.
