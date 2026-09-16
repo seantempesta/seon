@@ -52,6 +52,7 @@
             [seon.render :as render]
             [seon.render.data :as render.data]
             [seon.print :as print]
+            [seon.program :as program]
             [seon.render.value :as render.value]
             [seon.schedule :as schedule]
             [seon.sci.admit :as admit]
@@ -1949,6 +1950,24 @@
       (refused! "Development acquisition could not record a row fault." failure))
     result))
 
+(def ^:private adoption-identity-attribute?
+  "Declaration identity attributes the adoption record names.
+
+  A `:seon.fn.file/path` row is a file digest and a `:seon.lint/id` row is an
+  analyzer finding; neither is a declaration a test can reach, and the file is
+  already recorded as an adoption input. Excluding them here keeps
+  `:seon.test/adoption-identities` a set of real declaration refs."
+  #{:seon.ns/name :seon.fn/sym :seon.schema/key :seon.test/sym})
+
+(defn- adoption-identities
+  "Declaration identities among `identities`, in admission order.
+
+  An identity a row does not carry is absent, never a nil member: the
+  adoption record is a set of refs, and `#{nil}` names nothing a later check
+  can resolve."
+  [identities]
+  (into [] (filter (comp adoption-identity-attribute? first)) identities))
+
 (defn- development-source-refresh!
   [held-store instance before-publication published changed-paths]
   (let [connection (:seon.boot/cluster-connection instance)
@@ -1979,24 +1998,23 @@
                      (= prior-commit (:seon.source/commit-id before-publication)))
         _ (report-source-progress! "development program reconciliation")
         changed-identities
-        (if scalar?
-          (do
-            (when (seq scalar-rows)
-              (require-committed!
-               (db/transact! connection {:tx-data scalar-rows})
-               {:seon.boot/population :seon.fn/population}))
-            (mapv (fn [row]
-                    (some (fn [attribute]
-                            (when-let [entry (find row attribute)]
-                              [attribute (val entry)]))
-                          [:seon.ns/name :seon.fn/sym :seon.test/sym]))
-                  scalar-rows))
-          (:seon.program/identities
-           (seon.fn/index!
-            {:seon.db/connection connection
-             :seon.source/database published-database
-             :seon.source/previous-database previous-database}
-            *source-progress!*)))
+        (adoption-identities
+         (if scalar?
+           (do
+             (when (seq scalar-rows)
+               (require-committed!
+                (db/transact! connection {:tx-data scalar-rows})
+                {:seon.boot/population :seon.fn/population}))
+             ;; `program/row-identity` is the one identity derivation: a
+             ;; per-call roster of identity attributes reads every row it
+             ;; does not list — a file-digest row, a lint finding — as nil.
+             (into [] (keep program/row-identity) scalar-rows))
+           (:seon.program/identities
+            (seon.fn/index!
+             {:seon.db/connection connection
+              :seon.source/database published-database
+              :seon.source/previous-database previous-database}
+             *source-progress!*))))
         _ (require-committed!
            ((requiring-resolve 'seon.issue/adopt!) connection published-database)
            {:seon.boot/population :seon.issue/rows})
