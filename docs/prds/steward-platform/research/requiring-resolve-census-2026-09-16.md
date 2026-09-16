@@ -346,3 +346,43 @@ their classes; the table above carries the row for each.
 | `src/seon/cluster.clj` | 1 | 1×d (`seon.issue/adopt!` — recheck after the `seon.plan` mirror is dissolved) |
 | `src/seon/schema/datahike.clj` | 1 | 1×d |
 | `src/seon/schema/edn.clj`, `src/seon/sci/eval.clj`, `src/seon/schedule.clj` | 1 each | e (legitimate) |
+
+---
+
+## Second pass — three more namespaces, after their holders landed
+
+`seon.schema`, `seon.program` and `seon.test.runner` were held at the first
+pass and free at the second. With them, the lane closed every actionable site
+outside a held file.
+
+| namespace | what changed |
+|---|---|
+| `seon.program` | `seon.schema.edn` required on the CLJ side (a `#?(:clj …)` require, since the two uses already sat in a `#?(:clj …)` branch); 2 sites |
+| `seon.schema` | `clojure.core.reducers` required; the `schema.edn`, `seon.error` and two `schema.datahike` sites resolve once; the 3 dynamic sites stay |
+| `seon.test.runner` | `seon.fn`, `seon.instrument`, `seon.render`, `seon.schema.edn` and `seon.test.arm` required (12 sites); `cluster.source` was already required; the 4 `seon.cluster` sites resolve once; the 3 `seon.test-support` sites and the `seon.fresh-operator` site are commented late loads |
+| `seon.test.arm` | `arm-contracts!` and `initialize-contracts!` made public |
+
+### A privacy bypass the census did not predict
+
+`seon.test.runner` and `seon.test.fast` both reached
+`seon.test.arm/initialize-contracts!` **past its privacy** — the runner through
+`requiring-resolve`, `fast` through a var-quote (`src/seon/test/fast.clj:29`),
+and `test/seon/test/runner_test.clj:304` through a var-quote as well.
+`requiring-resolve` ignores `^:private`, so the dodge hid the fact that a
+private function had three callers in other namespaces. Replacing it with a
+require surfaced it as a kondo error, which is the point: **a
+`requiring-resolve` across namespaces also silently launders privacy.** Both
+entry points are now public, which is what three cross-namespace callers mean.
+
+## Final inventory
+
+`rg -c requiring-resolve src/`: **147 → 88** text hits. Of the 88: **40 are
+`delay`-held definitions**, 12 are prose, 2 are docstring/comment mentions, and
+**34 lines remain live**, broken down as
+
+- **18 class (e)** — a symbol carried as a fact or argument. Legitimate, untouched.
+- **6 class (c)** — `seon.test-support` (5) and `seon.fresh-operator` (1), each now carrying a comment naming the late load.
+- **8 still to do**, every one in a file another lane held: `src/seon/cluster.clj:2309`, `src/seon/schema/datahike.clj:14`, `src/seon/cluster/source.clj:508,567,569`, `src/seon/render/transcript.clj:1645,1659,1940`.
+
+**No per-call cross-namespace `requiring-resolve` survives in any file this
+lane could touch.**
