@@ -19,6 +19,57 @@
   {:seon.error/kind ::unknown :seon.test/unknown (str input)
    :seon.error/message message :seon.test/next-tier :none})
 
+(defn changed-since-green
+  "Functions in the recorded tested closure with source/spec datoms after its
+  last green result. Includes retractions. Missing history or closure evidence
+  is unknown. This names changed dependencies, not proof of causation."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.test/sym]
+                  [:or [:vector [:map [:db/id :int] [:seon.fn/sym :seon.fn/sym]]]
+                   :seon.error/value]]}
+  [database test-symbol]
+  (let [row (db/pull database [:db/id {:seon.test/reach [:db/id]}]
+                     [:seon.test/sym test-symbol])]
+    (cond
+      (:seon.error/kind row) row
+      (not (:db/id row)) (unknown test-symbol "The test has no recorded identity.")
+      (not (seq (:seon.test/reach row)))
+      (unknown test-symbol "The test has no retained function closure evidence.")
+      :else
+      (let [history (db/history database)
+            events (db/q '[:find ?a ?v ?t ?added
+                           :in $ ?e [?a ...]
+                           :where [?e ?a ?v ?t ?added]]
+                         history (:db/id row)
+                         [:seon.test/run :seon.test/pass-count
+                          :seon.test/fail-count :seon.test/error-count])]
+        (if (:seon.error/kind events) events
+            (let [{green :seon.test/run-basis-t}
+                  (reduce
+                    (fn [state [t datoms]]
+                      (let [next-state
+                            (reduce (fn [s [a v _ added]]
+                                      (if added (assoc s a v) (dissoc s a)))
+                                    state (sort-by #(if (nth % 3) 1 0) datoms))]
+                        (cond-> next-state
+                          (and (some #(and (= :seon.test/run (first %)) (nth % 3)) datoms)
+                               (pos? (get next-state :seon.test/pass-count 0))
+                               (= 0 (:seon.test/fail-count next-state))
+                               (= 0 (:seon.test/error-count next-state)))
+                          (assoc :seon.test/run-basis-t t))))
+                    {} (sort-by first (group-by #(nth % 2) events)))]
+              (if-not green
+                (unknown test-symbol "No green result is retained in this test's history.")
+                (let [changed (db/q '[:find ?f ?sym
+                                      :in $ $since [?f ...] [?a ...]
+                                      :where [$since ?f ?a]
+                                             [?f :seon.fn/sym ?sym]]
+                                    database (db/since history green)
+                                    (mapv :db/id (:seon.test/reach row))
+                                    [:seon.fn/source :seon.fn/spec])]
+                  (if (:seon.error/kind changed) changed
+                      (mapv (fn [[e s]] {:db/id e :seon.fn/sym s})
+                            (sort-by second changed)))))))))))
+
 (defn- test-loader []
   (let [loader (DynamicClassLoader. (clojure.lang.RT/baseLoader))
         paths (get-in (edn/read-string (slurp "deps.edn")) [:aliases :test :extra-paths])]

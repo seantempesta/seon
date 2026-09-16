@@ -41,3 +41,19 @@ basis 536871483, branch `cluster-default`. MCP answered; the new reach
 attribute was absent. First hook publication met a concurrent head change
 (`:stale-branch-head`); a subsequent publication is queued. This is not a
 test verdict. Foreign issue-lane edits remain untouched.
+
+## Slice 2
+
+`seon.test/changed-since-green` derives run transitions from result-row
+history and counts in force at each transition. Repeated green runs need
+not reassert unchanged zero counts. Source and spec changes include
+retractions and are intersected with recorded function refs. Missing test,
+closure, or green history returns a typed unknown. The test pair offers the
+query in AI source and links the named functions in HTML.
+
+Publication exposed a prerequisite defect: `exact-replacement-tx` supplied
+an entire cardinality-many tuple set to Datahike's tuple validator before
+`retractAttribute` dispatch. It now supplies one existing value; the operation
+still retracts the complete attribute. Regression covers a three-tuple set
+replaced by one tuple on the canonical database. This extends owned files to
+`src/seon/program.cljc`; no protected file was edited.

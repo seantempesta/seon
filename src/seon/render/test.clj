@@ -2,6 +2,7 @@
   "Entity projections for tests; execution remains in seon.test."
   (:require [seon.db :as db]
             [seon.repl :as repl]
+            [seon.test :as test]
             [seon.render.route :as route]))
 
 (defn render-ai
@@ -22,6 +23,9 @@
          (pr-str (list 'seon.test/run (list 'var (symbol test-name)) 'conn)) "\n"
          ";; Check from my agent: "
          (pr-str (list 'my.test/check {:seon.test/changed [test-name]})) "\n"
+         ";; Changed dependencies since the last green result:\n"
+         (repl/source-text (list 'seon.test/changed-since-green
+                                (list 'seon.db/db) test-name)) "\n"
          (repl/source-text
            (list 'seon.db/pull
              (list 'quote
@@ -60,4 +64,14 @@
              :let [target (when (map? called) (:seon.fn/sym called))]
              :when target]
          [:li [:a {:href (route/path :seon.render.route/namespace
-                           {:namespace (namespace (symbol target))})} target]]))]))
+                           {:namespace (namespace (symbol target))})} target]]))
+     (when-let [database (:seon.db/db unit)]
+       (let [changed (test/changed-since-green database test-name)]
+         [:section [:h4 "Changed since last green"]
+          (if (:seon.error/kind changed)
+            [:p (:seon.error/message changed)]
+            (into [:ul]
+              (map (fn [{target :seon.fn/sym}]
+                     [:li [:a {:href (route/path :seon.render.route/namespace
+                                       {:namespace (namespace (symbol target))})}
+                           target]]) changed)))]))]))

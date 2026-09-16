@@ -858,8 +858,12 @@
      (concat
       (map (fn [attribute]
              ;; Datahike validates tuple values before dispatching retraction.
+             ;; Cardinality-many values are sets; validate one existing tuple,
+             ;; not the set. retractAttribute still removes the entire attribute.
              ;; The current row comes from the writer's transaction database.
-             [:db.fn/retractAttribute entity-id attribute (get current attribute)])
+             (let [value (get current attribute)]
+               [:db.fn/retractAttribute entity-id attribute
+                (if (set? value) (first value) value)]))
            (sort (filter #(contains? current %) changed)))
       [(assoc desired :db/id entity-id)]))))
 
