@@ -67,12 +67,7 @@
     :seon.schedule/expression "0 3 * * 0"
     :seon.schedule/zone-id "UTC"
     :seon.schedule.task/id "root/maintenance/compact"
-    :seon.fn/sym "seon.operator/collect!"}
-   {:seon.schedule/id "root/maintenance/blob-retention-schedule"
-    :seon.schedule/expression "* * * * *"
-    :seon.schedule/zone-id "UTC"
-    :seon.schedule.task/id "root/maintenance/blob-retention"
-    :seon.fn/sym "seon.blob.retention/reclaim!"}])
+    :seon.fn/sym "seon.operator/collect!"}])
 
 (defn root-maintenance-seed-call
   "Return initialization data for root's absent maintenance tasks.
@@ -529,8 +524,7 @@
          (or (get-in instance [:seon.boot/config :seon.boot/log-dir])
              (io/file managed-root "data" "clusters" cluster-name "logs")))]
     (merge (declared-maintenance-request-values projection effective)
-           {:seon.config.blob/max-bytes (:seon.config.blob/max-bytes effective)
-            :seon.boot/cluster-name cluster-name
+           {:seon.boot/cluster-name cluster-name
             :seon.operator/repository-root repository-root
             :seon.operator/managed-root managed-root
             :seon.boot/log-dir log-dir})))

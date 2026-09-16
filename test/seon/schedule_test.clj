@@ -17,6 +17,35 @@
   (:import [java.time Instant]
            [java.util Date]))
 
+(deftest root-maintenance-seed-is-complete-and-has-no-minute-task
+  (test-support/with-database
+   (fn [connection]
+     (let [declarations @#'schedule/root-maintenance-portfolio
+           result (db/transact! connection
+                                [{:seon.agent/id "root"}
+                                 [:db.fn/call #'schedule/root-maintenance-seed-call]])
+           database (db/db connection)
+           rows (db/q database
+                      '[:find ?task-id ?function ?expression ?zone
+                        :where
+                        [?owner :seon.agent/id "root"]
+                        [?task :seon.schedule.task/owner ?owner]
+                        [?task :seon.schedule.task/id ?task-id]
+                        [?task :seon.schedule.task/function ?f]
+                        [?f :seon.fn/sym ?function]
+                        [?task :seon.schedule.task/schedule ?s]
+                        [?s :seon.schedule/expression ?expression]
+                        [?s :seon.schedule/zone-id ?zone]])
+           expected (into #{} (map (juxt :seon.schedule.task/id :seon.fn/sym
+                                          :seon.schedule/expression :seon.schedule/zone-id))
+                          declarations)]
+       (is (not (:seon.error/kind result)) (pr-str result))
+       (is (seq expected))
+       (is (= expected (set rows)))
+       (is (every? #(not= "* * * * *" (nth % 2)) rows))
+       (is (some #(= "seon.operator/collect!" (second %)) rows))
+       (is (empty? (schedule/root-maintenance-seed-call database)))))))
+
 (defn- instant
   [text]
   (Date/from (Instant/parse text)))

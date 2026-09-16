@@ -3,10 +3,6 @@
  ; isolated scratch and eval roots may explicitly choose false at creation.
  :seon.config.db/keep-history? true
 
- ; Unit: physical binary blob bytes across the root's shared store.
- ; 2026-09-08: initial root footprint 0.35 GiB; owner chose 512 MiB.
- :seon.config.blob/max-bytes 536870912
-
  ; Unit: queued compute submissions.
  ; Provenance: core.async.flow alpha3 uses a fixed buffer of 10 per channel;
  ; the scheduling testbed preserved it because a full channel parks the
