@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, schema, render, test]
 ---
@@ -37,3 +37,33 @@ hot-reload staleness as a sufficient explanation for this reproduction.
 The schema file remains under another lane's uncommitted edit; no workaround,
 contract suppression or assertion weakening was applied. The turn-test landing
 note records the complete occurrence and the affected candidate run.
+
+## Resolved, 2026-09-16
+
+`resources/seon/schemas/seon.eval.edn` now declares the entity map's
+`:seon.eval/renderer-fn` as `[:or :seon.eval/renderer-fn [:map [:db/id :int]]]`.
+`seon.eval/of-agent` pulls with a default `[*]` selector, so a `:seon.db/ref`
+attribute arrives as `{:db/id n}`; the declaration that admits only an integer
+described a shape the reader never returns. The same map already declares
+`[:seon.cluster.eval/run [:map [:db/id :int]]]`, and
+`resources/seon/schemas/seon.test.edn:51` declares
+`[:seon.test/run {:optional true} [:or :seon.test/run [:map [:db/id :int]]]]`
+for the identical pulled-ref case. Narrowing the selector instead was rejected:
+`{:seon.eval/renderer-fn [:seon.fn/sym]}` still yields a map, so the entity map
+must admit the pulled shape either way, and forcing it would constrain every
+caller-supplied selector. `src/seon/eval.clj` is unchanged.
+
+Live falsification in the `default` JVM, armed, against real evaluations
+carrying `:seon.eval/renderer-fn`: the pulled row validates under the adopted
+declaration (`true`) and refuses under the previous bare-ref declaration
+(`false`), which is the exact recorded boundary.
+`seon.eval/of-agent` returned 11 rows with renderer-fn values `{:db/id 4630}`
+and siblings, and the var carries its `:seon.instrument/var` wrapper.
+
+In-process regressions on the canonical fixture, one at a time:
+`seon.render.faults-test/the-opening-derives-repair-reads-through-function-refs`
+recorded 13 passes, 0 failures, 0 errors (previously 2 passes, 1 error).
+`seon.issue-test/issue-worker-opening-links-its-issue` recorded 0 errors,
+6 passes and 2 failures asserting absent `:seon.eval/shown` on its opening
+evaluations. That contract error is gone; the residual failures are the turn
+and plan opening writer, not this reader, and were masked by the refusal.
