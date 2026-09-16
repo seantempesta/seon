@@ -572,3 +572,25 @@ The synthetic prelude in `ordered-forms-use-existing-context-and-original-row-nu
 named the retired `seon.run/complete`; it passed only through the stale
 shared kondo cache. Now `seon.turn/open?` (declared as an available-function
 row in the prelude); assertions untouched; 7/0/0 in-process. Batch 53.
+
+### 2026-09-16 22:40Z — the last two turn-test defects (`b166c4246` tests, `42661e5b0` owner, `316337e98` research)
+
+delimiter-repair: the fixture counted every evaluation (system turn 0 now
+stores the opening), read a retired attribute (the 4 instrument ERRORs), and
+matched two turns' replies; now agent-authored evaluations of the driven turn
+via `:seon.eval/shown`; 15/1/0 — the one remaining failure is the 300 ms
+bookkeeping bound at 6,162 ms, ATTRIBUTED: `seon.fn/gate-set`
+(`turn.clj:3171` → `fn.clj:1052`) is 5,976 ms of a 6,416 ms window (93%) —
+one recursive-rule Datalog query per installing definition (the earlier
+~100 ms warm figure was a turn whose definition did not install). Real
+defect, needs its own lane on `src/seon/fn.clj`.
+a-lost-model-call: the reason lives on the occurrence (test read fixed);
+the prompt half was two defects — the stand-in evaluator replaced generated
+reads with `1` (now real SCI) and `seon.error/faults-form` selected only
+`:seon.error/fn`-reachable errors so a provider fault (no function ref) was
+durable and invisible (absence-as-health class); now one `or-join` also
+selects errors whose occurrence names the agent; 5/0/0.
+Boundary: proofs on reloaded source before default's adoption converged;
+afterwards the in-process cluster-turn fixture stopped deriving work
+(`next-agent-work` → nil) with another lane's wake/agent edits dirty — theirs;
+the cold gate is the proof (batch 53).
