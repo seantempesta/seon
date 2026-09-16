@@ -599,3 +599,13 @@ Queue, in order:
   (known residual). Two Opus triage/fix agents: fn-test now (test-side,
   commit promptly before the reset); transcript + web-debug after the
   reset. fresh-operator-test 2 FAIL with the peer.
+- 18:50Z fn-test facets reds fixed (`7cfe02790`): one defect, not four —
+  `seon.program/shapes` is a HAND-MAINTAINED per-family list of owned
+  attributes and `canonical-row` select-keys every statically indexed
+  entity down to it, so the two new facets were silently stripped on the
+  static path while runtime admission carried them (absence as health;
+  derive-or-die violation). Six lines in program.cljc; all five facet
+  regressions green in-process. Issue filed:
+  `program-shapes-mirror-the-schema-row-maps-by-hand` (derive owned
+  attributes from the declared row map, or a drift checker). The edit was
+  written from the shell; adoption rides the reset.
