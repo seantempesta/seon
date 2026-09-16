@@ -132,6 +132,18 @@ adoption re-armed from the publication. Two disposable probe namespaces were
 created and removed. `seon.print` was never reloaded in `default`. `default`
 was not stopped, restarted or reforked.
 
+## In-process run, on `default`
+
+`(seon.test/run (#'seon.test/resolve-test 'seon.instrument-test/restoring-instrumentation-state-never-reinstalls-a-replaced-definition) connection {… :seon.test/remaining-ms 180000})`
+after reloading only `seon.instrument-test` through `#'seon.test/with-test-loader`:
+`{:seon.test/pass-count 7, :seon.test/failure-count 0, :seon.test/error-count 0}`.
+The two-argument arity's 20 s bound is not enough for this test — it arms the
+whole program once — and reported
+`never arrived for :seon.test/run within the declared :seon.test/remaining-ms bound of 20000 ms`
+on the first attempt. `seon.test-support` was NOT reloaded. Afterwards
+`default` reports 1083 armed Vars, `seon.db/transact!` still armed, and
+`(seon.print/sink? (seon.print/text-sink {:seon.print/width 72}))` true.
+
 ## Verification boundary
 
 In-process on `default` only: the one regression above, plus the two live
