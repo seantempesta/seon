@@ -32,3 +32,13 @@ the concurrent resolver if a lock or cache file shows one) from "cache is
 stale". The cheapest structural fix is a file lock around the checkout's
 `.cpcache` refresh so two resolutions never run concurrently on one checkout
 (`bin/test`'s dependency phase and `bin/seon`'s JVM launches share it).
+
+## Recurrence 2026-09-16 21:06Z (batch 106, HEAD `f42af6261`)
+
+Two gates launched in the same second (batches 106 and 107). Batch 106
+aborted in the freshness phase with `Error building classpath. class
+java.util.HashMap$Node cannot be cast to class java.util.HashMap$TreeNode`
+from `DefaultModelBuilder.importDependencyManagement`; batch 107 proceeded.
+Log retained at `tmp/orchestrator/gate-results/batch-106-deps-race.log`.
+The relaunch a minute later ran normally. Same class, same fix: one file
+lock around the checkout's classpath resolution.
