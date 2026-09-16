@@ -173,3 +173,21 @@ system authorship. The refusal test still requires error outcome, no provider
 call phase, closure, and the exact durable occurrence message. Candidate runs
 **44679 4/0/0**, **44680 4/0/0**; source-reloaded fresh-base runs
 **44692 4/0/0**, **44693 4/0/0**. No generated-source production path changed.
+
+## Streaming observation slice
+
+`streaming-writes-zero-datoms-test` now executes the real completion and waits
+for the render proc to observe its partial **before the provider returns**.
+The later wait observes terminal facts clearing that already-observed partial.
+This removes the race that asked to observe an in-flight state after settlement.
+The zero-stream-attribute census remains intact; saved completion and provider
+reply are now exact-value assertions instead of retired result storage and a
+nil-or-string check. Candidate **44682 10/0/0**, file-reloaded fresh-base
+**44707 10/0/0**. No render owner changed.
+
+The delimiter observation candidate still cannot land. Its original uncontracted
+`defn` is refused under the ruled contract requirement. A contracted fixture
+restores all semantic assertions, but run **44708 is 14/1/0**: measured
+six-form bookkeeping **7198.085124 ms**, against the unchanged **300 ms** bound.
+The candidate and bound are not weakened or committed. This is a named
+performance residual, not a green test or a parser correctness attribution.

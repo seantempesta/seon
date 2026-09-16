@@ -3301,7 +3301,7 @@
   ;; where the durable transact of the same value is 74-88 ms, so the
   ;; partials were paying ~7,000x to be facts nobody could need once
   ;; the reply had settled.
-  (with-cluster fake-evaluate
+  (with-cluster
     (fn [cluster]
       (let [stream-channel (async/chan (async/sliding-buffer 1))
             cluster (assoc cluster :seon.turn.loop/stream-channel
@@ -3311,7 +3311,13 @@
             requests (atom [])
             chunks ["(seon.run/complete " "\"streamed" " home\")"]]
         (try
-          (with-redefs [ai/complete (streaming-completer requests chunks)]
+          (with-redefs [ai/complete
+                        (let [complete (streaming-completer requests chunks)]
+                          (fn [request]
+                            (let [reply (complete request)]
+                              (is (= 1 (await-streaming! proc 1 [:streaming-observed]))
+                                  "the render proc observed the in-flight partial")
+                              reply)))]
             (let [basis-before (:max-tx @connection)
                   reports (drive! cluster 10)]
               (is (= [:open :call]
@@ -3348,29 +3354,21 @@
                                        [?e :seon.ai.attempt/ordinal _]]
                                      @connection)))
                     "ONE attempt row for the one paid call")
-                (is (some? (db/q '[:find ?edn . :where
-                                  [?e :seon.cluster.eval/result-edn ?edn]]
-                                @connection))
-                    "and the terminal receipt settled"))
+                (is (= (pr-str (seon.run/complete "streamed home"))
+                       (:seon.eval/shown (first (agent-evaluations @connection))))
+                    "the terminal evaluation saved the exact completion"))
 
               (testing "the settled reply's text equals the fold's final
                         snapshot text"
-                (let [reply (db/q '[:find ?text . :where
-                                   [?m :seon.message/content ?text]
-                                   [?m :seon.message/from _]]
-                                 @connection)]
-                  (is (or (nil? reply)
-                          (string? reply))
-                      "the reply is a durable fact or the run closed
-                       without one — either way the TEXT never came
-                       from the channel")))
+                (is (= (apply str chunks)
+                       (db/q '[:find ?text . :where
+                               [?turn :seon.turn/reply ?text]
+                               [?turn :seon.turn/attempts _]]
+                             @connection))
+                    "the provider's final reply is stored exactly"))
 
               (testing "the terminal fact is the stream terminal"
-                ;; Establish the causal predecessor first. Without this
-                ;; observation, an initial zero can satisfy the terminal wait
-                ;; before either the partial or terminal input is consumed.
-                (is (= 1 (await-streaming! proc 1 [:streaming-observed]))
-                    "the render proc observed the in-flight partial")
+                ;; The provider observed the partial before returning its reply.
                 ;; Production's one routing listener offers this
                 ;; payload-free interest on the terminal transaction.
                 ;; This turn fixture owns no listener, so publish the
