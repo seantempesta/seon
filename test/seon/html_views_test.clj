@@ -138,7 +138,19 @@
         (readable! (error/render-html fault) ["failed" "Connection lost"])
         (readable! (error/render-faults-html [fault] @connection) ["Faults (1)" "Connection lost"])
         (is (= (golden :fault) (error/render-ai fault)))
-        (is (= (golden :faults) (error/render-faults-ai {:seon.render/value [fault]})))))))
+        (is (= (golden :faults) (error/render-faults-ai {:seon.render/value [fault]})))
+        ;; THE PAIR RENDERS THE FACT, NOT ITS EDN. The frozen bytes were
+        ;; `(pr-str ...)` output until `render-ai` became prose over the
+        ;; error's own data (`src/seon/error.clj:1558`); the golden kept
+        ;; asserting the dump a value with NO declared pair would print.
+        ;; These two assert the behaviour the bytes stand for, so neither
+        ;; side can go stale silently again.
+        (is (not (str/includes? (error/render-ai fault) "#:seon.error{"))
+            "an AI pair renders the fact's data, never its attribute dump")
+        (is (str/includes?
+             (error/render-ai (assoc fault :seon.error/occurrence-count 3))
+             "Occurrences: 3")
+            "and it carries the recorded occurrence evidence")))))
 
 (deftest maintenance-pair-preserves-ai
   (support/with-database
