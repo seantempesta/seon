@@ -2160,3 +2160,41 @@
       (finally
         (when-let [process @child] (stop-process-tree! process))
         (test-support/delete-recursively! root)))))
+
+(deftest recording-refusal-notice-names-the-cluster-cause
+  ;; The class: a check that reports the absence of a readable reply as a kind
+  ;; and a fixed sentence. The gate line must carry the raiser's own data.
+  (let [operator-failure
+        (ex-info
+         (str "The cluster threw during the prepl operation: "
+              "clojure.lang.ExceptionInfo: record-results! refused completion")
+         {:seon.error/kind :seon.fresh-operator/prepl-exception
+          :seon.fresh-operator/cause "record-results! refused completion"
+          :seon.fresh-operator/exception-data
+          {:seon.error/kind :seon.instrument/contract-violated}
+          :seon.fresh-operator/form "(try (require 'seon.cluster.source)"
+          :seon.fresh-operator/events [{:tag :ret :exception true}]})
+        failure (#'runner/recording-failure
+                 (fn [] (throw operator-failure)))
+        notice (#'runner/recording-failure-notice "persistent results" failure)]
+    (testing "the refusal value keeps the raiser's kind and data"
+      (is (= :seon.fresh-operator/prepl-exception (:seon.error/kind failure)))
+      (is (= "record-results! refused completion"
+             (:seon.fresh-operator/cause (:seon.error/data failure))))
+      (is (= {:seon.error/kind :seon.instrument/contract-violated}
+             (:seon.fresh-operator/exception-data
+              (:seon.error/data failure)))))
+    (testing "the printed gate line names the cluster's cause"
+      (is (str/includes? notice "persistent results NOT recorded:") notice)
+      (is (str/includes? notice ":seon.fresh-operator/prepl-exception") notice)
+      (is (str/includes? notice "record-results! refused completion") notice)
+      (is (str/includes? notice ":seon.instrument/contract-violated") notice)
+      (is (not (str/includes? notice ":seon.fresh-operator/events"))
+          "the raw prepl events stay out of the one-line notice"))
+    (testing "a refusal with no data still prints kind and message"
+      (let [bare (#'runner/recording-failure
+                  (fn [] {:seon.error/kind ::probe
+                          :seon.error/message "bare"}))]
+        (is (= (str "bin/test: persistent results NOT recorded: "
+                    ":seon.test-runner-test/probe bare")
+               (#'runner/recording-failure-notice "persistent results" bare)))))))

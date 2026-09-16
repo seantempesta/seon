@@ -111,3 +111,100 @@ the failure with a synthetic completion, and I did not run `bin/test`.
    — that expectation is stale and is the fix's first casualty),
    `seon.test.runner-test`, `seon.cluster.source-test`, plus
    `bin/test --platform`.
+
+## The fix and what it now names (2026-09-16, fix lane)
+
+HEAD at the fix: branch `steward-platform`. REPL-driven against the live
+`default` (one bounded MCP evaluation at a time); no cluster was stopped,
+started, or reforked, and no test JVM gate was run.
+
+### 1. The operator refusal carries the cluster's cause
+
+`script/seon/fresh_operator.clj` — the `:exception` branch of `prepl-eval!`
+no longer raises a fixed sentence. The reply's `:val` is read AS DATA (it is
+the cluster's printed `Throwable->map`) by two new helpers,
+`prepl-exception-evidence` and `prepl-exception-message`, and the refusal
+now carries its own kind plus the evidence:
+
+```
+:seon.error/kind                        :seon.fresh-operator/prepl-exception
+:seon.fresh-operator/cause              the innermost ex-message
+:seon.fresh-operator/via                [{:type :message :at :data} …]
+:seon.fresh-operator/exception-data     the root ex-data
+:seon.fresh-operator/trace-frame        the first frame
+:seon.fresh-operator/form               the sent form, clipped to 200 chars
+:seon.fresh-operator/advertisement      the addressed transport
+:seon.fresh-operator/events             the whole prepl event sequence
+:seon.fresh-operator/unreadable-value   only when `:val` is not readable data
+```
+
+A reply whose `:val` is not readable (`#object[…]`) is named as such with the
+clipped raw value — never swallowed into silence. The `:seon.boot/refused`
+branch is unchanged.
+
+### 2. The gate line prints the cause
+
+`src/seon/test/runner.clj` — `recording-failure` keeps the raiser's ex-data
+under `:seon.error/data` (it previously kept only kind and ex-message), and
+the new `recording-failure-notice` composes the printed line from kind,
+message, and that data with the raw `:seon.fresh-operator/events` dropped
+(bounded at 4000 chars). Measured line for an operator refusal:
+
+```
+bin/test: persistent results NOT recorded: :seon.fresh-operator/prepl-exception
+The cluster threw during the prepl operation: java.lang.StackOverflowError: boom
+#:seon.fresh-operator{:cause "boom", :form "(try (require ...))"}
+```
+
+### 3. Live proof through the OPERATOR path against `default`
+
+`seon.fresh-operator/live-root-value!` with root `"."` — exactly the call
+`seon.test.runner/record-persistent-results!` makes — driven from a probe JVM
+(`tmp/recording-cause-read-probe.clj`), addressing the owner's live `default`:
+
+| sent form | message | kind | data carried |
+|---|---|---|---|
+| `#seon.probe/no-such-tag[1 2 3]` (READ failure) | `The cluster threw during the prepl operation: clojure.lang.LispReader$ReaderException: No reader function for tag seon.probe/no-such-tag` | `:seon.fresh-operator/prepl-exception` | cause, via type, clipped form |
+| `(throw (ex-info "…" {:seon.error/kind :seon.probe/outside-the-catch}))` | `… clojure.lang.ExceptionInfo: probe: recorder analogue threw outside the catch` | same | `:seon.fresh-operator/exception-data #:seon.error{:kind :seon.probe/outside-the-catch}` |
+
+Both previously printed only *"The cluster rejected the prepl operation."*
+
+### 4. The real cause was NOT reproduced — two hypotheses falsified
+
+- **The full recorder path is green through the operator.**
+  `record-persistent-results! "." run-result` for a one-test completion
+  (`seon.custody-stability-test/cross-cluster-write-isolation`, program
+  digest `6676d170…54740`, basis-t 536871363, branch `:current-src`)
+  committed in **2229 ms**, returning
+  `[#:seon.test{:pass-count 1 … :run #:db{:id 45694}}]`
+  (`tmp/recording-cause-operator-probe.clj`). A deliberately wrong
+  `:seon.test.run/branch` string came back as a contract-refusal VALUE in
+  149 ms, with `:exception` nil — confirming cluster-side refusals are
+  values, never prepl exceptions.
+- **The out-fn emit hypothesis (`src/seon/cluster.clj:478-495`) is refuted
+  for size.** Returned reference vectors of 1, 50, 400, 1200 and 4000 maps
+  through the same operator send: **183 B / 9.1 KB / 73 KB / 221 KB /
+  739 KB printed, 114-217 ms, every one returned complete and readable,
+  none windowed or blob-settled** (`tmp/recording-cause-emit-probe.clj`).
+  A large return value does not make the emit throw.
+- The archived gate logs carrying the sentence
+  (`tmp/orchestrator/*-stdout.log`) are GREEN runs of 15-16 tests — small
+  completions with no failure payloads — so neither completion size nor
+  failure values explain them either.
+
+Verification boundary: the failure remains unreproduced on demand. The next
+occurrence now prints the cluster's own cause, kind, ex-data and the sent
+form; that line is the evidence to act on, and no further guessing is
+warranted until it appears.
+
+### 5. Regressions (run in-process on `default`, no test JVM)
+
+`(seon.test/run (#'seon.test/resolve-test 'sym) (seon.operator/connection "default"))`
+after reloading the test namespaces through `seon.test`'s own loader:
+
+| test | result |
+|---|---|
+| `seon.dev.fresh-operator-test/prepl-exception-refusal-carries-the-cluster-cause` | 13 pass, 0 fail, 0 error |
+| `seon.dev.fresh-operator-test/unreadable-prepl-exception-value-is-named-not-swallowed` | 4 pass, 0 fail, 0 error |
+| `seon.dev.fresh-operator-test/eval-failure-falls-back-to-sigterm` (stale fixed-sentence expectation replaced) | 8 pass, 0 fail, 0 error |
+| `seon.test-runner-test/recording-refusal-notice-names-the-cluster-cause` | 9 pass, 0 fail, 0 error |

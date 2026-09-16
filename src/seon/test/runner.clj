@@ -2003,11 +2003,35 @@
                :seon.error/message
                "The recorder returned no committed result references."}))
     (catch Throwable failure
-      {:seon.error/kind
-       (or (:seon.error/kind (ex-data failure))
-           ::persistent-results-recording-failed)
-       :seon.error/message
-       (or (ex-message failure) (.getName (class failure)))})))
+      (let [data (ex-data failure)]
+        (cond-> {:seon.error/kind
+                 (or (:seon.error/kind data)
+                     ::persistent-results-recording-failed)
+                 :seon.error/message
+                 (or (ex-message failure) (.getName (class failure)))}
+          (seq data) (assoc :seon.error/data data))))))
+
+(defn- recording-failure-notice
+  "The gate line for a refused recording, carrying the cluster's own cause.
+
+  The refusal names what was missing: its kind, its message, and the data the
+  raiser attached — never a kind and a sentence with the evidence dropped."
+  [recording-label failure]
+  (let [cause
+        (when-let [data (not-empty
+                         (dissoc (:seon.error/data failure)
+                                 :seon.fresh-operator/events))]
+          (let [text (pr-str data)]
+            (if (> (count text) 4000)
+              (str (subs text 0 4000) "…")
+              text)))]
+    (str/join
+     " "
+     (remove nil?
+             [(str "bin/test: " recording-label " NOT recorded:")
+              (str (:seon.error/kind failure))
+              (:seon.error/message failure)
+              cause]))))
 
 (defn- print-skipped!
   [skipped]
@@ -2971,9 +2995,7 @@
     (flush)
     (let [failure (when record-results! (recording-failure record-results!))]
       (when failure
-        (println (str "bin/test: " recording-label " NOT recorded:")
-                 (:seon.error/kind failure)
-                 (:seon.error/message failure)))
+        (println (recording-failure-notice recording-label failure)))
       (when (and green? (nil? failure) (::digests bulk))
         (record-green-basis! selection-mode git-sha (::digests bulk)))
       (flush)

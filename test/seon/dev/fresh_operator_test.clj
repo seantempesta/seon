@@ -1715,6 +1715,109 @@
       (finally
         (delete-recursively! root)))))
 
+(def ^:private cluster-cause-message
+  "seon.cluster.source/record-results! refused completion at [:seon.test.runner/results 0]")
+
+(def ^:private cluster-throwable-map
+  "One cluster-side `Throwable->map`, exactly as `prepl` prints it into an
+  `:exception` reply's `:val`."
+  {:cause cluster-cause-message
+   :data {:seon.error/kind :seon.instrument/contract-violated
+          :seon.instrument/function 'seon.cluster.source/record-results!}
+   :via [{:type 'clojure.lang.ExceptionInfo
+          :message cluster-cause-message
+          :data {:seon.error/kind :seon.instrument/contract-violated
+                 :seon.instrument/function 'seon.cluster.source/record-results!}
+          :at ['seon.cluster.source$record_results_BANG_
+               'invokeStatic "source.clj" 369]}]
+   :trace [['seon.cluster.source$record_results_BANG_
+            'invokeStatic "source.clj" 369]]})
+
+(deftest prepl-exception-refusal-carries-the-cluster-cause
+  ;; The class: a diagnostic that reports the ABSENCE of a readable reply as a
+  ;; fixed sentence. The operator's refusal must name the cluster's own cause.
+  (let [server (ServerSocket.
+                0 1 (java.net.InetAddress/getLoopbackAddress))
+        sent (promise)
+        served
+        (future
+          (with-open [socket (.accept server)
+                      reader (io/reader socket)
+                      writer (io/writer socket)]
+            (deliver sent (.readLine ^java.io.BufferedReader reader))
+            (.write writer
+                    (str (pr-str {:tag :ret
+                                  :val (pr-str cluster-throwable-map)
+                                  :exception true})
+                         "\n"))
+            (.flush writer)))
+        advertisement {:seon.boot/cluster-name "cause-probe"
+                       :seon.boot/prepl-host "127.0.0.1"
+                       :seon.boot/prepl-port (.getLocalPort server)}
+        form (str "(seon.test.runner/commit-persistent-results! "
+                  (apply str (repeat 400 "x"))
+                  ")")]
+    (try
+      (let [{message :seon.dev.fresh-operator-test/message
+             data :seon.dev.fresh-operator-test/data}
+            (operator-private-outcome 'prepl-eval! advertisement form 20000)]
+        (testing "the refusal names the cluster's own ex-message"
+          (is (some? message))
+          (is (not= "The cluster rejected the prepl operation." message))
+          (is (str/includes? (str message) cluster-cause-message) message)
+          (is (str/includes? (str message) "clojure.lang.ExceptionInfo") message))
+        (testing "the refusal carries its own kind and the cluster's data"
+          (is (= :seon.fresh-operator/prepl-exception
+                 (:seon.error/kind data)))
+          (is (= cluster-cause-message (:seon.fresh-operator/cause data)))
+          (is (= {:seon.error/kind :seon.instrument/contract-violated
+                  :seon.instrument/function 'seon.cluster.source/record-results!}
+                 (:seon.fresh-operator/exception-data data)))
+          (is (= 'clojure.lang.ExceptionInfo
+                 (:type (first (:seon.fresh-operator/via data)))))
+          (is (= advertisement (:seon.fresh-operator/advertisement data)))
+          (is (seq (:seon.fresh-operator/events data))))
+        (testing "the sent form is carried, clipped, never dropped"
+          (is (= 201 (count (:seon.fresh-operator/form data))))
+          (is (str/starts-with?
+               (:seon.fresh-operator/form data)
+               "(seon.test.runner/commit-persistent-results!"))
+          (is (= form (deref sent 1000 ::timeout)))))
+      (finally
+        (.close server)
+        (try (deref served 1000 nil) (catch Throwable _ nil))))))
+
+(deftest unreadable-prepl-exception-value-is-named-not-swallowed
+  (let [server (ServerSocket.
+                0 1 (java.net.InetAddress/getLoopbackAddress))
+        served
+        (future
+          (with-open [socket (.accept server)
+                      reader (io/reader socket)
+                      writer (io/writer socket)]
+            (.readLine ^java.io.BufferedReader reader)
+            (.write writer
+                    (str (pr-str {:tag :ret
+                                  :val "#object[java.lang.Object 0x1 \"x\"]"
+                                  :exception true})
+                         "\n"))
+            (.flush writer)))
+        advertisement {:seon.boot/cluster-name "unreadable-probe"
+                       :seon.boot/prepl-host "127.0.0.1"
+                       :seon.boot/prepl-port (.getLocalPort server)}]
+    (try
+      (let [{message :seon.dev.fresh-operator-test/message
+             data :seon.dev.fresh-operator-test/data}
+            (operator-private-outcome 'prepl-eval! advertisement "(+ 1 1)" 20000)]
+        (is (str/includes? (str message) "no readable Throwable map") message)
+        (is (str/includes? (str message) "#object[java.lang.Object") message)
+        (is (= :seon.fresh-operator/prepl-exception (:seon.error/kind data)))
+        (is (= "#object[java.lang.Object 0x1 \"x\"]"
+               (:seon.fresh-operator/unreadable-value data))))
+      (finally
+        (.close server)
+        (try (deref served 1000 nil) (catch Throwable _ nil))))))
+
 (deftest eval-failure-falls-back-to-sigterm
   (let [root (fresh-root)
         name "eval-failure"
@@ -1732,7 +1835,7 @@
                     (let [form (.readLine ^java.io.BufferedReader reader)]
                       (.write writer
                               (str (pr-str {:tag :ret
-                                            :val "nil"
+                                            :val (pr-str cluster-throwable-map)
                                             :exception true})
                                    "\n"))
                       (.flush writer)
@@ -1770,10 +1873,14 @@
         (testing "the remote eval exception is a named, loud fallback"
           (is completed? "The operator exceeded twenty seconds.")
           (is (= 0 (when completed? (.exitValue process))) output)
+          (is (not (str/includes?
+                    output "The cluster rejected the prepl operation."))
+              output)
           (is (str/includes?
                output
                (str "! prepl unavailable "
-                    "(The cluster rejected the prepl operation.); "
+                    "(The cluster threw during the prepl operation: "
+                    "clojure.lang.ExceptionInfo: " cluster-cause-message "); "
                     "SIGTERM pid " (.pid child)
                     " affects shared-JVM clusters: " name))
               output)

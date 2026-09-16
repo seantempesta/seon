@@ -1545,6 +1545,42 @@
   [_root argument]
   (valid-name! (or argument "default")))
 
+(defn- clipped-form
+  [form]
+  (let [text (str form)]
+    (if (> (count text) 200)
+      (str (subs text 0 200) "…")
+      text)))
+
+(defn- prepl-exception-evidence
+  "Project a prepl `:exception` reply's printed `Throwable->map` as data.
+
+  The reply's `:val` is the cluster's own `Throwable->map`, printed. Read it
+  as data: the innermost `:cause`, the `:via` chain's types and messages, the
+  root `ex-data`, and the first trace frame are the only evidence that can
+  name why the cluster threw."
+  [failure]
+  (let [via (mapv #(select-keys % [:type :message :at :data]) (:via failure))]
+    (cond-> {}
+      (:cause failure) (assoc :seon.fresh-operator/cause (:cause failure))
+      (seq via) (assoc :seon.fresh-operator/via via)
+      (:data failure) (assoc :seon.fresh-operator/exception-data (:data failure))
+      (first (:trace failure))
+      (assoc :seon.fresh-operator/trace-frame (first (:trace failure))))))
+
+(defn- prepl-exception-message
+  [failure raw]
+  (let [outermost (first (:via failure))
+        cause (or (:cause failure) (:message outermost))
+        kind (:type outermost)]
+    (cond
+      cause (str "The cluster threw during the prepl operation: "
+                 (when kind (str kind ": ")) cause)
+      kind (str "The cluster threw during the prepl operation: " kind
+                " carried no message.")
+      :else (str "The cluster threw during the prepl operation and its reply "
+                 "carried no readable Throwable map: " (clipped-form raw)))))
+
 (defn- prepl-eval!
   ([advertisement form]
    (prepl-eval! advertisement form (operator-silence-backstop-ms {})))
@@ -1602,8 +1638,18 @@
                        (fail! (or (:seon.error/message data) (:cause failure)
                                   "The cluster refused the prepl operation.")
                               (:seon.boot/offense data))
-                       (fail! "The cluster rejected the prepl operation."
-                              {:seon.fresh-operator/events events}))))
+                       (fail!
+                        (prepl-exception-message failure (:val event))
+                        (merge
+                         {:seon.error/kind
+                          :seon.fresh-operator/prepl-exception
+                          :seon.fresh-operator/form (clipped-form form)
+                          :seon.fresh-operator/advertisement advertisement
+                          :seon.fresh-operator/events events}
+                         (prepl-exception-evidence failure)
+                         (when-not failure
+                           {:seon.fresh-operator/unreadable-value
+                            (clipped-form (:val event))}))))))
                  events)
 
                :else
