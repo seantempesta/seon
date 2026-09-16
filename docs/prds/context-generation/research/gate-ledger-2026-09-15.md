@@ -1001,3 +1001,26 @@ own schemas, and required-ness is checked on the entity's resulting state
 Reading (a) matches "adding is free, omitted keys are left unchanged"
 (CLAUDE.md §3, datahike skill). Not decided here; the admission owner and
 the owner rule.
+
+### 2026-09-16 07:10 — batch 68 boot-test triage: attribution corrected
+
+The dominant class (8 of 12 reds) was NOT `ccccea806` or `fe44a981b`:
+`seon.cluster/stop!`'s `:seon.boot/instance` contract demanded LIVE
+resources (the store connection, its flock, the turn-loop connection), so
+an already-stopped instance — exactly the value its documented idempotence
+exists for — was refused before the body. Latent since `2d2655922`, exposed
+when the gate armed contracts; `6215ff0bc` had relaxed one of the three
+members and left two. Fix `7f99fe695`: liveness is decided at the authority
+(Datahike at the transaction, the flock's own validity at release), never
+asserted as a shape; the store map references connection and lock objects
+structurally, widening only. `d427728d7`: a boot-test fixture wrote a config
+row no owner can mint (the digest) — rewritten as one `[:db/add …]` datom;
+the sovereign-steer expectation updated to the current words, but that test
+stays red on `:malli.core/invalid-schema` before any declaration comparison
+(blocker issue filed; suspects `a3cbcd9a8` `0b910eb69` `bb46455fb`). Not
+root-caused: boot-order index ordering, partial-clusters refusal,
+incremental-source-refresh, two timeouts. Live defect found in passing:
+`seon.render.transcript/render-ai` throws `ClassCastException` (String →
+Date) for agent root on default (blocker issue). Landing note:
+`batch-68-boot-test-reds-2026-09-16.md` (`868d7b992`). Batch 71 adds
+seon.cluster.store-test and seon.cluster-test.
