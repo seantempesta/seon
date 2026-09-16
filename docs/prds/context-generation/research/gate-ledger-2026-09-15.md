@@ -704,3 +704,20 @@ commit files/bytes/fsyncs, growth curve on scratch stores, GC dry-run) to
 bring three owner options. Second-order recorder waste (reaches re-derived,
 814 lookup-ref pulls, identical `:seon.test/reach` churn per run) queued for
 a runner.clj lane.
+
+### 2026-09-17 04:20Z — write floor REFUTED (`83d3e92a0`): growth, not latency
+
+`write-latency-vs-store-size-2026-09-17.md`: an empty-delta commit on the
+12 GB / 107k-key store costs 23–38 ms writing 1–2 keys; a clean store is
+flat 17–32 ms / 2 files from 4k to 800k datoms; APFS directory fsync is
+flat 8.6–11.1 ms. The 4–9 s samples were single commits flushing a large
+accumulated dirty-leaf set (473 files / 39 MB in one): branching factor
+4096 → ~300 KB leaves × 6 indexes × fsync per blob. GC is wired
+(`operator/collect!` → `registry/collect!`) but only on the weekly cron; the
+lane's intended dry run ran a REAL collection (Datahike's gc ignores
+`:dry-run?`) — 12,043 → 10,406 MB and still running. Three owner options in
+the page (footprint/key-ceiling signal → collect!; a per-commit bound that
+names the batch; narrower leaves or LMDB). `seon.fn/exact-source` threw
+IndexOutOfBounds again during a publication coincident with a live fn.clj
+edit — a typed "source changed during analysis" refusal is owed (queued
+after the gate-set-contract lane releases fn.clj).
