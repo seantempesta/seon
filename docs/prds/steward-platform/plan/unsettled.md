@@ -333,3 +333,14 @@ Queue, in order:
   `declaration-settlement-consumes-invalid-read-as-ref` (row-tx built
   retractions from a `q` refusal map). Adoption converged at
   `6aaa1292…`. Next Opus triage: generated-read-identities + attempt files.
+- 10:45Z R5 analysis-facets landed (`114344f23`): every clj-kondo facet on
+  costs 4.0 s for 332 inputs (already paid by linting); per-usage entities
+  REFUSED on measurement (124,557 usages ≈ +197 % datoms); aggregates on the
+  `:seon.fn` identity ≈ +16.6 %. `:seon.fn/writes` needs no new facet —
+  span-containment of keyword positions inside transact! call sites yields
+  2,620 (writer, attribute) refs across 524 writers vs the census's 178
+  approximation; discarded only because fn.clj collapses positions to sets.
+  Priced order: writes (3 h), call-arities (4 h; arity mismatch becomes a
+  query over 117k call sites), interop census (3 h), dispatch graph (2 h),
+  macro-calls + destructured keywords (3 h). Lane `analyzer-facets` (Opus,
+  items 1–2 first) queued for the next slot.
