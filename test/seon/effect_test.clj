@@ -1,6 +1,9 @@
 (ns seon.effect-test
   (:require [my.fs]
             [clojure.core.async :as async]
+            [clojure.edn :as edn]
+            [malli.core :as m]
+            [malli.generator :as mg]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [datahike.core :as datahike]
@@ -922,3 +925,49 @@
                                     :seon.fn/sym]))))
           (.delete (java.io.File. path))
           (.delete (.getParentFile (java.io.File. path))))))))
+
+(deftest every-capability-owner-accepts-its-own-request-at-the-door
+  ;; THE CLASS: a door that asks the wrong contract. `accepts-request?` is the
+  ;; only thing standing between an agent's request and a protected handler,
+  ;; and it decides by validating the request against the OWNER's declared
+  ;; input — the Var the caller passed, which takes exactly the request. Ask
+  ;; the HANDLER's contract instead and the answer is false for every
+  ;; capability there is, because a handler takes the request AND the
+  ;; effective config the executor hands it; ask nothing and every malformed
+  ;; request reaches the handler. Neither mistake shows up in one capability's
+  ;; own test, so the population is derived from `:seon.fn/capability-fn`
+  ;; facts and each request is GENERATED from that owner's own declared input
+  ;; schema: a capability declared tomorrow is covered on the day it declares.
+  (test-support/with-database
+    (fn [connection]
+      (let [database (db/db connection)
+            projection (db/carried-projection database)
+            registry (:seon.schema.projection/registry projection)
+            owners (db/q '[:find ?symbol ?spec
+                           :where
+                           [?owner :seon.fn/capability-fn _]
+                           [?owner :seon.fn/sym ?symbol]
+                           [?owner :seon.fn/spec ?spec]]
+                         database)
+            marked (db/q '[:find [?symbol ...]
+                           :where
+                           [?owner :seon.effect/capability _]
+                           [?owner :seon.fn/sym ?symbol]]
+                         database)]
+        (is (seq owners)
+            (str "no capability owner carries :seon.fn/capability-fn — this "
+                 "check would otherwise pass by examining nothing"))
+        (is (= (set marked) (set (map first owners)))
+            (str "the symbol and the ref must name the same population; a "
+                 "marked owner missing its ref is an indexer defect"))
+        (doseq [[owner-symbol spec] (sort-by first owners)]
+          (let [request-schema (second (second (edn/read-string spec)))
+                request (mg/generate
+                         (mg/generator (m/schema request-schema
+                                                 {:registry registry})
+                                       {:registry registry})
+                         {:seed 20260917 :size 4})]
+            (is (true? (#'effect/accepts-request? database
+                        (symbol owner-symbol) request))
+                (str owner-symbol " must accept a well-formed "
+                     request-schema " at the effect door"))))))))

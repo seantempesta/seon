@@ -441,3 +441,71 @@ cost a gate cycle.
 (the source-root lane holds uncommitted `src/seon/fn.clj` work in this tree)
 and `seon.cluster.turn-test/delimiter-repair-is-span-local-and-precedes-intent`
 (protected).
+
+---
+
+# The effect-door report, refuted — and the boundary finally closed
+
+## The door asks the OWNER, and every owner accepts
+
+`docs/seon/issues/the-effect-door-validates-a-one-argument-request-against-a-two-argument-owner.md`
+reports that `accepts-request?` can only ever answer false. Its measurement
+asks about `seon.web.jvm/fetch` and `seon.fs.jvm/read` — those are HANDLERS.
+The door never names a handler: `request*` derives `owner-sym` from the Var the
+caller passed (`seon.effect/owner-symbol`, `src/seon/effect.clj:164`) and a
+capability owner passes its own (`(effect/request! #'form! request)`,
+`src/my/edit.clj:59`). Every owner takes exactly one argument, so `[request]`
+IS its complete declared input contract.
+
+Measured live, `default` pid 88182:
+
+```clojure
+{:owner-arity-1   {my.web/fetch true, my.fs/read true, my.edit/exact! true}
+ :handler-arity-1 {seon.web.jvm/fetch false, seon.fs.jvm/read false}}
+```
+
+And across the whole population — the ten symbols carrying
+`:seon.fn/capability-fn`, each handed a request generated from its own declared
+input schema — the door answers **true for all ten**.
+
+**One line on the trials**: `my.edit/exact!` succeeded through the ordinary
+door because the door asked `my.edit/exact!`, a one-argument owner. No second
+path, no twin.
+
+**Attribution wrong twice**: `git log -S "function-accepts-in? projection
+owner-sym" -- src/seon/effect.clj` names `b80f78a7c` (2026-09-15), not
+`0e15593aa`, whose diff touches neither `accepts-request?` nor `owner-sym`; and
+the line it wrote is correct. The web tests' red therefore has another cause,
+still that lane's. The shape to check first is the one this lane hit a batch
+earlier: a fixture that seeds no compiled config row leaves the branch with no
+dials, and the resulting failure is unclassified.
+
+**The class is real even though the instance is not**, so it is now guarded:
+`seon.effect-test/every-capability-owner-accepts-its-own-request-at-the-door`
+derives the population from `:seon.fn/capability-fn`, cross-checks it against
+the `:seon.effect/capability` markers, generates each request from that owner's
+own schema, and refuses to pass by examining nothing.
+
+## The verification boundary is closed
+
+`default` pid 88182 realized its fixture base AFTER this lane's schema landed:
+`:seon.fn/capability-fn` is installed there with its ten holders. Every
+regression this lane wrote — including the three that were red in batch 46 —
+now runs IN PROCESS, one at a time on a daemon thread, with the run's
+provenance and a 100 s bound:
+
+| test | pass | fail | error |
+|---|---|---|---|
+| `seon.effect-test/every-capability-owner-accepts-its-own-request-at-the-door` | 12 | 0 | 0 |
+| `seon.effect-test/effect-request-lands-declared-attributes` | 7 | 0 | 0 |
+| `seon.effect-test/effect-refs-its-evaluation-and-handler` | 4 | 0 | 0 |
+| `seon.effect-test/detached-work-is-bounded-by-its-own-limit-config-then-the-form` | 11 | 0 | 0 |
+| `seon.edit-test/form-edit-records-its-span-in-utf8-bytes` | 6 | 0 | 0 |
+| `seon.edit-test/form-failures-never-fall-back-to-text` | 5 | 0 | 0 |
+| `seon.edit-test/form-edit-refs-the-program-entity-it-changed` | 12 | 0 | 0 |
+| `seon.edit-test/changed-programs-since-basis-is-a-query` | 3 | 0 | 0 |
+| `seon.edit-test/edit-refusals-keep-their-filesystem-evidence` | 2 | 0 | 0 |
+
+62 assertions, 0 failures, 0 errors. The batch-46 config-row repair and both
+batch-43 root-cause fixes are now proven by execution, not by argument. The
+cold gate remains the isolated proof.
