@@ -8,6 +8,9 @@ tags: [research, instrumentation, schema, class/n3]
 
 ## Result and boundary
 
+Arming implementation commit: 98b5f2afe. The selector and residual evidence
+are a separate coherent follow-up slice.
+
 The host arming owner now retains the canonical contract's transitive
 declaration definitions and a 64-character contract digest. It compares the
 captured definitions with the supplied projection before re-arming. The

@@ -67,3 +67,22 @@ recorded 13 passes, 0 failures, 0 errors (previously 2 passes, 1 error).
 6 passes and 2 failures asserting absent `:seon.eval/shown` on its opening
 evaluations. That contract error is gone; the residual failures are the turn
 and plan opening writer, not this reader, and were masked by the refusal.
+
+## Attribution correction — 2026-09-16, referenced-schema arming lane
+
+The later web-debug refusal with the same leading integer message is a
+different shape. Its selector asks for only :seon.fn/sym inside renderer-fn,
+so it returns {:seon.fn/sym "seon.bootstrap/render-help-ai"}, without :db/id.
+The current widened union correctly refuses that value: Malli also reports
+the missing :db/id key. Captured live, carried, fixture and resolved forms
+all contain the widened union. This falsifies stale-wrapper attribution for
+that particular failure. The ledger selector now retains :db/id.
+
+The reader's direct default probe returned ten evaluations, including three
+pulled renderer refs, under its host wrapper. The renderer-reference regression
+is 11/0/0. Web-debug advances from 3/0/1 to 88/7/0; its remaining
+[fixture and budget failures](../web-debug-fixture-transactions-and-budget-expectations-fail.md)
+are separate. The generic referenced-declaration arming defect was independently
+repaired and verified with an eight-assertion canonical class regression.
+Exact results and the pending adoption/gate boundary are in the
+[arming landing note](../../../prds/steward-platform/research/arming-includes-referenced-schemas-2026-09-16.md).

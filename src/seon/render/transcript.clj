@@ -1519,7 +1519,7 @@
 (defn- ledger-acquisition [request]
   (let [selector '[:seon.cluster.eval/source :seon.cluster.eval/comment
                  :seon.eval/shown :seon.eval/renderer
-                 {:seon.eval/renderer-fn [:seon.fn/sym]} :seon.cluster.eval/error
+                 {:seon.eval/renderer-fn [:db/id :seon.fn/sym]} :seon.cluster.eval/error
                  :seon.cluster.eval/output :seon.error/kind
                  :seon.cluster.eval/read-basis-transaction
                  :seon.cluster.eval/interrupted-at :seon.cluster.eval/triage-edn

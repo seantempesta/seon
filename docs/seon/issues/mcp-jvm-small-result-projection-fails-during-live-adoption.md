@@ -42,6 +42,24 @@ printed confirmation and nil return. A separate ambient-snapshot evaluation
 hit its declared 20,000 ms bound. Neither observation establishes a cause
 for the earlier projection failure; this issue remains open.
 
+## Referenced-schema arming observation — 2026-09-16
+
+Default PID 53378: the renderer-reference test returned its complete result
+(11 passes, zero failures/errors, run 48986). After starting the web-debug
+turn-details test through `seon.test`'s loader in a future, repeated
+`(if (realized? user/arming-baseline) @user/arming-baseline :pending)`
+observations timed out at 5,000 and 10,000 ms. Runtime health separately
+returned unknown with `Read timed out`. A subsequent literal `1` returned
+1 in 1 ms, while the result observation again timed out at 5,000 ms.
+This establishes unavailable test-result delivery, not fixture poisoning,
+failed arming, or a cause in another lane. No runtime function was changed.
+
+The result was subsequently delivered in full through MCP stdout with
+`(do (prn @user/arming-baseline) :printed)`: run 48991, three passes,
+zero failures, one pulled-ref contract error. A small select-keys result
+also returned in 1 ms. The distinction is result delivery versus test
+completion; it is not evidence of a poisoned fixture base.
+
 ## Write-validation-class observation — 2026-09-16
 
 Two read-only inspections on default pid 7595 returned MCP timeout at
