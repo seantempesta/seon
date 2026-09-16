@@ -1113,3 +1113,20 @@ Note (steward, 2026-09-16): `bin/seon init --dev … | tail` masks the exit
 code — a pipe's status is the last command's. Adoption is confirmed by
 resolution (`:seon.source/commit-id` vs `seon.cluster.source/current`),
 never by a piped exit code.
+
+### 2026-09-16 09:05 — live projection: bytes vs value (`a8ed776e0`); cohosted drill's scalar rows
+
+The "committed storable declaration dropped from the live projection"
+blocker was not the named install seams: `seon.turn/row-tx` re-printed
+`:seon.schema/form` through `declaration-row` (`#:seon.db{:identity true}`
+vs `{:seon.db/identity true}`) and `committed-row?` compared BYTES, so the
+cluster's own committed storable declarations were skipped from the
+projection advance. One value-equal comparison at both seams now; a fresh
+declaration turn lands all three forms; database-derived population equals
+live (2,764). Batch 84 gates it. The cohosted drill's "definition nil after
+adoption" (batch 79) is a different seam: the scalar `:seon.source/upsert-rows`
+branch (`src/seon/cluster.clj:2151–2167`) commits scalar rows only when the
+prior commit equals the pre-publication commit — orchestrator territory,
+triage thread launched. Queued by the steward: the runner's drift-restore
+put four deliberately RETRACTED probe keys back into default's registry (a
+restore must not undo a committed retraction).
