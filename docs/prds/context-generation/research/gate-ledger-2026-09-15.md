@@ -1147,3 +1147,28 @@ Rule (steward, from the history-test lane): never reload `seon.test-support`
 through the test loader in the shared JVM — it holds worker-global protocol
 state; a reload splits reify/protocol across classloaders and pulls in
 another lane's uncommitted edits.
+
+### 2026-09-16 09:25 — cohosted drill: a publication carries its roots (`19874b71b`)
+
+Both batch-79 reds were one cause. `development-source-refresh!` reloads
+every namespace with `:seon.ns/source` on a cluster with no recorded
+commit (107 in the probe, including `seon.fn` and `seon.cluster`), which
+re-evaluates the `source-roots` defs; the post-adoption digest compare
+then re-read those vars — a seam acting on a mirror its authority had just
+re-decided (§2.1). The drill's `with-redefs` roots were silently undone,
+the compare reported a source change that never happened, the whole
+publication took its one retry (so four observed stages ran twice → eight
+200s), and the retry republished over the reverted roots where the probe
+file lies under no source root — its identities retracted, so the
+definition pulled nil on `default` while `beta` kept its own. Fix:
+`publication-roots` read once at `refresh-source!` entry and handed to
+every snapshot/manifest/refresh seam. Measured on a frozen worktree with
+two cohosted clusters: pre-fix 8 stages + retry, `default` nil; post-fix
+4 stages + "development cluster converged", `default` `[] 2`, `beta`
+`[] 1`. The test's `[200 200 200 200]` mirror now derives from the one
+`adoption-stages` set (`frequencies` = one each). Issue:
+`an-analysis-time-snapshot-change-never-reaches-the-one-publication-retry.md`.
+Open: why a freshly forked cluster records no `:seon.source/commit-id`
+(that is what makes the first adoption reload all 107 namespaces). Landing
+note `cohosted-adoption-scalar-rows-2026-09-16.md` (`0130957f5`).
+Re-gate as batch 88.
