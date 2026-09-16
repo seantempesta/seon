@@ -126,3 +126,22 @@ own-request-at-the-door` now derives the owner population from
 own declared input schema — so a capability declared tomorrow is covered on
 the day it declares, with no list. It also refuses to pass by examining
 nothing. Green in process: 12 assertions, 0 failures.
+
+## REFUTED 2026-09-17 — the probe asked the wrong symbol
+
+The orchestrator's A/B refuted this: the door asks the OWNER VAR, and every
+capability passes. The probe above queried the program graph for
+`seon.web.jvm/fetch` — a PRIVATE `defn-` whose declared contract is the
+two-argument handler — while `accepts-request?` resolves the capability
+through `my.web/fetch`'s `:seon.effect/capability`, whose declared input IS
+the one-argument request. The false/true pair measured above is real, but it
+measures a symbol the door never asks about.
+
+The two `seon.web.jvm-test` errors belong to the fixture class after all: the
+seed leaves the branch without compiled fs dials, and `seon.fs.jvm` throws a
+bare NPE reading them. Repaired with the rest of that namespace's seeds.
+
+This note stays as the record of a wrong attribution, so the same probe is not
+repeated. Naming it beats deleting it: the lesson is that a program-graph
+question about a capability must ask the capability's DECLARED owner, not the
+handler var behind it.
