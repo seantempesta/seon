@@ -389,3 +389,11 @@ Queue, in order:
   Opus agents (fixture-base fixer with the uniqueness-change fix folded in,
   reds triage, analyzer-facets) finish: reach-closure-facts (astra),
   issue-indexer-resolver, issue-generator, effect-facts (Opus).
+- 12:05Z issues-index --check exits 1 on the reforked default: 1,521
+  unresolved-symbol refusals over 728 notes (archive included; Java members,
+  Maven coordinates, deleted symbols in archived notes) since the indexer
+  resolves symbols through the program graph. Ruled for lane
+  issue-indexer-resolver: unresolved tokens are evidence
+  (`:seon.issue/unresolved`), archived notes never fail the check, the
+  check reports counts per path and exits non-zero only for malformed
+  frontmatter or duplicate slugs.
