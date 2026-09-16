@@ -156,3 +156,15 @@
   rows admitted BEFORE the fix keep their old edges until reanalysed (the
   next full publication/refork). With this, "skip if unchanged" is sound
   for agent tests too.
+- 06:55Z Opus triage of error-graph's batch 20 (`b45881f32`): nothing
+  attributes to error-graph. PLATFORM CLASS found: `seon.db/write-map-error`
+  validates a partial map against every entity schema that merely lists its
+  identity attribute (even optional) → fixture seeds silently refused →
+  tests assert on an empty database (13/15 transcript-test reds, the
+  turn-loop gauge test; since `26ec13420`); issue raised to blocker; astra
+  lane `write-validation-class` launched (db owner; fixture helpers must
+  fail loudly on a refusal). Also: default's own fault committer is refused
+  on default while accepted on the fixture — RESET NEEDED after error-graph's
+  schema change; refork once issue-family lands. Stale tests (bounded-result,
+  open-for-agent fixture, closed-tx ref) and `kill_child.clj` readiness
+  written despite a refused transact → Opus fix agents after the triages.
