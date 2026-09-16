@@ -425,3 +425,11 @@ transaction-cache structural repair landed in Datahike `49ea5933` and main
 contains every member verdict, exact runs, complete returned evidence, three
 priced options for provider diagnostic visibility, and the four-namespace gate
 request. No cold namespace/platform result is claimed.
+
+## Refreshed-base slice — 2026-09-16
+
+The [continuation landing](turn-test-reds-cache-2026-09-16.md) records the
+authorized one-shot 27.549-second base refresh and three repaired members:
+virtual-turn datoms (`99828a14d`), generated provider scenarios (`d8b06746b`),
+and terminal refusal (`80d8fbd0f`). All pass in-process before and after source
+reload. Two members remain named residuals, with unchanged assertions.

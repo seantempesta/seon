@@ -36,3 +36,9 @@ same **300 ms** bound. The uncontracted original fixture instead refuses the
 definition and therefore does not measure the successful installation path.
 No performance candidate or relaxed assertion was retained. Exact values are
 in the [batch-23 continuation](../../prds/context-generation/research/turn-test-reds-cache-2026-09-16.md).
+
+After the owner-authorized canonical base refresh in default on 2026-09-16,
+run **55845** again passes all **14 semantic assertions** and fails the unchanged
+**300 ms** bound: **5645.859042 ms**. The candidate uses the current contracted
+definition and saved shown text. It remains unlanded. This verifies the residual
+after refreshing the fixture; it does not attribute the cost to delimiter repair.

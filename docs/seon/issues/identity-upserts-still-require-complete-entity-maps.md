@@ -54,3 +54,11 @@ complete entities or explicit attribute writes, and read their results.
 
 The bounded implemented guarantee, regression and tradeoff are in
 [the landing note](../../prds/steward-platform/research/write-validation-class-2026-09-16.md).
+
+## 2026-09-16 fixture disposition
+
+The two turn-test members above no longer block: explicit lookup-ref updates
+and checked seed results preserve the complete-entity admission rule. Generated
+scenario repair `d8b06746b` passes 48 trials before/after source reload; terminal
+refusal repair `80d8fbd0f` passes 33 assertions before/after reload (57019, 60109).
+The broader policy question remains open; no validator changed.

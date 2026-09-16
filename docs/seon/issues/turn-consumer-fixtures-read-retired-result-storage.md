@@ -336,3 +336,14 @@ described a now-legal state and reached the provider. The four original behavior
 assertions pass before editing and after isolated adoption (48558 and 48588):
 error outcome, no provider request, no attempt row, and durable refusal kind.
 This resolves that stale fixture without changing production prompt policy.
+
+## 2026-09-16 refreshed-base continuation
+
+The owner-authorized canonical-base refresh succeeded in 27548.6125 ms.
+`99828a14d` repairs virtual-turn call-datom expectations (246 assertions);
+`d8b06746b` repairs generated scenario seeds, real SCI evaluation, turn selection
+and the static-refusal oracle (48 trials); `80d8fbd0f` repairs terminal refusal
+seeds and bounded continuation (33 assertions). Each passed before and after
+file reload in default's JVM. The class remains open for the measured delimiter
+bookkeeping bound and provider diagnostic visibility members; see the
+[landing](../../prds/context-generation/research/turn-test-reds-cache-2026-09-16.md).

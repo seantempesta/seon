@@ -508,3 +508,36 @@ matches the fixture connection, and observation matches the declared deletion
 target. Final candidate **57019: 33/0/0**; explicit checked-in namespace reload
 through `seon.test`'s loader **60109: 33/0/0**. These are live in-process proofs,
 not a cold gate. No production function changed.
+
+### Refreshed-base slice disposition and exact boundary
+
+| Cause | Test | Disposition | Regression proof |
+|---|---|---|---|
+| Evaluation call edges add datoms | virtual-turns-use-the-proc-and-compaction-is-agent-scoped | `99828a14d`, exact current counts | 55844 and 56328: 246/0/0 |
+| Partial identity seeds, retired envelope, stale static-refusal oracle | generated-model-attempt-traces-preserve-presence-and-episode-laws | `d8b06746b`, checked lookup-ref seed and real SCI | 55836 and 56329: 48 trials, 1/0/0 |
+| Partial identity seeds and stale continuation expectation | refused-terminal-program-transactions-settle-and-do-not-refire | `80d8fbd0f`, checked seeds and actual terminal closure | 57019 and 60109: 33/0/0 |
+| Bookkeeping exceeds recorded bound | delimiter-repair-is-span-local-and-precedes-intent | Unlanded candidate; performance residual | 55845: 14/1/0, 5645.859042 ms against unchanged 300 ms |
+| Durable provider occurrence absent from next prompt | a-lost-model-call-leaves-a-durable-readable-reason | Unlanded candidate; visibility residual | 55846: 3/1/0; exact diagnostic still absent |
+
+The two residuals remain in [the performance issue](../../../seon/issues/turn-bookkeeping-exceeds-recorded-regression-bound.md)
+and [the visibility issue](../../../seon/issues/provider-failure-diagnostic-is-absent-from-next-prompt.md).
+No production attribution for the measured time is proven. The earlier three
+priced visibility options remain unselected. Neither assertion was weakened
+and neither unlanded candidate remains loaded after the final namespace reload.
+
+[Complete returned values](turn-test-reds-batch28-refreshed-evidence-2026-09-16.edn)
+retain 19 result files (22595 bytes); [probe forms](turn-test-reds-batch28-refreshed-probes-2026-09-16.clj)
+retain the evaluated candidates and scenario observation. The final terminal
+run explicitly reloads `seon.cluster.turn-test` through `seon.test/with-test-loader`
+and invokes `seon.test/run` with default custody and a 120000 ms execution bound.
+No test JVM or local cold gate was run. Batch 28's cold SCI evaluation and
+Datahike-fork tests remain green; no code in those owners changed here.
+
+Gate request now contains only `seon.cluster.turn-test` and `seon.turn-test`,
+both verified under `test/`. The orchestrator owns cold verification. All 20
+owned batch-28 futures report realized. No background shell, scratch JVM or
+worktree remains. The authorized shared base stays under its shutdown hook.
+Protected production paths and foreign issue-owner edits were preserved.
+The markdown hook still reports 29 historical gitlink citations in the foreign
+`agents-md-audit-2026-09-15.md`; no evidence links in this slice were changed
+to conceal that unrelated check boundary. Stop after this slice.

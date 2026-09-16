@@ -27,3 +27,12 @@ records complete results, the candidate form, and three priced scope options.
 The existing context/error owners must settle the visibility obligation before
 changing production. Do not introduce a second notification path or weaken the
 assertion merely to make this test pass.
+
+After the owner-authorized canonical base refresh in default on 2026-09-16,
+run **55846** returns **3 passes, 1 failure, 0 errors** on the same real-fixture
+candidate. Closure, durable occurrence message, and the new incoming message
+seed pass; the next prompt still omits the diagnostic. `seon.error/faults-form`
+currently emits the steward-namespace query (`src/seon/error.clj:1640`), which
+does not select occurrences merely because they belong to this agent's turn.
+The existing visibility decision remains open; neither the assertion nor the
+production query was changed in this lane.
