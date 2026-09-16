@@ -241,3 +241,155 @@ were not modified. clj-kondo over the three files: 0 errors (70 pre-existing
 warnings of the namespace's existing `Shadowed var` / `reset!` classes). The
 orchestrator's batched gate is the proof; the request is
 `tmp/orchestrator/gate-requests/gate-recording.txt`.
+
+## Second landing — 2026-09-16, lane `gate-recording-latency`
+
+The pre-read is gone and the recorder still reported
+`:seon.fresh-operator/prepl-response-silent` on batch 27
+(`tmp/orchestrator/gate-results/batch-27/platform.log`, retained root
+`tmp/test-runs/run.4hIzdV`). This section names the remaining cause. It is NOT
+in the recorder, and it is NOT in this lane's owned paths; no source file was
+edited.
+
+### The send is honest — the remote really is blocked
+
+Timing each step of the recording form's own work against the live `default`
+JVM (pid 53378), idle machine, MCP `eval_clj` in `jvm` mode, with a realistic
+86-result completion (`pr-str` payload **24,509 bytes**, reply **26,955 bytes**
+— neither is large):
+
+| Step (`src/seon/cluster/source.clj:300-323`) | ms |
+|---|---|
+| `seon.cluster.source/current` (read the head) | 0 |
+| `registry/branch!` — fork the scratch | **1,437** … **63,224** |
+| `store/open-branch!` | 31 |
+| `schema/projection-from-database` | 1,372 |
+| `seon.test.runner/commit-results!` (86 rows, one transaction) | 699 |
+| `registry/retire-branch!` — retire the scratch | **74,326** |
+
+Everything except the two roster operations is sub-second to ~1.4 s. The roster
+operations are bimodal: the FIRST one in each evaluation waited 57-74 s, and
+every later one in the same evaluation took 13-29 ms.
+
+```
+[{:branch-ms 63224 :delete-ms 29} {:branch-ms 20 :delete-ms 13} {:branch-ms 28 :delete-ms 15}]
+```
+
+### Cause — the store's reachability gate is closed 96% of the time
+
+`registry/branch!` (`src/seon/cluster/registry.clj:196-206`) calls
+`datahike.api/branch!`, which acquires a `:roster` reachability permit
+(`reference-code/datahike/src/datahike/versioning.cljc:227-231`). That
+acquisition blocks **without a bound** while a sweep is queued or active
+(`reference-code/datahike/src/datahike/gc_guard.cljc:190-206`: `async/<!!` on
+the ready channel).
+
+Sampling the gate every 500 ms for 70 s against the live store
+(`224560ae-b0ba-3d5c-b6db-6d7415ad66e7`), using the non-queuing
+`try-reachability-permit!`:
+
+```
+{:n 139 :sweep-in-progress 134 :admitted 5}   ; 96.4% of wall time closed
+```
+
+The only caller of `acquire-sweep-permit!` in the tree is
+`seon.blob.retention/reclaim!` (`src/seon/blob/retention.clj:38`), and its
+schedule is **`"* * * * *"` — once per minute** (`src/seon/schedule.clj:71-75`).
+Its first act under that exclusive permit is `inventory`
+(`src/seon/blob/retention.clj:29`), a full `(k/keys store {:sync? true})` walk.
+Measured on this store:
+
+```
+{:konserve-keys 380285 :binary-keys 3624 :k-keys-ms 64580}
+```
+
+**64.6 s to enumerate 380,285 konserve keys in order to find 3,624 blobs**, on a
+store that is now **72 GB / 379,772 files** under `data/store`. One run does not
+finish before the next minute fires; the schedule fire facts show the delivery
+already slipping (`nominal 04:50:00 → observed 04:50:44`, `04:51:00 → 04:51:59`).
+So the gate is effectively always closed, every roster operation queues behind
+it, and the recorder's single send sits for ~60-135 s while the operator's
+30,000 ms socket read timeout (`script/seon/fresh_operator.clj:1548,1605-1615`,
+`:seon.config.operator/event-silence-backstop-ms`) fires first and reports
+`prepl-response-silent`.
+
+The 30 s diagnostic is therefore accurate, not a false negative: the remote
+genuinely had not answered. Raising the backstop would hide the defect.
+
+### Verdict
+
+Two defects, neither in the recorder and neither in this lane's owned paths:
+
+1. **`seon.blob.retention/reclaim!` scans the whole store under an exclusive
+   sweep permit, once a minute.** A blob inventory is derived by walking 380k
+   datahike index keys to select 3.6k binary keys — the work is ~100× the
+   question. Under AGENTS.md §2.3 the schedule also has no bound: a run that
+   cannot finish inside its own period is never reported, it simply starves
+   every other roster writer. `src/seon/blob/retention.clj:11-29`,
+   `src/seon/schedule.clj:71-75`.
+2. **The roster permit wait is unbounded** (`gc_guard.cljc:190-206`,
+   `versioning.cljc:227-231`). Even with retention fixed, any sweep can stall a
+   recording, a cluster start, a refork, or a publication forever with no event
+   naming what is being waited for. `seon.cluster/start!` already knows the
+   typed `:sweep-in-progress` refusal (`src/seon/cluster.clj:3081`); the roster
+   path has no equivalent.
+
+A third, separate observation: the shared root's store has reached 72 GB /
+379,772 files. Under AGENTS.md §6 that order-of-magnitude growth is itself the
+investigation signal.
+
+### Why no fix landed here
+
+The owned paths for this lane were `src/seon/test/runner.clj`,
+`script/seon/fresh_operator.clj`, `bin/test` and three test namespaces. Every
+root cause above lives in `src/seon/blob/retention.clj`,
+`src/seon/schedule.clj`, or the Datahike fork. Hardening the recorder against
+another mechanism's abnormal operation is exactly the shape AGENTS.md tells us
+to stop at, and adding a permit pre-read to the recorder would reintroduce the
+pre-read that the first landing deleted. Issue filed:
+`docs/seon/issues/blob-retention-sweep-starves-every-roster-writer.md`.
+
+### Verification boundary
+
+All numbers are live read-only evaluations against the running `default`
+cluster (pid 53378) through MCP `eval_clj`, on an otherwise idle machine. No
+test JVM was launched; `bin/test` and `bin/test-fast` were not run. No cluster
+was started, stopped, reforked, or reset. Probe scratch branches were retired;
+the roster is back to `#{:cluster-beta :cluster-default :current-src :db
+:test-results}` and `current-src`'s head was never advanced (the probe
+`commit-results!` wrote only into a scratch branch that was then retired). No
+source file was edited.
+
+### The batch-27 B red is not this commit's
+
+`seon.dev.fresh-operator-test/init-owns-current-source-and-dormant-cluster-lifecycle`
+missed `:task-complete` within the 270 s worker bound
+(`tmp/orchestrator/gate-results/batch-27/named.md`, worker pool-2 pid 64984,
+retained root `tmp/test-runs/run.o0NcHO`). The hypothesis under test was that
+7c7395c8a's `read-prepl-reply` can wait forever behind the start/export/init/stop
+seams. It cannot:
+
+- `read-prepl-reply` (`script/seon/fresh_operator.clj:944-958`) performs **no
+  I/O**. It is `edn/read-string` over a `String` that `terminal-value` took from
+  an already-completed `prepl-eval!`; its only new behavior is turning a bare
+  reader throw into a typed `:seon.fresh-operator/prepl-reply-unreadable`.
+- Every socket read still happens inside `prepl-eval!`
+  (`script/seon/fresh_operator.clj:1545-1615`) under
+  `(.setSoTimeout socket timeout-ms)`, whose `SocketTimeoutException` branch
+  raises the typed `prepl-response-silent`. The commit added no read loop, and
+  the pre-existing loop's `::eof` branch fails immediately rather than reading
+  on. `git show 7c7395c8a -- script/seon/fresh_operator.clj` touches no read.
+- The new `:seon.fresh-operator/probe-jvms?` option is honored by `cluster-truth`
+  (`script/seon/fresh_operator.clj:1012-1013,1271-1277`), so it is not a silently
+  ignored flag either.
+
+Positive evidence for the real cause: the worker emitted `END` at 04:50:58 —
+exactly 270.05 s after its 04:46:28 `BEGIN` — with a clean stderr (projection
+acquired, 1038 contracts armed, no exception). That is a slow run, not a wedge.
+The test's own recorded cost is **110.837 s** (it is one of the declared-long
+pool tests the platform tier skips; batch 27 B ran it because explicit
+namespaces run complete). It ran 04:46-04:51, inside the same window in which
+the shared `default` JVM performs its minute-by-minute 64.6 s walk of 380,285
+konserve keys over a 72 GB / 379,772-file store on the same disk, with two other
+worker JVMs alongside. A 2.4× slowdown of a disk-bound 110 s test under that
+load needs no further explanation, and the first defect above is its cause too.
