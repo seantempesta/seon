@@ -402,32 +402,66 @@
   ;; The class that wiped the development store: delete-then-create reached
   ;; with a root inferred from the working directory
   ;; (docs/seon/issues/a-platform-tier-test-wiped-the-checkouts-store.md).
+  ;; The evidence is a scratch checkout this test BUILDS — a `data/store` with
+  ;; a real branch roster and a sentinel beside it. The pooled worker's own
+  ;; checkout has no `data/store` at all, so asserting on it reads absence as
+  ;; health; the scratch tree's bytes before and after are the observable.
   (let [dir (fresh-dir)
+        scratch (str "tmp/store-test-" (random-uuid))
+        scratch-store (.getCanonicalPath (io/file scratch "data" "store"))
+        sentinel (io/file scratch "data" "sentinel.txt")
         checkout (.getCanonicalPath (io/file (System/getProperty "user.dir")))
         checkout-store (.getCanonicalPath (io/file checkout "data" "store"))
         rule (fn [f]
                (try (f) ::admitted
                     (catch Throwable error
-                      (:seon.cluster.store/rule (ex-data error)))))]
+                      (:seon.cluster.store/rule (ex-data error)))))
+        tree (fn [root]
+               (let [prefix (count (.getCanonicalPath (io/file root)))]
+                 (into (sorted-map)
+                       (for [^File f (file-seq (io/file root))
+                             :when (.isFile f)]
+                         [(subs (.getCanonicalPath f) prefix)
+                          (hash (vec (java.nio.file.Files/readAllBytes
+                                      (.toPath f))))]))))]
     (try
-      (testing "an inferred root is refused before any deletion"
-        (is (= :seon.cluster.store/undeclared-destructive-root
-               (rule #(store/admit-destructive-path!
-                       {:seon.cluster.store/root nil
-                        :seon.cluster.store/target checkout-store}))))
-        (is (= :seon.cluster.store/relative-destructive-root
-               (rule #(store/admit-destructive-path!
-                       {:seon.cluster.store/root "."
-                        :seon.cluster.store/target "./data/store"}))))
-        (is (= :seon.cluster.store/undeclared-checkout-deletion
-               (rule #(store/admit-destructive-path!
-                       {:seon.cluster.store/root checkout
-                        :seon.cluster.store/target checkout-store
-                        :seon.cluster.store/declared-root
-                        (.getCanonicalPath (io/file dir))})))
-            "only a JVM launched to operate the checkout may destroy its data")
-        (is (.exists (io/file checkout-store))
-            "the checkout's store is still there"))
+      (.mkdirs (io/file scratch "data"))
+      (let [built (store/open-store! {:seon.store/dir scratch-store})]
+        (test-support/transacted! (:seon.store/connection-object built)
+                                  probe-schema)
+        (test-support/transacted! (:seon.store/connection-object built)
+                                  [{:seon.store.test/marker "scratch-checkout"}])
+        (store/release-store! built))
+      (spit sentinel "a byte the admission must never touch")
+      (let [before (tree scratch)]
+        (is (contains? before "/data/sentinel.txt") "the sentinel is written")
+        (is (some #(str/includes? % "/store/") (keys before))
+            "the scratch checkout holds a real store")
+        (testing "an inferred root is refused before any deletion"
+          (is (= :seon.cluster.store/undeclared-destructive-root
+                 (rule #(store/admit-destructive-path!
+                         {:seon.cluster.store/root nil
+                          :seon.cluster.store/target scratch-store}))))
+          (is (= :seon.cluster.store/relative-destructive-root
+                 (rule #(store/admit-destructive-path!
+                         {:seon.cluster.store/root "."
+                          :seon.cluster.store/target "./data/store"}))))
+          (is (= :seon.cluster.store/undeclared-checkout-deletion
+                 (rule #(store/admit-destructive-path!
+                         {:seon.cluster.store/root checkout
+                          :seon.cluster.store/target checkout-store
+                          :seon.cluster.store/declared-root
+                          (.getCanonicalPath (io/file dir))})))
+              "only a JVM launched to operate the checkout may destroy its data")
+          (is (= :seon.cluster.store/destructive-path-outside-root
+                 (rule #(store/admit-destructive-path!
+                         {:seon.cluster.store/root
+                          (.getCanonicalPath (io/file dir))
+                          :seon.cluster.store/target scratch-store
+                          :seon.cluster.store/declared-root checkout})))
+              "a real store outside the deletion authority is refused")
+          (is (= before (tree scratch))
+              "every refusal left the scratch checkout byte-identical")))
       (testing "a complete store is never recreated"
         (let [opened (store/open-store! {:seon.store/dir dir})]
           (test-support/transacted! (:seon.store/connection-object opened)
@@ -446,7 +480,8 @@
                 "the durable marker survived the refused recreation")
             (finally (store/release-store! reopened)))))
       (finally
-        (test-support/delete-recursively! (str (io/file dir) "/..")))))) 
+        (test-support/delete-recursively! (str (io/file dir) "/.."))
+        (test-support/delete-recursively! scratch))))) 
 
 ;;; ---------------------------------------------------------------------------
 ;;; The flock across processes — a real child JVM holds the store
