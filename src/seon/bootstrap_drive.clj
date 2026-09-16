@@ -142,7 +142,8 @@
 (defn- evaluate-function
   [connection cluster-name agent-id function-symbol argument]
   (let [db @connection
-        caps (config/result-caps (config/effective db cluster-name))
+        settings (config/effective db cluster-name)
+        caps (config/result-caps settings)
         evaluation
         (sci.eval/evaluate
          {:seon.sci.eval/ctx (sci.eval/cluster-ctx db connection)
@@ -152,7 +153,8 @@
           [:seon.ns/name (agent-namespace db agent-id)]
           :seon.agent/id agent-id
           :seon.sci.admit/caps caps
-          :seon.sci.eval/time-limit-ms 30000
+          :seon.sci.eval/time-limit-ms
+          (:seon.config.eval/time-limit-ms settings)
           :seon.config/on-core-error :panic})]
     {:seon.bootstrap-drive/value (:seon.sci.admit/value evaluation)
      :seon.cluster.eval/error (:seon.cluster.eval/error evaluation)}))

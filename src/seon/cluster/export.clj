@@ -78,7 +78,18 @@
 
 (schema.edn/load! {})
 
-(def ^:private clone-deadline-ms 600000)
+(def ^:private clone-deadline-ms
+  "Last-resort bound on the clone child, in milliseconds.
+
+   The observable this stands in for is the copy child's own exit, which
+   `seon.operator.state/run-process!` already waits on; this value only bounds
+   a child that never exits at all, so an export can never wedge the operator
+   (AGENTS.md section 2.3). Unit: milliseconds of total child lifetime.
+   Provenance: none measured. A clone's duration scales with store size, and
+   the export seam takes a store value with no cluster database in reach, so
+   this is not a cluster config dial and is deliberately far above any clone
+   this repository has observed rather than tuned to one."
+  600000)
 
 (defn- refuse!
   "Refuse loudly with the one export error shape."

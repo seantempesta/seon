@@ -330,7 +330,7 @@
       (cluster/ensure-entity! connection process
                               (creation-request cluster-name id)))
     (doseq [id agent-ids]
-      (await-fact! connection 120000 (str "bootstrap " id)
+      (await-fact! connection timeout-ms (str "bootstrap " id)
                    #(bootstrap-complete? % id)))
     (let [message-id (inbound! connection cluster-name process agent-id objective)
           terminal
