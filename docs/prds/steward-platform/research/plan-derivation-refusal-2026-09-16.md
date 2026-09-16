@@ -140,11 +140,32 @@ through `seon.test`'s own loader.
 | `the-derivation-answers-for-a-plan-with-no-steps-and-for-parents` | 8 / 0 / 0 |
 | `completing-a-dependency-unblocks-the-dependent-step` | 5 / 0 / 0 |
 | `the-whole-plan-renders-once-in-both-projections` | 8 / 0 / 0 |
-| whole `my.plan-test` namespace | see §7 |
+| whole `my.plan-test` namespace | 21 tests, 120 assertions, 0 / 0 |
 
 `terminal-formatters-preserve-database-errors` was the stale expectation: it
 asserted the pass-through that produced the bare line. It is replaced, not
 deleted.
+
+Every other test namespace that calls a plan projection was run the same
+way: `seon.plan-completion-test`, `seon.contracts-plan-test`,
+`seon.html-views-test`, `seon.render.value-test`,
+`seon.render.page-settings-test`, `seon.render-simplification-test`,
+`seon.returned-error-test` — 75 tests, 627 assertions. Seven tests in that
+set fail, and their recorded failures name subjects outside this slice:
+
+| failing test | recorded failure |
+|---|---|
+| `render-simplification/generic-renderer-receives-the-acquired-entity-id` | `"9509:fixture-a"` where the acquired identity `"A:fixture-a"` is expected |
+| `render-simplification/unchanged-retained-call-…` , `…/shared-invocation-cache-…` | read-dependency invalidation and the invocation cache |
+| `render-simplification/nested-ai-values-…` | declared faces in HTML |
+| `html-views/fault-pairs-preserve-ai` | the fault entity's pair |
+| `returned-error/returned-refusal-is-a-schema-first-error-…` | expects `seon.db/transact!`'s shown refusal to start with `Expected:` |
+| `render/page-settings/effective-settings-and-authored-plan-examples-…` | `seon.repl/source-text refused form at []: … got nil` from `(first examples)`, the probe namespace `context-page-probe-2026-09-09/plan-examples` |
+
+None of them reads `seon.plan`'s frontier or its AI pair; the plan golden in
+`seon.html-views-test` and the whole of `seon.plan-completion-test`,
+`seon.contracts-plan-test` and `seon.render.value-test` are green. They are
+reported, not repaired: they are outside this assignment.
 
 ## 6. Still open, out of this lane's scope
 
@@ -160,6 +181,9 @@ same refusal. Filed as
 Measured: the reproduction and its threshold, the old-versus-derived
 equivalence on three database values, the render pair in both branches, and
 the in-process runs above — all in the default JVM at this HEAD. Not run by
-this lane: `bin/test` (no test JVM launched), the platform tier, and any
-observation of a freshly forked cluster's stored opening; the gate request
-is `tmp/orchestrator/gate-requests/plan-derivation.txt`.
+this lane: `bin/test` (no test JVM launched), the platform tier, the seven
+foreign reds above, and any observation of a freshly forked cluster's stored
+opening; the gate request is
+`tmp/orchestrator/gate-requests/plan-derivation.txt`. One in-memory probe
+database (~1000 datoms, `:backend :memory`) could not be released inside the
+default JVM and goes away with the announced reset.
