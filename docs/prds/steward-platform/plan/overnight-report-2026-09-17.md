@@ -70,17 +70,17 @@ peer session (batches 30–57; ledger
    the store). Both halves proven cold in batch 66 (platform green with the checker running first; the in-process refusal regressions green; store intact across the run). Issue:
    `a-platform-tier-test-wiped-the-checkouts-store`.
 
-0b. **The effect door refuses every declared capability** (since the
-   effect-facts change `0e15593aa`): `seon.effect/accepts-request?`
-   validates a one-argument request against owners that take
-   `[request effective]`, so `my.fs`/`my.web` requests through the door
-   answer false; it surfaced only when a fixture stopped hiding its refused
-   seed. Fix lane running (the door asks the owner's contract about the
-   request position). Issue:
-   `the-effect-door-validates-a-one-argument-request-against-a-two-argument-owner`.
-   A second real defect from the same pass: the opening walk's namespace
-   candidate hands a bare symbol where the contract wants an entity lookup
-   (`91f536c36`), fix lane running.
+0b. **A reported effect-door defect was REFUTED by measurement.** The
+   sweep's attribution (the door validates a one-argument request against
+   two-argument owners) measured the HANDLERS; the door asks the OWNER Var
+   the caller passed, and every owner takes one argument — all ten declared
+   capabilities accept their own generated request at the door. The class
+   is guarded either way (`2ac75efcb`: a regression derives the capability
+   population from facts and generates each request from its own schema).
+   The remaining `seon.web.jvm-test` reds go back to the fixture class (no
+   compiled config row on the branch). A second real defect from the same
+   pass stands: the opening walk's namespace candidate hands a bare symbol
+   where the contract wants an entity lookup (`91f536c36`), fix lane running.
 
 0c. **The cluster's live projection drops committed storable declarations.**
    When an agent admits a schema through a turn (Juniper's own scenario does
