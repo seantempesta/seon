@@ -778,6 +778,7 @@
            overlay-fn ai/agent-overlay
            resolutions (atom [])
            overlays (atom [])
+           overlay-values (atom [])
            requests (atom [])
            cluster (test-support/cluster-handle
                    {:seon.db/connection connection
@@ -836,7 +837,9 @@
           (with-redefs [ai/agent-overlay
                         (fn [db id]
                           (swap! overlays conj [db id])
-                          (overlay-fn db id))
+                          (let [value (overlay-fn db id)]
+                            (swap! overlay-values conj value)
+                            value))
                         ai/settings
                         (fn [cluster-settings agent-settings]
                           (let [resolved
@@ -862,7 +865,13 @@
               (is (= ["before-apply" "backup-before-apply"]
                      (mapv :seon.ai/model @requests)))
               (is (= [:high :high]
-                     (mapv :seon.ai/thinking @requests))))
+                     (mapv :seon.ai/thinking @requests)))
+              (is (apply = @overlay-values)
+                  "the call's one overlay derivation is the exact map both the
+                  primary and the backup attempt settle on; a failover that
+                  re-derived its own overlay would diverge the moment the
+                  agent's settings changed mid-flight, and this equality is
+                  what rules that out"))
             (let [first-settings (first @resolutions)
                   first-rows (settings-attempts @connection)]
               (is (= 2 (count first-rows)))
@@ -892,6 +901,7 @@
             (prepare-call!
              cluster agent-id "settings-run-2" "settings-message-2")
             (reset! overlays [])
+            (reset! overlay-values [])
             (reset! resolutions [])
             (turn/turn
              {:seon.turn.loop/cluster cluster
@@ -903,6 +913,8 @@
               (is (= 2 (count @resolutions)))
               (is (= "after-apply" (:seon.ai/model (last @requests))))
               (is (= :high (:seon.ai/thinking (last @requests))))
+              (is (apply = @overlay-values)
+                  "the second run's own three reads still settle on one value")
               (let [last-row (last (settings-attempts @connection))]
                 (is (= "after-apply" (:seon.ai/model last-row)))
                 (is (= "after-apply"

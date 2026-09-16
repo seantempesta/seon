@@ -37,17 +37,32 @@
   [:pre (render-directory-ai directory)])
 
 (defn frame
-  "Derive the current turn budget outside the saved evaluation history."
-  {:malli/schema [:=> [:cat :seon.db/db :seon.agent/id] :string]}
-  [database agent-id]
-  (let [remaining ((requiring-resolve 'seon.turn/turns-left) database agent-id)
-        overrides ((requiring-resolve 'seon.ai/agent-overlay) database agent-id)
-        maximum (or (:seon.config.run/max-episode-runs overrides)
-                    ((requiring-resolve 'seon.db/q)
-                     '[:find ?limit . :where
-                       [?config :seon.config/cluster _]
-                       [?config :seon.config.run/max-episode-runs ?limit]] database))]
-    (str "turns left: " remaining " of " maximum)))
+  "Derive the current turn budget outside the saved evaluation history.
+
+  READS THE OVERLAY ONCE (2.1). A caller already holding the agent's
+  resolved settings — `seon.cluster.prompt/prompt` derives them once for
+  the whole prompt — hands them through the three-argument arity instead
+  of this function re-deriving `ai/agent-overlay` a second time; the
+  two-argument arity derives it itself for a caller with no settings on
+  hand. Either way `seon.turn/max-episode-runs` is never called twice for
+  the same number: `episode-runs` alone (no overlay) gives the count that
+  turn budget subtracts from the max already read."
+  {:malli/schema
+   [:function
+    [:=> [:cat :seon.db/db :seon.agent/id] :string]
+    [:=> [:cat :seon.db/db :seon.agent/id :seon.config/agent-overlay] :string]]}
+  ([database agent-id]
+   (frame database agent-id ((requiring-resolve 'seon.ai/agent-overlay) database agent-id)))
+  ([database agent-id overrides]
+   (let [maximum (or (:seon.config.run/max-episode-runs overrides)
+                      ((requiring-resolve 'seon.db/q)
+                       '[:find ?limit . :where
+                         [?config :seon.config/cluster _]
+                         [?config :seon.config.run/max-episode-runs ?limit]] database))
+         remaining (long (max 0 (- (or maximum 0)
+                                    ((requiring-resolve 'seon.turn/episode-runs)
+                                     database agent-id))))]
+     (str "turns left: " remaining " of " maximum))))
 
 (defn shown-value
   "Read a complete shown EDN value; preserve terminal prose as its string."

@@ -186,7 +186,10 @@
       contributions)))
 
 (defn- acquire-context-report
-  [database request budget calibration]
+  "`settings` is the ONE resolution `prompt` already made (2.1): the turn
+  frame reads the same resolved dial through it rather than deriving the
+  agent's overlay a second time for the same number."
+  [database request budget calibration settings]
   (let [distance (long (get request :seon.render/distance default-depth))
         acquired (render/acquire-context!
                   (assoc request
@@ -196,7 +199,8 @@
       acquired
       (let [history (:seon.cluster.prompt/text acquired)
             frame (str (when (seq history) "\n\n")
-                       (repl/frame (:seon.db/db acquired) (:seon.agent/id request)))
+                       (repl/frame (:seon.db/db acquired) (:seon.agent/id request)
+                                   settings))
             text (str history frame)
             segments (conj (vec (or (:seon.render.history/segments acquired) [history])) frame)
             contributions (history-contributions segments calibration)
@@ -235,4 +239,5 @@
         (:seon.config.ai/model settings)
         (tokens/prior-calibration
          (:seon.config.ai/chars-per-token-prior settings))
-        agent-id)))))
+        agent-id)
+       settings))))
