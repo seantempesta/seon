@@ -1111,6 +1111,17 @@ analyzed" is a positive fact on the row; zero edges is ordinary absence under
 it; component trees validate with their parent). `workaround-inventory` and
 `recompute-from-scratch-inventory` research running.
 
+**Recompute inventory landed** (`bd76a97af`, `recompute-from-scratch-inventory-2026-09-16.md`):
+the edit hook did 40 complete rebuilds of 47 decisions today, 1 h 41 min of
+republishing for one-file edits, because any non-Clojure file is "structural"
+and 1,743 of 2,089 identity files are issue markdown. One class: no seam turns
+"these files changed" into "these facts changed"; `:seon.fn.file/*` rows
+already answer it. Corrections: the coordinator's 18 s "program graph" is
+worker JVM startup mislabelled; `config/apply!`'s cost is `compile-manifest`,
+its write already converges at zero. Lane `incremental-publication-is-the-rule`
+launched on R2/R3/R4/R7; R6 (dev-cache lock across its hit check, 87 s wait)
+goes to `test-preparation-costs` on its next resume; R8 landed (`bb6673af4`).
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
