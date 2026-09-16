@@ -13,6 +13,14 @@ if [[ "${1:-}" == "--root" ]]; then
   shift 2
 fi
 
+if [[ "${1:-}" == "issues-index" ]]; then
+  shift
+  exec bb --config "$SEON_SOURCE_ROOT/bb.edn" --deps-root "$SEON_SOURCE_ROOT" \
+    --classpath "$SEON_SOURCE_ROOT/script:$SEON_SOURCE_ROOT/src:$SEON_SOURCE_ROOT/resources" \
+    -e '(require (quote seon.dev.issues)) (System/exit (seon.dev.issues/run! (first *command-line-args*) (rest *command-line-args*)))' \
+    "$SEON_OPERATOR_ROOT" "$@"
+fi
+
 exec bb --config "$SEON_SOURCE_ROOT/bb.edn" --deps-root "$SEON_SOURCE_ROOT" \
   --classpath "$SEON_SOURCE_ROOT/script:$SEON_SOURCE_ROOT/src:$SEON_SOURCE_ROOT/resources" \
   -m seon.fresh-operator --seon-root "$SEON_OPERATOR_ROOT" "$@"

@@ -1424,6 +1424,11 @@
           (nil? manifest) (assoc :seon.fn/roots seon.fn/source-roots))
         report-source-progress!)
        (report-source-progress! "program rows complete")
+       (require-committed!
+        ((requiring-resolve 'seon.issue/index!)
+         {:seon.db/connection connection
+          :seon.issue/notes ((requiring-resolve 'seon.issue/notes) ".")})
+        {:seon.boot/population :seon.issue/rows})
        ;; Initialization rows come LAST because they may name a program row
        ;; by lookup ref — the call-preparation suppliers do — and program
        ;; rows are asserted by `index!` immediately above. Nothing earlier in
@@ -1449,7 +1454,7 @@
 (def source-roots
   "The complete file roots whose content identifies `current-src`."
   (into seon.fn/source-roots
-        ["config/default.edn"]))
+        ["config/default.edn" "docs/seon/issues"]))
 
 (defonce ^:private source-refresh-monitor
   ;; One JVM may receive overlapping editor events. Serialize analysis,
@@ -1964,6 +1969,9 @@
              :seon.source/database published-database
              :seon.source/previous-database previous-database}
             *source-progress!*)))
+        _ (require-committed!
+           ((requiring-resolve 'seon.issue/adopt!) connection published-database)
+           {:seon.boot/population :seon.issue/rows})
         database (db/db connection)
         projection (schema/projection-from-database database)
         deleted-identities (source/deleted-identities database)

@@ -1,7 +1,4 @@
-#!/usr/bin/env bb
-
-(require '[babashka.fs :as fs]
-         '[seon.dev.issues :as issues])
-
-(let [root (-> *file* fs/path fs/parent fs/parent str)]
-  (issues/run! root *command-line-args*))
+#!/usr/bin/env bash
+set -euo pipefail
+SEON_ISSUE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+exec "$SEON_ISSUE_ROOT/bin/seon" issues-index "$@"

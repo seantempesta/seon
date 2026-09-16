@@ -92,7 +92,8 @@
   [filename]
   (or (str/ends-with? filename ".clj")
       (str/ends-with? filename ".cljc")
-      (str/ends-with? filename ".edn")))
+      (str/ends-with? filename ".edn")
+      (str/ends-with? filename ".md")))
 
 (defn snapshot
   "The source-tree digest and exact per-file digests of the declared roots."
@@ -498,8 +499,18 @@
                 (cond->
                  {:tx-data
                   (into [[:db/retractEntity digest-entity]]
-                        (activation-seal-tx
-                         connection source-digest #{activation} activation-fn))}
+                        (do
+                          (when (db/q '[:find ?attribute .
+                                        :where [?attribute :db/ident :seon.issue/id]]
+                                      (db/db connection))
+                            (require-committed!
+                             ((requiring-resolve 'seon.issue/index!)
+                              {:seon.db/connection connection
+                               :seon.issue/notes ((requiring-resolve 'seon.issue/notes) ".")})
+                             :seon.issue/index-refused "Issue indexing was refused."
+                             {:seon.source/digest source-digest}))
+                          (activation-seal-tx
+                           connection source-digest #{activation} activation-fn)))}
                   process (assoc :tx-meta {:seon.db/process process})))
                ::incremental-activation-refused
                "the incremental source activation transaction was refused"
