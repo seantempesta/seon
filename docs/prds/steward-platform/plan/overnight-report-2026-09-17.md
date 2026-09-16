@@ -149,7 +149,16 @@ peer session (batches 30–57; ledger
    `a-partial-upsert-of-an-existing-entity-is-validated-against-its-complete-required-keys`
    [recommended: validate against the required keys as they stand after the
    transaction, merging the existing entity inside the transaction function].
-7. Earlier parked: R1 identity strings→symbols; call-arities tuple vs
+7. **Which budget owns the prompt?** The agent's history is rendered as ONE
+   string through the value renderer and cut at a character offset by the
+   VALUE profile (mid-form, no turn named) — 199 concurrency assertions
+   could never see their payload. Options: (a) the prompt's own
+   `:seon.config.ai/prompt-token-budget` cuts whole evaluations oldest
+   first and the value profile bounds each shown result [recommended]; (b)
+   raise the value budget for the history path; (c) keep as is and relax
+   the tests (hides the defect). Issue:
+   `the-agents-history-is-cut-as-one-string-by-the-value-budget`.
+8. Earlier parked: R1 identity strings→symbols; call-arities tuple vs
    interned family; `seon.commit` entity; retention removal; cold page slice 2.
 
 ## Still open
