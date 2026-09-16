@@ -736,3 +736,73 @@ naming the door instead of erroring out of an output-contract wrapper.
   `with-published-file-database` (`test/seon/shell/jvm_test.clj`,
   `test/seon/background_blob_test.clj`); recorded in
   [the effect-door issue](../../../seon/issues/the-effect-door-validates-a-one-argument-request-against-a-two-argument-owner.md).
+
+## Pass 7 — the cold residue past the door: a hand-spelled effect id and the inline ceiling
+
+Batch 88 (`tmp/orchestrator/gate-results/batch-88/named.log`, root
+`tmp/test-runs/run.j9rx0e`) put `public-fetch-settles-text-and-binary-body-
+representations` past the door — 3 failures, 0 errors, so the carry held — and
+left three assertions red. Two causes, both in the fixture.
+
+**1. The effect id was spelled by hand and matched nothing.** The fixture
+pulled `[:seon.effect/id (pr-str ["web-receipt-run" 0 ordinal])]`. The writer
+mints `(seon.id/digest 12 [:seon.effect/id turn form-ordinal effect-ordinal])`
+(`src/seon/effect.clj`), i.e. twelve hex characters — measured on a live pair:
+`["2158c04c1df0" "6db6bcd6f1b7"]`. The pull therefore answered nil, and the
+test read that absence as "the effect never settled" — the project's named
+failure class, inside the assertion this time. Both public tests now read
+their receipts through `turn-receipts`, a query over `:seon.effect/run` and
+the writer's own `:seon.effect/ordinal`, which does not need to know how an id
+is minted.
+
+**2. The inline ceiling contradicted the test's own subject.** The suite
+manifest sets `:seon.config.web/max-inline-bytes 8`; the body is
+`"<html>hello</html>"`, 18 bytes. Cold, the door reads that dial from the
+database and the body correctly took the BLOB arm, so `:my.web.body/text` was
+absent by design. The search test already raised the ceiling to 4096 for its
+own reason; the fetch test did not. It now does, and its stale
+`fixture-observation` prose ("blob-backed binary") is corrected to what its
+assertions actually check — both bodies INLINE, with the blob arm owned by
+`oversized-bodies-spill-byte-exactly-through-the-blob-tier`.
+
+**The projection carry moved to its owner.** It is now inside
+`seon.test-support/with-published-file-database`, so the other two callers
+(`test/seon/shell/jvm_test.clj`, `test/seon/background_blob_test.clj`) get it
+by construction. Only the two carry hunks were committed from that shared
+file; a peer lane's uncommitted `preserving-instrumentation-state` work in it
+was left staged-out and untouched.
+
+### Verification boundary, pass 7
+
+Still cold-only (`:seon.test/destructive-in-process`), still no test JVM. The
+whole fetch path was instead replayed at the seams in default pid 30138, on a
+daemon thread, against a `cp -Rp` copy of the newest published base
+(`target/test-published-bases/e43d9497…/base`, reidentified): a fresh branch
+of `:current-src`, the projection carried, `seed-cluster!` /`apply-config!` /
+`transacted!` applied through `seon.db`, a local `HttpServer` on
+`127.0.0.1:0`, and two real `my.web/fetch` calls through the door:
+
+```clojure
+{:inline-ceiling 4096
+ :text "<html>hello</html>"
+ :text-arm-keys (:my.web.body/bytes :my.web.body/digest :my.web.body/text)
+ :octets [0 1 255 2]
+ :ordinals [0 1]
+ :ids ["2158c04c1df0" "6db6bcd6f1b7"]
+ :settled [true true]
+ :stored-equals-live true}
+```
+
+That is every assertion the cold test makes, measured through the production
+owner. The probe copy was deleted; the published base was not written to.
+
+**Foreign, reported not touched:** batch 88 shows
+`public-search-settles-one-receipt-with-provider-credits` ERRORing on
+`seon.print/text-sink refused return value at []: expected must implement
+seon.print/Sink, got an instance of seon.print.TextSink` — a protocol/class
+identity split, not a web fixture fact. It also takes
+`seon.turn-loop-test/a-refused-batch-settlement-…` down in the same run, and
+`test/seon/test_support.clj:1084`'s own docstring names the mechanism
+(`seon.instrument/replaced-definitions`: a body that reloads the program's
+namespaces replaces the protocols and types its closures were built from).
+That belongs to the instrumentation/print owners.

@@ -139,7 +139,17 @@
       (str root)))))
 
 (defn with-published-file-database
-  "Run `body` on a private file-store branch of the published test base."
+  "Run `body` on a private file-store branch of the published test base.
+
+  The connection CARRIES the branch's own program projection, exactly as the
+  canonical in-memory base and a live cluster's boot do. A branch connection
+  opened straight off a store carries none, so every `db/db` on it fell back
+  to the thread's projection -- in a worker, the PACKAGED projection, which
+  declares schema forms and no function contracts at all. Every seam that asks
+  the carried projection about a FUNCTION then answered from an empty map:
+  `seon.effect/accepts-request?` refused every capability request alike with
+  :seon.effect/invalid-request (measured on batch 85's published base: 0
+  function contracts carried, 1118 derived)."
   [root branch body]
   (let [root (str root)]
     (populate-published-root! root)
@@ -153,7 +163,11 @@
                          :seon.store/branch branch})
       (let [connection (store/open-branch! opened branch)]
         (try
-          (body connection)
+          (let [database @connection
+                projection (schema/projection-from-database database)
+                state (sci.eval/projection-state database projection)]
+            (db/carry-connection-projection-state! connection state)
+            (schema/call-with-projection-state state #(body connection)))
           (finally
             (d/release connection))))
       (finally

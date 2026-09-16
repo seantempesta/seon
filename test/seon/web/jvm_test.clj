@@ -9,8 +9,6 @@
             [seon.db :as db]
             [seon.effect :as effect]
             [seon.fs :as filesystem]
-            [seon.schema :as schema]
-            [seon.sci.eval :as sci.eval]
             [seon.test-support :as support]
             [seon.web.jvm]
             [seon.web.search])
@@ -32,31 +30,19 @@
       (support/with-published-file-database
        root :my-web-test
        (fn [connection]
-          ;; CARRY THIS BRANCH'S OWN PROGRAM PROJECTION, exactly as the
-          ;; canonical base does and as a live cluster's boot does. A branch
-          ;; connection opened straight off the store carries none, so every
-          ;; `db/db` on it fell back to the worker's PACKAGED projection --
-          ;; schema forms with ZERO function contracts -- and the effect door
-          ;; asks the carried projection for the owner's declared input:
-          ;; `seon.effect/accepts-request?` then answered false for EVERY
-          ;; capability, and `my.web/fetch` refused its own well-formed request
-          ;; with :seon.effect/invalid-request. Measured on the batch-85
-          ;; published base: 0 function contracts carried, 1118 derived.
-          (let [projection (schema/projection-from-database @connection)
-                state (sci.eval/projection-state @connection projection)]
-            (db/carry-connection-projection-state! connection state)
-            (schema/call-with-projection-state
-             state
-             (fn []
-               ;; SEED THE CLUSTER, not just its config row. `seon.fs.jvm` and
-               ;; the effect door read their dials through the cluster's own
-               ;; facts, so a branch carrying a config row and no cluster
-               ;; entity answers nil for every dial and the handler
-               ;; dereferences it.
-               (support/seed-cluster!
-                connection "default"
-                {:seon.config.eval.result/blob-threshold 8})
-               (body connection))))))
+          ;; The branch's own program projection is carried by
+          ;; `with-published-file-database` itself -- without it the effect
+          ;; door asks a projection with no function contracts and refuses
+          ;; every capability request.
+          ;;
+          ;; SEED THE CLUSTER, not just its config row. `seon.fs.jvm` and the
+          ;; effect door read their dials through the cluster's own facts, so a
+          ;; branch carrying a config row and no cluster entity answers nil for
+          ;; every dial and the handler dereferences it.
+          (support/seed-cluster!
+           connection "default"
+           {:seon.config.eval.result/blob-threshold 8})
+          (body connection)))
       (finally
         (when (.exists root)
           (filesystem/delete-recursively! (str root) (str root)))))))
@@ -255,6 +241,25 @@
    :seon.config/on-core-error :record
    :seon.effect/counter (atom -1)})
 
+(defn- turn-receipts
+  "This turn's effect entities in ordinal order, DERIVED from the facts.
+
+  `:seon.effect/id` is `(seon.id/digest 12 [:seon.effect/id turn ordinal
+  effect-ordinal])` at the writer (`src/seon/effect.clj`), so a fixture that
+  spells an id by hand -- `(pr-str [\"web-receipt-run\" 0 0])` was the spelling
+  here -- matches nothing, pulls nil, and reads that absence as \"never
+  settled\". The run ref and the writer's own ordinal answer the same question
+  without knowing how an id is minted."
+  [connection turn-id]
+  (->> (db/q '[:find [(pull ?receipt [*]) ...]
+               :in $ ?turn
+               :where
+               [?receipt :seon.effect/run ?run]
+               [?run :seon.turn/id ?turn]]
+             (db/db connection) turn-id)
+       (sort-by :seon.effect/ordinal)
+       vec))
+
 (defn- accepted-at-the-door
   "The effect door's own verdict on the exact request this fixture sends.
 
@@ -417,35 +422,35 @@
                   #(binding [db/*conn* connection
                              effect/*request-context* (effect-context connection)]
                      (web/search request)))
-                receipt-id (pr-str ["web-receipt-run" 0 0])
-                receipt
-                (db/pull @connection '[*]
-                         [:seon.effect/id receipt-id])
-                stored-result (edn/read-string
-                               (:seon.effect/result-edn receipt))
-                receipt-count
-                (db/q '[:find (count ?receipt) .
-                        :in $ ?id
-                        :where [?receipt :seon.effect/id ?id]]
-                      @connection receipt-id)]
+                receipts (turn-receipts connection "web-receipt-run")
+                receipt (first receipts)
+                stored-result (some-> (:seon.effect/result-edn receipt)
+                                      edn/read-string)]
             (is (true? accepted)
                 "my.web/search must accept this fixture's own request at the door")
             (is (= 1 (:my.web/credits result)) (pr-str result))
             (is (= result stored-result))
-            (is (= 1 receipt-count))
+            (is (= 1 (count receipts)))
             (is (inst? (:seon.effect/opened-at receipt)))
             (is (inst? (:seon.effect/settled-at receipt)))
             (is (nil? (:seon.effect/interrupted-at receipt)))))))))
 
-(deftest ^{:seon.test/fixture-observation "The public fetch effect must settle inline text and blob-backed binary bodies with durable effect evidence."} public-fetch-settles-text-and-binary-body-representations
+(deftest ^{:seon.test/fixture-observation "The public fetch effect must settle inline text and inline octet bodies with durable effect evidence."} public-fetch-settles-text-and-binary-body-representations
   (with-file-database
     (fn [connection]
       (with-server
         (fn [{:keys [base-url]}]
+          ;; THIS TEST'S SUBJECT IS THE INLINE ARM of both body
+          ;; representations, so its inline ceiling must admit them: the
+          ;; suite manifest's `:seon.config.web/max-inline-bytes 8` sends the
+          ;; 18-byte HTML body to the blob tier and `:my.web.body/text` is
+          ;; then absent by design. The blob arm has its own test,
+          ;; `oversized-bodies-spill-byte-exactly-through-the-blob-tier`.
           (support/apply-config!
            connection "default"
            (assoc (web-manifest base-url)
-                  :seon.config.eval.result/blob-threshold 8))
+                  :seon.config.eval.result/blob-threshold 8
+                  :seon.config.web/max-inline-bytes 4096))
           (support/transacted!
                   connection
                   [{:seon.agent/id "web-agent"}
@@ -463,16 +468,9 @@
                           effect/*request-context* context]
                   [(web/fetch text-request)
                    (web/fetch binary-request)])
-                receipts
-                (mapv
-                 (fn [ordinal]
-                   (db/pull
-                    @connection '[*]
-                    [:seon.effect/id
-                     (pr-str ["web-receipt-run" 0 ordinal])]))
-                 [0 1])
+                receipts (turn-receipts connection "web-receipt-run")
                 stored-results
-                (mapv #(edn/read-string (:seon.effect/result-edn %))
+                (mapv #(some-> (:seon.effect/result-edn %) edn/read-string)
                       receipts)]
             (is (= [true true] accepted)
                 "my.web/fetch must accept this fixture's own requests at the door")
@@ -486,5 +484,6 @@
                                           :my.web.body/octet-values])))
             (is (not (contains? (:my.web/body binary-result)
                                 :my.web.body/text)))
+            (is (= [0 1] (mapv :seon.effect/ordinal receipts)))
             (is (= [text-result binary-result] stored-results))
             (is (every? #(inst? (:seon.effect/settled-at %)) receipts))))))))
