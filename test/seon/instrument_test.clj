@@ -31,6 +31,7 @@
             [seon.flow :as flow]
             [seon.fs :as fs]
             [seon.instrument :as instrument]
+            [seon.print :as print]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
             [seon.test.arm]
@@ -856,3 +857,57 @@
                         (catch Exception thrown thrown))]]
        (is (= :seon.instrument/contract-violated
               (:seon.error/kind (ex-data failure))))))))
+
+(deftest restoring-instrumentation-state-never-reinstalls-a-replaced-definition
+  ;; THE CLASS (gate batch 88, worker pool-1, run tmp/test-runs/run.j9rx0e):
+  ;; a fixture captured this JVM's armed roots, its body adopted a published
+  ;; program — `src/seon/cluster.clj:2247` reloads every namespace with source
+  ;; in the HOSTING JVM — and the restore put the pre-reload closures back over
+  ;; post-reload protocols and types. `seon.print/text-sink` then returned a
+  ;; superseded `seon.print.TextSink` that the reloaded `seon.print/sink?`
+  ;; refused, so its own armed output contract refused six later calls across
+  ;; three namespaces in that worker. A captured root is restorable only while
+  ;; the definition under it is still the one it was compiled against.
+  (instrumented!
+   (fn [_]
+     (let [namespace-name 'r7.reload.probe
+           ;; No file on any classpath, so nothing can load this namespace again.
+           load! (fn []
+                   (binding [*ns* (create-ns namespace-name)]
+                     (clojure.core/refer-clojure)
+                     (eval '(do (defprotocol ProbeSink (-emit [sink]))
+                                (deftype ProbeText [] ProbeSink (-emit [_] :text))
+                                (defn make [] (ProbeText.))
+                                (defn sink? [value] (satisfies? ProbeSink value))))))
+           emits-a-value-its-own-protocol-accepts?
+           (fn [] ((ns-resolve namespace-name 'sink?)
+                   ((ns-resolve namespace-name 'make))))]
+       (try
+         (load!)
+         (let [probe (ns-resolve namespace-name 'make)]
+           ;; Carry the wrapper shape `instrument/instrumented` derives from, so
+           ;; the probe enters `state` exactly as an armed Var does.
+           (alter-var-root probe
+                           (fn [original]
+                             (with-meta (fn [& arguments] (apply original arguments))
+                               {:seon.instrument/var probe
+                                :malli.instrument/original original})))
+           (let [state (instrument/state)
+                 entering (count (:seon.instrument/roots state))]
+             (is (contains? (:seon.instrument/roots state) probe)
+                 "an armed Var's root is part of the captured state")
+             (load!)
+             (is (= #{probe} (instrument/replaced-definitions state))
+                 "only the Var whose loaded definition was replaced is named")
+             (is (= #{probe} (instrument/restore! state))
+                 "the restore reports the Vars it left to the loader")
+             (is (emits-a-value-its-own-protocol-accepts?)
+                 "the replaced definition is left as the loader left it")
+             (is (print/sink? (print/text-sink {:seon.print/width 72}))
+                 "the class this regression exists for, at its measured Var")
+             (is (contains? (instrument/instrumented) #'db/transact!)
+                 "every unreplaced root round-trips through the restore")
+             (is (= (dec entering) (count (instrument/instrumented)))
+                 "and nothing else is armed or unarmed by it")))
+         (finally
+           (remove-ns namespace-name)))))))

@@ -744,3 +744,89 @@
   {:malli/schema [:=> [:cat] :seon.instrument/instrumented]}
   []
   (count (instrumented)))
+
+;;; ---------------------------------------------------------------------------
+;;; Scoping one caller's arming without reinstalling a superseded definition
+;;; ---------------------------------------------------------------------------
+
+(def ^:private function-schemas*
+  "Malli's own function-schema registry atom — the one JVM-wide declaration
+  state arming reads (`reference-code/malli/src/malli/core.cljc:3061`)."
+  @#'m/-function-schemas*)
+
+(defn state
+  "This JVM's instrumentation state as one value: every armed Var's current
+  root and Malli's function-schema registry.
+
+  A scope that is about to run something which arms, unarms or reloads hands
+  the value it captured here back to `restore!`."
+  {:malli/schema
+   [:=> [:cat]
+    [:map
+     [:seon.instrument/roots
+      [:map-of [:fn clojure.core/var?] [:fn clojure.core/ifn?]]]
+     [:seon.instrument/function-schemas :map]]]}
+  []
+  {:seon.instrument/roots (into {} (map (juxt identity deref)) (instrumented))
+   :seon.instrument/function-schemas @function-schemas*})
+
+(defn replaced-definitions
+  "Vars in `state` whose LOADED DEFINITION this JVM has replaced since it was
+  captured, derived by comparing each captured root's original with the Var's
+  current original.
+
+  Development adoption reloads the program's namespaces in the hosting JVM
+  (`src/seon/cluster.clj:2247`), and a reload replaces the protocols, types and
+  classes a captured closure builds from as well as the Var's root. A captured
+  root is therefore a mirror the loader has re-decided: it is restorable only
+  while the definition under it is still the one it was compiled against."
+  {:malli/schema
+   [:=> [:cat
+         [:map
+          [:seon.instrument/roots
+           [:map-of [:fn clojure.core/var?] [:fn clojure.core/ifn?]]]
+          [:seon.instrument/function-schemas :map]]]
+    [:set [:fn clojure.core/var?]]]}
+  [state]
+  (into #{}
+        (keep (fn [[candidate captured]]
+                (when (and (bound? candidate)
+                           (not (identical? (mi/-f->original captured)
+                                            (mi/-f->original @candidate))))
+                  candidate)))
+        (:seon.instrument/roots state)))
+
+(defn restore!
+  "Restore `state`, leaving every replaced definition as the loader left it.
+
+  Unarm the wrappers this JVM now holds, put Malli's function-schema registry
+  and the captured roots back, and skip both steps for the Vars
+  `replaced-definitions` names: reinstalling one of those closures leaves the
+  Var emitting values the current protocol no longer recognises. The measured
+  case is `seon.print/text-sink` handing back a superseded `seon.print.TextSink`
+  that the reloaded `seon.print/sink?` (`src/seon/print.cljc:27`) refuses, so
+  the Var's own armed output contract refused every later call in that JVM.
+
+  Returns the Vars left as the loaded program has them; an empty set — the
+  ordinary case — says nothing was replaced, and a non-empty set is the
+  evidence that something reloaded inside the scope."
+  {:malli/schema
+   [:=> [:cat
+         [:map
+          [:seon.instrument/roots
+           [:map-of [:fn clojure.core/var?] [:fn clojure.core/ifn?]]]
+          [:seon.instrument/function-schemas :map]]]
+    [:set [:fn clojure.core/var?]]]}
+  [state]
+  (let [roots (:seon.instrument/roots state)
+        replaced (replaced-definitions state)]
+    (try
+      (doseq [candidate (instrumented)
+              :when (not (contains? replaced candidate))]
+        (alter-var-root candidate mi/-f->original))
+      (finally
+        (reset! function-schemas* (:seon.instrument/function-schemas state))
+        (doseq [[candidate captured] roots
+                :when (and (bound? candidate) (not (contains? replaced candidate)))]
+          (alter-var-root candidate (constantly captured)))))
+    replaced))

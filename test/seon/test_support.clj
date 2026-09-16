@@ -5,7 +5,6 @@
             [clojure.java.io :as io]
             [clojure.test :as test]
             [datahike.api :as d]
-            [malli.instrument :as mi]
             [seon.cluster :as cluster]
             [seon.cluster.export :as cluster.export]
             [seon.cluster.registry :as registry]
@@ -1085,21 +1084,19 @@
 
 (defn preserving-instrumentation-state
   "Scope a test's deliberate instrumentation changes to that test.
-   Restore the entering callable roots and Malli registry even when it throws."
+   Restore the entering instrumentation state even when the body throws.
+
+   `seon.instrument` owns what restoring means, including the one case a
+   captured root cannot answer for: a body that reloads the program's
+   namespaces in this JVM (development adoption) replaces the protocols,
+   types and classes those closures build from, so the Vars it named are
+   left as the loader left them (`seon.instrument/replaced-definitions`)."
   [body]
-  (let [roots (into {} (map (juxt identity deref)) (instrument/instrumented))
-        registry @(ns-resolve 'malli.core '-function-schemas*)
-        schemas @registry]
+  (let [state (instrument/state)]
     (try
       (body)
       (finally
-        (try
-          (doseq [instrumented-var (instrument/instrumented)]
-            (alter-var-root instrumented-var mi/-f->original))
-          (finally
-            (reset! registry schemas)
-            (doseq [[instrumented-var callable] roots]
-              (alter-var-root instrumented-var (constantly callable)))))))))
+        (instrument/restore! state)))))
 
 (defn preserving-schema-registry
   "Scope a test's deliberate schema-registry changes to that test.
