@@ -375,3 +375,74 @@ launched. Every owned operator shell exited; no owned background shell,
 scratch cluster, or worktree remains. Foreign source/schema/runner edits were
 preserved. This closes the tuple-retraction blocker; the batched isolated
 namespace/platform gate remains assigned to the orchestrator.
+
+## Batch 19 triage — 2026-09-16
+
+Triage of the eleven distinct batch-19 reds in
+`tmp/orchestrator/gate-results/batch-19/program-provenance.md`. No test JVM
+was launched: every run is `(seon.test/run #'ns/test (seon.operator/connection
+"default"))` in default's JVM with explicit custody.
+
+**Method correction worth keeping.** `test/` is not on default's classpath;
+`seon.test/run` reaches test namespaces through `seon.test`'s own
+`DynamicClassLoader` over the `:test` alias extra-paths. A bare `require` of a
+test namespace is therefore a no-op against whatever an earlier session loaded,
+and the first two in-process runs reported green against stale loaded test
+code. Reloading each test namespace through that same loader before running
+reproduced every gate block exactly. An in-process verdict taken without that
+reload is worthless.
+
+### Verdict table
+
+| Test | In-process at HEAD (before fix) | Attribution | Outcome |
+|---|---|---|---|
+| `seon.fn-test/my-web-cascade-class-warns-without-vetoing-publication` | 0/0/1, `StringIndexOutOfBoundsException` in `exact-form-span` | program-provenance `3402913f3` | fixed at the owner, `35889c232`; 3/0/0 run 74029 |
+| `seon.fn-test/indexing-uses-a-prebuilt-manifest-without-analysis` | 0/0/1, `:seon.lint/col 8` refused, not `java.lang.Long` | program-provenance `3402913f3` | fixed at the owner, `35889c232`; 7/0/0 run 74045 |
+| `seon.fn-test/file-artifacts-and-manifests-are-byte-digested-and-deterministic` | 16/1/0, `(first rows)` is now the file row | program-provenance `3402913f3` | fixture selects the namespace row; 17/0/0 run 74025 |
+| `seon.fn-test/keyword-usage-is-indexed-per-declaration` | 5/2/0, `:entity-id/missing` on the file lookup ref | program-provenance `3402913f3` | fixture admits the emitted file rows; 7/0/0 run 74030 |
+| `seon.fn-test/settled-agent-form-has-static-index-edge-parity` | 0/1/1, same `:entity-id/missing` | program-provenance `3402913f3` | fixture admits the emitted file rows; 4/0/0 run 74044 |
+| `seon.program-test/positional-and-map-entry-contracts-have-distinct-addresses` | 1/5/0, setup write refused at `[2 :seon.schema.admission/source]` | pre-existing, `26ec13420` (authored transaction-data validation) | fixture declares its provenance; 6/0/0 run 74032 |
+| `seon.program-test/typed-cross-namespace-deletion-retracts-function-and-test` | 5/2/0, same refusal, then `no-terminal-fact` on the retired `result-edn` | pre-existing, `26ec13420` plus the retired `:seon.cluster.eval/result-edn` | fixture declares provenance and settles with `:seon.eval/shown`; 7/0/0 run 74033 |
+| `seon.program-test/identical-runtime-redeclaration-builds-no-datoms` | 0/0/1, `:seon.schema/missing-projection` at `seon.turn/row-tx` | pre-existing, `b80f78a7c` | fixture hands `(db/db connection)` and its provenance; 2/0/0 run 74041 |
+| `seon.program-test/changed-runtime-redeclaration-builds-a-real-replacement` | 0/0/1, same | pre-existing, `b80f78a7c` | same fix; 3/0/0 run 74042 |
+| `seon.program-test/opening-basis-divergence-is-only-claimed-when-it-is-measurable` | 0/0/1, same | pre-existing, `b80f78a7c` | same fix; 4/0/0 run 74043 |
+| `seon.program-test/reader-events-have-one-canonical-declaration-row` | 14/2/0, row carries `:seon.schema/ns` the expectation omits | pre-existing, `e4372b061` (the reader began carrying the declaring namespace on 2026-09-09) | stale expectation updated; 16/0/0 run 74031 |
+
+### Root causes fixed at the owner
+
+`src/seon/fn.clj`, commit `35889c232`:
+
+- `exact-form-span` clamps a column to its line's end. The synthetic cascade
+  fixture addresses column 44 of a 19-character line; the old offset computed
+  `(subs text 12 33)` over 32 characters and threw a raw
+  `StringIndexOutOfBoundsException` out of `build-manifest`. Real analyzer
+  positions are unaffected: `seon.plan/settle-call` still spans
+  `[27490 28550]` and its 1,060 UTF-8 bytes still equal `:seon.fn/source`.
+- `lint-rows` coerces clj-kondo's JDK Integer row and column to `long`.
+  `:seon.lint/row` and `:seon.lint/col` are `:db.type/long`, and Datahike
+  refused population with `Bad entity value 8 at [:db/add 42978
+  :seon.lint/col 8]`. A 44-finding probe returned `java.lang.Long` for every
+  row and column. `seon.id/id` is unchanged because both print identically.
+
+The four fixture repairs admit the emitted file rows exactly as publication
+admits them, the idiom `e441e0263` already established.
+
+### Probe recorded on an existing issue
+
+While the cached canonical base still predated `76774d044`,
+`seon.turn/row-tx` returned nine transaction entries, six of them built from a
+`seon.db/q` refusal map's own entries, for example
+`[:db/retract [:seon.db/invalid-read true] :seon.fn/pending-calls
+"sample/idempotent"]`. That names the previously unidentified query behind
+[the declaration-settlement issue](../../../seon/issues/declaration-settlement-consumes-invalid-read-as-ref.md),
+where the evidence is now recorded. `src/seon/turn.clj` is concurrently edited
+and was not touched. A `bin/seon init --dev default --changed src/seon/fn.clj`
+refused once with `:seon.cluster/source-changed-during-adoption` under
+concurrent edits, then converged at `:current-src` commit
+`6aaa1292-4a05-5bbf-b622-09c3867f1e69`; that adoption refreshed the canonical
+base and the last five tests then ran green without further change.
+
+All eleven batch-19 reds are green in-process at default after adoption. The
+isolated batched gate remains the orchestrator's proof. No test JVM, scratch
+cluster, worktree, or background shell was created; default was never stopped
+or reforked; every foreign edit was preserved.
