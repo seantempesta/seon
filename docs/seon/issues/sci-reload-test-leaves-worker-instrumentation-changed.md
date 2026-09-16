@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, testing, instrumentation, wave/contract-gate]
 ---
@@ -26,3 +26,21 @@ armed test completing with no worker-global drift report. The fixture and
 instrumentation owners were protected during N7; no changes were made there.
 Full gate context is in
 [the N7 landing note](../../prds/context-generation/research/n7-query-classification-2026-09-15.md).
+
+
+## Resolution — 2026-09-16 UTC
+
+Commit `0edd57230` scopes the reload test with the existing
+`seon.test-support/preserving-instrumentation-state` fixture. The generated-form
+instrumentation test uses the same fixture and deletes its bespoke cleanup.
+No second restoration mechanism was added.
+
+A live default JVM probe reproduced 24 removed wrappers before the repair.
+After loading the saved definitions and arming with default's carried projection,
+`seon.test/run` recorded three passing assertions for each test and no added or
+removed instrumented Vars. The complete final replay was 8 tests / 72 assertions,
+zero failures/errors and zero instrumentation-set changes. Exact run identities
+and before/after evidence are in
+[the P1 batch-12b landing record](../../prds/context-generation/research/p1-ambient-state-2026-09-15.md)
+and its adjacent `p1-batch12b-final-2026-09-15.edn`. The orchestrator re-gate is
+pending; no new full platform-tier result is claimed.

@@ -1,0 +1,4 @@
+#:seon.test{:fail-count 0, :pass-count 3, :run-at #inst "2026-09-15T23:58:18.211-00:00", :run #:db{:id 67388}, :run-basis-t 536872446, :error-count 0, :sym "seon.sci.eval-test/runtime-function-rows-carry-parsed-contract-facts"}
+#:seon.test{:fail-count 0, :pass-count 4, :run-at #inst "2026-09-15T23:58:47.390-00:00", :run #:db{:id 67389}, :run-basis-t 536872448, :error-count 0, :sym "seon.sci.eval-test/static-and-runtime-contracted-definitions-publish-identical-facts"}
+#:seon.test{:fail-count 0, :pass-count 11, :run-at #inst "2026-09-15T23:59:28.575-00:00", :run #:db{:id 67394}, :run-basis-t 536872450, :error-count 0, :sym "seon.sci.eval-test/public-walk-is-callable-through-an-agent-sci-eval"}
+#:seon.test{:fail-count 0, :pass-count 5, :run-at #inst "2026-09-16T00:00:00.250-00:00", :run #:db{:id 67395}, :run-basis-t 536872454, :error-count 0, :sym "seon.render-simplification-test/distance-spends-only-real-ref-hops-and-caps-win"}

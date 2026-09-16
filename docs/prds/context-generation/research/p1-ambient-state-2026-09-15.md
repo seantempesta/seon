@@ -804,3 +804,101 @@ roots were preserved.
 Repair slice committed as `72d7dc3a9`. Re-gate request rewritten at
 `tmp/orchestrator/gate-requests/p1-ambient-state.txt` after all 52 named
 regressions passed. The lane stops here without waiting for the gate.
+
+
+### Batch-12b repair — 2026-09-15 session, completed 2026-09-16 UTC
+
+The supplied gate was 340 tests / 2448 assertions / 11 failures, with a green
+platform tier. Its nine assertion blocks concerned five tests; the two
+worker-global notices named two additional tests, not the declaration-row
+assertion tests. Read the complete supplied report before diagnosis.
+
+**Final in-process evidence: 8 tests, 72 assertions, zero failures/errors,
+zero instrumented Vars added or removed.** Exact symbols, run entities,
+timestamps and before/after set differences are in
+[p1-batch12b-final-2026-09-15.edn](p1-batch12b-final-2026-09-15.edn).
+Every call used `seon.test/run` on `(seon.operator/connection "default")`;
+no test JVM was launched. The five gate subjects and both state-leak tests
+are covered, plus the existing short completion-bound regression.
+
+| Subject | Owning correction | Final passes |
+| --- | --- | ---: |
+| public walk | Cache the pull plan by schema and selector; return caller distance/caps outside the cached value. | 11 |
+| runtime contract row | Canonical database fixture and its acquired SCI fork replace a bare base context. | 3 |
+| static/runtime parity | Same canonical fixture and SCI acquisition. | 4 |
+| distance/cap | Assert the explicit root query-work refusal: allowed 1, observed 2; do not filter it out as absent. | 5 |
+| artifact lifecycle | One four-argument fresh-store constructor; remove the delegating arity and always pass fixture options. | 40 |
+| generated form/instrumentation | Use canonical instrumentation preservation; delete bespoke remove/restore code. | 3 |
+| evaluator reload | Preserve entering instrumentation around reload. | 3 |
+| short completion bound | Existing 50 ms refusal remains named and recorded. | 3 |
+
+The original artifact failure counted two function entrances, not two physical
+stores: the three-argument helper delegated through its redefined Var. The
+single constructor now makes the observer and the resource acquisition agree.
+No artifact scenario or assertion was removed. The final run preserves all
+five identity/paging/retraction cases and all 40 assertions.
+
+The live instrumentation reproduction added two wrappers in the generated-form
+test and removed 24 in the reload test. See
+[p1-batch12b-state-before-2026-09-15.edn](p1-batch12b-state-before-2026-09-15.edn).
+The saved-definition replay has empty differences for every test. An initial
+post-adoption replay still executed the previously loaded reload-test Var;
+explicitly loading the saved test forms and re-arming from default's carried
+projection corrected the verification surface. The final artifact replay also
+has empty differences. Do not confuse source adoption with test Var loading.
+
+The strengthened pull-plan regression was probed against the original function:
+**10 passes / 1 failure**, because equal selectors with different caller bounds
+received different plan objects. Restoring the candidate produced **11/0/0**.
+The regression verifies plan identity AND each caller's own bounds. The test's
+process-wide mocked `config/effective` counter was removed: the canonical
+configuration now supplies the real input, rather than replacing it globally.
+No schema/projection rebuild fallback was added.
+
+Newly populated physical stores and freshly acquired SCI contexts separately
+passed the two declaration tests and both walk tests: **3 + 4 + 11 + 5 = 23**
+assertions. These probes do not replace the shared database-base delay. They
+use the canonical fresh-store option with its required observation, acquire a
+new context, and restore the original test definition in `finally`. Exact
+replay forms and results:
+[p1-batch12b-cold-probes-2026-09-15.clj](p1-batch12b-cold-probes-2026-09-15.clj),
+[p1-batch12b-cold-2026-09-15.edn](p1-batch12b-cold-2026-09-15.edn).
+The artifact regression itself already requires a fresh physical store.
+
+The two declaration assertions did not reproduce on the warmed live base or
+in the initial fresh-population direct probe. Their fixtures nevertheless
+handed only a bare context, unlike production; their corrected canonical
+acquisition passes both ordinary and fresh-population runs. This evidence does
+not attribute their old gate failures to the instrumentation leaks.
+
+**In-process execution boundary:** the artifact test takes longer than the
+20 s default event backstop. Two initial calls timed out, independently of
+its store-count assertion. `seon.test/run` previously silently clamped an
+explicit `:seon.test/remaining-ms` to that default. It now honors the caller's
+already-declared remaining allowance and labels its diagnostic with that same
+key. The two-argument default remains 20 s; `check` retains its existing total
+configured deadline. Fresh-store probes explicitly supplied 120000 ms (the
+current check allowance); no global clock was changed. Candidate artifact run
+67214 passed 40 assertions in 52.384 s including tool work; final run 67412
+passed in 47.209 s. The 50 ms regression still passes. This is one execution
+mechanism with explicit bounds, not a second runner.
+
+Production forms were evaluated and probed before file edits. Explicit in-place
+adoption converged at `6aa9db5e-c296-512e-bc7e-9f87e74a28d2`; saved test forms were
+then loaded and rerun. Clj-kondo across the five changed paths: **0 errors,
+7 warnings**. `git diff --check` passes. The platform tier's prior green is
+reported input, not a newly run platform claim. The orchestrator gate remains
+pending. Both publication shells completed; default was never restarted.
+
+Concurrent value-renderer edits were preserved. The render-simplification test
+file became available after that lane committed, so the cap correction could
+be saved normally. The separate automatic-refresh issue for an already-retained
+canonical base remains open; no global fixture delay was replaced here.
+
+
+Batch-12b repair commits: `253206238` (fixture and explicit execution bound),
+`0edd57230` (pull-plan ownership and scoped test state). Re-gate request now
+contains only `seon.sci.eval-test`, `seon.render-simplification-test`,
+`seon.cluster.mcp-test`, `seon.test-support-test`, and `seon.test-reaching-test`.
+Each corresponding namespace file was verified under `test/`; the nonexistent
+`seon.sci.kernel-test` entry is removed. No lane gate was run or awaited.
