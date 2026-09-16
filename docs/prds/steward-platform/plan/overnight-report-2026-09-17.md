@@ -96,9 +96,15 @@ peer session (batches 30–57; ledger
    this on every reseed), the identity attribute and entity map are
    committed as facts but dropped from the in-memory projection at install;
    they re-derive later and read as drift. A stale mirror of the declaration
-   facts — the write storm's disease one layer up. Fix lane running at the
-   projection-advance seam. Issue:
+   facts — the write storm's disease one layer up. Fixed (`a8ed776e0`): the
+   turn's row canonicalization re-printed the schema form, and the install
+   seam compared bytes, so the cluster's own committed storable
+   declarations read as "not committed" and were skipped; one value-equal
+   comparison now. Issue resolved:
    `a-committed-storable-declaration-is-dropped-from-the-clusters-live-projection`.
+   A follow-up class from the same day: the runner's drift restore put
+   deliberately retracted declarations back (a restore must derive from the
+   committed facts) — `the-drift-restore-undoes-a-committed-schema-retraction`.
 
 1. **The store grows without collection.** `data/store` went 107 MB → 12 GB in
    eight hours with no periodic writer. The peer's measurement
