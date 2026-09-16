@@ -1,11 +1,19 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, database, runtime, schema, class/p3]
 ---
 
 # Transaction functions retain a committed query-cache identity
+
+Resolved 2026-09-16 by maintained fork commit `49ea5933` and its Seon
+acceptance regression. `datahike.core/with` detaches cache identity before
+transaction functions execute. Focused Kaocha runs in default's existing JVM
+pass 17/0/0 before and after source reload. The canonical declaration/deletion
+regression passes 8/0/0 after loading the file definitions, recorded run 74085.
+See [the landing record](../../prds/context-generation/research/turn-test-reds-cache-2026-09-16.md).
+Cold integration proof remains the orchestrator's gate; no test JVM was launched.
 
 Fresh canonical in-process probe, 2026-09-16 03:35 UTC, isolated development
 cluster `turn-test-reds19`, committed snapshot `9c03c1ec1` plus owned changes:
@@ -37,7 +45,8 @@ Acceptance: every speculative/mid-transaction database value is excluded from
 committed query-cache identity before any transaction function runs. Verify
 that repeated identical queries observe earlier writes in the same transaction,
 then replay the declaration/deletion regression with ordinary caching enabled.
-No cache disabling, dependency edit, or local projection workaround was landed.
-The dependency is outside this lane's granted paths. The related
+At that earlier stop, no cache disabling, dependency edit, or local projection
+workaround had landed. The owner subsequently granted the dependency repair.
+The related
 [unregister issue](runtime-schema-unregister-retains-installed-attribute.md)
 remains open.

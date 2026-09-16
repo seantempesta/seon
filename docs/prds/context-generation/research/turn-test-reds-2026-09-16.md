@@ -6,6 +6,8 @@ tags: [research, test, runtime, class/p3]
 
 # Turn test reds — 2026-09-16
 
+Latest continuation: [transaction-cache repair and batch 23](turn-test-reds-cache-2026-09-16.md).
+
 Continuation: [batch-19 class work and batch-20 seed verification](turn-test-reds-batch19-2026-09-16.md)
 records the later occurrence/configuration/prompt slices, exact blocked members,
 and the independently verified transaction-cache boundary. This earlier record's

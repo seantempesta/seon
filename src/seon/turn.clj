@@ -1217,9 +1217,12 @@
                           identity-value)))
                 deleted-identities)
           current-projection
-          (when (seq schema-keys) (or (db/carried-projection db)
-                  (throw (ex-info "Declaration database has no carried projection"
-                                  (db/projection-fallback 'seon.turn/row-tx)))))
+          (when (seq schema-keys)
+            (schema/projection-from-database
+             db
+             (or (db/carried-projection db)
+                 (throw (ex-info "Declaration database has no carried projection"
+                                 (db/projection-fallback 'seon.turn/row-tx))))))
           candidate-projection
           (reduce schema/projection-without-schema
                   current-projection
