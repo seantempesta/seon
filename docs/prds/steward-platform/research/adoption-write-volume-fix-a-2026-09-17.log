@@ -1,0 +1,70 @@
+● current-src: publication started
+● current-src: request accepted
+● current-src: bootstrap configuration
+● current-src: store acquisition
+● current-src: source build
+● current-src: complete publication: (:added-identity :component-or-cardinality-many-addition :component-or-cardinality-many-change :function-contract-change :missing-desired-artifact :removed-identity :schema-resource)
+● current-src: source snapshot
+● current-src: analysis started: 2063 source inputs
+● current-src: analysis complete
+● current-src: branch publication started
+● current-src: schema population started
+● current-src: schema population complete
+● current-src: instruction rows
+● current-src: program rows started
+● current-src: contract projection started: 2766 schemas, 1129 functions
+● current-src: contract projection complete
+● current-src: contract rows: 1820/10916
+● current-src: contract rows: 3640/10916
+● current-src: contract rows: 5460/10916
+● current-src: contract rows: 7280/10916
+● current-src: contract rows: 9100/10916
+● current-src: contract rows: 10916/10916
+● current-src: program population compiled: 39064 entities, 19311 identities, 35434 keyword facts
+● current-src: population: 93809/93809
+● current-src: program rows complete
+● current-src: initialization rows
+● current-src: branch publication complete
+● current-src: development source basis unavailable: 6aaad49e-a55e-52ad-981d-4df826c4bb8f; reconciling against the live cluster
+● current-src: development schema declarations
+● current-src: development program reconciliation
+● current-src: development loaded definitions
+● current-src: development reload seon.cluster.registry
+● current-src: development reload seon.cluster
+● current-src: development SCI acquisition
+● current-src: development JVM instrumentation
+● current-src: source changed during adoption; retrying publication once
+● current-src: source build
+● current-src: complete publication: (:added-identity :component-or-cardinality-many-addition :component-or-cardinality-many-change :removed-identity)
+● current-src: source snapshot
+● current-src: analysis started: 2063 source inputs
+● current-src: analysis complete
+● current-src: branch publication started
+● current-src: schema population started
+● current-src: schema population complete
+● current-src: instruction rows
+● current-src: program rows started
+● current-src: contract projection started: 2766 schemas, 1129 functions
+● current-src: contract projection complete
+● current-src: contract rows: 1820/10920
+● current-src: contract rows: 3640/10920
+● current-src: contract rows: 5460/10920
+● current-src: contract rows: 7280/10920
+● current-src: contract rows: 9100/10920
+● current-src: contract rows: 10920/10920
+● current-src: program population compiled: 39068 entities, 19315 identities, 35448 keyword facts
+● current-src: population: 93831/93831
+● current-src: program rows complete
+● current-src: initialization rows
+● current-src: branch publication complete
+● current-src: development source basis unavailable: 6aaad49e-a55e-52ad-981d-4df826c4bb8f; reconciling against the live cluster
+● current-src: development schema declarations
+● current-src: development program reconciliation
+● current-src: development loaded definitions
+● current-src: development reload seon.cluster
+● current-src: development reload seon.issue
+● current-src: development reload seon.operator
+● current-src: development SCI acquisition
+● current-src: development JVM instrumentation
+✗ Source changed during adoption through the one retry; the next edit must converge it.
+{:seon.source/commit-id #uuid "6aaae5a6-21b9-5789-8a08-dc27a58545fc", :seon.error/diagnostic-cause :seon.cluster/source-changed-during-adoption, :seon.source/change-phase :adoption}

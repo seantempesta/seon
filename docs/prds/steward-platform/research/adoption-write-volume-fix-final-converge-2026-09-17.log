@@ -1,0 +1,36 @@
+● current-src: publication started
+● current-src: request accepted
+● current-src: bootstrap configuration
+● current-src: store acquisition
+● current-src: source build
+● current-src: complete publication: (:component-or-cardinality-many-change :missing-desired-artifact :schema-resource)
+● current-src: source snapshot
+● current-src: analysis started: 2064 source inputs
+● current-src: analysis complete
+● current-src: branch publication started
+● current-src: schema population started
+● current-src: schema population complete
+● current-src: instruction rows
+● current-src: program rows started
+● current-src: contract projection started: 2771 schemas, 1129 functions
+● current-src: contract projection complete
+● current-src: contract rows: 1823/10934
+● current-src: contract rows: 3646/10934
+● current-src: contract rows: 5469/10934
+● current-src: contract rows: 7292/10934
+● current-src: contract rows: 9115/10934
+● current-src: contract rows: 10934/10934
+● current-src: program population compiled: 39088 entities, 19335 identities, 35522 keyword facts
+● current-src: population: 93945/93945
+● current-src: program rows complete
+● current-src: initialization rows
+● current-src: branch publication complete
+2026-09-16T19:10:03.074Z seans-m5-macbook-pro WARN [seon.cluster:2226] - Development source basis unavailable; reconciling against the live cluster {:seon.source/commit-id #uuid "6aaad49e-a55e-52ad-981d-4df826c4bb8f", :seon.cluster/name "default"}
+● current-src: development source basis unavailable: 6aaad49e-a55e-52ad-981d-4df826c4bb8f; reconciling against the live cluster
+● current-src: development schema declarations
+● current-src: development program reconciliation
+● current-src: development loaded definitions
+● current-src: development SCI acquisition
+● current-src: development JVM instrumentation
+● current-src: development cluster converged
+● :current-src commit 6aaae98a-34bd-5072-aaed-472ca71e7fd6 digest bd51f4ab26eeca08b56f9670966a72673844708d7b2a0add1102d1143ebbba2c
