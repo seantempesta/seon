@@ -1074,6 +1074,31 @@ class — HAND TO `retirement-is-a-fact` ON ITS RESUME: the fix must cover the
 (:756-757). `success-test` is the fixture's deliberate failing test leaking
 into the log as a FAIL line (reporting smell, recorded).
 
+**Schema-key audit landed** (`59256b33b`, `schema-key-audit-2026-09-16.md`,
+1,684 lines): 74 entity maps / 621 entries, per-schema writer/reader tables,
+and a reset edit list grouped by resource (its "Reset edit list" section is
+the launch unit list). Corrections it makes to earlier notes: evaluations DO
+get whole-entity write validation — through `:seon.cluster.eval/receipt`,
+a second evaluation schema with the same identity; `:seon.eval/entity` is a
+reader-shaped duplicate → consolidate to ONE canonical evaluation schema.
+New cross-cutting findings: required collections cannot distinguish "analysis
+omitted" from "computed empty" after Datahike drops empty sets (validate at
+submission, including `#{}`); 15 component maps are never selected by the
+whole-entity validator; `write-value` substitutes 0 for map refs (remove);
+`:seon.fn.arity/arity` and `:seon.fn.ast/type` are printed EDN strings of
+dependency values; 15 keys are optional only because one writer omits them.
+Its retirement rows assume Option B — SUPERSEDED by the owner's 23:10Z
+question (deletion = retraction + history; refs → symbols) pending his ruling.
+
+**Retirement lane STOPPED 23:12Z** before any production edit (owner
+questioned the premise). Proposed rules in chat: deletion is retraction;
+facts that must outlive a target store symbols not refs (`:seon.fn/calls`,
+`:seon.test/reach` → qualified symbols under symbols-everywhere); deleting a
+definition re-analyzes its known callers in the same publication; a missing
+ref is refused loudly, never minted; issues resolve (positive fact) or are
+retracted. Awaiting the owner; then either relaunch or delete the
+tombstone/minting machinery in the reset.
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
