@@ -1643,24 +1643,36 @@
   (let [value (:seon.render/value unit)]
     (get value (:seon.render.walk/attribute unit) value)))
 
+(def ^:private agent-faults-query
+  "Errors this agent must be able to read, by the two refs that name it.
+
+  A fault in a namespace it stewards names it through the function ref. A
+  fault recorded WHILE IT WAS WORKING — a lost model call is the founding
+  case — carries no `:seon.error/fn` at all and names the agent only through
+  its occurrence. Selecting only the first read the absence of the second as
+  health: the turn closed, the reason was durable, and the agent's next
+  prompt said nothing about it."
+  '[:find [(pull ?error [* {:seon.error/fn [:db/id :seon.fn/sym]}
+                          {:seon.error/occurrences [*]}]) ...]
+    :in $ ?id
+    :where [?agent :seon.agent/id ?id]
+           (or-join [?error ?agent]
+                    (and [?namespace :seon.ns/steward ?agent]
+                         [?function :seon.fn/ns ?namespace]
+                         [?error :seon.error/fn ?function])
+                    (and [?occurrence :seon.error.occurrence/agent ?agent]
+                         [?error :seon.error/occurrences ?occurrence]))])
+
 (defn faults-form
-  "Read errors whose function namespace is assigned to this agent."
+  "Read errors assigned to this agent: its stewarded namespaces, and its turns."
   {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :seon.render/form]]}
   [unit]
   (let [row (db/pull (:seon.db/db unit) [:seon.agent/id] (faults-input unit))]
     (when-let [agent-id (:seon.agent/id row)]
-      {:seon.repl/comment "Inspect errors in the namespaces assigned to me."
+      {:seon.repl/comment
+       "Inspect errors in the namespaces assigned to me and in my own turns."
        :seon.repl/form
-       (list 'seon.db/q
-             (list 'quote
-                   '[:find [(pull ?error [* {:seon.error/fn [:db/id :seon.fn/sym]}
-                                           {:seon.error/occurrences [*]}]) ...]
-                     :in $ ?id
-                     :where [?agent :seon.agent/id ?id]
-                            [?namespace :seon.ns/steward ?agent]
-                            [?function :seon.fn/ns ?namespace]
-                            [?error :seon.error/fn ?function]])
-             agent-id)})))
+       (list 'seon.db/q (list 'quote agent-faults-query) agent-id)})))
 
 (defn render-faults-ai
   "Emit the steward's read, or render already acquired fault entities."
@@ -1684,9 +1696,13 @@
               (db/q '[:find [(pull ?error [* {:seon.error/fn [:db/id :seon.fn/sym]}
                                              {:seon.error/occurrences [* {:seon.error.occurrence/turn [:seon.turn/id]}]}]) ...]
                       :in $ ?agent
-                      :where [?namespace :seon.ns/steward ?agent]
-                             [?function :seon.fn/ns ?namespace]
-                             [?error :seon.error/fn ?function]]
+                      :where
+                      (or-join [?error ?agent]
+                               (and [?namespace :seon.ns/steward ?agent]
+                                    [?function :seon.fn/ns ?namespace]
+                                    [?error :seon.error/fn ?function])
+                               (and [?occurrence :seon.error.occurrence/agent ?agent]
+                                    [?error :seon.error/occurrences ?occurrence]))]
                     database faults))
         references (cond acquired? faults
                          (:seon.error/kind row) [row]
