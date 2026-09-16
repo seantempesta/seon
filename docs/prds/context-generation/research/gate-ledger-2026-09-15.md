@@ -931,3 +931,16 @@ The orchestrator declined the proposed `:seon.fn/destructive` marker facet as
 a speculative addition with one consumer. Lane rule: destructive tests are
 cold-only. Batch 66 (after 65): platform (the proof) + seon.test.runner-test
 seon.test-runner-test seon.cluster.cohost-boot-test seon.test-support-test.
+
+### 2026-09-16 ~13:30Z — batch 65 B attribution: the sweep's loud-fixture wave
+
+142 distinct failing tests in 47 namespaces (boot 12, turn-loop 12,
+call-preparation 10, turn-work 10, schema-usage-guard 9, bootstrap 7,
+web.jvm 7, db 5 …). Sampled blocks are "Fixture write was refused at the
+write" through `transacted!` (`test_support.clj:250`), dominated by
+`run transition refused: receipt-exists` — dead fixtures the sweep made
+honest, not a regression of `ccccea806` (the platform tier was green apart
+from the sentinel). Two look real: call-preparation (a supplied value reaches
+the callee unreplaced) and boot-test's dead-holder recovery. Helper defect:
+the refusal text in test output is elided by the AI render profile — a test
+diagnostic must never be clipped. All with the steward's sweep lane.
