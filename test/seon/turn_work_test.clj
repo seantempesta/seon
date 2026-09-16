@@ -75,29 +75,38 @@
    :seon.ai.attempt/settings-edn "{}"})
 
 (defn- open-run!
-  "Open a turn, optionally planned."
+  "Open a turn, optionally planned, THROUGH THE WRITER.
+
+   A hand-written `{:seon.turn/id … :seon.turn/agent …}` row is not an open
+   turn: since `ae0e54841` the agent's open turn is read through its runtime
+   component (`[?runtime :seon.runtime/agent ?agent] [?runtime
+   :seon.runtime/turns ?turn]`, `seon.turn/open-for-agent`), and only
+   `open-call` writes that edge. A fixture that authors the turn map instead
+   leaves `agent-run` nil, so every derivation row answered `:open` or idle no
+   matter what else the table built."
   [connection {:keys [planned? triggered?]}]
   (support/transacted!
-          connection
-          (cond-> {:tx-data
-                   (cond-> [(cond-> {:seon.turn/id run-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}
-                              triggered?
-                              (assoc :seon.turn/trigger
-                                     [:seon.message/id message-id])
-                              true (assoc :seon.turn.work/situation :call)
-                              planned? (assoc :seon.turn/reply-size (long (count digest))))
-                            {:seon.agent/id agent-id
-                             }
-                            (model-attempt run-id now)]
-                     planned?
-                     (into (map (fn [ordinal]
-                                  {:seon.cluster.eval/id (str run-id "-" ordinal)
-                                   :seon.cluster.eval/run
-                                   [:seon.turn/id run-id]
-                                   :seon.cluster.eval/ordinal ordinal
-                                   :seon.cluster.eval/at now
-                                   :seon.cluster.eval/source (str "(+ " ordinal " 1)")})
-                                (range 2))))})))
+   connection
+   (turn/open-tx (cond-> {:seon.turn/id run-id
+                          :seon.turn/agent [:seon.agent/id agent-id]
+                          :seon.turn/opened-tx "datomic.tx"
+                          :seon.turn.work/situation :call}
+                   triggered?
+                   (assoc :seon.turn/trigger [:seon.message/id message-id]))))
+  (support/transacted!
+   connection
+   (cond-> [(model-attempt run-id now)]
+     planned?
+     (conj [:db/add [:seon.turn/id run-id]
+            :seon.turn/reply-size (long (count digest))])
+     planned?
+     (into (map (fn [ordinal]
+                  {:seon.cluster.eval/id (str run-id "-" ordinal)
+                   :seon.cluster.eval/run [:seon.turn/id run-id]
+                   :seon.cluster.eval/ordinal ordinal
+                   :seon.cluster.eval/at now
+                   :seon.cluster.eval/source (str "(+ " ordinal " 1)")})
+                (range 2))))))
 
 (defn- terminal-receipt!
   ([connection ordinal]
@@ -118,8 +127,15 @@
                       ]))
 
 (defn- configure-cap!
+  "Set the turn dial on the cluster the derivation actually reads.
+
+   `agent-a` is in no cluster, so the derivation reads the DEFAULT cluster's
+   config. The row this used to write named \"work-test\" and was refused by
+   write admission anyway, so the dial has been absent — and a fail-closed
+   bound with no dial opens no turn at all, which is why every row of the
+   table derived the same thing."
   [connection limit]
-  (support/apply-config! connection "work-test"
+  (support/apply-config! connection "default"
                          {:seon.config.run/max-episode-runs limit}))
 
 (defn- add-outside-trigger!
