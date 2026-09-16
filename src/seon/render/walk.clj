@@ -32,6 +32,7 @@
   Crash walk: pure over a database value. Nothing here opens, commits or
   holds anything."
   (:require [clojure.string :as str]
+            [datahike.pull-api :as pull-api]
             [seon.db :as db]
             [seon.cluster.wake :as wake]
             [seon.eval :as evaluation]
@@ -362,7 +363,7 @@
                      (:seon.schema.projection/fingerprint projection),
                      :seon.render.walk/selector selector,
                      :datahike.pull/plan
-                     ((requiring-resolve 'datahike.pull-api/compile-pull-plan)
+                     (pull-api/compile-pull-plan
                        database
                        selector)})
         acquired (if cache
