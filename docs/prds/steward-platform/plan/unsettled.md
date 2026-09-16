@@ -281,3 +281,20 @@ Queue, in order:
   kill (6 h) first. Also proposed: `:seon.fn/writes` at the analyzer so the
   census stops joining through literal keyword mentions. R5 (analyzer
   facets) launched into the freed slot.
+- 09:50Z R6 complex-issues-as-schema-spec landed (`090401fb3`): the indexer
+  keeps five hand-rostered citation shapes and drops the rest — 3 of the 8
+  complex notes have ZERO program refs (their citations are file:line),
+  41/51 cited qualified keywords already exist as `:seon.schema/key`
+  entities and are dropped, `:seon.issue/commits` are 9-char strings that
+  join to nothing. Accretions: on the issue — `keys` (schema entities),
+  `files` (seon.fn.file + span), `runs`, `issues` (siblings),
+  `measurements`, `findings` (component per dated section), `detector`,
+  `opened` from git when absent; new/fixed aggregate families —
+  `seon.publication` keyed by commit, identities for `seon.render.cost` and
+  `seon.operator.footprint`, `seon.test.drift`, `seon.commit` (owner
+  decision). DECISION (orchestrator): option B — replace the roster with
+  ONE resolver over `seon.db/identity-attributes` (the debug header's own
+  construction); lane `issue-indexer-resolver` (Opus) after issue-settlement
+  releases issue.clj. Pairs missing for linked entities: seon.fn.file,
+  seon.lint, seon.test.run, render.cost, operator.footprint → one Opus
+  pairs lane. R3 (effects + write-back provenance) launched.
