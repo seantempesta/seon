@@ -39,5 +39,20 @@ without a stack, while retaining the complete flat diagnostic as data and
 preserving historical shown text. Use the existing schema render pair and
 single value-renderer profile boundary.
 
+## Recurrent selection boundary — 2026-09-16
+
+`563034709` reintroduced the HTML-only guard in `value-node*`, removing AI
+pair selection for every returned map. The default census again found zero
+renderer symbols and refs across 78 evaluations. Fixed by `cecfaf428` at that
+same owner: declared AI pairs are selected again; explicit structural requests
+retain the existing opt-out. The new canonical SCI-to-settlement regression
+passes 11 assertions and verifies both renderer identities, plus absence of
+both for an ordinary map. Explicit structural printing passes 68 assertions;
+declared pair rendering passes 15. Default virtual turn `d0ec099ed5ec` closed
+with a directory evaluation carrying both identities and a plain evaluation
+carrying neither. See the
+[renderer follow-up](../../../prds/steward-platform/research/attempt-and-eval-facts-2026-09-16.md)
+for exact evaluations and the separate stale armed-proc boundary.
+
 Exact bytes, script, and verification boundaries are in
 [the transaction landing note](../../../prds/context-generation/research/transact-feedback-landing-2026-09-09.md).

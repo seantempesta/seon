@@ -149,7 +149,7 @@ gitlink citations in the agents-md audit; this lane did not edit that audit.
 
 ## Renderer regression follow-up — 2026-09-16
 
-**Fixed and verified for row 11.** The new canonical regression evaluates real
+**Fixed and verified for row 11 in `cecfaf428`.** The new canonical regression evaluates real
 SCI source, crosses `settlement-projection` and `evaluation-facts`, commits with
 the existing settlement transaction, and pulls both the renderer symbol and
 function ref. A plain map passes the same path and has neither attribute.

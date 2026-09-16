@@ -189,3 +189,21 @@ regression uses the observed malformed artifact shape and proves
 `manifest-function-symbols` is never reached. This keeps instrumentation strict
 and makes an older or corrupt incremental cache disposable rather than an
 authority.
+
+## Armed turn projection observation — 2026-09-16
+
+Renderer-facts follow-up on default PID 7595: Juniper virtual turn
+`404bfad994bc` admitted evaluations `a1279f65de56` and `465c141af764`, but the
+turn proc could not resolve Malli schema `:seon.error/recording`. A direct call
+to the existing `seon.turn/step` returned `:malli.core/invalid-schema` naming
+that exact alias. The source schema already declared it. The turn remained
+open after payload-free wakes; neither evaluation had a terminal result.
+
+A newly created proof agent's normal virtual turn `d0ec099ed5ec` subsequently
+closed at transaction 536871544, with the expected renderer symbol/ref pair.
+This distinguishes the old armed proc's unavailable schema from the repaired
+renderer. It does not identify which retained projection needs refresh.
+Adoption stamp `6aa9fe1b-203b-5ca1-bea2-9047ea996105` still differed from the
+published source. No graph restart, foreign-session operation, or default
+lifecycle operation was performed. Exact renderer evidence is in the
+[lane follow-up](../../prds/steward-platform/research/attempt-and-eval-facts-2026-09-16.md).
