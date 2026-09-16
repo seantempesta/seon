@@ -375,3 +375,15 @@ Gate recording on the fresh store is rejected with two
 scratch fork/retire (`source.clj:300-323`) pre-reads the current-src head
 and races the hook's publications — the pre-read-vs-authority class again.
 Both handed to the steward's reach-closure lane.
+
+### 2026-09-16 11:20Z — config-apply-cost landed (`6313d2006`, note `8f17a527c`)
+
+Both projection rebuilds in `apply-compiled!` removed (carried projection
+reused) and the duplicate fixture apply deleted: an identical-plan apply
+612–1,336 ms → 80–86 ms. Digest-only convergence was refuted by the lane
+(initialization changes and hand edits remain possible), so the plan still
+runs but no longer rebuilds. One class regression added. The lane could not
+verify the full fixture target in-process: the restarted default's shared
+fixture base had cached a missing-classpath exception (the base-poison
+class again, issue `in-process-test-runs-poison-the-shared-fixture-base`).
+Gate: batch 36 after batch 35.
