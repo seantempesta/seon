@@ -51,3 +51,9 @@
   eval elisions; the namespace view as one pull; landing order; four
   decisions. reach-digest beat 1 landed (`24d12bd48`): 39 s full pass,
   median closure 668 functions — must be incremental.
+- 01:45Z owner: faults stored properly (detect, look up, assign; one task per
+  class so occurrences roll into one agent's context); find every place with
+  prose or unlinked data; never strings for symbols; refs everywhere.
+  Data model §7 written: `seon.fault` (class, identity without process) +
+  `:seon.error/fault`/`fn`/`proc-fn` refs; the full 29-row list of prose,
+  EDN-text and string-named storage with verdict and writer seam.

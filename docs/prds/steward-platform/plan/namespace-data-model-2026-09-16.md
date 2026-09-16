@@ -219,3 +219,122 @@ query, later a schedule, later a listener.
 2. The derived `:seon.test/namespace-under-test` default when no subject metadata exists: the `-test` naming rule applied ONCE at index time and stored, or metadata only (then most of 1,659 tests stay unlinked until annotated).
 3. The first three production namespaces to receive stewards.
 4. Fault → function as a ref beside the existing string (3.2), yes or no.
+
+## 7. Faults as a connected graph, and the full list of prose and unlinked storage
+
+Owner (2026-09-16 01:45Z): "Faults and errors need to be properly stored so
+we can detect, look up, and assign agents to fix them and respond to them;
+each class is a task, so the agent sees the faults rolling in and we do not
+spawn multiple agents on the same problem. Find all the places we have prose
+or not properly linked data; define the schemas and fix the functions.
+Never strings for things that should be symbols; refs to related entities;
+a real connected graph; record intelligently for future tasks."
+
+### 7.1 What the fault writer records today (`src/seon/error.clj:513`, `:279`)
+
+An occurrence row per fault: `id`, `at`, `basis-t`, `process`, `kind`
+(keyword), `message` (string), `signature` = sha-256 of
+`[process throwable-class kind top-frame]`, `throwable-class` (string),
+`op` and `proc` (keywords naming Flow procs), `cid`, `data-edn`/`data-blob`
+(the ex-data as EDN text), `:seon.instrument/fn` (a STRING naming the
+function), sparse `agent` and `run` refs, `steward` never set. Two
+consequences: the class identity includes the PROCESS, so every restart
+mints new classes (audit A noted it); and nothing links an occurrence to
+the function row, the namespace, the steward, a regression, a task, or a
+resolution ([issue](../../../seon/issues/fault-resolution-has-no-declared-fact.md)).
+
+### 7.2 The schema: `seon.fault` is the class, `seon.error` rows are its occurrences
+
+"Fault" is already the platform's word for a core failure that rides the
+error channel into the fault committer (AGENTS.md §1). The class is an
+entity; an occurrence refs it; a task refs the class; the regression refs
+the class. Counts, first/last seen, and open/resolved are DERIVED.
+
+```clojure
+;; seon.fault.edn (new family: one row per distinct failure, across processes)
+#:seon.fault{:signature [:string {:seon.db/identity true
+                                  :description "sha-256 of [throwable-class kind fn-symbol top-frame] — the PROCESS is provenance of an occurrence, never part of the class."}]
+             :kind      :qualified-keyword
+             :fn        [:and {:description "The function whose contract or body raised it; a ref to its :seon.fn row (identity stubs exist for every reachable symbol, so the ref never dangles)."} :seon.db/ref]
+             :throwable-class [:symbol {:description "The JVM class as a symbol, e.g. clojure.lang.ExceptionInfo."}]
+             :frame     [:tuple {:description "Top frame as data: class symbol, method symbol, file, line."} :symbol :symbol :string :int]
+             :regression [:set {:description "Tests declaring ^{:seon.test/faults [signature …]}; a green one on the current reach digest is the repair evidence."} :seon.db/ref]
+             :task      [:and {:description "The one task open on this class; start! refuses a second while it exists."} :seon.db/ref]
+             :resolved-tx [:and {:description "The transaction that recorded the repair (a regression verified with no later occurrence); absence means open."} :seon.db/ref]
+             :fault [:map {:seon.db/attributes true
+                           :seon.render/units [:seon.fault/fn :seon.error/_fault :seon.fault/regression :seon.fault/task]
+                           :seon.render/ai seon.fault/render-ai :seon.render/html seon.fault/render-html}
+                     [:seon.fault/signature :seon.fault/signature] [:seon.fault/kind :seon.fault/kind]
+                     [:seon.fault/fn {:optional true} :seon.fault/fn]
+                     [:seon.fault/throwable-class {:optional true} :seon.fault/throwable-class]
+                     [:seon.fault/frame {:optional true} :seon.fault/frame]
+                     [:seon.fault/regression {:optional true} :seon.fault/regression]
+                     [:seon.fault/task {:optional true} :seon.fault/task]
+                     [:seon.fault/resolved-tx {:optional true} :seon.fault/resolved-tx]]}
+
+;; seon.error.edn — occurrences link to the class and to program rows; the strings stay as exact evidence
+#:seon.error{:fault [:and {:seon.db/index true :description "The class this occurrence belongs to."} :seon.db/ref]
+             :fn    [:and {:description "The raising function's program row (the string :seon.instrument/fn remains the wrapper's exact evidence)."} :seon.db/ref]
+             :proc-fn [:and {:description "The Flow proc's step function row, when the fault rode the error channel; :seon.error/proc keeps the proc keyword."} :seon.db/ref]}
+```
+
+Derived, never stored: occurrences per class (`count`), first and last
+`:seon.error/at`, the steward (`fn → ns → steward`), open = no
+`resolved-tx`, recurring = count over a threshold config dial. The fault
+committer (`src/seon/cluster.clj` `commit-fault!`, `error/prepare`) writes
+the class row by upsert on the signature and the two refs in the same
+transaction as the occurrence; the task writer sets `:seon.fault/task` under
+`:db.fn/call` so two workers cannot claim one class. A worker's opening
+renders the class through its units: its function, its occurrences rolling
+in (the `:seon.error/_fault` read is re-evaluated by the since-diff as new
+ones arrive), its regressions, and the completing calls.
+
+### 7.3 The full list: prose, EDN text, and code names stored as strings
+
+Rule applied to each row: exact text the system SAW (source, shown text,
+messages, notes, a provider's reply) is legitimate prose and stays; a
+STRUCTURED value serialised to a string, or a program identity stored as a
+string or symbol where a ref is possible, is a defect. Holders are from
+default at the time of writing (reforked 19:30Z, so fault counts are small).
+
+| # | Attribute (holders) | What it is | Verdict | Fix at |
+|---|---|---|---|---|
+| 1 | `:seon.instrument/fn` (string) | the raising function's symbol | **ref** `:seon.error/fn` beside it (7.2) | `error/prepare` |
+| 2 | `:seon.error/signature` includes `process` | class identity per process | **re-derive without process** into `seon.fault`; keep the old string on occurrences as evidence | `error/signature` |
+| 3 | `:seon.error/op`, `:seon.error/proc` (keywords) | Flow op and proc names | proc → **ref** `:seon.error/proc-fn` to the step function row; keep the keyword | `error/prepare` |
+| 4 | `:seon.error/throwable-class` (string) | a JVM class | **symbol** on the class row | `error/prepare` |
+| 5 | `:seon.error/data-edn` / `data-blob` | ex-data serialised | keep as the exact evidence blob; ADD the typed diagnostic fields (`diagnostic-layer`, `-operation`, `-member`, `-expected`, `-offending`, `-cause`) as attributes on the occurrence when the source is a `seon.error/diagnostic` — they already exist as declared keys | `error/prepare` |
+| 6 | `:seon.error/steward` (0) | who is on the hook | derive, do not store; the committer's routing reads `fn → ns → steward` | `error/steward` |
+| 7 | `:seon.ai.attempt/usage-edn` (91) | provider usage as EDN text with string keys | **facts**: the four declared `:seon.ai.usage/*` attributes (prompt, completion, total, cached) are installed and empty; write them | `turn/record-attempt!` (`src/seon/turn.clj:3812`) |
+| 8 | `:seon.ai.attempt/settings-edn` (91) | the effective dials as EDN text | **ref** to the settings entity that was in force, plus a `:seon.ai.attempt/model` symbol; the text can stay as a blob | `turn/record-attempt!` |
+| 9 | `:seon.cluster.eval/triage-edn` (22) | evaluation error triage as EDN | **attributes**: the triage is a small map of declared keys; store them | `sci/eval.clj` settlement |
+| 10 | `:seon.effect/request-edn` / `result-edn` / `result-blob` | capability request and result | request keys are declared per capability: store the capability as a **ref** to its function row plus the declared argument attributes; the result blob stays | `effect.clj`, `background.clj` |
+| 11 | `:seon.eval/renderer` (symbol, 44) | which render function produced the shown text | **ref** to the `:seon.fn` row | `turn/evaluation-facts` |
+| 12 | `:seon.render.call/selected-producer`, `:seon.render.web/function`, `:seon.render.unknown/producer` (symbols) | render functions by name in retained calls and requests | in-memory values may stay symbols; any DURABLE row (render cost, lint) refs the function row | `render.clj`, `render/web.clj` |
+| 13 | `:seon.maintenance.request/handler`, `receipt/handler` (symbols) | the maintenance function | **ref** (the schedule task already refs `:seon.schedule.task/function`) | `schedule.clj` |
+| 14 | `:seon.effect/capability` (qualified-symbol) | which capability | **ref** to the capability's function row | `effect.clj`, `fn.clj` capability rows |
+| 15 | `:my.plan.item/about` tokens (symbols) | what a step is about | superseded by `:my.plan.item/subject` (ref); retire tokens | `plan.clj` |
+| 16 | `:my.plan.item/done-when` (string, 7) | prose criterion | keep as the human sentence; `done-query` is the fact | — |
+| 17 | `:seon.test/failure-message` (22), `failing-assertions` (identity strings) | assertion failures | **structured**: one `seon.test.failure` component per failing `is` with expected/actual as exact EDN blobs, message, file, line; the identity stays | `runner/record-tx` |
+| 18 | `:seon.test.runner/summary`, `long-reason`, accretion `explanation`/`skip-reason` | run prose | values, not stored rows; fine as long as the stored result carries the structured fields above | — |
+| 19 | `:seon.test/pending-subject` (string) | a symbol that does not exist yet | legitimate: no row to ref; the resolver retracts it into `subject` when the row appears | — |
+| 20 | `:seon.context.capture/prompt` (91, big) | the exact prompt | keep, but route through the blob owner ([issue](../../../seon/issues/context-capture-prompts-bypass-the-blob-splitter.md)) | `context/capture-tx` |
+| 21 | `:seon.turn/reply` + `reply-blob` | the provider's exact reply | legitimate prose | — |
+| 22 | `:seon.message/content`, `:my.note/content`, `:seon.fn/source`, `:seon.test/source`, `:seon.ns/source`, `:seon.eval/shown`, `:seon.cluster.eval/source`, `:seon.cluster.eval/comment` | text the system saw or wrote | legitimate | — |
+| 23 | `:seon.fn/spec` (pr-str of the contract) | the contract | legitimate as exact text; the AST/arity/argument/binding rows already exist beside it | — |
+| 24 | `:seon.fn/arglists` (string) | arglists | **retire**: `:seon.fn.arity/arguments` and bindings carry the same as rows | `fn.clj` |
+| 25 | `:seon.fn.ast.entry/value-edn`, `argument/label-edn`, `binding.entry/default-edn` | literal values inside contract ASTs | legitimate: arbitrary literals have no entity | — |
+| 26 | `:my.agent/namespace` (symbol) | an agent's namespace in the `my.*` value | the durable fact is the ref `:seon.agent/namespace`; the protocol value may print a symbol | — |
+| 27 | Issues: 240 markdown notes | problems | **rows** (§3.3) | issue indexer |
+| 28 | Lint findings | clj-kondo output | **rows** (§3.4) with `:seon.lint/fn` ref | hook |
+| 29 | `:seon.schema.admission/source` (`:agent`/`:core`), `:seon.render.block/name` | provenance and DOM names | legitimate scalars | — |
+
+Rows 1–4, 7–14, 17, 24 are the "fix the functions" list: eleven writers,
+each one seam, each accretive (new attributes beside the old ones; the old
+strings retire in a later commit once every reader uses the ref).
+
+### 7.4 Decisions for the owner
+
+1. `seon.fault` named as above (class = fault, occurrence = `seon.error` row).
+2. The class identity drops `process` (one class survives restarts) — yes or no.
+3. Land order: 7.2 with rows 1–4 first (the fault graph), then 7 and 11 (usage facts, renderer ref), then 17 (structured failures), then the rest.
