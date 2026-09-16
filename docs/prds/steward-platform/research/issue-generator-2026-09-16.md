@@ -173,12 +173,14 @@ whose keyword namespace has a `:seon.ns/name` entity.
   `example.probe/beta` with one, plus the detector's own `:seon.fn/sym` row)
   was exercised against a real database value: the detector yields alpha, skips
   beta, and `generate` links the subject and its namespace as refs.
-- **Adoption of `src/seon/issue.clj` did not converge**, three attempts. The
-  first two were refused with "Source changed while … was being analyzed"
-  (three lanes publishing at once); the third was refused by a FOREIGN blocking
-  analysis error, `test/seon/test_failure_facts_test.clj:166 —
-  seon.problems/problems is called with 1 arg but expects 2`, an in-flight edit
-  of another lane. Publication analyses the whole tree, so no lane can adopt
+- **Adoption of `src/seon/issue.clj` did not converge**, four attempts over
+  90 minutes. The first two were refused with "Source changed while … was being
+  analyzed" (three lanes publishing at once); the last two were refused by a
+  FOREIGN blocking analysis error,
+  `test/seon/test_failure_facts_test.clj — seon.problems/problems is called
+  with 1 arg but expects 2` (row 166, then row 170 as that lane kept editing),
+  against a `seon.problems/problems` whose declared arglist is now `[db
+  _request]`. Publication analyses the whole tree, so no lane can adopt
   while that arity error stands. The running JVM does hold this lane's
   definitions (loaded into the host) and the `:seon.issue/detector` attribute IS
   installed on `default` from the hook's earlier schema publication — that is
