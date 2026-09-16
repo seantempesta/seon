@@ -957,3 +957,32 @@ and an expired bound that reports completed verdicts plus the typed expiry.
 The orchestrator launched a duplicate lane two minutes before learning that
 and stopped it (no commit; own hunks backed out by hand) — lesson: announce
 a lane before launching when the other session is active in the same area.
+
+### 2026-09-16 06:40 — store growth cause: a poisoned shared registry plus an unbounded turn-write retry
+
+Measured on default (pid 38993) while `data/store` stood at 21 GB and
+33,695 files: `:max-tx` advanced by 3 in 15 s, i.e. almost no transaction
+was committing, yet files kept appearing at roughly a gigabyte a minute.
+The steward (seon-61) read default's own log: the Datahike writer throws
+continuously with `:malli.core/invalid-schema
+:seon.schema-usage-guardb/entity-id` inside `seon.turn/row-tx` →
+`seon.schema/projection-with-schema`, invoked from the turn loop's
+`:db.fn/call` retain-transaction. That key is
+`seon.schema-usage-guard-test`'s synthetic probe schema: an in-process run
+of that namespace (one of the sweep's 46) registered it into default's
+shared registry and never restored it, so every turn write fails and the
+loop re-fires without bound; each failed attempt still flushes dirty
+leaves, hence the growth. Two classes, both filed by the steward:
+
+1. in-process tests mutating the shared schema registry (the registry
+   needs the equivalent of `preserving-instrumentation-state`);
+2. a failing turn write re-firing forever — bounded execution says a
+   repeated write error must stop and become a fault, never a storm.
+
+Corrections to earlier notes: the "write floor" and "growth, not size"
+readings were symptoms of this storm, not of Datahike's commit cost; the
+earlier retention sweep's regrowth (99 MB → 19 GB) has the same cause.
+Verdict: the steward resets `default` (`reset --force`); lanes paused;
+batch 68 runs cold and is unaffected. The regression for class 2 belongs
+in `seon.turn` (a repeated `:db.fn/call` refusal closes the turn with a
+fault); for class 1 in `seon.test-support`.
