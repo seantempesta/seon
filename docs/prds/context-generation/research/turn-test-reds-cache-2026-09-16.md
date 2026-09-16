@@ -460,3 +460,16 @@ one- and two-argument `seon.test/stale` contract. The daemon future completed.
 The fresh base was installed; its shutdown hook owns its lifetime. No retry
 was performed. This resolves the immediate stale-base verification boundary,
 not the missing automatic refresh mechanism described in the issue.
+
+
+### Virtual-turn call-datom slice
+
+The canonical helper now counts the evaluation call edge introduced by
+`76774d044`: one-form transactions **16/6/2**, three-form transactions
+**30/16/2**, total **48** datoms. All exact transaction and behavior assertions
+remain. Candidate run **55844: 246/0/0**; explicit source reload through
+`seon.test`'s loader, run **56328: 246/0/0**. Both independently constructed
+canonical forks complete, preserving the identity, private-object, compaction,
+generated-read, message-diff and real-proc obligations. The earlier closed-event
+timeout and renderer-ref error do not recur in these runs. This does not
+attribute either earlier failure to a specific concurrent change.

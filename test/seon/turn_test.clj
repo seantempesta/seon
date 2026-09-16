@@ -273,7 +273,7 @@
                         :seon.agent/id id}))
          (reset! transactions [])
          (submit "a")
-         (is (= [16 5 2] (mapv :seon.test/datoms @transactions))
+         (is (= [16 6 2] (mapv :seon.test/datoms @transactions))
              "the cold turn is open, evaluations, close, with no empty schedule recovery")
          (println {:seon.test/virtual-turn-transactions (count @transactions)
                    :seon.test/virtual-turn-datoms @transactions})
@@ -326,9 +326,9 @@
                      :seon.test/transactions measured
                      :seon.test/transaction-count (count measured)
                      :seon.test/datom-count (reduce + (map :seon.test/datoms measured))})
-           (is (= [30 13 2] (mapv :seon.test/datoms measured)))
+           (is (= [30 16 2] (mapv :seon.test/datoms measured)))
            (is (= 3 (count measured)))
-           (is (= 45 (reduce + (map :seon.test/datoms measured))))
+           (is (= 48 (reduce + (map :seon.test/datoms measured))))
            (is (= 1 (count (turn/receipt-settle-batch-tx
                             (mapv (fn [ordinal]
                                     {::turn/id turn-id
