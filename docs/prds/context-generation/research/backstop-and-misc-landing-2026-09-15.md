@@ -188,7 +188,7 @@ the CSS browser reproduction is additional research evidence.
   only repair and assert the census fixture's transaction order. Production
   code and schema bytes are identical to that passing platform checkpoint.
 
-The [missing-edge issue](../../../seon/issues/turn-dynamic-evaluation-calls-are-missing-from-the-program-graph.md)
+The [missing-edge issue](../../../seon/issues/archive/turn-dynamic-evaluation-calls-are-missing-from-the-program-graph.md)
 names the integration boundary: turn code dynamically resolves
 `evaluate-for-install` and `preview-sources`, but the graph omits those edges.
 Job 2 changed no turn, SCI, analyzer, or render-owner implementation. The test

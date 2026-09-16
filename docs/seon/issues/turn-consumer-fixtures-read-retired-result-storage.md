@@ -228,3 +228,21 @@ The neighboring `settled-agent-form-has-static-index-edge-parity` does assert
 settlement, entity existence, and the resulting facts; its fixture provenance
 was repaired in this lane. Repair or remove the redundant unobserved transition
 in the consumer-fixture owner; no passing settlement claim rests on it here.
+
+## Batch 14 selected cold repairs — 2026-09-15 assignment
+
+Commit `171c0c193` repairs `with-cluster`'s incomplete injected evaluation
+output at its one fixture seam: real SCI produces the complete envelope before
+intentional fixture evidence is merged. The completion/waiting regressions now
+pass on fresh canonical bases. The waiting and batched-definition observations
+read `:seon.eval/shown`; the latter asserts saved `"43"` directly.
+
+The prior map-to-`edn/read-string` error was a typed refusal from querying the
+uninstalled `:seon.cluster.eval/result-edn` attribute, not parsed data stored in
+place of a string. `semantic-result` also serves error-data codec calls, so it
+was not globally changed. Remaining legacy print-node/result-EDN assertions in
+the larger namespace still belong here; its complete gate is not claimed green.
+The four selected tests, including the independent fn graph census, pass
+18 assertions / 0 failures / 0 errors in default against newly constructed
+canonical populations and fresh SCI contexts. Exact runs and complete refusal
+values are in [the N7 landing](../../prds/context-generation/research/n7-eval-call-edges-2026-09-15.md).

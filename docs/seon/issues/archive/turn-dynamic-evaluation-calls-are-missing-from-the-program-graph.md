@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, test, program-graph, turn, wave/verification-audit]
 ---
@@ -40,4 +40,20 @@ assertions; do not replace the missing facts with a test-only caller list or
 treat an absent caller as health.
 
 Exact gates and counts belong to the
-[landing note](../../prds/context-generation/research/backstop-and-misc-landing-2026-09-15.md).
+[landing note](../../../prds/context-generation/research/backstop-and-misc-landing-2026-09-15.md).
+
+## Resolution — 2026-09-15 assignment
+
+`171c0c193` removes the unused evaluator-to-bootstrap static dependency and
+uses direct calls at the turn evaluation and preview seams. The existing
+analyzer now derives the real edges; no declared call roster or second indexing
+path was added. The census also includes the previously invisible real
+`system-turn` call to `evaluate-sources`.
+
+On a fresh canonical population and fresh SCI context in default's JVM,
+`seon.fn-test/agent-source-reaches-the-evaluator-through-one-visible-path`
+passed all 3 assertions before edits (run 67421) and after development adoption
+(run 67570, basis 536872510). Three cold turn regressions also passed, giving
+18 total assertions and no failures/errors. The broader orchestrator gate
+remains pending. See [the landing](../../../prds/context-generation/research/n7-eval-call-edges-2026-09-15.md)
+for the exact boundary and complete results.

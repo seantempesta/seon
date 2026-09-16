@@ -9,7 +9,9 @@ tags: [research, database, test, architecture]
 ## Outcome and boundary
 
 Implementation commits: `f402c5d3d` (analysis) and `924fdbf3a` (persistence),
-on `steward-platform`.
+on `steward-platform`. Cold-worker follow-up: `171c0c193` verifies four
+previously failing tests on fresh canonical bases: 18 assertions, zero failures
+or errors. See the final section for the corrected attribution and boundaries.
 
 **Guarantee:** every ordinary submitted evaluation uses the existing batch
 analysis and commits its resolved call refs on its evaluation identity through
@@ -280,3 +282,111 @@ Final post-commit MCP observation: **56 ms**, the same three ordinary call
 refs. Default's adopted source was `6aa9d3fc-9fe2-5348-91c0-53d22e0eaadb` and
 current-src was `6aa9d576-f74f-59e8-8ba8-59cfe8540658`; complete convergence
 was still not established. The shared development system remained alive.
+
+## Batch 14 cold-worker follow-up — 2026-09-15 assignment
+
+Batch 14 was red: 89 tests, 365 assertions, 59 failures, 44 errors. The earlier
+24 passing assertions did not establish that the complete turn namespace was
+green in a cold worker. This follow-up makes no such broader claim either.
+
+Read the diffs of `72d7dc3a9` and `924fdbf3a`, the gate's failure records, the
+four selected tests, their shared fixture, the evaluation output schema, and
+the existing dynamic-call and retired-result consumer issues. The proposed
+production return-shape attribution was **falsified** for the selected cases:
+
+- `72d7dc3a9` changes evaluation database custody lookup, not the returned
+  namespace/ending-namespace/print-options/record fields.
+- `with-cluster` replaced the real evaluator with `fake-evaluate`, whose
+  two-key result violates four required output fields. The complete direct
+  refusal is retained; the failure happens before settlement call-edge analysis.
+- `:seon.cluster.eval/result-edn` is uninstalled. The batched test passes the
+  resulting `:seon.db/invalid-read` map to `clojure.edn/read-string`. No parsed
+  map was stored in place of a string. The shared `semantic-result` also still
+  serves error-data codec callers, so globally weakening or changing it would
+  mix two different contracts.
+- Dynamic `requiring-resolve` calls were invisible to static graph indexing.
+  That is the independent fn census failure documented before this slice.
+
+### Kill and exact boundaries
+
+`171c0c193` fixes the existing fixture's evaluator seam: the real
+SCI evaluator constructs the complete result envelope for the injected value,
+then the fixture overlays its deliberately supplied evidence. No return contract
+is widened and no schema declaration is added. The two selected observations
+query saved `:seon.eval/shown`; the batched test asserts the exact shown `"43"`.
+Other retired-field/print-node assertions remain the existing consumer issue.
+
+The turn owner calls `evaluate-for-install`, `evaluate-sources`, and
+`preview-sources` directly. Its forward definitions use ordinary `declare`.
+Removing the unused static `seon.bootstrap` require from `seon.sci.eval`
+breaks the namespace cycle; `build-base-ctx` already resolves the declared
+injected symbols through `requiring-resolve` when a context is constructed
+(`src/seon/sci/eval.clj:195`). No new loader or analysis mechanism is added.
+The source dependency probe returned `:eval-to-turn nil` and
+`:turn-to-eval [seon.turn seon.sci.eval]`. The graph regression additionally
+asserts the real system-turn → evaluate-sources edge, which the old expected
+set omitted because that call was also dynamic.
+
+This follow-up is **4 code/test files, 22 insertions, 11 deletions; 6,326 bytes**
+of binary diff. `git diff --check` passed. The gate request was left byte-for-byte
+unchanged: only `seon.fn-test` and `seon.cluster.turn-test`, one per line.
+
+### Fresh canonical proof
+
+All runs were in default PID 69622 through MCP JVM mode, with explicit
+`(seon.operator/connection "default")`. No test JVM or provider was launched.
+The baseline used `create-base` on a new private clone of batch 14's published
+base `8d743392a4e4b9bbf989ee96357b2b55e21de58cb69efede49f1f23085834e24`.
+Each test obtained a fresh canonical database branch; each turn fixture acquired
+its fresh SCI context through `fork-cluster-ctx`.
+
+Candidate and post-adoption runs built complete canonical source populations
+from detached HEAD `779b1ec06` plus ONLY the four owned candidate paths under
+`tmp/n7-cold-wt`, with reference-code linked. No schema roster or hand-written
+call-edge rows were used. The fixture's existing `source-manifest` and
+`database-base` Vars were scoped with `with-redefs-fn` only around construction
+and the serial test calls, then restored. Every new base was closed in `finally`.
+Protected test-support/test-runner/render files were neither edited nor reloaded.
+
+The two changed turn function forms were evaluated from the candidate file;
+`seon.instrument/apply!` re-armed **1,057** host contracts before the candidate
+runs. The candidate `with-cluster` and changed deftests were also evaluated
+before file edits. The real lifecycle and batched turn tests call the changed
+functions with canonical data; the graph test reads a freshly built population.
+
+| Test Var (namespace abbreviated below) | Baseline pass/fail/error (run) | Candidate pass/fail/error (run) | Adopted fresh pass/fail/error (run / basis) |
+|---|---|---|---|
+| `seon.cluster.turn-test/a-completing-disposition-closes-in-the-terminal-transaction` | 0/0/1 (67390) | 2/0/0 (67418) | 2/0/0 (67567 / 536872507) |
+| `seon.cluster.turn-test/a-waiting-disposition-frees-the-agent-and-keeps-its-note` | 0/0/1 (67391) | 6/0/0 (67419) | 6/0/0 (67568 / 536872508) |
+| `seon.cluster.turn-test/a-batched-turn-commits-only-queryable-definition-facts` | 6/0/1 (67392) | 7/0/0 (67420) | 7/0/0 (67569 / 536872509) |
+| `seon.fn-test/agent-source-reaches-the-evaluator-through-one-visible-path` | 1/2/0 (67393) | 3/0/0 (67421) | 3/0/0 (67570 / 536872510) |
+
+Final total: **4 tests, 18 assertions, zero failures and zero errors**.
+
+Every row above uses `seon.test/run` over the named Var and the explicit default
+connection. Full returned results and the complete refused output/read values
+are retained in [cold evidence](n7-eval-call-edges-cold-evidence-2026-09-15.edn).
+The [probe](n7-eval-call-edges-cold-probe-2026-09-15.clj) records the exact fresh
+base construction and serial test calls.
+
+The first post-adoption attempt passed completion, waiting, and graph census;
+the batched test hit the runner's **20,000 ms** event bound (run 67561).
+Cancellation cleanup was still releasing a branch when base deletion ran.
+The one owned store was subsequently observed to have no active connections,
+then deleted. This failed attempt is retained, not counted green. The final
+run uses the existing run-options arity and default's declared
+`:seon.test/check-time-limit-ms` (**120,000 ms**) as its remaining bound, with
+fresh provenance. No runner function, contract, or timeout configuration changed.
+
+Development adoption exited zero, including loaded definitions, SCI acquisition,
+and JVM instrumentation, at source commit
+`6aa9dd6e-169a-5556-81fe-a35cc3bbe80a`, digest
+`520f5de1a7a7789e8455eaf2c7d5c50ab1e98ac46287f57c2b43822d0ca1ef2a`.
+The final four runs exercised those adopted definitions against a newly built
+canonical base; their source bytes matched the isolated candidate snapshot.
+The complete batch/platform gate remains the orchestrator's final proof.
+
+The publication shell exited. The final scoped base closed successfully and
+its fixture roots were restored. The completed probe future was unbound, and
+the owned worktree and scratch directory were removed after retaining this
+evidence. The batch-14 retained root and foreign files were preserved.
