@@ -15,6 +15,8 @@
               :expected-commit-id :uuid,
               :relative-file-digests [:map-of :string :seon.source/digest],
               :populate :qualified-symbol,
+              :change-class [:enum :schema-resource :config :no-program-facts],
+              :change-classes [:set :seon.source/change-class],
               :previous-database :seon.db/database-value,
               :activation :qualified-symbol,
               :activation-closure
@@ -27,6 +29,7 @@
                [:seon.source/digest :seon.source/digest]],
               :populate-request
               [:map
+               [:seon.source/change-classes {:optional true} :seon.source/change-classes]
                [:seon.fn/manifest
                 {:optional true}
                 :seon.fn.manifest/manifest]],
@@ -58,6 +61,8 @@
               :upsert-rows [:vector :seon.source/upsert-row],
               :upsert-request
               [:map
+               [:seon.source/populate {:optional true} :seon.source/populate]
+               [:seon.source/populate-request {:optional true} :seon.source/populate-request]
                [:seon.store/store :seon.store/store]
                [:seon.source/expected-commit-id
                 :seon.source/expected-commit-id]

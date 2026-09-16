@@ -695,6 +695,8 @@
                   :seon.source/published]}
   [{:keys [:seon.store/store :seon.db/process]
     manifest :seon.fn/manifest
+    populate :seon.source/populate
+    populate-request :seon.source/populate-request
     rows :seon.source/upsert-rows
     expected-commit :seon.source/expected-commit-id
     source-digest :seon.source/digest
@@ -709,7 +711,10 @@
         (try
           (assert-scalar-rows! @connection rows)
           (let [basis-before (:max-tx @connection)]
-          (when manifest
+          (when populate
+            ((resolve-population populate source-digest)
+             (assoc populate-request :seon.db/connection connection)))
+          (when (and manifest (nil? populate))
             (fn/index! {:seon.db/connection connection
                         :seon.fn/manifest manifest
                         :seon.source/previous-database @connection}

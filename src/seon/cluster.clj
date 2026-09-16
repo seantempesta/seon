@@ -1616,7 +1616,8 @@
     :nil]}
   [{connection :seon.db/connection
     manifest :seon.fn/manifest
-    roots :seon.fn/roots}]
+    roots :seon.fn/roots
+    classes :seon.source/change-classes}]
   (let [forms (schema.edn/packaged-forms)]
     (schema/call-with-forms
      forms
@@ -1625,9 +1626,11 @@
         (or (schema/handed-projection)
             (schema/declaration-projection forms))
         (fn []
+          (when (or (nil? classes) (classes :schema-resource))
           (report-source-progress! "schema population started")
           (accrete-schema-population! connection nil)
-          (report-source-progress! "schema population complete")
+          (report-source-progress! "schema population complete"))
+          (when (nil? classes)
           (report-source-progress! "instruction rows")
           (let [rows (instruction-row-changes
                       (db/db connection)
@@ -1639,13 +1642,14 @@
                               :tx-meta
                               {:seon.db/process
                                [:seon.db.process/id boot-process-identity]}})
-               {:seon.boot/population :seon.cluster.instruction/rows})))
+               {:seon.boot/population :seon.cluster.instruction/rows}))))
           (report-source-progress! "program rows started")
           (seon.fn/index!
            (cond-> {:seon.db/connection connection
                     :seon.db/process
                     [:seon.db.process/id boot-process-identity]}
              manifest (assoc :seon.fn/manifest manifest)
+             classes (assoc :seon.source/previous-database (db/db connection))
              (nil? manifest) (assoc :seon.fn/roots (or roots seon.fn/source-roots)))
            report-source-progress!)
           (report-source-progress! "program rows complete")
@@ -1656,10 +1660,11 @@
           ;; `seon.cluster.instruction` name no config attribute), so the move
           ;; costs no dependency and removes an ordering hazard that would
           ;; otherwise force every declared row to predate the program graph.
+          (when (or (nil? classes) (classes :config))
           (report-source-progress! "initialization rows")
           (let [rows (config/default-population)]
             (when (seq rows)
-              (transact-initialization! connection rows))))))))
+              (transact-initialization! connection rows)))))))))
   nil)
 
 ;;; ---------------------------------------------------------------------------
@@ -2040,6 +2045,7 @@
                                  :seon.schema.projection/forms declaration-forms
                                  :seon.fn.file/first-party-functions
                                  known-functions}))]
+                 (if (or clojure-source? current)
                  (assoc (seon.fn/plan-file-change
                   (cond->
                    {:seon.fn.change/status
@@ -2052,7 +2058,14 @@
                     (assoc :seon.fn.change/current-artifact current)
                     desired
                     (assoc :seon.fn.change/desired-artifact desired)))
-                        :seon.fn.change/artifact desired)))
+                        :seon.fn.change/artifact desired)
+                 {:seon.source/change-class
+                  (cond
+                    (or (= path "resources/seon/schemas")
+                        (str/starts-with? path "resources/seon/schemas/"))
+                    :schema-resource
+                    (= path config/default-manifest-path) :config
+                    :else :no-program-facts)})))
               paths)
              (catch clojure.lang.ExceptionInfo failure
                ;; A SOURCE CHANGE IS NOT A REBUILD REASON: rebuilding analyzes
@@ -2068,6 +2081,8 @@
             snapshot-after (current-source-snapshot roots)
             digest-after (:seon.source/digest snapshot-after)
             reasons (into #{} (mapcat :seon.fn.change/reasons) changes)
+            classes (into #{} (keep :seon.source/change-class) changes)
+            population? (some classes [:schema-resource :config])
             structural (set/difference reasons
                                        #{:component-or-cardinality-many-change
                                          :attribute-retraction})
@@ -2089,17 +2104,17 @@
           (let [desired-artifacts
                 ;; Persist complete file analysis for the next edit. Only
                 ;; `:seon.fn.change/rows` is the safe database delta.
-                (mapv :seon.fn.change/artifact changes)
+                (into [] (keep :seon.fn.change/artifact) changes)
                 next-manifest
                 (seon.fn/replace-manifest-artifacts manifest desired-artifacts)
                 _ (report-analysis-warnings! next-manifest)
-                scalar? (empty? reasons)
+                scalar? (and (empty? reasons) (not population?))
                 rows (if scalar? (into [] (mapcat :seon.fn.change/rows) changes) [])
                 _ (report-source-progress!
                    (str (if scalar? "incremental scalar publication" "incremental manifest reconciliation")
                         ": " (count paths) " paths; reasons=" (pr-str (sort reasons))))
                 unchanged
-                (when (and (empty? rows)
+                (when (and (not population?) (empty? rows)
                            (= digest-after (:seon.source/digest cached)))
                   (current-publication store digest-after))
                 result
@@ -2112,7 +2127,12 @@
                       :seon.source/activation `derive-activation
                       :seon.db/process
                       [:seon.db.process/id boot-process-identity]}
-                       (not scalar?) (assoc :seon.fn/manifest next-manifest))))]
+                       (not scalar?) (assoc :seon.fn/manifest next-manifest)
+                       population?
+                       (assoc :seon.source/populate `populate-source!
+                              :seon.source/populate-request
+                              {:seon.fn/manifest next-manifest
+                               :seon.source/change-classes classes}))))]
             (when-not unchanged
               (write-source-artifact! root
                                       (source-artifact result next-manifest
