@@ -337,3 +337,42 @@ hunks are `changed-source-paths` and its incremental caller (around lines
 failure's one transaction has NOT yet been captured or attributed. No test
 JVM, scratch root, or worktree was started; default remains alive and untouched.
 This documentation checkpoint is not a fix and requests no cold rerun.
+
+## Batch 96 transaction capture (follow-up)
+
+The concurrent cluster.clj hunks remain uncommitted. Asked the owner whether
+separate owned hunks may proceed despite the assignment's protected-file stop
+rule; no answer had arrived before this checkpoint. No production edit made.
+
+Independent observation used an isolated application JVM under
+`tmp/cloned-base-root`, never a test JVM. The exact MCP form is preserved in
+`cloned_base_batch96_capture_2026_09_17.clj`; its returned value is in
+`cloned-base-batch96-capture-2026-09-17.edn`. Explicit provider-disabled config
+was supplied to old-world3. This capture is NOT the cold regression: publication
+rebuilt because the shared tree changed, and the observation interval includes
+three transactions instead of one. It cannot establish the exact cold interval.
+
+After bootstrap closure at 536870948, transaction 536870949 writes:
+`:db/txInstant`, `:seon.turn/id`, `:seon.turn/agent`,
+`:seon.turn.work/situation`, `:seon.turn/opened-tx`, `:seon.turn/trigger`,
+`:seon.runtime/turns`. It opens root's ordinary turn, triggered by message
+entity 47221. Transaction 536870950 freezes its empty virtual reply, and
+536870951 closes it and removes the trigger from the inbox. Source ownership:
+`bootstrap/seed-tx` creates the initial task message in the inbox and assigns
+it as the opening turn's trigger. Bootstrap closure does not settle an ordinary
+reply. The running loop can therefore open the task turn after the fixture's
+`await-bootstrap!` returns. The publication regression must isolate publication
+from that running producer before capturing its basis; simply waiting for
+bootstrap closure is insufficient. This is evidence for the fixture race, not
+proof that no other write can occur in the cold run.
+
+Capture corrections: the first listener attempted `vec` on Datahike datoms
+and threw; it was removed. A second scratch attempt allowed provider activity,
+so its observations were discarded and its application JVM shut down. The
+preserved capture reads explicit datom fields and disables providers. The
+initial old-world health timeout was downstream of that faulty listener;
+no default MCP session was altered. No passing test is claimed here.
+
+Both scratch application JVMs were downed through the operator, which reported
+`flock free`; the scratch root and temporary probe files were deleted. No
+worktree was created, all shells completed, and no default restart occurred.
