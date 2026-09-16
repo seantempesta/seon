@@ -616,3 +616,12 @@ The 300 ms assertion still fails at 366 ms — the residual is the prompt
 Reach regressions 25 assertions green; adoption was blocked by the
 `:seon.issue/agent` index change (refork in progress). Batch 54 gates it
 with start-arms on the reforked default.
+
+### 2026-09-17 00:00Z — request-profile lane launched; default reforked (pid 95853)
+
+Steward reforked default for the `:seon.issue/agent` index addition
+(adoption compares declarations with `=`; index addition is accretion —
+their fix at `cluster.clj:888`). Opus lane launched on
+`request-profile-is-derived-64-times-per-turn` (derive once per render
+request, carry it; §2.1) — the residual behind the 300 ms bookkeeping bound.
+Batch 54 waits for adoption to converge on the new pid.
