@@ -94,3 +94,13 @@
   [issue-context-trials-2026-09-16.md](issue-context-trials-2026-09-16.md)
   (issue: doc/dir arglists EDN reader; seven renderings A–G; measures from
   facts). Two stale issues archived.
+- 04:15Z cross-session coordination with the gate-owning session (Agent debug
+  page data curation [0ad908]): HEAD does not publish because `6a491f0b3`
+  (issue-family) declared `:seon.issue/issue` with a render pair whose
+  input contract the publication refuses; issue-family stopped+resumed to
+  commit the fix first; gates held until the ledger says HEAD publishes.
+  Handed to error-graph at its next resume: the third error writer that
+  records refused-transition errors with no occurrence child
+  (`problems-refuses-its-own-zero-occurrence-signature`); to refusal-grammar:
+  the `{:min 1}` constraint dropped from the refusal text. Refork of default
+  only after the four schema lanes land, announced to the peer first.
