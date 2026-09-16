@@ -152,7 +152,8 @@ peer session (batches 30–57; ledger
 7. **Which budget owns the prompt?** The agent's history is rendered as ONE
    string through the value renderer and cut at a character offset by the
    VALUE profile (mid-form, no turn named) — 199 concurrency assertions
-   could never see their payload. Options: (a) the prompt's own
+   could never see their payload, and `seon.render.transcript-run-test`
+   (11) sees the HTML turns while the AI render answers an empty string. Options: (a) the prompt's own
    `:seon.config.ai/prompt-token-budget` cuts whole evaluations oldest
    first and the value profile bounds each shown result [recommended]; (b)
    raise the value budget for the history path; (c) keep as is and relax
