@@ -556,3 +556,10 @@ Queue, in order:
   renderer refs; the ledger selector keeps renderer `:db/id`. Residual: seven
   web-debug fixture/budget failures (Opus fixer after the reset). Launching
   issue-indexer-resolver (Opus) into the freed slot.
+- 17:05Z BLOCKER from the arming landing: on cold workers contract arming
+  dies — `compilable-form refused predicate-functions: got nil`
+  (instrument.clj:557 passes a dynamic binding a fresh JVM has not
+  established); batch 29 aborted before any test; all gates held; the store
+  reset is held behind the fix. Arming lane resumed: predicate functions
+  ride the projection or the identity avoids compiling predicates;
+  regression for cold arming.
