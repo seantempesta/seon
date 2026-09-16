@@ -1092,12 +1092,12 @@
         (merge-with set/union (call-targets-by-caller analysis first-party-functions)
                     declared-calls)
         references (references-by-caller analysis first-party-functions)
+        declared-callers (first-party-function-symbols analysis)
         unresolved-by-file
         (into {} (map (fn [[filename usages]]
                         [filename (get (references-by-caller
                                         {::analyzer/var-usages usages}
-                                        first-party-functions
-                                        (first-party-function-symbols analysis)) nil)]))
+                                        first-party-functions declared-callers) nil)]))
               (group-by ::analyzer/filename (::analyzer/var-usages analysis)))
         edges {:calls-by-caller calls-by-caller
                :references references

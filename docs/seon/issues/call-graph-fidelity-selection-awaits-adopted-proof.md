@@ -22,3 +22,10 @@ reference widening regressions, and S1 indexed/evaluated parity pass after
 adoption; the orchestrator reviews the diffs before its batched gate. Re-measure
 the same baseline queries and record cost. Absence of a call fact is unknown,
 not a declaration of no coverage.
+
+Follow-up: implementation commits `15a35c2a7`, `af800d1a0`, `7eeed900d`,
+`7907afc7a`, `b13705fc7` are present. Verification remains unknown: default's
+loaded test owner refuses runs for missing `:seon.fn/destroys` declarations;
+publication reached a writer refusal on `my.agent/identity`'s keyword set.
+The exact refusal and correct artifact probe are in the landing note. This
+note remains open until adopted fixture/parity proof and the reviewed gate.

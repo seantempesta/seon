@@ -211,3 +211,22 @@ The latest completed publication compiled 39,430 entities / 19,476 identities /
 `:seon.db/invalid-write`, expected set / offending `:seon.error/unknown`.
 A direct `build-artifact` probe returned the correct two-keyword set. This
 names the measured writer boundary without guessing its internal cause.
+
+## Review map at the final source revision
+
+- `src/seon/fn/analyzer.clj:323` attributes implementation bodies;
+  `:361` obtains Var-quote spans from kondo's parser.
+- `src/seon/fn.clj:350` retains unresolved call shapes;
+  `:549` derives declared function values; `:1066` joins edges into rows;
+  `:1130` routes runtime declarations through that same owner.
+- `src/seon/fn.clj:1259` derives unary coverage; `:1309` derives gate-set
+  through calls, references and schema-declared dispatch refs.
+- `resources/seon/schemas/seon.fn.edn:4`, `:40`, `:41` declare the three
+  accretive facts; `resources/seon/schemas/seon.schedule.task.edn:3`
+  declares its function reference's target identity.
+- `test/seon/fn_test.clj:2488`, `:2504`, `:2529`, `:2548` are the four
+  fixture regressions. S1 parity remains
+  `test/seon/program_test.clj:1066`; it has not been reported green here.
+
+The final small follow-up computes the operation's declared caller set once,
+then supplies it to every file's unresolved-reference derivation.
