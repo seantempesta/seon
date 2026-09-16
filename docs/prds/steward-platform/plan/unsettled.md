@@ -181,3 +181,7 @@
   issue/plan problem text. P5 landed by issue-settlement (`d132df212`:
   issue tests run before plan settlement, resolution derived); P6 guard in
   progress. Opus triage of program-provenance's reds running.
+- 07:35Z PLATFORM GREEN again: batch 21 (HEAD `7ccd30496`) 84 tests / 569
+  assertions / 0 failures — issue-family's publication fix holds. Result
+  recording failed (default's prepl silent 30 s under lane load); accepted
+  on the log, recording-only re-run requested after the refork.
