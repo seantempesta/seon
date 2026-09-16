@@ -1,6 +1,6 @@
 ---
 type: research
-status: in-progress
+status: complete
 created: 2026-09-16
 tags: [research, seon-hook, publication, operator, workarounds]
 ---
@@ -140,14 +140,39 @@ loaded publication owner, not successful development adoption. No claim is
 made about which concurrent edit changed that snapshot. The full stack and
 original exception data remained in the result envelope.
 
+Both halves of the phase-rename regression were then proven separately,
+because the shared gate queue made the combined run unobtainable (below).
+
+The JVM half — `tmp/hook-progress-probe/jvm_probe.clj`, run as
+`clojure -M:dev:test`, which is the `seon.dev.hook-test` body with its
+assertions printed instead of asserted — returned exactly:
+
+```clojure
+{:progress ["incremental scalar publication"
+            "completely renamed phase\nwith a newline"]
+ :commit-id "publication-probe"
+ :failure-kind :seon.fresh-operator/publication-failed
+ :failure-message "publication refused"
+ :failure-data #:seon.probe{:reason :invalid}
+ :failure-progress-same? true
+ :failure-has-stack? true}
+```
+
+Both phases survive the operator's `init-form` verbatim, embedded newline
+included; the successful commit id rides the same value; the failure
+envelope carries kind, message, the original `ex-data`, a stack, and the
+same progress observed before the throw.
+
 The continuing session's own `bin/test-fast seon.dev.hook-test
 seon.dev.edit-feedback-test` was launched at 16:29 and sat in
 `bin/_test-slot`'s queue behind ten other lanes' invocations (both slots
 held throughout; `bin/test-fast seon.cluster.wake-test
 seon.issue-settlement-test` alone held one for 27 minutes). That wait is
 the declared bound working, not a failure. The code was committed at that
-point rather than held hostage to the queue; the run's result is appended
-below when it lands.
+point rather than held hostage to the queue; the two halves above are the
+verification boundary that was actually obtained. The combined
+`bin/test-fast` run is NOT claimed: it never acquired a JVM slot in this
+session.
 
 ## Ownership and boundary
 
