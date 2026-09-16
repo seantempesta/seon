@@ -263,3 +263,21 @@ Queue, in order:
   default's `database-base` delay was swapped for a freshly built base by
   the fixer (old one lingers until JVM exit); in-process runs before
   ~03:47Z local validated against pre-edit schema.
+- 09:35Z R1 writer census landed (`cb019fcc8`), derived from the program
+  graph: 311 functions reach `transact!` (138 production, 55 direct) naming
+  178 installed attributes; 15 defect rows, largest: `:seon.fn/sym` (4,764)
+  and `:seon.test/sym` (1,779) stored as STRINGS while `:seon.ns/name` is a
+  symbol; `:seon.render/ai`/`html` name functions as text on schema rows;
+  `:seon.ns.alias/target-ns`; `:seon.fn/arglists` duplicated by arity
+  entities; `:seon.error/process` mixes three conventions in one string;
+  `:seon.test/subject` 0. Eight §7.3 rows already landed, two refuted
+  (`op`/`proc` 0 holders; `:seon.error/id` already the signature), six
+  missed. Class kill: declaration-time refusal in the advisory walk
+  (`schema/internal.cljc:119`) for storable string/symbol attributes naming
+  a program family or `-edn` keys unless justified; regression naming the
+  15. OWNER DECISION NEEDED (morning): changing `:seon.fn/sym`/`:seon.test/sym`
+  from string to symbol is a key-type change = breakage → new keys + reader
+  migration, or justified as-is; the census recommends the advisory-walk
+  kill (6 h) first. Also proposed: `:seon.fn/writes` at the analyzer so the
+  census stops joining through literal keyword mentions. R5 (analyzer
+  facets) launched into the freed slot.
