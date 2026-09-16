@@ -131,7 +131,14 @@ peer session (batches 30–57; ledger
    therefore needs a detector-driven completion path (issue filed).
 5. **D2 scope:** generate docstring issues for test helpers (28) or src
    only (2)? [recommended: src by default; test on request].
-6. Earlier parked: R1 identity strings→symbols; call-arities tuple vs
+6. **Write admission of partial upserts:** a map keyed by an identity is
+   validated against the WHOLE entity schema, so updating one attribute of
+   an existing entity is refused for keys it already carries (three
+   sightings today once fixtures stopped hiding refusals). Options in
+   `a-partial-upsert-of-an-existing-entity-is-validated-against-its-complete-required-keys`
+   [recommended: validate against the required keys as they stand after the
+   transaction, merging the existing entity inside the transaction function].
+7. Earlier parked: R1 identity strings→symbols; call-arities tuple vs
    interned family; `seon.commit` entity; retention removal; cold page slice 2.
 
 ## Still open
