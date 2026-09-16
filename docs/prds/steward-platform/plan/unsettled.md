@@ -505,10 +505,10 @@ Queue, in order:
   again) owning blob/retention/schedule files; Opus research on what the
   380k keys are. The every-minute maintenance commits were also the
   cold-page invalidator earlier tonight. My lanes stay off those files.
-- 15:20Z batch 28 (turn-test-reds' four namespaces, `258150603`): sci.eval,
-  turn, datahike-fork GREEN (the fork's cache fix holds cold);
-  cluster.turn-test 7 distinct tests red (44 → 7): four in that lane's
-  declared set, two to re-baseline on HEAD after the opening fixer
+- 15:20Z batch 28 (turn-test-reds' four namespaces, `258150603`): sci.eval and
+  datahike-fork GREEN (the fork's cache fix holds cold); cluster.turn-test
+  four tests red (that lane's declared set); seon.turn-test two red to
+  re-baseline on HEAD after the opening fixer
   (`3596cfb96`, landed after the snapshot) — virtual-turns datom counts and
   settlement-mints (agent-call-edges' settlement of `:seon.fn/calls`).
   Load cap full with arming (astra), analyzer-facets and the stale-only
