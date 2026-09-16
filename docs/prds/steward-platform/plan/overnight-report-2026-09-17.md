@@ -49,9 +49,12 @@ peer session (batches 30–57; ledger
    (`adoption-can-leave-a-changed-contract-armed-with-its-previous-shape`).
    The custody fix over-reached in one direction — an AGENT's own deftest
    run through `my.test/run` inside its evaluation also lost its cluster's
-   custody (the documented elided-arity affordance); fix lane running:
-   custody is handed as a value from the evaluation, a host in-process run
-   still has none (`an-agents-own-test-loses-its-clusters-custody`).
+   custody (the documented elided-arity affordance) — fixed (`453f08b5d`):
+   one custody scope binds exactly the connection handed on the run
+   request; the agent's entry `seon.test/run-owned` supplies its
+   evaluation's connection, a host in-process run supplies none
+   (`an-agents-own-test-loses-its-clusters-custody`, resolved; cold proof
+   pending).
 
 0. **The checkout's store was deleted and re-created from genesis (10:17Z).**
    Actual cause (peer, `ccccea806`): `seon.cluster/operator-root` answered
