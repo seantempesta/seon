@@ -1266,3 +1266,15 @@ publication assertions isolated, `a36d55c3b`). Log:
 green) this proves the whole cloned-base slice cold: `f1e93fd02`,
 `28f1a761e`, `a36d55c3b`, `ce8dbbacf`. Roots `run.1bLJ5O` (97) and
 `run.NXK1pO` (98) swept.
+
+## Batch 100 (orchestrator, 2026-09-17 13:45Z)
+
+`seon.render.history-test seon.render.web-test seon.render-coverage-test
+seon.render-simplification-test seon.render.walk-test` on HEAD ≥ `d15be4dcf`
+(no render fallback): platform GREEN; 97 tests / 694 assertions, 1 F —
+`seon.render-coverage-test/a-refused-render-producer-contributes-a-stable-typed-unknown`,
+pre-existing and attributed in `tmp/orchestrator/gate-requests/render-repl-reds.txt:26-32`
+(its producer is supplied at the explicit-request stage; unreachable by the
+diff). `d15be4dcf` proven on its namespaces. Two earlier attempts failed
+before running (base preparation during the collection; a zsh word-split
+error in the invocation). Root `run.VgHEBZ` swept.
