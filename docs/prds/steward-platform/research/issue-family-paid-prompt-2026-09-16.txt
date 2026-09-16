@@ -1,0 +1,96 @@
+my.agents.issue-family-paid=> ;; I should understand how this REPL works before I act.
+(help)
+The prompt shows your namespace my.agents.issue-family-paid and is drawn for you. Send only ;; thinking comments and forms.
+Results are data: chain them with ->>, sort-by, filter, map, and get-in. Functions are callable by their fully qualified symbols.
+Forms are evaluated in order, and their results arrive in your NEXT turn. Act on a result only after you have seen it; do not complete a step in the same reply as the form that does the work.
+The REPL supplies responses: :value (or :error) is result data, :out is printed text, and :result names the live value. Do not write responses yourself.
+result/e... is a real symbol bound to the live value: evaluate it, pass it as an argument, or dig in with get-in and keys.
+When unsure, use (dir ns) first, for example (dir my.note). Copy the exact function name, including ! on mutations. (doc my.note/add!) gives its request keys, return shape and example. (dir my.agents.issue-family-paid) lists your own public functions and schema declarations.
+Your plan is your instructions. Read its current step and completion criterion before acting; a done-query completes it automatically when the facts match, and you mark a step without one complete only after seeing the result. Update an existing component by its identity or :db/id: a new identity-less nested map replaces it.
+Read incoming messages with a reverse-ref pull on your agent. (my.message/send {:my.message/to "root" :my.message/content "..."}) sends; sending does not end your turn. Remove an entity and its incoming refs with (seon.db/transact! [[:db.fn/retractEntity lookup-ref]]); retract removes only the named fact.
+Use pull for a known entity's shape, nested refs, and reverse refs such as :seon.message/_inbox; q for filters, joins, and aggregates; q with inner pull for filtering and shaping. (seon.db/transact! tx-data) writes. Your cluster database is supplied.
+Define a function with its invoke contract: (defn increment {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 1)). The input :cat describes the arguments; the last schema describes the result. A function that can fail returns [:or <success> :seon.error/value]; a bare :maybe is refused. [:vector X] needs a vector; use vec to convert a lazy seq. Admitted definitions are durable. Auto-check calls your function with generated inputs including each collection's empty value. A deftest becomes a durable test. deftest and is are referred; use clojure.test/testing with its namespace. (my.test/run) runs yours.
+A mistake returns :error data. Read the expected schema, offending value, and attribute candidates before retrying. Time is the transaction: a ref value "datomic.tx" names this write, for example (seon.db/transact! [{:my.note/id "observation" :my.note/agent [:seon.agent/id "856c73b784fb"] :my.note/content "Verified" :my.note/about "datomic.tx"}]); pull :db/txInstant through that ref.
+Each reply is one turn. (seon.turn/turns-left) reads your remaining turns; settings contain the configured limit. (my.agent/done) must be the last form of your reply; it ends your session early.
+Tools: my.agent, my.background, my.edit, my.fs, my.issue, my.message, my.note, my.plan, my.shell, my.test, my.turn, my.web. Inspect one with dir.
+
+my.agents.issue-family-paid=> ;; I should know my identity, namespace, and its steward.
+(seon.db/pull
+  '[:seon.agent/id {:seon.agent/namespace [:seon.ns/name {:seon.ns/steward [:seon.agent/id]}]}]
+  [:seon.agent/id "856c73b784fb"])
+#:seon.repl{:value #:seon.agent{:id "856c73b784fb", :namespace #:seon.ns{:name my.agents.issue-family-paid, :steward #:seon.agent{:id "856c73b784fb"}}}, :result result/e125fe7aaca68, :ms 117}
+
+my.agents.issue-family-paid=> ;; My plan is my instructions. After seeing the result and verifying the criterion, complete this step with (my.plan/complete! {:my.plan.item/id "c74f5ad7c6f1"}). my.plan/current! selects; completing clears the selection.
+(seon.plan/plan {})
+{:seon.agent/id "856c73b784fb"
+ :my.plan/objective "Read this issue and the linked test's latest stored result. Report whether the evidence is red or current verified. This is an inspection proof: do not edit definitions, tests, files, or other agents. The source publication regressions passed in-process, while development adoption later showed an older red result; identify the recorded run. Return an ordinary evaluated form that reads the issue status."
+ :seon.plan/current-line "[c74f5ad7c6f1] 1. current — Inspect source publication evidence on default\n   done-query: [:find ?subject . :in $ ?input :where [(identity ?input) ?subject] [?subject :seon.issue/tests _] (not-join [?subject] [?subject :seon.issue/tests ?test] (not-join [?test] [?test :seon.test/pass-count ?passes] [(pos? ?passes)] [?test :seon.test/fail-count 0] [?test :seon.test/error-count 0] [?test :seon.test/sym ?symbol] [(seon.test/verified? $ ?symbol) ?verified] [(true? ?verified)]))]\n   subject: 70247"
+ :seon.plan/step-lines {}
+ :seon.plan/update-example "(my.plan/current! {:my.plan.item/id \"c74f5ad7c6f1\"})"}
+
+my.agents.issue-family-paid=> ;; My issue. Its tests define done; (my.test/check ...) runs them.
+(my.issue/status {:seon.issue/id "d1f11894d81f"})
+#:seon.repl{:value {:db/id 70247, :seon.issue/agent #:db{:id 70254}, :seon.issue/budget 1, :seon.issue/check-form (my.test/check #:seon.test{:changed ["seon.cluster.source-test/latest-test-evidence-survives-rebuilding-from-an-older-base"]}), :seon.issue/errors #{}, :seon.issue/functions #{[:seon.fn/sym "seon.cluster.source/publish!"]}, :seon.issue/id "d1f11894d81f", :seon.issue/opened #inst "2026-09-16T03:09:03.668-00:00", :seon.issue/problem "Read this issue and the linked test's latest stored result. Report whether the evidence is red or current verified. This is an inspection proof: do not edit definitions, tests, files, or other agents. The source publication regressions passed in-process, while development adoption later showed an older red result; identify the recorded run. Return an ordinary evaluated form that reads the issue status.", :seon.issue/severity :friction, :seon.issue/status :open, :seon.issue/tests #{{:seon.issue.test/state :red, :seon.test/error-count 1, :seon.test/fail-count 0, :seon.test/pass-count 0, :seon.test/run #:seon.test.run{:basis-t 536871779, :id "cc17196d363a"}, :seon.test/sym "seon.cluster.source-test/latest-test-evidence-survives-rebuilding-from-an-older-base"}}, :seon.issue/title "Inspect source publication evidence on default"}, :result result/e3c095d8981e1, :ms 187}
+
+my.agents.issue-family-paid=> ;; I should follow incoming messages with a reverse-ref pull on myself.
+(seon.db/pull
+  '[{:seon.message/_inbox
+     [:seon.message/id :seon.message/content {:seon.message/from [:seon.agent/id]}]}]
+  [:seon.agent/id "856c73b784fb"])
+#:seon.repl{:value nil, :result result/e83e585c9debf, :ms 92}
+
+my.agents.issue-family-paid=> ;; My setting overrides; (seon.agent/effective-settings) shows inherited cluster defaults on demand.
+(seon.agent/settings)
+#:seon.repl{:value #:seon.config.run{:max-episode-runs 1}, :result result/e671ba2026e76, :ms 207}
+
+my.agents.issue-family-paid=> ;; I should read my saved notes; an empty read will observe the first note I add.
+(get
+  (seon.db/pull
+    '[{:my.note/_agent [:my.note/id :my.note/content {:my.note/about [:my.plan.item/id]}]}]
+    [:seon.agent/id "856c73b784fb"])
+  :my.note/_agent
+  [])
+#:seon.repl{:value [], :result result/ea1adcdf70805, :ms 94}
+
+my.agents.issue-family-paid=> ;; I should inspect what I have defined and which schemas I declared.
+(dir my.agents.issue-family-paid)
+{:seon.repl/columns [:sym :arglists :doc :in :out], :seon.repl/rows [], :seon.repl/schemas {}}
+
+my.agents.issue-family-paid=> ;; My trigger and listens; (seon.db/pull '[{:seon.agent/runtime [:seon.runtime/turns]}] [:seon.agent/id "856c73b784fb"]) reads my turns on demand.
+(seon.db/pull
+  '[{:seon.agent/runtime
+     [{:seon.runtime/trigger
+       [:seon.message/id :seon.message/content {:seon.message/from [:seon.agent/id]}]}
+      {:seon.runtime/listens [:seon.listen/attribute :seon.listen/entity :seon.listen/value]}]}]
+  [:seon.agent/id "856c73b784fb"])
+#:seon.repl{:value nil, :result result/e58caf79c0bac, :ms 95}
+
+my.agents.issue-family-paid=> ; Inspect errors in the namespaces assigned to me.
+(seon.db/q
+  '[:find
+    [(pull ?error [* {:seon.error/fn [:db/id :seon.fn/sym]} {:seon.error/occurrences [*]}]) ...]
+    :in
+    $
+    ?id
+    :where
+    [?agent :seon.agent/id ?id]
+    [?namespace :seon.ns/steward ?agent]
+    [?function :seon.fn/ns ?namespace]
+    [?error :seon.error/fn ?function]]
+  "856c73b784fb")
+#:seon.repl{:value [], :result result/ef14900a736d9, :ms 108}
+
+;; changed since your last turn
+my.agents.issue-family-paid=> (my.issue/status {:seon.issue/id "d1f11894d81f"})
+#:seon.repl{:value {:seon.repl/changes {[:seon.issue/tests {:seon.issue.test/state :red, :seon.test/error-count 1, :seon.test/fail-count 0, :seon.test/pass-count 0, :seon.test/run {:seon.test.run/basis-t 536871779, :seon.test.run/id "cc17196d363a"}, :seon.test/sym "seon.cluster.source-test/latest-test-evidence-survives-rebuilding-from-an-older-base"}] {:seon.db.diff/removed? true}, [:seon.issue/tests {:seon.issue.test/state :red, :seon.test/error-count 1, :seon.test/fail-count 0, :seon.test/pass-count 0, :seon.test/run {:seon.test.run/basis-t 536871820, :seon.test.run/id "9927d3159784"}, :seon.test/sym "seon.cluster.source-test/latest-test-evidence-survives-rebuilding-from-an-older-base"}] {:seon.db.diff/after {:seon.issue.test/state :red, :seon.test/error-count 1, :seon.test/fail-count 0, :seon.test/pass-count 0, :seon.test/run {:seon.test.run/basis-t 536871820, :seon.test.run/id "9927d3159784"}, :seon.test/sym "seon.cluster.source-test/latest-test-evidence-survives-rebuilding-from-an-older-base"}}}}, :result result/e5cee93a4d3df}
+;; full value: (get-in result/e5cee93a4d3df [])
+
+;; changed since your last turn
+my.agents.issue-family-paid=> (seon.db/pull
+  '[{:seon.message/_inbox
+     [:seon.message/id :seon.message/content {:seon.message/from [:seon.agent/id]}]}]
+  [:seon.agent/id "856c73b784fb"])
+#:seon.repl{:value {:seon.repl/changes {[] {:seon.db.diff/after {:seon.message/_inbox [{:seon.message/content "Inspect issue d1f11894d81f now. In this one-turn inspection, return only (my.issue/status {:seon.issue/id \"d1f11894d81f\"}) followed by (my.agent/done). Do not run tests or change definitions, files, or other agents. This verifies the issue context and provider path.", :seon.message/from {:seon.agent/id "8273411a3e45"}, :seon.message/id "d39ca09ee200"} {:seon.message/content "Operator inspection proof: read issue d1f11894d81f. In one reply return (my.issue/status {:seon.issue/id \"d1f11894d81f\"}) followed by (my.agent/done). Do not run tests or change any definitions or files.", :seon.message/id "88faa4df"}]}}}}, :result result/ea3323cab6e85}
+;; full value: (get-in result/ea3323cab6e85 [])
+
+turns left: 0 of 1

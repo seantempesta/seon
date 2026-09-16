@@ -1,12 +1,23 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: blocker
 created: 2026-09-16
 tags: [issue, database, agent, operator]
 ---
 
 # Reconcile issue-family guarantees with implementation ownership
+
+## Verdict — 2026-09-16
+
+Superseded by the owner's explicit authorization of the publication,
+source-digest and adoption hunks and approval of index-and-inspect plus
+worker creation. Schema slice: `6a491f0b3`. The remaining writer invariant
+and settlement are deliberately deferred and tracked in
+[their owning issue](issue-test-preservation-and-settlement-need-writer-integration.md).
+This closes the scope decision, not those deferred guarantees. Live worker
+creation and its canonical in-process regression are recorded in the
+[landing note](../../prds/steward-platform/research/issue-family-2026-09-16.md).
 
 ## Problem
 

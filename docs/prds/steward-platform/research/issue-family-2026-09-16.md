@@ -1,11 +1,216 @@
 ---
 type: research
-status: awaiting owner decision
+status: implemented; live proof recorded; orchestrator gate pending
 created: 2026-09-16
 tags: [research, schema, database, agent]
 ---
 
-# Issue family: verified ownership boundary
+# Issue family: publication, workers, and live evidence
+
+## Implemented scope — 2026-09-16
+
+The owner approved option 1 and expanded it to atomic worker creation and
+the virtual-turn proof. The guarantee delivered at the publication seam is:
+**note identities and their program refs are indexed in a separate transaction
+after program writes, before the final source seal; worker creation composes
+the existing creation and opening transactions atomically.**
+
+The API adds tests; it does not enforce non-removal through arbitrary
+database writes. Automatic test execution and resolved-tx settlement remain
+the separately assigned settlement lane's responsibility. Their design is
+recorded in [the residual issue](../../../seon/issues/issue-test-preservation-and-settlement-need-writer-integration.md).
+
+Commits, each path-limited:
+
+- `6a491f0b3`: issue schema and agent reverse unit after the plan.
+- `ff48a4110`: renderer declarations accepting both the declaring issue shape
+  and render units. Default's exact render-contract observation accepted both
+  functions; assert-render-contracts! accepted :seon.issue/issue. This fixed
+  the HEAD publication refusal introduced by landing schema before its pair.
+- `a7d1e115e`: indexing, publication/adoption, query index, and CLI refusal report.
+- `4a1cfb7c1`: atomic worker creation and my.issue operations.
+- `fe9aeb336`: separate post-program issue transactions, conditional preservation
+  of installed test reach digests, and publication fixture corrections.
+- `cda42c461`: function lookup refs, error occurrence counts, and current-reach
+  verification after the two-argument seon.test/verified? landed.
+
+The former Markdown schedule is now a query. The CLI still supports
+`bin/issues-index --check`; it returns the indexer's unresolved citations and
+exit 1 when they exist. Issue identity is the note slug, including when a note
+is archived. Removed notes retain identity tombstones. Database-authored
+issues have no note path. Class tags become member refs; ordinary tags are
+not a second classification authority.
+
+The existing program replacement helper only handles program identities;
+the initial design's reuse claim below was falsified in the REPL. The issue
+owner instead computes exact attribute replacements for its own family.
+Indexing and adoption preserve assignment, budget, and added success tests
+for present notes. Source adoption consumes the published database, not a
+second filesystem read. Markdown-only edits require explicit publication
+with `bin/seon init --dev default --changed docs/seon/issues`; this lane did
+not widen the hook's admitted file-extension policy.
+
+## In-process regression record
+
+All calls used MCP JVM mode and explicit cluster custody. No bin/test,
+bin/test-fast, or test JVM was launched. Development candidates were evaluated
+before file edits, then the affected test was run; saved definitions were
+reloaded/adopted and tested again with armed contracts. Tests ran serially.
+
+The exact invocation shape was:
+
+```clojure
+(let [c (seon.operator/connection "default")]
+  (seon.test/run #'seon.cluster.source-test/latest-test-evidence-survives-rebuilding-from-an-older-base
+                c {:seon.test/remaining-ms 180000
+                   :seon.test.run/provenance
+                   (seon.test.runner/provenance (seon.db/db c))}))
+```
+
+The other invocations substitute the fully qualified test below. Ordinary
+issue tests used a 120000-ms bound; they completed far below it. Longer source
+tests retained their result in a disposable JVM future so MCP's 60000-ms
+transport bound did not discard the result. Every returned result was read.
+
+| Slice / test | Before file edit | Saved definition / recorded run |
+|---|---|---|
+| Schema contract fixture | 3/0/0 | run 67ccc991cf49 |
+| seon.issue-test/indexed-issues-replace-facts-and-retain-identities | 18/0/0 on scratch; lookup-ref candidate 18/0/0, 1345 ms | default 18/0/0, run entity 69330, 3177 ms including reload/arming |
+| seon.issue-test/issue-worker-creation-is-atomic | 13/0/0, 4173 ms | scratch 13/0/0, 4715 ms; final default 13/0/0, run entity 69334, 4771 ms |
+| seon.issue-test/issue-worker-opening-links-its-issue | real SCI/Flow fixture 10/0/0 including cold fixture assertions | 8/0/0, run entity 66828, 11241 ms |
+| seon.dev.issues-test/issue-cli-reports-absence-and-refusals | same implementation under canonical fixture | 5/0/0, run entity 67637, 591 ms |
+| seon.cluster.source-test/incremental-upsert-seals-one-activation-on-the-expected-commit | existing seal harness | 7/0/0, run entity 70774, 982 ms |
+| seon.cluster.source-test/latest-test-evidence-survives-rebuilding-from-an-older-base | reproduced 12 failures; missing completion reach digests | final default 21/0/0, run entity 68457, basis 536871714, at 03:01:13Z |
+| seon.cluster.source-test/incremental-first-party-publication-retains-complete-scalar-rows | 16/1/0: expected set omitted the source-file entity | final default 17/0/0, run entity 68465, basis 536871721, 42001 ms |
+
+Counts are pass/fail/error, not suite tallies. Scratch evidence was produced
+on the lane's isolated worktree runtime; default supplied the final source
+publication and issue API checks. The scratch fixture needed the already
+committed generic read-identity fix 474234fb7. No foreign main-tree files were
+edited to obtain that result. Early failures also exposed a missing test-only
+dependency and a missing fixture fault channel; neither is counted as green.
+
+Batch 19's blocks were read only from its platform.md. The reproduced source
+failures did not establish issue-index replacement of test evidence: the
+completion fixture lacked the required reach-digest map introduced by
+f2d537187, and the incremental expected identity set predated 3402913f3's
+source-file entity. The revised fixture derives digests through runner/reach-digests
+and explicitly verifies preservation. Its global conflict probe now counts
+only its own run identity, avoiding interception of concurrent test completions.
+One candidate run saw a live definition revert during adoption and one saw
+concurrent namespace drift; both red outcomes were retained during diagnosis.
+
+## Live default proof
+
+Default PID 7595 was never stopped, reforked, or restarted by this lane.
+Host forms were hot-reloaded and re-armed, and ordinary development adoption
+continued. A file save alone is not claimed as proof of convergence.
+
+The first seon.render.web steward is agent `8273411a3e45`, created through
+creation-tx and steward-call. A live pull verified the namespace's steward ref.
+The namespace-to-function-to-issue query returned 24 issue identities.
+At the 03:12Z census default held 1621 indexed issue entities and one authored
+issue, with 1514 citation refusals. A later report showed 248 open issues and
+1515 unresolved-symbol refusals as the shared notes changed. The CLI check
+returned exit 1 and 246790 bytes of refusal evidence; it did not report green
+on unresolved citations.
+
+The first real worker, `12254041a057`, started on
+`agent-form-calls-to-core-namespaces-are-not-indexed` while its cited test was
+5/2/0. Its opening `b93f168916f7` closed at transaction 536871499 with ten
+evaluations: plan ordinal 2, issue ordinal 3, every shown value present and
+no evaluation error. Its ordinary virtual reply read my.issue/status in turn
+`d46823b798c6`, closed at 536871519 with one successful evaluation.
+
+The exact opening is saved in
+[text](issue-family-opening-2026-09-16.txt) (9901 UTF-8 bytes) and
+[EDN](issue-family-opening-2026-09-16.edn). These historical bytes retain the
+then-existing sparse-function rendering warnings. The subsequent lookup-ref
+change was verified through SCI without those false restart messages; history
+was not rewritten to hide them. Chrome's namespace page visibly placed the
+issue block after the plan and displayed its test's verified state.
+
+my.issue/add! and my.issue/tests! were additionally called through MCP SCI
+on real data. The authored inspection issue is `d1f11894d81f`, worker
+`856c73b784fb`, namespace my.agents.issue-family-paid, budget 1. The owner file
+explicitly permits DeepSeek; the live configured model is deepseek-flash.
+Its paid-session result follows.
+
+### Paid-session ledger
+
+| Agent / issue | Provider turn / attempt | Model | Captured prompt | Tokens in / out / cached | Terminal result |
+|---|---|---|---|---|---|
+| 856c73b784fb / d1f11894d81f | 36e029636c82 / 3c0ce4212c40 | deepseek-flash | 10993 UTF-8 bytes | 3355 / 142 / 0 | closed at 536871861; wait disposition; 3 successful evaluations and 1 reader error |
+
+The exact [captured prompt](issue-family-paid-prompt-2026-09-16.txt) and
+[reply/evaluations/usage](issue-family-paid-2026-09-16.edn) are retained.
+The intended my.issue/status and my.agent/done forms both succeeded. Plain
+prose containing an inline form created an extra evaluation and an unmatched
+delimiter error; this is tracked in
+[the reader issue](../../../seon/issues/inline-form-in-reply-prose-becomes-an-evaluation.md).
+This is a completed inspection session, not a claim that the assigned
+publication defect was repaired by the model.
+
+The existing explain_probe_2026_09_14.clj helper made one separate DeepSeek
+call on the exact captured prompt. Its [saved answer](issue-family-explain-2026-09-16.edn)
+correctly identified the issue, test, requested forms, and red stored evidence.
+Usage: 3432 prompt tokens, 869 completion tokens, 3200 cache-hit tokens.
+It identified redundant instructions in the two messages and issue/plan
+problem text. Its explanation for prose addressed the current out-of-band
+question, not the original reply, so it does not establish why that reply
+violated the forms-only instruction. This limitation is part of the evidence.
+
+The first internal message did not refill the episode budget, by design.
+The operator's ordinary inbound-message transaction at 536871847 supplied
+the outside wake; the configured budget remained 1. The live graph had to
+be armed explicitly for this newly created worker. No alternate provider
+loop was introduced. The in-flight settlement lane ran issue tests between
+opening evaluations; the source-publication regression exceeded those
+30000-ms evaluation bounds. The [filtered thread dump](issue-family-settlement-stack-2026-09-16.txt)
+shows seon.plan/run-issue-tests! → seon.test/run → source publication. No
+protected settlement file was edited. The opening eventually completed.
+
+Chrome directly displayed the paid worker as idle, the plan at 0/1, its
+issue block immediately after the plan, the linked test red, and no routed
+core fault. The issue remains open. A separate
+[adoption-window issue](../../../seon/issues/development-adoption-window-loses-newer-issue-and-test-facts.md)
+records the lost earlier assignment and reverted test evidence without
+claiming an unverified writer attribution.
+
+## Exact boundaries and gate
+
+The original prohibitions were respected except for the owner's explicitly
+granted source publication, digest, adoption, and CLI hunks. Before editing
+or committing cluster.clj its diff contained only the lane's publication
+hunk; no error-graph commit-fault edits were included. The lane did not edit
+db.clj, plan.clj, turn.clj, the test owner, the error owner, or program-provenance
+owners. Settlement changes observed in the live JVM belong to their lane.
+
+The ownership-decision issue is superseded by authorization, with the writer
+and settlement residual named. No class/member roster was specified by this
+concrete issue-family assignment, so this note makes no unrelated class-closure
+claim. New detector and multi-issue proposals appended to spec sections 7–8
+remain later work; this slice implements the approved single-issue case.
+
+`tmp/orchestrator/gate-requests/issue-family.txt` requests the platform re-run
+at fe9aeb336. Both requested source tests passed in-process. The orchestrator's
+isolated gate remains the final proof; this lane does not claim a platform
+green from its in-process runs. git diff --check passed on committed paths.
+The exact source-test results are also saved in
+[the publication proof](issue-family-publication-proof-2026-09-16.edn).
+
+The scratch worktree runtime was shut down through its own bin/seon down;
+the worktree and old lane root were removed. All lane shell commands exited,
+and the retained test/explain futures completed. The two real worker agents
+remain as durable proof facts on default; no default lifecycle operation ran.
+The documentation hook still reports the pre-existing dependency-pin errors
+in agents-md-audit-2026-09-15.md; they are outside this lane's edits.
+
+## Historical pre-approval decision
+
+The remainder is the dated initial scope decision, retained as history. Its
+statements that no implementation or live proof ran describe that initial
+checkpoint only; the execution evidence above supersedes them.
 
 The requested guarantee is: every indexed issue follows publication and a
 started issue retains its success tests until verified settlement resolves it.

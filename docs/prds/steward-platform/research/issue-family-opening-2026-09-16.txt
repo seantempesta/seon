@@ -1,0 +1,80 @@
+user=> ;; I should understand how this REPL works before I act.
+(help)
+#:seon.repl{:value The prompt shows your namespace my.agents.issue-family-proof and is drawn for you. Send only ;; thinking comments and forms.
+Results are data: chain them with ->>, sort-by, filter, map, and get-in. Functions are callable by their fully qualified symbols.
+Forms are evaluated in order, and their results arrive in your NEXT turn. Act on a result only after you have seen it; do not complete a step in the same reply as the form that does the work.
+The REPL supplies responses: :value (or :error) is result data, :out is printed text, and :result names the live value. Do not write responses yourself.
+result/e... is a real symbol bound to the live value: evaluate it, pass it as an argument, or dig in with get-in and keys.
+When unsure, use (dir ns) first, for example (dir my.note). Copy the exact function name, including ! on mutations. (doc my.note/add!) gives its request keys, return shape and example. (dir my.agents.issue-family-proof) lists your own public functions and schema declarations.
+Your plan is your instructions. Read its current step and completion criterion before acting; a done-query completes it automatically when the facts match, and you mark a step without one complete only after seeing the result. Update an existing component by its identity or :db/id: a new identity-less nested map replaces it.
+Read incoming messages with a reverse-ref pull on your agent. (my.message/send {:my.message/to "root" :my.message/content "..."}) sends; sending does not end your turn. Remove an entity and its incoming refs with (seon.db/transact! [[:db.fn/retractEntity lookup-ref]]); retract removes only the named fact.
+Use pull for a known entity's shape, nested refs, and reverse refs such as :seon.message/_inbox; q for filters, joins, and aggregates; q with inner pull for filtering and shaping. (seon.db/transact! tx-data) writes. Your cluster database is supplied.
+Define a function with its invoke contract: (defn increment {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 1)). The input :cat describes the arguments; the last schema describes the result. A function that can fail returns [:or <success> :seon.error/value]; a bare :maybe is refused. [:vector X] needs a vector; use vec to convert a lazy seq. Admitted definitions are durable. Auto-check calls your function with generated inputs including each collection's empty value. A deftest becomes a durable test. deftest and is are referred; use clojure.test/testing with its namespace. (my.test/run) runs yours.
+A mistake returns :error data. Read the expected schema, offending value, and attribute candidates before retrying. Time is the transaction: a ref value "datomic.tx" names this write, for example (seon.db/transact! [{:my.note/id "observation" :my.note/agent [:seon.agent/id "12254041a057"] :my.note/content "Verified" :my.note/about "datomic.tx"}]); pull :db/txInstant through that ref.
+Each reply is one turn. (seon.turn/turns-left) reads your remaining turns; settings contain the configured limit. (my.agent/done) must be the last form of your reply; it ends your session early.
+Tools: my.agent, my.background, my.edit, my.fs, my.issue, my.message, my.note, my.plan, my.shell, my.test, my.turn, my.web. Inspect one with dir., :result result/e3112dd460857, :ms 491}
+
+user=> ;; I should know my identity, namespace, and its steward.
+(seon.db/pull
+  '[:seon.agent/id {:seon.agent/namespace [:seon.ns/name {:seon.ns/steward [:seon.agent/id]}]}]
+  [:seon.agent/id "12254041a057"])
+#:seon.repl{:value #:seon.agent{:id "12254041a057", :namespace #:seon.ns{:name my.agents.issue-family-proof, :steward #:seon.agent{:id "12254041a057"}}}, :result result/e41ff802bc17e, :ms 288}
+
+user=> ;; My plan is my instructions. No step is selected. my.plan/current! selects; completing clears the selection.
+(seon.plan/plan {})
+#:seon.repl{:value {:seon.agent/id "12254041a057"
+ :my.plan/objective "A run form's `:seon.fn/calls` edges are recorded for functions in the agent's\nown namespace and for `my.*` toolkit functions, but NOT for a fully qualified\ncore function the form plainly calls. `(seon.db/q '[...])` inside an agent form\nproduces no edge to the `seon.db/q` entity, even though that entity exists in\nthe same program graph.\n\nEvery \"which forms used this function?\" question is therefore silently wrong for\ncore functions — the exact class the \"everything is queryable\" principle exists\nto prevent. It is not a missing fact (the entity is there); it is a missing EDGE,\nwhich is worse, because the query returns a confident empty answer."
+ :seon.plan/step-lines {"f073bb6553f5" "1. completed — Historical call-edge analyses need re-evaluation — 2026-09-16T02:33:46.746Z"}
+ :seon.plan/update-example "(my.plan/current! {:my.plan.item/id \"f073bb6553f5\"})"}, :result result/ef9a3e0a36a42, :ms 345}
+
+user=> ;; My issue. Its tests define done; (my.test/check ...) runs them.
+(my.issue/status {:seon.issue/id "agent-form-calls-to-core-namespaces-are-not-indexed"})
+#:seon.repl{:value {:db/id 43695, :seon.issue/agent #:db{:id 55159}, :seon.issue/budget 1, :seon.issue/check-form (my.test/check #:seon.test{:changed ["seon.test-reaching-test/agent-admitted-tests-reach-their-tested-function"]}), :seon.issue/commits ["5deb40e4e" "7e35df213" "924fdbf3a" "f402c5d3d"], :seon.issue/functions #{"Restart the JVM to remove stale loaded Var clojure.core/=; it is absent from the published program graph." "Restart the JVM to remove stale loaded Var clojure.core/let; it is absent from the published program graph." "Restart the JVM to remove stale loaded Var clojure.test/deftest; it is absent from the published program graph." "Restart the JVM to remove stale loaded Var clojure.test/is; it is absent from the published program graph." "Restart the JVM to remove stale loaded Var my.turn/wait; it is absent from the published program graph." "Restart the JVM to remove stale loaded Var seon.db/db; it is absent from the published program graph." "Restart the JVM to remove stale loaded Var seon.db/q; it is absent from the published program graph." "Restart the JVM to remove stale loaded Var seon.fn/analyze-form; it is absent from the published program graph." "Restart the JVM to remove stale loaded Var seon.fn/analyze-forms; it is absent from the published program graph." "Restart the JVM to remove stale loaded Var seon.operator/connection; it is absent from the published program graph."}, :seon.issue/id "agent-form-calls-to-core-namespaces-are-not-indexed", :seon.issue/path "docs/seon/issues/agent-form-calls-to-core-namespaces-are-not-indexed.md", :seon.issue/problem "A run form's `:seon.fn/calls` edges are recorded for functions in the agent's\nown namespace and for `my.*` toolkit functions, but NOT for a fully qualified\ncore function the form plainly calls. `(seon.db/q '[...])` inside an agent form\nproduces no edge to the `seon.db/q` entity, even though that entity exists in\nthe same program graph.\n\nEvery \"which forms used this function?\" question is therefore silently wrong for\ncore functions — the exact class the \"everything is queryable\" principle exists\nto prevent. It is not a missing fact (the entity is there); it is a missing EDGE,\nwhich is worse, because the query returns a confident empty answer.", :seon.issue/severity :friction, :seon.issue/status :open, :seon.issue/tests #{{:seon.issue.test/state :verified, :seon.test/error-count 0, :seon.test/fail-count 0, :seon.test/pass-count 7, :seon.test/run #:seon.test.run{:basis-t 536871460, :id "710ed89b6b3a"}, :seon.test/sym "seon.test-reaching-test/agent-admitted-tests-reach-their-tested-function"}}, :seon.issue/title "Historical call-edge analyses need re-evaluation"}, :result result/e8e04ecc86529, :ms 331}
+
+user=> ;; I should follow incoming messages with a reverse-ref pull on myself.
+(seon.db/pull
+  '[{:seon.message/_inbox
+     [:seon.message/id :seon.message/content {:seon.message/from [:seon.agent/id]}]}]
+  [:seon.agent/id "12254041a057"])
+#:seon.repl{:value nil, :result result/e5e64bcebc534, :ms 163}
+
+user=> ;; My setting overrides; (seon.agent/effective-settings) shows inherited cluster defaults on demand.
+(seon.agent/settings)
+#:seon.repl{:value {:seon.config.ai/no-provider true, :seon.config.run/max-episode-runs 1}, :result result/e552293d632f0, :ms 385}
+
+user=> ;; I should read my saved notes; an empty read will observe the first note I add.
+(get
+  (seon.db/pull
+    '[{:my.note/_agent [:my.note/id :my.note/content {:my.note/about [:my.plan.item/id]}]}]
+    [:seon.agent/id "12254041a057"])
+  :my.note/_agent
+  [])
+#:seon.repl{:value [], :result result/e5002df802582, :ms 156}
+
+user=> ;; I should inspect what I have defined and which schemas I declared.
+(dir my.agents.issue-family-proof)
+#:seon.repl{:value {:seon.repl/columns [:sym :arglists :doc :in :out], :seon.repl/rows [], :seon.repl/schemas {}}, :result result/ee1b8b8cf9964, :ms 333}
+
+user=> ;; My trigger and listens; (seon.db/pull '[{:seon.agent/runtime [:seon.runtime/turns]}] [:seon.agent/id "12254041a057"]) reads my turns on demand.
+(seon.db/pull
+  '[{:seon.agent/runtime
+     [{:seon.runtime/trigger
+       [:seon.message/id :seon.message/content {:seon.message/from [:seon.agent/id]}]}
+      {:seon.runtime/listens [:seon.listen/attribute :seon.listen/entity :seon.listen/value]}]}]
+  [:seon.agent/id "12254041a057"])
+#:seon.repl{:value nil, :result result/e2ea3ca00edab, :ms 142}
+
+user=> ; Inspect errors in the namespaces assigned to me.
+(seon.db/q
+  '[:find
+    [(pull ?error [* {:seon.error/fn [:db/id :seon.fn/sym]} {:seon.error/occurrences [*]}]) ...]
+    :in
+    $
+    ?id
+    :where
+    [?agent :seon.agent/id ?id]
+    [?namespace :seon.ns/steward ?agent]
+    [?function :seon.fn/ns ?namespace]
+    [?error :seon.error/fn ?function]]
+  "12254041a057")
+#:seon.repl{:value [], :result result/ec38adaf5ad56, :ms 156}
