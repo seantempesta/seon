@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, boot, schema, cluster, class/absence-as-health]
 ---
@@ -60,3 +60,44 @@ own projection; declarations compared on the union of both facets),
 The same test also expected the word "predates", which `0b910eb69` deliberately
 replaced; that expectation was updated in `d427728d7`. It is not the cause of
 this red.
+
+## Resolved — 2026-09-16
+
+The open question is answered and the refusal is restored.
+
+**Which form, against which population.** `:seon.env/environment`, against the
+projection `seon.schema/projection-from-database` derived from the sovereign
+legacy branch itself. `seon.cluster/stand-boot-layers!` built that projection
+and handed it to `seon.sci.eval/projection-state` (`src/seon/sci/eval.clj:167`)
+before any admission check ran; `seon.instrument`'s wrapper compiles a
+function's contract against the projection SUPPLIED IN ITS ARGUMENTS
+(`seon.instrument/supplied-projection`, `src/seon/instrument.clj:542`), so the
+environment constructor's contract was compiled against a registry that carries
+none of this program's declarations. Malli's
+`{:schema :seon.env/environment :form :seon.env/environment}` is that lookup
+failing — nothing to do with `a3cbcd9a8`, `0b910eb69` or `bb46455fb`; the
+ordering predates all three.
+
+**The fix.** `seon.cluster/require-admissible-branch!` asks the two branch
+admission questions — `require-activation!`, then `declaration-changes` for its
+refusal — under the PACKAGED declarations, before the branch's own projection
+is derived (`src/seon/cluster.clj:3350`). Measured in a probe JVM over the
+test's own `seed-incompatible-sovereign!` fixture, `cluster/start!` now refuses
+with
+
+```
+Cluster `legacy` cannot reopen in place: `:seon.ns/requires` changed
+:db/valueType from :db.type/symbol to :db.type/ref, which Datahike does not
+apply to an installed attribute. `bin/seon init legacy --force` destroys and
+reforks it from `current-src`; use export/import instead to preserve its data.
+```
+
+and the cause chain carries the `:seon.ns/requires` offense with both values.
+`incompatible-sovereign-schema-refusal-steers-the-operator`: 14 assertions, 0
+failures.
+
+The same ordering was the cause of
+`partial-clusters-refuse-and-fresh-clusters-are-current` (a branch with every
+`:seon.fn/sym` retracted refused with `:seon.schema/render-contract-incoherent`
+instead of its activation refusal). Evidence and measurements:
+[boot-test residue](../../../prds/context-generation/research/boot-test-residue-2026-09-16.md).

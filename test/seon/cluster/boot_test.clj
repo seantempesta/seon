@@ -1392,7 +1392,7 @@
                     :seon.boot.phase/web
                     :seon.boot.phase/ready]
                    @phases)))
-          (testing "bootstrap completes one successful worked episode"
+          (testing "bootstrap settles one generated opening turn"
             (let [connection (:seon.boot/cluster-connection instance)
                   run-id (bootstrap/run-id "root")
                   _ (await-bootstrap! connection "root")
@@ -1406,9 +1406,26 @@
                     :seon.agent/id "root"
                     :seon.sci.admit/caps
                     (config/result-caps (config/defaults))})
-                  build-index (.indexOf session "(defn largest")
-                  verify-index (.indexOf session ":seon.fn/spec")
-                  complete-index (.indexOf session "(run/complete")]
+                  ;; The shipped bootstrap episode is the GENERATED OPENING,
+                  ;; not a hand-authored worked episode: `6aca09cce`
+                  ;; ("Use the system-turn generator for seeded agent
+                  ;; openings") replaced this run's derivation with the shared
+                  ;; system-turn source generator — "Creation and later system
+                  ;; turns derive their sources from the same record walk"
+                  ;; (`src/seon/turn.clj:4886`). The `(defn largest …)` /
+                  ;; `(run/complete …)` forms this once scanned for were the
+                  ;; hand-authored episode of `37df160dd`
+                  ;; (`resources/seon/bootstrap.edn`, deleted); `largest` is
+                  ;; now the ASSIGNMENT the opening delivers
+                  ;; (`seon.bootstrap/task-message`), performed by a model, so
+                  ;; no boot completes it. What this turn must show is the
+                  ;; REPL's own help, the agent's own record reads, and the
+                  ;; assignment it was triggered with; that it CLOSED is
+                  ;; already proven by `await-bootstrap!` above.
+                  help-index (.indexOf session "(help)")
+                  message-index (.indexOf session "(my.message/read")
+                  plan-index (.indexOf session "(seon.plan/plan {})")
+                  assignment-index (.indexOf session (bootstrap/task-message))]
               (is (= (db/q '[:find (count ?form) .
                              :in $ ?run-id
                              :where
@@ -1422,7 +1439,8 @@
                              [?receipt :seon.cluster.eval/run ?run]]
                            database run-id))
                   "every successful form settles with a real receipt")
-              (is (< build-index verify-index complete-index))
+              (is (< -1 help-index message-index plan-index assignment-index)
+                  "the generated opening leads with help, reads the trigger message and the plan, and delivers the seeded assignment")
               (is (not (str/includes? session "uses :any")))
               (is (empty?
                    (db/q '[:find ?error
@@ -1738,7 +1756,17 @@
                               :where [_ :seon.error/kind ?kind]]
                             database))]
             (is (= run-id (:seon.turn/id run)))
-            (is (nil? (:seon.turn/closed-tx run)))
+            ;; The killed turn comes back CLOSED. `34e47f595` (2026-09-09,
+            ;; "Close all prior open turns during boot recovery") deleted the
+            ;; exemption this once asserted — "A generated run stays open and
+            ;; attached: its settled receipts are the append-only derivation
+            ;; prefix" — and `seon.turn/recover-call` now rules that "a saved
+            ;; holder or a generated-source tag cannot exempt an open turn"
+            ;; (`src/seon/turn.clj:1793`), the crash model's "interrupted
+            ;; execution never resumes". What must survive the kill is below:
+            ;; the SAME run keeps its derived prefix and its trigger, and no
+            ;; second run answers that trigger.
+            (is (some? (:seon.turn/closed-tx run)))
             (is (= (bootstrap/task-message-id database "root")
                    (get-in run [:seon.turn/trigger
                                 :seon.message/id])))

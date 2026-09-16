@@ -195,7 +195,7 @@ needs a live `cluster/start!` over a store seeded by the test-only
 `seed-incompatible-sovereign!` (`boot_test.clj:180`), which this thread was not
 permitted to run, and the default cluster's io-prepl stopped serving sessions
 before an alternative probe could be built. Filed as
-[an opaque invalid-schema in place of the sovereign steer](../../../seon/issues/a-sovereign-schema-refusal-is-replaced-by-an-opaque-malli-invalid-schema.md),
+[an opaque invalid-schema in place of the sovereign steer](../../../seon/issues/archive/a-sovereign-schema-refusal-is-replaced-by-an-opaque-malli-invalid-schema.md),
 with the suspects to falsify first.
 
 ## Classes NOT root-caused, with the exact boundary

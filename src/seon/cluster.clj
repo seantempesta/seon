@@ -1510,6 +1510,43 @@
         (refused! (:seon.error/message refusal) refusal)))
     closure))
 
+(defn- require-admissible-branch!
+  "Refuse a branch this program cannot adopt, BEFORE deriving its projection.
+
+  Two admission questions, both answered from the branch's facts and the
+  PACKAGED declarations — never from the branch's own projection:
+
+  1. [[require-activation!]]: the stored activation closure names every fact
+     the program needs, so a branch missing them refuses with its missing
+     members, not with whatever breaks first downstream.
+  2. [[declaration-changes]], run for its REFUSAL alone — the same facet rule
+     [[accrete-schema-population!]] transacts through — so an installed
+     attribute Datahike cannot update steers the operator to refork or
+     export/import.
+
+  Both ran AFTER `seon.schema/projection-from-database` and
+  `seon.sci.eval/projection-state`, and the projection build refused first,
+  reading an inadmissible branch as a broken program: a sovereign legacy store
+  surfaced `:malli.core/invalid-schema` (`:seon.env/environment` unresolvable
+  in the branch's own registry) and a branch whose function rows were retracted
+  surfaced `:seon.schema/render-contract-incoherent` — in both cases naming
+  neither the offending attribute nor the missing activation facts (2026-09-16,
+  `docs/prds/context-generation/research/boot-test-residue-2026-09-16.md`).
+  Deriving a projection from a branch is legitimate only once the branch is
+  admitted."
+  [database cluster-name]
+  (let [forms (schema.edn/packaged-forms)]
+    (schema/call-with-forms
+     forms
+     (fn []
+       (schema/call-with-projection
+        (or (schema/handed-projection)
+            (schema/declaration-projection forms))
+        (fn []
+          (require-activation! database)
+          (declaration-changes database forms cluster-name))))))
+  nil)
+
 (defn- accrete-schema-population!
   "Install the current additive schema population on one branch.
 
@@ -3306,6 +3343,10 @@
                   (assoc instance
                          :seon.boot/cluster-connection provisional-connection))
         initial-database @provisional-connection
+        ;; BEFORE the branch's own projection is derived or used: an
+        ;; inadmissible branch must steer the operator, not surface as a
+        ;; projection build failure over facts the branch no longer carries.
+        _ (require-admissible-branch! initial-database cluster-name)
         initial-projection
         (or (:seon.schema/projection source-base)
             (schema/projection-from-database initial-database))
@@ -3318,7 +3359,6 @@
         _ (schema/call-with-projection-state
            initial-projection-state
            #(do
-              (require-activation! @provisional-connection)
               (require-coherent-program!
                provisional-connection cluster-name)
               (accrete-schema-population!
