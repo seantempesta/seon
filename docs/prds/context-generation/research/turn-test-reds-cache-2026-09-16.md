@@ -409,3 +409,37 @@ mentions must still produce no dangling edge. Candidate run **52264 10/0/0**;
 after file edit and explicit loader reload, **52265 10/0/0**. This is a
 ruled expectation repair, with no production change. Hook publication queued;
 this proof claims explicit test-file reload, not complete default adoption.
+
+
+### Batch-28 seed probe and live fixture boundary
+
+The original sparse config identity seed returns `:seon.db/invalid-write`,
+missing `:seon.config/applied-manifest-digest`. An explicit `:db/add` update
+commits and reads back max-episode-runs 2. The generated-scenario candidate
+uses a lookup-ref entity update, checks the transaction result, uses real SCI,
+and selects the provider turn through its attempt ref. Before any file edit,
+the representative call stops at `seon.test/stale` arity validation.
+
+A direct comparison verifies the cause: default's program row supports one
+and two arguments; the canonical fixture branch still carries the old
+one-argument contract. The loaded plan caller at `src/seon/plan.clj:570`
+supplies two. This is the [successful old-base boundary](../../../seon/issues/successful-fixture-base-retains-pre-adoption-contracts.md),
+not a failed property verdict. No seed/property candidate was written to the
+test file. The wave's explicit no-base-rebuild rule requires orchestrator
+direction; a refresh was requested before dependent work continues.
+
+Remaining tests retain their assertions. The virtual-turn candidate would
+account for the one `:seon.fn/calls` datom per evaluation (16/6/2 and 30/16/2),
+but its live event failure must be resolved before that change can land.
+The delimiter performance and provider prompt visibility candidates remain
+unlanded from the prior record. No production seam in this continuation was
+edited; protected source and unrelated working-tree edits remain untouched.
+
+
+Complete [batch-28 returned values](turn-test-reds-batch28-evidence-2026-09-16.edn)
+and [MCP forms](turn-test-reds-batch28-probes-2026-09-16.clj) are retained.
+All six owned futures reported realized; the checked-in cluster-turn namespace
+was reloaded to remove the unlanded candidate. No scratch JVM, worktree or
+background shell was created. The four existing namespace names remain in
+`tmp/orchestrator/gate-requests/turn-test-reds.txt`; they were re-verified under
+`test/`. Final cold proof remains the orchestrator's responsibility.
