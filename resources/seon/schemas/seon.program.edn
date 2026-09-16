@@ -4,6 +4,27 @@
  :seon.program/source-attribute
  [:enum :seon.ns/source :seon.fn/source :seon.schema/form :seon.test/source
   :seon.fn.file/digest :seon.lint/message]
+ :seon.program/row-schema
+ [:qualified-keyword
+  {:description
+   "Declared on a program identity attribute: the entity schema whose map
+    declares that family's row. Its declared attributes ARE the attributes the
+    static indexer owns, so declaring one there is sufficient — there is no
+    second list to extend (seon.program/shapes derives from this link)."}]
+ :seon.program/written-by
+ [:qualified-symbol
+  {:description
+   "Declared on one entry of a program entity map: the function that writes
+    this attribute instead of the indexer, such as seon.test.runner/record-tx
+    for a test's run outcome. The indexer neither keeps nor replaces it, so an
+    exact re-index cannot retract another writer's fact."}]
+ :seon.program/projected-properties
+ [:=
+  {:description
+   "Declared on a program entity map whose rows also carry every qualified
+    Malli property projected onto them, which no map can enumerate: the schema
+    family. Its owned attributes are the row's own qualified keys."}
+  true]
  :seon.program/schema-row-properties [:= :seon.program/schema-row-properties]
  :seon.program/owned-attributes
  [:or [:vector :qualified-keyword] :seon.program/schema-row-properties]

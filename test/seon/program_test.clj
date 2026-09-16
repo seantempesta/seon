@@ -10,6 +10,7 @@
             [seon.fn.schema-shape :as schema-shape]
             [seon.program :as program]
             [seon.schema :as schema]
+            [seon.schema.form :as schema.form]
             [seon.sci.reader :as reader]
             [seon.test-support :as test-support]))
 
@@ -885,3 +886,129 @@
             :seon.program/source
             "(seon.schema/unregister! :shared.schema/amount)"}
            (program/deletion-row event)))))
+
+;;; ---------------------------------------------------------------------------
+;;; Program row ownership is derived from the declared entity maps
+;;; ---------------------------------------------------------------------------
+
+(defn- program-entity-map
+  "The entity map form one identity attribute's declaration names."
+  [forms identity-attribute]
+  (get forms
+       (:seon.program/row-schema
+        (schema.form/attr-form-properties (get forms identity-attribute)))))
+
+(deftest declaring-an-attribute-on-a-program-row-schema-is-sufficient
+  ;; The class both 7cfe02790 and 925ca19fe hit: an attribute declared on the
+  ;; row schema, emitted by the indexer, and silently dropped because a second
+  ;; literal list did not name it. Declaration is now the whole requirement.
+  (let [forms (schema/registered-schemas)
+        row {:seon.fn/sym "sample/f"
+             :seon.fn/ns [:seon.ns/name 'sample]
+             :seon.fn/source "(defn f [] 1)"
+             :seon.fn/arglists "([])"
+             :seon.fn/private? false
+             :sample/facet "carried"}
+        declared (update forms :seon.fn/fn conj
+                         [:sample/facet {:optional true} :string])]
+    (is (nil? (:sample/facet (program/canonical-row forms row)))
+        "an undeclared attribute is not a program row attribute")
+    (is (= "carried" (:sample/facet (program/canonical-row declared row)))
+        "declaring it on :seon.fn/fn is sufficient — no code names it")
+    (is (contains? (set (program/changed-attributes
+                         declared row (dissoc row :sample/facet)))
+                   :sample/facet)
+        "and an exact replacement retracts it when the source stops carrying it"))
+  (testing "an entry naming another writer stays out of the indexer's hands"
+    (let [forms (schema/registered-schemas)
+          foreign (update forms :seon.fn/fn conj
+                          [:sample/outcome
+                           {:optional true
+                            :seon.program/written-by 'sample/writer}
+                           :string])
+          row {:seon.fn/sym "sample/f"
+               :seon.fn/ns [:seon.ns/name 'sample]
+               :seon.fn/source "(defn f [] 1)"
+               :seon.fn/arglists "([])"
+               :seon.fn/private? false
+               :sample/outcome "written elsewhere"}]
+      (is (nil? (:sample/outcome (program/canonical-row foreign row))))
+      (is (not (contains? (set (program/changed-attributes
+                                foreign row (dissoc row :sample/outcome)))
+                          :sample/outcome))
+          "so an exact re-index can never retract another writer's fact"))))
+
+(deftest every-program-row-attribute-is-owned-or-names-another-writer
+  ;; The drift checker. It fails when a program entity map declares an
+  ;; attribute that canonical-row neither keeps nor sees declared as written
+  ;; elsewhere — the silent strip cannot return. It also fails LOUDLY when it
+  ;; is measuring nothing, because an empty derivation would read as health.
+  (let [forms (schema/registered-schemas)
+        shapes (program/shapes-in forms)]
+    (is (= (set program/identity-attributes) (set (keys shapes)))
+        "every identity family has a derived shape")
+    (is (<= 6 (count shapes)) "the derivation found the program families")
+    (let [foreign
+          (into {}
+                (for [identity-attribute program/identity-attributes
+                      :let [definition (program-entity-map forms identity-attribute)
+                            owned (:seon.program/owned-attributes
+                                   (get shapes identity-attribute))
+                            owned (if (coll? owned) (set owned) nil)
+                            entries (schema.form/map-entries definition)]
+                      :when owned]
+                  [identity-attribute
+                   (into []
+                         (keep (fn [entry]
+                                 (let [attribute (first entry)
+                                       properties (when (map? (second entry))
+                                                    (second entry))]
+                                   (when-not (or (contains? owned attribute)
+                                                 (:seon.program/written-by properties))
+                                     attribute))))
+                         entries)]))]
+      (is (every? empty? (vals foreign))
+          (str "declared program attributes that are neither kept nor "
+               "declared :seon.program/written-by: " (pr-str foreign))))
+    (doseq [identity-attribute program/identity-attributes
+            :let [shape (get shapes identity-attribute)
+                  owned (:seon.program/owned-attributes shape)]]
+      (is (qualified-keyword? (:seon.program/source-attribute shape))
+          (str identity-attribute " declares a source attribute"))
+      (when (coll? owned)
+        (is (seq owned) (str identity-attribute " owns attributes"))
+        (is (some #{identity-attribute} owned)
+            (str identity-attribute " owns its own identity"))))
+    (is (some (fn [identity-attribute]
+                (some (fn [entry]
+                        (and (map? (second entry))
+                             (:seon.program/written-by (second entry))))
+                      (schema.form/map-entries
+                       (program-entity-map forms identity-attribute))))
+              program/identity-attributes)
+        "at least one entry declares another writer, so the exclusion is exercised")))
+
+(deftest program-identity-attributes-are-exactly-the-declared-row-schemas
+  (let [forms (schema/registered-schemas)
+        declaring (into #{}
+                        (keep (fn [[schema-key definition]]
+                                (when (:seon.program/row-schema
+                                       (schema.form/attr-form-properties definition))
+                                  schema-key)))
+                        forms)]
+    (is (seq declaring) "declarations were found")
+    (is (= (set program/identity-attributes) declaring)
+        "seon.program/identity-attributes names exactly the declared families")
+    (is (= (set program/identity-attributes)
+           (set (rest (get forms :seon.program/identity-attribute))))
+        "the identity-attribute enum does not drift from the declarations")
+    (is (= (into #{}
+                 (map #(:seon.program/source-attribute (program/shape forms %)))
+                 program/identity-attributes)
+           (set (rest (get forms :seon.program/source-attribute))))
+        "the source-attribute enum does not drift from the declarations")))
+
+(deftest process-resolved-shapes-match-the-current-declarations
+  (is (= (program/shapes-in (schema/registered-schemas))
+         (program/shapes))
+      "the shapes resolved once per process still describe the live declarations"))

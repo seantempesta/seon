@@ -147,7 +147,9 @@
           :spec :string,
           :sym
           [:string
-           {:min 1, :seon.db/identity true, :seon.search/index :symbol}],
+           {:min 1, :seon.db/identity true, :seon.search/index :symbol,
+            :seon.program/row-schema :seon.fn/fn,
+            :seon.program/source-attribute :seon.fn/source}],
           :workload [:enum :io :compute],
           :index-phase :keyword,
           :capability-rule :keyword,

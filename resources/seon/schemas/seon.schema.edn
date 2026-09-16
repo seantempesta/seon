@@ -41,7 +41,9 @@
               :compiled-validator fn?,
               :key
               [:keyword
-               {:seon.db/identity true, :seon.search/index :symbol}],
+               {:seon.db/identity true, :seon.search/index :symbol,
+                :seon.program/row-schema :seon.schema/schema,
+                :seon.program/source-attribute :seon.schema/form}],
               :form :string,
               :shape :seon.db/ref,
               :ns [:and {:description "The namespace where this schema was declared."} :seon.db/ref],
@@ -60,6 +62,7 @@
               :schema
               [:map
                {:seon.db/attributes true,
+                :seon.program/projected-properties true,
                 :seon.render/form seon.render.ns/schema-form}
                [:seon.schema/key :seon.schema/key]
                [:seon.schema.admission/source

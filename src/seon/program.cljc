@@ -4,7 +4,7 @@
             [seon.fn.schema-shape :as schema-shape]
             [seon.fn.signature :as signature]
             [seon.schema :as schema]
-            #?(:clj [seon.schema.form :as schema.form])
+            [seon.schema.form :as schema.form]
             #?(:clj [clojure.edn :as edn]
                :cljs [cljs.reader :as reader])))
 
@@ -36,54 +36,121 @@
           (sort-by str)
           vec))))
 
-(def shapes
-  "Program-row shapes keyed by their database identity attribute."
-  {:seon.fn.file/path
-   {:seon.program/identity-attribute :seon.fn.file/path
-    :seon.program/source-attribute :seon.fn.file/digest
-    :seon.program/owned-attributes
-    [:seon.fn.file/path :seon.fn.file/digest :seon.fn.file/root
-     :seon.schema.admission/source]}
-   :seon.lint/id
-   {:seon.program/identity-attribute :seon.lint/id
-    :seon.program/source-attribute :seon.lint/message
-    :seon.program/owned-attributes
-    [:seon.lint/id :seon.lint/fn :seon.lint/file :seon.lint/type
-     :seon.lint/level :seon.lint/message :seon.lint/row :seon.lint/col
-     :seon.schema.admission/source]}
-   :seon.ns/name
-   {:seon.program/identity-attribute :seon.ns/name
-    :seon.program/source-attribute :seon.ns/source
-    :seon.program/owned-attributes
-    [:seon.ns/name :seon.ns/source :seon.ns/doc :seon.ns/context-relevant?
-     :seon.ns/requires :seon.ns/aliases :seon.ns/imports :seon.ns/refers
-     :seon.schema.admission/source]}
-   :seon.fn/sym
-   {:seon.program/identity-attribute :seon.fn/sym
-    :seon.program/source-attribute :seon.fn/source
-    :seon.program/owned-attributes
-    [:seon.fn/sym :seon.fn/ns :seon.fn/source :seon.fn/file :seon.fn/form-span :seon.fn/arglists
-     :seon.fn/arglists-override?
-     :seon.fn/doc :seon.fn/private? :seon.fn/macro? :seon.fn/spec
-     :seon.test/subject
-     :seon.fn/arities
-     :seon.fn/ast :seon.fn/calls :seon.fn/call-arities :seon.fn/pending-calls
-     :seon.fn/keywords :seon.fn/writes :seon.fn/workload
-     :seon.fn/doc-order :seon.fn/internal? :seon.fn/external-sink :seon.fn/projection-boundary
-     :seon.effect/capability :seon.fn/capability-fn
-     :seon.schema.admission/source]}
-   :seon.schema/key
-   {:seon.program/identity-attribute :seon.schema/key
-    :seon.program/source-attribute :seon.schema/form
-    :seon.program/owned-attributes :seon.program/schema-row-properties}
-   :seon.test/sym
-   {:seon.program/identity-attribute :seon.test/sym
-    :seon.program/source-attribute :seon.test/source
-    :seon.program/owned-attributes
-    [:seon.test/sym :seon.test/ns :seon.test/source :seon.fn/file :seon.fn/form-span :seon.fn/calls
-     :seon.fn/call-arities
-     :seon.fn/keywords :seon.fn/writes :seon.fn/pending-calls :seon.test/usage :seon.test/subject :seon.test/fixture-observation
-     :seon.schema.admission/source]}})
+(defn- declaration-refused!
+  [message identities data]
+  (throw
+   (ex-info message
+            (merge {:seon.error/kind :seon.program/declaration-refused
+                    :seon.program/identities identities :seon.program/declaration-refused true}
+                   data))))
+
+(defn- entry-attribute
+  [entry]
+  (when (vector? entry) (first entry)))
+
+(defn- entry-properties
+  [entry]
+  (when (and (vector? entry) (map? (second entry))) (second entry)))
+
+(defn- derived-shape
+  "The shape one identity attribute's declared entity map defines.
+
+  The identity attribute names its entity schema (`:seon.program/row-schema`)
+  and its source attribute; the entity map's own entries are the attributes
+  the static indexer owns, minus every entry declaring another
+  `:seon.program/written-by`. Nothing here may read a missing declaration as
+  an empty shape: each absence refuses, naming the identity and the member,
+  because an empty owned set would silently strip every attribute of the
+  family it describes."
+  [forms identity-attribute]
+  (let [refuse!
+        (fn [message data]
+          (declaration-refused!
+           message [[identity-attribute nil]]
+           (merge {:seon.program/identity-attribute identity-attribute} data)))
+        attribute-form (get forms identity-attribute)
+        properties (or (schema.form/attr-form-properties attribute-form) {})
+        row-schema (:seon.program/row-schema properties)
+        _ (when-not (qualified-keyword? row-schema)
+            (refuse! "A program identity attribute declares no row schema."
+                     {:seon.program/missing-attributes [:seon.program/row-schema]}))
+        source-attribute (:seon.program/source-attribute properties)
+        _ (when-not (qualified-keyword? source-attribute)
+            (refuse! "A program identity attribute declares no source attribute."
+                     {:seon.program/missing-attributes
+                      [:seon.program/source-attribute]}))
+        definition (get forms row-schema)
+        _ (when-not (schema.form/map-shape? definition)
+            (refuse! "A program row schema is not a declared entity map."
+                     {:seon.program/row-schema row-schema}))
+        entries (schema.form/map-entries definition)
+        owned (into [] (comp (filter #(nil? (:seon.program/written-by
+                                             (entry-properties %))))
+                             (keep entry-attribute))
+                    entries)]
+    (when-not (some #{identity-attribute} owned)
+      (refuse! "A program row schema does not declare its own identity attribute."
+               {:seon.program/row-schema row-schema}))
+    {:seon.program/identity-attribute identity-attribute
+     :seon.program/source-attribute source-attribute
+     :seon.program/owned-attributes
+     (if (true? (:seon.program/projected-properties
+                 (schema.form/schema-properties definition)))
+       :seon.program/schema-row-properties
+       owned)}))
+
+(defn shapes-in
+  "Program-row shapes derived from the entity maps `forms` declares.
+
+  THE ONE ANSWER to \"which attributes does a program row own\". Declaring an
+  attribute on `:seon.fn/fn`, `:seon.test/test`, `:seon.ns/ns`,
+  `:seon.fn.file/file`, `:seon.lint/finding` or `:seon.schema/schema` is
+  therefore sufficient for the indexer to keep, write and exactly replace it:
+  there is no second list, which is what twice silently stripped an owned
+  attribute on 2026-09-16 (`7cfe02790`, `925ca19fe`)."
+  {:malli/schema
+   [:=> [:cat :map]
+    [:map-of :seon.program/identity-attribute :seon.program/shape]]}
+  [forms]
+  (into {}
+        (map (fn [identity-attribute]
+               [identity-attribute (derived-shape forms identity-attribute)]))
+        identity-attributes))
+
+(defonce ^:private !declared-shapes (atom nil))
+
+(defn- process-shapes
+  "The shapes derived once in this process from the AUTHORED resources.
+
+  The program row families are this program's own structure, so the authority
+  is the declaration resources and not whichever projection happens to be
+  active: a cluster whose stored schema predates a declaration must still index
+  by it — the exact scope the literal table this replaced had. Only a SUCCESS
+  is remembered, because a cached refusal would outlive the reload that fixes
+  the declaration and report a healthy population as broken forever."
+  []
+  (or @!declared-shapes
+      (reset! !declared-shapes
+              (shapes-in #?(:clj ((requiring-resolve
+                                   'seon.schema.edn/packaged-forms))
+                            :cljs (schema/registered-schemas))))))
+
+(defn shapes
+  "Program-row shapes keyed by their database identity attribute.
+
+  The no-argument arity answers from the AUTHORED declaration resources,
+  resolved once in this process (see [[process-shapes]]) — the same static
+  scope the literal table it replaced had, and the reason a per-row caller
+  never re-resolves a population that costs a complete resource merge. A
+  caller holding the operation's own population hands it over."
+  {:malli/schema
+   [:function
+    [:=> [:cat]
+     [:map-of :seon.program/identity-attribute :seon.program/shape]]
+    [:=> [:cat :map]
+     [:map-of :seon.program/identity-attribute :seon.program/shape]]]}
+  ([] (process-shapes))
+  ([forms] (shapes-in forms)))
 
 (defn declaration-at
   "The declaration whose `:seon.fn/form-span` contains `position`.
@@ -115,10 +182,13 @@
 (defn shape
   "The program shape owned by `identity-attribute`."
   {:malli/schema
-   [:=> [:cat :seon.program/identity-attribute]
-    [:maybe :seon.program/shape]]}
-  [identity-attribute]
-  (get shapes identity-attribute))
+   [:function
+    [:=> [:cat :seon.program/identity-attribute]
+     [:maybe :seon.program/shape]]
+    [:=> [:cat :map :seon.program/identity-attribute]
+     [:maybe :seon.program/shape]]]}
+  ([identity-attribute] (get (shapes) identity-attribute))
+  ([forms identity-attribute] (get (shapes-in forms) identity-attribute)))
 
 (defn row-identity
   "The `[identity-attribute value]` pair carried by `row`."
@@ -138,14 +208,6 @@
                 (when-some [value (get row identity-attribute)]
                   [identity-attribute value])))
         identity-attributes))
-
-(defn- declaration-refused!
-  [message identities data]
-  (throw
-   (ex-info message
-            (merge {:seon.error/kind :seon.program/declaration-refused
-                    :seon.program/identities identities :seon.program/declaration-refused true}
-                   data))))
 
 (defn- read-edn
   [source]
@@ -731,10 +793,8 @@
 
     :else row))
 
-(defn canonical-row
-  "The exact non-nil attributes owned by one declaration row."
-  {:malli/schema [:=> [:cat [:maybe :map]] [:maybe :map]]}
-  [row]
+(defn- canonical-row-in
+  [row-shapes row]
   (let [identities (row-identities row)]
     (when (> (count identities) 1)
       (declaration-refused!
@@ -743,7 +803,7 @@
        {}))
     (when-let [[identity-attribute _] (first identities)]
       (let [owned-attributes
-            (:seon.program/owned-attributes (shape identity-attribute))
+            (:seon.program/owned-attributes (get row-shapes identity-attribute))
             owned-attributes
             (if (= :seon.program/schema-row-properties owned-attributes)
               (into [] (filter qualified-keyword?) (keys row))
@@ -758,6 +818,20 @@
                                             attribute)
                                  (empty? value)))))
               (select-keys row owned-attributes))))))
+
+(defn canonical-row
+  "The exact non-nil attributes owned by one declaration row.
+
+  Ownership comes from the family's declared entity map (see [[shapes-in]]),
+  so an attribute declared there is kept without any code change here. The
+  explicit-population arity is the honest one for a caller that already holds
+  the operation's declaration population."
+  {:malli/schema
+   [:function
+    [:=> [:cat [:maybe :map]] [:maybe :map]]
+    [:=> [:cat :map [:maybe :map]] [:maybe :map]]]}
+  ([row] (canonical-row-in (shapes) row))
+  ([forms row] (canonical-row-in (shapes-in forms) row)))
 
 (defn- canonical-namespace-components
   "Namespace components in the one shape `:seon.ns/ns` declares.
@@ -851,14 +925,12 @@
            {:seon.program/missing-attributes missing}))))
     row))
 
-(defn changed-attributes
-  "Owned non-identity attributes whose exact values differ."
-  {:malli/schema [:=> [:cat :map :map] [:vector :keyword]]}
-  [current desired]
+(defn- changed-attributes-in
+  [row-shapes current desired]
   (if-let [[identity-attribute _]
            (or (row-identity desired) (row-identity current))]
     (let [owned-attributes
-          (:seon.program/owned-attributes (shape identity-attribute))
+          (:seon.program/owned-attributes (get row-shapes identity-attribute))
           owned-attributes
           (if (= :seon.program/schema-row-properties owned-attributes)
             (into #{}
@@ -872,6 +944,19 @@
         (filter #(not= (get current %) (get desired %))))
        owned-attributes))
     []))
+
+(defn changed-attributes
+  "Owned non-identity attributes whose exact values differ.
+
+  An attribute another writer owns (`:seon.program/written-by` on its entry)
+  is never named here, so an exact re-index can never retract a fact the
+  indexer did not write."
+  {:malli/schema
+   [:function
+    [:=> [:cat :map :map] [:vector :keyword]]
+    [:=> [:cat :map :map :map] [:vector :keyword]]]}
+  ([current desired] (changed-attributes-in (shapes) current desired))
+  ([forms current desired] (changed-attributes-in (shapes-in forms) current desired)))
 
 (defn exact-replacement-tx
   "Replace one declaration row using current values and component-aware retraction."

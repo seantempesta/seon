@@ -42,7 +42,9 @@
              [:seon.error/message :seon.error/message]],
             :sym
             [:string
-             {:min 1, :seon.db/identity true, :seon.search/index :symbol}],
+             {:min 1, :seon.db/identity true, :seon.search/index :symbol,
+              :seon.program/row-schema :seon.test/test,
+              :seon.program/source-attribute :seon.test/source}],
             :result
             [:map
              {:seon.render/ai seon.render.test/render-ai
@@ -75,11 +77,21 @@
              [:seon.schema.admission/source
               :seon.schema.admission/source]
              [:seon.test/ns {:optional true} :seon.test/ns]
-             [:seon.test/failures {:optional true} :seon.test/failures]
+             [:seon.test/failures
+              {:optional true :seon.program/written-by seon.test.runner/record-tx}
+              :seon.test/failures]
              [:seon.test/source {:optional true} :seon.test/source]
-             [:seon.test/reach-digest {:optional true} :seon.test/reach-digest]
-             [:seon.test/reach {:optional true} :seon.test/reach]
-             [:seon.test/reach-unknown {:optional true} :seon.test/reach-unknown]
+             [:seon.fn/file {:optional true} :seon.fn/file]
+             [:seon.fn/form-span {:optional true} :seon.fn/form-span]
+             [:seon.test/reach-digest
+              {:optional true :seon.program/written-by seon.test.runner/record-tx}
+              :seon.test/reach-digest]
+             [:seon.test/reach
+              {:optional true :seon.program/written-by seon.test.runner/record-tx}
+              :seon.test/reach]
+             [:seon.test/reach-unknown
+              {:optional true :seon.program/written-by seon.test.runner/record-tx}
+              :seon.test/reach-unknown]
              [:seon.fn/calls {:optional true} :seon.fn/calls]
              [:seon.fn/call-arities {:optional true} :seon.fn/call-arities]
              [:seon.fn/writes {:optional true} :seon.fn/writes]
@@ -89,27 +101,33 @@
              [:seon.test/fixture-observation {:optional true}
               :seon.test/fixture-observation]
              [:seon.test/subject {:optional true} :seon.test/subject]
-             [:seon.test/pending-subject {:optional true}
+             [:seon.test/pending-subject
+              {:optional true
+               :seon.program/written-by seon.turn/relation-assertions}
               :seon.test/pending-subject]
              [:seon.test/pass-count
-              {:optional true}
+              {:optional true :seon.program/written-by seon.test.runner/record-tx}
               :seon.test/pass-count]
              [:seon.test/fail-count
-              {:optional true}
+              {:optional true :seon.program/written-by seon.test.runner/record-tx}
               :seon.test/fail-count]
              [:seon.test/error-count
-              {:optional true}
+              {:optional true :seon.program/written-by seon.test.runner/record-tx}
               :seon.test/error-count]
              [:seon.test/run-basis-t
-              {:optional true}
+              {:optional true :seon.program/written-by seon.test.runner/record-tx}
               :seon.test/run-basis-t]
-             [:seon.test/run-at {:optional true} :seon.test/run-at]
-             [:seon.test/run {:optional true} :seon.test/run]
+             [:seon.test/run-at
+              {:optional true :seon.program/written-by seon.test.runner/record-tx}
+              :seon.test/run-at]
+             [:seon.test/run
+              {:optional true :seon.program/written-by seon.test.runner/record-tx}
+              :seon.test/run]
              [:seon.test/failing-assertions
-              {:optional true}
+              {:optional true :seon.program/written-by seon.test.runner/record-tx}
               :seon.test/failing-assertions]
              [:seon.test/failure-message
-              {:optional true}
+              {:optional true :seon.program/written-by seon.test.runner/record-tx}
               :seon.test/failure-message]]
 :seon.test/changed
  [:vector [:or :qualified-symbol [:string {:min 1}] :seon.program/identity]]

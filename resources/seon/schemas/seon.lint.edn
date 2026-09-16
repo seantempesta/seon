@@ -1,4 +1,6 @@
-{:seon.lint/id [:string {:min 1 :seon.db/identity true}]
+{:seon.lint/id [:string {:min 1 :seon.db/identity true
+                        :seon.program/row-schema :seon.lint/finding
+                        :seon.program/source-attribute :seon.lint/message}]
  :seon.lint/fn [:and {:description "The containing function or test program row, when the finding is inside a declaration."} :seon.db/ref]
  :seon.lint/file :seon.db/ref
  :seon.lint/type [:keyword {:description "The exact clj-kondo finding type, such as :unused-binding; clj-kondo emits unqualified keywords."}]
@@ -15,4 +17,6 @@
   [:seon.lint/level :seon.lint/level]
   [:seon.lint/message :seon.lint/message]
   [:seon.lint/row :seon.lint/row]
-  [:seon.lint/col :seon.lint/col]]}
+  [:seon.lint/col :seon.lint/col]
+  [:seon.schema.admission/source {:optional true}
+   :seon.schema.admission/source]]}
