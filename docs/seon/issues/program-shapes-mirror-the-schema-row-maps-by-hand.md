@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, program-graph, schema, data-model, class/p2]
 ---
@@ -35,9 +35,28 @@ list was extended too — verified live in `default`'s JVM before the edit. Twic
 in one day the hand-maintained mirror silently stripped an owned attribute; the
 first was `:seon.fn/writes` / `:seon.fn/call-arities` in `7cfe02790`.
 
-Dissolution: derive `:seon.program/owned-attributes` from the identity
-family's declared schema row map (the keys of `:seon.fn/fn`,
-`:seon.test/test`, `:seon.ns/ns`, `:seon.fn.file/file`, `:seon.lint/lint`),
-and delete the literal lists. Failing that, one checker that fails on drift
-between `shapes` and those row maps. Until then, every attribute added to a
-program row map must be added here in the same commit.
+## Resolved 2026-09-16 (`8795db4ac`)
+
+The literal lists are deleted. An identity attribute declares
+`:seon.program/row-schema` (its entity map) and
+`:seon.program/source-attribute`; that entity map's own entries are the
+attributes the static indexer owns, minus every entry declaring another
+`:seon.program/written-by`. `:seon.program/projected-properties` selects the
+schema family's open row, and every absence refuses rather than yielding an
+empty owned set.
+
+The two genuine exclusions are now declared facts, not omissions:
+`seon.test.runner/record-tx` owns the thirteen run-outcome attributes on
+`:seon.test/test`, `seon.turn/relation-assertions` owns
+`:seon.test/pending-subject`, and `seon.cluster.agent/steward-call` owns
+`:seon.ns/steward`. `:seon.fn/writes` was probed as the source of that fact
+and FALSIFIED — it records none of them, because they are assembled in
+helpers away from the `seon.db/transact!` span.
+
+The class regressions are
+`seon.program-test/declaring-an-attribute-on-a-program-row-schema-is-sufficient`,
+`seon.program-test/every-program-row-attribute-is-owned-or-names-another-writer`,
+`seon.program-test/program-identity-attributes-are-exactly-the-declared-row-schemas`
+and `seon.fn-test/the-indexer-emits-no-attribute-the-program-row-schema-drops`.
+Evidence and the measured re-index numbers:
+[program-shapes-dissolution-2026-09-16](../../prds/steward-platform/research/program-shapes-dissolution-2026-09-16.md).
