@@ -546,3 +546,20 @@ until now by same-JVM ordering. Issue
 `a-fixture-namespace-poisons-the-workers-shared-kondo-cache.md`; Opus lane
 launched to isolate fixture analysis at the analyzer seam (no shared cache
 for paths outside declared roots) with one class regression.
+
+### 2026-09-16 21:00Z — fixture kondo-cache class killed (`b50f4ddc7`)
+
+`seon.fn.analyzer/analyze` now runs kondo with `:cache false` unless every
+analyzed path is the checkout's own declared source (roots from `deps.edn`
+`:paths` + alias `:extra-paths`, minus the test alias's `.`); fixture roots
+under `tmp/` are isolated by construction and the stdin special case
+dissolves into the rule. Reproduced then killed live: the old rule shrank
+`seon.error.transit.json` 13,570 → 194 bytes and made `await.clj` report
+`Unresolved var: error/diagnostic`; the new rule leaves the entry
+byte-identical. Regression
+`fixture-analysis-never-writes-the-checkouts-dependency-cache` 3/0/0.
+Proofs on evaluated forms (default does not adopt right now). Two
+pre-existing reds noted for cold verification: `analyzer-test/
+ordered-forms-use-existing-context-and-original-row-numbers` and
+`fn-test/keyword-usage-is-indexed-per-declaration`'s database assertions
+(likely the un-adopted default). Batch 51.
