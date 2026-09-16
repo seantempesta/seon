@@ -251,3 +251,22 @@ alone does not prove completed adoption. The explicit retry waited at least
 The incident is recorded as
 [resolved with the live proof](../../../seon/issues/archive/generated-reference-identities-depend-on-turn-taking.md);
 the canonical gate and adoption boundaries remain explicit here.
+
+Final publication outcome: exit 1 after namespace reload, SCI acquisition,
+and JVM instrumentation. Refusal was
+`:seon.cluster/source-changed-during-adoption`, published commit
+`6aa9f987-5457-5d2f-8e10-5fa66bbdcd3a`. Both explicit publication shells
+exited; no lane-owned background process remains. This lane did not restart
+or refork default to bypass concurrent source churn.
+
+After that reload/instrumentation, reran the exact single-test command at
+02:06:54Z. Run entity 55944 again recorded 0/0/1 at its 20,000 ms bound
+(21,436 ms MCP execution), with the same agent-already-running log. The
+[separate regression execution issue](../../../seon/issues/running-fixture-regression-exceeds-in-process-bound.md)
+records this residual without assigning an unverified cause. The isolated
+gate request must resolve it; no successful canonical regression is claimed.
+
+Documentation hook validation also reported twelve pre-existing dependency-pin
+citation findings in `docs/prds/context-generation/research/agents-md-audit-2026-09-15.md`.
+The owned probe script's initial missing-require and namespace/file-name
+findings were corrected. No production lint error remained in the owned slice.
