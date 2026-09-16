@@ -35,5 +35,6 @@
                        [:set #:seon.db{:component true} :seon.db/ref],
                        :id [:string {:min 1, :seon.db/identity true}],
                        :prompt
-                       [:string {:min 1, :seon.db/no-history? true}],
+                       [:string {:min 1,
+                                 :description "Exact prompt observed for this capture, retained in history after replacement or retraction so temporal token calibration can recover the original bytes."}],
                        :run :seon.db/ref}
