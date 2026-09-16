@@ -1237,6 +1237,30 @@ bare set from `:seon.ns/name` rows, `find` deleted; first cold gate proves the
 12 deftest-free namespaces load). Machine: load avg 24–43; only 3 JVMs
 (default at 10 GB RSS + two test-fast slots) — the load is agents, not JVMs.
 
+**02:05Z codex restored (owner).** Rule now: astra for hard/design-heavy
+work, Opus for well-specified items. Opus continuations keep their current
+seams to avoid a second orphaning; hard remainders go back to astra as each
+stops (edges-are-symbols seams → `reset-batch-integration`; test-prep step 2
+publication reuse; incremental publication R2/R7 if not landed).
+
+**Schema design review landed** (`1bf6fa984`, `schema-design-review-2026-09-17.md`):
+G1 removed the protection (identity rows never retract) that made every
+remaining ref safe; ELEVEN more name-shaped refs beyond calls/reach
+(`references`, `writes`, schema `references`, arity `*-refs`, issue citations,
+test `subject`/`pending-subject`, schedule task `function`, both
+`capability-fn`, `listen/entity` — whose absence means "match everything", so
+retracting the watched entity silently widens a wake to global —, `error/fn`,
+failure `file`); the agent entity has no creation/deletion fact and its
+retraction sweeps other agents' message senders; `seon.fn.ast` is a recursive
+component forest with no production reader (delete, after the falsifying
+grep); `maintenance.result` root validates nothing; 13 `*-edn` strings hand-do
+the bridge's codec; `:seon.cluster.eval/author` and `:seon.issue/status` are
+kind stamps; four spellings of one digest; "receipt" lives in four schema
+families. Launched astra `reset-batch-integration`: ONE ordered reset edit
+list merging edges plan + audit + design review + symbols inventory + S2, the
+reset procedure and live proofs, and two owner questions (kind-2 living refs
+refusing target retraction inside db.fn/call; ast delete vs merge).
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
