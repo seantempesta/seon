@@ -1,6 +1,6 @@
 ---
 type: research
-status: active; census complete, class (a)+(d) rip-out in progress
+status: active; census complete, class (a)+(b)+(d) applied in every free file
 created: 2026-09-16
 tags: [research, workarounds, dissolution, requiring-resolve, load-cycles, program-graph]
 ---
@@ -247,3 +247,102 @@ Two limits are stated rather than papered over:
    `src/seon/test/runner.clj:3806` records a real interleaving incident caused
    by exactly that — but no benchmark in this tree measures a hot-path cost,
    and this note does not add one.
+
+## What was applied
+
+Nineteen namespaces, one path-limited commit each (`7bdd299a2` … `a00e73e49`).
+`rg -c requiring-resolve src/` goes from **147 to 100** text hits, of which
+**33 are now `delay`-held definitions** and 12 are prose; **55 per-call or
+dynamic sites remain**, and every one of those is either class (e) or sits in
+a file another lane holds.
+
+| namespace | a | b | c | d | note |
+|---|---|---|---|---|---|
+| `seon.turn` | 1 | 6 | — | 15 | `declare planned-sources`; 15 sites aliased to `sci.eval` |
+| `seon.db` | — | 6 | — | 4 | `pull-api` was already required |
+| `seon.issue` | — | 6 | — | 4 | see the correction below |
+| `seon.plan` | — | 1 | — | 8 | `seon.issue` made an explicit require |
+| `seon.render` | — | 4 | — | 1 | |
+| `seon.repl` | — | 2 | — | 5 | |
+| `seon.render.value` | — | 3 | — | 1 | |
+| `seon.render.web` | — | 1 | — | 3 | |
+| `seon.test.arm` | — | — | — | 4 | |
+| `seon.flow` | — | — | 4 | — | one resolution, was four per-call |
+| `seon.effect` | — | — | 1 | — | |
+| `seon.error` | — | 1 | — | 1 | |
+| `seon.fn`, `seon.cluster.agent`, `seon.render.walk`, `seon.bootstrap` | — | — | — | 1 each | |
+| `seon.sci.admit`, `seon.test.accretion` | — | 1 each | — | — | |
+| `seon.test` | — | — | 2 | — | comment only |
+
+Every class (b) and (c) site now resolves **once**, in a `defonce`-held
+`delay` carrying a comment that names the cycle or the late load. No site
+resolves a var on every call any more outside the held files.
+
+## One correction to the table above
+
+Six `seon.issue` sites naming `seon.turn` and `seon.cluster.agent` are
+classified **d** in the table and are in fact **b**. The require graph misses
+them because the edge that closes the cycle is not a `:require`: `seon.plan`
+**derefs** `seon.issue/done-query` at load
+(`src/seon/plan.clj:599`, formerly `@(requiring-resolve 'seon.issue/done-query)`),
+so loading `seon.plan` loads `seon.issue`, and `seon.turn` requires
+`seon.plan`. A load-time `requiring-resolve` outside a function body is a
+require the graph cannot see.
+
+That hidden edge is now stated: `seon.plan` requires `seon.issue` in its `ns`
+form, and the six `seon.issue` sites are `delay`-held. **The underlying defect
+is `seon.plan/issue-done-query` itself** — a mirror, in the low-level
+namespace, of a query the high-level namespace owns, inverting the dependency
+direction. Dissolving it (the plan step reads the query from `seon.issue`, or
+the query moves to whichever namespace owns the fact) would let `seon.issue`
+require `seon.turn` outright and close all six. Out of scope here; recorded so
+the next lane does not rediscover it.
+
+## Cycle proof
+
+After every edit the graph was rebuilt from the edited `ns` forms and checked
+for a namespace reachable from its own requires. The answer is the empty set:
+no `:require` cycle exists in `src/`.
+
+## Verification boundary — what this lane proved and what it did not
+
+**Proved.** `clj-kondo --lint src` is clean of new findings: one error before
+the work (`src/seon/db.clj:579` `Unresolved var: parser.type/->Variable`, a
+pre-existing stale dependency-cache finding in a line this lane did not
+touch), one after; warnings go 366 → 365. The require graph rebuilt from the
+edited `ns` forms is acyclic.
+
+**Not proved by this lane.** No JVM loaded the edited program. `clojure -M:dev
+-e "(require 'the.ns)"` and `(require … :reload)` on the development cluster
+were both out of bounds for this assignment, so the load proof is the gate,
+and at the time of writing both `bin/_test-slot` slots were held by other
+lanes' gates with 21 `bin/test` processes live. A `bin/test-fast` invocation
+launched earlier hit the liveness watchdog at 30 minutes without reaching a
+test (`exit 124`, slot contention, not a failure of these edits).
+
+**What could still be wrong, named exactly.** A `defonce`-held `delay` changes
+*when* a var is resolved, not *whether*: a target var that never existed would
+previously fail at the first call and now fails at the first deref, in the same
+place. The real risk of the class (d) changes is load ORDER, which only a JVM
+answers — and the acyclic graph is necessary but not sufficient, because a
+namespace that reads a var at load time (exactly the `seon.plan` case found
+above) forms an edge no `ns` form declares. The remaining such reads in the
+tree are `src/seon/test/runner.clj:1681`
+(`(def ^:private arm-contracts! (requiring-resolve 'seon.test.arm/arm-contracts!))`)
+and `src/seon/test/runner.clj:702`; both are in a held file and unchanged.
+
+## Skipped: files another lane held
+
+Checked with `git status` before each commit. These files keep their sites and
+their classes; the table above carries the row for each.
+
+| file | sites left | classes |
+|---|---|---|
+| `src/seon/test/runner.clj` | 20 | 2×c, 2×e, 16×d/b |
+| `src/seon/schema.clj` | 8 | 3×e, 1×d (third-party), 4×b |
+| `src/seon/cluster/source.clj` | 5 | 2×e, 2×d, 1×b |
+| `src/seon/render/transcript.clj` | 3 | 3×d |
+| `src/seon/program.cljc` | 2 | 2×d |
+| `src/seon/cluster.clj` | 1 | 1×d (`seon.issue/adopt!` — recheck after the `seon.plan` mirror is dissolved) |
+| `src/seon/schema/datahike.clj` | 1 | 1×d |
+| `src/seon/schema/edn.clj`, `src/seon/sci/eval.clj`, `src/seon/schedule.clj` | 1 each | e (legitimate) |
