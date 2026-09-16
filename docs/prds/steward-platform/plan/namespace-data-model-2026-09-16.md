@@ -338,3 +338,122 @@ strings retire in a later commit once every reader uses the ref).
 1. `seon.fault` named as above (class = fault, occurrence = `seon.error` row).
 2. The class identity drops `process` (one class survives restarts) — yes or no.
 3. Land order: 7.2 with rows 1–4 first (the fault graph), then 7 and 11 (usage facts, renderer ref), then 17 (structured failures), then the rest.
+
+## 8. Entity allocation and the connected graph, rooted at the agent
+
+Owner (2026-09-16 02:05Z): "A fault has its own entity, and through the
+graph we know the functions involved and via that the namespaces. Allocate
+entities optimally and make sure all the graphs are connected. Prioritise
+from the agent entity and its namespace."
+
+### 8.1 What is an entity today, and how it is linked
+
+| Entity | Identity | Refs it holds | Reverse refs that reach it |
+|---|---|---|---|
+| agent `seon.agent` | `:seon.agent/id` | `namespace` → ns; `plan`, `settings`, `runtime` (components) | `:seon.ns/_steward`, `:seon.message/_to`/`_from`/`_inbox`, `:seon.turn/_agent`, `:my.note/_agent`, `:seon.error/_agent` |
+| namespace `seon.ns` (411) | `:seon.ns/name` | `requires` → ns; `steward` → agent; alias/refer/import components | `:seon.fn/_ns` (4,608), `:seon.test/_ns` (1,599), `:seon.agent/_namespace`, `:seon.ns/_requires` |
+| function `seon.fn` (4,621) | `:seon.fn/sym` | `ns` → ns; `calls` → fn; arity/argument/binding components | `:seon.fn/_calls`, `:seon.test/_subject` (0 today) |
+| test `seon.test` (1,753) | `:seon.test/sym` | `ns` → defining ns; `subject` → fn (0); `calls` → fn; `run` → run | `:my.task/_tests` (proposed) |
+| test run `seon.test.run` | `:seon.test.run/id` | — | `:seon.test/_run` |
+| turn `seon.turn` | `:seon.turn/id` | `agent` → agent; `trigger` → any; attempts components | `:seon.cluster.eval/_run`, `:seon.error/_run` |
+| evaluation `seon.eval` | derived id | `run` → turn; `read-evidence` components | — |
+| message | `:seon.message/id` | `from`/`to`/`inbox` → agent; `about` → any; `caused-by` → message | `:seon.message/_about` |
+| plan item | `:my.plan.item/id` | `subject` → any; `needs` → items | component of plan / item |
+| fault occurrence `seon.error` | `:seon.error/id` (random today) | `agent`, `run` (sparse); **function by STRING** | — |
+| schedule task, fire, maintenance receipt | ids | `owner` → agent, `function` → fn, `schedule` → schedule | — |
+
+So from an agent the walk already reaches its namespace, and from the
+namespace every function and every test defined there. What does NOT
+connect: faults to functions (string), tests to the function they test
+(0), issues to anything (files), tasks (no family), lint (nothing),
+production namespaces to a steward (2 of 411).
+
+### 8.2 The allocation rule
+
+An entity is anything with its own identity and life that more than one
+fact will point at: a namespace, a function, a test, a fault class, a task,
+an issue, an agent, a turn, a message. A fact that belongs to exactly one
+owner and dies with it is a component (arity rows, plan items, listens,
+read evidence). A fact that is a property of one entity is an attribute.
+Refs point **from the later, more specific fact to the more stable
+identity** — occurrence → fault → function → namespace → steward — never the
+other way; the stable side never accumulates back-pointers, and every
+reverse direction is a `_attr` pull for free. Counts, states and ownership
+are derived at read time from the same refs.
+
+### 8.3 The graph (proposed additions in bold)
+
+```mermaid
+graph LR
+  A[agent] -->|namespace| N[namespace]
+  N -->|steward| A
+  N -->|requires| N
+  F[function] -->|ns| N
+  F -->|calls| F
+  T[test] -->|ns| N
+  T ==>|subject| F
+  T -->|run| R[test run]
+  FC[fault class] ==>|fn| F
+  FC ==>|regression| T
+  FC ==>|task| K[task]
+  O[fault occurrence] ==>|fault| FC
+  O -->|agent| A
+  O -->|run| U[turn]
+  U -->|agent| A
+  E[evaluation] -->|run| U
+  E ==>|renderer| F
+  M[message] -->|from / to| A
+  M -->|about| X((any))
+  K ==>|agent| A
+  K ==>|namespace| N
+  K ==>|tests| T
+  K ==>|subject| X
+  I[issue] ==>|functions| F
+  I ==>|namespaces| N
+  I ==>|task| K
+  L[lint finding] ==>|fn| F
+  P[plan item] -->|subject| X
+  A -->|plan| P
+```
+
+Bold edges are §3, §7 and the task prototype; thin edges exist today.
+Every proposed edge lands on an identity that already exists (function,
+namespace, test, agent) or on one new identity (fault class, task, issue,
+lint finding).
+
+### 8.4 The agent-rooted view, one pull
+
+```clojure
+[:seon.agent/id
+ {:my.task/_agent [:my.task/id :my.task/title {:my.task/tests [:seon.test/sym :seon.test/fail-count :seon.test/error-count]}]}
+ {:seon.agent/plan [:my.plan/objective]}
+ {:seon.message/_inbox [:seon.message/id {:seon.message/from [:seon.agent/id]}]}
+ {:seon.agent/namespace
+  [:seon.ns/name {:seon.ns/steward [:seon.agent/id]}
+   {:seon.fn/_ns [:seon.fn/sym :seon.fn/private?
+                  {:seon.fault/_fn [:seon.fault/signature :seon.fault/kind
+                                    {:seon.error/_fault [:seon.error/occurrences :seon.error/at {:seon.error/agent [:seon.agent/id]}]}
+                                    {:seon.fault/task [:my.task/id]}]}
+                  {:seon.test/_subject [:seon.test/sym :seon.test/fail-count :seon.test/error-count]}
+                  {:seon.lint/_fn [:seon.lint/rule :seon.lint/level]}
+                  {:seon.issue/_functions [:seon.issue/id :seon.issue/status]}]}
+   {:seon.issue/_namespaces [:seon.issue/id :seon.issue/title :seon.issue/status :seon.issue/severity]}
+   {:my.task/_namespace [:my.task/id {:my.task/agent [:seon.agent/id]}]}]}]
+```
+
+That is the steward's opening and the namespace page, from one root, with
+the agent's own work first (tasks, plan, inbox) and its namespace's health
+second (functions → faults, tests, lint, issues; then namespace-level
+issues and the tasks other workers hold there). Today the pull returns the
+first three branches and the function list; every other branch is one of
+the proposed edges.
+
+### 8.5 Fault occurrence identity (owner, 02:00Z)
+
+The occurrence's `:seon.error/id` becomes derived by `seon.id/id` from
+`[fault-signature agent-id (turn-id | process)]` instead of `random-uuid`;
+the committer upserts the class by signature and the occurrence by that id
+in one transaction function, increments `:seon.error/occurrences` from the
+mid-transaction value, asserts `first-at` only when absent, replaces `at`
+and the evidence blob ref. History keeps every replaced value with its
+transaction, so rates and recency are temporal queries, not rows.
