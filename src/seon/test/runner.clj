@@ -2166,9 +2166,10 @@
                         (mapcat val)
                         (remove known-present))
                reaches))
+        packaged-forms ((requiring-resolve 'seon.schema.edn/packaged-forms))
         portable-reach
         (fn [refs]
-          (into [] (keep (partial source/identity-ref absent-identities)) refs))
+          (into [] (keep (partial source/identity-ref packaged-forms absent-identities)) refs))
         file-present?
         (memoize #(some? (db/pull database [:db/id] [:seon.fn.file/relative-path %])))
         ;; A file identity cannot be minted honestly: `:seon.fn.file/file`
@@ -2190,7 +2191,7 @@
                        :seon.test.run/immutable run-id
                        :seon.test.run/id run-id})))
     (into
-     (into (into (source/identity-tombstone-rows absent-identities)
+     (into (into (source/identity-tombstone-rows packaged-forms absent-identities)
                  [(assoc run :db/id "test-run")])
            (map (fn [namespace-name]
                   {:db/id (namespace-tempid namespace-name)
