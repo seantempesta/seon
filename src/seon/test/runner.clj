@@ -915,7 +915,8 @@
   (let [callees (into {}
                       (map (fn [row]
                              [(or (:seon.fn/sym row) (:seon.test/sym row))
-                              (into #{} (map second) (:seon.fn/calls row))]))
+                              (into #{} (map second)
+                                    (concat (:seon.fn/calls row) (:seon.fn/references row)))]))
                       rows)]
     (loop [frontier [[test-symbol]]
            seen #{test-symbol}]
@@ -1767,7 +1768,7 @@
        row))))
 
 (def ^:private reach-attributes
- [:seon.fn/sym :seon.fn/source :seon.fn/spec :seon.fn/calls :seon.fn/keywords
+ [:seon.fn/sym :seon.fn/source :seon.fn/spec :seon.fn/calls :seon.fn/references :seon.fn/keywords
   :seon.test/sym :seon.test/source :seon.test/subject :seon.test/pending-subject
   :seon.schema/key :seon.schema/form])
 (defn- reach-keywords [form]
@@ -1808,7 +1809,7 @@
        pulled (if (seq ids)
                 (db/pull-many database
                  '[:db/id :seon.fn/sym :seon.fn/source :seon.fn/spec :seon.fn/keywords
-                   {:seon.fn/calls [:db/id]} :seon.test/sym :seon.test/source
+                   {:seon.fn/calls [:db/id]} {:seon.fn/references [:db/id]} :seon.test/sym :seon.test/source
                    {:seon.test/subject [:db/id]} :seon.test/pending-subject
                    :seon.schema/key :seon.schema/form] ids) [])
        _ (when (:seon.error/kind pulled) (throw (ex-info "Reach rows unavailable." pulled)))
@@ -1859,6 +1860,7 @@
                        target (get symbols named)]
                   (recur (into (pop pending)
                                (concat (map :db/id (:seon.fn/calls r))
+                                       (map :db/id (:seon.fn/references r))
                                        (when subject [subject]) (when target [target])))
                          (conj seen e) (cond-> missing named (conj [::reach-symbol named])))))
                 {::reach-ids seen ::reach-missing missing}))

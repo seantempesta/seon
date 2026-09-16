@@ -79,3 +79,24 @@ No property-name roster or regular expression was added.
 A live build-artifact of `src/seon/print.cljc` returns 81 rows and now includes
 `emit` → `emit-sequential`, `emit-map-like`, protocol methods and other body
 callees. This is a JVM owner probe, not an adopted-database measurement.
+
+## Slice 3 — reference facts and conservative selection
+
+`:seon.fn/references` stores known targets with no resolved call shape.
+Kondo's quoted-symbol analysis supplies requiring-resolve literals; source
+spans supply their referencing definitions. apply/partial/comp and syntax
+quotes use the same rule. File-level `:seon.fn/unresolved-references` retains
+targets with no attributable callable definition and widens selection.
+Gate-set and the whole-graph Datalog relation follow reference edges;
+manifest selection follows the same facts. Missing identity / unattributed
+reference selection widens instead of claiming an empty set is sufficient.
+The existing result-reach recorder and destructive-call-path follow refs too;
+those consumers were read before editing, are not protected paths, and are
+included in this slice so the new relation cannot silently disappear there.
+
+REPL probe before source edit recovered apply and requiring-resolve targets
+without target arities. Fixture:
+`test/fixtures/call_graph_fidelity/references.txt`; regression:
+`seon.fn-test/unresolved-call-shapes-preserve-reference-edges-and-reach`.
+Post-adoption result pending. Schema changes are new keys and optional entries;
+no existing stored key changes meaning. **No RESET NEEDED for this slice.**

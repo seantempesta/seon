@@ -125,7 +125,7 @@
   [row]
   (let [callers (row-identities row)]
     (for [caller callers
-          called (concat (:seon.fn/calls row)
+          called (concat (:seon.fn/calls row) (:seon.fn/references row)
                          (when-let [subject (:seon.test/subject row)]
                            [subject]))
           :when (vector? called)]
@@ -168,11 +168,15 @@
                                       (remove reached))
                                 frontier)]
                       (recur (into reached next-frontier) next-frontier))))]
+    (if (some (fn [row]
+                (some #(contains? reached [:seon.fn/sym %])
+                      (:seon.fn/unresolved-references row))) rows)
+      (vec (sort (keep :seon.test/sym rows)))
     (->> reached
          (keep (fn [[attribute value]]
                  (when (= :seon.test/sym attribute) value)))
          sort
-         vec)))
+         vec))))
 
 (defn- basis-file
   "The recorded green-basis artifact below one checkout root.

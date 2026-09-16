@@ -21,6 +21,8 @@
           :arities [:vector #:seon.db{:component true} :seon.db/ref],
           :ast [:and #:seon.db{:component true} :seon.db/ref],
           :calls [:set :seon.db/ref],
+          :references [:set {:description "Function references without a resolved call shape. Selection follows these conservatively; no invocation or arity is asserted."} :seon.db/ref],
+          :unresolved-references [:set {:description "Known function targets mentioned outside an attributable definition. A changed target widens selection; absence of a caller never proves no test is needed."} :seon.fn/sym],
           :writes
           [:set
            {:description
@@ -111,6 +113,7 @@
            [:seon.fn/macro? {:optional true} :seon.fn/macro?]
            [:seon.fn/spec {:optional true} :seon.fn/spec]
            [:seon.fn/calls {:optional true} :seon.fn/calls]
+           [:seon.fn/references {:optional true} :seon.fn/references]
            [:seon.fn/call-arities {:optional true} :seon.fn/call-arities]
            [:seon.fn/writes {:optional true} :seon.fn/writes]
            [:seon.fn/pending-calls {:optional true} :seon.fn/pending-calls]

@@ -99,6 +99,7 @@
               {:optional true :seon.program/written-by seon.test.runner/record-tx}
               :seon.test/reach-unknown]
              [:seon.fn/calls {:optional true} :seon.fn/calls]
+             [:seon.fn/references {:optional true} :seon.fn/references]
              [:seon.fn/call-arities {:optional true} :seon.fn/call-arities]
              [:seon.fn/writes {:optional true} :seon.fn/writes]
              [:seon.fn/pending-calls {:optional true} :seon.fn/pending-calls]

@@ -2526,3 +2526,21 @@
             (is (not-any? #(= target (first %)) (:seon.fn/call-arities row)))
             (is (= ["sample.call-declarations/reaches-declarations"]
                    (seon.fn/tests-reaching @connection target)))))))))
+(deftest unresolved-call-shapes-preserve-reference-edges-and-reach
+  (with-provenance-file
+    "sample/call_references.clj"
+    (slurp (io/resource "test/fixtures/call_graph_fidelity/references.txt"))
+    (fn [connection _ rows]
+      (test-support/transacted! connection (seon.fn/reconcile-tx @connection rows []))
+      (doseq [[caller target] [["applied" "apply-target"] ["partialled" "partial-target"]
+                               ["composed" "comp-target"] ["expanded" "macro-target"]
+                               ["resolved" "resolve-target"]]]
+        (let [caller (str "sample.call-references/" caller)
+              target (str "sample.call-references/" target)
+              row (db/pull @connection
+                           '[:seon.fn/call-arities {:seon.fn/references [:seon.fn/sym]}]
+                           [:seon.fn/sym caller])]
+          (is (contains? (set (map :seon.fn/sym (:seon.fn/references row))) target))
+          (is (not-any? #(= target (first %)) (:seon.fn/call-arities row)))
+          (is (= ["sample.call-references/reaches-references"]
+                 (seon.fn/tests-reaching @connection target))))))))

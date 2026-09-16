@@ -27,6 +27,7 @@
    {:arglists true
     :var-usages true
     :protocol-impls true
+    :symbols true
     :keywords true
     :var-definitions {:shallow false
                       :meta true}
@@ -324,7 +325,15 @@
   A defmethod target usage spans only its name; its containing macro call
   supplies the body span. Protocol implementations already carry that span."
   [analysis]
-  (let [usages (:var-usages analysis)
+  (let [quoted (keep (fn [entry]
+                       (let [target (:symbol entry)]
+                         (when (qualified-symbol? target)
+                           (assoc entry :to (or (:to entry) (symbol (namespace target)))
+                                        :name (or (:name entry) (symbol (name target)))
+                                        :reference true))))
+                     (:symbols analysis))
+        usages (into (vec (:var-usages analysis)) quoted)
+        definitions (group-by :filename (:var-definitions analysis))
         calls (group-by :filename (filter :arity usages))
         methods (keep (fn [usage]
                         (when (:defmethod usage)
@@ -340,10 +349,13 @@
     (mapv (fn [usage]
             (if-let [span (innermost-span (get spans (:filename usage)) usage)]
               (merge usage (select-keys span [:from :from-var]))
-              (cond-> usage
-                (some #(contains-position? % usage)
-                      (get var-quotes (:filename usage)))
-                (assoc :var-quote true))))
+              (let [definition (when-not (:from-var usage)
+                                 (innermost-span (get definitions (:filename usage)) usage))]
+                (cond-> usage
+                  definition (assoc :from (:ns definition) :from-var (:name definition))
+                  (some #(contains-position? % usage)
+                        (get var-quotes (:filename usage)))
+                  (assoc :var-quote true)))))
           usages)))
 
 (defn- var-quote-spans

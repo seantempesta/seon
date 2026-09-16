@@ -347,6 +347,23 @@
   (when (or (contains? usage ::analyzer/arity) (::analyzer/var-quote usage))
     (usage-symbol usage)))
 
+(defn- references-by-caller
+  "Resolved target identities without a resolved call shape.
+  Quoted symbols are references, never invented arities. A nil caller is
+  retained for file-level widening rather than discarded as no coverage."
+  [analysis first-party-functions]
+  (reduce
+   (fn [references usage]
+     (let [caller (usage-caller usage)
+           target (usage-symbol usage)]
+       (if (and target (first-party-functions target)
+                (or (not (contains? usage ::analyzer/arity))
+                    (not (first-party-functions caller))))
+         (update references (when (first-party-functions caller) caller)
+                 (fnil conj #{}) target)
+         references)))
+   {} (::analyzer/var-usages analysis)))
+
 (defn- external-target?
   [first-party-functions target]
   (and target (not (contains? first-party-functions target))))
@@ -560,7 +577,7 @@
 
 (defn- var-row
   [contexts namespace-contexts
-   {:keys [calls-by-caller used-keywords writes call-arities]} entry]
+   {:keys [calls-by-caller references used-keywords writes call-arities]} entry]
   (let [namespace-name (::analyzer/ns entry)
         qualified (symbol (str namespace-name) (str (::analyzer/name entry)))
         metadata (::analyzer/meta entry)
@@ -601,6 +618,10 @@
                (into #{}
                      (map (fn [target] [:seon.fn/sym target]))
                      (get calls-by-caller (str qualified))))
+        (seq (get references (str qualified)))
+        (assoc :seon.fn/references
+               (into #{} (map #(vector :seon.fn/sym %))
+                     (get references (str qualified))))
         (keyword-values used-keywords qualified)
         (assoc :seon.fn/keywords (keyword-values used-keywords qualified))
         (write-refs writes qualified)
@@ -635,6 +656,10 @@
                (into #{}
                      (map (fn [target] [:seon.fn/sym target]))
                      (get calls-by-caller (str qualified))))
+        (seq (get references (str qualified)))
+        (assoc :seon.fn/references
+               (into #{} (map #(vector :seon.fn/sym %))
+                     (get references (str qualified))))
         (keyword-values used-keywords qualified)
         (assoc :seon.fn/keywords (keyword-values used-keywords qualified))
         (write-refs writes qualified)
@@ -724,7 +749,7 @@
               (keep (comp :seon.fn/sym :seon.program/row))
               requests)
         referenced-symbols
-        (into #{} (keep call-target) (::analyzer/var-usages analysis))
+        (into #{} (keep usage-symbol) (::analyzer/var-usages analysis))
         existing-symbols
         (if-let [candidates (seq (set/difference referenced-symbols
                                                    batch-symbols))]
@@ -826,6 +851,7 @@
           program-symbol (conj program-symbol))
         calls-by-caller
         (call-targets-by-caller analysis first-party-functions)
+        references (references-by-caller analysis first-party-functions)
         used-keywords (keywords-by-holder analysis)
         writes (writes-by-writer analysis declared-key?)
         call-arities
@@ -856,6 +882,10 @@
               (assoc :seon.fn/pending-calls
                      (into #{} (remove first-party-functions)
                            (get calls-by-caller program-symbol)))
+              (seq (get references program-symbol))
+              (assoc :seon.fn/references
+                     (into #{} (map #(vector :seon.fn/sym %))
+                           (get references program-symbol)))
               (keyword-values used-keywords qualified)
               (assoc :seon.fn/keywords
                      (keyword-values used-keywords qualified))
@@ -866,7 +896,7 @@
                      (into #{} (get call-arities program-symbol)))
               subject (assoc :seon.test/subject subject))))
         merged-row (when program-row
-                     (merge (dissoc program-row :seon.fn/calls :seon.fn/pending-calls
+                     (merge (dissoc program-row :seon.fn/calls :seon.fn/references :seon.fn/pending-calls
                                     :seon.fn/keywords :seon.fn/writes :seon.fn/call-arities)
                             program-facts))]
     [(if program-row
@@ -1045,7 +1075,15 @@
         (merge-with set/union
                     (call-targets-by-caller analysis first-party-functions)
                     (declared-calls-by-caller used-keywords targets))
+        references (references-by-caller analysis first-party-functions)
+        unresolved-by-file
+        (into {} (map (fn [[filename usages]]
+                        [filename (get (references-by-caller
+                                        {::analyzer/var-usages usages}
+                                        first-party-functions) nil)]))
+              (group-by ::analyzer/filename (::analyzer/var-usages analysis)))
         edges {:calls-by-caller calls-by-caller
+               :references references
                :used-keywords used-keywords
                :writes (writes-by-writer analysis declared-attributes)
                :call-arities (call-arities-by-caller analysis calls-by-caller)}
@@ -1060,10 +1098,12 @@
      (fn [rows entry]
        (if-let [row (if (::analyzer/ns entry)
                       (var-row contexts namespace-contexts edges entry)
-                      (namespace-row contexts
-                                     (get namespace-contexts
-                                          (::analyzer/name entry))
-                                     entry))]
+                      (cond-> (namespace-row contexts
+                                              (get namespace-contexts (::analyzer/name entry))
+                                              entry)
+                        (seq (get unresolved-by-file (::analyzer/filename entry)))
+                        (assoc :seon.fn/unresolved-references
+                               (get unresolved-by-file (::analyzer/filename entry)))))]
          (update rows (::analyzer/filename entry) (fnil conj []) row)
          rows))
      {}
@@ -1159,6 +1199,11 @@
         file-row (cond-> {:seon.fn.file/relative-path canonical-path
                           :seon.fn.file/digest (:seon.fn.file/digest context)}
                    root (assoc :seon.fn.file/relative-root (fs/relative-path directory root)))
+        file-row (cond-> file-row
+                   (some :seon.fn/unresolved-references rows)
+                   (assoc :seon.fn/unresolved-references
+                          (into #{} (mapcat :seon.fn/unresolved-references) rows)))
+        rows (mapv #(dissoc % :seon.fn/unresolved-references) rows)
         rows (into (into [file-row] rows)
                    (lint-rows directory file context rows findings))
         rows (walk/postwalk
@@ -1197,6 +1242,8 @@
 (def ^:private test-reach-rules
   '[[(call-edge ?function ?target)
      [?function :seon.fn/calls ?target]]
+    [(call-edge ?function ?target)
+     [?function :seon.fn/references ?target]]
     [(call-edge ?function ?target)
      [?declaration :seon.fn/reference-to :seon.fn/sym]
      [?declaration :seon.schema/key ?attribute]
@@ -1258,6 +1305,9 @@
     (if (:seon.error/kind row)
       row
       (let [target (:db/id row)
+            unresolved (db/q '[:find [?file ...] :in $ ?symbol
+                               :where [?file :seon.fn/unresolved-references ?symbol]]
+                             database function-symbol)
             declared (declared-reference-edges database)
             incoming-declared (group-by second (when-not (:seon.error/kind declared) declared))
             walked
@@ -1267,9 +1317,12 @@
               (if-let [entity (peek pending)]
                 (if (seen entity)
                   (recur (pop pending) seen callers)
-                  (let [edges (db/datoms database :avet :seon.fn/calls entity)]
-                    (if (:seon.error/kind edges)
-                      edges
+                  (let [calls (db/datoms database :avet :seon.fn/calls entity)
+                        references (db/datoms database :avet :seon.fn/references entity)
+                        refusal (some #(when (:seon.error/kind %) %) [calls references])
+                        edges (when-not refusal (concat calls references))]
+                    (if refusal
+                      refusal
                       (let [incoming (into (mapv :e edges)
                                            (map first (get incoming-declared entity)))]
                         (recur (into (pop pending) incoming)
@@ -1297,7 +1350,10 @@
                                    [?test :seon.test/pending-subject ?target-symbol]
                                    [?test :seon.test/sym ?symbol]]
                                  database function-symbol)]
-            (or (some #(when (:seon.error/kind %) %) [by-edge by-subject by-pending])
+            (or (some #(when (:seon.error/kind %) %)
+                      [unresolved by-edge by-subject by-pending])
+                (when (or (nil? target) (seq unresolved))
+                  (db/q '[:find [?test ...] :where [_ :seon.test/sym ?test]] database))
                 (->> (concat by-edge by-subject by-pending)
                      distinct
                      sort
@@ -2234,7 +2290,7 @@
         call-target-symbols
         (into #{}
               (comp
-               (mapcat #(or (:seon.fn/calls %) []))
+               (mapcat #(concat (:seon.fn/calls %) (:seon.fn/references %)))
                (keep (fn [[identity-attribute function-symbol]]
                        (when (= :seon.fn/sym identity-attribute)
                          function-symbol))))
