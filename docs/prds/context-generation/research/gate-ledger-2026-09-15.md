@@ -25,6 +25,7 @@ the same namespace twice for the same HEAD.
 | 33 | `7b3a9ecc8` | FRESH STORE (reset: 72 GB → 107 MB; default pid 27828): platform (recording) then seon.issue-test (indexer `75996a9e6`…`da0309344`) seon.test-runner-test seon.test.runner-test seon.test-support-test (reach-closure `bbbfafaf1`, `1086a7b80`) | A: PLATFORM RED 86/579, 13 F all in seon.cluster.source-test/latest-test-evidence-survives-rebuilding-from-an-older-base — `commit-results!` refused at the writer: `:seon.test.run/unavailable The completion lacks its tested database reach membership` (reach-closure's seam); gate recording also rejected; root run.5goq1Y. BLOCKER for the platform tier; fixed by reach-closure `8199364a2` (recording total: `:seon.test/reach-unknown`). B: 66/514, 3 F — seon.issue-test 2 tests (`:seon.issue/unresolved` vector vs set; steward's indexer); runner/support namespaces GREEN; root run.6P5SxE | steward |
 | 37 | `e25f0f360` | steward's issue-index-publication-cost `6ed16de1a` (delta-only index-tx; 1,276 → 358 ms): seon.issue-test seon.cluster.source-test | 21/221, 0 F 0 E — both GREEN (source-test's latest-test-evidence… passes under named selection); recording failed only because default was restarting; root run.sK2dTh swept | steward |
 | 39 | `3c446a558` | transcript second pass (`c19e826fa`…`583dab7c9`) + config-apply-cost `5e5aa6293`: seon.render.transcript-test seon.render.web-debug-test seon.config-test seon.reconcile-test | 56/568, 1 F: web-debug, config, reconcile GREEN; transcript-test 13 → 1 — every-generated-history-is-ordered-and-total (generative: two same-instant inbound messages order, seed 2026073104); root run.q75EGY | steward |
+| 44 | `b77c553e4` | recording wrapper carries the cluster's cause (`b77c553e4`): platform (recording — first gate that can NAME the rejection) then seon.dev.fresh-operator-test seon.test-runner-test | running | orchestrator |
 | 43 | HEAD | steward's effect-facts (`0e15593aa` `774b4da39`) + issue-generator (`88b04b970` `8c01f7420` `e2117dd73`): seon.effect-test seon.edit-test seon.fn-test seon.issue-generate-test seon.issue-test | `e3bfa76d1`: 70/482, 17 F 4 E — fn-test, issue-test GREEN; effect-test 2 (detached limit fails instead of interrupting; my.fs refuses the fixture temp path in a cold worker), edit-test 4 (my.edit/form! now requires :my.edit/expected-digest; fixtures refused), issue-generate-test 2 (idempotence, reopen); root run.RRQXky | steward |
 | 42 | `c010f87fd` | transcript generator fix `f75112dbd`: seon.render.transcript-test | 17/275, 0 F — GREEN (transcript class closed: 13 → 0); recording rejected again | steward |
 | 41 | `cfac8275c` | reach-closure's five commits (`d2a0ad636` expiry vs permit, `3c6a6bb8f` failure identities at the writer, `e2eb91fcd` recording rebased across publications, `e8a017620`, `bb2843264`): platform (recording) then seon.test-runner-test seon.test.runner-test seon.test-failure-facts-test seon.cluster.source-test | A: PLATFORM GREEN 86/582 0/0 (source-test :546 passes); recording STILL rejected, value still hidden; root run.tEkmC6. B: 68/485, 0 F 0 E — seon.test-runner-test, seon.test.runner-test, seon.test-failure-facts-test, seon.cluster.source-test ALL GREEN (batch-34 reds closed); recording rejected again | steward |
@@ -468,3 +469,16 @@ diagnostic value) and a concurrent publication. Opus fix lane launched: the
 wrapper carries the cluster's cause, the notice prints it, regression
 replaces the stale-sentence assertion at `fresh_operator_test.clj:1776`;
 then one reproduction through the operator path to name the real cause.
+
+### 2026-09-16 16:30Z — wrapper fix landed (`b77c553e4`); cause still unnamed
+
+The operator's `:exception` branch now raises `:seon.fresh-operator/prepl-exception`
+carrying the cluster's `Throwable->map` (cause, via chain, ex-data, first
+frame, clipped form, advertisement), and the runner's notice prints kind,
+message and data. Two more hypotheses falsified live: the full recorder
+through `live-root-value! "."` commits on default in 2,229 ms, and reply
+sizes up to 739 KB printed return complete — so neither payload size nor a
+failure value explains the sentence; the archived gates that printed it were
+green 15–16-test runs. Batch 44 is the first gate whose notice can name the
+rejection. Stale-sentence assertion at `fresh_operator_test.clj:1776`
+replaced (4 in-process regressions green).
