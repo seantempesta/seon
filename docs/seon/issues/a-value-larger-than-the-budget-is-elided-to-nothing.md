@@ -43,3 +43,11 @@ string and a 200-row `dir` under the agent profile yields shown text whose
 length is within the budget and non-empty, and whose elision value carries
 a requery that returns the remainder. Owner: n1-mcp-bypass / n1-total-render
 when their current slices land.
+
+## Generated-read-identities observation, 2026-09-16
+
+The MCP JVM return carrying the first 40 Juniper prompt lines elided all
+8,290 characters at offset zero. This time it supplied a retrievable artifact
+digest, so the observed residual is whole-string omission, not missing requery.
+Exact bytes are preserved in
+[the opening artifact](../../prds/steward-platform/research/generated-read-identities-2026-09-16-opening.txt).

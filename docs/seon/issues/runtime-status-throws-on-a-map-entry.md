@@ -18,3 +18,10 @@ evidence. A separate JVM `eval_clj` of `(+ 1 1)` returned 2.
 Owner: development MCP runtime health projection; outside run4-blockers.
 Acceptance: the same status call returns explicit health observations,
 including unavailable observations, without throwing.
+
+## Generated-read-identities observation, 2026-09-16
+
+On default PID 7595, MCP runtime_status returned health and flow `unknown`
+with `Read timed out`; JVM eval_clj immediately returned ordinary values.
+This is unavailable health evidence, not a reproduced MapEntry exception.
+The lane left the MCP owner and default lifecycle untouched.
