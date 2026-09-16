@@ -126,8 +126,13 @@
 
   ;; Rebuild the source-preferred class cache for the dependency namespaces
   ;; reached by `seon.artifact`; first-party source remains uncached.
+  ;; `ensure-cache` load-files `seon.test.selection` to derive the gate's
+  ;; input digests from the one selector, so this tool classpath carries that
+  ;; namespace's own dependencies. Omitting one refuses the whole gate at its
+  ;; dependency-cache phase.
   :dev-cache
-  {:deps {io.github.clojure/tools.build {:mvn/version "0.10.5"}}
+  {:deps {io.github.clojure/tools.build {:mvn/version "0.10.5"}
+          babashka/process {:local/root "reference-code/babashka-process"}}
    :ns-default dev-cache}
 
   ;; The system test gate: `bin/test` (all suites) or
