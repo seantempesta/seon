@@ -181,3 +181,21 @@ fixture, no store open); recording should work again from the next gate at
 or after that commit. reach-digest's only remaining cold red belongs to
 agent-call-edges.
 
+## 06:20Z — batch 20 attribution (steward session's Opus triage, `b45881f32`)
+
+None of batch 20's reds attribute to error-graph. A PLATFORM CLASS since
+`26ec13420`: `seon.db/write-map-error` validates a partial entity map
+against every entity schema that lists its identity attribute, so fixture
+seeds are silently refused and tests assert against an empty database
+(issue raw-write-validation-refuses-reverse-refs-and-partial-entity-maps,
+blocker; astra lane write-validation-class on db.clj). That explains
+seon.cluster.turn-test growing 18 → 48 red between batches 19 and 20; the
+turn-test-reds lane was told to classify seed-refused tests as blocked by
+that lane and work only the rest. Other attributions: render.faults →
+attempt-and-eval-facts; three transcript/turn-loop tests stale (Opus fix
+later); turn-test settlement row → agent-call-edges (`76774d044`);
+flow-test kill_child reads absence as readiness. Default's own fault
+committer transactions are refused on default ("at [0 :seon.error/at]")
+after error-graph's schema change: RESET NEEDED; the steward session
+reforks after issue-family lands and messages first.
+
