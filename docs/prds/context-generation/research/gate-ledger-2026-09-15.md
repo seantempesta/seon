@@ -671,3 +671,20 @@ at the owner (derive a stable root when none is supplied per §2.4 "renders
 never refuse an ordinary value", or prove production always supplies one
 and fix the fixture) and to make the typed-unknown contribution total.
 Queued: batch 57 = dir-elision r2 `90f7abec0` (+ render-coverage when fixed).
+
+### 2026-09-17 02:30Z — ordered-evaluation preview fixed (`91cd63e5a`); two lanes launched
+
+Two causes, one class (a transaction report never read): the fixture closed
+turns with a map that write admission refused (missing `:seon.turn/agent`),
+so the turn stayed open and `agent-already-running` was genuine; and
+`seon.turn/stored-record-content` (`turn.clj:1484`) compared resolved tx refs
+against the request's `"datomic.tx"` tempid so an identical re-record could
+never be the specified no-op. Fixed at the owner (`recorded-run`) and in the
+fixture (closes through `turn/close-tx`, asserts the report); 36/0/0 (was
+24/9). Findings: `seon.fn/tests-reaching` throws "gate-set refused return
+value at [0]" (regression from `1d141d26a`; breaks the reaching-tests
+tier) — Opus fix lane launched on fn.clj; a fixture's JVM-global
+`with-redefs` write counter is sound only in the gate's worker. turn.clj
+released → astra lane `turn-settlement-cost` launched (settlement delta,
+one analyze-forms per form, budget semantics, the 300 ms assertion
+re-expressed).
