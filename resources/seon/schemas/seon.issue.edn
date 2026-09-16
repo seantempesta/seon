@@ -1,5 +1,5 @@
 #:seon.issue{:id        [:string {:min 1 :seon.db/identity true :description "The note's file slug for indexed issues; seon.id/id of [title subject] for issues authored in the database."}]
-             :title     [:string {:min 1}]
+             :title     [:string {:min 1 :seon.db/index true}]
              :status    [:enum {:description "The issues README lifecycle; a closed set."} :open :resolved :superseded]
              :severity  [:enum :blocker :friction :cleanup]
              :opened    :inst
