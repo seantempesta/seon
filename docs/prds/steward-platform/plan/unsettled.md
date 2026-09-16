@@ -1319,6 +1319,26 @@ owner; two launchers get complementary memberships; a killed worker's claim
 is reclaimed. Launch stage 2 (astra) when the implementer count drops below
 four; stage 1 the day the reset converges.
 
+**High-effort design review landed** (`65ea3cae1`,
+`design-review-eval-path-and-deletion-contract-2026-09-17.md`). Corrections
+to the one-evaluation-path design: `evaluate` is not pure (binds connection
+and effect context, mutates the SCI ctx) so one PATH does not mean one
+COMMIT — an effectful or unknown form commits its intent (mint) before it
+runs, system forms included, until a positive effect-free proof exists;
+identity fences ≠ identical-retry idempotence (lost ack after a successful
+commit) — keep the history-basis comparison at admission; recovery keeps
+`interrupted-at` for every unfinished evaluation (no purity proof → no
+rollback); the unchanged-read basis advance becomes a named metadata
+transition, not a bare :db/add. Improved one-page design in the note.
+Deletion contract: every non-component ref is LIVING, no property; the check
+needs expanded deletion targets in the final report (delete-and-recreate
+probe) → a fork change; N8 stays a ref (retract the scoped listener with its
+issue), N10 keeps the declaration ref and persists the dispatched handler
+symbol on the effect, N11 populates path/line values first; agents get no
+deletion API and no tombstone. Integrator resumed on released groups with
+these; owner rulings requested: living-ref rule, Q2 merge-then-delete, the
+eval-path design as revised.
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
