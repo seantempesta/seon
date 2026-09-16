@@ -560,3 +560,26 @@ pre-existing unused private function, and one unused test binding), plus one
 qualified `t/is` informational finding; exit 2 reflects those warnings.
 The owned canonical base was closed through `close-base!`; retained probe
 values were unmapped. No owned background shell or scratch cluster remains.
+
+## Batch 19 triage — 2026-09-16
+
+Triage of the batch-19 isolated gate result
+(`tmp/orchestrator/gate-results/batch-19/reach-digest.md`), which ran the cold
+snapshot `74b46eeb4`. Every run below is in-process on default (JVM pid 7595)
+through `(seon.test/run #'<test> (seon.operator/connection "default") options)`
+with `:seon.test/remaining-ms 110000`; the default 20,000 ms bound fired once
+on the deferral regression and is recorded as such. No test JVM was launched,
+and default was never stopped, restarted, or reforked.
+
+| Test | In-process at HEAD | Attribution | Fix |
+|---|---|---|---|
+| `seon.test-reaching-test/declared-observations-defer-before-cheap-reaching-tests` (7 blocks) | first attempt errored on the 20,000 ms bound while `datahike.writer` logged `:datahike/write-rejected {:kind :entity-id/missing}`; after the fix **9/0/0**, run 67427, basis 536871642 | **Not reach-digest.** `f2d537187` never touched this regression. `3402913f3 Index source file spans and lint findings as program facts` added `:seon.fn/file [:seon.fn.file/path …]` to every indexed test row (`src/seon/fn.clj:369`, `src/seon/fn.clj:389`), so the regression's single-row transact carried a dangling lookup ref | Fixed at this lane's own test owner in `e441e0263` |
+| `seon.test-reaching-test/agent-admitted-tests-reach-their-tested-function` (2 blocks) | **7/0/0**, runs 67429 and 67441 (run 67429 additionally reported foreign wrapper drift adding `seon.test.runner/commit-results!`; run 67441 was clean) | **Pre-existing, owned by lane agent-call-edges.** It passes in-process only because that lane's *uncommitted* `src/seon/fn.clj` and `src/seon/fn/analyzer.clj` (now exposing `program-prelude` as kondo namespace context) are hot-loaded into pid 7595. At committed HEAD the agent-local call edge is still absent | Left red. Not this lane's owner; see [the call-edge issue](../../../seon/issues/agent-form-calls-to-core-namespaces-are-not-indexed.md) |
+| `seon.test-runner-test/the-agent-fork-callable-returns-the-committed-projection` | **1/0/0**, run 66112, basis 536871623 | **Caused by reach-digest.** `f2d537187` added `:seon.test/reach-digest` to `record-tx`; the regression's pull selector omitted it | Already fixed at HEAD by `1b5c09e15` |
+| `seon.test-runner-test/concurrent-bin-test-invocations-both-reach-their-tallies` | **Not run** — the regression launches two real `bin/test` subprocesses, which this triage is forbidden to do | **Caused by reach-digest.** The `f2d537187` `completion-reach-digests` opened the shared published base store (`-Dseon.test.published-base`, `bin/test:714`/`bin/test:776`) under its lifetime `flock` on every `commit-results!`. The gate's own notices name that exact path: `the store at …/target/test-published-bases/c5ef…/base/data/store is held by another live process`, and the coordinator's `:seon.fresh-operator/prepl-response-silent` after 30,000 ms is the same contention. Both nested gates therefore exited non-zero at the `exitValue` assertion | Already fixed at HEAD by `1b5c09e15`, which replaced the store open with the canonical private fixture. Its regression `concurrent-completions-use-the-canonical-program` passed **4/0/0**, run 67440, basis 536871649 |
+
+Verification boundary: the two `1b5c09e15` attributions are proven by the
+committed diff plus the in-process runs above; the cold two-process
+`bin/test` path itself remains the orchestrator's gate to re-observe. The
+agent-call-edges red will only clear cold once that lane commits its analyzer
+work.
