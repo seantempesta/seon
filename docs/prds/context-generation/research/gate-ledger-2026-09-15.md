@@ -387,3 +387,16 @@ verify the full fixture target in-process: the restarted default's shared
 fixture base had cached a missing-classpath exception (the base-poison
 class again, issue `in-process-test-runs-poison-the-shared-fixture-base`).
 Gate: batch 36 after batch 35.
+
+### 2026-09-16 11:50Z — base poison on pid 37572: the evaluation context loads test namespaces
+
+Orchestrator's one-shot base refresh (the turn-test-reds form) failed in
+25 s: `seon.sci.eval` (`eval.clj:1026`) refused to load
+`seon.dev.dependency-cache-test` — cause chain: syntax error at
+`dev_cache.clj:1:1` ← `clojure.tools.build.api` not on the classpath. Since
+reach-closure made tests program rows, the base SCI context requires every
+test namespace too, and `dev-cache` needs a :test-alias-only dependency the
+dev JVM lacks (the test loader adds :test paths, not its extra-deps). Every
+db-backed in-process run on default is blocked until reach-closure decides:
+the evaluation context stops loading test namespaces, or the loader carries
+the :test alias's deps. Handed to the steward's reach-closure resume.
