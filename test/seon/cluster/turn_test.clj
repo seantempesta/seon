@@ -1552,7 +1552,11 @@
   ;; the drive sat claimed-with-no-plan for 120 s and the operator had to
   ;; reproduce the call by hand to learn it was a missing credential.
   ;; The reason is now a fact, and the next prompt says it.
-  (with-cluster fake-evaluate
+  ;; REAL SCI, deliberately: the stand-in evaluator replaces every
+  ;; generated opening read's value with 1, so a prompt assembled under it
+  ;; could never carry a read's actual answer. The subject here IS what the
+  ;; next prompt says.
+  (with-cluster
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)]
         (with-redefs [ai/complete
@@ -1566,34 +1570,40 @@
                             [_ :seon.turn/closed-tx ?c]] @connection)))
           )
         (testing "and WHY is readable from the database"
+          ;; THE OCCURRENCE CARRIES THE MESSAGE. The error identity groups
+          ;; by signature and kind; every per-firing fact — message, time,
+          ;; process, agent, turn — belongs to the occurrence the writer
+          ;; commits (`seon.error/latest-fact` projects it back).
           (is (re-find #"DEEPSEEK_API_KEY"
-                       (db/q '[:find ?e . :where
-                              [?error :seon.error/occurrences ?occurrence]
-                                 [?occurrence :seon.error.occurrence/turn _] [?error :seon.error/message ?e]] @connection))))
+                       (db/q '[:find ?message .
+                               :where
+                               [?occurrence :seon.error.occurrence/turn _]
+                               [?occurrence :seon.error.occurrence/message ?message]]
+                             @connection))))
         (testing "so the agent's next prompt tells it what happened"
-          ;; the NEXT prompt belongs to the next held run: open it the
-          ;; way the loop does — the run carries the trigger and the
-          ;; agent pointer names the run
-          (db/transact! connection
-                      {:tx-data [{:seon.turn/id "run-next" :seon.turn/agent [:seon.agent/id "agent-a"] :seon.turn/trigger [:seon.message/id "m-1"] :seon.turn/opened-tx "datomic.tx"}
-                                 {:seon.agent/id "agent-a"
-                                  }]})
-          (is (re-find #"DEEPSEEK_API_KEY"
-                       (:seon.cluster.prompt/text
-                        (prompt/prompt @connection
-                                       {:seon.turn/id "run-next"
-                                        :seon.agent/id "agent-a"
-                                        :seon.db/connection connection
-                                        :seon.sci.admit/caps
-                                        (:seon.sci.admit/caps cluster)
-                                        :seon.sci.eval/ctx
-                                        (:seon.sci.eval/ctx cluster)
-                                        :seon.sci.eval/time-limit-ms
-                                        (:seon.config.eval/time-limit-ms cluster)
-                                        :seon.config/on-core-error
-                                        (:seon.config/on-core-error cluster)
-                                        :seon.render/context-channel
-                                        (:seon.render/context-channel cluster)})))))))))
+          ;; THE LOOP'S OWN PATH TO THE NEXT PROMPT. A terminal provider
+          ;; refusal defers reopening until a new outside wake, so the next
+          ;; prompt exists only after one arrives; and the prompt the agent
+          ;; actually sees is the one the provider call carries. Between the
+          ;; two, the system turn re-evaluates every declared read whose
+          ;; answer changed — the fault read is one of them.
+          (let [prompts (atom [])]
+            (let [seeded
+                  (db/transact! connection
+                                [{:seon.message/id "m-2"
+                                  :seon.message/to [:seon.agent/id "agent-a"]
+                                  :seon.message/content "try again"
+                                  :seon.message/inbox [:seon.agent/id "agent-a"]}])]
+              (is (nil? (:seon.error/kind seeded))
+                  "the wake that reopens the agent must commit"))
+            (with-redefs [ai/complete
+                          (fn [request]
+                            (swap! prompts conj (:seon.ai/prompt request))
+                            {:seon.ai/text "(seon.run/complete \"retried\")"})]
+              (drive! cluster 6))
+            (is (seq @prompts) "the new wake reopened the agent")
+            (is (some #(re-find #"DEEPSEEK_API_KEY" %) @prompts)
+                "the agent reads the reason its own call was lost")))))))
 
 (deftest a-real-evaluation-that-runs-away-is-stopped-and-recorded
   ;; the loop's honest failure path, end to end: an agent writes an
@@ -2691,15 +2701,6 @@
             (is (= prefix-count @evaluations)
                 "recovery never re-executes the in-memory prefix")))))))
 
-(defn- ordered-receipts
-  [database]
-  (->> (db/q '[:find [(pull ?receipt [*]) ...]
-               :where
-               [?receipt :seon.cluster.eval/ordinal]]
-             database)
-       (sort-by :seon.cluster.eval/ordinal)
-       vec))
-
 (deftest delimiter-repair-is-span-local-and-precedes-intent
   (testing "repair is one bounded, honest, idempotent pass"
     (let [repair (deref (ns-resolve 'seon.turn 'repair-source))
@@ -2715,8 +2716,13 @@
     (with-cluster
       (fn [cluster]
         (let [connection (:seon.db/connection cluster)
+              ;; CONTRACTED ON PURPOSE. The repair's own subject is the
+              ;; missing closer, but the form after it calls what the
+              ;; repaired form defined: only a contracted definition is
+              ;; installed into the program, so an uncontracted one makes
+              ;; this fixture measure a refusal instead of the repair.
               original
-              (str "(defn repaired [x]\n  (+ x 1)\n"
+              (str "(defn ^{:malli/schema [:=> [:cat :int] :int]} repaired [x]\n  (+ x 1)\n"
                    "(+ 40 2)\n"
                    "(repaired 2)\n"
                    "(+ 1 1)\n"
@@ -2751,8 +2757,14 @@
                now))
             (let [elapsed (- (System/nanoTime) (or @reply-arrived started))
                   bookkeeping-ms (/ (double (- elapsed @eval-nanos)) 1000000.0)
-                  receipts (ordered-receipts @connection)
-                  sources (mapv :seon.cluster.eval/source receipts)
+                  ;; THE SUBJECT IS THE AGENT'S OWN SIX FORMS. System turn 0
+                  ;; stores the generated opening in the same evaluation
+                  ;; family, so an absolute count over every evaluation
+                  ;; measures the opening as well; authorship is the fact
+                  ;; that separates them, and `agent-evaluations` orders by
+                  ;; turn and ordinal.
+                  evaluations (agent-evaluations @connection)
+                  sources (mapv :seon.cluster.eval/source evaluations)
                   rendered
                   (transcript/render-ai
                    {:seon.db/db @connection
@@ -2761,21 +2773,25 @@
                     :seon.sci.eval/time-limit-ms 2000
                     :seon.config/on-core-error :panic
                     :seon.sci.admit/caps (:seon.sci.admit/caps cluster)})]
-              (is (= 6 (count receipts)))
-              (is (= "(defn repaired [x]\n  (+ x 1))\n" (first sources)))
+              (is (= 6 (count evaluations)))
+              (is (= (str "(defn ^{:malli/schema [:=> [:cat :int] :int]}"
+                          " repaired [x]\n  (+ x 1))\n")
+                     (first sources)))
               (is (= "(+ 40 2)" (second sources))
                   "the adjacent good form remains byte-identical")
-              (is (= [42 3 2 4]
-                     (mapv (comp semantic-result
-                                 :seon.cluster.eval/result-edn)
-                           (subvec receipts 1 5))))
+              ;; the evaluation stores its SHOWN TEXT; there is no second
+              ;; serialized result to read back (turn PRD 15).
+              (is (= ["42" "3" "2" "4"]
+                     (mapv :seon.eval/shown (subvec evaluations 1 5))))
               (is (= original
                      (db/q '[:find ?reply .
-                             :where [_ :seon.turn/reply ?reply]]
-                           @connection))
+                             :in $ ?turn-id
+                             :where
+                             [?turn :seon.turn/id ?turn-id]
+                             [?turn :seon.turn/reply ?reply]]
+                           @connection (:seon.turn/id call-work)))
                   "raw intent provenance remains the original reply")
-              (is (str/includes? rendered
-                                 "(defn repaired [x]\n  (+ x 1))"))
+              (is (str/includes? rendered "repaired [x]\n  (+ x 1))"))
               (is (< bookkeeping-ms 300.0)
                   (str "six-form bookkeeping took " bookkeeping-ms " ms"))))))))
   (testing "indent mode repairs a mismatched closer type"
@@ -2785,11 +2801,10 @@
               source "(let [x 1)\n  x)\n(seon.run/complete \"fixed\")"]
           (with-redefs [ai/complete (fn [_] {:seon.ai/text source})]
             (drive! cluster 6))
-          (let [receipts (ordered-receipts @connection)]
+          (let [evaluations (agent-evaluations @connection)]
             (is (= "(let [x 1]\n  x)\n"
-                   (:seon.cluster.eval/source (first receipts))))
-            (is (= 1 (semantic-result
-                      (:seon.cluster.eval/result-edn (first receipts))))))))))
+                   (:seon.cluster.eval/source (first evaluations))))
+            (is (= "1" (:seon.eval/shown (first evaluations)))))))))
   (testing "an odd map stays an error and the following form still settles"
     (with-cluster
       (fn [cluster]
@@ -2797,15 +2812,15 @@
               source "{:a 1 :b}\n(+ 20 22)\n(seon.run/complete \"continued\")"]
           (with-redefs [ai/complete (fn [_] {:seon.ai/text source})]
             (drive! cluster 6))
-          (let [receipts (ordered-receipts @connection)]
+          (let [evaluations (agent-evaluations @connection)]
             (is (= "{:a 1 :b}\n"
-                   (:seon.cluster.eval/source (first receipts))))
-            (is (= :seon.sci.reader/unreadable
-                   (:seon.error/kind
-                    (semantic-result
-                     (:seon.cluster.eval/result-edn (first receipts))))))
-            (is (= 42 (semantic-result
-                       (:seon.cluster.eval/result-edn (second receipts)))))))))))
+                   (:seon.cluster.eval/source (first evaluations))))
+            (is (str/includes? (:seon.eval/shown (first evaluations))
+                               "seon.sci.reader/read refused source")
+                "the unreadable form keeps the reader's own refusal")
+            (is (str/includes? (:seon.cluster.eval/error (first evaluations))
+                               "Map literals must contain an even number of forms"))
+            (is (= "42" (:seon.eval/shown (second evaluations))))))))))
 
 (deftest a-batched-turn-commits-only-queryable-definition-facts
   (with-cluster
