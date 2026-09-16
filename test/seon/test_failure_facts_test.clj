@@ -394,39 +394,54 @@
                 "minting never fabricates a definition")))))))
 
 (deftest preserved-evidence-survives-a-rebuild-that-deleted-a-declaration
-  (support/with-database
-    {:seon.test-support/extra-schema reported-path-schema}
-    (fn [connection]
-      (let [deleted "rebuilt.facts/deleted"
-            path "/rebuilt/facts/no-such-file.clj"
-            evidence [{:seon.test/sym "rebuilt.facts/check"
-                       :seon.schema.admission/source :core
-                       :seon.test/pass-count 0 :seon.test/fail-count 1
-                       :seon.test/error-count 0
-                       :seon.test/reach [[:seon.fn/sym deleted]]
-                       :seon.test/failures
-                       [{:seon.test.failure/id (id/id ["rebuilt" 0])
-                         :seon.test.failure/type :fail
-                         :seon.test.failure/ordinal 0
-                         :seon.test.failure/file [:seon.fn.file/path path]
-                         :seon.test.failure/line 7}]}]
-            database (db/db connection)]
-        (is (nil? (db/pull database [:db/id] [:seon.fn/sym deleted]))
-            "the rebuilt source never minted the deleted declaration")
-        (let [rewritten (#'seon.cluster.source/preserved-evidence-tx database evidence)
-              report (db/transact! connection [[:db.fn/call (fn [_] rewritten)]])
-              committed (db/db connection)]
-          (is (:db-after report) (pr-str report))
-          (is (= [deleted]
-                 (mapv :seon.fn/sym
-                       (:seon.test/reach
-                        (db/pull committed '[{:seon.test/reach [:seon.fn/sym]}]
-                                 [:seon.test/sym "rebuilt.facts/check"]))))
-              "the carried member still resolves, through a minted tombstone")
-          (let [failure (first (:seon.test/failures
-                                (db/pull committed
-                                         '[{:seon.test/failures [*]}]
-                                         [:seon.test/sym "rebuilt.facts/check"])))]
-            (is (= path (:seon.test.failure/reported-file failure)))
-            (is (= 7 (:seon.test.failure/line failure))
-                "the site keeps its line without a dangling file ref")))))))
+  (testing "a renamed test and a deleted function both survive as tombstones"
+    (support/with-database
+      {:seon.test-support/extra-schema reported-path-schema}
+      (fn [connection]
+        (let [renamed "rebuilt.facts/renamed-away"
+              deleted "rebuilt.facts/deleted"
+              path "/rebuilt/facts/no-such-file.clj"
+              evidence [{:seon.test/sym renamed
+                         :seon.schema.admission/source :core
+                         :seon.test/pass-count 0 :seon.test/fail-count 1
+                         :seon.test/error-count 0
+                         :seon.test/reach [[:seon.fn/sym deleted]]
+                         :seon.test/failures
+                         [{:seon.test.failure/id (id/id ["rebuilt" 0])
+                           :seon.test.failure/type :fail
+                           :seon.test.failure/ordinal 0
+                           :seon.test.failure/test [:seon.test/sym renamed]
+                           :seon.test.failure/file [:seon.fn.file/path path]
+                           :seon.test.failure/line 7}]}]
+              database (db/db connection)]
+          (doseq [absent [[:seon.test/sym renamed] [:seon.fn/sym deleted]
+                          [:seon.fn.file/path path]]]
+            (is (nil? (db/pull database [:db/id] absent))
+                "the rebuilt source never minted this identity"))
+          (let [rewritten (#'seon.cluster.source/preserved-evidence-tx database evidence)
+                report (db/transact! connection [[:db.fn/call (fn [_] rewritten)]])
+                committed (db/db connection)]
+            (is (:db-after report) (pr-str report))
+            (is (= {:seon.test/sym renamed}
+                   (select-keys (db/pull committed '[*] [:seon.test/sym renamed])
+                                [:seon.test/sym :seon.test/source]))
+                "the renamed test identity resolves and carries no fabricated source")
+            (is (= [deleted]
+                   (mapv :seon.fn/sym
+                         (:seon.test/reach
+                          (db/pull committed '[{:seon.test/reach [:seon.fn/sym]}]
+                                   [:seon.test/sym renamed]))))
+                "the carried member still resolves, through a minted tombstone")
+            (is (= {:seon.fn/sym deleted}
+                   (dissoc (db/pull committed '[*] [:seon.fn/sym deleted])
+                           :db/id :seon.fn/ns :seon.schema.admission/source))
+                "a minted function identity asserts nothing but its name")
+            (let [failure (first (:seon.test/failures
+                                  (db/pull committed
+                                           '[{:seon.test/failures [*]}]
+                                           [:seon.test/sym renamed])))]
+              (is (= path (:seon.test.failure/reported-file failure))
+                  "an unmintable file identity is named as the typed unknown")
+              (is (nil? (:seon.test.failure/file failure)))
+              (is (= 7 (:seon.test.failure/line failure))
+                  "the site keeps its line without a dangling file ref"))))))))

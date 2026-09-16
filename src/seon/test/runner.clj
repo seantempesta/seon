@@ -1764,15 +1764,10 @@
         absent-identities
         (source/absent-program-identities
          database
-         (into [] (comp (filter (fn [[_ refs]] (vector? refs)))
-                        (mapcat val)
-                        (keep second))
-               reaches))
+         (into [] (comp (filter (fn [[_ refs]] (vector? refs))) (mapcat val)) reaches))
         portable-reach
         (fn [refs]
-          (mapv (fn [reference]
-                  (source/identity-ref absent-identities (second reference)))
-                refs))
+          (into [] (keep (partial source/identity-ref absent-identities)) refs))
         file-present?
         (memoize #(some? (db/pull database [:db/id] [:seon.fn.file/path %])))
         ;; A file identity cannot be minted honestly: `:seon.fn.file/file`

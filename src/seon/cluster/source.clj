@@ -273,59 +273,94 @@
                               :seon.store/branch scratch})
     (catch Throwable _ nil)))
 
-(defn- identity-tempid [sym] (str "evidence-identity:" sym))
-(defn- identity-namespace [sym] (symbol (namespace (symbol sym))))
+(defn- identity-tempid [[identity-attribute value]]
+  (str "evidence-identity:" identity-attribute ":" value))
+
 (defn- identity-namespace-tempid [namespace-name]
   (str "evidence-identity-ns:" namespace-name))
 
+(defn- mintable-identity
+  "The minimal row that asserts this identity, or nil when none is honest.
+
+  ONE rule over every attribute `seon.program/identity-attributes` declares:
+  take the row schema's required keys, drop the identity itself and the
+  admission source, and mint only what remains DERIVABLE FROM THE IDENTITY.
+  Nothing left means the identity alone is a complete row
+  (`:seon.ns/ns`, `:seon.test/test`); a single required `:seon.db/ref` beside a
+  namespace-qualified identity is that identity's namespace (`:seon.fn/fn`).
+  Anything else — `:seon.fn.file/file` wants the digest of the file the indexer
+  walked, `:seon.schema/schema` its form, `:seon.lint/finding` its site — cannot
+  be minted without inventing a fact, so those callers keep the typed unknown."
+  [forms [identity-attribute value :as program-identity]]
+  (let [row-schema (:seon.program/row-schema
+                    (schema.form/attr-form-properties (get forms identity-attribute)))
+        entries (schema.form/map-entries (get forms row-schema))
+        declared (into #{} (map first) entries)
+        required (into [] (comp (remove #(:optional (second %))) (map first)) entries)
+        companions (remove #{identity-attribute :seon.schema.admission/source} required)
+        namespace-name (when (string? value)
+                         (some-> (namespace (symbol value)) symbol))
+        companion (first companions)
+        companion-ref? (and companion (= 1 (count companions))
+                            (= :seon.db/ref (get forms companion))
+                            namespace-name)
+        row (cond-> {:db/id (identity-tempid program-identity) identity-attribute value}
+              (declared :seon.schema.admission/source)
+              (assoc :seon.schema.admission/source :core)
+              companion-ref?
+              (assoc companion (identity-namespace-tempid namespace-name)))]
+    (when (or (empty? companions) companion-ref?)
+      (cond-> [row]
+        companion-ref? (conj {:db/id (identity-namespace-tempid namespace-name)
+                              :seon.ns/name namespace-name})))))
+
 (defn absent-program-identities
-  "The function identities this database value has no row for.
+  "The program identities this database value has no row for.
 
   Ruling 47 — PROGRAM IDENTITY ROWS NEVER RETRACT — makes a ref to a deleted
   declaration stable forever, because deletion retracts definition facts and
   leaves the identity behind as a tombstone. A database built FRESH from later
   source has nothing to tombstone, so evidence that crosses a publication (a
-  recorded `:seon.test/reach` member, a failure site) can name an identity that
-  value never minted. The decision is made HERE, on the writer's own database,
-  never on a caller's pre-read of the database the evidence came from."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:sequential :seon.fn/sym]]
-                  [:set :seon.fn/sym]]}
-  [database-value syms]
+  recorded `:seon.test/reach` member, a failure's test or site) can name an
+  identity that value never minted. The decision is made HERE, on the writer's
+  own database, never on a caller's pre-read of the database the evidence
+  came from."
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       [:sequential :seon.program/identity]]
+                  [:set :seon.program/identity]]}
+  [database-value identities]
   (into #{}
         (comp (distinct)
-              (remove #(some? (db/pull database-value [:db/id] [:seon.fn/sym %]))))
-        syms))
+              (remove #(some? (db/pull database-value [:db/id] %))))
+        identities))
 
 (defn identity-tombstone-rows
   "Mint each absent identity as a tombstone: the identity and nothing else.
 
   This restores the population invariant at the writer rather than rejecting
-  the whole transaction on the first absent lookup ref. The minted row carries
+  the whole transaction on the first absent lookup ref. A minted row carries
   no source, span, or contract — it asserts only that the name once existed,
-  exactly as an ordinary deletion leaves it."
-  {:malli/schema [:=> [:cat [:set :seon.fn/sym]] [:vector :map]]}
+  exactly as an ordinary deletion leaves it. An identity no honest minimal row
+  can assert is skipped; its holder reports the typed unknown instead."
+  {:malli/schema [:=> [:cat [:set :seon.program/identity]] [:vector :map]]}
   [absent]
-  (let [namespaces (distinct (map identity-namespace absent))]
-    (into (mapv (fn [namespace-name]
-                  {:db/id (identity-namespace-tempid namespace-name)
-                   :seon.ns/name namespace-name})
-                namespaces)
-          (map (fn [sym]
-                 {:db/id (identity-tempid sym)
-                  :seon.fn/sym sym
-                  :seon.fn/ns (identity-namespace-tempid (identity-namespace sym))
-                  :seon.schema.admission/source :core}))
-          (sort absent))))
+  (let [forms (schema.edn/packaged-forms)]
+    (into [] (comp (mapcat #(mintable-identity forms %)) (distinct))
+          (sort-by pr-str absent))))
 
 (defn identity-ref
-  "The portable ref for this identity: its lookup ref, or the minted tempid.
+  "The portable ref for this identity, or nil when none exists.
 
   A tempid is used for an absent identity because the minted row lands in the
-  SAME transaction; a lookup ref would be resolved against the value before it."
-  {:malli/schema [:=> [:cat [:set :seon.fn/sym] :seon.fn/sym]
-                  [:or [:tuple :qualified-keyword :seon.fn/sym] :string]]}
-  [absent sym]
-  (if (contains? absent sym) (identity-tempid sym) [:seon.fn/sym sym]))
+  SAME transaction; a lookup ref would be resolved against the value before it.
+  Nil means the identity is absent and cannot be minted honestly."
+  {:malli/schema [:=> [:cat [:set :seon.program/identity] :seon.program/identity]
+                  [:maybe [:or :seon.program/identity :string]]]}
+  [absent program-identity]
+  (cond
+    (not (contains? absent program-identity)) program-identity
+    (seq (mintable-identity (schema.edn/packaged-forms) program-identity))
+    (identity-tempid program-identity)))
 
 (defn- result-preservation-tx
   "Carry latest evidence from the published head, never the rebuild's base.
@@ -377,39 +412,52 @@
                              failures)))))))
             results))))
 
+(defn- evidence-identities
+  "Every program identity the carried evidence names, as a ref or as a row."
+  [evidence]
+  (into []
+        (mapcat (fn [row]
+                  (into (into [] (keep program/row-identity) [row])
+                        (concat (:seon.test/reach row)
+                                (keep :seon.test.failure/file (:seon.test/failures row))
+                                (keep :seon.test.failure/test (:seon.test/failures row))))))
+        evidence))
+
 (defn- preserved-evidence-tx
   "Rewrite carried evidence against the database it is written into.
 
-  Evidence outlives declarations: a `:seon.test/reach` member or a failure
-  site can name a declaration this rebuilt source no longer has. An absent
-  function identity is MINTED as a tombstone and referred to by its tempid,
-  so refs to identities stay stable by construction. A file identity cannot
-  be minted honestly — `:seon.fn.file/file` requires the digest of the file
-  that was walked — so an absent site keeps its line and reports its path as
-  the typed `:seon.test.failure/reported-file` instead of a dangling ref.
-  Either way the rest of the evidence commits."
+  Evidence outlives declarations: a `:seon.test/reach` member, a failure's
+  own test, and a failure site can all name a declaration this rebuilt source
+  no longer has. Every such identity is minted as a tombstone and referred to
+  by its tempid, so refs to identities stay stable by construction. An
+  identity no honest minimal row can assert — a file, whose entity requires
+  the digest of the file the indexer walked — keeps its line and reports its
+  path as the typed `:seon.test.failure/reported-file` instead of a dangling
+  ref. Either way the rest of the evidence commits."
   [database-value evidence]
-  (let [syms (into [] (comp (keep :seon.test/reach) cat (keep second)) evidence)
-        absent (absent-program-identities database-value syms)
-        file-present?
-        (memoize #(some? (db/pull database-value [:db/id] [:seon.fn.file/path %])))
+  (let [absent (absent-program-identities database-value (evidence-identities evidence))
         reported-path?
         (some? (get (:schema database-value) :seon.test.failure/reported-file))
         portable-failure
         (fn [failure]
-          (let [path (second (:seon.test.failure/file failure))]
-            (if (or (nil? path) (file-present? path))
-              failure
-              (cond-> (dissoc failure :seon.test.failure/file)
-                reported-path? (assoc :seon.test.failure/reported-file path)))))]
+          (let [site (:seon.test.failure/file failure)
+                owner (:seon.test.failure/test failure)
+                path (second site)]
+            (cond-> failure
+              owner (assoc :seon.test.failure/test (identity-ref absent owner))
+              (and site (nil? (identity-ref absent site)))
+              (-> (dissoc :seon.test.failure/file)
+                  (cond-> reported-path?
+                    (assoc :seon.test.failure/reported-file path)))
+              (and site (identity-ref absent site))
+              (assoc :seon.test.failure/file (identity-ref absent site)))))]
     (into (identity-tombstone-rows absent)
           (map (fn [row]
                  (cond-> row
+                   (program/row-identity row)
+                   (assoc :db/id (identity-tempid (program/row-identity row)))
                    (:seon.test/reach row)
-                   (update :seon.test/reach
-                           #(mapv (fn [reference]
-                                    (identity-ref absent (second reference)))
-                                  %))
+                   (update :seon.test/reach #(into [] (keep (partial identity-ref absent)) %))
                    (:seon.test/failures row)
                    (update :seon.test/failures #(mapv portable-failure %)))))
           evidence)))
