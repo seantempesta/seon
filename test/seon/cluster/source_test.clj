@@ -666,10 +666,13 @@
        (seon.schema.datahike/malli->datahike-schema @#'source/source-attributes))
       (let [seal #'source/activation-seal-tx
             requested #{'seon.cluster/derive-activation}
-            initial (seal connection digest-a requested cluster/derive-activation)]
+            initial-digest (or (db/q '[:find ?digest .
+                                      :where [_ :seon.source/digest ?digest]] @connection)
+                               digest-a)
+            initial (seal connection initial-digest requested cluster/derive-activation)]
         (when (seq initial) (test-support/transacted! connection initial))
         (let [before @connection
-              unchanged (seal connection digest-a requested cluster/derive-activation)]
+              unchanged (seal connection initial-digest requested cluster/derive-activation)]
           (is (= [] unchanged))
           (is (= (:max-tx before) (:max-tx @connection))
               "an unchanged seal needs no transaction")

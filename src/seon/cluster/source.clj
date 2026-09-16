@@ -228,7 +228,8 @@
                 (db/pull database-value
                          '[* {:seon.source/activation-closure [*]}] prior-id))
         prior-closure (:seon.source/activation-closure prior)]
-    (if (= source-digest (:seon.source/digest prior))
+    (if (and (:db/id prior-closure)
+             (= source-digest (:seon.source/digest prior)))
       []
       (let [{closure :seon.activation/closure
          lookup-rows :seon.activation/lookup-rows
