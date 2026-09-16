@@ -26,6 +26,7 @@
    :analysis
    {:arglists true
     :var-usages true
+    :protocol-impls true
     :keywords true
     :var-definitions {:shallow false
                       :meta true}
@@ -116,7 +117,7 @@
     (present-values
      entry
      [:from :from-var :to :name :alias :refer :arity :macro :private
-      :fixed-arities :varargs-min-arity :lang]))))
+      :fixed-arities :varargs-min-arity :defmethod :dispatch-val-str :lang]))))
 
 ;; clj-kondo's analysis README documents `:keywords` without naming `:from`
 ;; or `:from-var`, but the implementation emits both for every keyword read
@@ -303,6 +304,44 @@
        (.getCanonicalPath mirror)))
    (sort-by key sources)))
 
+(defn- contains-position?
+  [span entry]
+  (let [start ((juxt :row :col) span)
+        end ((juxt :end-row :end-col) span)
+        position ((juxt :row :col) entry)]
+    (and (= (:filename span) (:filename entry))
+         (every? integer? (concat start end position))
+         (not (pos? (compare start position)))
+         (neg? (compare position end)))))
+
+(defn- innermost-span
+  [spans entry]
+  (last (sort-by (juxt :row :col)
+                (filter #(contains-position? % entry) spans))))
+
+(defn- attributed-usages
+  "Join implementation bodies to their dispatch identities using kondo spans.
+  A defmethod target usage spans only its name; its containing macro call
+  supplies the body span. Protocol implementations already carry that span."
+  [analysis]
+  (let [usages (:var-usages analysis)
+        calls (group-by :filename (filter :arity usages))
+        methods (keep (fn [usage]
+                        (when (:defmethod usage)
+                          (when-let [span (innermost-span (get calls (:filename usage)) usage)]
+                            (assoc span :from (:to usage) :from-var (:name usage)
+                                   :dispatch-val-str (:dispatch-val-str usage)))))
+                      usages)
+        implementations (map #(assoc % :from (:protocol-ns %)
+                                      :from-var (:method-name %))
+                             (:protocol-impls analysis))
+        spans (group-by :filename (concat methods implementations))]
+    (mapv (fn [usage]
+            (if-let [span (innermost-span (get spans (:filename usage)) usage)]
+              (merge usage (select-keys span [:from :from-var]))
+              usage))
+          usages)))
+
 (defn analyze
   "Analyze captured source text, complete source roots, or individual files.
 
@@ -324,6 +363,7 @@
      [::namespace-usages [:vector :map]]
      [::var-definitions [:vector :map]]
      [::var-usages [:vector :map]]
+     [::protocol-impls [:vector :map]]
      [::keywords [:vector :map]]
      [::findings [:vector :map]]]]}
   [{::keys [paths sources]}]
@@ -358,7 +398,8 @@
                     (assoc :cache false)))
                  (finally
                    (when mirror-root (delete-tree! mirror-root))))
-        analysis (:analysis result)]
+        analysis (update (:analysis result) :var-usages
+                         (fn [_] (attributed-usages (:analysis result))))]
     {::namespace-definitions
      (filterv jvm-entry?
               (normalized-entries analysis :namespace-definitions namespace-definition))
@@ -371,6 +412,12 @@
      ::var-usages
      (filterv jvm-entry?
               (normalized-entries analysis :var-usages var-usage))
+     ::protocol-impls
+     (normalized-entries analysis :protocol-impls
+                         #(merge (location %)
+                                 (present-values % [:protocol-ns :protocol-name
+                                                    :method-name :impl-ns
+                                                    :defined-by :defined-by->lint-as])))
      ::keywords
      (filterv jvm-entry?
               (normalized-entries analysis :keywords keyword-usage))

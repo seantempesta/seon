@@ -1,0 +1,12 @@
+(ns sample.call-implementations
+  (:require [clojure.test :refer [deftest is]]))
+(defn protocol-target [x] x)
+(defn multi-target [x] x)
+(defprotocol Operation (operate [this x]))
+(defrecord OperationImpl [] Operation
+  (operate [_ x] (protocol-target x)))
+(defmulti dispatch identity)
+(defmethod dispatch :a [x] (multi-target x))
+(deftest reaches-implementations
+  (is (= :a (operate (->OperationImpl) :a)))
+  (is (= :a (dispatch :a))))

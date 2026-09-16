@@ -314,11 +314,16 @@
                               {:seon.ns.import/local local
                                :seon.ns.import/target-class target})) imports)))))
 
+(defn- function-definition?
+  [entry]
+  (or (seq (::analyzer/arglist-strs entry))
+      (= 'clojure.core/defmulti (::analyzer/defined-by->lint-as entry))))
+
 (defn- first-party-function-symbols
   [analysis]
   (into #{}
         (comp
-         (filter #(seq (::analyzer/arglist-strs %)))
+         (filter function-definition?)
          (map #(str (symbol (str (::analyzer/ns %))
                             (str (::analyzer/name %))))))
         (::analyzer/var-definitions analysis)))
@@ -556,7 +561,7 @@
         (test-subject metadata)
         (assoc :seon.test/subject (test-subject metadata)))
 
-      (seq (::analyzer/arglist-strs entry))
+      (function-definition? entry)
       (cond-> {:seon.fn/sym (str qualified)
                :seon.fn/ns [:seon.ns/name namespace-name]
                :seon.fn/source source

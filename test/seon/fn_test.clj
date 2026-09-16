@@ -2485,3 +2485,19 @@
           (is (= (count files) (:seon.program/shapes-in-calls counts))
               "and each artifact derives its shapes exactly once")))
       (finally (test-support/delete-recursively! root)))))
+(deftest implementation-bodies-contribute-edges-and-test-reach
+  (with-provenance-file
+    "sample/call_implementations.clj"
+    (slurp (io/resource "test/fixtures/call_graph_fidelity/implementations.txt"))
+    (fn [connection _ rows]
+      (test-support/transacted! connection (seon.fn/reconcile-tx @connection rows []))
+      (doseq [[caller target] [["sample.call-implementations/operate" "sample.call-implementations/protocol-target"]
+                               ["sample.call-implementations/dispatch" "sample.call-implementations/multi-target"]]]
+        (is (= #{target}
+               (set (filter #{target}
+                            (map :seon.fn/sym
+                                 (:seon.fn/calls
+                                  (db/pull @connection '[{:seon.fn/calls [:seon.fn/sym]}]
+                                           [:seon.fn/sym caller])))))))
+        (is (= ["sample.call-implementations/reaches-implementations"]
+               (seon.fn/tests-reaching @connection target)))))))
