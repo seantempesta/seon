@@ -406,8 +406,6 @@
             run-id "namespace-resume-run"
             starting-ns 'my.agents.namespace-resume
             ending-ns 'my.generated.after-resume]
-        (config/apply! {:seon.db/connection connection
-                        :seon.boot/cluster-name cluster-name})
         (test-support/seed-cluster! connection cluster-name)
         (test-support/transacted!
                      connection
@@ -415,6 +413,13 @@
                       {:seon.agent/id agent-id
                        :seon.ns/name starting-ns
                        :seon.cluster/name cluster-name}))
+        ;; THE POPULATION INVARIANT: every name the SCI context can resolve
+        ;; has a program row, minted where the context learns it. This test
+        ;; settles through `receipt-settle-tx` directly instead of through the
+        ;; loop that mints, so it supplies the row the loop would have — the
+        ;; settle carries `:seon.sci.eval/ending-ns` as a lookup, and the
+        ;; writer refuses a lookup that resolves to nothing.
+        (test-support/transacted! connection [{:seon.ns/name ending-ns}])
         (test-support/transacted!
                      connection
                      (turn/open-tx {:seon.turn/id run-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}))
