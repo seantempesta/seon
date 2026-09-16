@@ -676,12 +676,52 @@ deepest file that owns it.
    pooled workers run many tests per JVM. A probe namespace that must be
    unloaded has NO file on any classpath, so the property holds by
    construction.
+8. **Fixture entities come from the canonical helpers, never a hand-written
+   map.** A program declaration is `seon.test-support/program-fn-row`
+   (`test/seon/test_support.clj:1038`), a config overlay is `apply-config!`
+   (`:1051`), a cluster is `seed-cluster!` (`:1070`), and every fixture
+   write goes through `transacted!` (`:296`), which surfaces the writer's
+   refusal instead of letting the test read absence as behaviour. A
+   hand-written map meets one required key per gate run: on 2026-09-17
+   `seon.background-blob-test` was refused for
+   `:seon.schema.admission/source`, then again for `:seon.fn/ns`, across
+   three cold runs (`cb97d3e4b`, `af5a0fdbe`, `20e6791ba`) before the
+   helper replaced the map. Patching keys one at a time is the defect.
+9. **A fixture never retracts what a running loop is settling.** The live
+   Juniper fixture's history wipe raced the agent loop's own settlement and
+   the loop then re-asserted a turn that no longer existed
+   (`the-live-juniper-fixture-wipes-turns-under-a-running-agent-loop`);
+   `seon.turn/open-run-tx-call` (`src/seon/turn.clj:417`) now makes that
+   decision inside the transaction, but a fixture that mutates an agent's
+   facts stops the graph first or hands the loop the decision.
 
 Tests deliberately changing instrumentation use
-`seon.test-support/preserving-instrumentation-state` to restore the entering
-callable roots and Malli function-schema registry, including after a throw.
+`seon.test-support/preserving-instrumentation-state` (`test/seon/test_support.clj:1085`),
+which delegates to `seon.instrument/restore!` (`src/seon/instrument.clj:799`):
+it restores the entering callable roots and Malli function-schema registry,
+including after a throw, and LEAVES ALONE any definition a reload replaced
+inside the scope, returning that set (`replaced-definitions`, `:773`).
+Callable roots are restorable; the protocols and classes those closures were
+compiled against are not — a test body that reloads a program namespace (a
+development adoption inside a worker did this on 2026-09-17) and then
+reinstalled the entering roots left every later `seon.print/text-sink` in
+that worker building a superseded class its own `sink?` refused
+(`restoring-captured-roots-reinstalls-a-definition-a-reload-replaced`).
 The runner's drift detector remains the independent check; its automatic
 re-arm does not excuse a test leaving its worker unarmed.
+
+Running a test in process from the development JVM (`seon.test/run`,
+`src/seon/test.clj:306`, through `seon.test/resolve-test`) is the lane's
+iteration loop when no test JVM may be launched; its two-argument arity waits
+the declared `event-backstop-seconds`, which the shared fixture base's
+post-adoption construction consumes whole, so hand `:seon.test/remaining-ms`
+explicitly after an adoption and never read that first bound failure as a
+red. An agent's own test goes through `seon.test/run-owned` (`:380`), which
+binds exactly the connection on the request via `seon.db/call-with-custody`
+(`src/seon/db.clj:259`); a host run binds none. A namespace whose requires
+need a `:test` alias dependency cannot load there yet
+(`the-in-process-test-loader-cannot-load-a-namespace-needing-a-test-alias-dependency`);
+its proof is the cold gate.
 
 Acquire resources inside `with-open` scopes; use
 `seon.test-support/closeable` when release is a separate function. Setup failure
@@ -895,6 +935,47 @@ edit another lane's session or files to get past it.
 VERIFY THE CLAIM BEFORE YOU NAME THE CAUSE: an attribution is a hypothesis
 until a probe confirms it; a lane that refutes its assignment with evidence
 has done its job.
+
+**Launching a lane (orchestrator rules, measured 2026-09-17).**
+- **One lane per class, after a query.** A red gets its own lane only once
+  `docs/seon/issues/` and the working edge show it is not a member of an
+  open class. The honest-fixture sweep found five instances of one disease
+  (`fixtures-that-ignore-a-refused-transaction-read-absence-as-behaviour`)
+  across 297 tests; each instance given its own lane repaid a full grounding
+  cost for a fix one class lane covered.
+- **The launch cites the ledger entry it extends, and the lane's first act
+  is reading the issue note's `status`.** A settlement lane was launched on
+  2026-09-17 for work already dissolved at `0c8f90630` two nights earlier;
+  the lane found it by reading and made no change. The ledger, not the
+  report, is the launch authority.
+- **The spec carries raw evidence paths, never an attribution.** Hand the
+  gate log block, the fault entity's blob digest, the writer log lines. Two
+  lanes that night refuted the orchestrator's stated cause from evidence
+  that was readable before launch (the "oversized refusal" was
+  `seon.error/bounded-admission` working as declared; the real cause was in
+  the writer log's `no-such-run` rejections). A guessed cause costs the lane
+  the time to disprove it.
+- **A schema resource and its loaded consumer land in one publication.** An
+  edit to `resources/seon/schemas/*.edn` is live on disk for every reader the
+  moment it is written, while the JVM still holds the previous `def`; one
+  lane's in-flight rename of a program identity key refused
+  `seon.test.runner/provenance` for every other lane's in-process run until
+  it converged (`live-resources-outrun-the-loaded-program-identity-list`,
+  `one-lanes-intermediate-edit-refuses-adoption-for-every-lane`). Until the
+  identity list derives from the same forms, a lane edits the resource and
+  its consumer in the same edit-hook publication or not at all.
+- **Protected means concurrently edited, and it is released the moment the
+  holder lands.** The astra lane that landed root-relative source identities
+  stopped correctly at two protected hunks; both files were free by then and
+  the stop cost a resume. Check `git status` before naming a path protected.
+- **Bound the JVM's io-prepl connections.** At most four processes probe the
+  development cluster's prepl at once, the peer session's gate included;
+  research lanes run from files, `git`, and gate logs with at most one
+  read-only evaluation.
+- **Resets are the recovery for schema breakage, not an event.** Eight
+  resets on 2026-09-17, each under two minutes, took the store from 21 GB to
+  102 MB; none lost anything a reseed did not restore. Database data is
+  disposable by ruling; a lane records RESET NEEDED and continues.
 
 **Orchestrator sweep.** At each integration checkpoint, inspect lane progress
 and bounded logs, the `default` debug page and runtime errors, gate failures,
