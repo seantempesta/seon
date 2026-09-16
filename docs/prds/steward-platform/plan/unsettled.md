@@ -32,3 +32,11 @@
   cold-page-kills (approved plan, two slices). test-attribution plan landed
   (option 1 recommended; owner decision pending; its wake fact is now a
   separate question from starting a task).
+- 01:05Z owner: "no fake tasks; index all the real tasks we need for
+  self-building and repair." [plan/README.md](README.md) opened as the
+  roadmap: sections A (task definition), B (test evidence), C (signals as
+  facts), D (chatting task and steward), E (batches, merge), F (disk),
+  G (platform defects), H (live proof ladder), five pending decisions.
+  Owner rulings folded in: the chatting test is relative to the user's newest
+  message; workers add tests, never remove (pending confirmation); batches on
+  forked clusters merged by exact row replacement; write-back by file span.

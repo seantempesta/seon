@@ -25,7 +25,11 @@ design.** The owner will form the plan of attack from these pieces.
 3. [research/data-audit-b-2026-09-15.md](research/data-audit-b-2026-09-15.md)
    — session side: messages, plan done-whens, stalls, elisions, render
    cost; what pairs actually receive; the call ledger question; the MVP.
-4. [plan/unsettled.md](plan/unsettled.md) — the working edge once a plan exists.
+4. [plan/README.md](plan/README.md) — THE ROADMAP: the index of real tasks
+   (A–H) with builds-on, missing, proof, status; the one ordered list.
+5. [plan/task-prototype-2026-09-16.md](plan/task-prototype-2026-09-16.md) —
+   the `my.task` prototype under iteration.
+6. [plan/unsettled.md](plan/unsettled.md) — the working edge.
 
 ## Inherited facts (from the context-generation program, closing)
 
