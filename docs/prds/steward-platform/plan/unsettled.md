@@ -381,3 +381,11 @@ Queue, in order:
   file/span, settlement guard schemas and clears the 17 GB JVM. After it:
   reseed Juniper, recording-only platform run, then launch
   reach-closure-facts, issue-indexer-resolver, issue-generator.
+- 11:45Z REFORK DONE: default pid 53378, from current-src `6aaa15f4`,
+  adoption converged `6aaa17a3` (exit 0); `:seon.test/reach-digest`
+  non-unique, error signature identity, 1,632 issue entities indexed at
+  publication. Juniper reseed running; recording-only platform run
+  requested from the gate session. Queued lanes launch as the three running
+  Opus agents (fixture-base fixer with the uniqueness-change fix folded in,
+  reds triage, analyzer-facets) finish: reach-closure-facts (astra),
+  issue-indexer-resolver, issue-generator, effect-facts (Opus).
