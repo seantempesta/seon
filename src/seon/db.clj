@@ -2596,7 +2596,7 @@
 (defn- write-entity-schemas
   [projection]
   (schema/projection-cache-value
-   projection ::write-entity-schemas
+   projection ::write-required-identity-schemas
    (fn []
      (let [forms (:seon.schema.projection/forms projection)]
        (reduce-kv
@@ -2605,8 +2605,9 @@
             (if (and (schema.form/map-shape? form)
                      (:seon.db/attributes (schema.form/schema-properties form)))
               (reduce
-               (fn [result [attribute]]
-                 (if (schema/identity-attr? forms attribute)
+               (fn [result [attribute options]]
+                 (if (and (not (and (map? options) (:optional options)))
+                          (schema/identity-attr? forms attribute))
                    (update result attribute (fnil conj []) schema-key)
                    result))
                by-identity (schema.form/map-entries form))
@@ -2703,6 +2704,16 @@
   (let [installed (get (dbi/-schema database) attribute)
         authored (get (:seon.schema.projection/forms projection) attribute)]
     (cond
+      (and (not single?) (db.utils/reverse-ref? attribute)
+           (db.utils/ref? database (db.utils/reverse-ref attribute)))
+      (let [values (write-many-values database attribute value)
+            collection-value? (identical? values value)]
+        (some (fn [[index child]]
+                (write-ref-error database projection child
+                                 (if collection-value? (conj path index) path)
+                                 entity-form))
+              (map-indexed vector values)))
+
       (and (nil? installed) (not (contains? datahike.schema/schema-keys attribute)))
       (invalid-write projection attribute :seon.error/unknown value path entity-form
                      ::attribute-not-installed

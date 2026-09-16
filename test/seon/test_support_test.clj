@@ -19,6 +19,27 @@
             [seon.schema.edn :as schema.edn]
             [seon.test-support :as test-support]))
 
+(deftest fixture-setup-refusals-stop-before-the-body
+  (let [body-ran (atom false)
+        failure (try
+                  (test-support/with-database
+                   {:seon.test-support/extra-schema [{:my.plan.item/title 42}]}
+                   (fn [_] (reset! body-ran true)))
+                  (catch clojure.lang.ExceptionInfo error (ex-data error)))]
+    (is (false? @body-ran))
+    (is (= :seon.db/invalid-write (:seon.error/kind failure)))
+    (is (= [0 :my.plan.item/title] (:seon.db/path failure)))
+    (is (= 42 (:seon.db/offending failure))))
+  (test-support/with-database
+   (fn [connection]
+     (test-support/seed-cluster! connection "checked-fixture")
+     (is (= "checked-fixture"
+            (db/q '[:find ?name . :where [_ :seon.cluster/name ?name]]
+                  (db/db connection))))
+     (is (string?
+          (db/q '[:find ?digest . :where [_ :seon.source/digest ?digest]]
+                (db/db connection)))))))
+
 (defn- file-digests
   [root]
   (into (sorted-map)

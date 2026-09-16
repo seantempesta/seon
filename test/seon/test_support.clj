@@ -198,19 +198,28 @@
   (swap! branch-leases update :seon.test-support/available conj branch)
   nil)
 
+(defn- checked-fixture-result
+  "Stop setup at its first flat refusal, retaining the complete diagnostic."
+  [result]
+  (when (:seon.error/kind result)
+    (throw (ex-info "Fixture setup was refused." result)))
+  result)
+
 (defn- populate-database!
   [connection]
-  (cluster/populate-source!
-   {:seon.db/connection connection
-    :seon.fn/manifest @source-manifest})
+  (checked-fixture-result
+   (cluster/populate-source!
+    {:seon.db/connection connection
+     :seon.fn/manifest @source-manifest}))
   ;; `populate-source!` is the contents step used by production
   ;; `source/publish!`; production seals that completed population in the
   ;; following transaction. Keep this canonical fixture on the same side of
   ;; that provenance boundary so indexed core contracts are not misclassified
   ;; as agent-authored rows.
-  (db/transact!
-   connection
-   {:tx-data [{:seon.source/digest (apply str (repeat 64 "0"))}]})
+  (checked-fixture-result
+   (db/transact!
+    connection
+    {:tx-data [{:seon.source/digest (apply str (repeat 64 "0"))}]}))
   nil)
 
 (defn- close-base!
@@ -591,7 +600,7 @@
    projection-state
    (fn []
      (when (seq extra-schema)
-       (db/transact! connection {:tx-data extra-schema}))
+       (checked-fixture-result (db/transact! connection {:tx-data extra-schema})))
      (body connection))))
 
 (defn- reconnect-with-projection
@@ -672,12 +681,12 @@
 (defn seed-cluster!
   "Seed one complete cluster/config path for tests that create agents."
   [connection cluster-name]
-  (let [configured (config/apply! {:seon.db/connection connection
-                                   :seon.boot/cluster-name cluster-name})]
-    (when (:seon.error/kind configured)
-      (throw (ex-info "The fixture cluster configuration was refused." configured))))
-  (cluster/ensure-cluster-entity!
-   connection cluster-name cluster/boot-process-identity)
+  (checked-fixture-result
+   (config/apply! {:seon.db/connection connection
+                  :seon.boot/cluster-name cluster-name}))
+  (checked-fixture-result
+   (cluster/ensure-cluster-entity!
+    connection cluster-name cluster/boot-process-identity))
   nil)
 
 (defn preserving-instrumentation-state

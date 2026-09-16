@@ -5,6 +5,43 @@
             [seon.schema :as schema]
             [seon.test-support :as test-support]))
 
+(deftest raw-write-maps-select-only-their-asserted-required-identity
+  (test-support/with-database
+   (fn [connection]
+     (let [accepted (db/transact! connection
+                                 [{:seon.problems/id "x"}
+                                  [:db/add "reverse-turn" :seon.turn/id "reverse-turn"]
+                                  {:seon.problems/id "reverse-attempt"
+                                   :seon.turn/_attempts [:seon.turn/id "reverse-turn"]}])]
+       (is (some? (:db-after accepted)) (pr-str accepted))
+       (is (= "x" (:seon.problems/id
+                    (db/pull @connection [:seon.problems/id] [:seon.problems/id "x"]))))
+       (is (= "reverse-attempt"
+              (db/q '[:find ?id . :where
+                      [?turn :seon.turn/id "reverse-turn"]
+                      [?turn :seon.turn/attempts ?attempt]
+                      [?attempt :seon.problems/id ?id]] @connection))))
+     (let [accepted (db/transact! connection
+                                 [{:db/id [:seon.problems/id "x"]
+                                   :my.plan.item/title "attribute-only"}])]
+       (is (some? (:db-after accepted)) (pr-str accepted))
+       (is (= "attribute-only"
+              (:my.plan.item/title (db/pull @connection [:my.plan.item/title]
+                                           [:seon.problems/id "x"])))))
+     (let [before (:t @connection)
+           refused (db/transact! connection [{:seon.cluster.eval/id "incomplete"}])
+           wrong (db/transact! connection [{:my.plan.item/title 42}])
+           nested (db/transact! connection
+                                [{:seon.problems/id "nested"
+                                  :seon.turn/_attempts [{:seon.turn/id 42}]}])]
+       (is (= :seon.db/invalid-write (:seon.error/kind refused)))
+       (is (= [0 :seon.cluster.eval/run] (:seon.db/path refused)))
+       (is (str/includes? (:seon.error/message refused) ":seon.cluster.eval/run"))
+       (is (= :seon.db/invalid-write (:seon.error/kind wrong)))
+       (is (= [0 :my.plan.item/title] (:seon.db/path wrong)))
+       (is (= [0 :seon.turn/_attempts 0 :seon.turn/id] (:seon.db/path nested)))
+       (is (= before (:t @connection)))))))
+
 (defn- refused
   [connection transaction attribute offending path]
   (let [before (:t @connection)
