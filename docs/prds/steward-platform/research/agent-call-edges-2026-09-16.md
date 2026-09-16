@@ -68,6 +68,7 @@ All runs use MCP JVM mode and `(seon.operator/connection "default")`, with
 | 65267, basis 536871569 | same | 5 / 2 / 0 | Earlier-call and digest checks pass; pending-call resolution fails with original writer loaded. |
 | 66097, basis 536871609 | same | 2 / 5 / 0 | Candidate run during reload; empty call sets. This is not a passing proof. |
 | 66113, basis 536871623 | same | **7 / 0 / 0** | Final source definitions, complete canonical fixture, real SCI virtual turns. |
+| 67551, basis 536871684 | same | **7 / 0 / 0** | Post-file repeat, after the live-default proof; analyzer and settlement public contracts confirmed armed. |
 
 The baseline's function change left digest
 `8aae56c01668c6853a09877504aba1739ec48c1aa18eb25b0372984ec5c04b2a`
@@ -150,3 +151,71 @@ exit **124** and `Publication did not finish within its declared bound.`
 No completed adoption is claimed at this checkpoint. Concurrent files,
 including other turn-test edits, are preserved. No default lifecycle command
 or foreign lane operation was performed.
+
+## Live default proof and final verdict
+
+Implementation: **`76774d044`**. Production and regression diff: **7 files,
+208 insertions, 27 deletions, 20,023 bytes** of Git binary diff. The landing
+note adds a separate evidence file; these numbers exclude documentation.
+
+Default's own running handle and routing admitted the following source through
+`seon.turn/virtual-turn!`, with the explicit operator connection for reads.
+The [REPL probe](agent-call-edges-probe-2026-09-16.clj) preserves exact bytes.
+
+| Source | Turn | Closed transaction |
+|---|---|---|
+| `(defn target {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))` | `e03045b2b832` | 536871660 |
+| `(clojure.test/deftest target-test (clojure.test/is (= 3 (target 2))))` | `4c7924597d69` | 536871673 |
+| `(defn target {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 1))` | `3df996866291` | 536871681 |
+
+Test entity **67496**,
+`my.agents.agent-call-edges-live-proof/target-test`, persisted exactly the
+three call refs `clojure.core/=`, `clojure.test/is`, and
+`my.agents.agent-call-edges-live-proof/target`. The last target is function
+entity **67444**. No direct edge transaction or subject was supplied.
+
+Before: `822981feab880303787d1f30f196b7645a4c602945f86ad1bdd6a1db432fa13e`.
+After: `b8b159b429b35a944b64bdff84ce9eaf6c6c322e3db88e5e8558fb37a895fc99`.
+The final function pull contains the replacement `(+ x 1)` source.
+
+The initial attempt reused a fixture-handle constructor against default and
+failed with a null-number exception; that is not a proof. The replacement
+used default's actual handle. Its initial bundled probe exceeded the fixture's
+event wait; an immediate resubmission correctly refused `agent-already-running`.
+Readback subsequently confirmed the first turn closed, and the remaining
+sources were submitted separately after observing each closed transaction.
+No bound was increased and no lifecycle reset was used.
+
+Per-member verdict: the fresh declaration omission is **resolved** by the
+implementation and live probe. The original
+[member note](../../../seon/issues/archive/agent-form-calls-to-core-namespaces-are-not-indexed.md)
+is **superseded** by the explicitly named
+[historical reanalysis residual](../../../seon/issues/historical-call-edge-analyses-need-rederivation.md).
+Historical rows and ablation conclusions were not rewritten. Config discovery
+and namespace projection are outside this assignment; N7 remains open.
+
+Publication `8072322a-c510-44ce-bcfe-f0466a879df7` also exited **124**.
+Final observed adoption fact `6aa9fe1b-203b-5ca1-bea2-9047ea996105` differs
+from published head `6aaa057f-0293-5a82-81e5-5b83392e83cf`. Source/schema
+changes and armed definitions are live, but complete development adoption is
+**not verified**. Public `program-prelude`, `analyze-forms`, and
+`receipt-settle-call` all carried their `:seon.instrument/var` wrappers before
+the final green run. The existing
+[mixed-adoption issue](../../../seon/issues/development-adoption-can-mix-host-and-sci-generations.md)
+owns this boundary; no cause is attributed to another lane.
+
+Gate request: `tmp/orchestrator/gate-requests/agent-call-edges.txt` asks for
+`seon.fn-test`, `seon.agent-call-edges-test`, `seon.test-reaching-test`, and
+`seon.cluster.turn-test`, then `--platform`, serially in the orchestrator's
+batched gate. **Not run here**, per the lane's no-test-JVM instruction.
+`git diff --check` passed. Markdown lint still reports twelve dependency-pin
+errors in the foreign `agents-md-audit-2026-09-15.md`; none is attributed to
+this change.
+
+Cleanup: both scratch agents disarmed, no open scratch turns, all four probe
+and test futures completed, and the privately acquired canonical base closed.
+Only this lane's `tmp/agent-call-edges` scratch directory is removed; the gate
+request is retained for the orchestrator. No owned background shell remains.
+After implementation commit, foreign `record-attempt!` edits appeared in
+`turn.clj`; they are preserved and excluded from this lane's documentation
+commit.

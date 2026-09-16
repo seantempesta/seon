@@ -67,3 +67,16 @@ their residual proof named). The three open boundaries are exactly those
 listed above. No generic publication enforcement or provenance analyzer was
 introduced. The dated per-member table, live probes, broader baseline reds,
 and all touched paths are in the landing note.
+
+## Agent declaration calls — 2026-09-16
+
+`76774d044` closes the fresh declaration-call omission at the analyzer and
+existing declaration writer. The real-SCI class regression passes seven
+assertions, and default's scratch test records the agent-local edge and changes
+its reach digest after a virtual-turn function replacement. The original call
+issue is archived as superseded; its remaining historical reanalysis and
+ablation regrading live in
+[the residual note](historical-call-edge-analyses-need-rederivation.md).
+Other N7 owners remain outside this bounded lane; this class stays open.
+Exact evidence and the unclaimed batched gate are in
+[the agent-call landing](../../prds/steward-platform/research/agent-call-edges-2026-09-16.md).

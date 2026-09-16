@@ -1,11 +1,33 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: friction
 tags: [issue, agent, sci, class/n7, wave/program-graph-indexing]
 ---
 
 # Historical call-edge analyses need re-evaluation
+
+## Closing verdict — 2026-09-16
+
+Implementation residual resolved by `76774d044`: runtime declaration analysis
+uses the existing program prelude, and the declaration writer retains and
+resolves pending calls. The canonical real-SCI virtual-turn regression passed
+**7/0/0**, run **66113**, basis **536871623**, in default JVM **7595**.
+It covers function-first and test-first admission, function-to-function calls,
+changed reach digest, and lexical shadowing.
+
+Default's scratch test entity **67496** now records its call to
+`my.agents.agent-call-edges-live-proof/target`. The function source change
+from `(inc x)` to `(+ x 1)` changed its digest from
+`822981feab880303787d1f30f196b7645a4c602945f86ad1bdd6a1db432fa13e` to
+`b8b159b429b35a944b64bdff84ce9eaf6c6c322e3db88e5e8558fb37a895fc99`.
+Both virtual turns closed; no edge was inserted manually.
+
+This note is **superseded**, because historical reanalysis and regrading were
+never performed by the constructor fixes. That residual is now named in
+[historical call-edge analysis](../historical-call-edge-analyses-need-rederivation.md).
+The batched gate and complete adoption boundary remain explicit in
+[the landing](../../../prds/steward-platform/research/agent-call-edges-2026-09-16.md).
 
 ## Current verdict — 2026-09-15
 
@@ -16,7 +38,7 @@ After development adoption, the canonical in-process persistence and analysis
 regressions passed **24 assertions, zero failures/errors** (run entities 67084
 and 67086). `tests-reaching` found the installed test over its function and
 through transitive `my.turn/wait` reach. Exact commands and complete values:
-[the residual landing](../../prds/context-generation/research/n7-eval-call-edges-2026-09-15.md).
+[the residual landing](../../../prds/context-generation/research/n7-eval-call-edges-2026-09-15.md).
 
 **Remaining scope:** the original acceptance item to re-derive historical
 ablation conclusions made from missing call edges. This change does not
@@ -80,7 +102,7 @@ and 12 and also carry no `seon.db/q` edge.
 The minimum-context ablation's third success criterion is
 "another clean receipt belongs to a form calling `seon.db/q` and carrying
 literal keyword `:seon.fn/spec`"
-([plan](../../prds/sci-execution-runtime/research/minimum-context-ablation-plan-2026-08-11.md)).
+([plan](../../../prds/sci-execution-runtime/research/minimum-context-ablation-plan-2026-08-11.md)).
 Because the edge never exists, that criterion is UNSATISFIABLE, and all four
 variants were graded `:minimum-context.grade/success? false` regardless of what
 the agent actually did — FULL and HALF both completed the work correctly.
@@ -125,7 +147,7 @@ probe is in the N7 landing note.
 N7 implementation commit `5deb40e4e` changes namespace relevance indexing,
 not this unproven evaluation edge. The class remains open at this boundary;
 the green owner/platform gates do not prove ordinary evaluation persistence.
-See [the landing note](../../prds/context-generation/research/n7-query-classification-2026-09-15.md).
+See [the landing note](../../../prds/context-generation/research/n7-query-classification-2026-09-15.md).
 
 ## N7 evaluation-edge slice — 2026-09-15
 
@@ -143,7 +165,7 @@ include it in transitive `my.turn/wait` reach.
 
 **Still open:** protected `src/seon/turn.clj` selects only declarations for
 analysis, so ordinary evaluation persistence is not repaired by this commit.
-The [residual landing](../../prds/context-generation/research/n7-eval-call-edges-2026-09-15.md)
+The [residual landing](../../../prds/context-generation/research/n7-eval-call-edges-2026-09-15.md)
 contains the exact proposed recorder diff and the full virtual-turn acceptance
 proof still required. No second parser, edge family, or synthetic callable
 identity was introduced.
@@ -178,7 +200,7 @@ equivalent test was admitted and no edge was inserted by this probe. Before
 trusting reach-based reuse, verify the n7 repaired analyzer on a freshly
 admitted Juniper-shaped test, and separately decide how historical test rows
 are reanalyzed. Exact source, measurements, and reproducible probe:
-[reach-digest beat 1](../../prds/steward-platform/research/reach-digest-2026-09-16.md).
+[reach-digest beat 1](../../../prds/steward-platform/research/reach-digest-2026-09-16.md).
 
 ## Program-provenance baseline — 2026-09-16
 
@@ -189,7 +211,7 @@ scope correction withdrew inferred subjects, so this lane neither backfills
 that edge nor masks it with a subject. The direct-call namespace query returned
 22 tests for `seon.plan`, 114 for `seon.turn`, and 35 for
 `seon.cluster.message`. Exact query and scope:
-[program provenance](../../prds/steward-platform/research/program-provenance-2026-09-16.md).
+[program provenance](../../../prds/steward-platform/research/program-provenance-2026-09-16.md).
 
 ## Fresh declaration-test analysis probe — 2026-09-16
 
