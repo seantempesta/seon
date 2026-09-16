@@ -1,5 +1,6 @@
 (ns seon.test-reaching-test
-  (:require [clojure.test :as t :refer [deftest is]]
+  (:require [clojure.java.io]
+            [clojure.test :as t :refer [deftest is]]
             [seon.db :as db]
             [seon.fn :as functions]
             [seon.id :as id]
@@ -39,6 +40,42 @@
                       :seon.test/source (pr-str source)}])
       (assertion test-symbol test-var)
       (finally (remove-ns namespace-name)))))
+
+(deftest declared-observations-defer-before-cheap-reaching-tests
+  (support/with-database
+    (fn [connection]
+      (with-test connection '(clojure.test/is true)
+        (fn [cheap-symbol _]
+          (with-test connection '(clojure.test/is true)
+            (fn [observed-symbol observed-var]
+              (let [reason "Observe the external fixture lifecycle explicitly."
+                    root (doto (clojure.java.io/file "tmp" (str "observation-index-" (id/id))) .mkdirs)
+                    source (str "(ns " (namespace (symbol observed-symbol))
+                                " (:require [clojure.test :refer [deftest is]]))\n"
+                                "(deftest ^{:seon.test/fixture-observation " (pr-str reason)
+                                "} probe (is true))\n")]
+                (try
+                  (spit (clojure.java.io/file root "probe.clj") source)
+                  (let [rows (functions/rows {:seon.fn/roots [(.getPath root)]})
+                        row (first (filter #(= observed-symbol (:seon.test/sym %)) rows))]
+                    (is (= reason (:seon.test/fixture-observation row)) (pr-str row))
+                    (is (:db-after (db/transact! connection [row]))))
+                  (let [result (sut/check {:seon.db/connection connection
+                                           :seon.test/changed [observed-symbol cheap-symbol]})
+                        deferred [{:seon.test/sym observed-symbol
+                                   :seon.test/fixture-observation reason
+                                   :seon.test/command ["bin/test-check" "default" "--test" observed-symbol]}]
+                        feedback (sut/feedback result)]
+                    (is (= [cheap-symbol] (:seon.test/tests result)) (pr-str result))
+                    (is (= [cheap-symbol] (:seon.test/passed result)))
+                    (is (= deferred (:seon.test/deferred result)))
+                    (is (.contains feedback reason) feedback)
+                    (is (.contains feedback (str "'bin/test-check' 'default' '--test' '" observed-symbol "'")) feedback)
+                    (is (nil? (:seon.test/run (db/pull (db/db connection) [:seon.test/run]
+                                                       [:seon.test/sym observed-symbol]))))
+                    (let [explicit (sut/run observed-var connection)]
+                      (is (= 1 (:seon.test/pass-count explicit)) (pr-str explicit))))
+                  (finally (support/delete-recursively! root)))))))))))
 
 (deftest check-records-provenance-and-verifies-green
   (support/with-database

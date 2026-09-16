@@ -404,9 +404,11 @@
              event
              (cond
                test?
-               {:seon.test/sym (str qualified)
-                :seon.test/ns namespace-ref
-                :seon.test/source source}
+               (cond-> {:seon.test/sym (str qualified)
+                        :seon.test/ns namespace-ref
+                        :seon.test/source source}
+                 (find metadata :seon.test/fixture-observation)
+                 (assoc :seon.test/fixture-observation (:seon.test/fixture-observation metadata)))
 
                function?
                (cond-> {:seon.fn/sym (str qualified)

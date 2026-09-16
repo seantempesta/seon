@@ -1512,3 +1512,47 @@
         (testing "the page and system turn reuse the same evaluation path"
           (is (= #{"seon.render.web/render-source-call" "seon.turn/system-turn"} previews)
               (pr-str previews)))))))
+
+(deftest fixture-observations-survive-static-and-runtime-admission
+  (let [root (fixture-root)
+        namespace-name 'sample.observation
+        reason "Observe a real external fixture lifecycle."
+        source (str "(ns sample.observation (:require [clojure.test :refer [deftest is]]))\n"
+                    "(deftest ^{:seon.test/fixture-observation " (pr-str reason) "} observed (is true))\n"
+                    "(deftest ordinary (is true))\n")]
+    (try
+      (write-source! root "sample/observation.clj" source)
+      (test-support/with-database
+        (fn [connection]
+          (test-support/seed-cluster! connection "default")
+          (let [rows (seon.fn/rows {:seon.fn/roots [(.getPath root)]})
+                admitted (db/transact! connection rows)]
+            (is (:db-after admitted) (pr-str admitted))
+            (is (= reason (:seon.test/fixture-observation
+                           (db/pull @connection [:seon.test/fixture-observation]
+                                    [:seon.test/sym "sample.observation/observed"]))))
+            (is (nil? (:seon.test/fixture-observation
+                        (db/pull @connection [:seon.test/fixture-observation]
+                                 [:seon.test/sym "sample.observation/ordinary"])))))
+          (let [ctx (test-support/fork-cluster-ctx connection)
+                cluster (test-support/cluster-handle
+                         {:seon.db/connection connection :seon.cluster/name "default"
+                          :seon.db.process/id "observation-probe" :seon.sci.eval/ctx ctx})]
+            (doseq [[name metadata expected] [["runtime-observed" (str "^{:seon.test/fixture-observation " (pr-str reason) "} ") reason]
+                                             ["runtime-ordinary" "" nil]]]
+              (let [evaluation (sci.eval/evaluate
+                                (merge (select-keys cluster [:seon.sci.admit/caps :seon.config/on-core-error])
+                                       {:seon.cluster.eval/source (str "(clojure.test/deftest " metadata name " (clojure.test/is true))")
+                                        :seon.cluster.eval/ns [:seon.ns/name namespace-name]
+                                        :seon.sci.eval/ctx ctx :seon.sci.eval/time-limit-ms 10000
+                                        :seon.db/db @connection :seon.db/connection connection}))
+                    row (:seon.program/row evaluation)]
+                (is (:seon.test/sym row) (pr-str evaluation))
+                (is (= expected (:seon.test/fixture-observation row)) (pr-str row))
+                (when row
+                  (let [admitted (db/transact! connection [(dissoc row :seon.sci.eval/evaluated?)])]
+                    (is (:db-after admitted) (pr-str admitted))
+                    (is (= expected (:seon.test/fixture-observation
+                                      (db/pull @connection [:seon.test/fixture-observation]
+                                               [:seon.test/sym (str namespace-name "/" name)])))))))))))
+      (finally (test-support/delete-recursively! root)))))

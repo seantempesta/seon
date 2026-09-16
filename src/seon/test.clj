@@ -217,7 +217,19 @@
                                                 [?n :seon.ns/name ?name]] database)))
                    (if (:seon.error/kind reaches) reaches
                        (vec (sort (distinct (mapcat val reaches)))))))
-        runnable (if (and widened defer?) [] selected)
+        deferred (when-not (:seon.error/kind selected)
+                   (into []
+                         (keep (fn [test-symbol]
+                                 (when-let [reason (:seon.test/fixture-observation
+                                                   (db/pull database [:seon.test/fixture-observation]
+                                                            [:seon.test/sym test-symbol]))]
+                                   {:seon.test/sym test-symbol
+                                    :seon.test/fixture-observation reason
+                                    :seon.test/command ["bin/test-check" (or cluster "default")
+                                                        "--test" test-symbol]})))
+                         selected))
+        runnable (if (or (:seon.error/kind selected) (and widened defer?)) []
+                     (filterv (complement (set (map :seon.test/sym deferred))) selected))
         provenance (when (and (not (:seon.error/kind selected)) (seq runnable))
                      (runner/provenance database))]
     (cond
@@ -233,21 +245,22 @@
                              :seon.test/results []
                              :seon.test.run/basis-t (db/basis-t database)
                              :seon.test/next-tier (commands paths namespaces)}
+                      (seq deferred) (assoc :seon.test/deferred deferred)
                       provenance (assoc :seon.test.run/program-digest
                                         (:seon.test.run/program-digest provenance))
                       widened (assoc :seon.test/widened
                                      (str "the reaching set cannot bound this change: "
                                           (str/join ", " widened))))
-            _ (when (and (seq selected) (not (and widened defer?))
-                         (some (set (functions/tests-reaching database "seon.test-support/with-database")) selected))
+            _ (when (and (seq runnable)
+                         (some (set (functions/tests-reaching database "seon.test-support/with-database")) runnable))
                 (reset! progress "canonical fixture preparation")
                 ;; Realize the fixture owner's one base before starting a Var's
                 ;; event backstop. The total check deadline still applies.
                 (with-test-loader
                   #(deref @(requiring-resolve 'seon.test-support/database-base))))
-            prepared (when (and (seq selected) (not (and widened defer?)))
+            prepared (when (seq runnable)
                        (reset! progress "test namespace loading and contract arming")
-                       (prepare-tests! database selected effective))
+                       (prepare-tests! database runnable effective))
             result
             (if (:seon.error/kind prepared)
               (assoc prepared :seon.test/next-tier :none)
@@ -390,6 +403,10 @@
                         (str "\n" (:seon.test/sym failure) " reaches "
                              (pr-str (:seon.test/changed failure)) ": "
                              (:seon.test/failure-message failure))))
+           (apply str (for [deferred (:seon.test/deferred result)]
+                        (str "\ndeferred " (:seon.test/sym deferred) ": "
+                             (:seon.test/fixture-observation deferred)
+                             "; run " (str/join " " (map quote-arg (:seon.test/command deferred))))))
            (if (seq invocations) (str "\nrun " (str/join " then " invocations))
                "\nnext-tier: none; fix failures first")))))
 

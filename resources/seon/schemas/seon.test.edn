@@ -118,6 +118,11 @@
   [:seon.error/message :seon.error/message]]
  :seon.test/next-tier
  [:or [:= :none] [:vector [:vector [:string {:min 1}]]]]
+ :seon.test/command [:vector [:string {:min 1}]]
+ :seon.test/deferred
+ [:vector [:map [:seon.test/sym :seon.test/sym]
+           [:seon.test/fixture-observation :seon.test/fixture-observation]
+           [:seon.test/command :seon.test/command]]]
  :seon.test/check-result
  [:map
   [:seon.test/tests [:vector :seon.test/sym]]
@@ -132,7 +137,8 @@
   [:seon.test/elapsed-ms :double]
   [:seon.test/next-tier :seon.test/next-tier]
   [:seon.test/widened {:optional true} :string]
-  [:seon.test/pending {:optional true} [:vector :seon.test/sym]]]
+  [:seon.test/pending {:optional true} [:vector :seon.test/sym]]
+  [:seon.test/deferred {:optional true} :seon.test/deferred]]
  :seon.test/adoption-identities [:set :seon.db/ref]
  :seon.test/adoption-inputs [:set :string]
  :seon.test/adoption-cluster :seon.db/ref

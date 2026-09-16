@@ -38,7 +38,9 @@
     (.start server)
     server))
 
-(deftest public-docstring-examples-run-in-the-canonical-agent-context
+(deftest ^{:seon.test/fixture-observation
+           "Runs public examples through real HTTP, filesystem, and background-effect fixtures; an ordinary database branch cannot prove these effects."}
+  public-docstring-examples-run-in-the-canonical-agent-context
   (support/with-database
     (fn [connection]
       (with-open [root-resource (support/closeable

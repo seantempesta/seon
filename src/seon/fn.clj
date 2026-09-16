@@ -368,6 +368,8 @@
       (cond-> {:seon.test/sym (str qualified)
                :seon.test/ns [:seon.ns/name namespace-name]
                :seon.test/source source}
+        (find metadata :seon.test/fixture-observation)
+        (assoc :seon.test/fixture-observation (:seon.test/fixture-observation metadata))
         (true? (:seon.test/usage metadata))
         (assoc :seon.test/usage true)
         (seq (get calls-by-caller (str qualified)))

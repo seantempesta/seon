@@ -7,6 +7,7 @@
                     [(second *command-line-args*) (drop 2 *command-line-args*)]
                     ["." *command-line-args*])
       cluster (or (first args) "default")
+      [_ selection test-symbol bound-option bound-value & extra] args
       root (.getCanonicalPath (io/file root))
       advertisement (#'operator/advertisement root cluster)
       eval! (fn [form timeout-ms]
@@ -17,18 +18,45 @@
                      (list 'seon.schema/call-with-projection 'projection
                            (list 'fn [] body))))]
   (try
+    (when (and selection
+               (not (and (= "--test" selection) test-symbol
+                         (qualified-symbol? (symbol test-symbol))
+                         (or (nil? bound-option)
+                             (and (= "--time-limit-ms" bound-option)
+                                  (pos-int? (parse-long (or bound-value "")))))
+                         (empty? extra))))
+      (throw (ex-info "Usage: bin/test-check [--root PATH] [CLUSTER [--test NS/TEST [--time-limit-ms N]]]" {})))
     (when-not advertisement
       (throw (ex-info "No live cluster advertisement; test-check starts no JVM." {})))
-    (let [bound (eval! (scoped (list :seon.test/check-time-limit-ms
-                                    (list 'seon.config/effective
-                                          '(seon.db/db connection) cluster)))
-                       (#'operator/operator-silence-backstop-ms {}))
+    (let [bound (or (some-> bound-value parse-long)
+                    (eval! (scoped (list :seon.test/check-time-limit-ms
+                                        (list 'seon.config/effective
+                                              '(seon.db/db connection) cluster)))
+                           (#'operator/operator-silence-backstop-ms {})))
           _ (when-not (pos-int? bound)
               (throw (ex-info "Apply cluster configuration to supply :seon.test/check-time-limit-ms." {})))
-          result (eval! (scoped (list 'seon.test/feedback
-                                      (list 'seon.test/check-adoption 'connection cluster)))
+          work (if test-symbol
+                 (list 'let ['database '(seon.db/db connection)
+                             'effective (list 'seon.config/effective 'database cluster)
+                             'prepared (list '(var seon.test/prepare-tests!) 'database [test-symbol] 'effective)]
+                       (list 'if '(:seon.error/kind prepared) 'prepared
+                             (list 'if-let ['test-var (list '(var seon.test/resolve-test) test-symbol)]
+                                   (list 'seon.test/run 'test-var 'connection
+                                         {:seon.test.run/provenance '(seon.test.runner/provenance database)
+                                          :seon.test/remaining-ms bound})
+                                   {:seon.error/kind :seon.test/unknown
+                                    :seon.test/unknown test-symbol
+                                    :seon.error/message "The indexed test Var is unavailable."})))
+                 (list 'seon.test/feedback (list 'seon.test/check-adoption 'connection cluster)))
+          result (eval! (scoped work)
                         (+ bound (#'operator/operator-silence-backstop-ms {})))]
-      (println result))
+      (println (if test-symbol (pr-str result) result))
+      (when (and test-symbol
+                 (or (:seon.error/kind result)
+                     (not (pos? (or (:seon.test/pass-count result) 0)))
+                     (pos? (or (:seon.test/fail-count result) 0))
+                     (pos? (or (:seon.test/error-count result) 0))))
+        (System/exit 1)))
     (catch Exception failure
       (binding [*out* *err*]
         (println "check unavailable:" (ex-message failure)))
