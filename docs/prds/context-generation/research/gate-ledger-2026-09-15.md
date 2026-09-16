@@ -1067,3 +1067,12 @@ owner: a named-namespace gate should either exclude declared-long tests
 unless opted in, or the exchange bound must derive from the declaration —
 a bound that ignores the declared long-ness is the tuned-constant defect
 (§2.3).
+
+Steward's ruling on the long-test bound (recorded in their working edge):
+keep §5 ("explicit namespaces run complete"); the worker exchange bound
+DERIVES from the declaration — a test declared `:seon.test/long` carries
+its own allowance, the runner's per-exchange bound is max(default,
+declared). Excluding long tests from a named gate would silently narrow
+"run this namespace"; the in-process `check` exclusion exists because
+check selects by reach, not by name. Runner slice; queued behind the
+write-storm lane's class-1 release of runner.clj.
