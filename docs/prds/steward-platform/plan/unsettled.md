@@ -1384,6 +1384,23 @@ pulled shape) re-derived from the Datahike source. Their notes are the input
 to one owner-decisions page with background and real examples, per the
 standing rule. The integrator keeps to released, non-deletion groups until then.
 
+**~00:00Z landings after the resume:** runner-test errors `6cc32046c`
+(reviewed: source-roots deref dropped; both initialize-contracts! shapes
+asserted as what they are; the fixture deletes through
+`seon.program/exact-replacement-tx`, 18/134/0/0 fast), composable-history
+`9a6bb9f1d`+`789a1a3d2` (reviewed: `rendered-family` re-fit deleted; the
+four batch-111 reds green together 48/3,394/0/0 fast; issue
+`a-fast-gate-jvm-dies-on-the-shared-kondo-cache-lock` filed), integrator
+`79c106925` (capture prompts retain temporal history; stopped at a
+coherent seam). Cold gates for all three owed. **PUBLICATION BLOCKED for
+every agent:** current-src branch publication refuses
+`:seon.schema/unresolved-predicate seon.search/handle?` ("no admitted
+callable in the corpus projection") since `68e95b029` — environment
+continuation relaunched on it first (may run `init --dev`). Also running:
+wake-matchers, tier-0 remaining, no-default-cluster, incremental
+publication (told about the source-test seal red at source_test.clj:81/:98).
+Queued: bin/test preparation bounds.
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
