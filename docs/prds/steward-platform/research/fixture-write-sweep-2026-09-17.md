@@ -632,3 +632,107 @@ repaired — reported. This lane's own files lint clean against the committed
   `src/my/test.clj`, `resources/seon/schemas/seon.db.edn` and
   `resources/seon/schemas/seon.test.edn` carried peer edits throughout; none
   was touched or committed here.
+
+## Pass 6 — the web.jvm public-capability errors were a missing carried projection
+
+`seon.web.jvm-test/public-search-settles-one-receipt-with-provider-credits`
+and `…/public-fetch-settles-text-and-binary-body-representations` ERRORed cold
+in batch 85 (root `tmp/test-runs/run.5tgDUG`) with *"The capability request
+does not satisfy its owner contract"* — `:seon.effect/invalid-request`,
+`src/seon/effect.clj:720`.
+
+**What the fixture lacked: its own program projection, not a request key.**
+The requests are well formed. Asked against `default`'s database, the door
+already accepted both:
+
+```clojure
+[(#'seon.effect/accepts-request? db 'my.web/fetch  {:my.web/url "http://127.0.0.1:1234/small-html"})
+ (#'seon.effect/accepts-request? db 'my.web/search {:my.web/query "web capability evidence"
+                                                    :my.web/max-results 2})]
+;; => [true true]   (default pid 88182)
+```
+
+`accepts-request?` reads `(db/carried-projection database)`
+(`src/seon/effect.clj:180`). A branch connection opened straight off a store —
+`seon.test-support/with-published-file-database` →
+`seon.cluster.store/open-branch!` → `d/connect` — carries none, so `db/db`
+falls back to the thread's handed projection (`src/seon/db.clj:199`). In a
+`bin/test` worker that is the PACKAGED projection
+(`seon.test.arm/packaged-test-projection` → `schema/declaration-projection`,
+`src/seon/schema.clj:1068`), which carries schema forms and **no**
+`:seon.schema.projection/function-contracts` key. `function-arities-in`
+therefore answers `[]` for every symbol and the door refuses every capability
+alike.
+
+Measured on the exact batch-85 published base
+(`target/test-published-bases/f1bb1c8…/base`, copied `cp -Rp`, reidentified,
+opened read-only in default pid 88182), branch `:current-src`:
+
+| member | value |
+|---|---|
+| `carried-is-packaged` | `true` |
+| function contracts in the carried (packaged) projection | `0` |
+| function contracts in `schema/projection-from-database` | `1118` |
+| `accepts-request?` under the carried projection | `false` |
+| `function-accepts-in?` under the derived projection (fetch, search) | `true`, `true` |
+
+That is why `seon.effect-test/every-capability-owner-accepts-its-own-request-
+at-the-door` passes while these two error: the guard runs on the canonical
+in-memory base, which already carries its own program for exactly this reason
+(`test/seon/test_support.clj:398` — "The worker's bootstrap projection has
+schema forms, but no populated function contracts").
+
+### The fix, at the fixture's root
+
+`with-file-database` (`test/seon/web/jvm_test.clj`) now does what the
+canonical base and a live cluster's boot do, BEFORE its seeds:
+
+```clojure
+(let [projection (schema/projection-from-database @connection)
+      state (sci.eval/projection-state @connection projection)]
+  (db/carry-connection-projection-state! connection state)
+  (schema/call-with-projection-state state (fn [] … seed … (body connection))))
+```
+
+The pass-5 cluster-entity seed (`support/seed-cluster!`, commit `87359e9fb`)
+is in place and is kept, now inside that projection scope.
+
+The two tests additionally assert the door's own verdict on the SAME request
+map they hand the owner (`accepted-at-the-door`, calling
+`#'seon.effect/accepts-request?`). The request stays the one the test needs —
+a URL on its own local server — while the assertion is derived from the
+owner's declared contract, so a fixture that loses its projection again fails
+naming the door instead of erroring out of an output-contract wrapper.
+
+### Verification boundary, pass 6
+
+- These tests are **cold-only**: `seon.test/run` refuses them in process —
+  `:seon.test/destructive-in-process`, reach `seon.web.jvm-test/…` →
+  `with-file-database` → `seon.test-support/with-published-file-database` →
+  `populate-published-root!` — and no test JVM was launched from this lane.
+  They make no external network calls; the fixture serves every route from a
+  local `HttpServer` on `127.0.0.1:0`.
+- Proof is therefore the door itself, on a **copy** of batch 85's published
+  base, in default pid 88182 on daemon threads: a fresh branch of
+  `:current-src`, the worker's packaged projection handed around it, the
+  fixture's own `seed-cluster!` / `apply-config!` / `transacted!` writes
+  applied through `seon.db`, and then
+
+  ```clojure
+  {:before-carry false :after-carry-fetch true :after-carry-search true
+   :timeout-dial 1000}
+  ```
+
+  — the red before the carry, green after it, with the config dial reading
+  back through `seon.config/effective`, so the seeds still admit under the
+  derived projection.
+- Not proven here: the assertions after the door (credits, blob round-trip,
+  effect rows). Those need the cold gate — request filed as
+  `tmp/orchestrator/gate-requests/web-jvm-fixture.txt`.
+- The probe copy under `tmp/web-door-probe/` was deleted; the batch-85 base in
+  `target/test-published-bases/` was never written to.
+- `test/seon/test_support.clj`, `src/seon/effect.clj` and `src/my/web.clj`
+  were read only. The class survives in the other two callers of
+  `with-published-file-database` (`test/seon/shell/jvm_test.clj`,
+  `test/seon/background_blob_test.clj`); recorded in
+  [the effect-door issue](../../../seon/issues/the-effect-door-validates-a-one-argument-request-against-a-two-argument-owner.md).

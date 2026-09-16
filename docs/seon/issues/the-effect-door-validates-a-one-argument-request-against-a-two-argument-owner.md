@@ -145,3 +145,64 @@ This note stays as the record of a wrong attribution, so the same probe is not
 repeated. Naming it beats deleting it: the lesson is that a program-graph
 question about a capability must ask the capability's DECLARED owner, not the
 handler var behind it.
+
+## ROOT CAUSE, measured on the batch-85 published base (2026-09-17)
+
+Third attribution, and this one is measured on the exact store the red ran
+against (`target/test-published-bases/f1bb1c8…/base`, copied with `cp -Rp`,
+reidentified, read in default pid 88182).
+
+The door is right and the request is right. What was wrong is the PROJECTION
+the fixture's database carried.
+
+`accepts-request?` asks `(db/carried-projection database)` first
+(`src/seon/effect.clj:180`). A branch connection opened straight off a store
+(`seon.test-support/with-published-file-database` →
+`seon.cluster.store/open-branch!` → `d/connect`) carries no projection, so
+`db/db`'s fallback hands it the thread's projection
+(`src/seon/db.clj:199`) — in a `bin/test` worker that is the PACKAGED
+projection `seon.test.arm/packaged-test-projection` builds from
+`schema/declaration-projection`, which carries schema forms and **no**
+`:seon.schema.projection/function-contracts` key at all
+(`src/seon/schema.clj:1068`). `function-arities-in` then answers `[]` for every
+symbol, `function-accepts-in?` answers false, and the door refuses every
+capability request alike with `:seon.effect/invalid-request`.
+
+Measured on that base, `:current-src`:
+
+```clojure
+{:carried-is-packaged true
+ :packaged-contracts  0      ; function contracts in the carried projection
+ :derived-contracts   1118   ; (schema/projection-from-database db)
+ :accepts-under-carried false
+ :accepts-under-derived true}   ; my.web/fetch and my.web/search both
+```
+
+And on a fresh branch of that base, under the same packaged handed projection,
+with the fixture's own seeds applied:
+
+```clojure
+{:before-carry false :after-carry-fetch true :after-carry-search true
+ :timeout-dial 1000}
+```
+
+The canonical in-memory base already carries its own program for exactly this
+reason (`test/seon/test_support.clj:398`: "The worker's bootstrap projection
+has schema forms, but no populated function contracts"). The file-backed
+fixture did not, so `seon.effect-test/every-capability-owner-accepts-its-own-
+request-at-the-door` passed (canonical base) while the two `seon.web.jvm-test`
+public-capability tests errored (file base).
+
+Repaired in `test/seon/web/jvm-test`'s `with-file-database`, which now derives
+`schema/projection-from-database`, carries it with
+`db/carry-connection-projection-state!` and runs the body under
+`schema/call-with-projection-state`, and both tests now assert the door's own
+verdict on the exact request they send.
+
+**The class is not fully dead.** Any fixture on
+`seon.test-support/with-published-file-database` that crosses the effect door
+has the same hole (`test/seon/shell/jvm_test.clj`,
+`test/seon/background_blob_test.clj` are the other two callers). The carry
+arguably belongs IN `with-published-file-database` itself — a branch of a
+published base always has a program to derive — but that file is held by
+another lane; left for its owner.

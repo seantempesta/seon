@@ -9,6 +9,8 @@
             [seon.db :as db]
             [seon.effect :as effect]
             [seon.fs :as filesystem]
+            [seon.schema :as schema]
+            [seon.sci.eval :as sci.eval]
             [seon.test-support :as support]
             [seon.web.jvm]
             [seon.web.search])
@@ -30,14 +32,31 @@
       (support/with-published-file-database
        root :my-web-test
        (fn [connection]
-          ;; SEED THE CLUSTER, not just its config row. `seon.fs.jvm` and the
-          ;; effect door read their dials through the cluster's own facts, so a
-          ;; branch carrying a config row and no cluster entity answers nil for
-          ;; every dial and the handler dereferences it.
-          (support/seed-cluster!
-           connection "default"
-           {:seon.config.eval.result/blob-threshold 8})
-          (body connection)))
+          ;; CARRY THIS BRANCH'S OWN PROGRAM PROJECTION, exactly as the
+          ;; canonical base does and as a live cluster's boot does. A branch
+          ;; connection opened straight off the store carries none, so every
+          ;; `db/db` on it fell back to the worker's PACKAGED projection --
+          ;; schema forms with ZERO function contracts -- and the effect door
+          ;; asks the carried projection for the owner's declared input:
+          ;; `seon.effect/accepts-request?` then answered false for EVERY
+          ;; capability, and `my.web/fetch` refused its own well-formed request
+          ;; with :seon.effect/invalid-request. Measured on the batch-85
+          ;; published base: 0 function contracts carried, 1118 derived.
+          (let [projection (schema/projection-from-database @connection)
+                state (sci.eval/projection-state @connection projection)]
+            (db/carry-connection-projection-state! connection state)
+            (schema/call-with-projection-state
+             state
+             (fn []
+               ;; SEED THE CLUSTER, not just its config row. `seon.fs.jvm` and
+               ;; the effect door read their dials through the cluster's own
+               ;; facts, so a branch carrying a config row and no cluster
+               ;; entity answers nil for every dial and the handler
+               ;; dereferences it.
+               (support/seed-cluster!
+                connection "default"
+                {:seon.config.eval.result/blob-threshold 8})
+               (body connection))))))
       (finally
         (when (.exists root)
           (filesystem/delete-recursively! (str root) (str root)))))))
@@ -236,6 +255,20 @@
    :seon.config/on-core-error :record
    :seon.effect/counter (atom -1)})
 
+(defn- accepted-at-the-door
+  "The effect door's own verdict on the exact request this fixture sends.
+
+  `seon.effect/accepts-request?` validates the request against the OWNER
+  Var's declared input contract, read from the projection the database in
+  hand CARRIES. A fixture whose connection carries no projection of its own
+  falls back to the worker's packaged projection, which declares schema forms
+  and no function contracts, and the door then refuses every well-formed
+  request alike. Asserting this on the same map the test passes to the owner
+  keeps the request derived from the declared contract rather than from a
+  hand-written shape that can drift away from it."
+  [connection owner request]
+  (#'effect/accepts-request? (db/db connection) owner request))
+
 (deftest ^{:seon.test/fixture-observation "The response crosses the inline ceiling and must round-trip byte-exactly through physical blob storage."} oversized-bodies-spill-byte-exactly-through-the-blob-tier
   (with-file-database
     (fn [connection]
@@ -374,15 +407,16 @@
                     :seon.turn/agent
                     [:seon.agent/id "web-agent"]
                     :seon.turn/opened-tx "datomic.tx"}])
-          (let [result
+          (let [request {:my.web/query "web capability evidence"
+                         :my.web/max-results 2}
+                accepted (accepted-at-the-door connection 'my.web/search request)
+                result
                 (with-redefs-fn
                   {(ns-resolve 'seon.web.jvm 'credential)
                    (constantly "test-serper-key")}
                   #(binding [db/*conn* connection
                              effect/*request-context* (effect-context connection)]
-                     (web/search
-                      {:my.web/query "web capability evidence"
-                       :my.web/max-results 2})))
+                     (web/search request)))
                 receipt-id (pr-str ["web-receipt-run" 0 0])
                 receipt
                 (db/pull @connection '[*]
@@ -394,6 +428,8 @@
                         :in $ ?id
                         :where [?receipt :seon.effect/id ?id]]
                       @connection receipt-id)]
+            (is (true? accepted)
+                "my.web/search must accept this fixture's own request at the door")
             (is (= 1 (:my.web/credits result)) (pr-str result))
             (is (= result stored-result))
             (is (= 1 receipt-count))
@@ -418,11 +454,15 @@
                     [:seon.agent/id "web-agent"]
                     :seon.turn/opened-tx "datomic.tx"}])
           (let [context (effect-context connection)
+                text-request {:my.web/url (str base-url "/small-html")}
+                binary-request {:my.web/url (str base-url "/binary")}
+                accepted (mapv #(accepted-at-the-door connection 'my.web/fetch %)
+                               [text-request binary-request])
                 [text-result binary-result]
                 (binding [db/*conn* connection
                           effect/*request-context* context]
-                  [(web/fetch {:my.web/url (str base-url "/small-html")})
-                   (web/fetch {:my.web/url (str base-url "/binary")})])
+                  [(web/fetch text-request)
+                   (web/fetch binary-request)])
                 receipts
                 (mapv
                  (fn [ordinal]
@@ -434,6 +474,8 @@
                 stored-results
                 (mapv #(edn/read-string (:seon.effect/result-edn %))
                       receipts)]
+            (is (= [true true] accepted)
+                "my.web/fetch must accept this fixture's own requests at the door")
             (is (= "<html>hello</html>"
                    (get-in text-result [:my.web/body
                                         :my.web.body/text])))
