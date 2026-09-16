@@ -1,0 +1,10 @@
+[
+#:seon.test{:fail-count 0, :pass-count 14, :run-at #inst "2026-09-16T01:48:01.733-00:00", :run #:db{:id 41494}, :run-basis-t 536871160, :error-count 0, :sym "seon.cluster.turn-test/a-whole-turn-runs-a-REAL-sci-evaluation-end-to-end"}
+#:seon.test{:fail-count 0, :pass-count 6, :run-at #inst "2026-09-16T01:48:05.138-00:00", :run #:db{:id 41495}, :run-basis-t 536871161, :error-count 0, :sym "seon.cluster.turn-test/agent-code-with-defn-and-println-folds-green-without-in-ns"}
+#:seon.test{:fail-count 0, :pass-count 6, :run-at #inst "2026-09-16T01:48:13.903-00:00", :run #:db{:id 41496}, :run-basis-t 536871162, :error-count 0, :sym "seon.cluster.turn-test/a-whole-turn-runs-from-trigger-to-closed-run"}
+#:seon.test{:fail-count 0, :pass-count 10, :run-at #inst "2026-09-16T01:48:17.261-00:00", :run #:db{:id 41497}, :run-basis-t 536871163, :error-count 0, :sym "seon.cluster.turn-test/a-combined-evaluation-projects-every-terminal-receipt-datom"}
+#:seon.test{:fail-count 0, :pass-count 7, :run-at #inst "2026-09-16T01:48:21.073-00:00", :run #:db{:id 41498}, :run-basis-t 536871164, :error-count 0, :sym "seon.cluster.turn-test/acquisition-orders-agent-authored-refer-targets-and-ignores-alias-cycles"}
+#:seon.test{:fail-count 0, :pass-count 4, :run-at #inst "2026-09-16T01:48:22.317-00:00", :run #:db{:id 41499}, :run-basis-t 536871165, :error-count 0, :sym "seon.cluster.turn-test/function-install-reads-the-case-count-from-cluster-facts"}
+#:seon.test{:fail-count 0, :pass-count 11, :run-at #inst "2026-09-16T01:48:33.340-00:00", :run #:db{:id 41500}, :run-basis-t 536871166, :error-count 0, :sym "seon.cluster.turn-test/successful-call-persists-the-providers-open-usage-document"}
+#:seon.test{:fail-count 0, :pass-count 11, :run-at #inst "2026-09-16T01:48:39.781-00:00", :run #:db{:id 41501}, :run-basis-t 536871167, :error-count 0, :sym "seon.cluster.turn-test/reasoning-starvation-persists-usage-finish-and-the-named-error"}
+]

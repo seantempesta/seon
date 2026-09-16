@@ -400,10 +400,11 @@
   (with-cluster
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
-            configured (db/transact!
-                        connection
-                        [{:seon.config/cluster "turn-test"
-                          :seon.config.test/auto-check-cases 3}])]
+            configured (config/apply!
+                        {:seon.db/connection connection
+                         :seon.boot/cluster-name "turn-test"
+                         :seon.config/manifest
+                         {:seon.config.test/auto-check-cases 3}})]
         (is (nil? (:seon.error/kind configured)))
         (with-redefs [ai/complete
                       (fn [_]
@@ -423,154 +424,80 @@
             (is (= [3] cases))))))))
 
 (deftest a-whole-turn-runs-a-REAL-sci-evaluation-end-to-end
-  ;; the injection seam, proven: the same qualified symbol the cluster
-  ;; handle carries now points at seon.sci.eval, so this drives a real
-  ;; armed boundary, a real fork, and real admission — with no model
-  ;; call, because the reply is the only thing stubbed.
   (with-cluster
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)]
         (with-redefs [ai/complete
-                      (fn [_] {:seon.ai/text
-                               (str "(def widgets (map inc (range 3)))\n"
-                                    "(do (seon.db/q '[:find [?id ...] "
-                                    ":where [_ :seon.agent/id ?id]]) "
-                                    "widgets)\n"
-                                    "(seon.run/complete (str \"counted \" "
-                                    "(reduce + widgets)))")})]
-          (let [reports (drive! cluster 10)]
-            (is (= [:open :call]
-                   (mapv :seon.turn.work/situation reports))
-                "open, model, then ONE fold — the whole plan over one ctx")
-            (testing "the receipts carry what sci actually produced"
-              (let [results (into {}
-                                  (map (fn [[ordinal result-edn]]
-                                         [ordinal
-                                          (semantic-result result-edn)]))
-                                  (db/q '[:find ?ordinal ?edn
-                                         :where
-                                         [?e :seon.cluster.eval/ordinal ?ordinal]
-                                         [?e :seon.cluster.eval/result-edn ?edn]]
-                                       @connection))]
-                (is (= {:seon.sci.admit/reference "sci.lang.Var"
-                        :seon.sci.admit/name
-                        "#'my.agents.agent-a/widgets"}
-                       (get results 0))
-                    "a def evaluates to a VAR, admission names it without
-                     dereferencing it, and it landed in the AGENT'S
-                     namespace — no in-ns anywhere")
-                (is (= '(1 2 3) (get results 1))
-                    "form 1 SAW form 0's def — one ctx per run, not per
-                     form — and its lazy sequence came back REALIZED")
-                (is (= (assoc (seon.run/complete "counted 6")
-                              :my.turn/delivered-to :outside)
-                       (get results 2))
-                    "and the disposition round-tripped through admission")))
-            (testing "the real settlement retains queryable read evidence"
-              (let [[receipt-eid read-basis start-tx settlement-tx]
-                    (db/q '[:find [?receipt ?read-basis ?start-tx
-                                   ?settlement-tx]
-                            :where
-                            [?receipt :seon.cluster.eval/ordinal 1]
-                            [?receipt
-                             :seon.cluster.eval/read-basis-transaction
-                             ?read-basis ?settlement-tx]
-                            [?receipt :seon.cluster.eval/at _ ?start-tx]
-                            [?receipt :seon.cluster.eval/result-edn
-                             _ ?settlement-tx]]
-                          @connection)
-                    evidence-eid
-                    (db/q '[:find ?evidence .
-                            :where
-                            [?receipt :seon.cluster.eval/ordinal 1]
-                            [?receipt :seon.cluster.eval/read-evidence
-                             ?evidence]]
-                          @connection)
-                    evidence
-                    (db/pull @connection
-                             '[:seon.db/source-argument-position
-                               :datahike.read/dependency-plan
-                               :datahike.read/revision]
-                             evidence-eid)]
-                (is (= start-tx read-basis)
-                    "the cursor is the database basis used by evaluation")
-                (is (not= settlement-tx read-basis)
-                    "the terminal transaction is not substituted as shown")
-                (is (= settlement-tx
-                       (db/q '[:find ?tx .
-                               :in $ ?receipt
-                               :where
-                               [?receipt :seon.cluster.eval/read-evidence
-                                _ ?tx]]
-                             @connection receipt-eid))
-                    "read evidence and the cursor share the terminal commit")
-                (is (int? (:seon.db/source-argument-position evidence)))
-                (is (contains? evidence :datahike.read/dependency-plan))
-                (is (map? (:datahike.read/revision evidence)))
-                (is (empty?
-                     (db/q '[:find ?receipt
-                             :where
-                             [?receipt :seon.cluster.eval/ordinal 0]
-                             [?receipt
-                              :seon.cluster.eval/read-basis-transaction _]]
-                           @connection))
-                    "a form that read no database value omits the member")))
-            (testing "every receipt settled clean — no interrupt, no error"
-              (is (= 3 (count (db/q '[:find ?e :where
-                                     [?e :seon.cluster.eval/result-edn _]]
-                                   @connection))))
-              (is (empty? (db/q '[:find ?e :where
-                                 (or [?e :seon.cluster.eval/error _]
-                                     [?e :seon.cluster.eval/interrupted-at _])]
-                               @connection))
-                  "no error and no cut instant anywhere — presence is
-                   the state"))
-            (is (some? (db/q '[:find ?c . :where
-                              [_ :seon.turn/closed-tx ?c]] @connection))
-                "and the run closed")))))))
+                      (fn [_]
+                        {:seon.ai/text
+                         (str "(def widgets (map inc (range 3)))\n"
+                              "(do (seon.db/q '[:find [?id ...] :where [_ :seon.agent/id ?id]]) widgets)\n"
+                              "(seon.run/complete (str \"counted \" (reduce + widgets)))")})]
+          (is (= [:open :call]
+                 (mapv :seon.turn.work/situation
+                       (drive-agent! cluster "agent-a" 2))))
+          (let [database (db/db connection)
+                evaluations (agent-evaluations database)
+                [definition read-evaluation completion] evaluations
+                evaluation-id (:db/id read-evaluation)
+                [read-basis start-tx settlement-tx]
+                (db/q '[:find [?basis ?start ?settlement]
+                        :in $ ?evaluation
+                        :where
+                        [?evaluation :seon.cluster.eval/read-basis-transaction ?basis ?settlement]
+                        [?evaluation :seon.cluster.eval/at _ ?start]
+                        [?evaluation :seon.eval/shown _ ?settlement]]
+                      database evaluation-id)
+                evidence
+                (db/q '[:find [(pull ?evidence [*]) ...]
+                        :in $ ?evaluation
+                        :where
+                        [?evaluation :seon.cluster.eval/read-evidence ?evidence]]
+                      database evaluation-id)]
+            (is (= 3 (count evaluations)))
+            (is (str/includes? (:seon.eval/shown definition) "my.agents.agent-a/widgets"))
+            (is (= "(1 2 3)" (:seon.eval/shown read-evaluation))
+                "a later evaluation sees the private object from the persistent SCI context")
+            (is (str/includes? (:seon.eval/shown completion) "counted 6"))
+            (is (int? read-basis))
+            (is (= start-tx read-basis))
+            (is (not= settlement-tx read-basis))
+            (is (= #{settlement-tx}
+                   (set (db/q '[:find [?tx ...]
+                                :in $ ?evaluation
+                                :where [?evaluation :seon.cluster.eval/read-evidence _ ?tx]]
+                              database evaluation-id))))
+            (is (seq evidence))
+            (is (every? #(and (int? (:seon.db/source-argument-position %))
+                             (contains? % :datahike.read/dependency-plan)
+                             (map? (:datahike.read/revision %))) evidence))
+            (is (int? (:seon.cluster.eval/read-basis-transaction definition))
+                "every evaluation records its database basis")
+            (is (every? #(and (nil? (:seon.cluster.eval/error %))
+                             (nil? (:seon.cluster.eval/interrupted-at %))) evaluations))
+            (is (nil? (turn/next-agent-work database (request connection))))))))))
 
 (deftest agent-code-with-defn-and-println-folds-green-without-in-ns
-  ;; the live drive's two wiring failures, as one falsifier: the model
-  ;; writes ordinary Clojure — a defn, a println, a call — and never
-  ;; mentions a namespace, because it does not have to.
   (with-cluster
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)]
         (with-redefs [ai/complete
-                      (fn [_] {:seon.ai/text
-                               (str "(defn widget-count [n] (* n 3))\n"
-                                    "(println \"counting\" (widget-count 4)"
-                                    " \"in\" (str *ns*))\n"
-                                    "(seon.run/complete (str \"there are \""
-                                    " (widget-count 4)))")})]
-          (drive! cluster 10)
-          (testing "every form ran and settled clean"
-            (is (= 3 (count (db/q '[:find ?e :where
-                                   [?e :seon.cluster.eval/result-edn _]]
-                                 @connection))))
-            (is (empty? (db/q '[:find ?e :where
-                               (or [?e :seon.cluster.eval/error _]
-                                   [?e :seon.cluster.eval/interrupted-at _])]
-                             @connection))))
-          (testing "the def landed in the agent's namespace"
-            (is (re-find #"my\.agents\.agent-a/widget-count"
-                         (db/q '[:find ?edn . :where
-                                [?e :seon.cluster.eval/ordinal 0]
-                                [?e :seon.cluster.eval/result-edn ?edn]]
-                              @connection))))
-          (testing "and what it PRINTED is durable, not dropped"
-            (let [output (db/q '[:find ?out . :where
-                                [?e :seon.cluster.eval/ordinal 1]
-                                [?e :seon.cluster.eval/output ?out]]
-                              @connection)]
-              ;; content, not exact whitespace: sci's println does not
-              ;; leave its trailing newline in the writer, and pinning
-              ;; that would be pinning sci's io rather than our contract
-              (is (= "counting 12 in my.agents.agent-a" (str/trim output)))))
-          (testing "and the disposition closed the run"
-            (is (some? (db/q '[:find ?c . :where
-                              [_ :seon.turn/closed-tx ?c]]
-                            @connection)))))))))
+                      (fn [_]
+                        {:seon.ai/text
+                         (str "(defn widget-count {:malli/schema [:=> [:cat :int] :int]} [n] (* n 3))\n"
+                              "(println \"counting\" (widget-count 4) \"in\" (str *ns*))\n"
+                              "(seon.run/complete (str \"there are \" (widget-count 4)))")})]
+          (drive-agent! cluster "agent-a" 2)
+          (let [evaluations (agent-evaluations (db/db connection))]
+            (is (= 3 (count evaluations)))
+            (is (every? #(and (nil? (:seon.cluster.eval/error %))
+                             (nil? (:seon.cluster.eval/interrupted-at %))) evaluations))
+            (is (str/includes? (:seon.eval/shown (first evaluations))
+                               "my.agents.agent-a/widget-count"))
+            (is (= "counting 12 in my.agents.agent-a"
+                   (str/trim (:seon.cluster.eval/output (second evaluations)))))
+            (is (str/includes? (:seon.eval/shown (nth evaluations 2)) "there are 12"))
+            (is (nil? (turn/next-agent-work (db/db connection) (request connection))))))))))
 
 (deftest mixed-plan-publishes-only-the-contracted-function
   (with-cluster
@@ -1563,103 +1490,63 @@
   (test-support/with-database
     (fn [connection]
       (let [target-source
-            (str "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
-                 "increment [x] (inc x))")
+            "(defn ^{:malli/schema [:=> [:cat :int] :int]} increment [x] (inc x))"
             consumer-source
-            (str "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
-                 "call-plus [x] (plus (target/increment x)))")
-            authored-ctx (sci.eval/build-base-ctx)
-            _ (sci.core/add-namespace! authored-ctx 'authored.target {})
-            _ (sci.core/add-namespace! authored-ctx 'authored.consumer {})
-            _ (sci.core/binding [sci.core/ns
-                                 (sci.core/create-ns 'authored.target)]
-                (sci.core/eval-string* authored-ctx target-source))
-            _ (sci.core/install-namespace-bindings!
-               authored-ctx 'authored.consumer
-               {:aliases {'target 'authored.target}
-                :refers {'plus 'authored.target/increment}})
-            _ (sci.core/binding [sci.core/ns
-                                 (sci.core/create-ns 'authored.consumer)]
-                (sci.core/eval-string* authored-ctx consumer-source))
-            root-edn
-            (fn [function-symbol]
-              (binding [*print-meta* true]
-                (pr-str
-                 (first (sci.core/var-root-data authored-ctx
-                                                [function-symbol])))))]
-        (db/transact!
-         connection
-         [{:seon.agent/id "authored-order"
-           :seon.agent/namespace
-           {:seon.ns/name 'authored.target
-            :seon.ns/source "(ns authored.target)"}}
-          {:seon.ns/name 'authored.target
-         :seon.ns/source "(ns authored.target)"}
-        {:seon.ns/name 'authored.consumer
-         :seon.ns/source "(ns authored.consumer)"
-         :seon.ns/requires [[:seon.ns/name 'authored.target]]
-         :seon.ns/aliases
-         [{:seon.ns.alias/local 'target
-           :seon.ns.alias/target-ns 'authored.target}]
-         :seon.ns/refers
-         [{:seon.ns.refer/local 'plus
-           :seon.ns.refer/target-ns 'authored.target
-           :seon.ns.refer/target-name 'increment}]}
-        {:seon.ns/name 'alias.cycle-a
-         :seon.ns/source "(ns alias.cycle-a)"
-         :seon.ns/aliases
-         [{:seon.ns.alias/local 'b
-           :seon.ns.alias/target-ns 'alias.cycle-b}
-          {:seon.ns.alias/local 'ghost
-           :seon.ns.alias/target-ns 'not.loaded}]}
-        {:seon.ns/name 'alias.cycle-b
-         :seon.ns/source "(ns alias.cycle-b)"
-         :seon.ns/aliases
-         [{:seon.ns.alias/local 'a
-           :seon.ns.alias/target-ns 'alias.cycle-a}]}])
-        (db/transact!
-         connection
-         [{:seon.fn/sym "authored.target/increment"
-         :seon.schema.admission/source :agent
-         :seon.fn/ns [:seon.ns/name 'authored.target]
-         :seon.fn/source target-source
-         :seon.fn/arglists "([x])"
-         :seon.fn/private? false
-         :seon.fn/spec "[:=> [:cat :int] :int]"}
-        {:seon.fn/sym "authored.consumer/call-plus"
-         :seon.schema.admission/source :agent
-         :seon.fn/ns [:seon.ns/name 'authored.consumer]
-         :seon.fn/source consumer-source
-         :seon.fn/arglists "([x])"
-         :seon.fn/private? false
-         :seon.fn/spec "[:=> [:cat :int] :int]"}
-        {:seon.def/key (pr-str ["authored-order"
-                                "authored.target/increment#root"])
-         :seon.def/id "authored.target/increment#root"
-         :seon.def/agent [:seon.agent/id "authored-order"]
-         :seon.def/ns [:seon.ns/name 'authored.target]
-         :seon.def/name 'increment#root
-         :seon.def/value-edn (root-edn 'authored.target/increment)
-         :seon.def/ordinal 0
-         :seon.schema.admission/source :agent}
-        {:seon.def/key (pr-str ["authored-order"
-                                "authored.consumer/call-plus#root"])
-         :seon.def/id "authored.consumer/call-plus#root"
-         :seon.def/agent [:seon.agent/id "authored-order"]
-         :seon.def/ns [:seon.ns/name 'authored.consumer]
-         :seon.def/name 'call-plus#root
-         :seon.def/value-edn (root-edn 'authored.consumer/call-plus)
-         :seon.def/ordinal 0
-         :seon.schema.admission/source :agent}])
-      (let [ctx (sci.eval/build-base-ctx)
+            "(defn ^{:malli/schema [:=> [:cat :int] :int]} call-plus [x] (plus (target/increment x)))"
+            namespace-result
+            (db/transact!
+             connection
+             [{:seon.ns/name 'authored.target
+               :seon.ns/source "(ns authored.target)"}
+              {:seon.ns/name 'authored.consumer
+               :seon.ns/source "(ns authored.consumer)"
+               :seon.ns/requires [[:seon.ns/name 'authored.target]]
+               :seon.ns/aliases
+               [{:seon.ns.alias/local 'target
+                 :seon.ns.alias/target-ns 'authored.target}]
+               :seon.ns/refers
+               [{:seon.ns.refer/local 'plus
+                 :seon.ns.refer/target-ns 'authored.target
+                 :seon.ns.refer/target-name 'increment}]}
+              {:seon.ns/name 'alias.cycle-a
+               :seon.ns/source "(ns alias.cycle-a)"
+               :seon.ns/aliases
+               [{:seon.ns.alias/local 'b
+                 :seon.ns.alias/target-ns 'alias.cycle-b}
+                {:seon.ns.alias/local 'ghost
+                 :seon.ns.alias/target-ns 'not.loaded}]}
+              {:seon.ns/name 'alias.cycle-b
+               :seon.ns/source "(ns alias.cycle-b)"
+               :seon.ns/aliases
+               [{:seon.ns.alias/local 'a
+                 :seon.ns.alias/target-ns 'alias.cycle-a}]}])
+            function-result
+            (db/transact!
+             connection
+             [{:seon.fn/sym "authored.target/increment"
+               :seon.schema.admission/source :agent
+               :seon.fn/ns [:seon.ns/name 'authored.target]
+               :seon.fn/source target-source
+               :seon.fn/arglists "([x])"
+               :seon.fn/private? false
+               :seon.fn/spec "[:=> [:cat :int] :int]"}
+              {:seon.fn/sym "authored.consumer/call-plus"
+               :seon.schema.admission/source :agent
+               :seon.fn/ns [:seon.ns/name 'authored.consumer]
+               :seon.fn/source consumer-source
+               :seon.fn/arglists "([x])"
+               :seon.fn/private? false
+               :seon.fn/spec "[:=> [:cat :int] :int]"}])
+            database (db/db connection)
+            ctx (sci.eval/build-base-ctx)
             acquired
             (sci.eval/acquire!
              {:seon.sci.eval/ctx ctx
-              :seon.db/db @connection})]
-        (is (= 43
-               (sci.core/eval-string*
-                ctx "(authored.consumer/call-plus 41)"))
-            "refer and aliased target Vars exist before the consumer")
+              :seon.db/db database
+              :seon.schema/projection (db/carried-projection database)})]
+        (is (some? (:db-after namespace-result)))
+        (is (some? (:db-after function-result)))
+        (is (= 43 (sci.core/eval-string* ctx "(authored.consumer/call-plus 41)")))
         (is (= 'authored.target/increment
                (get-in (sci.core/namespace-bindings ctx 'authored.consumer)
                        [:refers 'plus])))
@@ -1670,8 +1557,8 @@
         (is (= 'not.loaded
                (get-in (sci.core/namespace-bindings ctx 'alias.cycle-a)
                        [:aliases 'ghost]))
-            "an effective as-alias target need not be loaded")
-        (is (= 6 (:seon.sci.eval/installed acquired))))))))
+            "an as-alias target need not be loaded")
+        (is (= 6 (:seon.sci.eval/installed acquired)))))))
 
 (deftest a-lost-model-call-leaves-a-durable-readable-reason
   ;; the drive sat claimed-with-no-plan for 120 s and the operator had to
@@ -1824,36 +1711,22 @@
               "the whole batch settles in one transaction"))))))
 
 (deftest a-whole-turn-runs-from-trigger-to-closed-run
-  (with-cluster fake-evaluate
+  (with-cluster
     (fn [cluster]
       (with-redefs [ai/complete
                     (fn [_] {:seon.ai/text
                              "(+ 1 1)\n(seon.run/complete \"two widgets\")"})]
-        (with-redefs [injected-evaluation {:seon.cluster.eval/result-edn "2"
-                               :seon.sci.admit/value 2}]
-          (let [connection (:seon.db/connection cluster)
-                reports (drive! cluster 10)]
-            (testing "the trigger was answered by exactly one run"
-              (is (empty? (turn/unanswered-triggers @connection "agent-a"))))
-            (testing "and the terminal resume closes without another pass"
-              (is (= [:open :call]
-                     (mapv :seon.turn.work/situation reports))))
-            (testing "every form got exactly one terminal receipt"
-              (is (= 2 (count (db/q '[:find ?e :where
-                                     [?e :seon.cluster.eval/ordinal _]]
-                                   @connection)))))
-            (testing "and the run is closed, so the agent is idle again"
-              (is (nil? (turn/next-agent-work @connection (request connection)))))))))))
+        (let [connection (:seon.db/connection cluster)
+              reports (drive-agent! cluster "agent-a" 2)
+              database (db/db connection)
+              evaluations (agent-evaluations database)]
+          (is (empty? (turn/unanswered-triggers database "agent-a")))
+          (is (= [:open :call] (mapv :seon.turn.work/situation reports)))
+          (is (= 2 (count evaluations)))
+          (is (= "2" (:seon.eval/shown (first evaluations))))
+          (is (str/includes? (:seon.eval/shown (second evaluations)) "two widgets"))
+          (is (nil? (turn/next-agent-work database (request connection)))))))))
 
-;;; A prose-only reply used to record a comment-only form row that nothing
-;;; could ever settle: the reader finds no event in it, so no receipt was
-;;; written and the run closed with an unsettled form of its own — the
-;;; 105-forms/102-receipts accounting gap, whose three real instances were
-;;; deepseek-v4-flash chat-template control markup reading as prose
-;;; (`docs/seon/issues/a-runs-last-form-can-close-without-a-receipt.md`).
-;;; The class is dead by construction: the reply reader never makes a plan
-;;; source out of prose alone, so a form row that cannot settle is
-;;; unrepresentable, and the turn refuses LOUDLY instead.
 (deftest a-pure-prose-reply-refuses-and-records-no-unsettleable-form
   (with-cluster fake-evaluate
     (fn [cluster]
@@ -2060,77 +1933,56 @@
                 "the run closed in the SAME transaction as its receipt")))))))
 
 (deftest a-combined-evaluation-projects-every-terminal-receipt-datom
-  ;; Characterization before receipt-request extraction: these facts used to
-  ;; be assembled by one inline cond-> and must survive together, not only in
-  ;; the separate examples that cover each attribute alone.
-  (with-cluster fake-evaluate
+  (with-cluster
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
-            result (seon.run/complete "combined receipt")
-            result-edn (pr-str result)
-            result-blob (apply str (repeat 64 "a"))
-            row {:seon.schema/key
-                         :my.agents.agent-a/combined-receipt
-                         :seon.schema/form ":string"}
-            installed (atom [])]
-        (with-redefs [ai/complete
-                      (fn [_]
-                        {:seon.ai/text
-                         "(seon.run/complete \"combined receipt\")"})
+            installed (atom [])
+            install-row! sci.eval/install-row!
+            schema-key :shared.runtime/combined
+            declaration (str "(seon.schema/register! :shared.runtime/combined "
+                             "(do (println \"combined output\") :string))")
+            source (str declaration "\n(seon.run/complete \"combined evaluation\")")]
+        (with-redefs [ai/complete (fn [_] {:seon.ai/text source})
                       sci.eval/install-row!
                       (fn [request]
-                        (swap! installed conj request))]
-          (with-redefs [injected-evaluation
-                    {:seon.sci.admit/value result
-                     :seon.cluster.eval/result-edn result-edn
-                     :seon.cluster.eval/result-blob result-blob
-                     :seon.cluster.eval/interrupted-at now
-                     :seon.cluster.eval/error "combined error"
-                     :seon.cluster.eval/output "combined output\n"
-                     :seon.program/row row}]
-            (is (= [:open :call]
-                   (mapv :seon.turn.work/situation
-                         (drive-agent! cluster "agent-a" 10))))
-            (let [receipt
-                  (db/q '[:find (pull ?receipt
-                                    [:seon.cluster.eval/result-edn
-                                     :seon.cluster.eval/result-blob
-                                     :seon.cluster.eval/interrupted-at
-                                     :seon.cluster.eval/error
-                                     :seon.cluster.eval/output]) .
-                         :where
-                         [?receipt :seon.cluster.eval/ordinal 0]]
-                       @connection)
-                  terminal-txs
-                  (db/q '[:find [?tx ...]
-                         :where
-                         [?receipt :seon.cluster.eval/ordinal 0]
-                         [?receipt :seon.cluster.eval/result-edn _ ?tx]
-                         [?receipt :seon.cluster.eval/result-blob _ ?tx]
-                         [?receipt :seon.cluster.eval/interrupted-at _ ?tx]
-                         [?receipt :seon.cluster.eval/error _ ?tx]
-                         [?receipt :seon.cluster.eval/output _ ?tx]
-                         [?run :seon.turn/closed-tx _ ?tx]
-                         [?schema :seon.schema/key
-                          :my.agents.agent-a/combined-receipt ?tx]]
-                       @connection)]
-              (is (= (assoc result :my.turn/delivered-to :outside)
-                     (semantic-result
-                      (:seon.cluster.eval/result-edn receipt)))
-                  "settlement accretes delivery onto the disposition")
-              (is (= {:seon.cluster.eval/result-blob result-blob
-                      :seon.cluster.eval/interrupted-at now
-                      :seon.cluster.eval/error "combined error"
-                      :seon.cluster.eval/output "combined output\n"}
-                     (dissoc receipt :seon.cluster.eval/result-edn)))
-              (is (= 1 (count terminal-txs))
-                  "receipt facts, program row, and completion close commit together")
-              (is (= [row]
-                     (mapv :seon.program/row @installed))
-                  "the committed row installs once into the live base context")
-              (is (identical? (:seon.sci.eval/ctx cluster)
-                              (:seon.sci.eval/ctx (first @installed)))
-                  "the install advances the live program base"))))))))
+                        (let [result (install-row! request)]
+                          (swap! installed conj request)
+                          result))]
+          (is (= [:open :call]
+                 (mapv :seon.turn.work/situation
+                       (drive-agent! cluster "agent-a" 2))))
+          (let [database (db/db connection)
+                evaluations (agent-evaluations database)
+                evaluation (first evaluations)
+                terminal-txs
+                (db/q '[:find [?tx ...]
+                        :in $ ?evaluation ?schema-key
+                        :where
+                        [?evaluation :seon.eval/shown _ ?tx]
+                        [?evaluation :seon.cluster.eval/output _ ?tx]
+                        [?evaluation :seon.cluster.eval/run ?turn]
+                        [?turn :seon.turn/closed-tx _ ?tx]
+                        [?schema :seon.schema/key ?schema-key]
+                        [?schema :seon.schema/form _ ?tx]]
+                      database (:db/id evaluation) schema-key)
+                schema-installations
+                (filter #(= schema-key
+                            (get-in % [:seon.program/row :seon.schema/key]))
+                        @installed)]
+            (is (= 2 (count evaluations)))
+            (is (= declaration (:seon.cluster.eval/source evaluation)))
+            (is (= ":shared.runtime/combined" (:seon.eval/shown evaluation)))
+            (is (str/includes? (:seon.eval/shown (second evaluations)) "combined evaluation"))
+            (is (= "combined output" (str/trim (:seon.cluster.eval/output evaluation))))
+            (is (nil? (:seon.cluster.eval/error evaluation)))
+            (is (= 1 (count terminal-txs))
+                "shown text, output, declaration and turn closure share one commit")
+            (is (= 1 (count schema-installations))
+                "the real installer receives the committed schema exactly once")
+            (is (= ":string"
+                   (:seon.schema/form
+                    (db/pull database [:seon.schema/form]
+                             [:seon.schema/key schema-key]))))))))))
 
 (deftest a-waiting-disposition-frees-the-agent-and-keeps-its-note
   ;; REVISED TWICE, each time toward one commit. First: a wait used to
@@ -2302,7 +2154,8 @@
             "and a call that worked committed no error fact")))))
 
 (deftest successful-call-persists-the-providers-open-usage-document
-  (with-cluster fake-evaluate
+  (doseq [retain? [false true]]
+    (with-cluster
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
             requests (atom [])
@@ -2311,6 +2164,12 @@
                    "prompt_cache_hit_tokens" 23
                    "prompt_cache_miss_tokens" 8
                    "prompt_tokens_details" {"cached_tokens" 23}}]
+        (when retain?
+          (is (some? (:db-after
+                      (db/transact! connection
+                                    [{:seon.agent/id "agent-a"
+                                      :seon.agent/settings
+                                      {:seon.config.ai/retain-reasoning true}}])))))
         (with-redefs [ai/complete
                       (recording-completer
                        requests
@@ -2318,10 +2177,7 @@
                          :seon.ai/reasoning-content "private reasoning"
                          :seon.ai/usage usage
                          :seon.ai/finish-reason "stop"}])]
-          (with-redefs [injected-evaluation {:seon.cluster.eval/result-edn
-                                  (pr-str (seon.run/complete "one"))
-                                  :seon.sci.admit/value (seon.run/complete "one")}]
-            (drive! cluster 10)))
+          (drive-agent! cluster "agent-a" 2))
         (let [[row :as rows] (attempt-rows @connection)]
           (is (= 1 (count rows)))
           (is (= usage
@@ -2332,11 +2188,12 @@
                   (ai/normalize-usage
                    (edn/read-string (:seon.ai.attempt/usage-edn row)))))
               "DeepSeek's cache-hit tokens normalize from the stored document")
-          (is (= "private reasoning"
-                 (:seon.ai.attempt/reasoning row))
+          (is (if retain?
+                (= "private reasoning" (:seon.ai.attempt/reasoning row))
+                (not (contains? row :seon.ai.attempt/reasoning)))
               "settled reasoning reaches the same durable attempt row")
           (is (= "stop" (:seon.ai.attempt/finish-reason row))
-              "finish reason is its own fact, never inserted into usage"))))))
+              "finish reason is its own fact, never inserted into usage")))))))
 
 (deftest a-partial-stream-truncation-is-a-durable-nonfailure-attempt-fact
   (with-cluster fake-evaluate
@@ -2400,7 +2257,8 @@
               "the already-arrived completion still settles as the plan"))))))
 
 (deftest reasoning-starvation-persists-usage-finish-and-the-named-error
-  (with-cluster fake-evaluate
+  (doseq [retain? [false true]]
+    (with-cluster
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
             requests (atom [])
@@ -2418,8 +2276,14 @@
                       :seon.ai/request-transmitted? true
                       :seon.ai/response-started? true
                       :seon.ai/output-observed? true}}]
+        (when retain?
+          (is (some? (:db-after
+                      (db/transact! connection
+                                    [{:seon.agent/id "agent-a"
+                                      :seon.agent/settings
+                                      {:seon.config.ai/retain-reasoning true}}])))))
         (with-redefs [ai/complete (recording-completer requests [failure])]
-          (drive! cluster 10))
+          (drive-agent! cluster "agent-a" 2))
         (let [[row :as rows] (attempt-rows @connection)
               error-fact (db/pull @connection '[*]
                                  (:db/id (:seon.ai.attempt/error row)))]
@@ -2427,10 +2291,12 @@
           (is (= usage
                  (edn/read-string (:seon.ai.attempt/usage-edn row))))
           (is (= "length" (:seon.ai.attempt/finish-reason row)))
-          (is (= "all reasoning" (:seon.ai.attempt/reasoning row))
+          (is (if retain?
+                (= "all reasoning" (:seon.ai.attempt/reasoning row))
+                (not (contains? row :seon.ai.attempt/reasoning)))
               "reasoning-only starvation still persists the settled trace")
           (is (= :seon.ai/token-starvation (:seon.error/kind error-fact))
-              "the receipt points at the named starvation error fact"))))))
+              "the attempt points at the named starvation error fact")))))))
 
 (deftest reasoning-only-time-limit-persists-its-flat-diagnostic
   (with-cluster fake-evaluate

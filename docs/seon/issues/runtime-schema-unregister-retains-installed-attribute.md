@@ -29,3 +29,30 @@ Acceptance: the same real register/unregister turn removes the unused database
 attribute and schema definition, preserves its program identity tombstone,
 and retains the existing refusal when current data uses an affected attribute.
 See [the lane evidence](../../prds/context-generation/research/turn-test-reds-2026-09-16.md).
+
+## Owning-seam probe — 2026-09-16 01:46 UTC
+
+A scoped observer around the real `schema-attribute-change-tx` in the isolated
+snapshot JVM captured the complete call during the unchanged register/unregister
+scenario:
+
+```clojure
+{:turn-test-reds/current-form nil
+ :turn-test-reds/candidate-form nil
+ :turn-test-reds/stored-form
+ {:seon.schema/form "[:int #:seon.db{:index true}]"}
+ :turn-test-reds/installed
+ {:db/ident :shared.runtime/unregister-me
+  :db/valueType :db.type/long
+  :db/cardinality :db.cardinality/one
+  :db/index true}
+ :turn-test-reds/tx-data []}
+```
+
+Thus the transaction's database already contains the schema and installed
+attribute, while the supplied projection lacks it. The comparison emits no
+retraction. The fix belongs at the declaration writer's projection acquisition:
+derive the projection from that transaction's actual program facts, including
+prior rows in the same batch, before comparing desired declarations. A guard
+on this single attribute would leave the class intact. `src/seon/turn.clj`
+remains protected; no foreign code or live session was changed.

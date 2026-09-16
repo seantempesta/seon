@@ -140,3 +140,41 @@ all three expected namespaces instead of comparing a row's namespace with
 itself. One-reply fixtures execute the two transitions they intend; they no
 longer accidentally drive later continuation turns. No production continuation
 or reader behavior changed.
+
+### Protected schema-deletion residual
+
+The [complete owning-seam trace](turn-test-reds-unregister-trace-2026-09-16.edn)
+proves stale projection input: current and candidate forms are both absent,
+but the transaction database contains the declaration and a live indexed long
+attribute. The diff returns `[]`. The writer must derive its projection from
+its actual mid-batch database facts before calculating schema changes. The
+protected `seon.turn/row-tx` owner was not edited. Its issue records this exact
+needed change; the old failing removal assertion remains intact.
+
+A final read-only probe of the hot-reloaded deletion owner in default returned
+`{:turn-test-reds/absent? true :turn-test-reds/deleted? true}` in **4 ms**.
+This is direct live Var evidence, not a claim of complete default publication
+or a namespace gate. The exact form is retained in the probe script.
+
+### Slice 3 — complete execution and configuration fixtures
+
+Eight tests pass **69 assertions / 0 failures / 0 errors** after editing and
+in-place snapshot adoption at `6aa9f4da-6be3-5d8a-9558-2c59863ee53b`;
+recorded runs 41494–41501. Each candidate passed its fresh-base in-process run
+before the file edit. The [complete after-adoption results](turn-test-reds-fixtures-after-adoption-2026-09-16.edn)
+name all eight tests.
+
+The constructor seam is the real SCI evaluation and canonical configuration
+application. Tests no longer invent impossible terminal envelopes, return a
+vector from a map-returning installation owner, omit a required carried
+projection, or pass an incomplete singleton to configuration reconciliation.
+The combined-evaluation regression wraps the real installation function and
+asserts one transaction for output, shown text, schema declaration, and closure.
+The acquisition regression uses durable source and contracts rather than retired
+private-root blobs. Provider cases exercise default retention and explicit
+retention with complete configuration and real evaluation; normalized usage is
+still checked from its stored provider document at this snapshot's HEAD.
+
+The delimiter candidate's semantic assertions passed, but its existing
+300 ms bookkeeping assertion measured **6694.698498 ms**. It is not retained or
+weakened. This performance residual remains outside the landed fixture repair.

@@ -1,0 +1,1 @@
+[#:turn-test-reds{:current-form nil, :candidate-form nil, :stored-form #:seon.schema{:form "[:int #:seon.db{:index true}]"}, :installed #:db{:ident :shared.runtime/unregister-me, :valueType :db.type/long, :cardinality :db.cardinality/one, :index true}, :tx-data []}]

@@ -37,3 +37,41 @@
                                          :seon.test/run])))
                 test-names)))
            (finally (#'seon.test-support/close-base! base))))))))
+
+(comment
+  ;; Default's read-only after-edit seam probe (returned true/true in 4 ms).
+  (let [database (seon.db/db (seon.operator/connection "default"))
+        identity [:seon.test/sym "my.agents.turn-reds/never-declared"]]
+    {:turn-test-reds/absent? (nil? (seon.db/pull database '[*] identity))
+     :turn-test-reds/deleted?
+     (seon.sci.eval/committed-row?
+      database
+      {:seon.program/delete-identities [identity]
+       :seon.program/source "(ns-unmap 'my.agents.turn-reds 'never-declared)"})})
+
+  ;; Scope this observer only around the isolated snapshot's serial test run.
+  ;; The real declaration-diff function runs; no result is substituted.
+  (let [observations (atom [])
+        original @#'seon.turn/schema-attribute-change-tx]
+    (try
+      (with-redefs-fn
+        {#'seon.turn/schema-attribute-change-tx
+         (fn [database current candidate]
+           (let [tx (original database current candidate)
+                 k :shared.runtime/unregister-me]
+             (swap! observations conj
+                    {:turn-test-reds/current-form
+                     (get (:seon.schema.projection/forms current) k)
+                     :turn-test-reds/candidate-form
+                     (get (:seon.schema.projection/forms candidate) k)
+                     :turn-test-reds/stored-form
+                     (seon.db/pull database [:seon.schema/form] [:seon.schema/key k])
+                     :turn-test-reds/installed (get (:schema database) k)
+                     :turn-test-reds/tx-data tx})
+             tx))}
+        #(turn-reds-run
+          "unregister-trace"
+          ["runtime-schema-unregister-removes-one-unused-global-schema"]))
+      (finally
+        (spit "tmp/turn-test-reds/unregister-trace.edn"
+              (pr-str @observations))))))
