@@ -138,3 +138,14 @@
   issue-family (platform red), issue-settlement, agent-call-edges and the
   peer's turn-test-reds. Rule going forward: at most four lanes probing
   default at once; reds triage runs serially after the platform is green.
+- 06:20Z Opus triage of reach-digest's batch-19 reds (per the owner's rule:
+  astra only for hard implementations): two reds were reach-digest's own
+  and already repaired at HEAD by `1b5c09e15` (pull selector missing the
+  digest; and the substantive one — `completion-reach-digests` opened the
+  gate's SHARED published-base store under its lifetime flock on every
+  `commit-results!`, serialising concurrent gates: now the canonical private
+  fixture); one was a foreign fixture bug from the file-ref accretion, fixed
+  at the test owner (`e441e0263`); the remaining red is the agent-local call
+  edge owned by agent-call-edges. Opus triage of error-graph's batch 20 is
+  running; program-provenance, generated-read-identities and
+  attempt-and-eval-facts follow serially.
