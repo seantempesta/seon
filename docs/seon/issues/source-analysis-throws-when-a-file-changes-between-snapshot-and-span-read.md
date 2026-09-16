@@ -44,3 +44,11 @@ but a span computed from a different text than the one sliced — a cached
 analysis (the analyzer's shared cache, or spans carried on program rows from
 an earlier version) applied to the current file. That would make the
 defect deterministic and a blocker for adoption, not a race.
+
+## Update 2026-09-16 21:20Z — it was a live edit after all
+
+The 114,007-byte file was `test/seon/render/web_test.clj` (114,561 bytes
+minutes later, dirty under the dir-elision lane's edits), not `fn.clj`. So
+the class stands as filed: a file changing between the analysis snapshot
+and the span read yields a raw index exception instead of the typed
+source-changed refusal the operator retries on.
