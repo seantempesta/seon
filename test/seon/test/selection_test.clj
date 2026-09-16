@@ -9,7 +9,8 @@
   absent — and it must decide from recorded facts (`:seon.fn/calls` edges
   and content digests), never from a modification time, a filename, or a
   maintained list."
-  (:require [clojure.java.io :as io]
+  (:require [babashka.process :as process]
+            [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [seon.test.selection :as selection])
@@ -92,8 +93,12 @@
   (is (selection/widening-path? "config/default.edn"))
   (is (not (selection/widening-path? "src/seon/db.clj")))
   (is (not (selection/widening-path? "test/seon/db_test.clj")))
-  (is (not (selection/widening-path? "resources-of-mine.edn"))
-      "prefix matching is path-segment exact, never a string prefix"))
+  (is (selection/widening-path? "resources-of-mine.edn"))
+  (is (selection/widening-path? "new-gate-input/custom.edn"))
+  (is (selection/widening-path? "src-other/example.clj"))
+  (doseq [root selection/graph-roots]
+    (is (not (selection/widening-path? root)))
+    (is (not (selection/widening-path? (str root "/example.clj"))))))
 
 (deftest changed-inputs-are-decided-by-content-not-modification-time
   (let [root (.toFile (Files/createTempDirectory
@@ -103,6 +108,8 @@
         _ (.mkdirs source)
         file (io/file source "leaf.clj")]
     (try
+      (process/check (process/shell {:dir (.getPath root) :out :string :err :string}
+                                    "git" "init"))
       (spit file "(ns example.leaf)\n")
       (let [first-pass (selection/input-digests (.getPath root))]
         (is (contains? first-pass "src/example/leaf.clj"))
@@ -149,6 +156,8 @@
           checkout (io/file root "checkout")
           _ (.mkdirs (io/file checkout "src"))]
       (try
+        (process/check (process/shell {:dir (.getPath checkout) :out :string :err :string}
+                                      "git" "init"))
         (spit (io/file checkout "src" "real.clj") "(ns real)\n")
         (Files/createSymbolicLink
          (.toPath (io/file checkout "deps.edn"))

@@ -13,7 +13,8 @@
   Nothing here consults a file modification time, a filename convention, or a
   maintained list. A file is changed when its SHA-256 differs from the digest
   recorded by the last green run."
-  (:require [clojure.edn :as edn]
+  (:require [babashka.process :as process]
+            [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str])
   (:import (java.io File)
@@ -24,15 +25,10 @@
   "Roots whose files are represented in the program-graph manifest."
   ["src" "test"])
 
-(def widening-inputs
-  "Declared gate inputs that no `:seon.fn/calls` edge can reach.
-
-  A schema resource, a config default, an operator script, a dependency
-  manifest, or the gate itself can change the behaviour of any test without
-  changing one indexed call edge. A change below these paths widens the
-  default tier to every non-long test rather than guessing."
-  ["resources" "config" "script" "bin/test" "bb.edn" "deps.edn"
-   ".clj-kondo/config.edn"])
+(def ^:private inventory-bound-ms
+  "Bound for Git's local file inventory, matching the existing issue-history
+  Git read allowance. Expiry refuses selection rather than omitting inputs."
+  30000)
 
 (defn- sha-256
   [^bytes source-bytes]
@@ -44,30 +40,26 @@
   (str/replace (str (.relativize (.toPath root) (.toPath file)))
                File/separator "/"))
 
-(defn- symbolic-link?
-  [^File file]
-  (Files/isSymbolicLink (.toPath file)))
-
-(defn- files-below
-  "Regular files below one input, never descending a symbolic link.
-
-  A symbolic link to a FILE is digested through the link — `bin/test` copies
-  the first-party directories into its isolated run root but symlinks
-  top-level files such as `deps.edn`, and their content is what the basis
-  compares. A symbolic link to a DIRECTORY is never traversed, so the walk
-  can only ever see paths below its own root."
-  [^File input]
-  (cond
-    (symbolic-link? input) (when (.isFile input) [input])
-    (.isDirectory input) (mapcat files-below (.listFiles input))
-    (.isFile input) [input]))
-
-(defn- digestible?
-  [^File file]
-  (not (str/includes? (.getPath file) "/__pycache__/")))
+(defn- input-paths
+  [^File root]
+  (let [child (process/process
+               ["git" "--work-tree" (.getPath root) "ls-files"
+                "--cached" "--others" "--exclude-standard" "-z"]
+               {:dir (.getPath root) :out :string :err :string})]
+    (try
+      (let [result (deref child inventory-bound-ms ::expired)]
+        (when (or (= ::expired result) (not= 0 (:exit result)))
+          (throw (ex-info "Git could not enumerate test inputs."
+                          {:seon.test.selection/root (.getPath root)
+                           :seon.test.selection/result result})))
+        (vec (enumeration-seq
+              (java.util.StringTokenizer. (:out result) (str (char 0))))))
+      (finally (process/destroy-tree child)))))
 
 (defn input-digests
-  "SHA-256 by repository-relative path for every declared gate input."
+  "Hash Git's tracked and non-ignored files by repository-relative path.
+  Directory links and submodule directories are never traversed.
+  The gate snapshot carries the source Git index but hashes its own bytes."
   {:malli/schema [:=> [:cat [:string {:min 1}]]
                   [:map-of [:string {:min 1}] [:string {:min 1}]]]}
   [root]
@@ -75,12 +67,12 @@
     (into
      (sorted-map)
      (comp
-      (mapcat (fn [input] (files-below (io/file root-file input))))
-      (filter digestible?)
+      (map #(io/file root-file %))
+      (filter #(.isFile ^File %))
       (map (fn [^File file]
              [(relative-path root-file file)
               (sha-256 (Files/readAllBytes (.toPath file)))])))
-     (concat graph-roots widening-inputs))))
+     (input-paths root-file))))
 
 (defn changed-inputs
   "Repository-relative paths whose bytes differ from a recorded basis."
@@ -109,11 +101,11 @@
   "True when a changed path is a gate input outside the program graph."
   {:malli/schema [:=> [:cat [:string {:min 1}]] :boolean]}
   [path]
-  (boolean
+  (not
    (some (fn [input]
            (or (= path input)
                (str/starts-with? path (str input "/"))))
-         widening-inputs)))
+         graph-roots)))
 
 (defn- row-identities
   [row]

@@ -1,11 +1,34 @@
 ---
 type: research
-status: blocked; assignment stop boundary, proposed hunk only
+status: active; resumed after owner clarified item-local stop boundary
 created: 2026-09-16
 tags: [workarounds, program, environment, values-carry-their-world]
 ---
 
 # Environment carries it — review boundary
+
+## Resumed assignment: item 21
+
+The owner clarified that item 20's stop applies only to that item. The
+initial stop record below is historical; independent work resumed.
+
+`widening-inputs` is removed. `widening-path?` is the complement of
+`graph-roots`, with exact path-segment matching. Input hashing enumerates
+Git's tracked and non-ignored files, using the snapshot's own working-tree
+bytes. Git supplies NUL-delimited paths; no filename/prose parsing or input
+roster remains. Directory links and submodule directories are not walked.
+The existing Babashka process owner supplies bounded completion and cleanup
+(`reference-code/babashka-process/src/babashka/process.cljc:119`, `:165`).
+
+At edit time selection.clj was clean; its existing `read-basis` region was
+unchanged. No foreign hunk was included. Verification:
+`bin/test-fast --paths src/seon/test/selection.clj
+test/seon/test/selection_test.clj -- seon.test.selection-test`: **5 tests,
+27 assertions, 0 failures, 0 errors**. Log:
+`tmp/environment-selection-fast.log`. The regression covers new outside
+paths, near-prefix paths and every declared graph root; existing content
+and symlink regressions pass. A subsequent cleanup removed the now-unused
+private symlink predicate and corrected the docstring; behavior is unchanged.
 
 Read AGENTS.md §0–§3 and §5–§7 and
 [workaround-inventory-2026-09-16.md](workaround-inventory-2026-09-16.md)
