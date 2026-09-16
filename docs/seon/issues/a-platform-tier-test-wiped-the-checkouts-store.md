@@ -135,3 +135,19 @@ owners (typed refusal before any delete; the owner's deliberate `reset
 before every delete; the two fallbacks removed; the symlinked-sentinel class
 regression. Gates stay held until it lands. Full page:
 `docs/prds/context-generation/research/store-wipe-2026-09-17.md`.
+
+## Actual cause 2026-09-17 12:00Z (peer `ccccea806`)
+
+`seon.cluster/operator-root` answered the JVM property `-Dseon.operator.root`
+(default's own root = the checkout) BEFORE the root the caller held — a
+fetch-at-call-time defect (§2.1). So an IN-PROCESS fixture run inside
+default's JVM (`test-support/populate-published-root!` with a
+`tmp/<test>/<uuid>` root; verified live: resolve-bootstrap with that root
+returned `/Users/sean/src/seon/data/store`) ran delete + clone over the
+developer's store. A lane's repl-rule run did it, not a gate; every lane on
+default could have. Fixed: recursive deletion admitted only with absolute
+root+target under a root the JVM was DECLARED to operate; operator-root
+takes the caller's root first; create-store! refuses to delete a store whose
+`:branches` roster is present; every delete logs root/targets/bytes/caller/pid.
+Regressions 22/0/0, 6/0/0. Gates resumed (batch 65). Item 3 (platform tier
+carries no destructive drill; tier checker) is a separate lane.
