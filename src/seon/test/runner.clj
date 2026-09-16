@@ -16,10 +16,15 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.env :as env]
+            [seon.fn :as seon.fn]
+            [seon.instrument :as instrument]
             [seon.id :as id]
             [seon.program :as program]
+            [seon.render :as render]
             [seon.render.value :as value]
             [seon.schema :as schema]
+            [seon.schema.edn :as schema.edn]
+            [seon.test.arm :as test.arm]
             [seon.test.selection :as selection]
             [seon.test.cache :as cache])
   (:import (java.io BufferedReader PrintWriter StringWriter)
@@ -37,6 +42,17 @@
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
   [value]
   (or (var? value) (sci.utils/var? value)))
+
+;;; LOAD-CYCLE BOUNDARIES. `seon.cluster` requires `seon.test.runner`
+;;; transitively, so this namespace cannot require it back. One resolution
+;;; per var, realized at first use, instead of a `requiring-resolve` on every
+;;; call (AGENTS §2.1).
+(defonce ^:private cluster-start!
+  (delay (requiring-resolve 'seon.cluster/start!)))
+(defonce ^:private cluster-stop!
+  (delay (requiring-resolve 'seon.cluster/stop!)))
+(defonce ^:private cluster-refresh-source!
+  (delay (requiring-resolve 'seon.cluster/refresh-source!)))
 
 (def var-generator
   "Finite representatives for the closed host/SCI Var representation sum."
@@ -94,7 +110,7 @@
     (assoc (select-keys configuration
                         [:seon.print/length :seon.print/level])
            :seon.render/profile
-           ((requiring-resolve 'seon.render/agent-render-profile) configuration))))
+           (render/agent-render-profile configuration))))
 
 (defn- throwable-signature
   [^Throwable failure]
@@ -699,7 +715,7 @@
   built over, so namespace discovery keys on a root the program graph admits
   rather than on a filename suffix."
   (delay
-    (let [roots @(requiring-resolve 'seon.fn/source-roots)]
+    (let [roots @seon.fn/source-roots]
       (or (some #{"test"} roots)
           (throw
            (ex-info
@@ -1391,7 +1407,7 @@
                             (meta candidate)]
                         (symbol (str (ns-name namespace-object))
                                 (str var-name)))))
-               ((requiring-resolve 'seon.instrument/instrumented)))
+               (instrument/instrumented))
          ::snapshot-registered
          (into #{}
                (mapcat (fn [[namespace-symbol entries]]
@@ -1575,7 +1591,7 @@
 (defn- packaged-test-projection
   "Acquire the packaged projection once for one test-runner JVM."
   [role]
-  (let [forms ((requiring-resolve 'seon.schema.edn/packaged-forms))
+  (let [forms (schema.edn/packaged-forms)
         _ (load-declared-predicate-owners! forms)
         projection (schema/declaration-projection forms)]
     (binding [*out* *err*]
@@ -1678,12 +1694,12 @@
            ::instrumentation-unavailable true})))
       declared)))
 
-(def ^:private arm-contracts! (requiring-resolve 'seon.test.arm/arm-contracts!))
+(def ^:private arm-contracts! #'test.arm/arm-contracts!)
 
 (defn- initialize-contracts!
   "Load selected tests and acquire the one arming value for workers and test-fast."
   [role namespaces projection]
-  ((requiring-resolve 'seon.test.arm/initialize-contracts!) role namespaces projection))
+  (test.arm/initialize-contracts! role namespaces projection))
 
 (defn- reassert-contracts!
   "Re-arm this worker JVM when a task left its contracts stripped.
@@ -1705,7 +1721,7 @@
   costs one re-arm rather than a silently unarmed remainder."
   [arming worker-id]
   (when-let [{::keys [projection namespaces instrumented decision]} arming]
-    (let [live (count ((requiring-resolve 'seon.instrument/instrumented)))]
+    (let [live (count (instrument/instrumented))]
       ;; LESS than the worker armed means a task STRIPPED wrappers, which is
       ;; the hazard. More means a test armed something extra of its own and is
       ;; expected to undo it; re-arming over that would fight its subject.
@@ -1818,6 +1834,8 @@
         started (System/nanoTime)
         base (schema/call-with-projection
               projection
+              ;; `seon.test-support` lives under `test/`: a deliberate late
+              ;; dependency of the worker, never a load-cycle dodge.
               #(deref @(requiring-resolve 'seon.test-support/database-base)))]
     (when (:seon.error/kind base)
       (throw (ex-info "A test worker could not prepare its canonical fixture base."
@@ -2284,7 +2302,7 @@
                         (mapcat val)
                         (remove known-present))
                reaches))
-        packaged-forms ((requiring-resolve 'seon.schema.edn/packaged-forms))
+        packaged-forms (schema.edn/packaged-forms)
         portable-reach
         (fn [refs]
           (into [] (keep (partial source/identity-ref packaged-forms absent-identities)) refs))
@@ -2452,8 +2470,8 @@
 
 (defn- start-cluster!
   [cluster-name root]
-  (let [start! (requiring-resolve 'seon.cluster/start!)
-        stop! (requiring-resolve 'seon.cluster/stop!)]
+  (let [start! @cluster-start!
+        stop! @cluster-stop!]
     (try
       (start! {:seon.boot/cluster-name cluster-name
                :seon.boot/root root})
@@ -2468,6 +2486,7 @@
   (if (and (:seon.test/reach-digests run-result) (:seon.test/reaches run-result))
     run-result
     (try
+     ;; `seon.test-support` lives under `test/`: a deliberate late dependency.
      ((requiring-resolve 'seon.test-support/with-database)
      (fn [connection]
        (let [database (db/db connection)
@@ -2515,12 +2534,12 @@
                            :seon.test.run/basis-t :seon.test.run/branch])}]
         (commit-results! connection completion))
       (finally
-        ((requiring-resolve 'seon.cluster/stop!) instance)))))
+        (@cluster-stop! instance)))))
 
 (defn- commit-persistent-results!
   "Commit one completion through the source publication owner."
   [held-store run-result]
-  ((requiring-resolve 'seon.cluster.source/record-results!)
+  (source/record-results!
    held-store
    {:seon.test/reach-digests (:seon.test/reach-digests run-result)
     :seon.test/reaches (:seon.test/reaches run-result)
@@ -2622,6 +2641,8 @@
     (try
       (let [{live? :seon.fresh-operator/live-process?
              value :seon.fresh-operator/value}
+            ;; `seon.fresh-operator` lives under `script/`: a deliberate late
+            ;; dependency of the operator drill, never a load-cycle dodge.
             ((requiring-resolve 'seon.fresh-operator/live-root-value!)
              operator-root (persistent-results-form (str completion-file)))]
         (if live?
@@ -2854,6 +2875,7 @@
 
 (defn- event-backstop-seconds
   []
+  ;; `seon.test-support` lives under `test/`: a deliberate late dependency.
   (long @(requiring-resolve 'seon.test-support/event-backstop-seconds)))
 
 (defn- append-dispatch!
@@ -3724,7 +3746,7 @@
   []
   (if-let [base (System/getProperty "seon.test.published-base")]
     (cache/manifest base)
-    ((requiring-resolve 'seon.fn/build-manifest)
+    (seon.fn/build-manifest
      {:seon.fn/roots selection/graph-roots})))
 
 (defn- run-coordinator!
@@ -3955,7 +3977,7 @@
         (when-not (= expected actual)
           (throw (ex-info "Publication classpath does not name its snapshot."
                           {::expected (str expected) ::actual (str actual)}))))
-      ((requiring-resolve 'seon.cluster/refresh-source!) root)
+      (@cluster-refresh-source! root)
       (let [held-store (store/open-store!
                         {:seon.store/dir (str (io/file root "data" "store"))})]
         (try
