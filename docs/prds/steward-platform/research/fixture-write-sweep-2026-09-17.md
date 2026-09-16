@@ -448,3 +448,117 @@ likeliest source; this lane did not touch them and did not attempt a repair.
 
 **Everything in `4d181533d`, `55a0abae0` and `d7e5a0268` is therefore
 edit-verified and lint-clean but COLD-GATE-UNPROVEN.**
+
+## Fourth pass: batch 75 — the authored turn, and two attributions
+
+Batch 75: 184 F / 7 E over the pass-3 namespaces, 154 of them
+`concurrency-independence` (blocked on the history-cut ruling, untouched).
+
+### The root cause under most of the turn reds: an AUTHORED turn is not an open turn
+
+`ae0e54841` moved the agent→turn edge onto a RUNTIME COMPONENT. The agent's
+open turn is read through it:
+
+```clojure
+;; src/seon/turn.clj:330, seon.turn/open-for-agent
+[?runtime :seon.runtime/agent ?agent]
+[?runtime :seon.runtime/turns ?turn]
+(not [?turn :seon.turn/closed-tx])
+```
+
+Only `open-call` writes that edge. Two derivation tables authored
+`{:seon.turn/id … :seon.turn/agent …}` rows directly, so `agent-run` answered
+nil and EVERY row derived `:open` or idle no matter what else it built. Both
+now open through `seon.turn/open-tx`, with the planned / closed / completed
+markers as datoms on the opened turn.
+
+| test | before | after (in process) |
+|---|---|---|
+| `seon.turn-work-test/the-derivation-is-total-over-every-state` | 16 / 6 / 0 | **25 / 0 / 0** |
+| `seon.turn-work-test/a-generated-run-resumes-then-requests-one-more-form` | 0 / 3 / 0 | **3 / 0 / 0** |
+| `seon.turn-work-test/comment-only-input-is-recorded-but-never-becomes-eval-work` | 1 / 2 / 0 | **3 / 0 / 0** |
+| `seon.turn-loop-test/kill-positions-per-agent-test` | 1 / 5 / 0 | **6 / 0 / 0** |
+
+Two expectations followed the writer's own rulings rather than the reverse:
+
+- **"claimed, no plan, custody died" expected `nil`** because a turn used to
+  be able to carry no situation. `open-call` writes
+  `:seon.turn.work/situation :call` at open (`src/seon/turn.clj:377`), so that
+  state is unproducible — and `seon.turn-work-test`'s totality table has said
+  `:call` for the same state all along. The stale table followed the live one.
+- **Idle after a closed run needs the DISPOSITION.** A closed provider reply
+  CONTINUES unless its turn carries one (`src/seon/turn.clj:2845`); the
+  disposition is the fact `my.turn/complete` leaves
+  (`src/seon/turn.clj:3512`). Both tables now record it, which is what the
+  rows meant by "idle".
+- **`triggers-come-back-oldest-first`** bound an arrival instant per message
+  and expected the order to follow it. The instant was never written —
+  clj-kondo had been reporting the binding unused — and there is no arrival
+  attribute: `unanswered-triggers` sorts by `(juxt :seon.wake/t :db/id)`
+  because answeredness is decided in exactly one place, by `:t`
+  (`src/seon/turn.clj:3003`, turn PRD §14). 1 / 0 / 0 after.
+
+Commits: `04a364e93`, `4b0e21c16`, `583b43d5b`, `132e0ae73`.
+
+### The two ERRORS, attributed (reported, not forced)
+
+**1. `seon.render.walk/ordered-episode refused … [:seon.repl/candidates N
+:seon.repl/subject]: expected an integer, got a symbol`.** The PRODUCER is the
+stale side, and it is not the vocabulary. `seon.bootstrap/namespace-subject`
+(`src/seon/bootstrap.clj:219`) takes a valid lookup `[:seon.ns/name my.foo]`
+and returns its VALUE — a bare symbol — then assigns it to
+`:seon.repl/subject`, which is contracted as `:seon.render.walk/lookup`
+(`:int`, `:keyword`, `:string`, `:uuid`, or `[qualified-keyword value]`;
+`resources/seon/schemas/seon.render.walk.edn:18`). A bare symbol is not an
+entity lookup, and the neighbouring producer
+(`usage-demonstration-candidates`, `:432`) passes `subject-lookup` correctly.
+Owning commit: `91f536c36` "Derive opening episode from symbol frontier" —
+the frontier is symbols, but the SUBJECT is still the entity the candidate is
+about. This is not the result-handle question: the ruled `result/e<id>` symbol
+handle lives on `:seon.repl/handle`, not here.
+
+**2. "The capability request does not satisfy its owner contract" — a
+platform defect, measured.** `seon.effect/accepts-request?`
+(`src/seon/effect.clj:178`) asks
+`(schema/function-accepts-in? projection owner-sym [request])`, and that
+function validates the COMPLETE declared input contract (its own docstring,
+`src/seon/schema.clj:3093`). Every capability owner takes TWO arguments —
+the request and the effective config the executor hands it. Live on pid 74930:
+
+```clojure
+{:one-arg false   ; seon.web.jvm/fetch with [request]
+ :two-arg true    ; seon.web.jvm/fetch with [request effective]
+ :fs-one  false}  ; seon.fs.jvm/read with [request]
+```
+
+So the door refuses EVERY declared capability. It surfaced only because the
+sweep made `seon.web.jvm-test`'s seed honest, so the door was reached for the
+first time — the named class from the other side: a check that had never run
+reads as health. Issue filed:
+[the-effect-door-validates-a-one-argument-request-against-a-two-argument-owner](../../../seon/issues/the-effect-door-validates-a-one-argument-request-against-a-two-argument-owner.md).
+Introduced with `0e15593aa`. Not repaired here — the effect owner's slice.
+
+### Per-namespace verdict, pass 4
+
+| namespace | batch 75 | now |
+|---|---|---|
+| `seon.turn-work-test` | 13 F | 3 tests green in process; `situation-totality-property` 1 F remains (same continuation/disposition family: the generator closes runs without recording one) |
+| `seon.turn-loop-test` | 11 F | `kill-positions` 6/0/0 green. Untouched: `attempt-settlement-updates-the-registered-model-gauges` 3 F (`ai/model-row` answers nil — the gauges are never written), `prompt-and-call-resolve-once` 2 F + 1 E (the overlay the fixture applies is not the one the call reads: it got the shipped `deepseek-*` models), `a-clean-last-form…` 1 F |
+| `seon.cluster.problem-routing-test` | 2 F | untouched (form-state derivation) |
+| `seon.render.web-context-test` | 2 F | untouched — the bystander fix did not settle it; ANY commit now re-walks (`@walks` 2 vs 1 AND 3 vs 2), which is a question for the acquisition owner, not the seed |
+| `seon.render.web-test` | 1 F | untouched (same shape: discovery/invocation counts move) |
+| `seon.bootstrap-test` | 1 F + 1 E | `intent-membership` delta untouched; the ERROR is attribution 1 above |
+| `seon.web.jvm-test` | 2 E | attribution 2 above — a platform defect, not a fixture |
+| `seon.concurrency-independence-test` | 154 F | blocked on the history-cut ruling |
+
+### Verification boundary, fourth pass
+
+- In process on `default`, one test at a time, across pids 74930 and 88182
+  (the store was reset mid-pass; the base was reconstructed per the rule on
+  the new pid before the first run).
+- One run answered `"Cannot delete a branch with an active connection"` and
+  was re-run clean — a fixture branch-lease race in the shared JVM, named
+  rather than hidden.
+- `src/seon/fn.clj`, `test/seon/fn_test.clj` and `test/seon/program_test.clj`
+  carried a peer lane's uncommitted edits at the end of this pass; none was
+  touched or committed here.
