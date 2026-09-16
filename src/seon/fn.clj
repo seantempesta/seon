@@ -43,10 +43,12 @@
   [result phase]
   (when (:seon.error/kind result)
     (throw
-     (ex-info "Program indexing transaction was refused."
-              {:seon.error/kind ::index-refused
-               :seon.fn/index-phase phase
-               :seon.fn/transaction-result result :seon.fn/index-refused true})))
+     (ex-info
+      (str "Program indexing transaction was refused. "
+           (:seon.error/message result) " "
+           (pr-str (select-keys result [:seon.db/attribute :seon.db/offending]))
+           " Entity: " (pr-str (get-in result [:seon.error/data :seon.db/entity])))
+      (assoc result :seon.fn/index-phase phase :seon.fn/index-refused true))))
   result)
 
 (defn- rooted-file

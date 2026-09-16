@@ -1476,6 +1476,21 @@
             (is (empty? (message-ids foreign-connection))
                 "nothing reaches the foreign branch"))))))))
 
+(deftest final-entity-keyword-sets-are-not-lookup-refs
+  (test-support/with-database
+   (fn [connection]
+     (let [row (test-support/program-fn-row "seon.db/final-keyword-set-fixture")
+           function-id [:seon.fn/sym (:seon.fn/sym row)]
+           keywords #{:seon.agent/id :seon.db/db}]
+       (test-support/transacted!
+        connection
+        [row
+         [:db/add function-id :seon.fn/keywords :seon.agent/id]
+         [:db/add function-id :seon.fn/keywords :seon.db/db]])
+       (is (= keywords (set (:seon.fn/keywords
+                            (db/pull (db/db connection) [:seon.fn/keywords]
+                                     function-id)))))))))
+
 (deftest all-transaction-grammars-validate-the-resulting-entity
   (test-support/with-database
    (fn [connection]

@@ -2910,27 +2910,76 @@
       (update :seon.error/message #(str % " Entity: " (pr-str identities) "."))
       (assoc-in [:seon.error/data ::entity] identities)))
 
+(defn- write-tombstone-validator
+  "A retained program identity has no indexer-owned definition facts.
+   Runtime-owned attributes remain declared and validated by their own entries."
+  [projection schema-key]
+  (schema/projection-cache-value
+   projection [::write-tombstone-validator schema-key]
+   (fn []
+     (let [forms (:seon.schema.projection/forms projection)
+           identity-attrs (into #{}
+                                (keep (fn [[attribute form]]
+                                        (when (= schema-key
+                                                 (:seon.program/row-schema
+                                                  (schema.form/attr-form-properties form)))
+                                          attribute)))
+                                forms)
+           entries (schema.form/map-entries
+                    (schema.datahike/resolve-malli-form-in projection schema-key))
+           owned (into #{}
+                       (comp (remove #(or (identity-attrs (first %))
+                                          (:seon.program/written-by
+                                           (when (map? (second %)) (second %)))))
+                             (map first))
+                       entries)]
+       (when (seq identity-attrs)
+         (m/validator
+          [:and (into [:map] (remove #(owned (first %))) entries)
+           [:fn (fn [row] (not-any? #(contains? row %) owned))]]
+          {:registry (:seon.schema.projection/registry projection)}))))))
+
 (defn- write-entity-error
   "Validate the whole resulting entity, including identities present before a retraction."
-  [database projection entity-id identities row]
+  [database projection entity-id identities row before]
   (when (seq row)
     (let [forms (:seon.schema.projection/forms projection)
           schemas (write-entity-schemas projection)
           schema-keys (distinct (mapcat #(get schemas %) (keys identities)))
           normalized (reduce-kv (fn [result attribute value]
                                   (assoc result attribute
-                                         (write-value database projection attribute value false)))
+                                         ;; Final EAVT values are already resolved. A many-value
+                                         ;; collection here cannot be submission lookup-ref syntax.
+                                         (if (db.utils/multival? database attribute)
+                                           (case (schema.datahike/form-head
+                                                  (schema.datahike/resolve-datahike-form-in
+                                                   projection attribute))
+                                             :set (set value)
+                                             (vec value))
+                                           value)))
                                 {} row)]
       (some
        (fn [schema-key]
-         (when-not ((write-validator projection schema-key) normalized)
+         (when-not
+          (or ((write-validator projection schema-key) normalized)
+              (when-let [validate-tombstone
+                         (write-tombstone-validator projection schema-key)]
+                (and (some (fn [[attribute value]]
+                             (and (= schema-key
+                                     (:seon.program/row-schema
+                                      (schema.form/attr-form-properties (get forms attribute))))
+                                  (seq (d/datoms before :eavt entity-id attribute value))))
+                           identities)
+                     (validate-tombstone normalized))))
            (let [explain (schema/projection-cache-value
                           projection [::write-explainer schema-key]
                           #(schema/projection-explainer projection schema-key))
                  failure (first (:errors (explain normalized)))
                  in (:in failure)
                  attribute (or (first in) (first (keys identities)))
-                 value (get-in row in :seon.error/unknown)
+                 value (if (= :malli.core/missing-key (:type failure))
+                         :seon.error/unknown
+                         (:value failure))
                  refusal (invalid-write projection attribute
                                         (or (get forms attribute) (get forms schema-key))
                                         value (into [entity-id] in) (get forms schema-key)
@@ -2972,7 +3021,7 @@
                                                     [(:a datom) (:v datom)])))
                                           (d/datoms before :eavt entity-id))
                    identities (merge prior-identities (select-keys row identity-attrs))]
-               (write-entity-error database projection entity-id identities row)))
+               (write-entity-error database projection entity-id identities row before)))
            affected))))
 
 (defn- write-report-validator

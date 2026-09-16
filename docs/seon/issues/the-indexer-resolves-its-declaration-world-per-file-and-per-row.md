@@ -1,6 +1,6 @@
 ---
 type: issue
-status: resolved
+status: open
 severity: friction
 created: 2026-09-17
 tags: [issue, program-graph, schema, publication, performance, class/p1]
@@ -96,3 +96,16 @@ derivation over the attributes declaring `:seon.program/row-schema` — see
 of this change because the list also carries a deterministic ADMISSION ORDER
 that a population's key set cannot supply, and because `row-identity` /
 `row-identities` read it per row with no population in hand.
+
+## Reopened: publication evidence resolves forms per reference
+
+The original indexer callers remain fixed. The same class recurs at
+`src/seon/cluster/source.clj:385`: `identity-ref` reads `packaged-forms` for
+every absent reference while `preserved-evidence-tx` (`:483`) maps retained
+`:seon.test/reach`. A complete publication on default PID 53320 was observed
+inside this path by an all-thread JVM dump on 2026-09-16 (UTC), with subsequent
+publications waiting for `source-refresh-monitor`. The callback has not yet
+reached final-report validation. Carry the projection/derived mintable
+identities once with the evidence operation; do not fetch declarations per
+reference. This owner is outside the urgent two-defect write-admission repair.
+Evidence: [write-admission landing note](../../prds/steward-platform/research/write-admission-2026-09-17.md).

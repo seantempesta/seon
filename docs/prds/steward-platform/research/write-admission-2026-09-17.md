@@ -517,3 +517,95 @@ The fork-maintenance reference's selected gitlink and dependency ledger were
 updated after the Markdown checker identified that new drift. Its remaining
 30 historical gitlink findings predate this slice; the elided checker output
 does not support a repository-wide Markdown-clean claim.
+
+## Urgent complete-publication repair (2026-09-17 assignment)
+
+The original full-population integration questions above were real defects in
+this lane's validator. The followup fixes exactly diagnostic propagation and
+validation of the actual stored program-row shapes. No Datahike fork change is
+needed: `transaction.cljc:1206–1215` puts the callback's complete value in
+`:datahike/validation-refusal`; `writer.cljc:148–183` delivers the same throwable
+and rejects the report before the commit queue. `seon.db/transact-call`
+(`src/seon/db.clj:3178`) already extracts that flat value. The bounded writer
+log is not the transaction result. `seon.fn/require-committed!` (`:41`) was
+replacing the message and nesting the original refusal; it now preserves the
+flat map, adds phase metadata, and puts identity, attribute and offending value
+in the exception message consumed by the operator. The real 20:22:05Z failed
+adoption printed the identity `seon.cluster.fault-storage-test/fault-facts`,
+`:seon.schema.admission/source`, and `:seon.error/unknown`, proving the operator
+path now reports the cause instead of only “Program indexing transaction was
+refused.” Missing values are explicitly unknown, never invented nil values.
+Malli collection failures now report their actual `:value`; a set's `:in` path
+contains a value, so `get-in` was not a valid way to recover it.
+
+### First refusal and the model correction
+
+The immutable replay built the complete manifest/desired rows through the
+publication owner's functions under its explicit packaged projection, reconciled
+against `:current-src`, and called `datahike.api/with` with the actual final-report
+callback. The initial snapshot was commit
+`6aaaf81a-0aef-52b4-82da-43ac3fcf7a1f`; manifest digest
+`b0a69b4641edc50c7456434ee9dd11786e373c72520c7a4f7642561925510a5b`.
+It produced 11,035 desired rows and 95,529 operations. The first refusal was:
+
+```clojure
+{:identity {:seon.fn/sym "my.agent/identity"}
+ :schema :seon.fn/fn
+ :key :seon.fn/keywords
+ :stored-value #{:seon.agent/id :seon.db/db}
+ :incorrectly-normalized-value #{#{:seon.agent/id :seon.db/db}}}
+```
+
+`write-many-values` implements Datahike's *submission* lookup-ref heuristic.
+The final validator incorrectly reused it on already resolved EAVT values.
+Two identity keywords in a stored set became one nested set. The final check
+now reconstructs only the declared set/vector collection from stored values;
+it never treats a resolved collection as transaction syntax. Attribute
+pre-validation and final attempted-datom validation remain in place.
+The corrected complete replay accepted 95,529 operations / 431,542 datoms;
+its immutable basis moved from 536870926 to 536870927, without writing a branch.
+
+The subsequent real publication completed, then adoption exposed a second
+wrong row shape: retiring `seon.cluster.fault-storage-test/fault-facts` removes
+its definition facts and preserves its identity by owner ruling 47. It is not
+a newly created incomplete function. The adoption replay had 121 removals:
+1 function, 1 test, 119 lint identities. `write-tombstone-validator` derives
+the retired-row schema from the same authored `:seon.program/row-schema` and
+`:seon.program/written-by` entries the indexer uses (`program.cljc:55–102`,
+`:975–999`). This shape requires the *same pre-existing identity*, permits no
+indexer-owned non-identity definition facts, and still validates retained
+runtime-owned entries. A new bare identity is refused; removing only one
+required definition fact is refused. Ordinary entity schemas remain unchanged.
+This is validation of the actual retired-row shape, not a transaction-grammar
+exception, disabled validation, or weaker live-row schema. The final corrected
+adoption replay accepted 76,331 operations / 521,680 datoms. No transaction
+function was executed twice to perform validation.
+
+### Proof and boundary
+
+The retained repair probe records the complete immutable replay procedure.
+Representative live probes returned `{:existing-tombstone true,
+:new-identity-refused true, :partial-definition-refused true}` and confirmed the
+publication exception preserves the flat refusal exactly (apart from its two
+phase metadata keys). The canonical regressions exercise the real database
+fixture and writer, including unchanged `:max-tx` on refused writes.
+
+The full operator attempt is pending at this checkpoint. A JVM thread dump
+(`jcmd 53320 Thread.dump_to_file -format=json ...`, includes virtual threads)
+showed its predecessor holding `source-refresh-monitor` while awaiting the
+writer; the writer was in `seon.cluster.source/identity-ref` (`source.clj:385`),
+called by `preserved-evidence-tx` (`:483`) and rereading
+`seon.schema.edn/packaged-forms`. The new operator attempt had printed
+“publication started” and “request accepted” but had not acquired that monitor
+(`cluster.clj:2391`). This is before final-report validation, not a validator
+refusal. No other lane's session or owner function was altered to make it pass.
+
+No cold Seon test JVM or gate has run. Dependency fork
+`73afe78271a289861da236c5ac3457e64349653f` is unchanged in this repair. Its previously
+recorded dependency-suite proof stands; this repair's live proof uses the
+already loaded reducer Vars in PID 53320. `deps.edn:25–27` selects the local
+fork; a rebuilt dev-cache alone does not replace classes in that process.
+The new retained probe passes clj-kondo with zero errors/warnings; source hooks
+accept the edits. Standalone clj-kondo still reports the existing dependency
+`parser.type/->Variable` at `db.clj:562` after dependency cache refresh; it is
+not in the changed admission code. No repository-wide lint-clean claim is made.

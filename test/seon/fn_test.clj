@@ -1168,8 +1168,48 @@
                    #(#'seon.fn/require-committed!
                      {:seon.error/kind :seon.db/invalid-transaction}
                      :seon.fn/population))]
-      (is (= :seon.fn/index-refused (:seon.error/kind failure)))
+      (is (= :seon.db/invalid-transaction (:seon.error/kind failure)))
       (is (= :seon.fn/population (:seon.fn/index-phase failure))))))
+
+(deftest publication-refusals-preserve-the-entity-key-and-value
+  (test-support/with-database
+   (fn [connection]
+     (let [refusal (db/transact! connection
+                                [{:seon.schedule/id "publication-refusal"
+                                  :seon.schedule/expression "0 4 * * *"}])
+           failure (try
+                     (#'seon.fn/require-committed! refusal :seon.fn/population)
+                     nil
+                     (catch Exception failure failure))]
+       (is (= :seon.db/invalid-write (:seon.error/kind (ex-data failure))))
+       (is (= refusal (dissoc (ex-data failure)
+                             :seon.fn/index-phase :seon.fn/index-refused)))
+       (is (str/includes? (ex-message failure) "publication-refusal"))
+       (is (str/includes? (ex-message failure) ":seon.schedule/zone-id"))
+       (is (str/includes? (ex-message failure) ":seon.error/unknown"))))))
+
+(deftest retired-program-identities-validate-as-retired-rows
+  (test-support/with-database
+   (fn [connection]
+     (let [row (test-support/program-fn-row "seon.fn/retired-row-fixture")
+           entity-ref [:seon.fn/sym (:seon.fn/sym row)]]
+       (test-support/transacted! connection [row])
+       (let [before (db/db connection)]
+         (is (= :seon.db/invalid-write
+                (:seon.error/kind
+                 (db/transact! connection
+                               [[:db/retract entity-ref :seon.schema.admission/source :core]]))))
+         (is (= (:max-tx before) (:max-tx (db/db connection))))
+         (is (= :seon.db/invalid-write
+                (:seon.error/kind
+                 (db/transact! connection [{:seon.fn/sym "seon.fn/new-bare-row"}]))))
+         (is (= (:max-tx before) (:max-tx (db/db connection)))))
+       (test-support/transacted!
+        connection (seon.fn/reconcile-tx (db/db connection) [] [entity-ref]))
+       (let [retired (db/pull (db/db connection) '[*] entity-ref)]
+         (is (= (:seon.fn/sym row) (:seon.fn/sym retired)))
+         (is (nil? (:seon.schema.admission/source retired)))
+         (is (nil? (:seon.fn/ns retired))))))))
 
 (deftest keyword-usage-is-indexed-per-declaration
   (let [root (fixture-root)
