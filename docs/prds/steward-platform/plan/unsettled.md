@@ -1458,6 +1458,18 @@ no signal (`:seon.test/reach` 484k datoms already cut); `#{}` is erased by
 explode before any seam — the required provenance datom is the only honest
 encoding (G4 confirmed).
 
+**Listening learned** (`aa4b92678`, `what-listening-is-2026-09-16.md`): a
+listen pattern IS an index pattern (attribute required, entity/value
+optional) applied to Datahike's tx-report `:tx-data` inside `d/listen` —
+the owner's described shape is what the code does; the nil-entity branch
+was a design (6778a4614). Broken, no redesign proposed (owner: not the
+focus): the ONE live pattern names `:seon.issue/budget`, which carries no
+`:seon.wake/listen`, so it routes but never opens a turn; entity is a ref
+(sweep widens silently); routing ignores `:added` while arming and reads
+check it; authored patterns escape the `:avet` refusal. The log carries
+`:added`, `:tx` and tx-meta datoms (whose `:e` is the tx id) that no
+pattern can reach today. Deferred by ruling.
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
