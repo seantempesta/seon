@@ -1208,6 +1208,12 @@ report the doc/dir hunk explicitly; tell `no-default-cluster-fallback` on its
 resume. Lesson recorded in memory: Opus subagents trip safeguards on
 "rip out" phrasing; use codex lanes for cleanup with neutral wording.
 
+**Owner instruction 01:20Z:** the codex account may run out of credits; if
+lanes fail on a usage/credit error (check `bin/codex-agent summary <lane>`
+and the lane's output for a quota message), switch NEW launches to Opus
+subagents with neutral wording ("remove", "delete", never "rip out") until
+the owner says the account is fixed. Codex is preferred again after that.
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
