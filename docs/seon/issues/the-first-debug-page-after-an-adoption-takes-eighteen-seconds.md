@@ -148,3 +148,15 @@ Source remained that commit and basis remained **536871753** across all
 three GETs. The unrelated namespace docstring changes are included so the
 adopted bytes are reviewable. The later fixture corrections create a separate
 test-only publication; they are not represented as part of this measurement.
+
+## 2026-09-16 03:00Z — owner decision
+
+Slice 1 landed (`0dd6bc0aa`: read-only MCP returns preserve retained pages).
+Slice 2 (sound narrowing of the history walk's `:all` dependency record) is
+DEFERRED by the owner: "that's fine, let's leave it for now." Cause stated in
+[cold-page-kills-2026-09-16.md](../../prds/context-generation/research/cold-page-kills-2026-09-16.md):
+every-minute maintenance commits invalidate the `:all`-dependent history
+walk; narrowing to concrete attributes went stale on entity deletion, so
+entity-existence changes must enter the revision evidence first. Cold cost
+today ~1.7–2.0 s, warm 60 ms. Reopen when the reach-digest and read-evidence
+work make existence evidence available.
