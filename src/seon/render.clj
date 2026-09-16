@@ -22,6 +22,7 @@
             [seon.error :as error]
             [seon.print :as print]
             [seon.render.hiccup :as hiccup]
+            [seon.repl :as repl]
             [seon.render.value :as render.value]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
@@ -36,6 +37,18 @@
 ;;; ---------------------------------------------------------------------------
 
 (schema.edn/load! {})
+
+;;; LOAD-CYCLE BOUNDARIES. `seon.render.web`, `seon.turn` and
+;;; `seon.render.walk` all require `seon.render`, so this namespace cannot
+;;; require them back. One resolution per var, realized at first use, instead
+;;; of a `requiring-resolve` on every call (AGENTS §2.1).
+(defonce ^:private render-web-derive-context!
+  (delay (requiring-resolve 'seon.render.web/derive-context!)))
+(defonce ^:private turn-opening-db
+  (delay (requiring-resolve 'seon.turn/opening-db)))
+(defonce ^:private render-walk-neighborhood
+  (delay (requiring-resolve 'seon.render.walk/neighborhood)))
+
 
 ;;; ---------------------------------------------------------------------------
 ;;; Contract-derived renderer selection and guarded invocation
@@ -1552,7 +1565,7 @@
     (if (or (:seon.error/kind acquired)
             (not (string? capture)) (= capture (:seon.cluster.prompt/text acquired))
             (= capture (str (:seon.cluster.prompt/text acquired) "\n\n"
-                            ((requiring-resolve 'seon.repl/frame)
+                            (repl/frame
                              (:seon.db/db acquired) (:seon.agent/id request)))))
       acquired
       {:seon.error/kind ::capture-mismatch
@@ -1571,14 +1584,14 @@
                    :seon.render/context-change-result :seon.error/value]]}
   [request]
   (if (:seon.render/context-action request)
-    ((requiring-resolve 'seon.render.web/derive-context!) request)
+    (@render-web-derive-context! request)
     (let [database (:seon.db/db request)
           turn-id (:seon.turn/id request)
           basis (if turn-id
-                  ((requiring-resolve 'seon.turn/opening-db) database turn-id)
+                  (@turn-opening-db database turn-id)
                   database)]
       (if (:seon.error/kind basis) basis
-        (let [acquired ((requiring-resolve 'seon.render.web/derive-context!)
+        (let [acquired (@render-web-derive-context!
                         (assoc request :seon.db/db basis))]
           (if turn-id (captured-history request acquired) acquired))))))
 
@@ -1752,7 +1765,7 @@
                    depth (long (get options :depth 2))
                    branch (:branch options)
                    units
-                   ((requiring-resolve 'seon.render.walk/neighborhood)
+                   (@render-walk-neighborhood
                     (cond->
                      {:seon.db/db db
                       :seon.sci.eval/ctx (:seon.sci.eval/ctx *walk-context*)
