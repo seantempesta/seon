@@ -28,9 +28,10 @@ peer session (batches 30–57; ledger
    store, every delete logs root/targets/caller/pid; regressions green.
    Recovered by a fourth refork (the day's recorded test results on default
    are lost; data is disposable by ruling). Gates resumed at batch 65 with
-   the store size checked around each run. Still open (lane running): the
-   platform tier must carry no destructive drill, derived from reach to the
-   delete seam and enforced by a checker. Issue:
+   the store size checked around each run. Also landed: the platform tier
+   carries no destructive drill — the runner refuses a platform set in which
+   any test reaches one of the three declared destructive owners (checked
+   before the first platform task; three tests moved to the bulk tier). Issue:
    `a-platform-tier-test-wiped-the-checkouts-store`.
 
 1. **The store grows without collection.** `data/store` went 107 MB → 12 GB in
