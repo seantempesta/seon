@@ -4,6 +4,7 @@
                       {:seon.db/attributes true,
                        :seon.render/units
                        [:seon.agent/plan
+                        :seon.issue/_agent
                         :seon.message/_inbox
                         :seon.agent/settings
                         :my.note/_agent
