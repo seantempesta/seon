@@ -1,0 +1,219 @@
+---
+type: research
+status: complete
+created: 2026-09-16
+tags: [research, steward, instrumentation, boot-recovery, gate-reds]
+---
+
+# Two batch-65 B reds: call preparation's refusal shape, and boot recovery's expectations
+
+Date: 2026-09-16 (gate batch 65 B, HEAD `ccccea806`; run root
+`tmp/test-runs/run.mVNxT1`, failure blocks
+`tmp/orchestrator/gate-results/batch-65/named-failure-blocks.txt`).
+
+Both reds were judged "possibly REAL, not fixture-honesty" by the gate session.
+Neither is a regression from today's lanes, and neither is a fixture refusal.
+One is a MECHANISM defect (`seon.instrument`), one is EXPECTATION drift
+(`seon.cluster.boot-test`). Attribution and evidence below.
+
+## 1. `seon.call-preparation-test/a-compiled-first-party-call-is-prepared`
+
+### What the gate saw
+
+```
+FAIL (call_preparation_test.clj:493)  "the caller's 1 reached the callee unreplaced"
+expected: (= [#:seon.db{:connection 1}] (:seon.error/diagnostic-offending ...))
+actual:   (not (= [#:seon.db{:connection 1}] [1]))
+
+FAIL (call_preparation_test.clj:502)  "the caller's 1 reached the callee unreplaced"
+expected: (= ["a" 1] ...)
+actual:   (not (= ["a" 1] [1]))
+```
+
+The kind (`:seon.instrument/contract-violated`) and the operation
+(`seon.call-preparation-test/probe-received-connection?`) assertions PASSED.
+So call preparation itself is correct: CALLER WINS holds, the caller's `1`
+reached the callee unreplaced, and the callee's own contract refused it before
+the body — exactly what the test set out to prove. Only the refusal's
+`:seon.error/diagnostic-offending` disagreed.
+
+### Attribution
+
+Not today's lanes. `src/seon/instrument.clj` was last touched 2026-09-15 23:12
+(`98b5f2afe`); the change that produced this shape is `6acd8818e` (2026-09-15
+10:53, "WIP checkpoint at the program switch: in-flight lane work committed
+as-is", explicitly "Not a gated state"), continued in `a65985098` "Render
+structured refusals through the shared error grammar". That work replaced the
+old bounded `offending-value`/`offending-leaf` reconstruction with
+`"Retain the actual offending values; the error render pair owns projection."`
+— a correct move under the one-clipping-spot law (AGENTS §2.4). What it did
+NOT carry over was WHICH value the seam names.
+
+`git log -S` over `src/seon/render.clj`, `src/seon/turn.clj`,
+`src/seon/sci/eval.clj` and `src/seon/call_preparation.clj` shows no commit on
+2026-09-16 touching call preparation or instrumentation: the render-selection,
+settlement, and loader lanes are not implicated.
+
+### Root cause (mechanism), verified live
+
+`src/seon/instrument.clj` bound
+
+```clojure
+offending (if arity? (:arity data)
+              (if (= :input arm)
+                [(:value (first (:errors explanation)))]
+                (:value (first (:errors explanation)))))
+```
+
+i.e. ONE problem's leaf value, while `:seon.error/diagnostic-member` says
+`:arguments` and `:seon.instrument/problem-count` may be greater than one.
+Reproduced in the default JVM (pid 38993) against `#'seon.instrument/violation`
+before the change:
+
+```clojure
+{:fn-name 'probe.ns/f :args [{:seon.db/connection 1}]
+ :input [:cat [:map [:seon.db/connection :string]]]}
+;; => offending [1]
+;;    message "probe.ns/f refused argument 0 (0-based) at [:seon.db/connection]: …"
+{:fn-name 'probe.ns/g :args ["a" 1] :input [:cat :string :string]}
+;; => offending [1]
+;;    message "probe.ns/g refused argument 1 (0-based) at []: …"
+```
+
+The second case is the tell: path `[]`, offending `[1]`, and nothing in the
+value says which argument or how many arguments there were. A refusal that
+names a bare `1` is not evidence-complete about the call.
+
+### The fix
+
+The offending value is the value the contract CHECKED — the same value the
+`case` above already binds for every arm:
+
+```clojure
+offending (if arity? (:arity data) value)
+```
+
+input → the caller's arguments; output → the returned value; guard → the
+`[arguments return]` pair; arity → the count. Nothing is lost: every problem
+already carries its own leaf value and path in `:seon.error/problems`
+(`seon.error/explain-problem`, `src/seon/error.clj:773`), and the message
+still names the failing argument and path. No bounding is reintroduced at the
+seam — the render pair keeps owning projection.
+
+Live after adoption (`bin/seon init --dev default --changed src/seon/instrument.clj`,
+commit `6aaa879b-57fe-55ef-aadd-1ebee6fdfddd`), same two probes plus an output arm:
+
+```
+[[{:seon.db/connection 1}] ["a" 1]]   ; input arm — the two gate expectations
+7                                      ; output arm — the returned value
+```
+
+`test/seon/call_preparation_test.clj` is UNCHANGED: its expectations were right.
+
+### In-process regressions (default, pid 38993)
+
+| run | result |
+|---|---|
+| `seon.instrument-test/a-sci-only-arity-miss-names-its-program-graph-arglists` | 0 fail / 0 error |
+| `seon.instrument-test/a-violation-carries-bounded-arguments-only-when-it-can` | 4 pass / 0 fail / 0 error |
+| `seon.instrument-test/registry-sized-contract-evidence-retains-the-offending-object` | 0 fail / 0 error |
+| `seon.instrument-test/registration-failure-names-the-var-and-authored-contract` | 0 fail / 0 error |
+| `seon.instrument-test/jvm-and-interpreted-functions-arm-the-declared-guard` | 6 pass / 0 fail / 0 error |
+
+VERIFICATION BOUNDARY: `seon.call-preparation-test` cannot be reproduced
+in-process. Its probes are not armed in default's JVM, so
+`test-support/refusal-data` returns `nil` and every assertion in that block
+fails for an environment reason, not a behavioural one. The mechanism change is
+proven directly against `#'seon.instrument/violation` with the exact two
+argument shapes the test uses; the cold gate is the proof.
+
+## 2. `seon.cluster.boot-test/a-dead-holders-run-is-unclaimed-by-the-time-start-returns`
+
+Three sub-failures, all EXPECTATION drift. Boot recovery is behaving correctly.
+
+### 2a. `(inst? (:seon.turn/closed-tx (db/pull … '[*] …)))` — impossible since 2026-09-09
+
+`:seon.turn/closed-tx` is declared `[:and {:seon.wake/context-inert true}
+:seon.db/ref]` (`resources/seon/schemas/seon.turn.edn:157`), made a ref by
+`ae0e54841` (2026-09-09, "Move agent data to transaction refs, inbox edges, and
+runtime components"). A pull of a ref attribute answers `{:db/id n}` and can
+never answer an inst. Confirmed live on default:
+
+```clojure
+(db/pull d '[{:seon.turn/closed-tx [:db/id :db/txInstant]}] [:seon.turn/id "12a2b18544e6"])
+;; => #:seon.turn{:closed-tx {:db/id 536870948, :db/txInstant #inst "2026-09-16T10:58:01Z"}}
+```
+
+Fixed by asserting the instant one hop away, through the ref.
+
+### 2b. `[_ :seon.turn/reply-size ?d]` — an unbound query answered from another turn
+
+The `testing` label claims "the run is CLOSED with its plan intact", but the
+fixture seeded `run-crashed` with NO reply facts at all, and the query bound
+`_`, so it could be satisfied by any turn anywhere in the store. It passed
+historically off a bootstrap opening that carried `:seon.turn/reply-size`; the
+generated system-turn opening does not. Observed live: default's opening turn
+`12a2b18544e6` (`:seon.turn.work/situation :generate`, ordinals 0-9 = `(help)`,
+`(dir …)`, the situation reads) carries no `:seon.turn/reply-size`, while the
+six ordinary turns do.
+
+This is the project's recurring class in mirror image: a check whose subject
+was absent reported health from an unrelated entity.
+
+Fixed by seeding the crashed turn's reply (`"(+ 1 1)"` and its count) and
+asserting both facts on `[:seon.turn/id "run-crashed"]`. The seeded write shape
+was proven admissible before the edit (LIVE-PROOF VALIDATION RULE):
+`(#'seon.db/write-error database projection [that-map])` → `nil`.
+
+### 2c. `(= 1 (:seon.boot/recovered-runs instance))` — a literal mirror of an incidental count
+
+`recover-runs!` (`src/seon/cluster.clj:2341`) counts EVERY open turn at boot and
+closes them all in one transaction. The test seeds one open turn but the first
+boot's own bootstrap opening is also still open when `cluster/stop!` runs
+immediately after `await-bootstrap!`, so the second boot honestly recovers 2.
+The number is a property of what the previous boot happened to leave open, not
+of whether the dead holder's run was unclaimed.
+
+Fixed by DERIVING it: the turns whose `:seon.turn/closed-tx` is the transaction
+that closed `run-crashed` ARE what recovery closed, so the instance's report is
+compared against that count. That kills a real class — a boot report disagreeing
+with the facts it committed — where the literal `1` only asserted an accident.
+The query form was verified live (`:in $ ?tx` count against default).
+
+VERIFICATION BOUNDARY: this test builds a published root and creates stores, so
+`seon.test/run` REFUSES it in the development JVM (destructive-owner reach) and
+it is cold-only. Every query form and the seeded write shape were proven
+individually against default; the test itself has NOT been executed. It needs
+the cold gate.
+
+## Files touched
+
+- `src/seon/instrument.clj` — the offending-value fix (mechanism).
+- `test/seon/cluster/boot_test.clj` — the three recovery expectations.
+
+## Shared-tree note: who committed the boot_test hunks
+
+`test/seon/cluster/boot_test.clj` was clean when this lane started and went
+dirty under the fixture-sweep lane while these edits were in the working tree.
+That lane's `0da13c8ae` ("fixture writes: clusters, messages and turns carry
+their required refs") committed the whole file, so all four hunks described
+above landed under ITS message rather than this lane's. Nothing was clobbered
+and nothing is missing — HEAD carries `crashed-reply` (line 1719), the seeded
+reply facts (1742-1743), the `:db/txInstant` hop (1774, 1784-1787) and the
+derived recovery count (1811). Recorded because the commit message does not
+describe them. The foreign hunks in that file, which this lane did not touch,
+are at `@@ -222` (`:seon.schema.admission/source` on a `legacy.core/f` row) and
+`@@ -1467` (a seeded message recipient).
+
+## One defect found in passing, filed not fixed
+
+`seon.test/check` has no `:seon.test/long` filter, so checking the tests
+reaching `seon.instrument/violation` selected
+`seon.cluster.boot-test/development-adoption-targets-one-of-two-cohosted-clusters`
+into default's JVM and spent the whole 120,000 ms
+`:seon.test/check-time-limit-ms` bound, returning a bare `:seon.test/unknown`
+with `:seon.test/next-tier :none` and none of the results it had already
+recorded. The test booted and cleaned up its own isolated root
+(`tmp/boot-test/caff60ab-…`); the developer store was never a target and
+`default` stayed healthy (`bin/seon status`: 1/1 alive, pid 38993). Filed as
+[in-process-check-selects-declared-long-tests](../../../seon/issues/in-process-check-selects-declared-long-tests.md).
