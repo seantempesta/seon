@@ -9,6 +9,7 @@
             [seon.id :as id]
             [seon.instrument]
             [seon.test :as sut]
+            [seon.render.test :as render.test]
             [seon.test.runner :as runner]
             [seon.test-support :as support]))
 
@@ -427,8 +428,10 @@
                    (clojure.core/refer 'clojure.core)
                    (eval source))]
     (try
-      (is (:db/id (db/pull (db/db connection) [:db/id] [:seon.fn/sym destructive-owner]))
-          "the canonical population declares the destructive owner")
+      (is (seq (:seon.fn/destroys
+                (db/pull (db/db connection) [:seon.fn/destroys]
+                         [:seon.fn/sym destructive-owner])))
+          "the canonical population carries the owner's own :seon.fn/destroys")
       (support/transacted! connection
                            [{:seon.ns/name namespace-name}
                             {:seon.test/sym test-symbol
@@ -466,7 +469,16 @@
             (is (= :seon.test/destructive-in-process (:seon.error/kind result)) (pr-str result))
             (is (= test-symbol (:seon.test/sym result)))
             (is (= destructive-owner (:seon.fn/sym result)))
+            (is (= (:seon.fn/destroys (db/pull database [:seon.fn/destroys]
+                                               [:seon.fn/sym destructive-owner]))
+                   (:seon.fn/destroys result))
+                "the refusal names what the owner destroys, from its declaration")
             (is (= [test-symbol destructive-owner] (:seon.test/destructive-path result)))
+            (let [report (sut/host database test-symbol)]
+              (is (= :seon.test.host/isolated-snapshot (:seon.test/host report)) (pr-str report))
+              (is (= destructive-owner (:seon.fn/sym report)))
+              (is (seq (:seon.fn/destroys report)) (pr-str report))
+              (is (.contains (sut/host-text database test-symbol) destructive-owner)))
             (is (= ["bin/test" "--" (namespace (symbol test-symbol))]
                    (:seon.test/command result)))
             (is (.contains (:seon.error/message result "") working) (pr-str result))
@@ -530,23 +542,90 @@
                   (is (nil? (:seon.test/destructive-excluded isolated)))
                   (is (.exists marker)))))))))))
 
-(deftest a-destructive-owner-without-a-program-row-refuses-instead-of-admitting
+(deftest a-program-declaring-no-destroyer-refuses-instead-of-admitting
   (support/with-database
     (fn [connection]
       (let [database (db/db connection)
-            owner (db/pull database [:db/id] [:seon.fn/sym destructive-owner])
-            removed (db/transact! connection
-                                  [[:db/retract (:db/id owner) :seon.fn/sym destructive-owner]])
+            owners (sut/destroyers database)
+            _ (is (contains? owners destructive-owner) (pr-str owners))
+            removed (db/transact!
+                     connection
+                     (vec (for [[owner what] owners]
+                            [:db/retract (:db/id (db/pull database [:db/id] [:seon.fn/sym owner]))
+                             :seon.fn/destroys what])))
             after (db/db connection)
-            reach (#'sut/destructive-reach after)]
+            derived (sut/destroyers after)]
         (is (:db-after removed) (pr-str removed))
-        (is (= :seon.test/unknown (:seon.error/kind reach)) (pr-str reach))
-        (is (.contains (:seon.error/message reach "") destructive-owner) (pr-str reach))
+        (is (= :seon.test/unknown (:seon.error/kind derived)) (pr-str derived))
+        (is (.contains (:seon.error/message derived "") ":seon.fn/destroys") (pr-str derived))
+        (is (= :seon.test/unknown (:seon.error/kind (sut/host after "seon.id-test/anything")))
+            "an unanswerable declaration never answers in-process")
         (is (:seon.error/kind (#'sut/destructive-refusal
                                after
                                (.getCanonicalPath (clojure.java.io/file (System/getProperty "user.dir")))
                                "seon.id-test/does-not-matter"))
             "an unanswerable reach refuses the run instead of admitting it")))))
+
+(deftest a-test-with-no-program-row-is-unknown-and-is-never-run-in-process
+  (support/with-database
+    (fn [connection]
+      (support/seed-cluster! connection "default")
+      (let [database (db/db connection)
+            namespace-name (symbol (str "unindexed.probe" (id/id)))
+            namespace-object (create-ns namespace-name)
+            test-symbol (str namespace-name "/probe")
+            marker (clojure.java.io/file "tmp" (str "unindexed-probe-" (id/id)))
+            test-var (binding [*ns* namespace-object]
+                       (clojure.core/refer 'clojure.core)
+                       (eval (list 'clojure.test/deftest 'probe
+                                   (list 'clojure.test/is
+                                         (list '.mkdirs (list 'clojure.java.io/file
+                                                              (.getPath marker)))))))
+            working (.getCanonicalPath (clojure.java.io/file (System/getProperty "user.dir")))]
+        (try
+          (is (nil? (:db/id (db/pull database [:db/id] [:seon.test/sym test-symbol])))
+              "the probe is deliberately not indexed")
+          (let [report (sut/host database test-symbol)]
+            (is (= :seon.test/unknown (:seon.error/kind report)) (pr-str report))
+            (is (nil? (:seon.test/host report))
+                "an unknown call graph never reads as in-process")
+            (is (.contains (sut/host-text database test-symbol) "unknown")))
+          (let [result (sut/run test-var connection
+                                {:seon.db/db database
+                                 :seon.test.run/provenance (runner/provenance database)
+                                 :seon.test/remaining-ms 10000
+                                 :seon.test/declared-root working})]
+            (is (= :seon.test/unknown (:seon.error/kind result)) (pr-str result))
+            (is (not (.exists marker)) "an unknown host executed nothing"))
+          (finally
+            (support/delete-recursively! marker)
+            (remove-ns namespace-name)))))))
+
+(deftest a-tests-render-pair-shows-where-it-runs-and-why
+  (support/with-database
+    (fn [connection]
+      (with-destructive-test connection
+        (fn [test-symbol _ _]
+          (let [database (db/db connection)
+                unit {:seon.db/db database
+                      :seon.render/value {:seon.test/sym test-symbol}}
+                what (:seon.fn/destroys (db/pull database [:seon.fn/destroys]
+                                                 [:seon.fn/sym destructive-owner]))
+                ai (render.test/render-ai unit)
+                html (pr-str (render.test/render-html unit))]
+            (is (.contains ai "runs: isolated snapshot") ai)
+            (is (.contains ai destructive-owner) ai)
+            (is (.contains ai what) ai)
+            (is (.contains html "runs: isolated snapshot") html)
+            (is (.contains html destructive-owner) html))
+          (let [cheap (str "render.probe" (id/id) "/cheap")]
+            (support/transacted! connection
+                                 [{:seon.test/sym cheap
+                                   :seon.schema.admission/source :core
+                                   :seon.test/source "(deftest cheap (is true))"}])
+            (let [ai (render.test/render-ai {:seon.db/db (db/db connection)
+                                             :seon.render/value {:seon.test/sym cheap}})]
+              (is (.contains ai "runs: in the cluster process") ai))))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; An in-process check excludes a declared-long test and reports what expired

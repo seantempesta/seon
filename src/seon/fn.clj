@@ -587,6 +587,7 @@
         file [:seon.fn.file/relative-path (::analyzer/filename entry)]
         span (exact-form-span contexts entry)
         external-sink (:seon.fn/external-sink metadata)
+        destroys (:seon.fn/destroys metadata)
         projection-boundary (:seon.fn/projection-boundary metadata)
         capability-declared? (contains? metadata :seon.effect/capability)
         capability (capability-symbol
@@ -677,6 +678,12 @@
         (contains? #{:seon.render/ai :seon.render/html :none}
                    projection-boundary)
         (assoc :seon.fn/projection-boundary projection-boundary)
+        ;; ONE declaration of destructiveness, at the definition: what this
+        ;; function deletes that it did not create. Every consumer derives
+        ;; from it by `:seon.fn/calls` reach (`seon.test/host`), so no
+        ;; roster of destructive owners or destructive tests exists.
+        (and (string? destroys) (not (str/blank? destroys)))
+        (assoc :seon.fn/destroys destroys)
         capability-declared?
         (assoc :seon.effect/capability capability
                ;; The same fact as a ref, so "which code runs this

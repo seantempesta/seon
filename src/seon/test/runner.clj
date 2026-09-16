@@ -864,48 +864,34 @@
 ;;; The platform tier declares no destructive drill
 ;;; ---------------------------------------------------------------------------
 
-(def destructive-owners
-  "The functions that DELETE a filesystem path they did not create.
+(defn- destructive-owner-rows
+  "The program rows declaring `:seon.fn/destroys`, or a refusal.
 
-  `populate-published-root!` / `populate-published-operator-root!` replace a
-  store directory (`delete-recursively!` + clone) inside a root they were
-  handed; `cleanup-root-under-lock!` removes an operator root's whole `data/`.
-  These are the paths a root-resolution defect turns into the developer's own
-  store — one of them did, on 2026-09-17
+  THE ONE DERIVATION of \"which functions destroy\", over the declaration each
+  owner carries in its own metadata at its definition. There is no owner
+  roster here or anywhere else: a rename moves with the definition, and a
+  declaration added to a new owner is picked up by indexing alone.
+
+  `seon.cluster.store/create-store!` deliberately declares nothing: every
+  `open-store!` reaches it, it deletes only its own incomplete genesis and now
+  refuses a complete store outright, so declaring it would empty the platform
+  tier of every file-store fixture (42 of its tests reach it) while naming
+  nothing the 2026-09-17 incident is about
   (`docs/seon/issues/a-platform-tier-test-wiped-the-checkouts-store.md`).
 
-  `seon.cluster.store/create-store!` is deliberately NOT one: every
-  `open-store!` reaches it, it deletes only its own incomplete genesis, and it
-  now refuses a complete store outright — declaring it destructive would empty
-  the platform tier of every file-store fixture (42 of its tests reach it)
-  while naming nothing the incident is about. Datahike branch retirement and
-  collection are not here either: they act on a store handle the fixture
-  already holds, never on a path it can misspell.
-
-  Declared here, beside the fixture owners, and RESOLVED against the program
-  graph at `destructive-owner-rows`: a rename fails the gate instead of
-  silently emptying the set.
-
-  THE ONE OWNER SET. The cold gate reads it here for the platform tier;
-  `seon.test/run` reads the same set for its in-process refusal, over the same
-  `:seon.fn/calls` reach, so the two halves of the rule can never disagree."
-  #{"seon.test-support/populate-published-root!"
-    "seon.test-support/populate-published-operator-root!"
-    "seon.operator/cleanup-root-under-lock!"})
-
-(defn- destructive-owner-rows
-  "The program rows of every declared destructive owner, or a refusal.
-  An owner with no row means the declaration drifted from the program: the
-  checker would then walk to nothing and report the tier healthy, which is
-  the absence-of-signal class this whole issue is about."
+  A program in which NOTHING declares `:seon.fn/destroys` is drift, not
+  health: the checker would walk to nothing and report the tier clean, which
+  is the absence-of-signal class this whole issue is about. So it throws."
   [rows]
-  (let [owner-rows (filterv #(destructive-owners (:seon.fn/sym %)) rows)
-        missing (set/difference destructive-owners
-                                (set (map :seon.fn/sym owner-rows)))]
-    (when (seq missing)
-      (throw (ex-info "Tier selection cannot resolve its destructive owners."
-                      {:seon.error/kind ::missing-destructive-owners
-                       ::missing-destructive-owners (vec (sort missing))})))
+  (let [owner-rows (filterv #(and (:seon.fn/sym %)
+                                  (string? (:seon.fn/destroys %))
+                                  (seq (:seon.fn/destroys %)))
+                            rows)]
+    (when (empty? owner-rows)
+      (throw (ex-info (str "No analyzed declaration carries :seon.fn/destroys, "
+                           "so tier selection cannot tell which tests delete a "
+                           "filesystem path they did not create.")
+                      {:seon.error/kind ::missing-destructive-owners})))
     owner-rows))
 
 (defn- destructive-call-path
@@ -944,9 +930,9 @@
   [manifest platform-vars]
   (when (seq platform-vars)
     (let [rows (manifest-rows manifest)
-          owner-symbols (set (map :seon.fn/sym (destructive-owner-rows rows)))
-          destructive (tests-reaching-rows
-                       rows #(destructive-owners (:seon.fn/sym %)))
+          owner-rows (destructive-owner-rows rows)
+          owner-symbols (set (map :seon.fn/sym owner-rows))
+          destructive (tests-reaching-rows rows (set owner-rows))
           offenders (vec (for [test-var platform-vars
                                :let [test-symbol (str (var-symbol test-var))]
                                :when (destructive test-symbol)]

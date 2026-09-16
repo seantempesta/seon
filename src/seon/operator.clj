@@ -308,6 +308,9 @@
 ;;; BEFORE the first deletion, and the deletion is recorded with root,
 ;;; canonical targets, bytes and caller so a future wipe names itself.
 (defn- cleanup-root-under-lock!
+  {:seon.fn/destroys
+   "an operator root's whole data/ directory — its clusters, its store, the
+  store lock and staged blobs — none of which this function created"}
   [repository-root managed-root]
   (let [managed-root (declared-managed-root managed-root)
           target (.getCanonicalPath (io/file managed-root "data"))

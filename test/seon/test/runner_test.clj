@@ -109,18 +109,24 @@
                          :seon.fn.file/first-party-functions known})]}
             selected #(vector (ns-resolve namespace-name %))
             rows (#'runner/manifest-rows manifest)]
-        (is (= (sort @#'runner/destructive-owners)
-               (sort (map :seon.fn/sym (#'runner/destructive-owner-rows rows))))
-            "every declared destructive owner resolves to a program row")
-        (let [drifted (filterv #(not= "seon.test-support/populate-published-root!"
-                                      (:seon.fn/sym %))
-                               rows)
+        (let [owner-rows (#'runner/destructive-owner-rows rows)
+              owners (into {} (map (juxt :seon.fn/sym :seon.fn/destroys)) owner-rows)]
+          (is (seq owner-rows) "the analyzed source declares its destructive owners")
+          (is (every? #(and (string? %) (seq %)) (vals owners))
+              "every owner says what it destroys")
+          (is (contains? owners "seon.test-support/populate-published-root!")
+              "the declaration at the definition is admitted as a program fact")
+          (is (str/includes? (get owners "seon.test-support/populate-published-root!" "")
+                             "store")
+              (pr-str owners)))
+        (let [drifted (mapv #(dissoc % :seon.fn/destroys) rows)
               refusal (try (#'runner/destructive-owner-rows drifted)
                            nil
                            (catch clojure.lang.ExceptionInfo failure failure))]
-          (is (some? refusal) "a renamed owner refuses instead of emptying the set")
-          (is (= ["seon.test-support/populate-published-root!"]
-                 (:seon.test.runner/missing-destructive-owners (ex-data refusal)))))
+          (is (some? refusal)
+              "a program declaring nothing refuses instead of reporting the tier clean")
+          (is (= :seon.test.runner/missing-destructive-owners
+                 (:seon.error/kind (ex-data refusal)))))
         (let [refusal (try (#'runner/verify-platform-tier-carries-no-destructive-drill!
                             manifest (selected 'drill))
                            nil

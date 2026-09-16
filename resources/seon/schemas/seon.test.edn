@@ -179,8 +179,20 @@
  :seon.test/destructive-excluded
  [:vector [:map [:seon.test/sym :seon.test/sym]
            [:seon.fn/sym :seon.fn/sym]
+           [:seon.fn/destroys {:optional true} :seon.fn/destroys]
            [:seon.test/destructive-path :seon.test/destructive-path]
            [:seon.test/command :seon.test/command]]]
+ :seon.test/host
+ [:enum {:description "Where a test runs, derived from its program-graph reach, never declared on the test: :seon.test.host/in-process is the cluster's own JVM; :seon.test.host/isolated-snapshot is a JVM under its own operator root, because the test reaches a function declaring :seon.fn/destroys. An unanswerable reach is the typed unknown, never this value."}
+  :seon.test.host/in-process :seon.test.host/isolated-snapshot]
+ :seon.test/host-report
+ [:map {:description "Where one test runs and why, as data an agent can read: the host, and for an isolated one the owner it reaches, what that owner destroys, the declared call path between them, and the cold invocation that may run it."}
+  [:seon.test/sym :seon.test/sym]
+  [:seon.test/host :seon.test/host]
+  [:seon.fn/sym {:optional true} :seon.fn/sym]
+  [:seon.fn/destroys {:optional true} :seon.fn/destroys]
+  [:seon.test/destructive-path {:optional true} :seon.test/destructive-path]
+  [:seon.test/command {:optional true} :seon.test/command]]
  :seon.test/unknown :string
  :seon.test/unknown-error
  [:map {:seon.error/class true :seon.render/ai seon.error/render-ai

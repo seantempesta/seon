@@ -185,35 +185,55 @@
           working (.getCanonicalPath (io/file (System/getProperty "user.dir")))]
       (when (= root working) root))))
 
+(defn destroyers
+  "What each declared destructive owner destroys: `{owner-symbol text}`.
+
+  THE ONE DERIVATION on this side, over `:seon.fn/destroys` — the declaration
+  each owner carries in its own metadata at its definition, indexed as a
+  program fact. There is no roster of owners in code: the cold gate's tier
+  checker derives the same set from the same attribute over manifest rows
+  (`seon.test.runner/destructive-owner-rows`), so the two halves of the rule
+  read one declaration and can never disagree.
+
+  A program in which NOTHING declares it is the typed unknown, never an empty
+  set: an unpublished or drifted program would otherwise walk to nothing and
+  admit every test, which is absence of signal read as health."
+  {:malli/schema [:=> [:cat :seon.db/database-value]
+                  [:or [:map-of :seon.fn/sym :seon.fn/destroys] :seon.error/value]]}
+  [database]
+  (let [rows (db/q '[:find ?sym ?destroys
+                     :where
+                     [?function :seon.fn/destroys ?destroys]
+                     [?function :seon.fn/sym ?sym]]
+                   database)]
+    (cond
+      (:seon.error/kind rows) rows
+      (empty? rows)
+      (unknown :seon.fn/destroys
+               (str "No function in this program declares :seon.fn/destroys, "
+                    "so an in-process run cannot tell whether a test deletes a "
+                    "filesystem path it did not create. Republish the program "
+                    "(bin/seon init --dev default), or declare the attribute "
+                    "in the owner's own metadata at its definition."))
+      :else (into {} rows))))
+
 (defn- destructive-reach
   "Every test symbol whose reach includes a destructive owner, mapped to it.
 
-  The owner set is `seon.test.runner/destructive-owners` — the ONE declaration,
-  shared with the cold gate's platform-tier checker — and membership is the
-  shared `:seon.fn/calls` derivation `seon.fn/tests-reaching`. An owner with no
-  program row is a typed unknown: a rename would otherwise leave this walking
-  to nothing and admitting every test, which is absence of signal read as
-  health."
+  Membership is the shared `:seon.fn/calls` derivation `seon.fn/tests-reaching`,
+  walked from each owner `destroyers` names."
   [database]
-  (reduce
-   (fn [reached owner]
-     (let [row (db/pull database [:db/id] [:seon.fn/sym owner])]
-       (cond
-         (:seon.error/kind row) (reduced row)
-         (nil? (:db/id row))
-         (reduced
-          (unknown owner
-                   (str "No program row declares the destructive owner " owner
-                        ", so an in-process run cannot tell whether a test "
-                        "deletes a filesystem path. Republish the program, or "
-                        "correct seon.test.runner/destructive-owners.")))
-         :else
+  (let [owners (destroyers database)]
+    (if (:seon.error/kind owners)
+      owners
+      (reduce
+       (fn [reached owner]
          (let [tests (functions/tests-reaching database owner)]
            (if (:seon.error/kind tests)
              (reduced tests)
-             (reduce #(assoc %1 %2 owner) reached tests))))))
-   {}
-   (sort runner/destructive-owners)))
+             (reduce #(assoc %1 %2 owner) reached tests))))
+       {}
+       (sort (keys owners))))))
 
 (defn- destructive-path
   "The shortest declared call path from one test down to its destructive owner.
@@ -255,56 +275,123 @@
 
 (defn- destructive-exclusion
   "One selected test's destructive evidence, or nil when it reaches no owner."
-  [database reach test-symbol]
+  [database owners reach test-symbol]
   (when-let [owner (get reach test-symbol)]
-    {:seon.test/sym test-symbol
-     :seon.fn/sym owner
-     :seon.test/destructive-path (destructive-path database test-symbol owner)
-     :seon.test/command ["bin/test" "--" (namespace (symbol test-symbol))]}))
+    (cond-> {:seon.test/sym test-symbol
+             :seon.fn/sym owner
+             :seon.test/destructive-path (destructive-path database test-symbol owner)
+             :seon.test/command ["bin/test" "--" (namespace (symbol test-symbol))]}
+      (string? (get owners owner))
+      (assoc :seon.fn/destroys (get owners owner)))))
+
+(defn host
+  "Where one test runs, and why, as data.
+
+  `:seon.test/host` is `:seon.test.host/in-process` — the cluster's own JVM,
+  where an agent's own run and `seon.test/check` execute it — or
+  `:seon.test.host/isolated-snapshot`, because the test reaches a function
+  declaring `:seon.fn/destroys`; that answer carries the owner, what it
+  destroys, the declared call path between them, and the cold invocation that
+  may run it.
+
+  Derived, never declared on the test and never stored: the answer is the
+  program graph read now, so it moves the moment a declaration or a call edge
+  does. A test with NO program row has no known call graph and the answer is
+  the typed unknown — absence of edges is never read as safe.
+
+  Example:
+  (seon.test/host (seon.db/db) \"seon.cluster.boot-test/a-real-boot\")"
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.test/sym]
+                  [:or :seon.test/host-report :seon.error/value]]}
+  [database test-symbol]
+  (let [owners (destroyers database)]
+    (if (:seon.error/kind owners)
+      owners
+      (let [row (db/pull database [:db/id] [:seon.test/sym test-symbol])]
+        (cond
+          (:seon.error/kind row) row
+          (nil? (:db/id row))
+          (unknown test-symbol
+                   (str "No program row declares the test " test-symbol
+                        ", so its call graph is unknown and where it runs "
+                        "cannot be derived. Publish the program "
+                        "(bin/seon init --dev default --changed <file>) and "
+                        "ask again."))
+          :else
+          (let [reach (destructive-reach database)]
+            (if (:seon.error/kind reach)
+              reach
+              (if-let [evidence (destructive-exclusion database owners reach test-symbol)]
+                (assoc evidence :seon.test/host :seon.test.host/isolated-snapshot)
+                {:seon.test/sym test-symbol
+                 :seon.test/host :seon.test.host/in-process}))))))))
+
+(defn host-text
+  "One line an agent reads: where this test runs and why.
+  The unknown says so; it never reads as in-process."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.test/sym] :string]}
+  [database test-symbol]
+  (let [report (host database test-symbol)]
+    (cond
+      (:seon.error/kind report)
+      (str "runs: unknown — " (:seon.error/message report))
+      (= :seon.test.host/isolated-snapshot (:seon.test/host report))
+      (str "runs: isolated snapshot, under its own operator root ("
+           (str/join " -> " (:seon.test/destructive-path report)) ": "
+           (or (:seon.fn/destroys report) "deletes a filesystem path it did not create")
+           "). Cold invocation: "
+           (str/join " " (:seon.test/command report)))
+      :else "runs: in the cluster process")))
 
 (defn- destructive-refusal
   "Refuse one in-process run that would execute a destructive drill, or nil.
 
-  A test reaching a declared destructive owner deletes a filesystem path it did
-  not create. Run in the JVM that operates the developer's own checkout, that
-  is the 2026-09-17 incident: an in-process run emptied `data/store`
+  A test reaching a function that declares `:seon.fn/destroys` deletes a
+  filesystem path it did not create. Run in the JVM that operates the
+  developer's own checkout, that is the 2026-09-17 incident: an in-process run
+  emptied `data/store`
   (`docs/seon/issues/a-platform-tier-test-wiped-the-checkouts-store.md`). The
-  rule was prose; this is the check. It fires only for a JVM whose DECLARED
-  operator root is that development root — a `bin/test` worker or a lane's
-  `--root` scratch JVM runs the same test untouched. The refusal names the
-  test, the owner it reaches, the call path between them, and the cold
-  invocation that may run it."
+  rule was prose; this is the check, and it reads the ONE derivation `host`
+  reads. It fires only for a JVM whose DECLARED operator root is that
+  development root — a `bin/test` worker or a lane's `--root` scratch JVM runs
+  the same test untouched. The refusal names the test, the owner it reaches,
+  what that owner destroys, the call path between them, and the cold
+  invocation that may run it. An UNANSWERABLE host is refused too: an unknown
+  call graph is never admitted as safe."
   [database declared-root test-symbol]
   (when-let [root (development-root declared-root)]
-    (let [reach (destructive-reach database)]
-      (if (:seon.error/kind reach)
-        (assoc reach :seon.test/next-tier :none)
-        (when-let [evidence (destructive-exclusion database reach test-symbol)]
-          (let [owner (:seon.fn/sym evidence)]
-            (error/diagnostic
-             (merge
-              evidence
-              {:seon.error/kind ::destructive-in-process
-               :seon.error/message
-               (str test-symbol " reaches " owner
-                    ", which deletes a filesystem path it did not create, and "
-                    "this JVM was launched to operate the development root "
-                    root ". Run it cold — bin/test -- "
-                    (namespace (symbol test-symbol))
-                    " — or in a JVM under an isolated operator root "
-                    "(bin/seon --root tmp/<lane>-root). Call path: "
-                    (str/join " -> " (:seon.test/destructive-path evidence)) ".")
-               :seon.error/diagnostic-layer :test
-               :seon.error/diagnostic-operation ::run
-               :seon.error/diagnostic-member test-symbol
-               :seon.error/diagnostic-expected :isolated-operator-root
-               :seon.error/diagnostic-offending root
-               :seon.error/diagnostic-cause owner
-               :seon.error/diagnostic-evidence evidence
-               :seon.test/next-tier :none}))))))))
+    (let [report (host database test-symbol)]
+      (cond
+        (:seon.error/kind report) (assoc report :seon.test/next-tier :none)
+
+        (= :seon.test.host/isolated-snapshot (:seon.test/host report))
+        (let [evidence (dissoc report :seon.test/host)
+              owner (:seon.fn/sym report)]
+          (error/diagnostic
+           (merge
+            evidence
+            {:seon.error/kind ::destructive-in-process
+             :seon.error/message
+             (str test-symbol " reaches " owner
+                  ", which deletes a filesystem path it did not create ("
+                  (or (:seon.fn/destroys report) "declared :seon.fn/destroys")
+                  "), and this JVM was launched to operate the development "
+                  "root " root ". Run it cold — bin/test -- "
+                  (namespace (symbol test-symbol))
+                  " — or in a JVM under an isolated operator root "
+                  "(bin/seon --root tmp/<lane>-root). Call path: "
+                  (str/join " -> " (:seon.test/destructive-path report)) ".")
+             :seon.error/diagnostic-layer :test
+             :seon.error/diagnostic-operation ::run
+             :seon.error/diagnostic-member test-symbol
+             :seon.error/diagnostic-expected :isolated-operator-root
+             :seon.error/diagnostic-offending root
+             :seon.error/diagnostic-cause owner
+             :seon.error/diagnostic-evidence evidence
+             :seon.test/next-tier :none})))))))
 
 (defn run
-  "Run one declared test Var, commit its result facts, and return them.\n\n  The connection is ordinarily supplied by call preparation from the calling\n  agent's environment. The returned value is pulled from the transaction's\n  `:db-after`, so it cannot disagree with the facts that were committed.\n\n  A test whose program-graph reach includes a declared destructive owner is\n  REFUSED, without executing, in a JVM whose declared operator root is the\n  development checkout it runs in; the refusal names the test, the owner, the\n  call path, and the cold invocation that may run it. `:seon.test/declared-root`\n  in the options is that declaration when the caller genuinely holds one;\n  absent, this JVM's own is read once here.\n\n  The test BODY runs under exactly the custody the options hand it:\n  `:seon.db/connection` present means the run is that cluster's own work and\n  the body's elided `seon.db` arities reach it; absent means none, which is\n  what a host REPL calling this is. `run-owned` is the agent's entry and\n  supplies its evaluation's connection. The `connection` argument is where\n  the RESULT FACTS are committed and never decides the body's custody."
+  "Run one declared test Var, commit its result facts, and return them.\n\n  The connection is ordinarily supplied by call preparation from the calling\n  agent's environment. The returned value is pulled from the transaction's\n  `:db-after`, so it cannot disagree with the facts that were committed.\n\n  A test whose program-graph reach includes a function declaring\n  `:seon.fn/destroys` is REFUSED, without executing, in a JVM whose declared operator root is the\n  development checkout it runs in; the refusal names the test, the owner, the\n  call path, and the cold invocation that may run it. `:seon.test/declared-root`\n  in the options is that declaration when the caller genuinely holds one;\n  absent, this JVM's own is read once here.\n\n  The test BODY runs under exactly the custody the options hand it:\n  `:seon.db/connection` present means the run is that cluster's own work and\n  the body's elided `seon.db` arities reach it; absent means none, which is\n  what a host REPL calling this is. `run-owned` is the agent's entry and\n  supplies its evaluation's connection. The `connection` argument is where\n  the RESULT FACTS are committed and never decides the body's custody."
   {:malli/schema
    [:function
     [:=> [:cat :seon.test/var :seon.db/connection] [:or :seon.test/result :seon.error/value]]
@@ -603,12 +690,17 @@
                    (val entry)
                    (store/declared-operator-root))
         destructive (when-not (:seon.error/kind selected)
-                      (let [reach (when (development-root declared)
-                                    (destructive-reach database))]
+                      (let [owners (when (development-root declared)
+                                     (destroyers database))
+                            reach (cond
+                                    (nil? owners) nil
+                                    (:seon.error/kind owners) owners
+                                    :else (destructive-reach database))]
                         (cond
                           (nil? reach) []
                           (:seon.error/kind reach) reach
-                          :else (into [] (keep #(destructive-exclusion database reach %))
+                          :else (into []
+                                      (keep #(destructive-exclusion database owners reach %))
                                       selected))))
         excluded (if (vector? destructive)
                    (set (map :seon.test/sym destructive))
@@ -741,7 +833,8 @@
   :seon.test/paths for exact escalation commands. Widening inputs select the
   supplied affected namespaces, or all declared test namespaces when unknown.
   Hook callers set :seon.test/defer-widened? to report widening without running.
-  A selected test reaching a declared destructive owner is EXCLUDED, never run,
+  A selected test reaching a function that declares `:seon.fn/destroys` is
+  EXCLUDED, never run,
   when this JVM operates the development checkout; the exclusions are reported
   with their owner, call path, and cold command in :seon.test/destructive-excluded.
   A selected test declared :seon.test/long is EXCLUDED the same way and reported
@@ -860,6 +953,8 @@
            (apply str (for [excluded (:seon.test/destructive-excluded result)]
                         (str "\ndestructive " (:seon.test/sym excluded) " reaches "
                              (:seon.fn/sym excluded)
+                             (when-let [what (:seon.fn/destroys excluded)]
+                               (str " (" what ")"))
                              "; never in process on a development root — run "
                              (str/join " " (map quote-arg (:seon.test/command excluded))))))
            (apply str (for [excluded (:seon.test/long-excluded result)]

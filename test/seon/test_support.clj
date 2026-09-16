@@ -100,6 +100,9 @@
 
 (defn populate-published-root!
   "Populate `root` from the runner's immutable base, or publish standalone."
+  {:seon.fn/destroys
+   "the store directory of the root it is handed, replaced wholesale by a
+  clone of the runner's published base"}
   ([root] (populate-published-root! root {}))
   ([root options]
   ((requiring-resolve 'seon.test.runner/fixture-observation!)
@@ -123,6 +126,9 @@
 
 (defn populate-published-operator-root!
   "Populate an operator root from the runner's immutable current-src base."
+  {:seon.fn/destroys
+   "the store directory under the operator root it is handed, replaced
+  wholesale by a clone of the runner's published current-src base"}
   ([root] (populate-published-operator-root! root {}))
   ([root options]
   ((requiring-resolve 'seon.test.runner/fixture-observation!)

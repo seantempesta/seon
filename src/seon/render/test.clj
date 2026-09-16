@@ -44,6 +44,8 @@
   [unit]
   (let [entity (evidence unit) test-name (:seon.test/sym entity)
         text (str "Test " test-name ": " (state entity)
+                  (when (and (:seon.db/db unit) (string? test-name) (seq test-name))
+                    (str "\n" (test/host-text (:seon.db/db unit) test-name)))
                   (if (seq (:seon.test/failures entity))
                     (str "\n" (str/join "\n\n" (map test/failure-text (failures entity))))
                     (when-let [legacy (:seon.test/failure-message entity)] (str "\n" legacy)))
@@ -51,7 +53,8 @@
     (str (repl/source-text (list 'clojure.core/identity text)) "\n"
          (repl/source-text (list 'seon.db/pull (list 'quote evidence-selector)
                                 [:seon.test/sym test-name])) "\n"
-         (repl/source-text (list 'seon.test/changed-since-green (list 'seon.db/db) test-name)))))
+         (repl/source-text (list 'seon.test/changed-since-green (list 'seon.db/db) test-name)) "\n"
+         (repl/source-text (list 'seon.test/host (list 'seon.db/db) test-name)))))
 
 (defn- function-link [target]
   [:a {:href (str (route/path :seon.render.route/namespace
@@ -88,6 +91,8 @@
   (let [entity (evidence unit) test-name (:seon.test/sym entity)]
     [:section {:class "seon-family-entry seon-test"}
      [:h3 (function-link test-name) " — " (state entity)]
+     (when (and (:seon.db/db unit) (string? test-name) (seq test-name))
+       [:p {:class "seon-test-host"} (test/host-text (:seon.db/db unit) test-name)])
      (into [:div {:class "seon-test-failures"}]
        (map #(failure-html entity %) (failures entity)))
      (when (and (empty? (:seon.test/failures entity)) (:seon.test/failure-message entity))

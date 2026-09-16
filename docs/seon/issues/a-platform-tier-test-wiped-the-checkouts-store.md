@@ -112,8 +112,7 @@ fixture, or lane JVM can spell the developer's `data/store` at all.
 (1) and (2) landed in `ccccea806`.
 
 **(3) landed 2026-09-17** (`docs/prds/steward-platform/research/platform-tier-no-destructive-drill-2026-09-17.md`).
-`seon.test.runner/destructive-owners` declares the three functions that
-delete a filesystem path they did not create —
+The three functions that delete a filesystem path they did not create —
 `seon.test-support/populate-published-root!`,
 `seon.test-support/populate-published-operator-root!` and
 `seon.operator/cleanup-root-under-lock!` — and
@@ -136,7 +135,7 @@ The wipe was an in-process `seon.test/run`, so the prose rule ("those are
 cold-only", `tmp/orchestrator/wave2/repl-rule.txt`) is now a check at the one
 seam every in-process execution passes through. `seon.test/run` refuses a test
 whose `:seon.fn/calls` reach includes a member of the same
-`seon.test.runner/destructive-owners` set — no second list — when the operator
+declared destructive owner set — no second list — when the operator
 root this JVM DECLARES is the development checkout it runs in; it executes
 nothing and commits nothing, and the typed
 `:seon.test/destructive-in-process` refusal names the test, the owner, the
@@ -192,3 +191,14 @@ takes the caller's root first; create-store! refuses to delete a store whose
 `:branches` roster is present; every delete logs root/targets/bytes/caller/pid.
 Regressions 22/0/0, 6/0/0. Gates resumed (batch 65). Item 3 (platform tier
 carries no destructive drill; tier checker) is a separate lane.
+
+**The roster became a declaration, 2026-09-17** (owner ruling F1;
+`docs/prds/steward-platform/research/destructive-tests-derived-2026-09-17.md`).
+`seon.test.runner/destructive-owners` was a hand-maintained set of three
+symbol strings in code. It is deleted. Each owner now carries
+`:seon.fn/destroys` in its own metadata at its definition, saying what it
+deletes; the indexer admits it as a program fact; and both the cold tier
+checker and the in-process refusal derive the owner set from that one
+attribute. A test's host is derived per question by `seon.test/host` over
+`:seon.fn/calls`, never stored, and the test entity's AI and HTML renders
+say where the test runs and why.
