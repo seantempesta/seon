@@ -2219,6 +2219,7 @@
                 (let [prepared (when (seq evaluated)
                                  (record-evaluated-tx
                                   {:seon.turn.loop/cluster handle :seon.db/db database :seon.turn/id turn-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/starting-ns [:seon.ns/name namespace-name] :seon.turn/reply (str/join "\n" (map :seon.cluster.eval/source selected)) :seon.turn/opened-tx "datomic.tx" :seon.turn/closed-tx "datomic.tx" :seon.turn.loop/evaluated-sources evaluated}))
+                      _ (plan/run-issue-tests! handle agent-id)
                       report (blob/with-publication!
                               connection (vec (:seon.blob/staged-writes prepared))
                               #(db/transact!
@@ -3449,8 +3450,10 @@
          (:seon.error/values-tx delivery))
         tx-data (if batch?
                   (vec side-tx)
-                  (conj (into (receipt-settle-tx database receipt) side-tx)
-                        [:db.fn/call #'plan/settle-call agent-id]))]
+                  (do
+                    (plan/run-issue-tests! cluster agent-id)
+                    (conj (into (receipt-settle-tx database receipt) side-tx)
+                          [:db.fn/call #'plan/settle-call agent-id])))]
     {:seon.turn.loop/settled settled
      :seon.turn.loop/undisposed? undisposed?
      :seon.turn.loop/evaluation evaluation
@@ -3489,7 +3492,9 @@
                       (receipt-settle-batch-tx (mapv :seon.turn.loop/receipt prepared)))
                 (mapcat :seon.db/tx-data)
                 prepared)
-          (map (fn [agent-id] [:db.fn/call #'plan/settle-call agent-id]))
+          (map (fn [agent-id]
+                 (plan/run-issue-tests! cluster agent-id)
+                 [:db.fn/call #'plan/settle-call agent-id]))
           (distinct (map :seon.agent/id requests)))}
         ;; `with-publication!` IS TOTAL OVER AN EMPTY VECTOR — it calls the
         ;; commit directly — so the caller has no branch to get wrong. The
@@ -4667,7 +4672,8 @@
                   (report :released (count gated)))))))))))
 (defn- close-turn
   [{cluster :seon.turn.loop/cluster work :seon.turn.loop/work now :seon.turn.loop/now report :seon.turn.loop/report}]
-  (let [outcome (db/transact!
+  (let [_ (plan/run-issue-tests! cluster (:seon.agent/id work))
+        outcome (db/transact!
                  (:seon.db/connection cluster)
                  (conj (close-tx {:seon.turn/id (:seon.turn/id work) :seon.turn/closed-tx "datomic.tx"})
                        [:db.fn/call #'plan/settle-call (:seon.agent/id work)]))]

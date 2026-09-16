@@ -224,7 +224,7 @@ The only committed live mutations from this lane are the two ordinary test
 results. Speculative title, assignment and test-ref changes were verified
 absent from the live issue.
 
-**Gate request: not ready.** After the chosen implementation passes the
+**Initial gate request: not ready.** After the chosen implementation passes the
 required in-process tests before and after adoption, the orchestrator should
 run one path-limited affected-namespace gate and then the platform gate,
 serially. There is no production slice to submit to a gate now.
@@ -235,3 +235,60 @@ forms are readable. Markdown hook feedback reported
 agents-md-audit note; the remaining feedback was elided, so no complete
 cause attribution is made. Initial Clojure-script packaging lint was
 removed by storing exact replayable MCP request data in EDN instead.
+
+## Resumed decision and slice 1 — P5
+
+The owner chose sequencing, not narrowing: P5 first, then P6 with immutable
+snapshots and historical assignment/creator authority. This supersedes the
+initial stop and options above. P6 remains required after this slice.
+
+The kill at `seon.plan` is: an issue-backed step completes only when every
+required test has current verified run facts; completion and issue resolution
+are asserted in the same transaction. All four turn settlement sites run the
+unresolved assigned issues' tests before submitting settlement. One configured
+evaluation deadline covers the set. Timeout and unavailable executable tests
+record red evidence through the existing test result writer. Host test Vars
+retain their fixture context; SCI test Vars run under the worker context's
+interrupt arm, inside the test runner's bounded thread. No transaction function
+executes tests. Existing issue queries are interpreted by this one owner.
+
+Exact in-process regression invocation throughout this slice:
+`(seon.test/run #'seon.issue-settlement-test/issue-settlement-runs-tests-and-derives-completion (seon.operator/connection "default"))`.
+The canonical fixture admits its function and test through the real SCI path,
+then exercises system turns for red, throwing, over-bound and green definitions.
+All 19 assertions passed before the file edit (03:04:40Z, 10048 ms,
+run entity 68519), after the initial source edit (03:10:47Z, 11111 ms,
+70779), before the host-Var correction edit (03:14:44Z, 9097 ms, 70906),
+and after that edit (03:15:32Z, 8965 ms, 70936). The latter recorded reach
+digest was `4a4647140df2171c35a7688620d6e9df60d7dc18d4931814815a762d9ae78e85`.
+Forms were evaluated and called in the development JVM before editing.
+
+The requested baseline retry of `seon.issue-test/issue-worker-creation-is-atomic`
+again exceeded its 20000 ms bound: 22058 ms wall time, result 0/0/1,
+run entity 67488 at 02:54:02Z. The in-process canonical fixture continued as
+directed; no test JVM was launched.
+
+Live proof used issue 43695, worker `12254041a057`, and its actual test
+`seon.test-reaching-test/agent-admitted-tests-reach-their-tested-function`.
+The old step was already completed at transaction 536871475, and source
+adoption had removed the issue assignment. The probe restored that assignment
+and added verification step 70816 (`issue-settlement-live-proof`), preserving
+the old completed step. Run 70850 was red and left the new step open. After
+the host-Var correction, run 70922 (`8068393c78dc`, basis 536871821) recorded
+7/0/0; settlement transaction **536871824** asserted both the step's
+completed-tx and the issue's resolved-tx. This proves the live settlement
+owner using hot-reloaded definitions, not a refork.
+
+Exact live boundary: a full system turn on this preexisting worker refuses
+with `:seon.turn/generated-read-depends-on-turns` before reaching settlement.
+The live probe therefore called `run-issue-tests!` and submitted the existing
+`settle-call` directly; the canonical regression proves the system-turn path.
+Publication 69bed57b-af8e-493d-94a5-b5be95d1492e exceeded its declared operator
+bound (exit 124), so full publication convergence is not claimed from these
+hot-Var runs. The pending source publication must be verified before final
+integration. Default has never been stopped, reforked or restarted.
+
+Gate request for slice 1: affected namespaces `seon.issue-settlement-test`,
+`seon.plan-test`, `seon.turn-test`, with paths `src/seon/plan.clj`,
+`src/seon/turn.clj`, `test/seon/issue_settlement_test.clj`, followed serially
+by `--platform` at the orchestrator. No lane test JVM was launched.

@@ -533,21 +533,112 @@
                {:seon.agent/id agent-id}))
     (+ (System/nanoTime) (* 1000000 limit))))
 
+(def issue-done-query
+  "A nonempty issue test set is complete only on current verified run evidence."
+  '[:find ?subject . :in $ ?input :where
+    [(identity ?input) ?subject]
+    [?subject :seon.issue/id]
+    [?subject :seon.issue/tests _]
+    (not-join [?subject]
+      [?subject :seon.issue/tests ?test]
+      (not-join [?test]
+        [?test :seon.test/sym ?symbol]
+        [?test :seon.test/pass-count ?passes]
+        [(pos? ?passes)]
+        [?test :seon.test/fail-count 0]
+        [?test :seon.test/error-count 0]
+        [(seon.test/verified? $ ?symbol) ?verified]
+        [(true? ?verified)]))])
+
+(defn run-issue-tests!
+  "Run every open issue's tests before settlement, sharing one evaluation deadline.
+  Results, including unavailable or expired tests, use the existing test writer."
+  {:malli/schema [:=> [:cat :seon.turn.loop/cluster :seon.agent/id] :nil]}
+  [cluster agent-id]
+  (let [connection (:seon.db/connection cluster)
+        database (db/db connection)
+        tests (db/q '[:find [?test ...] :in $ ?agent-id
+                      :where [?a :seon.agent/id ?agent-id]
+                      [?i :seon.issue/agent ?a]
+                      (not [?i :seon.issue/resolved-tx])
+                      [?i :seon.issue/tests ?test]] database agent-id)]
+    (when (error-value? tests)
+      (throw (ex-info (:seon.error/message tests) tests)))
+    (when (seq tests)
+      (let [deadline (query-deadline database agent-id)
+            provenance ((requiring-resolve 'seon.test.runner/provenance) database)
+            ctx ((requiring-resolve 'seon.cluster.agent/acquire-context!) cluster agent-id)]
+        (when (error-value? provenance)
+          (throw (ex-info (:seon.error/message provenance) provenance)))
+        (doseq [test-eid (sort tests)]
+          (let [test-symbol (:seon.test/sym (db/pull database [:seon.test/sym] test-eid))
+                remaining-ms (quot (- deadline (System/nanoTime)) 1000000)
+                result
+                (if (and test-symbol (pos? remaining-ms))
+                  (let [qualified (symbol test-symbol)
+                        test-var ((requiring-resolve 'sci.core/resolve) ctx qualified)
+                        metadata (meta test-var)
+                        runnable
+                        ((requiring-resolve 'sci.core/new-var)
+                         (symbol (name qualified)) nil
+                         (assoc metadata
+                           :name (symbol (name qualified))
+                           :ns (or (:ns metadata)
+                                   ((requiring-resolve 'sci.core/create-ns)
+                                    (symbol (namespace qualified))))
+                           :test
+                           (fn []
+                             (let [remaining (quot (- deadline (System/nanoTime)) 1000000)]
+                               (when-not (pos? remaining)
+                                 (throw (ex-info "The issue test set exhausted its evaluation deadline."
+                                                 {:seon.test/sym test-symbol})))
+                               (when-not (ifn? (:test metadata))
+                                 (throw (ex-info "The issue test has no runnable SCI Var."
+                                                 {:seon.test/sym test-symbol})))
+                               (if (var? test-var)
+                                 ((:test metadata))
+                                 (let [armed ((requiring-resolve 'seon.sci.kernel/arm) ctx remaining)]
+                                   (try ((:test metadata))
+                                        (finally ((:seon.sci.kernel/stop! armed))))))))))]
+                    ((requiring-resolve 'seon.test/run)
+                     runnable connection
+                     {:seon.db/db database
+                      :seon.test.run/provenance provenance
+                      :seon.test/remaining-ms remaining-ms}))
+                  (if-not test-symbol
+                    (refuse! :seon.issue/not-a-test
+                             "An issue success ref no longer identifies a test."
+                             {:seon.agent/id agent-id :seon.db/ref test-eid})
+                    ((requiring-resolve 'seon.test.runner/commit-results!)
+                     connection
+                     {:seon.db/db database :seon.test.run/provenance provenance
+                      :seon.test/run-basis-t (:seon.test.run/basis-t provenance)
+                      :seon.test/run-at (:seon.test.run/at provenance)
+                      :seon.test.runner/results
+                      [{:seon.test/sym test-symbol :seon.test/pass-count 0
+                        :seon.test/fail-count 0 :seon.test/error-count 1
+                        :seon.test/failure-message
+                        "The issue test set exhausted its configured evaluation deadline before this test."}]})))]
+            (when (error-value? result)
+              (throw (ex-info (:seon.error/message result) result)))))))
+    nil))
+
 (defn- done-query-result
   [database step deadline]
-  (let [query (:my.plan.item/done-query step)
-        subject (:my.plan.item/subject step)
+  (let [subject (:my.plan.item/subject step)
+        subject (if (map? subject) (:db/id subject) subject)
+        issue? (and subject (:seon.issue/id (db/pull database [:seon.issue/id] subject)))
+        query (if issue? issue-done-query (:my.plan.item/done-query step))
         request (if (and (map? query) (:query query)) query {:query query})
         result (db/q (assoc request
-                           :args (cond-> [database] subject (conj (if (map? subject) (:db/id subject) subject)))
+                           :args (cond-> [database] subject (conj subject))
                            :cancel (reify clojure.lang.IDeref
                                      (deref [_] (> (System/nanoTime) deadline)))))]
     (when (error-value? result)
       (refuse! :my.plan/done-query-failed
                (str "Completion query failed: " (pr-str query) "; found " (pr-str result))
                {:my.plan.item/id (:my.plan.item/id step)
-                :my.plan.item/done-query query
-                :seon.db/result result}))
+                :my.plan.item/done-query query :seon.db/result result}))
     result))
 
 (defn- query-satisfied?
@@ -556,10 +647,14 @@
 
 (defn- completion-tx
   [database plan-entity step]
-  (cond-> [[:db/add step :my.plan.item/completed-tx "datomic.tx"]]
-    (= step (db/q '[:find ?current . :in $ ?plan
-                    :where [?plan :my.plan/current-step ?current]] database plan-entity))
-    (conj [:db/retract plan-entity :my.plan/current-step step])))
+  (let [subject (db/q '[:find ?subject . :in $ ?step
+                        :where [?step :my.plan.item/subject ?subject]
+                        [?subject :seon.issue/id]] database step)]
+    (cond-> [[:db/add step :my.plan.item/completed-tx "datomic.tx"]]
+      subject (conj [:db/add subject :seon.issue/resolved-tx "datomic.tx"])
+      (= step (db/q '[:find ?current . :in $ ?plan
+                      :where [?plan :my.plan/current-step ?current]] database plan-entity))
+      (conj [:db/retract plan-entity :my.plan/current-step step]))))
 
 (defn settle-call
   "Evaluate every open query-backed step and record first completion in this write."
