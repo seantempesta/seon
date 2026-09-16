@@ -1,2 +1,11 @@
 #:seon.config.render{:coalesce-ms
-                     [:int {:min 0, :max 1000, :seon.config/dial true}]}
+                     [:int {:min 0, :max 1000, :seon.config/dial true}]
+                     :issue-opening
+                     [:enum
+                      {:seon.config/dial true
+                       :seon.config/per-agent true
+                       :seon.config/optional true
+                       :description
+                       "Which AI opening a worker's issue block renders. One enum member per candidate rendering under trial (docs/prds/steward-platform/plan/issue-context-trials-2026-09-16.md). Absent means :bare, the floor the family shipped with; the schema pair symbol stays seon.issue/render-ai, which dispatches on this value."}
+                      :bare :plan-first :evidence-first :walkthrough
+                      :questions :namespace-picture :minimal-retrieval]}

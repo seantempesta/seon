@@ -6,6 +6,7 @@
             [clojure.string :as str]
             [seon.db :as db]
             [seon.id :as id]
+            [seon.issue.opening :as opening]
             [seon.repl :as repl]
             [seon.schema.form :as schema.form]))
 
@@ -618,19 +619,34 @@
           (check-form row test-rows)
           (assoc :seon.issue/check-form (check-form row test-rows)))))))
 
+(defn- render-floor
+  "The floor opening: what decides done, named, plus the ordinary read."
+  [row named]
+  (str (if (and (empty? (:seon.issue/tests row)) (:seon.issue/detector row))
+         (if named
+           (str ";; My issue. Its detector decides done: it resolves on the run after\n"
+                ";; (" named " (seon.db/db)) stops naming this subject.\n")
+           ";; My issue. Its detector decides done: it resolves when the detector stops naming this subject.\n")
+         ";; My issue. Its tests define done; (my.test/check ...) runs them.\n")
+       (repl/source-text (list 'my.issue/status {:seon.issue/id (:seon.issue/id row)}))))
+
 (defn render-ai
-  "Emit the ordinary read for this issue; what decides done is named."
+  "Emit the ordinary read for this issue; what decides done is named.
+
+  An issue that carries tests renders through the candidate its worker is
+  dialled to (`:seon.config.render/issue-opening`); `:bare`, the default,
+  is the floor this function shipped with. A generated issue with no tests
+  keeps naming its detector here: no candidate covers that case yet."
   {:malli/schema [:=> [:cat [:or :seon.issue/issue :seon.render/unit]] :seon.render/source]}
   [unit]
   (let [row (or (:seon.render/value unit) unit)
-        named (detector-symbol row)]
-    (str (if (and (empty? (:seon.issue/tests row)) (:seon.issue/detector row))
-           (if named
-             (str ";; My issue. Its detector decides done: it resolves on the run after\n"
-                  ";; (" named " (seon.db/db)) stops naming this subject.\n")
-             ";; My issue. Its detector decides done: it resolves when the detector stops naming this subject.\n")
-           ";; My issue. Its tests define done; (my.test/check ...) runs them.\n")
-         (repl/source-text (list 'my.issue/status {:seon.issue/id (:seon.issue/id row)})))))
+        named (detector-symbol row)
+        database (:seon.db/db unit)
+        dialled (when (and database (seq (:seon.issue/tests row)) (:seon.issue/id row))
+                  (opening/source database (:seon.issue/id row)))]
+    (if (string? dialled)
+      dialled
+      (render-floor row named))))
 
 (defn render-html
   "Show the issue and current test outcomes as one block."
@@ -748,6 +764,7 @@
                        [:map [:seon.issue/id :seon.issue/id]
                         [:seon.issue/budget :seon.issue/budget]
                         [:seon.ns/name {:optional true} :seon.ns/name]
+                        [:seon.agent/settings {:optional true} :seon.config/agent-overlay]
                         [:seon.config.ai/no-provider {:optional true} :seon.config.ai/no-provider]]]
                   :seon.db/tx-data]}
   [database request]
@@ -775,7 +792,8 @@
                       (if (= agent-id (:seon.agent/id entry))
                         (-> entry
                             (update :seon.agent/settings merge
-                                    (cond-> {:seon.config.run/max-episode-runs (:seon.issue/budget request)}
+                                    (cond-> (merge {:seon.config.run/max-episode-runs (:seon.issue/budget request)}
+                                                   (:seon.agent/settings request))
                                       (:seon.config.ai/no-provider request)
                                       (assoc :seon.config.ai/no-provider true)))
                             (update :seon.agent/plan merge
@@ -806,6 +824,7 @@
                              [:seon.issue/id :seon.issue/id]
                              [:seon.issue/budget :seon.issue/budget]
                              [:seon.ns/name {:optional true} :seon.ns/name]
+                             [:seon.agent/settings {:optional true} :seon.config/agent-overlay]
                              [:seon.config.ai/no-provider {:optional true} :seon.config.ai/no-provider]]]
                   :map]}
   [{connection :seon.db/connection :as request}]
