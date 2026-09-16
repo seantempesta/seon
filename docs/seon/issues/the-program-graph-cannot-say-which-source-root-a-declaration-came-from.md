@@ -32,3 +32,28 @@ Acceptance: an indexed declaration carries its declared source root as a fact
 the classpath root it read the file from), a detector scopes on that fact, and
 one regression asserts a first-party production function and a test helper are
 distinguished by the query rather than by their names.
+
+## 2026-09-16 — attempted, blocked at a protected file
+
+Status stays **open**. The fix was scoped and verified live, then stopped: the
+file row is minted through `seon.program/canonical-row`, which keeps only the
+attributes named in `seon.program/shapes` for `:seon.fn.file/path`
+(`src/seon/program.cljc:41`). A `:seon.fn.file/root` written by the indexer is
+silently dropped there, and re-index replacement uses the same list, so the
+fact needs one element added to that vector in `src/seon/program.cljc` — a file
+protected by the concurrent reach-closure verification.
+
+Two findings that constrain the eventual fix:
+
+- `seon.fn/source-roots` is `["src" "test"]` and the indexer has no `script/`
+  handling; `seon.cluster/source-roots` widens only the source snapshot.
+- Default holds 335 `seon.fn.file` entities: 106 under `src/`, 228 under
+  `test/`, and one under `docs/` (a lane probe script minted by the edit hook's
+  changed-path seam, which admits any `.clj` regardless of root). The root
+  attribute must therefore be OPTIONAL, absence must mean "under no declared
+  root", and consumers must join positively on the root value — a negation
+  would read absence as `src` and re-create the class this project keeps
+  hitting.
+
+Evidence and the ready-to-land edits:
+[source-root-fact-2026-09-16](../../prds/steward-platform/research/source-root-fact-2026-09-16.md).
