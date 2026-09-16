@@ -74,6 +74,7 @@
             [seon.blob :as blob]
             [seon.cluster.status :as cluster.status]
             [seon.env :as env]
+            [seon.issue.opening :as issue.opening]
             [seon.error :as error]
             [seon.repl :as repl]
             [seon.schema :as schema]
@@ -215,7 +216,7 @@
        (into [{:seon.render/source identity-source}]
              (map (fn [issue-id]
                     {:seon.render/source
-                     ((requiring-resolve 'seon.issue.opening/source) database issue-id)
+                     (issue.opening/source database issue-id)
                      :seon.eval/origin [:seon.issue/id issue-id]}))
              (sort issues))}
       identity-source)))
