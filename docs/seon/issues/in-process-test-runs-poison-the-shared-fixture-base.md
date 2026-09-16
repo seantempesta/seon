@@ -103,3 +103,20 @@ on its very first force.
 4. One regression asserts the class: force the base with a construction that
    throws, then force it again with the cause removed, and observe a usable
    base rather than the first throwable.
+
+## Re-observed by config-apply-cost — 2026-09-16
+
+After the owner's restart to default PID 37572, the canonical delay was
+initially unrealized. Running
+`seon.config-test/converged-apply-uses-carried-projection-and-remains-exact`
+through `seon.test/run` on a future, with an explicit 270000 ms execution
+bound and database-derived provenance, completed in 32756.598 ms rather
+than timing out. Run 49224 recorded 2 pass / 0 fail / 1 error: cold SCI
+acquisition could not load `seon.dev.dependency-cache-test` because
+`clojure.tools.build.api` was absent. Dereferencing the now-realized base
+again returned the cached `:seon.sci.eval/namespace-unloadable` exception.
+This reproduces classpath cause 2 independently of an MCP timeout.
+The lane obeyed the base-poison stop rule; it did not repair the classpath,
+replace the delay, or restart default. Its implementation and measurement
+boundary are in
+[the config landing](../../prds/context-generation/research/turn-bookkeeping-cost-2026-09-16.md).

@@ -303,3 +303,29 @@ duplicate-require warnings remain in the touched namespaces. `git diff
 `seon.reconcile-test`, `seon.schema-test`, `seon.db-test`,
 `seon.cluster.turn-test`, `seon.test-support-test`, and `platform`.
 No test-suite green claim is made; the orchestrator's batched gate owns it.
+
+### Final boundary after the owner's restart
+
+Implementation committed path-limited as `6313d2006`. During cleanup default
+changed to PID 37572; this lane did not restart it. The queued publication
+`f915faf2-ca7d-4b51-8442-574a829c5426` subsequently reported convergence on
+source commit `6aaa36cc-8be5-5a3c-8fbf-2f27933c7b14`, but its reaching check
+was unavailable during the process transition.
+
+The fresh process initially had an unrealized canonical fixture base. One
+retry of the class regression used `seon.test/run` on a future, with its
+three-argument options carrying `seon.db/db`, `seon.test.runner/provenance`
+of that database, and `:seon.test/remaining-ms 270000` to avoid interrupting
+cold base construction. It finished in **32756.598 ms**, run **49224**,
+recorded **2 pass / 0 fail / 1 error**. Construction failed loading
+`seon.dev.dependency-cache-test`: `clojure.tools.build.api` is absent from
+the process classpath. A subsequent dereference of the realized base
+confirmed the cached `:seon.sci.eval/namespace-unloadable` exception.
+
+This is now the explicit **base-poison stop boundary** in `repl-rule.txt`,
+not the earlier held-permit boundary. No further fixture run, classpath
+repair, base replacement, or restart was attempted. The existing issue
+[in-process-test-runs-poison-the-shared-fixture-base](../../../seon/issues/in-process-test-runs-poison-the-shared-fixture-base.md)
+was updated with this recurrence; that issue note is one additional edited
+path, solely to retain the observed verification blocker. Owned scratch
+files were removed; the completed retry has no running future.
