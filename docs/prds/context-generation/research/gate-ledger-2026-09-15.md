@@ -160,3 +160,13 @@ seon.agent.edn). Landed today: reach-digest `f2d537187`/`e5de6ebc7`
 (warm check 2.65 ms; one changed function 56 ms, three digests recomputed),
 program-provenance `3402913f3`/`f9a46b0bd`, entity-pairs, generated-read
 fix `474234fb7`, attempt facts `17dd75e89`.
+
+## 05:40Z — default's prepl saturates under in-process regressions
+
+Eight lanes across both sessions ran their in-process regressions inside
+default's JVM at once; the hook's publications exited 124 on their bound
+and `runtime_status` timed out. The steward session paused four of its
+lanes. Same shape as the test-JVM saturation: the development JVM's prepl
+is one shared resource; in-process test runs need the same admission as
+gates (a slot, or the reaching-tests check running them serially).
+
