@@ -1,6 +1,6 @@
 ---
 type: plan
-status: active — released seams authorized; living-ref enforcement and Q2 await owner rulings
+status: active — program deletion refusal authorized; Q2 awaits owner ruling
 created: 2026-09-17
 tags: [schema, reset, program-graph, symbols, deletion, provenance]
 ---
@@ -14,24 +14,80 @@ never restarts or resets default. The explicit step-2 restriction overrides
 the assignment's later generic cold-gate paragraph. The orchestrator runs the
 cold gates after the one reset. No migration or compatibility population.
 
-## Review correction and current authorization — 2026-09-17
+## Current owner correction — program deletion admission
+
+Read end to end: **J**, [program-graph deletion semantics](../research/deletion-semantics-program-graph-2026-09-16.md)
+(revised at `2871e77e1`, especially §2.5, §2.6 and §5); **K**,
+[agent/turn deletion semantics](../research/deletion-semantics-agents-and-turns-2026-09-16.md);
+and **X**, [reset schema recommendations](../research/reset-schema-recommendations-2026-09-16.md).
+The owner's latest assignment and these corrections supersede H's universal
+living-ref proposal. No classification property, universal enforcement or
+Datahike fork extension belongs to this implementation. Existing required refs
+already refuse a sweep through whole-entity validation; optional refs sweep.
+Components must validate with their parents (G5), not acquire invented identities.
+
+The authorized first production seam is the indexed symbol-edge retype plus
+`seon.db/write-report-error` refusal and canonical regressions. Calls,
+references, namespace requirements and declared test subjects are current
+obligations; reach is historical evidence, reported stale and never a blocker.
+Values preserve the evidence needed to distinguish a repair from Datahike's
+incoming-ref sweep. The complete caller list is data; only rendering elides.
+The detection is affected entities with datoms before and none after, followed
+by indexed lookups against the final database. Fresh complete publication has
+no deleted identities and reports unresolved edges positively.
+
+Agents are never deleted; no deletion API, tombstone or closure lifecycle is
+added. Listeners are out of this assignment. Declaration capability-fn deletion
+and shared shape-row reclamation remain owner questions (J §5.2–3). Q2 AST
+removal remains unapproved. These explicit boundaries override recommendations
+in J/K/X that would expand this seam.
+
+### Seven schema corrections (X wins over the earlier tables where they differ)
+
+| Finding | Corrected edit and publication boundary | Required proof |
+|---|---|---|
+| X1 issue status | **Keep `:seon.issue/status`.** It is the current authority, not a mirror: 1,742 status datoms versus zero resolved-tx in the dated probe. Any later removal first needs replacement writers from authored note states; no migration is introduced. | Terminal notes remain terminal; opened instant remains authored observation, not import transaction. |
+| X2 nonstored contracts | `:seon.eval/outcome`, `:seon.maintenance.result/value`, `:seon.test/failure-identity`, `:seon.render/rendered`, `:seon.cluster.wake/offer-result` are **contract-only work**, outside reset-gated groups. They are not five stored maps: their forms differ, and all five were absent from the installed schema. | Ask `storable-attribute-in?` and inspect installed schema before asserting storage semantics. |
+| X3 exception class | The throwable-class symbol sighting was signature input, not a datom writer. Merge class attributes only with actual writers; separately fix db's string under symbol-typed exception-class. | Assert stored symbol and the rendered fault, not merely signature construction. |
+| X4 tuple members | Keep value tuples, never ref members. Datahike's heterogeneous check accepts all-invalid members. A cardinality-many tuple write is a set of tuples, not a bare tuple. | Assert stored callee is qualified-symbol and arity is integer; test wrong types and bare-tuple input explicitly. |
+| X5 pulled forms | Derive `:as`, defaults, component-reverse cardinality and unexpanded `:db/ident`; refuse unsupported recursion/limit selectors. Pull's silent default cap is 1,000. | More than 1,000 edges remain complete in admission/reporting via datoms; bounded pull reports its cut as an elision, never apparent completeness. |
+| X6 literal/EDN shape | The codec requires a genuinely mixed `[:or …]` without explicit value-type. A bare map, vector of maps or single-type union does not engage it. | Every -edn replacement declares its actual mixed literal arms; otherwise retain a documented opaque string. Round-trip and reject noncanonical bytes. |
+| X7 render codec exits | ai/html/form storage changes leave the EDN codec; they are **not** program-symbol flips. Keep them in the render pair publication with all readers. | Read native renderer symbols and independently validate rendered text/Hiccup. |
+
+G4 is strengthened by X §3: `explode` erases `#{}` before the final report or
+a transaction function can observe it. Require the exact analyzed-input digest
+datom; only that fact licenses interpreting absent relation datoms as a known
+empty result. There is no submission-time or db.fn/call empty-set workaround.
+Recorded reach requires its own computation digest; a definition digest is not
+evidence that reach ran. Unknown analyzer symbols must normalize at the analyzer
+or use the existing codec at print/read seams, never a third encoding.
+
+K's per-family evidence replaces blanket living-ref language throughout the
+older inventory: required refs already refuse; optional current-step, runtime
+trigger, causal-chain and sibling-attempt pointers may deliberately sweep.
+Historical origin/about/effect-evaluation/occurrence/plan dependency mentions
+need their actual identity-value carrier and all writers/readers in one later
+publication. Do not infer a new generic deletion policy from this inventory.
+The evaluation author deletion also waits for a proven derivation: X measured
+24 renderer facts versus 69 system stamps, a 45-row disagreement. Its deletion
+cannot be justified by renderer presence alone.
+
+## Previous review correction — superseded on deletion by J/K/X above
 
 Read [the high-effort evaluation/deletion review](../research/design-review-eval-path-and-deletion-contract-2026-09-17.md)
 end to end, including both designs, every N1–N11 writer verification, both
 reproducible probes and its failed-gate boundary. Label **H** below names that
-review. H Design 2 supersedes the original Q1 alternatives and R's blanket
-ref-classification claims. The owner has **not** ruled on universal living-ref
-enforcement or Q2: neither enforcement nor AST deletion is enabled by this
-plan. Q2 option A is the requested implementation direction once ruled.
+review. H superseded the original Q1 alternatives; J/K/X and the current owner
+direction now supersede H Design 2. Q2 option A remains the requested direction
+once ruled; no AST deletion is authorized.
 
 Authorized now: released/unowned derived pull forms, plain digest format,
 G5 groundwork and released group 4/5 seams. G5 ownership passes to this
 integrator unless the edges continuation reports otherwise; its bridge/schema
 files are currently held, so ownership does not authorize overlapping edits.
-The Datahike expanded-deletion report extension must be its **own fork commit**
-with the dependency's suite proof before updating Seon's pin/consumer. It does
-not authorize enabling the universal rule. No fork change is part of the first
-capture-history seam.
+The previously proposed Datahike expanded-deletion report extension is removed
+from this reset's prerequisites. The authorized value-edge refusal needs no
+fork change. The capture-history seam landed separately at `79c106925`.
 
 Explicit held files at resumption: config.clj, schedule.clj, sci/eval.clj,
 cluster.clj, cluster/source.clj, schema/edn.clj, schema/datahike.clj,
@@ -89,10 +145,10 @@ publication, browser observation or reset was performed for this plan.
 | A/S retype fn.ast/type versus R C.2 | **Q2 controls.** Do not spend work repairing a family scheduled for removal/merge. Both options remove the old family; provenance replaces its analysis-presence test. |
 | S says delete search :symbol tags versus S §1.3's correction | **S §1.3 wins.** Preserve all identifier tokenizer properties, including the keyword identity site. |
 | R N27 says binding shape derives from children/entries | Empty sequential and map bindings have no member datoms. **G4 wins over that derivation.** Delete the redundant shape only after deriving from the required stored binding/form through the Clojure reader, including `{}` and `[]`; never use collection presence as the replacement. |
-| R C.1/N12 origin assumptions versus H rollout inventory | **H wins.** A historical origin that must survive becomes an identity value. Audit transaction provenance `:seon.db/receipt` and effect/evaluation provenance too before universal enforcement, or compaction and issue deletion would be blocked. No silent weak-ref exemption and no cascading transaction entities. |
+| R C.1/N12 origin assumptions versus H rollout inventory | **K and the current owner direction win.** Historical origins need an explicit identity carrier; required/optional refs keep their existing dial. Audit transaction/effect provenance per family; no universal enforcement and no cascading transaction entities. |
 | R D.2 superseded-by ref versus R C.1 name mentions | Use a superseded-by **issue-id value**, not a dangling name-ref; it is a historical statement that must survive target removal. Resolution is a query. |
 | R N38/N39 all instants become tx refs | Use tx refs for database transitions only; retain actual occurrence/provider event instants and imported issue opening dates as observations with distinct semantics. Never reinterpret an old date as the transaction that imported it. |
-| R D.4 calls nil-enum removal accretion | It narrows a boundary; **AGENTS §2.5 wins**. Treat wake offer-result as a reset/publication-coupled retype, with all callers changed. |
+| R D.4 calls nil-enum removal accretion | It narrows a boundary; **AGENTS §2.5 wins**. Treat wake offer-result as a contract-only narrowing with all callers changed (X2), not a reset-gated storage retype. |
 | R B.4 says four AST resources; C.2 says two | At this HEAD the targeted resources are `seon.fn.ast.edn` and `seon.fn.ast.entry.edn`, plus the attribute in `seon.fn.edn`. Q2 records the actual grep; no invented deletion paths. |
 | S reset --force versus this assignment's exact default sequence | **Assignment wins.** Only the orchestrator executes the four-command default sequence below. Do not down unrelated clusters or delete the shared store. |
 | R B.12 render/form versus current vocabulary | Retire form as a third output selector; render functions choose executable forms within their existing AI/HTML pair. Change the ten declaring schema sites and walk consumers before deleting the key. Preserve rendered HTML under its own Hiccup value key, not a string-only output slot. |
@@ -121,10 +177,10 @@ not permission to reset or to weaken contracts.
 | Order / group | Atomic contents and dependency | Ownership at assignment |
 |---|---|---|
 | 0 — landed prerequisite | Platform declaration, fixture exclusion and runner partition. Preserve these while changing program identity/result schemas. | **Landed** `f54771e84` (test schema/program), `8d4b3689f` (runner/gates); inspected commit stats. No reimplementation. |
-| 1 — writer and declaration foundation | Q1 expanded-deletion report/check (pending ruling), complete G5 parent validation, canonical stored/selector-derived forms, plain digest format. Constructors of newly checked components travel here. No deletion enabled before this unit accepts valid writes and rejects invalid native/expanded writes. | **Integrator owns G5 groundwork** unless E reports otherwise; bridge/schema overlaps remain held. **Pending ruling:** Q1 enforcement. Derived forms/digest are authorized only on released files; source digest is currently modified. |
-| 2 — program names and provenance | All symbol identities and aliases, indexed calls/references/reach/writes/schema references/arity references, source digest and required derivables, full constructors, every graph reader and emitted form. Subject and capability changes extend E. Name-valued schedule/citation readers that join program identities travel in this same publication. Includes canonical fixtures. | **E §7.3–4 owns base symbols, fn/program/turn, source and runner seams.** **No-default-cluster lane owns config/schedule/sci-eval edits.** R extensions are **unowned**, to integrate only after owner release; never assume its schedule work already implements N9. |
-| 3 — entity deletion | Reconcile and ns-unmap/schema removal use retractEntity; delete tombstone fallback/minting/pending resolution after groups 1–2; preserve test result evidence as values; deleted result subject refuses. Issue deletion keeps existing retention rules. | **E §7.4 and its issue-deletion seam owned.** New living-relation effects on deletion transactions are integrator work after Q1. No takeover until orchestrator reports the continuation stopped. |
-| 4 — lifecycle and names beyond graph | Evaluation consolidation/read observation; test result/run/failure derivation; error signature/occurrence cleanup; typed issue citations/status transitions; explicit listen constraint; agent/plan/import required constructors. Requires 1–2 and coherent ownership release. | **Unowned**, with held `sci/eval`, schedule/config, runner and turn seams coordinated through the orchestrator. |
+| 1 — writer and declaration foundation | Q1 program value-edge check (authorized, combined with group 2 retype), complete G5 parent validation, canonical stored/selector-derived forms, plain digest format. Constructors of newly checked components travel here. No deletion enabled before this unit accepts valid writes and rejects invalid native/expanded writes. | **Integrator owns G5 groundwork** unless E reports otherwise; bridge/schema overlaps remain held. **Authorized:** Q1 program deletion refusal; no universal ref rule. Derived forms/digest are authorized only on released files; source digest is currently modified. |
+| 2 — program names and provenance | All symbol identities and aliases, indexed calls/references/reach/writes/schema references/arity references, source digest and required derivables, full constructors, every graph reader and emitted form. Subject and capability changes extend E. Name-valued schedule/citation readers that join program identities travel in this same publication. Includes canonical fixtures. | **Integrator now owns the released fn/program/db and schema seam.** Held source/selection/SCI consumers must land or be released in the same coherent unit. **No-default-cluster lane owns config/schedule/sci-eval edits.** R extensions are **unowned**, to integrate only after owner release; never assume its schedule work already implements N9. |
+| 3 — entity deletion | Reconcile and ns-unmap/schema removal use retractEntity; delete tombstone fallback/minting/pending resolution after groups 1–2; preserve test result evidence as values; deleted result subject refuses. Issue deletion keeps existing retention rules. | **Integrator owns released deletion/refusal work.** Held source/SCI publication seams remain boundaries; no tombstone removal before their value consumers land. |
+| 4 — lifecycle and names beyond graph | Evaluation consolidation/read observation; test result/run/failure derivation; error signature/occurrence cleanup; typed issue citations/status transitions; listeners excluded by current assignment; agent/plan/import required constructors. Requires 1–2 and coherent ownership release. | **Unowned**, with held `sci/eval`, schedule/config, runner and turn seams coordinated through the orchestrator. |
 | 5 — component values and remaining families | Literal codec consolidation, maintenance root/components and transition names, provider descriptor fields, render pair output split, capture requirements, wake enum. Run consumers with narrowed declarations in each publication. | **Unowned**; no-default-cluster config/schedule work remains protected; R provider/render extensions are not implicitly covered by it. |
 | 6 — AST decision and final cleanup | Q2 replaces reconciliation/backfill reads first, removes old AST writers/attributes/resources last. Remove stale mirrors/docs and verify no old lookup/string/ref consumer remains. | **Unowned**, E names fn/program/turn so wait for explicit release. |
 | 7 — one reset and cold proof | All group iteration evidence collected; orchestrator publishes/reforks once, reseeds, converges, runs namespace cold gates and live proofs. | **Orchestrator only**. This integrator never runs reset or bin/test in step 2. |
@@ -149,20 +205,20 @@ removing keys superseded by these decisions.
 
 | Group | Edit | Source finding | Kind | Writers in the same publication | Readers in the same publication | Regression that proves it |
 |---|---|---|---|---|---|---|
-| 1 | Audit every retained ref from its actual writer: existing component ownership stays component; every noncomponent ref means a living relation, without a new property. Mentions that must survive deletion become values of the target identity type. Document deletion consequences; enforcement waits for the owner ruling and the expanded-deletion report. | R C.1; Q1 | add | `seon.agent/update-settings-call` (`src/seon/agent.clj:40`); `seon.cluster.agent/creation-tx` (`src/seon/cluster/agent.clj:122`); `seon.plan/add-step-call` (`src/seon/plan.clj:516`); `seon.plan/compile-tree` (`src/seon/plan.clj:1028`); `seon.plan/completion-tx` (`src/seon/plan.clj:702`); `seon.plan/start-step-call` (`src/seon/plan.clj:811`) | seon.plan, my.plan and agent plan rendering | seon.db-test: installed-ref census derives from native ref/component properties; expanded-deletion report check rejects surviving referrer loss, including delete-and-recreate |
+| 1 | Audit actual storable refs by their writer: components cascade; required refs refuse through existing whole-entity validation; optional refs may deliberately sweep. Historical tokens become identity values. Document the chosen behavior; no universal enforcement or fork extension (K/X). | R C.1; Q1 | add | `seon.agent/update-settings-call` (`src/seon/agent.clj:40`); `seon.cluster.agent/creation-tx` (`src/seon/cluster/agent.clj:122`); `seon.plan/add-step-call` (`src/seon/plan.clj:516`); `seon.plan/compile-tree` (`src/seon/plan.clj:1028`); `seon.plan/completion-tx` (`src/seon/plan.clj:702`); `seon.plan/start-step-call` (`src/seon/plan.clj:811`) | seon.plan, my.plan and agent plan rendering | seon.db-test: installed-ref census distinguishes stored refs from API forms; required-ref sweep refuses, optional sweep remains intentional, components validate with parent |
 | 4 | Add absence-condition docstrings for surviving optional entries: `:my.plan/current-step`, `:my.plan/objective`, `:my.plan/steps`, `:seon.agent/plan`. Keep optionality unless the specific required/transition row above changes it; for renamed entries apply the condition to the replacement. | A my.plan reset row | add | `seon.agent/update-settings-call` (`src/seon/agent.clj:40`); `seon.cluster.agent/creation-tx` (`src/seon/cluster/agent.clj:122`); `seon.plan/add-step-call` (`src/seon/plan.clj:516`); `seon.plan/compile-tree` (`src/seon/plan.clj:1028`); `seon.plan/completion-tx` (`src/seon/plan.clj:702`); `seon.plan/start-step-call` (`src/seon/plan.clj:811`) | seon.plan, my.plan and agent plan rendering | my.plan-test: canonical constructor succeeds; legal absent lifecycle fields remain absent and malformed final entity refuses |
 
 ### `resources/seon/schemas/seon.activation.edn`
 
 | Group | Edit | Source finding | Kind | Writers in the same publication | Readers in the same publication | Regression that proves it |
 |---|---|---|---|---|---|---|
-| 1 | Retain canonical required entries; add explicit component/empty-collection and surviving living-relation declarations where applicable. No identity invented for observation maps. Validate actual constructor result through the canonical parent/selector; absence is not evidence of coverage. | A seon.activation reset row; P G5 | add | `seon.cluster.source/activation-seal-tx` (`src/seon/cluster/source.clj:223`); `seon.cluster/derive-activation` (`src/seon/cluster.clj:1346`) | seon.cluster acquisition and activation queries | seon.source-reconciliation-test: actual canonical constructor accepted, malformed required value refused; child-only update checks owning root |
+| 1 | Retain canonical required entries; add explicit component/empty-collection and per-family deletion-behavior docstrings where applicable. No identity invented for observation maps. Validate actual constructor result through the canonical parent/selector; absence is not evidence of coverage. | A seon.activation reset row; P G5 | add | `seon.cluster.source/activation-seal-tx` (`src/seon/cluster/source.clj:223`); `seon.cluster/derive-activation` (`src/seon/cluster.clj:1346`) | seon.cluster acquisition and activation queries | seon.source-reconciliation-test: actual canonical constructor accepted, malformed required value refused; child-only update checks owning root |
 
 ### `resources/seon/schemas/seon.activation.lookup.edn`
 
 | Group | Edit | Source finding | Kind | Writers in the same publication | Readers in the same publication | Regression that proves it |
 |---|---|---|---|---|---|---|
-| 1 | Retain canonical required entries; add explicit component/empty-collection and surviving living-relation declarations where applicable. No identity invented for observation maps. Validate actual constructor result through the canonical parent/selector; absence is not evidence of coverage. | A seon.activation.lookup reset row; P G5 | add | `seon.cluster.source/activation-seal-tx` (`src/seon/cluster/source.clj:223`); `seon.cluster/activation-lookup-row` (`src/seon/cluster.clj:1230`) | seon.cluster activation lookup resolution | seon.source-reconciliation-test: actual canonical constructor accepted, malformed required value refused; child-only update checks owning root |
+| 1 | Retain canonical required entries; add explicit component/empty-collection and per-family deletion-behavior docstrings where applicable. No identity invented for observation maps. Validate actual constructor result through the canonical parent/selector; absence is not evidence of coverage. | A seon.activation.lookup reset row; P G5 | add | `seon.cluster.source/activation-seal-tx` (`src/seon/cluster/source.clj:223`); `seon.cluster/activation-lookup-row` (`src/seon/cluster.clj:1230`) | seon.cluster activation lookup resolution | seon.source-reconciliation-test: actual canonical constructor accepted, malformed required value refused; child-only update checks owning root |
 
 ### `resources/seon/schemas/seon.blob.edn`
 
@@ -174,38 +230,38 @@ removing keys superseded by these decisions.
 
 | Group | Edit | Source finding | Kind | Writers in the same publication | Readers in the same publication | Regression that proves it |
 |---|---|---|---|---|---|---|
-| 1 | Retain canonical required entries; add explicit component/empty-collection and surviving living-relation declarations where applicable. No identity invented for observation maps. Validate actual constructor result through the canonical parent/selector; absence is not evidence of coverage. | A seon.call-preparation reset row; P G5 | add | `seon.config/default-population` (`src/seon/config.clj:300`); `seon.config/population-transaction-data` (`src/seon/config.clj:422`) | seon.call-preparation suppliers and SCI calls | seon.call-preparation-test: actual canonical constructor accepted, malformed required value refused; child-only update checks owning root |
+| 1 | Retain canonical required entries; add explicit component/empty-collection and per-family deletion-behavior docstrings where applicable. No identity invented for observation maps. Validate actual constructor result through the canonical parent/selector; absence is not evidence of coverage. | A seon.call-preparation reset row; P G5 | add | `seon.config/default-population` (`src/seon/config.clj:300`); `seon.config/population-transaction-data` (`src/seon/config.clj:422`) | seon.call-preparation suppliers and SCI calls | seon.call-preparation-test: actual canonical constructor accepted, malformed required value refused; child-only update checks owning root |
 
 ### `resources/seon/schemas/seon.cluster.edn`
 
 | Group | Edit | Source finding | Kind | Writers in the same publication | Readers in the same publication | Regression that proves it |
 |---|---|---|---|---|---|---|
-| 1 | Retain canonical required entries; add explicit component/empty-collection and surviving living-relation declarations where applicable. No identity invented for observation maps. Validate actual constructor result through the canonical parent/selector; absence is not evidence of coverage. | A seon.cluster reset row; P G5 | add | `seon.cluster/ensure-cluster-entity!` (`src/seon/cluster.clj:2492`) | seon.operator and cluster custody/acquisition | seon.db-test: actual canonical constructor accepted, malformed required value refused; child-only update checks owning root |
-| 1 | Audit every retained ref from its actual writer: existing component ownership stays component; every noncomponent ref means a living relation, without a new property. Mentions that must survive deletion become values of the target identity type. Document deletion consequences; enforcement waits for the owner ruling and the expanded-deletion report. | R C.1; Q1 | add | `seon.cluster/ensure-cluster-entity!` (`src/seon/cluster.clj:2492`) | seon.operator and cluster custody/acquisition | seon.db-test: installed-ref census derives from native ref/component properties; expanded-deletion report check rejects surviving referrer loss, including delete-and-recreate |
+| 1 | Retain canonical required entries; add explicit component/empty-collection and per-family deletion-behavior docstrings where applicable. No identity invented for observation maps. Validate actual constructor result through the canonical parent/selector; absence is not evidence of coverage. | A seon.cluster reset row; P G5 | add | `seon.cluster/ensure-cluster-entity!` (`src/seon/cluster.clj:2492`) | seon.operator and cluster custody/acquisition | seon.db-test: actual canonical constructor accepted, malformed required value refused; child-only update checks owning root |
+| 1 | Audit actual storable refs by their writer: components cascade; required refs refuse through existing whole-entity validation; optional refs may deliberately sweep. Historical tokens become identity values. Document the chosen behavior; no universal enforcement or fork extension (K/X). | R C.1; Q1 | add | `seon.cluster/ensure-cluster-entity!` (`src/seon/cluster.clj:2492`) | seon.operator and cluster custody/acquisition | seon.db-test: installed-ref census distinguishes stored refs from API forms; required-ref sweep refuses, optional sweep remains intentional, components validate with parent |
 
 ### `resources/seon/schemas/seon.cluster.instruction.edn`
 
 | Group | Edit | Source finding | Kind | Writers in the same publication | Readers in the same publication | Regression that proves it |
 |---|---|---|---|---|---|---|
-| 1 | Retain canonical required entries; add explicit component/empty-collection and surviving living-relation declarations where applicable. No identity invented for observation maps. Validate actual constructor result through the canonical parent/selector; absence is not evidence of coverage. | A seon.cluster.instruction reset row; P G5 | add | `seon.cluster.instruction/seed-rows` (`src/seon/cluster/instruction.clj:59`); `seon.config/default-population` (`src/seon/config.clj:300`) | seon.bootstrap instruction rendering | seon.schema-test: actual canonical constructor accepted, malformed required value refused; child-only update checks owning root |
+| 1 | Retain canonical required entries; add explicit component/empty-collection and per-family deletion-behavior docstrings where applicable. No identity invented for observation maps. Validate actual constructor result through the canonical parent/selector; absence is not evidence of coverage. | A seon.cluster.instruction reset row; P G5 | add | `seon.cluster.instruction/seed-rows` (`src/seon/cluster/instruction.clj:59`); `seon.config/default-population` (`src/seon/config.clj:300`) | seon.bootstrap instruction rendering | seon.schema-test: actual canonical constructor accepted, malformed required value refused; child-only update checks owning root |
 
 ### `resources/seon/schemas/seon.config.edn`
 
 | Group | Edit | Source finding | Kind | Writers in the same publication | Readers in the same publication | Regression that proves it |
 |---|---|---|---|---|---|---|
-| 1 | Retain canonical required entries; add explicit component/empty-collection and surviving living-relation declarations where applicable. No identity invented for observation maps. Validate actual constructor result through the canonical parent/selector; absence is not evidence of coverage. | A seon.config reset row; P G5 | add | `seon.agent/update-settings-call` (`src/seon/agent.clj:40`); `seon.cluster.agent/creation-tx` (`src/seon/cluster/agent.clj:122`) | seon.config/effective, agent overlays and environment acquisition | seon.config-test: actual canonical constructor accepted, malformed required value refused; child-only update checks owning root |
+| 1 | Retain canonical required entries; add explicit component/empty-collection and per-family deletion-behavior docstrings where applicable. No identity invented for observation maps. Validate actual constructor result through the canonical parent/selector; absence is not evidence of coverage. | A seon.config reset row; P G5 | add | `seon.agent/update-settings-call` (`src/seon/agent.clj:40`); `seon.cluster.agent/creation-tx` (`src/seon/cluster/agent.clj:122`) | seon.config/effective, agent overlays and environment acquisition | seon.config-test: actual canonical constructor accepted, malformed required value refused; child-only update checks owning root |
 
 ### `resources/seon/schemas/seon.db.edn`
 
 | Group | Edit | Source finding | Kind | Writers in the same publication | Readers in the same publication | Regression that proves it |
 |---|---|---|---|---|---|---|
-| 1 | Do not add a classification property. After owner ruling, consume the fork final report with expanded deletion targets; every installed noncomponent ref is living. Refuse target deletion with surviving before-state referrers, including delete-and-recreate (Q1/H). Separate transaction ref grammar from selector-derived pull forms; remove fake-0 validation and temporary widened ref form only with the replacement. | P G3/G5; E §4; A db/shared writers; R C.1 | add; retype; delete | seon.db/write-report-error, retain-transaction, write-entity-value, write-value; seon.schema.datahike bridge | Every seon.db pull/transaction boundary and schema-derived validator | seon.db-test: map/datom/nested db.fn/call deletion, sibling rollback, numeric dangling target, both operation orders, >1,000 components, child-only edits and missing root |
+| 1 | No classification property or fork change. In the existing final report, refuse deleted program identities still named by surviving value obligations in db-after (Q1/J). Separate transaction ref grammar from selector-derived pull forms; remove fake-0 validation and temporary widened ref form only with the replacement. | P G3/G5; E §4; A db/shared writers; R C.1 | add; retype; delete | seon.db/write-report-error, retain-transaction, write-entity-value, write-value; seon.schema.datahike bridge | Every seon.db pull/transaction boundary and schema-derived validator | seon.db-test: map/datom/nested db.fn/call deletion, sibling rollback, numeric dangling target, both operation orders, >1,000 components, child-only edits and missing root |
 
 ### `resources/seon/schemas/seon.dev.mcp.artifact.edn`
 
 | Group | Edit | Source finding | Kind | Writers in the same publication | Readers in the same publication | Regression that proves it |
 |---|---|---|---|---|---|---|
-| 1 | Retain canonical required entries; add explicit component/empty-collection and surviving living-relation declarations where applicable. No identity invented for observation maps. Validate actual constructor result through the canonical parent/selector; absence is not evidence of coverage. | A seon.dev.mcp.artifact reset row; P G5 | add | `seon.cluster/mcp-project` (`src/seon/cluster.clj:338`) | MCP artifact page/value reader | seon.schema-test: actual canonical constructor accepted, malformed required value refused; child-only update checks owning root |
+| 1 | Retain canonical required entries; add explicit component/empty-collection and per-family deletion-behavior docstrings where applicable. No identity invented for observation maps. Validate actual constructor result through the canonical parent/selector; absence is not evidence of coverage. | A seon.dev.mcp.artifact reset row; P G5 | add | `seon.cluster/mcp-project` (`src/seon/cluster.clj:338`) | MCP artifact page/value reader | seon.schema-test: actual canonical constructor accepted, malformed required value refused; child-only update checks owning root |
 
 ### `resources/seon/schemas/seon.fn.binding.child.edn`
 
@@ -217,68 +273,68 @@ removing keys superseded by these decisions.
 
 | Group | Edit | Source finding | Kind | Writers in the same publication | Readers in the same publication | Regression that proves it |
 |---|---|---|---|---|---|---|
-| 1 | Audit every retained ref from its actual writer: existing component ownership stays component; every noncomponent ref means a living relation, without a new property. Mentions that must survive deletion become values of the target identity type. Document deletion consequences; enforcement waits for the owner ruling and the expanded-deletion report. | R C.1; Q1 | add | `seon.issue/adopt-tx` (`src/seon/issue.clj:713`); `seon.issue/file-citations` (`src/seon/issue.clj:210`); `seon.issue/index-tx` (`src/seon/issue.clj:262`) | seon.issue note/file citation rendering | seon.db-test: installed-ref census derives from native ref/component properties; expanded-deletion report check rejects surviving referrer loss, including delete-and-recreate |
+| 1 | Audit actual storable refs by their writer: components cascade; required refs refuse through existing whole-entity validation; optional refs may deliberately sweep. Historical tokens become identity values. Document the chosen behavior; no universal enforcement or fork extension (K/X). | R C.1; Q1 | add | `seon.issue/adopt-tx` (`src/seon/issue.clj:713`); `seon.issue/file-citations` (`src/seon/issue.clj:210`); `seon.issue/index-tx` (`src/seon/issue.clj:262`) | seon.issue note/file citation rendering | seon.db-test: installed-ref census distinguishes stored refs from API forms; required-ref sweep refuses, optional sweep remains intentional, components validate with parent |
 | 4 | Add absence-condition docstrings for surviving optional entries: `:seon.issue.citation/end-row`, `:seon.issue.citation/row`. Keep optionality unless the specific required/transition row above changes it; for renamed entries apply the condition to the replacement. | A seon.issue.citation reset row | add | `seon.issue/adopt-tx` (`src/seon/issue.clj:713`); `seon.issue/file-citations` (`src/seon/issue.clj:210`); `seon.issue/index-tx` (`src/seon/issue.clj:262`) | seon.issue note/file citation rendering | seon.issue-deletion-test: canonical constructor succeeds; legal absent lifecycle fields remain absent and malformed final entity refuses |
 
 ### `resources/seon/schemas/seon.lint.edn`
 
 | Group | Edit | Source finding | Kind | Writers in the same publication | Readers in the same publication | Regression that proves it |
 |---|---|---|---|---|---|---|
-| 1 | Audit every retained ref from its actual writer: existing component ownership stays component; every noncomponent ref means a living relation, without a new property. Mentions that must survive deletion become values of the target identity type. Document deletion consequences; enforcement waits for the owner ruling and the expanded-deletion report. | R C.1; Q1 | add | `seon.fn/artifact` (`src/seon/fn.clj:1217`); `seon.fn/lint-rows` (`src/seon/fn.clj:1171`) | seon.fn lint reconciliation and issue detectors | seon.db-test: installed-ref census derives from native ref/component properties; expanded-deletion report check rejects surviving referrer loss, including delete-and-recreate |
+| 1 | Audit actual storable refs by their writer: components cascade; required refs refuse through existing whole-entity validation; optional refs may deliberately sweep. Historical tokens become identity values. Document the chosen behavior; no universal enforcement or fork extension (K/X). | R C.1; Q1 | add | `seon.fn/artifact` (`src/seon/fn.clj:1217`); `seon.fn/lint-rows` (`src/seon/fn.clj:1171`) | seon.fn lint reconciliation and issue detectors | seon.db-test: installed-ref census distinguishes stored refs from API forms; required-ref sweep refuses, optional sweep remains intentional, components validate with parent |
 | 4 | Add absence-condition docstrings for surviving optional entries: `:seon.lint/fn`, `:seon.schema.admission/source`. Keep optionality unless the specific required/transition row above changes it; for renamed entries apply the condition to the replacement. | A seon.lint reset row | add | `seon.fn/artifact` (`src/seon/fn.clj:1217`); `seon.fn/lint-rows` (`src/seon/fn.clj:1171`) | seon.fn lint reconciliation and issue detectors | seon.fn-test: canonical constructor succeeds; legal absent lifecycle fields remain absent and malformed final entity refuses |
 
 ### `resources/seon/schemas/seon.maintenance.request.edn`
 
 | Group | Edit | Source finding | Kind | Writers in the same publication | Readers in the same publication | Regression that proves it |
 |---|---|---|---|---|---|---|
-| 1 | Audit every retained ref from its actual writer: existing component ownership stays component; every noncomponent ref means a living relation, without a new property. Mentions that must survive deletion become values of the target identity type. Document deletion consequences; enforcement waits for the owner ruling and the expanded-deletion report. | R C.1; Q1 | add | `seon.schedule/fire-call` (`src/seon/schedule.clj:313`); `seon.schedule/request-entity` (`src/seon/schedule.clj:278`) | seon.maintenance operations and schedule execution | seon.db-test: installed-ref census derives from native ref/component properties; expanded-deletion report check rejects surviving referrer loss, including delete-and-recreate |
+| 1 | Audit actual storable refs by their writer: components cascade; required refs refuse through existing whole-entity validation; optional refs may deliberately sweep. Historical tokens become identity values. Document the chosen behavior; no universal enforcement or fork extension (K/X). | R C.1; Q1 | add | `seon.schedule/fire-call` (`src/seon/schedule.clj:313`); `seon.schedule/request-entity` (`src/seon/schedule.clj:278`) | seon.maintenance operations and schedule execution | seon.db-test: installed-ref census distinguishes stored refs from API forms; required-ref sweep refuses, optional sweep remains intentional, components validate with parent |
 | 4 | Add absence-condition docstrings for surviving optional entries: `:seon.config.maintenance/log-max-bytes`, `:seon.config.maintenance/log-retained-files`, `:seon.config.maintenance/min-usable-bytes`, `:seon.config.maintenance/min-usable-ratio`, `:seon.config.operator/event-silence-backstop-ms`. Keep optionality unless the specific required/transition row above changes it; for renamed entries apply the condition to the replacement. | A seon.maintenance.request reset row | add | `seon.schedule/fire-call` (`src/seon/schedule.clj:313`); `seon.schedule/request-entity` (`src/seon/schedule.clj:278`) | seon.maintenance operations and schedule execution | seon.maintenance-schema-test: canonical constructor succeeds; legal absent lifecycle fields remain absent and malformed final entity refuses |
 
 ### `resources/seon/schemas/seon.ns.alias.edn`
 
 | Group | Edit | Source finding | Kind | Writers in the same publication | Readers in the same publication | Regression that proves it |
 |---|---|---|---|---|---|---|
-| 1 | Retain canonical required entries; add explicit component/empty-collection and surviving living-relation declarations where applicable. No identity invented for observation maps. Validate actual constructor result through the canonical parent/selector; absence is not evidence of coverage. | A seon.ns.alias reset row; P G5 | add | `seon.fn/namespace-row` (`src/seon/fn.clj:293`); `seon.program/canonical-namespace-components` (`src/seon/program.cljc:877`); `seon.sci.eval/binding-rows` (`src/seon/sci/eval.clj:529`) | SCI namespace alias acquisition | seon.program-test: actual canonical constructor accepted, malformed required value refused; child-only update checks owning root |
+| 1 | Retain canonical required entries; add explicit component/empty-collection and per-family deletion-behavior docstrings where applicable. No identity invented for observation maps. Validate actual constructor result through the canonical parent/selector; absence is not evidence of coverage. | A seon.ns.alias reset row; P G5 | add | `seon.fn/namespace-row` (`src/seon/fn.clj:293`); `seon.program/canonical-namespace-components` (`src/seon/program.cljc:877`); `seon.sci.eval/binding-rows` (`src/seon/sci/eval.clj:529`) | SCI namespace alias acquisition | seon.program-test: actual canonical constructor accepted, malformed required value refused; child-only update checks owning root |
 
 ### `resources/seon/schemas/seon.ns.edn`
 
 | Group | Edit | Source finding | Kind | Writers in the same publication | Readers in the same publication | Regression that proves it |
 |---|---|---|---|---|---|---|
-| 1 | Audit every retained ref from its actual writer: existing component ownership stays component; every noncomponent ref means a living relation, without a new property. Mentions that must survive deletion become values of the target identity type. Document deletion consequences; enforcement waits for the owner ruling and the expanded-deletion report. | R C.1; Q1 | add | `seon.cluster.agent/creation-tx` (`src/seon/cluster/agent.clj:122`); `seon.cluster.agent/steward-call` (`src/seon/cluster/agent.clj:97`); `seon.cluster.source/mintable-identity` (`src/seon/cluster/source.clj:305`); `seon.fn/namespace-row` (`src/seon/fn.clj:293`); `seon.program/declaration-row` (`src/seon/program.cljc:906`); `seon.sci.eval/binding-rows` (`src/seon/sci/eval.clj:529`); `seon.test.runner/record-tx` (`src/seon/test/runner.clj:2095`) | SCI acquisition, namespace render and stewardship queries | seon.db-test: installed-ref census derives from native ref/component properties; expanded-deletion report check rejects surviving referrer loss, including delete-and-recreate |
+| 1 | Audit actual storable refs by their writer: components cascade; required refs refuse through existing whole-entity validation; optional refs may deliberately sweep. Historical tokens become identity values. Document the chosen behavior; no universal enforcement or fork extension (K/X). | R C.1; Q1 | add | `seon.cluster.agent/creation-tx` (`src/seon/cluster/agent.clj:122`); `seon.cluster.agent/steward-call` (`src/seon/cluster/agent.clj:97`); `seon.cluster.source/mintable-identity` (`src/seon/cluster/source.clj:305`); `seon.fn/namespace-row` (`src/seon/fn.clj:293`); `seon.program/declaration-row` (`src/seon/program.cljc:906`); `seon.sci.eval/binding-rows` (`src/seon/sci/eval.clj:529`); `seon.test.runner/record-tx` (`src/seon/test/runner.clj:2095`) | SCI acquisition, namespace render and stewardship queries | seon.db-test: installed-ref census distinguishes stored refs from API forms; required-ref sweep refuses, optional sweep remains intentional, components validate with parent |
 | 4 | Add absence-condition docstrings for surviving optional entries: `:seon.ns/aliases`, `:seon.ns/context-relevant?`, `:seon.ns/doc`, `:seon.ns/imports`, `:seon.ns/refers`, `:seon.ns/requires`, `:seon.ns/source`, `:seon.ns/steward`, `:seon.schema.admission/source`. Keep optionality unless the specific required/transition row above changes it; for renamed entries apply the condition to the replacement. | A seon.ns reset row | add | `seon.cluster.agent/creation-tx` (`src/seon/cluster/agent.clj:122`); `seon.cluster.agent/steward-call` (`src/seon/cluster/agent.clj:97`); `seon.cluster.source/mintable-identity` (`src/seon/cluster/source.clj:305`); `seon.fn/namespace-row` (`src/seon/fn.clj:293`); `seon.program/declaration-row` (`src/seon/program.cljc:906`); `seon.sci.eval/binding-rows` (`src/seon/sci/eval.clj:529`); `seon.test.runner/record-tx` (`src/seon/test/runner.clj:2095`) | SCI acquisition, namespace render and stewardship queries | seon.program-test: canonical constructor succeeds; legal absent lifecycle fields remain absent and malformed final entity refuses |
 
 ### `resources/seon/schemas/seon.ns.refer.edn`
 
 | Group | Edit | Source finding | Kind | Writers in the same publication | Readers in the same publication | Regression that proves it |
 |---|---|---|---|---|---|---|
-| 1 | Retain canonical required entries; add explicit component/empty-collection and surviving living-relation declarations where applicable. No identity invented for observation maps. Validate actual constructor result through the canonical parent/selector; absence is not evidence of coverage. | A seon.ns.refer reset row; P G5 | add | `seon.fn/namespace-row` (`src/seon/fn.clj:293`); `seon.program/canonical-namespace-components` (`src/seon/program.cljc:877`); `seon.sci.eval/binding-rows` (`src/seon/sci/eval.clj:529`) | SCI namespace refer acquisition | seon.program-test: actual canonical constructor accepted, malformed required value refused; child-only update checks owning root |
+| 1 | Retain canonical required entries; add explicit component/empty-collection and per-family deletion-behavior docstrings where applicable. No identity invented for observation maps. Validate actual constructor result through the canonical parent/selector; absence is not evidence of coverage. | A seon.ns.refer reset row; P G5 | add | `seon.fn/namespace-row` (`src/seon/fn.clj:293`); `seon.program/canonical-namespace-components` (`src/seon/program.cljc:877`); `seon.sci.eval/binding-rows` (`src/seon/sci/eval.clj:529`) | SCI namespace refer acquisition | seon.program-test: actual canonical constructor accepted, malformed required value refused; child-only update checks owning root |
 
 ### `resources/seon/schemas/seon.operator.log.edn`
 
 | Group | Edit | Source finding | Kind | Writers in the same publication | Readers in the same publication | Regression that proves it |
 |---|---|---|---|---|---|---|
-| 1 | Retain canonical required entries; add explicit component/empty-collection and surviving living-relation declarations where applicable. No identity invented for observation maps. Validate actual constructor result through the canonical parent/selector; absence is not evidence of coverage. | A seon.operator.log reset row; P G5 | add | `seon.operator/rotate-logs!` (`src/seon/operator.clj:544`) | operator maintenance log consumers | seon.maintenance-test: actual canonical constructor accepted, malformed required value refused; child-only update checks owning root |
+| 1 | Retain canonical required entries; add explicit component/empty-collection and per-family deletion-behavior docstrings where applicable. No identity invented for observation maps. Validate actual constructor result through the canonical parent/selector; absence is not evidence of coverage. | A seon.operator.log reset row; P G5 | add | `seon.operator/rotate-logs!` (`src/seon/operator.clj:544`) | operator maintenance log consumers | seon.maintenance-test: actual canonical constructor accepted, malformed required value refused; child-only update checks owning root |
 
 ### `resources/seon/schemas/seon.runtime.edn`
 
 | Group | Edit | Source finding | Kind | Writers in the same publication | Readers in the same publication | Regression that proves it |
 |---|---|---|---|---|---|---|
-| 1 | Audit every retained ref from its actual writer: existing component ownership stays component; every noncomponent ref means a living relation, without a new property. Mentions that must survive deletion become values of the target identity type. Document deletion consequences; enforcement waits for the owner ruling and the expanded-deletion report. | R C.1; Q1 | add | `seon.cluster.agent/creation-tx` (`src/seon/cluster/agent.clj:122`); `seon.issue/start-tx` (`src/seon/issue.clj:885`); `seon.turn/open-call` (`src/seon/turn.clj:351`); `seon.turn/record-evaluated-call` (`src/seon/turn.clj:1569`) | agent arming, seon.turn and wake matching | seon.db-test: installed-ref census derives from native ref/component properties; expanded-deletion report check rejects surviving referrer loss, including delete-and-recreate |
+| 1 | Audit actual storable refs by their writer: components cascade; required refs refuse through existing whole-entity validation; optional refs may deliberately sweep. Historical tokens become identity values. Document the chosen behavior; no universal enforcement or fork extension (K/X). | R C.1; Q1 | add | `seon.cluster.agent/creation-tx` (`src/seon/cluster/agent.clj:122`); `seon.issue/start-tx` (`src/seon/issue.clj:885`); `seon.turn/open-call` (`src/seon/turn.clj:351`); `seon.turn/record-evaluated-call` (`src/seon/turn.clj:1569`) | agent arming, seon.turn and wake matching | seon.db-test: installed-ref census distinguishes stored refs from API forms; required-ref sweep refuses, optional sweep remains intentional, components validate with parent |
 | 4 | Add absence-condition docstrings for surviving optional entries: `:seon.runtime/listens`, `:seon.runtime/trigger`, `:seon.runtime/turns`. Keep optionality unless the specific required/transition row above changes it; for renamed entries apply the condition to the replacement. | A seon.runtime reset row | add | `seon.cluster.agent/creation-tx` (`src/seon/cluster/agent.clj:122`); `seon.issue/start-tx` (`src/seon/issue.clj:885`); `seon.turn/open-call` (`src/seon/turn.clj:351`); `seon.turn/record-evaluated-call` (`src/seon/turn.clj:1569`) | agent arming, seon.turn and wake matching | seon.turn-loop-test: canonical constructor succeeds; legal absent lifecycle fields remain absent and malformed final entity refuses |
 
 ### `resources/seon/schemas/seon.schedule.edn`
 
 | Group | Edit | Source finding | Kind | Writers in the same publication | Readers in the same publication | Regression that proves it |
 |---|---|---|---|---|---|---|
-| 1 | Retain canonical required entries; add explicit component/empty-collection and surviving living-relation declarations where applicable. No identity invented for observation maps. Validate actual constructor result through the canonical parent/selector; absence is not evidence of coverage. | A seon.schedule reset row; P G5 | add | `seon.config/default-population` (`src/seon/config.clj:300`); `seon.schedule/root-maintenance-seed-call` (`src/seon/schedule.clj:72`) | seon.schedule next/fire logic | seon.schedule-test: actual canonical constructor accepted, malformed required value refused; child-only update checks owning root |
-| 1 | Audit every retained ref from its actual writer: existing component ownership stays component; every noncomponent ref means a living relation, without a new property. Mentions that must survive deletion become values of the target identity type. Document deletion consequences; enforcement waits for the owner ruling and the expanded-deletion report. | R C.1; Q1 | add | `seon.config/default-population` (`src/seon/config.clj:300`); `seon.schedule/root-maintenance-seed-call` (`src/seon/schedule.clj:72`) | seon.schedule next/fire logic | seon.db-test: installed-ref census derives from native ref/component properties; expanded-deletion report check rejects surviving referrer loss, including delete-and-recreate |
+| 1 | Retain canonical required entries; add explicit component/empty-collection and per-family deletion-behavior docstrings where applicable. No identity invented for observation maps. Validate actual constructor result through the canonical parent/selector; absence is not evidence of coverage. | A seon.schedule reset row; P G5 | add | `seon.config/default-population` (`src/seon/config.clj:300`); `seon.schedule/root-maintenance-seed-call` (`src/seon/schedule.clj:72`) | seon.schedule next/fire logic | seon.schedule-test: actual canonical constructor accepted, malformed required value refused; child-only update checks owning root |
+| 1 | Audit actual storable refs by their writer: components cascade; required refs refuse through existing whole-entity validation; optional refs may deliberately sweep. Historical tokens become identity values. Document the chosen behavior; no universal enforcement or fork extension (K/X). | R C.1; Q1 | add | `seon.config/default-population` (`src/seon/config.clj:300`); `seon.schedule/root-maintenance-seed-call` (`src/seon/schedule.clj:72`) | seon.schedule next/fire logic | seon.db-test: installed-ref census distinguishes stored refs from API forms; required-ref sweep refuses, optional sweep remains intentional, components validate with parent |
 
 ### `resources/seon/schemas/seon.schedule.fire.edn`
 
 | Group | Edit | Source finding | Kind | Writers in the same publication | Readers in the same publication | Regression that proves it |
 |---|---|---|---|---|---|---|
-| 1 | Retain canonical required entries; add explicit component/empty-collection and surviving living-relation declarations where applicable. No identity invented for observation maps. Validate actual constructor result through the canonical parent/selector; absence is not evidence of coverage. | A seon.schedule.fire reset row; P G5 | add | `seon.schedule/fire-call` (`src/seon/schedule.clj:313`) | seon.schedule execution/recovery | seon.schedule-test: actual canonical constructor accepted, malformed required value refused; child-only update checks owning root |
-| 1 | Audit every retained ref from its actual writer: existing component ownership stays component; every noncomponent ref means a living relation, without a new property. Mentions that must survive deletion become values of the target identity type. Document deletion consequences; enforcement waits for the owner ruling and the expanded-deletion report. | R C.1; Q1 | add | `seon.schedule/fire-call` (`src/seon/schedule.clj:313`) | seon.schedule execution/recovery | seon.db-test: installed-ref census derives from native ref/component properties; expanded-deletion report check rejects surviving referrer loss, including delete-and-recreate |
+| 1 | Retain canonical required entries; add explicit component/empty-collection and per-family deletion-behavior docstrings where applicable. No identity invented for observation maps. Validate actual constructor result through the canonical parent/selector; absence is not evidence of coverage. | A seon.schedule.fire reset row; P G5 | add | `seon.schedule/fire-call` (`src/seon/schedule.clj:313`) | seon.schedule execution/recovery | seon.schedule-test: actual canonical constructor accepted, malformed required value refused; child-only update checks owning root |
+| 1 | Audit actual storable refs by their writer: components cascade; required refs refuse through existing whole-entity validation; optional refs may deliberately sweep. Historical tokens become identity values. Document the chosen behavior; no universal enforcement or fork extension (K/X). | R C.1; Q1 | add | `seon.schedule/fire-call` (`src/seon/schedule.clj:313`) | seon.schedule execution/recovery | seon.db-test: installed-ref census distinguishes stored refs from API forms; required-ref sweep refuses, optional sweep remains intentional, components validate with parent |
 
 ### `resources/seon/schemas/seon.source.edn`
 
@@ -290,7 +346,7 @@ removing keys superseded by these decisions.
 
 | Group | Edit | Source finding | Kind | Writers in the same publication | Readers in the same publication | Regression that proves it |
 |---|---|---|---|---|---|---|
-| 1 | Audit every retained ref from its actual writer: existing component ownership stays component; every noncomponent ref means a living relation, without a new property. Mentions that must survive deletion become values of the target identity type. Document deletion consequences; enforcement waits for the owner ruling and the expanded-deletion report. | R C.1; Q1 | add | `seon.turn/close-call` (`src/seon/turn.clj:397`); `seon.turn/open-call` (`src/seon/turn.clj:351`); `seon.turn/plan-call` (`src/seon/turn.clj:574`); `seon.turn/record-attempt!` (`src/seon/turn.clj:3947`); `seon.turn/record-evaluated-call` (`src/seon/turn.clj:1569`); `seon.turn/recover-call` (`src/seon/turn.clj:1803`); `seon.turn/refresh-call` (`src/seon/turn.clj:794`); `seon.turn/system-run-call` (`src/seon/turn.clj:655`) | turn loop, recovery, context and history rendering | seon.db-test: installed-ref census derives from native ref/component properties; expanded-deletion report check rejects surviving referrer loss, including delete-and-recreate |
+| 1 | Audit actual storable refs by their writer: components cascade; required refs refuse through existing whole-entity validation; optional refs may deliberately sweep. Historical tokens become identity values. Document the chosen behavior; no universal enforcement or fork extension (K/X). | R C.1; Q1 | add | `seon.turn/close-call` (`src/seon/turn.clj:397`); `seon.turn/open-call` (`src/seon/turn.clj:351`); `seon.turn/plan-call` (`src/seon/turn.clj:574`); `seon.turn/record-attempt!` (`src/seon/turn.clj:3947`); `seon.turn/record-evaluated-call` (`src/seon/turn.clj:1569`); `seon.turn/recover-call` (`src/seon/turn.clj:1803`); `seon.turn/refresh-call` (`src/seon/turn.clj:794`); `seon.turn/system-run-call` (`src/seon/turn.clj:655`) | turn loop, recovery, context and history rendering | seon.db-test: installed-ref census distinguishes stored refs from API forms; required-ref sweep refuses, optional sweep remains intentional, components validate with parent |
 | 4 | Add absence-condition docstrings for surviving optional entries: `:seon.turn.work/situation`, `:seon.turn/attempts`, `:seon.turn/closed-tx`, `:seon.turn/disposition`, `:seon.turn/reply`, `:seon.turn/reply-blob`, `:seon.turn/reply-size`, `:seon.turn/starting-ns`, `:seon.turn/trigger`. Keep optionality unless the specific required/transition row above changes it; for renamed entries apply the condition to the replacement. | A seon.turn reset row | add | `seon.turn/close-call` (`src/seon/turn.clj:397`); `seon.turn/open-call` (`src/seon/turn.clj:351`); `seon.turn/plan-call` (`src/seon/turn.clj:574`); `seon.turn/record-attempt!` (`src/seon/turn.clj:3947`); `seon.turn/record-evaluated-call` (`src/seon/turn.clj:1569`); `seon.turn/recover-call` (`src/seon/turn.clj:1803`); `seon.turn/refresh-call` (`src/seon/turn.clj:794`); `seon.turn/system-run-call` (`src/seon/turn.clj:655`) | turn loop, recovery, context and history rendering | seon.turn-test: canonical constructor succeeds; legal absent lifecycle fields remain absent and malformed final entity refuses |
 
 ### `resources/seon/schemas/seon.effect.edn`
@@ -312,8 +368,8 @@ removing keys superseded by these decisions.
 
 | Group | Edit | Source finding | Kind | Writers in the same publication | Readers in the same publication | Regression that proves it |
 |---|---|---|---|---|---|---|
-| 2 | Retype sym, caller, callee and tuple callee to qualified-symbol; calls/references to indexed qualified-symbol sets; writes to indexed qualified-keyword set. Keep namespace/file/arities relations. Require source/arglists/private? and analyzed-source-digest. Logical empty calls/references/writes/keywords/call-arities derive only under provenance. Remove pending-calls and retyped uses of reference-to; KEEP declaration capability-fn ref as G2 specifies; no retired-tx. | P G1–G4/S2; E §1–3; S §1.1; A fn; R N1/N2/N10 | retype; required; delete | seon.fn var-row/analyzed-form/reconcile-tx-in; seon.program; seon.sci.eval; seon.turn relation-assertions/row-tx | seon.fn gate-sets/reach/output graph; seon.test, runner, selection; seon.db sink reach; effect, bootstrap, run, render/ns/test, issue/detect; all S §2 sites | seon.fn-test, seon.test-reaching-test: nonempty actual symbol datoms, tuple schema, deleted B retains A edge and selects tests, redefine B resolves same value; unknown analyzer namespace is not minted as an unreadable symbol |
-| 4 | Add absence-condition docstrings for surviving optional entries: `:seon.effect/capability`, `:seon.fn/arglists-override?`, `:seon.fn/arities`, `:seon.fn/call-arities`, `:seon.fn/destroys`, `:seon.fn/doc`, `:seon.fn/doc-order`, `:seon.fn/external-sink`, `:seon.fn/file`, `:seon.fn/form-span`, `:seon.fn/internal?`, `:seon.fn/keywords`, `:seon.fn/macro?`, `:seon.fn/projection-boundary`, `:seon.fn/references`, `:seon.fn/spec`, `:seon.fn/workload`, `:seon.fn/writes`, `:seon.test/subject`. Keep optionality unless the specific required/transition row above changes it; for renamed entries apply the condition to the replacement. | A seon.fn reset row | add | `seon.cluster.source/mintable-identity` (`src/seon/cluster/source.clj:305`); `seon.fn/backfill-contract-facts!` (`src/seon/fn.clj:2229`); `seon.fn/reconcile-tx-in` (`src/seon/fn.clj:2557`); `seon.fn/var-row` (`src/seon/fn.clj:584`); `seon.program/contract-facts` (`src/seon/program.cljc:729`); `seon.program/declaration-row` (`src/seon/program.cljc:906`); `seon.program/with-contract-facts` (`src/seon/program.cljc:792`); `seon.sci.eval/declared-row` (`src/seon/sci/eval.clj:1902`); `seon.sci.eval/definition-row` (`src/seon/sci/eval.clj:392`); `seon.turn/row-tx` (`src/seon/turn.clj:1280`) | seon.fn gate-sets/reach/output graph; seon.test, runner, selection; seon.db sink reach; effect, bootstrap, run, render/ns/test, issue/detect; all S §2 sites | seon.fn-test, seon.test-reaching-test: nonempty actual symbol datoms, tuple schema, deleted B retains A edge and selects tests, redefine B resolves same value; unknown analyzer namespace is not minted as an unreadable symbol |
+| 2 | Retype sym, caller, callee and tuple callee to qualified-symbol; calls/references to indexed qualified-symbol sets; writes to indexed qualified-keyword set. Keep namespace/file/arities relations. Require source/arglists/private? and analyzed-source-digest. Logical empty calls/references/writes/keywords/call-arities derive only under provenance. Remove pending-calls and retyped uses of reference-to; KEEP declaration capability-fn ref as G2 specifies; no retired-tx. | P G1–G4/S2; E §1–3; S §1.1; A fn; R N1/N2/N10 | retype; required; delete | seon.fn var-row/analyzed-form/reconcile-tx-in; seon.program; seon.sci.eval; seon.turn relation-assertions/row-tx | seon.fn gate-sets/reach/output graph; seon.test, runner, selection; seon.db sink reach; effect, bootstrap, run, render/ns/test, issue/detect; all S §2 sites | seon.fn-test, seon.test-reaching-test: nonempty actual symbol datoms, tuple schema, deleting B with surviving A refuses atomically; repairing A in the same transaction succeeds; stale reach is reported, redefinition preserves identity; unknown analyzer namespace is not minted as an unreadable symbol |
+| 4 | Add absence-condition docstrings for surviving optional entries: `:seon.effect/capability`, `:seon.fn/arglists-override?`, `:seon.fn/arities`, `:seon.fn/call-arities`, `:seon.fn/destroys`, `:seon.fn/doc`, `:seon.fn/doc-order`, `:seon.fn/external-sink`, `:seon.fn/file`, `:seon.fn/form-span`, `:seon.fn/internal?`, `:seon.fn/keywords`, `:seon.fn/macro?`, `:seon.fn/projection-boundary`, `:seon.fn/references`, `:seon.fn/spec`, `:seon.fn/workload`, `:seon.fn/writes`, `:seon.test/subject`. Keep optionality unless the specific required/transition row above changes it; for renamed entries apply the condition to the replacement. | A seon.fn reset row | add | `seon.cluster.source/mintable-identity` (`src/seon/cluster/source.clj:305`); `seon.fn/backfill-contract-facts!` (`src/seon/fn.clj:2229`); `seon.fn/reconcile-tx-in` (`src/seon/fn.clj:2557`); `seon.fn/var-row` (`src/seon/fn.clj:584`); `seon.program/contract-facts` (`src/seon/program.cljc:729`); `seon.program/declaration-row` (`src/seon/program.cljc:906`); `seon.program/with-contract-facts` (`src/seon/program.cljc:792`); `seon.sci.eval/declared-row` (`src/seon/sci/eval.clj:1902`); `seon.sci.eval/definition-row` (`src/seon/sci/eval.clj:392`); `seon.turn/row-tx` (`src/seon/turn.clj:1280`) | seon.fn gate-sets/reach/output graph; seon.test, runner, selection; seon.db sink reach; effect, bootstrap, run, render/ns/test, issue/detect; all S §2 sites | seon.fn-test, seon.test-reaching-test: nonempty actual symbol datoms, tuple schema, deleting B with surviving A refuses atomically; repairing A in the same transaction succeeds; stale reach is reported, redefinition preserves identity; unknown analyzer namespace is not minted as an unreadable symbol |
 | 6 | Remove ast attribute and map entry only after Q2 reader replacement; remove backfill's nil-AST analysis test. Keep canonical spec and schema.shape facts. | R N16/N29; B.4/C.2; Q2 | delete | seon.program/with-contract-facts; seon.fn/backfill-contract-facts!; seon.turn declared projection | seon.fn reconciliation comparison; canonical shape consumers | seon.program-test: repeated publication is no-op, contract change detected, no fn.ast datoms |
 
 ### `resources/seon/schemas/seon.fn.file.edn`
@@ -334,7 +390,7 @@ removing keys superseded by these decisions.
 | Group | Edit | Source finding | Kind | Writers in the same publication | Readers in the same publication | Regression that proves it |
 |---|---|---|---|---|---|---|
 | 2 | Cited functions/tests indexed qualified-symbol sets; namespaces symbols; keys qualified-keywords; errors signature strings; runs/issues id strings. Parse known-family tokens by declared cites identity grammar without requiring a current row. Query missing targets positively; retain ambiguous/unclassified raw-token evidence until its family is known. Missing obligated success tests remain explicit incomplete/refused results, never omitted or counted verified. Remove unresolved storage only when that evidence has a complete replacement. | R N5/D.1; S citation; A issue | retype; delete | seon.issue/citation-attributes, citation-index, index-tx, adopt-tx, generate, tests-tx | issue opening/render/detect, completion, retention validation | seon.issue-test: valid unresolved tokens persist before/after target deletion, no citation loss, malformed token gives diagnostic, protected issue test retention still enforced on values |
-| 4 | Delete status; derive open/resolved from resolved-tx; add superseded-by issue-id value. Add opened-tx for database creation; retain imported opening date under its observation semantics. Preserve creator/agent living refs and append-only authority. Index/adopt removed note emits retractEntity, not identity-only row. | P G1; E issue seam; R N26/N38/C.1; A issue | delete; add; rename | seon.issue/index-tx, adopt-tx, create-tx, start-tx, exhaust-tx, add-tx | issue index/opening/completion/render, note frontmatter serialization | seon.issue-deletion-test and seon.issue-test: archived ordinary issue/citations gone currently, history retained; started last-test removal refuses and rolls back sibling writes |
+| 4 | KEEP status (X1). Any later deletion requires positive resolved/superseded writers from authored note states first; no migration. Add opened-tx for database creation; retain imported opening date under its observation semantics. Preserve creator/agent living refs and append-only authority. Index/adopt removed note emits retractEntity, not identity-only row. | P G1; E issue seam; R N26/N38/C.1; A issue | add | seon.issue/index-tx, adopt-tx, create-tx, start-tx, exhaust-tx, add-tx | issue index/opening/completion/render, note frontmatter serialization | seon.issue-deletion-test and seon.issue-test: archived ordinary issue/citations gone currently, history retained; started last-test removal refuses and rolls back sibling writes |
 | 4 | Add absence-condition docstrings for surviving optional entries: `:seon.issue/agent`, `:seon.issue/budget`, `:seon.issue/budget-exhausted-tx`, `:seon.issue/commits`, `:seon.issue/created-by`, `:seon.issue/detector`, `:seon.issue/errors`, `:seon.issue/files`, `:seon.issue/functions`, `:seon.issue/issues`, `:seon.issue/keys`, `:seon.issue/members`, `:seon.issue/namespaces`, `:seon.issue/opened`, `:seon.issue/path`, `:seon.issue/resolved-tx`, `:seon.issue/runs`, `:seon.issue/tests`. Keep optionality unless the specific required/transition row above changes it; for renamed entries apply the condition to the replacement. | A seon.issue reset row | add | `seon.issue/add-tx` (`src/seon/issue.clj:985`); `seon.issue/adopt-tx` (`src/seon/issue.clj:713`); `seon.issue/create-tx` (`src/seon/issue.clj:823`); `seon.issue/exhaust-tx` (`src/seon/issue.clj:939`); `seon.issue/generate` (`src/seon/issue.clj:483`); `seon.issue/index-tx` (`src/seon/issue.clj:262`); `seon.issue/start-tx` (`src/seon/issue.clj:885`); `seon.issue/tests-tx` (`src/seon/issue.clj:1038`) | issue opening/render/detect, completion, retention validation | seon.issue-test: valid unresolved tokens persist before/after target deletion, no citation loss, malformed token gives diagnostic, protected issue test retention still enforced on values |
 
 ### `resources/seon/schemas/seon.program.edn`
@@ -360,29 +416,29 @@ removing keys superseded by these decisions.
 
 | Group | Edit | Source finding | Kind | Writers in the same publication | Readers in the same publication | Regression that proves it |
 |---|---|---|---|---|---|---|
-| 2 | sym qualified-symbol; reach indexed qualified-symbol set; subject qualified-symbol; delete pending-subject and pending-calls entries. changed drops string arm; destructive-path is symbol vector. Require ns/source/analyzed-source-digest; preserve platform and fixture-exclusion declarations from landed commits. | P G2/G4/S2; E §1–3; S §1.1; A test; R N7 | retype; required; delete | seon.fn/var-row; seon.program/declaration-row; seon.sci.eval; seon.turn; seon.test.runner/record-tx; source preservation | seon.test reach/changed-since-green, selection, runner digests, effect/accretion, render/test, issue checks | seon.test-reaching-test and seon.test.runner-test: >1,000 members survive, no-op recording, missing subject definition refuses, deleted subject symbol survives and remains selectable |
-| 4 | Require completed result counts/run together; require reach-digest on successful recorded closure, not on unrun definition. Delete reach-unknown only after failed computation refuses recording. Delete failing-assertions, run-at/run-basis-t copies; derive result schema from entity plus selector; alias failure-identity to shared digest and remove reach digest identity-negation. | A result/test; R N15/N32/N35/N36/N40/B.3 | required; delete; retype | seon.test.runner/provenance, record-tx, failure handling; seon.cluster.source/result-preservation-tx | seon.test/verified?, changed-since-green; render/test/transcript; issue completion | seon.test.runner-test: analyzed-but-unrun is unknown, computed-empty reach is known, failed reach never green, counts cannot default to zero |
-| 4 | Add absence-condition docstrings for surviving optional entries: `:seon.fn/call-arities`, `:seon.fn/file`, `:seon.fn/form-span`, `:seon.fn/keywords`, `:seon.fn/references`, `:seon.fn/writes`, `:seon.test/error-count`, `:seon.test/fail-count`, `:seon.test/failure-message`, `:seon.test/failures`, `:seon.test/fixture-observation`, `:seon.test/long`, `:seon.test/long-ms`, `:seon.test/pass-count`, `:seon.test/reach`, `:seon.test/reach-digest`, `:seon.test/run`, `:seon.test/subject`, `:seon.test/usage`. Keep optionality unless the specific required/transition row above changes it; for renamed entries apply the condition to the replacement. | A seon.test reset row | add | `seon.cluster.source/mintable-identity` (`src/seon/cluster/source.clj:305`); `seon.cluster.source/result-preservation-tx` (`src/seon/cluster/source.clj:392`); `seon.cluster/development-source-refresh!` (`src/seon/cluster.clj:2211`); `seon.fn/var-row` (`src/seon/fn.clj:584`); `seon.program/declaration-row` (`src/seon/program.cljc:906`); `seon.sci.eval/definition-row` (`src/seon/sci/eval.clj:392`); `seon.test.runner/record-tx` (`src/seon/test/runner.clj:2095`) | seon.test reach/changed-since-green, selection, runner digests, effect/accretion, render/test, issue checks | seon.test-reaching-test and seon.test.runner-test: >1,000 members survive, no-op recording, missing subject definition refuses, deleted subject symbol survives and remains selectable |
+| 2 | sym qualified-symbol; reach indexed qualified-symbol set; subject qualified-symbol; delete pending-subject and pending-calls entries. changed drops string arm; destructive-path is symbol vector. Require ns/source/analyzed-source-digest; preserve platform and fixture-exclusion declarations from landed commits. | P G2/G4/S2; E §1–3; S §1.1; A test; R N7 | retype; required; delete | seon.fn/var-row; seon.program/declaration-row; seon.sci.eval; seon.turn; seon.test.runner/record-tx; source preservation | seon.test reach/changed-since-green, selection, runner digests, effect/accretion, render/test, issue checks | seon.test-reaching-test and seon.test.runner-test: >1,000 members survive, no-op recording, subject-target deletion refuses while the subject survives; stale reach symbols survive and select reruns |
+| 4 | Require completed result counts/run together; require reach-digest on successful recorded closure, not on unrun definition. Delete reach-unknown only after failed computation refuses recording. Delete failing-assertions, run-at/run-basis-t copies; derive result schema from entity plus selector; remove reach digest identity-negation. The failure-identity format alias is separate contract-only work (X2). | A result/test; R N15/N32/N35/N36/N40/B.3 | required; delete; retype | seon.test.runner/provenance, record-tx, failure handling; seon.cluster.source/result-preservation-tx | seon.test/verified?, changed-since-green; render/test/transcript; issue completion | seon.test.runner-test: analyzed-but-unrun is unknown, computed-empty reach is known, failed reach never green, counts cannot default to zero |
+| 4 | Add absence-condition docstrings for surviving optional entries: `:seon.fn/call-arities`, `:seon.fn/file`, `:seon.fn/form-span`, `:seon.fn/keywords`, `:seon.fn/references`, `:seon.fn/writes`, `:seon.test/error-count`, `:seon.test/fail-count`, `:seon.test/failure-message`, `:seon.test/failures`, `:seon.test/fixture-observation`, `:seon.test/long`, `:seon.test/long-ms`, `:seon.test/pass-count`, `:seon.test/reach`, `:seon.test/reach-digest`, `:seon.test/run`, `:seon.test/subject`, `:seon.test/usage`. Keep optionality unless the specific required/transition row above changes it; for renamed entries apply the condition to the replacement. | A seon.test reset row | add | `seon.cluster.source/mintable-identity` (`src/seon/cluster/source.clj:305`); `seon.cluster.source/result-preservation-tx` (`src/seon/cluster/source.clj:392`); `seon.cluster/development-source-refresh!` (`src/seon/cluster.clj:2211`); `seon.fn/var-row` (`src/seon/fn.clj:584`); `seon.program/declaration-row` (`src/seon/program.cljc:906`); `seon.sci.eval/definition-row` (`src/seon/sci/eval.clj:392`); `seon.test.runner/record-tx` (`src/seon/test/runner.clj:2095`) | seon.test reach/changed-since-green, selection, runner digests, effect/accretion, render/test, issue checks | seon.test-reaching-test and seon.test.runner-test: >1,000 members survive, no-op recording, subject-target deletion refuses while the subject survives; stale reach symbols survive and select reruns |
 
 ### `resources/seon/schemas/my.note.edn`
 
 | Group | Edit | Source finding | Kind | Writers in the same publication | Readers in the same publication | Regression that proves it |
 |---|---|---|---|---|---|---|
-| 4 | Add absence-condition docstrings for surviving optional entries: `:my.note/about`. Keep optionality unless the specific required/transition row above changes it; for renamed entries apply the condition to the replacement. | A my.note reset row | add | `seon.note/add-note-call` (`src/seon/note.clj:177`); `seon.note/forget-note-call` (`src/seon/note.clj:211`) | my.note and namespace render | seon.render.entity-pairs-test: note authored/read forms execute; about deletion follows Q1 |
-| 5 | Remove render/form declarations with AI/HTML form selection; document optional about relation and living deletion semantics. | A note; R B.12/C.1 | delete; add | seon.note/add-note-call, forget-note-call; note pair | my.note and namespace render | seon.render.entity-pairs-test: note authored/read forms execute; about deletion follows Q1 |
+| 4 | Add absence-condition docstrings for surviving optional entries: `:my.note/about`. Keep optionality unless the specific required/transition row above changes it; for renamed entries apply the condition to the replacement. | A my.note reset row | add | `seon.note/add-note-call` (`src/seon/note.clj:177`); `seon.note/forget-note-call` (`src/seon/note.clj:211`) | my.note and namespace render | seon.render.entity-pairs-test: note authored/read forms execute; about semantics follow the separately ruled identity-carrier decision |
+| 5 | Remove render/form declarations with AI/HTML form selection; document optional about semantics and its pending identity-carrier decision (K §7). | A note; R B.12/C.1 | delete; add | seon.note/add-note-call, forget-note-call; note pair | my.note and namespace render | seon.render.entity-pairs-test: note authored/read forms execute; about semantics follow the separately ruled identity-carrier decision |
 
 ### `resources/seon/schemas/my.plan.item.edn`
 
 | Group | Edit | Source finding | Kind | Writers in the same publication | Readers in the same publication | Regression that proves it |
 |---|---|---|---|---|---|---|
-| 4 | Require position; retain completion/needs/subject optional lifecycle meanings; subject living relation, steps components. No completed/open flag. | A item; P G5 | required; add | seon.plan/add-step-call, compile-tree, entry-tx-map, update-step-call; seon.issue/create-tx | plan ordering, completion, rendering | my.plan-test: canonical constructor supplies position, partial valid update works, missing position in final row refuses |
+| 4 | Require position; retain completion/needs/subject optional lifecycle meanings; subject/needs are identity-token observations per K; steps are components. No completed/open flag. | A item; P G5 | required; add | seon.plan/add-step-call, compile-tree, entry-tx-map, update-step-call; seon.issue/create-tx | plan ordering, completion, rendering | my.plan-test: canonical constructor supplies position, partial valid update works, missing position in final row refuses |
 | 4 | Add absence-condition docstrings for surviving optional entries: `:my.plan.item/about`, `:my.plan.item/agent`, `:my.plan.item/completed-tx`, `:my.plan.item/description`, `:my.plan.item/done-query`, `:my.plan.item/done-when`, `:my.plan.item/needs`, `:my.plan.item/steps`, `:my.plan.item/subject`. Keep optionality unless the specific required/transition row above changes it; for renamed entries apply the condition to the replacement. | A my.plan.item reset row | add | `seon.issue/create-tx` (`src/seon/issue.clj:823`); `seon.plan/add-step-call` (`src/seon/plan.clj:516`); `seon.plan/compile-tree` (`src/seon/plan.clj:1028`); `seon.plan/completion-tx` (`src/seon/plan.clj:702`); `seon.plan/entry-tx-map` (`src/seon/plan.clj:928`); `seon.plan/update-step-call` (`src/seon/plan.clj:837`) | plan ordering, completion, rendering | my.plan-test: canonical constructor supplies position, partial valid update works, missing position in final row refuses |
 
 ### `resources/seon/schemas/seon.agent.edn`
 
 | Group | Edit | Source finding | Kind | Writers in the same publication | Readers in the same publication | Regression that proves it |
 |---|---|---|---|---|---|---|
-| 4 | Require namespace/plan/runtime/settings on complete agent; constructors create valid empty owned plan and settings/runtime. Keep agent identity; no agent deletion API or tombstone. Positive closure lifecycle is outside this reset. Document existing relation/component consequences. Remove render/form property only with render function conversion. | A agent; R A.2/C.1/B.12 | required; add; delete | seon.cluster.agent/creation-tx; seon.agent/update-settings-call; seon.plan/compile-tree | agent acquisition, render, message/issue ownership | seon.cluster.agent-identity-test: complete creation succeeds; missing required component refuses; agent deletion preserving another agent's message refuses (Q1) |
+| 4 | Require namespace/plan/runtime/settings on complete agent; constructors create valid empty owned plan and settings/runtime. Keep agent identity; no agent deletion API or tombstone. Positive closure lifecycle is outside this reset. Document existing relation/component consequences. Remove render/form property only with render function conversion. | A agent; R A.2/C.1/B.12 | required; add; delete | seon.cluster.agent/creation-tx; seon.agent/update-settings-call; seon.plan/compile-tree | agent acquisition, render, message/issue ownership | seon.cluster.agent-identity-test: complete creation succeeds; missing required component refuses; agent identity remains; no deletion API or closure lifecycle introduced |
 
 ### `resources/seon/schemas/seon.ai.edn`
 
@@ -402,7 +458,7 @@ removing keys superseded by these decisions.
 
 | Group | Edit | Source finding | Kind | Writers in the same publication | Readers in the same publication | Regression that proves it |
 |---|---|---|---|---|---|---|
-| 4 | Move stored map to seon.eval owner; delete receipt alias and author stamp. Require read-basis-transaction on the evidence-capturing read path as positive observation; empty evidence plus basis is known-empty, missing observation unknown. triage-edn becomes triage typed value via codec. Keep evidence child schemas linked to canonical parent. | A cluster eval; R N14/N20/N24/B.1/B.11; E §4 | delete; required; rename; retype | seon.turn/receipt-read-evidence-tx, start/settle/recover/refresh and generated source constructors; seon.sci.eval | seon.turn since-diff; seon.repl authorship/history; evaluation consumers | seon.rereads-test and seon.eval-test: empty read observation remains distinguishable and invalidates on relevant insertion; writes/effects never rerun; missing observation reported unknown |
+| 4 | Move stored map to seon.eval owner; delete receipt alias. Keep author stamp until its replacement derivation accounts for X's 45-row disagreement. Require read-basis-transaction on the evidence-capturing read path as positive observation; empty evidence plus basis is known-empty, missing observation unknown. triage-edn becomes triage typed value via codec. Keep evidence child schemas linked to canonical parent. | A cluster eval; R N14/N20/N24/B.1/B.11; E §4 | delete; required; rename; retype | seon.turn/receipt-read-evidence-tx, start/settle/recover/refresh and generated source constructors; seon.sci.eval | seon.turn since-diff; seon.repl authorship/history; evaluation consumers | seon.rereads-test and seon.eval-test: empty read observation remains distinguishable and invalidates on relevant insertion; writes/effects never rerun; missing observation reported unknown |
 | 4 | Add absence-condition docstrings for surviving optional entries: `:seon.cluster.eval/comment`, `:seon.cluster.eval/error`, `:seon.cluster.eval/interrupted-at`, `:seon.cluster.eval/ns`, `:seon.cluster.eval/output`, `:seon.cluster.eval/read-basis-transaction`, `:seon.cluster.eval/read-evidence`, `:seon.cluster.eval/refreshes`, `:seon.cluster.eval/source`, `:seon.db/read-request`, `:seon.db/read-result-digest`, `:seon.error/kind`, `:seon.eval/duration-ms`, `:seon.eval/origin`, `:seon.eval/renderer`, `:seon.eval/shown`, `:seon.print/length`, `:seon.print/level`, `:seon.problems/id`, `:seon.sci.eval/ending-ns`, `:seon.test.accretion/case-count`, `:seon.test.accretion/executed-count`, `:seon.test.accretion/gate-fail-count`, `:seon.test.accretion/gate-pass-count`, `:seon.test.accretion/gate-test-count`, `:seon.test.accretion/gate-tests`, `:seon.test.accretion/report-blob`, `:seon.test.accretion/report-size`, `:seon.test.accretion/seed`, `:seon.test.accretion/status`. Keep optionality unless the specific required/transition row above changes it; for renamed entries apply the condition to the replacement. | A seon.cluster.eval reset row | add | `seon.turn/append-generated-call` (`src/seon/turn.clj:696`); `seon.turn/plan-call` (`src/seon/turn.clj:574`); `seon.turn/receipt-read-evidence-tx` (`src/seon/turn.clj:1495`); `seon.turn/receipt-row` (`src/seon/turn.clj:891`); `seon.turn/receipt-settle-call` (`src/seon/turn.clj:1712`); `seon.turn/receipt-start-call` (`src/seon/turn.clj:913`); `seon.turn/record-evaluated-call` (`src/seon/turn.clj:1569`); `seon.turn/recover-call` (`src/seon/turn.clj:1803`); `seon.turn/refresh-call` (`src/seon/turn.clj:794`); `seon.turn/source-rows` (`src/seon/turn.clj:527`); `seon.turn/system-run-call` (`src/seon/turn.clj:655`); `seon.turn/system-turn` (`src/seon/turn.clj:2189`) | seon.turn since-diff; seon.repl authorship/history; evaluation consumers | seon.rereads-test and seon.eval-test: empty read observation remains distinguishable and invalidates on relevant insertion; writes/effects never rerun; missing observation reported unknown |
 
 ### `resources/seon/schemas/seon.context.capture.edn`
@@ -430,14 +486,14 @@ removing keys superseded by these decisions.
 
 | Group | Edit | Source finding | Kind | Writers in the same publication | Readers in the same publication | Regression that proves it |
 |---|---|---|---|---|---|---|
-| 4 | Keep occurrence/process as the sole occurrence process fact; remove error/process duplicate from occurrence constructors/map. Retain typed instrument/fn and throwable-class, agent/turn optional only with declared provenance conditions. | A occurrence; R B.6/N13 | delete; retype; add | seon.error/prepare, commit-call; fault committer | occurrence readers and rendered provenance | seon.error-class-schema-test: occurrence names one actual process, source fault retained through deleting function |
+| 4 | Keep occurrence/process as the sole occurrence process fact; remove error/process duplicate from occurrence constructors/map. Retain typed instrument/fn and the canonical symbol exception-class, agent/turn optional only with declared provenance conditions. | A occurrence; R B.6/N13 | delete; retype; add | seon.error/prepare, commit-call; fault committer | occurrence readers and rendered provenance | seon.error-class-schema-test: occurrence names one actual process, source fault retained through deleting function |
 | 4 | Add absence-condition docstrings for surviving optional entries: `:seon.error.occurrence/agent`, `:seon.error.occurrence/data-blob`, `:seon.error.occurrence/proc-fn`, `:seon.error.occurrence/turn`, `:seon.error/cid`, `:seon.error/data-size`, `:seon.error/dropped-fault-count`, `:seon.error/dropped-fault-digest`, `:seon.error/op`, `:seon.error/proc`, `:seon.error/throwable-class`, `:seon.instrument/args`, `:seon.instrument/arm`, `:seon.instrument/expected`, `:seon.instrument/fn`. Keep optionality unless the specific required/transition row above changes it; for renamed entries apply the condition to the replacement. | A seon.error.occurrence reset row | add | `seon.error/commit-call` (`src/seon/error.clj:1306`); `seon.error/prepare` (`src/seon/error.clj:516`) | occurrence readers and rendered provenance | seon.error-class-schema-test: occurrence names one actual process, source fault retained through deleting function |
 
 ### `resources/seon/schemas/seon.eval.edn`
 
 | Group | Edit | Source finding | Kind | Writers in the same publication | Readers in the same publication | Regression that proves it |
 |---|---|---|---|---|---|---|
-| 4 | Own the single stored evaluation entity; replace reader-shaped entity, preserve pair, derive read shape with reader-only :t. Delete renderer-fn/outcome; retain renderer symbol and explicit terminal shown/error/interruption facts. Historical origins that must survive source deletion become target identity values; audit transaction/effect provenance too before enforcement (H). | A eval; R N6/N12/N18/N25/B.1 | delete; required; add | seon.turn/source-rows, record-evaluated-call, settlement/recovery; seon.sci.eval result projection | seon.eval/of-agent; seon.repl; context and transcript readers | seon.eval-test and seon.repl-parity-test: creation/terminal groups coherent, comment without executable source valid, renderer deletion preserves symbol, origin deletion follows Q1 |
+| 4 | Own the single stored evaluation entity; replace reader-shaped entity, preserve pair, derive read shape with reader-only :t. Delete renderer-fn; outcome removal is separate contract-only work (X2). Retain renderer symbol and explicit terminal shown/error/interruption facts. Historical origins that must survive source deletion become target identity values; audit transaction/effect provenance by per-family semantics (K), without universal enforcement. | A eval; R N6/N12/N18/N25/B.1 | delete; required; add | seon.turn/source-rows, record-evaluated-call, settlement/recovery; seon.sci.eval result projection | seon.eval/of-agent; seon.repl; context and transcript readers | seon.eval-test and seon.repl-parity-test: creation/terminal groups coherent, comment without executable source valid, renderer deletion preserves symbol, origin deletion follows Q1 |
 
 ### `resources/seon/schemas/seon.fn.argument.edn`
 
@@ -457,8 +513,8 @@ removing keys superseded by these decisions.
 
 | Group | Edit | Source finding | Kind | Writers in the same publication | Readers in the same publication | Regression that proves it |
 |---|---|---|---|---|---|---|
-| 4 | KEEP optional listen/entity as a living ref. Absence is an intentionally authored wildcard. Issue deletion must retract its scoped listener entity in the same transaction, not merely unlink/remove the constraint. Do not introduce :all or a new name-watch contract (H N8). | H N8; R N8 corrected; A listen | add | seon.config/default-population; seon.issue/start-tx; runtime listen constructors | seon.cluster.wake matching and schema-driven subscriptions | seon.cluster.wake-test: watched issue plus scoped listener co-deletion succeeds; target-only deletion refuses after enforcement; authored absent-entity wildcard still matches |
-| 4 | Add absence-condition docstrings for surviving optional entries: `:seon.listen/entity`, `:seon.listen/value`. Keep optionality unless the specific required/transition row above changes it; for renamed entries apply the condition to the replacement. | A seon.listen reset row | add | `seon.config/default-population` (`src/seon/config.clj:300`); `seon.issue/start-tx` (`src/seon/issue.clj:885`) | seon.cluster.wake matching and schema-driven subscriptions | seon.cluster.wake-test: watched issue plus scoped listener co-deletion succeeds; target-only deletion refuses after enforcement; authored absent-entity wildcard still matches |
+| excluded | Listener redesign/co-deletion is outside this assignment. H N8 and K disagree on the remedy; retain the recorded issue and do not enable universal enforcement to choose implicitly. | H N8; R N8 corrected; A listen | add | seon.config/default-population; seon.issue/start-tx; runtime listen constructors | seon.cluster.wake matching and schema-driven subscriptions | seon.cluster.wake-test: future listener owner proves scoped deletion cannot widen matching; no listener change in this seam |
+| 4 | Add absence-condition docstrings for surviving optional entries: `:seon.listen/entity`, `:seon.listen/value`. Keep optionality unless the specific required/transition row above changes it; for renamed entries apply the condition to the replacement. | A seon.listen reset row | add | `seon.config/default-population` (`src/seon/config.clj:300`); `seon.issue/start-tx` (`src/seon/issue.clj:885`) | seon.cluster.wake matching and schema-driven subscriptions | seon.cluster.wake-test: future listener owner proves scoped deletion cannot widen matching; no listener change in this seam |
 
 ### `resources/seon/schemas/seon.maintenance.receipt.edn`
 
@@ -472,14 +528,14 @@ removing keys superseded by these decisions.
 | Group | Edit | Source finding | Kind | Writers in the same publication | Readers in the same publication | Regression that proves it |
 |---|---|---|---|---|---|---|
 | 4 | Add absence-condition docstrings for surviving optional entries: `:seon.dev.process/generation`, `:seon.error/kind`, `:seon.operator.claim/path`. Keep optionality unless the specific required/transition row above changes it; for renamed entries apply the condition to the replacement. | A seon.maintenance.result reset row | add | `seon.maintenance/claim-error` (`src/seon/maintenance.clj:106`); `seon.maintenance/collection-component` (`src/seon/maintenance.clj:200`); `seon.maintenance/process-identity` (`src/seon/maintenance.clj:73`); `seon.maintenance/process-observation` (`src/seon/maintenance.clj:81`); `seon.maintenance/project-cluster-cleanup-result` (`src/seon/maintenance.clj:213`); `seon.maintenance/project-collect-result` (`src/seon/maintenance.clj:177`); `seon.maintenance/project-process-census-result` (`src/seon/maintenance.clj:115`); `seon.maintenance/project-reap-result` (`src/seon/maintenance.clj:141`); `seon.maintenance/root-claim` (`src/seon/maintenance.clj:92`); `seon.schedule/settle-call` (`src/seon/schedule.clj:419`) | maintenance render/query and whole-parent validator | seon.maintenance-schema-test: all four real projections valid; malformed last nested child rejects root and sibling writes; id-only root refuses |
-| 5 | The same root that receives the merged maintenance lifecycle declares actual optional operation component attributes (census/reap/collect/cleanup), exactly one operation shape on successful completed result by attribute presence (open creation requires start provenance; error settlement requires error). Delete unconstrained value map or replace its API use by derived union. G5 validates all nested components; no synthetic identities for anonymous children. | R C.3/N44/B.9; A result; E §4 | add; delete; retype | seon.maintenance project-process-census-result/project-reap-result/project-collect-result/project-cluster-cleanup-result and nested constructors; seon.schedule/settle-call | maintenance render/query and whole-parent validator | seon.maintenance-schema-test: all four real projections valid; malformed last nested child rejects root and sibling writes; id-only root refuses |
+| 5 | The same root that receives the merged maintenance lifecycle declares actual optional operation component attributes (census/reap/collect/cleanup), exactly one operation shape on successful completed result by attribute presence (open creation requires start provenance; error settlement requires error). The value map is nonstored: its replacement by a derived API union is contract-only work (X2), not a reset gate. G5 validates all nested components; no synthetic identities for anonymous children. | R C.3/N44/B.9; A result; E §4 | add; delete; retype | seon.maintenance project-process-census-result/project-reap-result/project-collect-result/project-cluster-cleanup-result and nested constructors; seon.schedule/settle-call | maintenance render/query and whole-parent validator | seon.maintenance-schema-test: all four real projections valid; malformed last nested child rejects root and sibling writes; id-only root refuses |
 
 ### `resources/seon/schemas/seon.message.edn`
 
 | Group | Edit | Source finding | Kind | Writers in the same publication | Readers in the same publication | Regression that proves it |
 |---|---|---|---|---|---|---|
-| 4 | Delete pulled/pulled-reference mirrors after selector derivation. Declare to/from/inbox/caused-by/about living relation semantics and parent component ownership. Remove form properties with render group. | A message; R B.2/C.1/B.12 | delete; add | seon.cluster.message/inbound-tx, send-call; seon.error/message-tx | my.message, unread queries, message pairs and wake matching | seon.db-test and seon.render.entity-pairs-test: actual nested pulls validate; sender deletion refuses without deleting referrer |
-| 4 | Add absence-condition docstrings for surviving optional entries: `:my.message/reason`, `:seon.message/about`, `:seon.message/caused-by`, `:seon.message/from`, `:seon.message/inbox`, `:seon.message/read-tx`. Keep optionality unless the specific required/transition row above changes it; for renamed entries apply the condition to the replacement. | A seon.message reset row | add | `seon.cluster.message/inbound-tx` (`src/seon/cluster/message.clj:198`); `seon.cluster.message/send-call` (`src/seon/cluster/message.clj:705`); `seon.error/message-tx` (`src/seon/error.clj:1295`) | my.message, unread queries, message pairs and wake matching | seon.db-test and seon.render.entity-pairs-test: actual nested pulls validate; sender deletion refuses without deleting referrer |
+| 4 | Delete pulled/pulled-reference mirrors after selector derivation. Declare per-family semantics (K): required to refuses; inbox moves at settlement; caused-by may sweep; about identity carrier preserves wake classification. No blanket living rule. Remove form properties with render group. | A message; R B.2/C.1/B.12 | delete; add | seon.cluster.message/inbound-tx, send-call; seon.error/message-tx | my.message, unread queries, message pairs and wake matching | seon.db-test and seon.render.entity-pairs-test: actual nested pulls validate; agent deletion is not an API; current message ownership and wake classification remain unchanged |
+| 4 | Add absence-condition docstrings for surviving optional entries: `:my.message/reason`, `:seon.message/about`, `:seon.message/caused-by`, `:seon.message/from`, `:seon.message/inbox`, `:seon.message/read-tx`. Keep optionality unless the specific required/transition row above changes it; for renamed entries apply the condition to the replacement. | A seon.message reset row | add | `seon.cluster.message/inbound-tx` (`src/seon/cluster/message.clj:198`); `seon.cluster.message/send-call` (`src/seon/cluster/message.clj:705`); `seon.error/message-tx` (`src/seon/error.clj:1295`) | my.message, unread queries, message pairs and wake matching | seon.db-test and seon.render.entity-pairs-test: actual nested pulls validate; agent deletion is not an API; current message ownership and wake classification remain unchanged |
 
 ### `resources/seon/schemas/seon.ns.import.edn`
 
@@ -562,7 +618,7 @@ removing keys superseded by these decisions.
 
 | Group | Edit | Source finding | Kind | Writers in the same publication | Readers in the same publication | Regression that proves it |
 |---|---|---|---|---|---|---|
-| 5 | Replace offer-result true/false/nil with :delivered/:refused/:no-channel; all callers handle total outcomes explicitly. | R N43 | retype | seon.cluster.wake offer/delivery functions | agent armer and wake callers | seon.cluster.wake-test: each actual channel outcome named; absent channel never healthy |
+| contract-only | Replace offer-result true/false/nil with :delivered/:refused/:no-channel; all callers handle total outcomes explicitly. | R N43 | retype | seon.cluster.wake offer/delivery functions | agent armer and wake callers | seon.cluster.wake-test: each actual channel outcome named; absent channel never healthy |
 
 ### `resources/seon/schemas/seon.flow.edn`
 
@@ -586,7 +642,7 @@ removing keys superseded by these decisions.
 
 | Group | Edit | Source finding | Kind | Writers in the same publication | Readers in the same publication | Regression that proves it |
 |---|---|---|---|---|---|---|
-| 5 | ai/html schema properties become qualified-symbol only. Move rendered AI value to rendered and HTML value to existing hiccup shape under a distinct output value key. Retire form selector/property; AI/HTML functions choose forms. Update failure/output maps and all schema property projections before narrowing. | S §1.1; A render; R B.12 | retype; delete; add | seon.render output construction; seon.schema property projection; seon.instrument contract-definition acquisition; ten pair declarations | render walk, value, ns, test, repl, web and transcript | seon.render.entity-pairs-test and seon.repl-parity-test: generated forms execute, AI text/HTML values satisfy separate contracts, stored pair datoms symbols |
+| 5 | ai/html storage leaves the EDN codec for native qualified-symbol values (X7); this is a render-consumer publication, not the program-symbol retype. Move rendered AI value to rendered and HTML value to existing hiccup shape under a distinct output value key. Retire form selector/property; AI/HTML functions choose forms. Update failure/output maps and all schema property projections before narrowing. | S §1.1; A render; R B.12 | retype; delete; add | seon.render output construction; seon.schema property projection; seon.instrument contract-definition acquisition; ten pair declarations | render walk, value, ns, test, repl, web and transcript | seon.render.entity-pairs-test and seon.repl-parity-test: generated forms execute, AI text/HTML values satisfy separate contracts, stored pair datoms symbols |
 
 ### `resources/seon/schemas/seon.schema.map-entry.edn`
 
@@ -652,8 +708,9 @@ storable attributes after aliases/property projection; a text count of ref
 mentions includes API schemas; native installed ref/component properties are the authority.
 
 For each surviving storable ref in **every** table: existing component
-ownership is the only distinction; every other ref is living. There is no
-classification property. For each mention that must survive: store a value of
+ownership cascades, required keys refuse a sweep through whole-entity validation,
+and optional refs may deliberately sweep (K). There is no classification property
+or universal living-ref rule. For each mention that must survive: store a value of
 the target identity type. Verify the identity domain before narrowing it (H N3).
 This catches transitive sites not named in R N1–N11, including maintenance
 handler and lint function references. `seon.maintenance.receipt/handler`
@@ -711,65 +768,59 @@ reader assembling ordered bytes from this collection. Use a set of attachments;
 do not add ordinals. **N34 resolved:** `src/seon/program.cljc:691–692` writes
 both argument/order and argument/index from exactly `(long order)`; keep order.
 
-## Q1 — corrected by H Design 2; owner ruling pending
+## Q1 — settled: program deletion refuses surviving obligations
 
-**Do not enable universal enforcement yet.** The recommendation is every
-noncomponent ref is living, with no classification property. A mention that
-must survive target deletion is a value of the target identity type. Existing
-native component/ref declarations supply the complete distinction; no opt-in
-protection flag or unclassified-ref escape.
+J §2.1–2.6 and the owner's current instruction replace the universal living-ref
+proposal. No fork change and no override. The final-report validator already
+receives attempted and effective datoms, before and final databases. An affected
+eid with datoms before and none after contributes its prior program identity.
+For each deleted identity, read indexed obligations in the final database:
+function calls/references and test subjects by qualified symbol; namespace
+requirements by namespace symbol. A same-transaction replacement that no longer
+names the target is a repair. Deleting the caller too also removes its
+obligation. Redefining the same identity is not deletion.
 
-The one check stays in `seon.db/write-report-error` via the already-installed
-`:datahike/validate-report` callback. There is no trailing transaction function,
-second writer, client pre-read or replay. The fork must add ephemeral
-`:datahike/retracted-entities` operation evidence: each resolved retractEntity
-target, including expanded transaction calls and component cascades, enters
-the set. Tempid retries reconstruct it per attempt. The validator receives it;
-the public report and transaction metadata do not retain it.
+The flat refusal carries **every** surviving caller and the edge attribute,
+grouped by deleted identity, with the before/final basis as evidence. Never
+take, truncate or clip the data payload. Use datoms/AVET rather than wildcard
+pull so the dependency's 1,000-member cap cannot hide a caller. Presentation
+elision belongs to the existing render profile.
 
-Implement that fork refinement as a separate commit in
-`reference-code/datahike`, with the dependency suite and direct regression for
-native/nested/cascade deletion, delete-and-recreate, retry isolation and public
-report cleanliness. Update the Seon gitlink and pin consumers only with that
-proof. The previous assertion that no dependency change was needed is withdrawn.
+Test reach is excluded from refusal. Keep its symbol members, report the
+tests whose recorded closure became stale on a committed deletion, and have
+changed-since-green select unresolved members as changed dependencies. A
+declared subject is an obligation and does refuse. A test deletion has no
+program-edge obligation merely because it is a test; ordinary retention rules
+still apply (K §5f records the issue-tests coupling until citation values land).
 
-Let B/A be the actual before/final databases. Deletion targets are expanded
-operation targets union affected entities that had datoms in B and none in A,
-restricted to entities that existed in B. **Before/after absence alone is not
-sufficient:** H's delete-and-recreate probe leaves the target present while
-its incoming relation disappears. Use B's installed noncomponent-ref schema
-for prior incoming relations; schema changes in the transaction cannot exempt
-them. For each prior incoming source, refuse if that source has datoms in A.
-Order of endpoint deletions does not matter. Explicit unlink/reparent plus
-target deletion still refuses when the old referrer survives under this strict
-rule. Independently validate final surviving added/reasserted refs using A's
-schema and actual EAVT target existence; temporary add-then-retract does not
-falsely fail. Return the existing flat diagnostic, with old identities, datom,
-operation, basis and the required condition.
+The schema-key extension uses keyword obligations (writes, schema references,
+arity input/output/guard refs) after those values and every writer/consumer
+land together. J's dated connection-key example is 182 grouped breaks
+(4 writes, 32 schema references, 146 input refs); keyword mentions are excluded.
+Do not reconstruct erased ref edges and pretend they distinguish a repair.
 
-Cost from H: O(K + R) traversal; O(U + S + A+) existence seeks; D×R incoming
-AVET seeks and O(I) returned datoms. K is attempted/effective datoms, U affected
-entities, D old deletion targets, R installed noncomponent ref attributes,
-S surviving sources checked and A+ final asserted targets. D=0 needs no
-incoming scans or protected-attribute enumeration. O(D) ephemeral target set;
-existence memoization is per immutable report only. No production latency
-number is established. H's 10 ms/5 ms tiny probes prove semantics only.
+Three origin proofs belong to the same acceptance:
+1. Real SCI admission reaches the writer and returns the flat refusal mid-turn;
+   no declaration transaction commits.
+2. Incremental publication with a surviving caller outside the changed set
+   refuses; the previous source commit stays selected and bin/seon init reports
+   the complete refactoring payload legibly. Deletion plus caller repairs in
+   the same publication succeeds.
+3. Fresh complete publication contains no deleted old identity, so this rule
+   is vacuous. Report unresolved edge symbols positively as the work list.
 
-Rollout prerequisites extend beyond N1–N11: transaction `:seon.db/receipt` and
-effect/evaluation provenance must survive compaction as identity values where
-historical, and generated issue origins must not block G1 by accident. Scoped
-issue listeners co-delete with their issue; authored wildcard listeners remain
-valid. Declaration fn/capability-fn remains a living ref; historical effect
-handler becomes the exact dispatched symbol. Canonical failure path/line are
-written before their file ref is removed. Missing issue success-test obligations
-remain explicitly incomplete. Agent identity stays: no deletion API/tombstone,
-and no new closure lifecycle in this reset.
+Canonical regressions use the real named declarations from J: open? (dated
+5 callers), seon.turn (176 declarations / 67 requirers), connection (182
+grouped declaration breaks), and a test deletion. Derive current membership
+from the fixture; the dated counts are evidence to compare, not a hand-rostered
+fixture or an assertion that HEAD cannot accrete. Include native and expanded
+transaction calls, atomic refusal, repair/delete in either order, >1,000
+callers, and unresolved fresh edges. Measure indexed check cost; no latency
+number is claimed before a run.
 
-Acceptance uses canonical armed fixtures and one generative operation-order
-test: optional and required refs, target-only refusal and unchanged basis,
-both endpoint orders, nested db.fn/call, cascades, delete-and-recreate, unlink
-plus deletion, idempotent reasserted numeric refs and nonexistent targets.
-No gate or live proof is claimed for this pending mechanism.
+RESET NEEDED for ref-to-symbol types. No default lifecycle action, bin/test,
+capability-fn decision, listener edit, agent deletion or shape reclamation is
+authorized by this seam.
 
 ## Q2 — option A requested; owner ruling pending before implementation
 
@@ -886,7 +937,7 @@ attributes. Do not run AST deletion while E owns its source files.
 | Proof | Exact observation to record | Pass condition |
 |---|---|---|
 | Reverse-walk parity number | Run [E's probe](../research/edges-symbol-walk-probe-2026-09-16.clj) against one immutable new-default database; record source commit, basis, actual identity/edge counts, map acquisition cost, median/p95, edge bytes and set equality. Baseline [captured EDN](../research/edges-symbol-walk-baseline-2026-09-16.edn): basis 536871871, 6,975 identities, 65,119 edges, 260,697 printed edge bytes; three-target ref median **452.444458 ms**, p95 **562.141042 ms**; closures 116/87/3,056. | Write the **new mapped-symbol median/p95 and ratio** beside baseline; compare equivalent captured populations for parity and label changed populations separately. Include map cost once per operation, deleted/redefined targets, empty closures and cycles. Probe covers calls/references, not the complete declared-dispatch/file-uncertainty gate query. Before-reset numbers alone never establish parity. |
-| One actual deletion on default | Through ordinary Juniper/agent definition admission create disposable A calling B and its test; record their nonempty identities/digests and edge. Delete B through owning ns-unmap/settlement path; record transaction, A's exact surviving call value and public unresolved-call query answer. Reintroduce B only as an explicit follow-up proof, then clean up these owned declarations. | B absent, A→B still present, unresolved query positively names A and B, reaching test selected; history/as-of sees B before deletion; Q1 does not reject a name edge as custody. |
+| One actual deletion on default | Create disposable A calling B through ordinary agent admission. Attempt B deletion alone: capture the flat refusal and unchanged basis. Repair A and delete B in one transaction, then query history and stale test reach. Separately query unresolved symbols from the fresh publication as its positive work list. | First deletion refuses with complete A→B payload; repaired deletion commits; stale reach retains B and selects rerun. History sees B before deletion. The unresolved query answers explicitly (empty for the repaired pair), never by swept absence. |
 | One agent-authored definition provenance | Submit a contracted definition through fixture submit!/real agent turn, not shared debug SCI or direct hand-built program row. Pull admitted source/namespace/admission/digest and recorded evaluation. Compare digest with the analyzer's exact input including its resolver prelude. | A 64-hex digest matches actual analyzed input; definition is agent-admitted, callable, and remains proven analyzed when its calls set is empty. No requirement to fake a file or keep a compactable evaluation ref. |
 | One archived issue retracted | Create/index a disposable ordinary note via existing issue owner; retain before basis and component citation identities. Move its note to archive through the existing index/adoption path; do not pick a protected/started issue. Query current issue and component citations and their history. | Current issue and owned citations absent; historical issue present; cited noncomponent targets survive. Started issue last-test removal still refuses under its separate regression; no forced bypass. |
 | Living relation and components | On disposable canonical facts in default, attempt deleting one agent while a surviving message names it, then co-delete both; attempt a raw invalid child update. | First transaction refuses with unchanged sender/basis and named relation; authorized complete co-deletion succeeds; malformed child refuses at parent path with sibling rollback. |
@@ -926,7 +977,7 @@ by raw log/path and verification boundary, not an unproven attribution.
 Never resume, message or edit another lane's session. A held file blocks its
 seam, not independent authorized work.
 
-**Step 2 is authorized for released seams only. Report at the first coherent landed seam; Q1 enforcement and Q2 AST removal remain pending owner rulings.**
+**Step 2 authorizes Q1 program deletion refusal on released seams. Report at the first coherent schema/refusal/test landing or a concrete held-consumer boundary. Q2 AST removal remains pending.**
 
 ## First released seam — capture prompt history (group 5, R J6)
 
@@ -987,3 +1038,41 @@ and `logs/current-source-failure.log`. This is the exact refusal, not a proven
 attribution to another editor. `search.clj` is assignment-held; it was not
 edited. No adoption convergence or live behavior claim is made. This boundary
 does not block the owned HEAD-plus-paths fast test or authorize a reset.
+
+## Program deletion seam — held-consumer boundary after J/K/X correction
+
+At `2ee83761db526af9dec990024ba8322dd92045a9`, fn/program/db and the named
+schema resources are clean. Cluster/source were modified at entry and became
+clean during this investigation. The remaining **direct retype dependency** is
+modified, assignment-held `src/seon/test/selection.clj:115–125`: `row-edges`
+accepts only vector-valued calls/references/subjects. Changing those producers
+to symbols makes the existing selector drop every edge, silently returning an
+incomplete test set. HEAD-plus-owned-paths cannot fix this semantic dependency:
+the HEAD version has the same vector filter. A schema-only commit would violate
+the required schema/consumer publication unit and would make a green selected
+run vacuous.
+
+Required matching edit: `row-edges` must translate symbol edge members into
+the same identity domain used by its seed/reverse index, or convert that whole
+walk to symbols; its regression must select an unchanged test through a
+changed callee using the new artifact shape. This is part of the requested
+schema/refusal seam, not a separate generic runner cleanup. Release this
+specific consumer or have its current owner land the matching change. No other
+lane was messaged or operated. No source/schema retype was exposed while this
+consumer still discards it.
+
+Further origin boundaries remain the assignment-held SCI evaluation seam and
+the publication consumers until their release is established. At entry,
+`cluster/namespace-requires` joined requirement values as eids, and
+`cluster.source` preserved reach through identity refs/tombstones. These must
+change with the retype even though those files are now clean. The schema-key
+182-break extension also reaches currently modified `src/seon/schema.clj`.
+Do not describe any of these origins as proven from a direct writer test alone.
+
+Read-only default probe (5 ms): calls/requires both `:db.type/ref`; open? callers
+are recover-call, receipt-run, render-ai, require-open-run and open-run-tx-call
+in seon.turn (5); seon.turn requiring namespaces = 67. The committed probe and
+landing note retain the exact query. This verifies the inherited model, not
+the proposed refusal. Default remains PID 41413; no transaction or lifecycle
+operation was performed. No bin/test or fast test was run for this docs-only
+correction. Production implementation is **not landed** at this boundary.
