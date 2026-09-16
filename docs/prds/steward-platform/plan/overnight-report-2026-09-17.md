@@ -169,6 +169,13 @@ peer session (batches 30–57; ledger
   generated issues on default, idempotent by identity; the generated
   opening names its detector; effect facts (`:seon.effect/eval`, capability
   fn, file/span/program on `my.edit` effects).
+- **Efficient updates:** every commit had been re-walking and re-rendering
+  every acquired agent's whole history — the read-result digest threw on
+  inst/uuid/char values and was swallowed to nil, leaving only the commit id
+  as read evidence (peer, `dfd2aae54`; after it, all retained calls stay
+  current across a neutral commit); the result recording delta; settlement
+  no longer rebuilds its projection per declaration (peer); gate-set from
+  indexed call edges.
 - **Agent loop:** an agent creation IS the arm wake; the issue assignment
   datum is the worker's first wake; plan derivation in Clojure; `dir` shows
   rows + a token-sized elision with a requery offset.
