@@ -1152,6 +1152,15 @@ leaving an entity the schema refuses — the fixture-completeness class; hand
 to `composable-history-cold-reds` on its next resume (it owns the history
 tests) or fix with step B.
 
+**Batch 113 (issue namespaces, 00:10Z): 46 tests, 36F/3E.** The stale turn-loop
+assertion and the detector red are GONE (fixes verified cold). Everything left
+is the retired-issue class (33 assertions, `adopt-tx`/`index-tx` removed arms)
+— under the deletion ruling awaiting the owner this becomes plain retraction
+of an issue whose note is gone, no schema change — plus `success-test` noise
+and one real bug: `issue-settlement-runs-tests-and-derives-completion` throws
+`nth not supported on this type: PersistentArrayMap` (a destructuring error in
+settlement; also seen in seon.log earlier today).
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
