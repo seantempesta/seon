@@ -505,6 +505,8 @@
          (assoc :seon.test/failure-message (str/join "\n\n" messages)))))
    order))
 
+(declare ambient-snapshot ambient-drift)
+
 (defn run-var!
   "Run one host or SCI test Var and return its captured assertion result.
 
@@ -526,7 +528,8 @@
           options (report-options)
           capture (atom {::order [] ::results {}})
           reported-signatures (atom #{})
-          default-report (.getRawRoot #'test/report)]
+          default-report (.getRawRoot #'test/report)
+          before (ambient-snapshot)]
       (binding [test/*report-counters* (ref test/*initial-report-counters*)
                 test/*testing-vars* ()
                 test/*testing-contexts* ()
@@ -536,7 +539,13 @@
                    options capture selected-namespaces default-report
                    reported-signatures event))]
         (test/test-vars [test-var]))
-      (first (captured-results @capture)))))
+      (let [result (first (captured-results @capture))
+            drift (ambient-drift before (ambient-snapshot))]
+        (cond-> result
+          (seq drift) (update :seon.test/error-count (fnil inc 0))
+          (seq drift) (update :seon.test/failure-message
+                             #(str (when % (str % "\n"))
+                                   "Worker-global state changed: " (pr-str drift))))))))
 
 (defn- test-vars-in
   [namespaces]
@@ -858,21 +867,22 @@
     (find-var qualified-symbol)))
 
 (defn- sci-base-namespace-sizes
-  "Per-namespace var counts of the shared test SCI base ctx, when realized.
-
-  `seon.test-support` acquires ONE cluster SCI ctx per worker JVM and every
-  `fork-cluster-ctx` forks it, so a task that evaluates into the BASE rather
-  than into its own fork changes what every later task inherits. The delay is
-  never forced here: a worker that has not built the base has nothing to leak."
-  []
-  (when-let [base (some-> (resolve-loaded 'seon.test-support/database-base)
-                          var-get)]
-    (when (realized? base)
+  "Observe an acquired SCI base without forcing an unrealized or failed delay.
+  A memoized acquisition failure is an explicit unavailable observation,
+  not test setup and not an acquired context."
+  [base]
+  (when (and base (realized? base))
+    (try
       (when-let [env (some-> @base :seon.sci.eval/ctx :env)]
         (into {}
               (map (fn [[namespace-name bindings]]
                      [namespace-name (count bindings)]))
-              (:namespaces @env))))))
+              (:namespaces @env)))
+      (catch Exception failure
+        {::fixture-base-unavailable true
+         :seon.error/kind ::fixture-base-unavailable
+         :seon.error/message (or (ex-message failure)
+                                 (.getName (class failure)))}))))
 
 (defn- ambient-snapshot
   "Facts about this worker JVM's process-global state, DERIVED.
@@ -906,7 +916,8 @@
          (or (some-> (resolve-loaded 'seon.cluster/running-instances)
                      var-get deref keys set)
              #{})}]
-    (if-let [sizes (sci-base-namespace-sizes)]
+    (if-let [sizes (sci-base-namespace-sizes
+                     (some-> (resolve-loaded 'seon.test-support/database-base) var-get))]
       (assoc snapshot ::snapshot-sci-base sizes)
       snapshot)))
 
@@ -1355,6 +1366,149 @@
            :else value))
        row))))
 
+(def ^:private reach-attributes
+ [:seon.fn/sym :seon.fn/source :seon.fn/spec :seon.fn/calls :seon.fn/keywords
+  :seon.test/sym :seon.test/source :seon.test/subject :seon.test/pending-subject
+  :seon.schema/key :seon.schema/form])
+(defn- reach-keywords [form]
+ (into #{} (filter qualified-keyword?) (tree-seq coll? seq form)))
+(defn- reach-canonical [value]
+ (walk/postwalk (fn [v] (cond
+  (map? v) (into (sorted-map-by #(compare (pr-str %1) (pr-str %2))) v)
+  (set? v) (into (sorted-set-by #(compare (pr-str %1) (pr-str %2))) v)
+  :else v)) value))
+(defn- reach-row [row]
+ (let [sym (or (:seon.test/sym row) (:seon.fn/sym row))
+       schema-key (:seon.schema/key row)
+       spec (some-> (:seon.fn/spec row) edn/read-string)
+       form (some-> (:seon.schema/form row) edn/read-string)]
+  (cond-> row
+   sym (assoc ::reach-symbol sym
+              ::reach-leaf (id/digest 64 [sym (or (:seon.test/source row) (:seon.fn/source row)) (:seon.fn/spec row)])
+              ::reach-keys (into (set (:seon.fn/keywords row)) (reach-keywords spec)))
+   schema-key (assoc ::reach-leaf (id/digest 64 [schema-key (reach-canonical form)])
+                     ::reach-keys (reach-keywords form)))))
+(defn- reach-schema-keys [rows schemas seed]
+  (loop [pending [seed] seen #{}]
+    (if-let [k (peek pending)]
+      (if (seen k)
+        (recur (pop pending) seen)
+        (recur (into (pop pending) (get-in rows [(get schemas k) ::reach-keys]))
+               (conj seen k)))
+      seen)))
+
+(defn- reach-refresh [database previous]
+ (let [basis (db/basis-t database)
+       ids (if previous
+             (db/q '[:find [?e ...] :in $ [?a ...] :where [?e ?a]]
+                   (db/since (db/history database) (::reach-basis previous)) reach-attributes)
+             (db/q '[:find [?e ...] :in $ [?a ...] :where [?e ?a]]
+                   database [:seon.fn/sym :seon.test/sym :seon.schema/key]))
+       _ (when (:seon.error/kind ids) (throw (ex-info "Reach identities unavailable." ids)))
+       pulled (if (seq ids)
+                (db/pull-many database
+                 '[:db/id :seon.fn/sym :seon.fn/source :seon.fn/spec :seon.fn/keywords
+                   {:seon.fn/calls [:db/id]} :seon.test/sym :seon.test/source
+                   {:seon.test/subject [:db/id]} :seon.test/pending-subject
+                   :seon.schema/key :seon.schema/form] ids) [])
+       _ (when (:seon.error/kind pulled) (throw (ex-info "Reach rows unavailable." pulled)))
+       old-rows (::reach-rows previous {})
+       pulled (mapv (fn [e r] (assoc (or r {}) :db/id e)) ids pulled)
+       changed (filterv #(not= (dissoc (get old-rows (:db/id %)) ::reach-symbol ::reach-leaf ::reach-keys) %) pulled)
+       rows (reduce (fn [rs r] (assoc rs (:db/id r) (reach-row r))) old-rows changed)
+       schemas (if (seq changed)
+                 (into {} (keep (fn [[e row]] (when-let [k (:seon.schema/key row)] [k e]))) rows)
+                 (::reach-schemas previous {}))
+       changed-schema-keys (into #{} (keep :seon.schema/key) changed)
+       schema-closures (if (and previous (empty? changed-schema-keys))
+                         (::reach-schema-closures previous)
+                         (reduce-kv
+                         (fn [closures k _]
+                           (if (and (get closures k)
+                                    (not (some (get closures k) changed-schema-keys)))
+                             closures
+                             (assoc closures k (reach-schema-keys rows schemas k))))
+                         (::reach-schema-closures previous {}) schemas))
+       tokens (into (set (map :db/id changed))
+                    (mapcat (fn [r] (for [v [r (get old-rows (:db/id r))]
+                                         :let [s (or (:seon.test/sym v) (:seon.fn/sym v))
+                                               k (:seon.schema/key v)]
+                                         token (cond-> [] s (conj [::reach-symbol s]) k (conj [::reach-schema k]))]
+                                     token))) changed)
+       kept (if (seq tokens)
+              (into {} (remove (fn [[_ entry]] (some (::reach-dependencies entry) tokens)))
+                    (::reach-digests previous {}))
+              (::reach-digests previous {}))]
+  (assoc (or previous {})
+    ::reach-basis basis ::reach-rows rows
+    ::reach-symbols (if (seq changed) (into {} (keep (fn [[e r]] (when-let [s (::reach-symbol r)] [s e]))) rows) (::reach-symbols previous {}))
+    ::reach-schemas schemas ::reach-schema-closures schema-closures
+    ::reach-digests kept
+    ::reach-updated (count changed) ::reach-invalidated (- (count (::reach-digests previous)) (count kept)))))
+(defn- reach-entry [index test-symbol]
+ (let [rows (::reach-rows index)
+       symbols (::reach-symbols index)
+       schemas (::reach-schemas index)
+       start (get symbols test-symbol)
+       nodes (loop [pending (if start [start] []) seen #{} missing #{}]
+               (if-let [e (peek pending)]
+                (if (seen e) (recur (pop pending) seen missing)
+                 (let [r (get rows e)
+                       subject (:db/id (:seon.test/subject r))
+                       named (:seon.test/pending-subject r)
+                       target (get symbols named)]
+                  (recur (into (pop pending)
+                               (concat (map :db/id (:seon.fn/calls r))
+                                       (when subject [subject]) (when target [target])))
+                         (conj seen e) (cond-> missing named (conj [::reach-symbol named])))))
+                {::reach-ids seen ::reach-missing missing}))
+       keyword-seeds (reduce into #{} (map #(get-in rows [% ::reach-keys]) (::reach-ids nodes)))
+       schema-keys (reduce into #{}
+                     (map #(get (::reach-schema-closures index) % #{%}) keyword-seeds))
+       node-parts (sort-by first (map (fn [e] (let [r (get rows e)] [(or (::reach-symbol r) (str e)) (::reach-leaf r)])) (::reach-ids nodes)))
+       schema-parts (sort-by first (map (fn [k] [k (get-in rows [(get schemas k) ::reach-leaf])]) schema-keys))]
+  {::reach-digest (id/digest 64 [test-symbol (vec node-parts) (vec schema-parts)])
+   ::reach-dependencies (into (into (::reach-ids nodes) (::reach-missing nodes))
+                             (concat [[::reach-symbol test-symbol]] (map #(vector ::reach-schema %) schema-keys)))
+   ::reach-function-count (count (::reach-ids nodes))}))
+(defn- reach-cache [database]
+ (or (:seon.sci.eval/projection-state (meta database))
+     (when-let [projection (db/carried-projection database)]
+      (schema/projection-cache-value projection
+       [::reach-cache (:config database)] #(atom nil)))))
+(defn reach-digests
+ "Derive selected reach digests, incrementally on the database's carried cache.
+ Result-only transactions invalidate nothing. A cache retains only one basis;
+ older or different branch values derive independently and never replace it."
+ {:malli/schema [:=> [:cat :seon.db/database-value [:vector :seon.test/sym]]
+                  [:or [:map-of :seon.test/sym :seon.source/digest] :seon.error/value]]}
+ [database test-symbols]
+ (try
+ (let [holder (reach-cache database)
+       configuration (:config database)
+       value-identity (db/committed-value-identity database)
+       derive-index (fn [previous]
+                (let [index (if (= (db/basis-t database) (::reach-basis previous))
+                              previous (reach-refresh database previous))
+                      missing (remove #(get-in index [::reach-digests %]) test-symbols)
+                      index (reduce (fn [i s] (assoc-in i [::reach-digests s] (reach-entry i s))) index missing)]
+                 (assoc index ::reach-config configuration ::reach-value-identity value-identity ::reach-computed (count missing))))]
+  (if holder
+   (locking holder
+    (let [previous (::reach-index (meta holder))
+          usable (and value-identity (= configuration (::reach-config previous))
+                      (or (< (::reach-basis previous 0) (db/basis-t database))
+                          (and value-identity (= value-identity (::reach-value-identity previous)))))
+          index (derive-index (when usable previous))]
+     (when (and value-identity (or usable (nil? previous)))
+      (alter-meta! holder assoc ::reach-index index))
+     (into {} (map (fn [s] [s (get-in index [::reach-digests s ::reach-digest])])) test-symbols)))
+   (let [index (derive-index nil)]
+    (into {} (map (fn [s] [s (get-in index [::reach-digests s ::reach-digest])])) test-symbols))))
+ (catch Exception failure
+  {:seon.error/kind :seon.test/unknown :seon.test/unknown "reach digest"
+   :seon.error/message (str "Reach digest unavailable: " (ex-message failure))})))
+
 (defn program-digest
   "Identify the tested program from its source seal and current program facts.
   An unchanged publication keeps its exact snapshot digest. Admitted changes
@@ -1431,8 +1585,20 @@
                   :seon.test.runner/record-tx]}
   [database
    {results :seon.test.runner/results
-    run :seon.test.run/provenance}]
-  (let [namespace-names
+    run :seon.test.run/provenance
+    tested-database :seon.db/db
+    carried-digests :seon.test/reach-digests}]
+  (let [tested (or tested-database
+                   (when (= (:seon.test.run/branch run) (get-in database [:config :branch]))
+                     (db/as-of database (:seon.test.run/basis-t run))))
+        digests (or carried-digests
+                    (when tested (reach-digests tested (mapv :seon.test/sym results))))
+        _ (when (or (:seon.error/kind digests)
+                    (some #(not (string? (get digests (:seon.test/sym %)))) results))
+            (throw (ex-info "The completion lacks its tested database reach digests."
+                            {:seon.error/kind :seon.test.run/unavailable
+                             :seon.test.run/unavailable true})))
+        namespace-names
         (distinct
          (map #(symbol (namespace (symbol (:seon.test/sym %)))) results))
         namespace-tempid #(str "test-result-namespace:" %)
@@ -1460,6 +1626,7 @@
               result-row
               (cond-> (assoc result
                              :seon.test/run "test-run"
+                             :seon.test/reach-digest (get digests test-symbol)
                              :seon.test/run-basis-t basis-t
                              :seon.test/run-at at)
                 (not exists?)
@@ -1474,7 +1641,8 @@
       results))))
 
 (def ^:private result-selector
-  [:seon.test/sym
+  [:seon.test/reach-digest
+   :seon.test/sym
    :seon.test/pass-count
    :seon.test/fail-count
    :seon.test/error-count
@@ -1491,6 +1659,12 @@
     [:or :seon.test/results :seon.error/value]]}
   [connection {results :seon.test.runner/results :as completion}]
   (let [database (db/db connection)
+        tested (:seon.db/db completion)
+        completion (if tested
+                     (assoc (dissoc completion :seon.db/db)
+                            :seon.test/reach-digests
+                            (reach-digests tested (mapv :seon.test/sym results)))
+                     completion)
         transaction-report
         (if (:seon.error/kind database)
           database
@@ -1518,6 +1692,35 @@
           (stop! instance))
         (throw failure)))))
 
+(defn- completion-reach-digests
+  "Carry reach evidence from the immutable prepared base across a JVM boundary."
+  [run-result]
+  (if (:seon.test/reach-digests run-result)
+    run-result
+    (let [root (System/getProperty "seon.test.published-base")]
+      (when-not root
+        (throw (ex-info "The result transport requires its prepared test base."
+                        {:seon.error/kind :seon.test.run/unavailable
+                         :seon.test.run/unavailable true})))
+      (let [held-store (store/open-store!
+                         {:seon.store/dir (str (io/file root "data" "store"))})]
+        (try
+          (let [database (source/database held-store
+                           (:seon.source/commit-id (source/current held-store)))
+                database (vary-meta database assoc :seon.schema/projection
+                                    (schema/projection-from-database database))
+                digest (program-digest database)
+                _ (when-not (= digest (:seon.test.run/program-digest run-result))
+                    (throw (ex-info "The prepared base no longer identifies the tested program."
+                                    {:seon.error/kind :seon.test.run/unavailable
+                                     :seon.test.run/unavailable true})))
+                digests (reach-digests database
+                          (mapv :seon.test/sym (:seon.test.runner/results run-result)))]
+            (when (:seon.error/kind digests)
+              (throw (ex-info (:seon.error/message digests) digests)))
+            (assoc run-result :seon.test/reach-digests digests))
+          (finally (store/release-store! held-store)))))))
+
 (defn record!
   "Commit one runner completion into an explicitly named, non-default cluster."
   {:malli/schema [:=> [:cat :seon.test.runner/record-request]
@@ -1532,11 +1735,13 @@
       {:seon.error/kind ::default-cluster-refused
        ::default-cluster-refused cluster-name
        :seon.boot/cluster-name cluster-name})))
-  (let [instance (start-cluster! cluster-name root)]
+  (let [run-result (completion-reach-digests run-result)
+        instance (start-cluster! cluster-name root)]
     (try
       (let [connection (:seon.boot/cluster-connection instance)
             completion
-            {:seon.test.runner/results
+            {:seon.test/reach-digests (:seon.test/reach-digests run-result)
+             :seon.test.runner/results
              (:seon.test.runner/results run-result)
              :seon.test/run-basis-t (:seon.test.run/basis-t run-result)
              :seon.test/run-at (:seon.test.run/at run-result)
@@ -1554,7 +1759,8 @@
   [held-store run-result]
   ((requiring-resolve 'seon.cluster.source/record-results!)
    held-store
-   {:seon.test.runner/results (:seon.test.runner/results run-result)
+   {:seon.test/reach-digests (:seon.test/reach-digests run-result)
+    :seon.test.runner/results (:seon.test.runner/results run-result)
     :seon.test/run-basis-t (:seon.test.run/basis-t run-result)
     :seon.test/run-at (:seon.test.run/at run-result)
     :seon.test.run/provenance
@@ -1593,7 +1799,8 @@
 (defn- record-persistent-results!
   "Commit one bare-gate completion through the authoritative store holder."
   [operator-root run-result]
-  (let [{live? :seon.fresh-operator/live-process?
+  (let [run-result (completion-reach-digests run-result)
+        {live? :seon.fresh-operator/live-process?
          value :seon.fresh-operator/value}
         ((requiring-resolve 'seon.fresh-operator/live-root-value!)
          operator-root (persistent-results-form run-result))]

@@ -902,7 +902,7 @@
         (test-support/seed-cluster! connection "test")
         (let [committed (runner/commit-results! connection completion)]
           (is (= (:seon.test.runner/results run-result)
-                 (mapv #(dissoc % :seon.test/run-basis-t
+                 (mapv #(dissoc % :seon.test/reach-digest :seon.test/run-basis-t
                                 :seon.test/run
                                 :seon.test/run-at)
                        committed))

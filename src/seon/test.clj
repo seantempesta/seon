@@ -87,16 +87,18 @@
      [:cat :seon.test/var :seon.db/connection :seon.test/run-options]
      [:or :seon.test/result :seon.error/value]]]}
   ([test-var connection]
-    (let [provenance (runner/provenance (db/db connection))]
+    (let [database (db/db connection)
+          provenance (runner/provenance database)]
       (if (:seon.error/kind provenance)
         provenance
         (run
           test-var
           connection
-          {:seon.test.run/provenance provenance,
+          {:seon.db/db database,
+           :seon.test.run/provenance provenance,
            :seon.test/remaining-ms (event-backstop-ms)}))))
   ([test-var connection options]
-    (let [database (db/db connection)]
+    (let [database (or (:seon.db/db options) (db/db connection))]
       (if (:seon.error/kind database)
         database
         (let [provenance (:seon.test.run/provenance options)
@@ -109,7 +111,8 @@
             result
             (let [committed (runner/commit-results!
                               connection
-                              {:seon.test.runner/results [result],
+                              {:seon.db/db database,
+                               :seon.test.runner/results [result],
                                :seon.test/run-basis-t (:seon.test.run/basis-t provenance),
                                :seon.test/run-at (:seon.test.run/at provenance),
                                :seon.test.run/provenance provenance})]
@@ -159,6 +162,47 @@
     (if (:seon.error/kind reaches) reaches
         (vec (sort (distinct (mapcat val reaches)))))))
 
+(defn reach-digest
+  "Digest this test's source, transitively reached definitions and named schemas."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.test/sym]
+                  [:or :seon.test/reach-digest :seon.error/value]]}
+  [database test-symbol]
+  (let [result (runner/reach-digests database [test-symbol])]
+    (if (:seon.error/kind result) result (get result test-symbol))))
+
+(defn- stale-in [database test-symbols]
+  (let [rows (db/pull-many database
+               [:seon.test/sym :seon.test/reach-digest :seon.test/run
+                :seon.test/fixture-observation]
+               (mapv #(vector :seon.test/sym %) test-symbols))
+        eligible (when-not (:seon.error/kind rows)
+                   (into [] (keep #(when (and (:seon.test/run %)
+                                             (:seon.test/reach-digest %)
+                                             (not (:seon.test/fixture-observation %)))
+                                     (:seon.test/sym %))) rows))
+        digests (if (seq eligible) (runner/reach-digests database eligible) {})]
+    (cond
+      (:seon.error/kind rows) rows
+      (:seon.error/kind digests) digests
+      :else (into [] (keep (fn [row]
+                            (let [s (:seon.test/sym row)]
+                              (when (or (:seon.test/fixture-observation row)
+                                        (not (:seon.test/run row))
+                                        (not (:seon.test/reach-digest row))
+                                        (not= (get digests s) (:seon.test/reach-digest row)))
+                                s)))) rows))))
+
+(defn stale
+  "Source-bearing tests with no result or a changed reach digest.
+  Declared fixture observations are always stale."
+  {:malli/schema [:=> [:cat :seon.db/database-value]
+                  [:or [:vector :seon.test/sym] :seon.error/value]]}
+  [database]
+  (let [symbols (db/q '[:find [?s ...] :where
+                        [?t :seon.test/sym ?s] [?t :seon.test/source]] database)]
+    (if (:seon.error/kind symbols) symbols
+        (stale-in database (vec (sort symbols))))))
+
 (defn- namespace-tests [database namespaces]
   (db/q '[:find [?symbol ...] :in $ [?ns ...]
           :where [?n :seon.ns/name ?ns] [?t :seon.test/ns ?n]
@@ -206,8 +250,14 @@
                                    :when (and (vector? change)
                                               (= :seon.schema/key (first change)))]
                                (str "schema " (second change)))))
-        reaches (when-not widened (changed-reach database changed))
-        selected (if (and widened defer? (not (seq namespaces)))
+        reaches (when (and (some? changed) (not widened)) (changed-reach database changed))
+        candidates (when (nil? changed)
+                     (vec (sort (namespace-tests database
+                                  (or (seq namespaces)
+                                      (db/q '[:find [?name ...] :where [?n :seon.ns/name ?name]] database))))))
+        selected (if (nil? changed)
+                   (stale-in database candidates)
+                   (if (and widened defer? (not (seq namespaces)))
                    []
                    (if widened
                    (namespace-tests database
@@ -216,7 +266,7 @@
                                                 :where [?t :seon.test/ns ?n]
                                                 [?n :seon.ns/name ?name]] database)))
                    (if (:seon.error/kind reaches) reaches
-                       (vec (sort (distinct (mapcat val reaches)))))))
+                       (vec (sort (distinct (mapcat val reaches))))))))
         deferred (when-not (:seon.error/kind selected)
                    (into []
                          (keep (fn [test-symbol]
@@ -245,6 +295,8 @@
                              :seon.test/results []
                              :seon.test.run/basis-t (db/basis-t database)
                              :seon.test/next-tier (commands paths namespaces)}
+                      (nil? changed) (assoc :seon.test/skipped-count (- (count candidates) (count selected))
+                                           :seon.test/skip-reason "recorded result has an unchanged reach digest")
                       (seq deferred) (assoc :seon.test/deferred deferred)
                       provenance (assoc :seon.test.run/program-digest
                                         (:seon.test.run/program-digest provenance))
@@ -278,7 +330,8 @@
                     (let [outcome (try
                                     (if-let [test-var (resolve-test test-symbol)]
                                       (run test-var connection
-                                           {:seon.test.run/provenance provenance
+                                           {:seon.db/db database
+                                            :seon.test.run/provenance provenance
                                             :seon.test/remaining-ms remaining-ms})
                                       (unknown test-symbol "The indexed test Var is unavailable."))
                                     (catch Exception failure
@@ -308,6 +361,7 @@
 (defn check
   "Run tests observing this change in the calling JVM and record their facts.
 
+  Without :seon.test/changed, select stale results and report unchanged skips.
   Supply :seon.test/changed symbols or adoption identities and optional
   :seon.test/paths for exact escalation commands. Widening inputs select the
   supplied affected namespaces, or all declared test namespaces when unknown.
@@ -347,7 +401,10 @@
                             :seon.error/diagnostic-evidence {:seon.test/changed (:seon.test/changed request)}}})]
               (if (:seon.error/kind result)
                 (unknown @progress (str (:seon.error/message result) " Pending: " @progress))
-                result))
+                (do
+                  (when-let [n (:seon.test/skipped-count result)]
+                    (println "Skipped" n "tests:" (:seon.test/skip-reason result)))
+                  result)))
             (catch Exception failure
               (unknown @progress (str "Check failed at " @progress ": "
                                       (or (some-> failure ex-cause ex-message)
@@ -399,6 +456,8 @@
            " / passed " (count (:seon.test/passed result))
            " / failed " (count (:seon.test/failed result))
            " / elapsed " (:seon.test/elapsed-ms result) " ms"
+           (when-let [n (:seon.test/skipped-count result)]
+             (str " / skipped " n ": " (:seon.test/skip-reason result)))
            (apply str (for [failure (:seon.test/failed result)]
                         (str "\n" (:seon.test/sym failure) " reaches "
                              (pr-str (:seon.test/changed failure)) ": "
@@ -426,9 +485,24 @@
   Missing subjects, results, runs, or assertions return false. A database
   refusal remains an error value; callers must require true, not truthiness."
   {:malli/schema
-   [:=> [:cat :seon.db/database-value :seon.test/sym :seon.test.run/program-digest]
-    [:or :boolean :seon.error/value]]}
-  [database test-symbol program-digest]
+   [:function
+    [:=> [:cat :seon.db/database-value :seon.test/sym] [:or :boolean :seon.error/value]]
+    [:=> [:cat :seon.db/database-value :seon.test/sym :seon.test.run/program-digest]
+     [:or :boolean :seon.error/value]]]}
+  ([database test-symbol]
+   (let [row (db/pull database
+               [:seon.test/source :seon.test/pass-count :seon.test/fail-count
+                :seon.test/error-count :seon.test/run :seon.test/reach-digest] [:seon.test/sym test-symbol])
+         digest (reach-digest database test-symbol)]
+     (cond
+       (:seon.error/kind row) row
+       (:seon.error/kind digest) digest
+       :else (boolean (and (:seon.test/source row) (:seon.test/run row)
+                           (pos? (get row :seon.test/pass-count 0))
+                           (= 0 (:seon.test/fail-count row))
+                           (= 0 (:seon.test/error-count row))
+                           (= digest (:seon.test/reach-digest row)))))))
+  ([database test-symbol program-digest]
   (let [result (db/q
                 '[:find ?test .
                   :in $ ?symbol ?digest
@@ -443,4 +517,4 @@
                   [?run :seon.test.run/id]
                   [?run :seon.test.run/program-digest ?digest]]
                 database test-symbol program-digest)]
-    (if (:seon.error/kind result) result (boolean result))))
+    (if (:seon.error/kind result) result (boolean result)))))

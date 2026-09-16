@@ -1,4 +1,8 @@
 #:seon.test{:ns :seon.db/ref,
+            :reach-digest [:and {:seon.db/identity false} :seon.source/digest],
+            :reach-digests [:map-of :seon.test/sym :seon.test/reach-digest],
+            :skipped-count [:int {:min 0}],
+            :skip-reason :string,
             :source :string,
             :subject :seon.db/ref,
             :pending-subject :string,
@@ -41,6 +45,7 @@
              [:seon.test/pass-count :seon.test/pass-count]
              [:seon.test/fail-count :seon.test/fail-count]
              [:seon.test/error-count :seon.test/error-count]
+             [:seon.test/reach-digest {:optional true} :seon.test/reach-digest]
              [:seon.test/run-basis-t :seon.test/run-basis-t]
              [:seon.test/run-at :seon.test/run-at]
              [:seon.test/run {:optional true}
@@ -62,6 +67,7 @@
               :seon.schema.admission/source]
              [:seon.test/ns {:optional true} :seon.test/ns]
              [:seon.test/source {:optional true} :seon.test/source]
+             [:seon.test/reach-digest {:optional true} :seon.test/reach-digest]
              [:seon.fn/calls {:optional true} :seon.fn/calls]
              [:seon.fn/keywords {:optional true} :seon.fn/keywords]
              [:seon.test/usage {:optional true} :seon.test/usage]
@@ -103,13 +109,14 @@
   [:seon.test/changed :seon.test/changed]]
  :seon.test/check-request
  [:map [:seon.db/connection :seon.db/connection]
-  [:seon.test/changed :seon.test/changed]
+  [:seon.test/changed {:optional true} :seon.test/changed]
   [:seon.test/paths {:optional true} :seon.test/paths]
   [:seon.test/namespaces {:optional true} :seon.test/namespaces]
   [:seon.boot/cluster-name {:optional true} :seon.boot/cluster-name]
   [:seon.test/defer-widened? {:optional true} :boolean]]
  :seon.test/run-options
  [:map [:seon.test.run/provenance :seon.test.run/provenance]
+  [:seon.db/db {:optional true} :seon.db/database-value]
   [:seon.test/remaining-ms [:int {:min 1}]]]
  :seon.test/unknown :string
  :seon.test/unknown-error
@@ -127,6 +134,8 @@
            [:seon.test/command :seon.test/command]]]
  :seon.test/check-result
  [:map
+  [:seon.test/skipped-count {:optional true} :seon.test/skipped-count]
+  [:seon.test/skip-reason {:optional true} :seon.test/skip-reason]
   [:seon.test/tests [:vector :seon.test/sym]]
   [:seon.test/passed [:vector :seon.test/sym]]
   [:seon.test/failed
