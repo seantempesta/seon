@@ -16,12 +16,19 @@ peer session (batches 30–57; ledger
 ## Broken first
 
 1. **The store grows without collection.** `data/store` went 107 MB → 12 GB in
-   eight hours with no periodic writer; an empty-delta transaction costs 4–9 s
-   on default vs 46 ms on a fresh store, and every publication, turn, probe
-   and recording pays it. Reset twice today; a third follows the peer's
-   measurements. This is the top decision: the peer's research brings three
-   options keyed on an observable signal (footprint magnitude / key count /
-   per-commit latency bound), never a timer.
+   eight hours with no periodic writer. The peer's measurement
+   ([write-latency-vs-store-size](../../context-generation/research/write-latency-vs-store-size-2026-09-17.md))
+   REFUTED the latency premise: an empty-delta commit costs 23–38 ms on the
+   12 GB store, same as clean — Datahike's commit is O(delta). The 4–9 s
+   samples were single commits flushing a large accumulated dirty-leaf set
+   (one wrote 473 files / 39 MB: ~300 KB leaves × 6 indexes × ~10 ms fsync
+   each). So GROWTH is the defect (nothing collects unreachable keys; a real
+   `collect!` reclaimed 12.0 → 10.4 GB and counting), and in-process test
+   runs are slow because their transactions dirty many leaves. Reset three
+   times today. Three owner options are in that page, each keyed on an
+   observable signal: footprint order-of-magnitude / key ceiling →
+   `collect!`; a per-commit bound that names the batch and requests
+   reclamation; narrower leaves or the vendored LMDB backend for the dev root.
 2. **Live agents cannot yet close a code issue.** The trials
    ([issue-context-trials](../research/issue-context-trials-2026-09-16.md))
    ran seven cheapest-DeepSeek sessions on the arglists issue; candidate F
