@@ -329,3 +329,90 @@ repair, base replacement, or restart was attempted. The existing issue
 was updated with this recurrence; that issue note is one additional edited
 path, solely to retain the observed verification blocker. Owned scratch
 files were removed; the completed retry has no running future.
+
+## Batch 36 cold-red follow-up — 2026-09-16
+
+The owner's batch 36 at `7216a688b` supplies the missing cold evidence:
+the generated turn test completed in **105245 ms**, versus the earlier
+270000 ms worker bound. Schema, database, and fixture-support namespaces
+were green. Config/reconcile contained eight failing assertions. The retained
+root `tmp/test-runs/run.gIQ9CS` was left read-only.
+
+### Verified causes and repairs
+
+1. **Carriage:** on default, `(db/carried-projection @connection)` is nil
+   while `(db/carried-projection (db/db connection))` is present. Both
+   `config/apply-compiled!` and `reconcile/reconcile!` now obtain the database
+   through `db/db`. The class regression observes that same public boundary.
+2. **Hand edits, provenance, identity scope, and managed pulls:** the
+   apparent semantic failures were refused setup writes, not a changed
+   reconcile plan. Read-only calls to `seon.db/write-error` with default's
+   real database and projection returned `:seon.db/invalid-write` for the
+   old identity-bearing hand edit, at
+   `[0 :seon.config/applied-manifest-digest]`, and for the five-field seed
+   row at `[0 :seon.config.agent/turn-completion-backstop-ms]`. The tests
+   discarded those returned errors. Therefore no edit, provenance datom,
+   outside-scope row, or managed eid existed to observe.
+
+   The prior write-validation ruling deliberately requires complete entities
+   when a map asserts their required identity; attribute edits use `:db/id`
+   lookup refs or explicit datoms. The owning `config-row` fixture helper
+   now calls the production manifest compiler for a complete desired row.
+   `transact-as!` checks its report and throws the complete refusal before
+   any downstream assertion. Hand edits use `{:db/id
+   [:seon.config/cluster name], ...}`. The class regression additionally
+   asserts a committed report and the changed value before applying the
+   manifest. Both revised write shapes passed live admission. The existing
+   repair, provenance, scope, and pull expectations are unchanged; neither
+   database admission nor reconciliation semantics were weakened.
+3. **Shipped defaults:** the exact set difference was
+   `#{:seon.test/check-time-limit-ms}`, not the removed blob dial. The
+   registered dial already defaulted to 120000 ms, but the shipped EDN
+   omitted its explicit decision. `config/default.edn` now contains that
+   value. Registry/default differences are empty on the live read-only
+   probe. `:seon.config.blob/max-bytes` is absent from both sides.
+
+The extra paths for this follow-up are `config/default.edn` (the missing
+shipped decision) and
+[identity-upserts-still-require-complete-entity-maps](../../../seon/issues/identity-upserts-still-require-complete-entity-maps.md)
+(the existing issue's newly verified fixture members). No protected source
+or schema resource was edited. The schema/fixture and REPL skills loaded in
+the initial slice remain the method; the existing write-validation landing
+and identity-upsert issue supplied the precise admission contract.
+
+### One authorized cold iteration
+
+Candidate source functions and fixture helpers were evaluated in default
+before source edits, and the functions were re-armed (1058 registered /
+1058 instrumented). No database-backed in-process test was attempted against
+the poisoned fixture base. The owner's exception authorized this one serial
+single-JVM iteration, using HEAD plus only the five edited code/config paths:
+
+```sh
+SEON_TEST_ORCHESTRATOR=1 bin/test-fast --paths \
+  src/seon/config.clj src/seon/reconcile.cljc \
+  test/seon/config_test.clj test/seon/reconcile_test.clj \
+  config/default.edn -- seon.config-test seon.reconcile-test
+```
+
+Snapshot basis `f9734422a519595a7b1d2fc3d8713b8434fb584b`, temporary root
+`tmp/test-runs/run.AkWdZZ`, test JVM PID 45575. The runner armed 1040/1040
+contracts. Namespace execution ran from 06:49:59.751446Z through
+06:51:56.152005Z. **27 tests / 128 assertions / 0 failures / 0 errors;
+exit 0.** This includes all six tests responsible for the eight cold
+failures. The complete class regression took 889.881 ms; that includes
+initial application, convergence, hand editing and repair, and changed
+initialization—not one apply latency measurement.
+
+Exactly one cold iteration was launched. No `bin/test` gate, `--all`,
+parallel test invocation, process kill, default restart, or shared-base
+replacement was performed. The runner retired its successful snapshot.
+Test-file clj-kondo and `git diff --check` passed. The temporary test log
+was removed after recording the result here. The existing seven-line gate
+request was refreshed; platform and broader integration remain the
+orchestrator's gate, not a claim made by this two-namespace iteration.
+
+Hook `4078e361-ac23-4efe-a0a2-2f569978a21e` reported convergence to
+`6aaa3c2a-99ed-57e5-9d4c-ab5b225c18d3`; its automatic reaching check was
+unavailable because the cluster rejected the prepl operation. The cold
+snapshot result above is the execution proof for this follow-up.

@@ -457,7 +457,7 @@
    [:=> [:cat :seon.db/connection :seon.config/compiled]
     :seon.reconcile/result]}
   [connection compiled]
-  (let [database @connection
+  (let [database (db/db connection)
         projection (or (db/carried-projection database)
                        (schema/handed-projection)
                        (do (db/projection-fallback 'seon.config/apply-compiled!)

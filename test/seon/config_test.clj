@@ -175,7 +175,7 @@
            fallbacks (atom 0)
            planned-operations (atom [])]
        (is (false? (:seon.reconcile/converged? first-result)))
-       (is (some? (db/carried-projection @connection)))
+       (is (some? (db/carried-projection (db/db connection))))
        (with-redefs [schema/projection-from-database
                      (fn [& arguments]
                        (when (identical? caller (Thread/currentThread))
@@ -204,9 +204,17 @@
              digest (:seon.config/applied-manifest-digest compiled)
              queue-depth (get-in compiled [:seon.config/effective
                                           :seon.config.flow.compute/queue-depth])]
-         (db/transact! connection
-                       [{:seon.config/cluster "default"
-                         :seon.config.flow.compute/queue-depth (inc queue-depth)}])
+         (let [edited (db/transact!
+                       connection
+                       [{:db/id [:seon.config/cluster "default"]
+                         :seon.config.flow.compute/queue-depth (inc queue-depth)}])]
+           (is (some? (:db-after edited)) (pr-str edited))
+           (is (= (inc queue-depth)
+                  (:seon.config.flow.compute/queue-depth
+                   (db/pull (db/db connection)
+                            [:seon.config.flow.compute/queue-depth]
+                            [:seon.config/cluster "default"])))
+               "the hand edit committed before reconciliation"))
          (is (= digest (:seon.config/applied-manifest-digest
                         (db/pull @connection [:seon.config/applied-manifest-digest]
                                  [:seon.config/cluster "default"]))))

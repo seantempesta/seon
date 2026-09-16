@@ -62,3 +62,22 @@ and checked seed results preserve the complete-entity admission rule. Generated
 scenario repair `d8b06746b` passes 48 trials before/after source reload; terminal
 refusal repair `80d8fbd0f` passes 33 assertions before/after reload (57019, 60109).
 The broader policy question remains open; no validator changed.
+
+## Config/reconcile cold-gate follow-up — 2026-09-16
+
+Batch 36's config hand-edit and reconcile provenance/scope/pull failures
+share this same refused-fixture-write premise. Read-only admission on default
+confirmed the original five-field config seed refuses the missing
+`:seon.config.agent/turn-completion-backstop-ms`; the identity-bearing
+hand edit refuses missing `:seon.config/applied-manifest-digest`. Neither
+write had been checked, so downstream assertions described facts that were
+never committed. This is not evidence of lost transaction metadata or a
+digest-only convergence shortcut.
+
+`seon.reconcile-test/config-row` now uses `config/compile-manifest` for a
+complete desired row. Its `transact-as!` helper throws with the full refusal
+before continuing. Hand edits use the existing `:db/id` lookup-ref form;
+the config class regression verifies both the write report and changed value
+before checking repair. No write validator or behavioral expectation was
+weakened. The exact cold iteration result lives in
+[the config landing](../../prds/context-generation/research/turn-bookkeeping-cost-2026-09-16.md).

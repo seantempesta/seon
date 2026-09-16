@@ -1,12 +1,12 @@
 (ns seon.reconcile-test
   "Sealed acceptance draft for provenance-scoped exact reconciliation."
-  (:require [clojure.string :as str]
-            [clojure.test :refer [deftest is testing]]
+  (:require [clojure.test :refer [deftest is testing]]
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [datahike.api :as d]
             [seon.cluster :as cluster]
+            [seon.config :as config]
             [seon.db :as db]
             [seon.reconcile :as reconcile]
             [seon.schema.edn :as schema.edn]
@@ -21,9 +21,6 @@
 
 (def ^:private unmanaged-process
   "seon.db.process/unmanaged")
-
-(def ^:private digest
-  (str/join (repeat 64 "a")))
 
 (defn- with-model-database
   [body]
@@ -61,9 +58,12 @@
 
 (defn- transact-as!
   [connection process tx-data]
-  (db/transact! connection
-              {:tx-data tx-data
-               :tx-meta (transaction-meta process)}))
+  (let [result (db/transact! connection
+                             {:tx-data tx-data
+                              :tx-meta (transaction-meta process)})]
+    (when (:seon.error/kind result)
+      (throw (ex-info "Reconcile fixture write was refused." result)))
+    result))
 
 (defn- request
   [desired]
@@ -76,11 +76,13 @@
 
 (defn- config-row
   [cluster queue-depth]
-  {:seon.config/cluster cluster
-   :seon.config/applied-manifest-digest digest
-   :seon.config.flow.compute/queue-depth queue-depth
-   :seon.config.flow.compute/concurrency 18
-   :seon.config/on-core-error :panic})
+  (:seon.config/desired-row
+   (config/compile-manifest
+    {:seon.boot/cluster-name cluster
+     :seon.config/manifest
+     {:seon.config.flow.compute/queue-depth queue-depth
+      :seon.config.flow.compute/concurrency 18
+      :seon.config/on-core-error :panic}})))
 
 (deftest fixture-provenance-is-real-transaction-metadata
   (with-model-database
@@ -167,7 +169,7 @@
         (reconcile/reconcile! connection (request desired))
         (transact-as! connection
                       unmanaged-process
-                      [{:seon.config/cluster "drifted"
+                      [{:db/id [:seon.config/cluster "drifted"]
                         :seon.config.flow.compute/queue-depth 99}])
         (is (= 99
                (:seon.config.flow.compute/queue-depth

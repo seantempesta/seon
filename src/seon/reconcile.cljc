@@ -430,7 +430,7 @@
   and atomically from inside the writer otherwise."
   {:malli/schema [:=> [:cat :seon.db/connection ::request] ::result]}
   [connection request]
-  (let [tx-data (plan @connection request)
+  (let [tx-data (plan (seon.db/db connection) request)
         operations (count tx-data)]
     (if (zero? operations)
       {::converged? true

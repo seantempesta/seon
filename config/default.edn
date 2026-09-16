@@ -343,6 +343,10 @@
  ; and a quiet cluster costs none.
  :seon.config.render/coalesce-ms 16
 
+ ; Unit: milliseconds for in-process test selection, fixture preparation,
+ ; and execution. Matches the declared seon.test/check-time-limit-ms default.
+ :seon.test/check-time-limit-ms 120000
+
  ; THE MODEL SEAM. DeepSeek is the standing default provider; each :call
  ; resolves current facts, so the provider is a fact rather than a literal in
  ; a drive script. Nothing here spends anything: an installed loop with no
