@@ -183,6 +183,55 @@ D3. **Issues are how work is farmed for now; the same machinery is,
     definitions still lack a test, so the bar is visible while it works
     rather than a refusal mid-thought.
 
+## 1e. Rulings of 2026-09-17 18:00Z (owner, answering the lunch questions)
+
+F1. **Destructive tests run on an immutable snapshot of the named cluster in
+    an isolated process; recording goes to the cluster.** Accepted. And: we
+    must know WHICH tests are destructive from facts, not by hand — the
+    owner functions that destroy (boot, publish, kill, delete a store)
+    declare it once, the test's destructiveness derives by reach, and it is
+    indexed on the test so an agent can query where a test runs and why.
+
+F2. **Write admission validates ALL inputs, always.** A grammar that is
+    validated less (raw datom adds as an escape from entity validation) is a
+    hack and is not an answer. Find out exactly what is happening at the
+    admission seam; if validating the merged entity inside the transaction
+    function is easy and correct, do it, and a failed validation ABORTS the
+    whole transaction (Datahike rejects a transaction whose `:db.fn/call`
+    throws — nothing partial is written). Dedicated research first.
+
+F3. **The agent's history is rendered per evaluation, composed, never as one
+    giant string.** Each evaluation entity renders through its own pair;
+    the prompt is a composition of rendered units and the budget selects
+    units. If the way evaluations are stored on the entity gets in the way,
+    change the storage. Research and propose the composable design.
+
+F4. **Conversational agents get their N turns like everyone else, and get a
+    reply concept with feedback every turn.** A conversation's done
+    condition is that a reply entity exists for the triggering message (a
+    Markdown reply). The agent is told each turn, like an issue agent,
+    whether it has replied yet and how (the exact form). Everything it does
+    on the way renders well: `;;` comments saved and shown as thinking,
+    evaluation results with their HTML renders on the page. No agent burns
+    thirty turns with zero feedback because it never called the right
+    function. This is the dual-render concern (AI and HTML) applied to the
+    conversation.
+
+F5. **Everything that is a symbol is stored as a symbol.** Written into
+    AGENTS.md §3. Upgrade the schemas, delete the database and reset from
+    scratch; no migration.
+
+F6. **Root collects the store automatically** on the existing daily row at
+    twice the last retained size, with the derived cutoff, no human step.
+
+F7. **First agent tasks are the simple ones:** functions without contracts
+    or without a reaching test, not render pairs (rendering is complicated).
+    Detectors for both; the without-test detector depends on the call-graph
+    fidelity fix so it does not lie.
+
+F8. **The orchestrator resets `default` whenever needed and does not wait
+    on the owner for important things.**
+
 ## 2. What exists today, with the seams named
 
 Verified on `steward-platform` at `a36d55c3b`/`849bbce0b` on 2026-09-17.

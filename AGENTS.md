@@ -420,6 +420,18 @@ Clojure — at design time, not only before the edit. The compact invariants:
 - every public function has a correct Malli input/output schema — no
   `:any`/`:some`/`[:maybe X]` without a proven genuinely polymorphic
   boundary; absent = no key, never stored nil.
+- **anything that IS a symbol is stored as a symbol, never as a string**
+  (owner, 2026-09-17: "all functions and vars and anything that is a symbol
+  should be stored as a symbol and not a string. ALL OF IT"). A function's
+  qualified name, a test's, a namespace's, a render pair's function, a
+  capability handler, a schedule task's function, a flow step-fn: Malli
+  `:symbol`/`:qualified-symbol`, which the schema bridge maps to Datahike's
+  `:db.type/symbol` (`src/seon/schema/datahike.clj:66-67`). A string in one
+  of those attributes is a defect; a `(str sym)` to write one or a `(symbol
+  s)` to read one is the sighting. A schema tag saying "this string is a
+  symbol" is a mirror of the value's real type and is deleted with the
+  string. Changing an existing attribute's type is done at a reset with no
+  migration — database data is disposable by ruling.
 
 **An entity IS its attributes, values, and refs — never a stamped kind.**
 Do not add `:type`/`:kind` discriminator attributes: query attribute
