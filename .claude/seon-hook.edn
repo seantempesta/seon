@@ -7,6 +7,11 @@
 ;; checks tests reaching the recorded adoption; widened edits only name a gate.
 ;; Gemini review is one asynchronous, coalesced batch per two-minute window;
 ;; it never delays edit feedback or creates parallel review workers.
+;; Every numeric bound this hook enforces is declared here and nowhere else:
+;; the publication timeout, the review size limits, and the review call's own
+;; bound. The hook has no numeric fallback — an absent or non-positive value
+;; refuses by exact key path rather than substituting a literal.
+;; SEON_HOOK_CONFIG selects a complete fixture config.
 
 {:lint
  {:enabled true}
@@ -44,7 +49,10 @@
   ;; anything longer is cut with an in-band truncation marker.
   :max-code-length 40000
   :max-batch-length 200000
-  :max-rubric-length 60000}
+  :max-rubric-length 60000
+  ;; The provider call's own declared bound. One review window waits at most
+  ;; this long; a fired bound drops the snapshot and is logged, never retried.
+  :call-timeout-seconds 60}
 
  :feedback
  {:max-tokens 300}}

@@ -67,7 +67,7 @@ defect: a corrupt basis file and an absent one are the same answer.
 | `src/seon/cluster.clj:625-651` | `retrying-source-change`: retry ONCE on "source changed under me" | a file edited between snapshot and publication | it hardens a mechanism against its own normal operation (AGENTS §0) | the observable is filesystem quiescence; the hook's own coalescing window (`.claude/seon-hook.edn:27`) is the event — wait for it, don't retry |
 | `src/seon/reconcile.cljc:319-323` | `(or carried-projection handed-projection (do (projection-fallback) (projection-from-database db)))` | a bootstrap caller before carriage is installed | the fallback is **loud** (`db.clj:1049` prints, counts by caller) | **legitimate as built**; see the recompute-from-scratch pass for the cost |
 | `src/seon/sci/eval.clj:1226,1252-1253,1277-1278` | `(edn/read-string (or (:seon.fn/spec row) "[]"))`, `(or (:seon.fn/arglists row) "()")`, `(or (:seon.fn/doc row) "")` in the `doc`/`dir` surface | a program row missing its contract | **no** — an absent contract renders identically to an empty one, in the surface an agent reads to decide how to call a function | typed unknown: "this row carries no contract" |
-| `bin/seon-hook:1128-1140` (`publication-exception`) | EDN-reads every stdout and stderr line of the operator child, two nested `(catch Exception _ nil)` | extracting a failure envelope from mixed output | no | the operator should write its failure to a known file (it already writes `logs/current-source-failure.log`); reading the child's console is the workaround |
+| `bin/seon-hook:1128-1140` (`publication-exception`) | EDN-reads every stdout and stderr line of the operator child, two nested `(catch Exception _ nil)` | extracting a failure envelope from mixed output | no | the operator should write its failure to a known file (it already writes `logs/current-source-failure.log`); reading the child's console is the workaround | **dissolved**: `init --result-file PATH` writes the typed terminal value; see [hook-progress-is-a-value](hook-progress-is-a-value-2026-09-16.md) |
 | `bin/test-check:56` | `(not (pos? (or (:seon.test/pass-count result) 0)))` | a result map missing the key | the *direction* is right (absent ⇒ fail) but the key's absence and a genuine zero are conflated | require the key |
 | `src/seon/search.clj:159-166` | `(try (namespace (symbol identity-value)) (catch Throwable _ nil))` | a non-symbol identity string | no | the attribute's declared type answers this; AGENTS §3 — symbols are stored as symbols |
 | `src/seon/instrument.clj:183-184, 190, 413` | three `(catch Throwable _ …)` collapsing every cause into `:failed` / `nil` | arglist and violation rendering must never throw | totality is right; **losing the cause is not** | keep the catch, carry `(ex-message failure)` — `:189` already does this one line away |
@@ -175,7 +175,7 @@ Cross-checked against
 | `bin/test:659-666` | namespace discovery by `find` + filename munge (also §5) | `:seon.test/sym` rows |
 | `bin/test:679-701` | worker-count arithmetic in bash | the runner already knows the selection; size the pool there |
 | `bin/test-check:15-52` | a Babashka script that **constructs a twenty-line Clojure program with `list`** and ships it over prepl — re-implementing the call protocol of `seon.test/check-adoption`, `seon.test/prepare-tests!`, `seon.test/resolve-test` and `seon.test/run` outside the JVM that owns them | one function on the cluster side taking a request map; the script sends `(seon.test/check-request {…})` |
-| `bin/seon-hook:1204-1240` | the hook shells `bin/seon … init --dev … --changed` and then reads the child's console for progress and failure (also §2, §5) | a publication fact the hook queries |
+| `bin/seon-hook:1204-1240` | the hook shells `bin/seon … init --dev … --changed` and then reads the child's console for progress and failure (also §2, §5) | a publication fact the hook queries  **dissolved** — [hook-progress-is-a-value](hook-progress-is-a-value-2026-09-16.md) |
 | `src/seon/test/cache.clj:44-50` | the JVM shells `/bin/cp -cRP` (macOS) or `cp -a --reflink=auto` (else) per top-level entry, one child process each | `java.nio.file.Files/copy` with `COPY_ATTRIBUTES`, or one child for the whole tree — and the os-name branch is a second path |
 | `src/seon/issue.clj:49-53` | the JVM shells `git log --format=%x00%at --name-only` and parses `\0`-separated output with `str/starts-with?` at `:60` | acceptable — git is the authority for git history; but the parse should be `-z` and structured |
 | `dev_cache.clj` at the **repository root** | 611 lines of un-namespaced build tooling living beside `deps.edn`, copied into every `tmp/test-runs/run.*` root | it is a build script; `script/` is where build scripts live |
@@ -208,7 +208,7 @@ first.
 3. **`bin/test:79-80`, `runner.clj:3775` result-cluster/root env reads.** Flags already exist.
 4. **`src/seon/bootstrap_drive.clj:155` `30000`.** The effective config is read ten lines above at `:145`.
 5. **`src/seon/eval/drive.clj:333` `120000`.** The request's `timeout-ms` is used on the next line.
-6. **`bin/seon-hook:910-912` / `:1113-1117` / `:1224` / `:1251` duplicated defaults.** Three copies of four numbers; keep the ones in `.claude/seon-hook.edn`.
+6. **`bin/seon-hook:910-912` / `:1113-1117` / `:1224` / `:1251` duplicated defaults.** Three copies of four numbers; keep the ones in `.claude/seon-hook.edn`. **Dissolved 2026-09-16** — [hook-progress-is-a-value](hook-progress-is-a-value-2026-09-16.md). The `:1123` `call-agy` literal in §2 was taken with them; `.claude/seon-hook.edn` now declares all five bounds and the hook refuses an absent one by key path.
 7. **`src/seon/test/cache.clj:25` second `SEON_TEST_SILENCE_SECONDS` default.** One accessor.
 8. **`.claude/worktrees/gym-metric-validation` (218 MB, deleted CLJS pod).** `git worktree remove` after confirming no holder — AGENTS §6 requires the holder check before deleting any run root.
 
@@ -226,7 +226,7 @@ first.
 
 16. **`src/seon/program.cljc:11-14` `identity-attributes`** — collapse three derivations into one (§4 row 1). Touches `fn.clj`, `turn.clj`, `cluster/source.clj`, `test/runner.clj`, `sci/eval.clj`.
 17. **`bin/test:659-666` `find`-based namespace discovery** — the launcher's naming convention overrides every derived selection (test-execution-model D2).
-18. **`bin/seon-hook:1233-1237` English-phrase progress contract** — replace with a keyed progress value emitted by `report-source-progress!`.
+18. **`bin/seon-hook:1233-1237` English-phrase progress contract** — replace with a keyed progress value emitted by `report-source-progress!`. **Dissolved 2026-09-16** — [hook-progress-is-a-value](hook-progress-is-a-value-2026-09-16.md).
 19. **Four classpath derivations → one** (`dev_cache.clj`, `test.clj:108`, `analyzer.clj:172`, `runner.clj:2892`). Closes an open issue on the in-process test loader.
 20. **`src/seon/program.cljc:899-904` `declaration-required-attributes`** — read `:required` off the declared row schema.
 21. **`src/seon/test/selection.clj:28-35` `widening-inputs`** — invert the predicate; the list disappears.

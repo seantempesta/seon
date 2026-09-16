@@ -2394,6 +2394,8 @@
                             changed-paths)
         cold-source (gensym "source")
         cold-store (gensym "store")
+        progress (gensym "progress")
+        primary-failure (gensym "primary-failure")
         ;; `publish?` is spliced into syntax-quoted `(when ~publish? ...)`
         ;; templates below, so it must be a literal-safe boolean: a retained
         ;; path seq would generate `(when ("path" ...))` and call the string.
@@ -2440,6 +2442,16 @@
               store#
               ((ns-resolve 'seon.cluster.source (symbol "current")) store#)
               (get instances# ~name))))
+        operation `(try
+                     (let [value# ~operation]
+                       (assoc value# :seon.fresh-operator/progress @~progress))
+                     (catch Throwable failure#
+                       (vreset! ~primary-failure failure#)
+                       {:seon.error/kind :seon.fresh-operator/publication-failed
+                        :seon.error/message (ex-message failure#)
+                        :seon.fresh-operator/exception-data (ex-data failure#)
+                        :seon.fresh-operator/exception (Throwable->map failure#)
+                        :seon.fresh-operator/progress @~progress}))
         emitted-operation
         (if source-process?
           `(println
@@ -2452,7 +2464,8 @@
                   :seon.fresh-operator/data (ex-data failure#)}))))
           operation)]
     (pr-str
-     `(let [primary-failure# (volatile! nil)]
+     `(let [~primary-failure (volatile! nil)
+            ~progress (atom [])]
        (try
         (when ~publish?
           ;; Publication reads and validates the stable filesystem snapshot
@@ -2475,6 +2488,7 @@
                   (ns-resolve 'seon.cluster (symbol "*source-progress!*"))
                   progress!#
                   (fn [phase#]
+                    (swap! ~progress conj {:seon.source/progress phase#})
                     (println (str "● current-src: " phase#))
                     (flush))]
               (with-bindings
@@ -2482,14 +2496,14 @@
                 ~emitted-operation))
            emitted-operation)
         (catch Throwable failure#
-          (vreset! primary-failure# failure#)
+          (vreset! ~primary-failure failure#)
           (throw failure#))
         (finally
           (when ~publish?
             (try
               ~(refresh-instrument-form)
               (catch Throwable restore-failure#
-                (if-let [failure# @primary-failure#]
+                (if-let [failure# @~primary-failure]
                   (.addSuppressed failure# restore-failure#)
                   (throw restore-failure#)))))))))))
 
@@ -2591,6 +2605,8 @@
             (if-let [message (:seon.fresh-operator/message outcome)]
               (fail! message (:seon.fresh-operator/data outcome))
               (:seon.fresh-operator/value outcome))))
+        _ (when (:seon.error/kind result)
+            (fail! (:seon.error/message result) result))
         source-branch (:seon.source/branch result)
         source-commit (:seon.source/commit-id result)
         digest (:seon.source/digest result)]
@@ -2613,8 +2629,32 @@
        (or (:seon.fresh-operator/transport-advertisement live-target)
            (:seon.fresh-operator/advertisement live-target)
            (:seon.fresh-operator/registered-advertisement live-target))
-       name))))
+       name))
+    result))
   )
+
+(defn- init-result!
+  "Write the operator's typed terminal result separately from console output."
+  [root arguments]
+  (if (= "--result-file" (first arguments))
+    (let [path (second arguments)]
+      (when (str/blank? path)
+        (fail! "Use `init --result-file PATH [init arguments]`." {}))
+      (io/make-parents path)
+      (try
+        (let [result (init! root (vec (drop 2 arguments)))]
+          (spit path (str (pr-str result) "\n"))
+          result)
+        (catch Throwable error
+          (spit path
+                (str (pr-str (merge (ex-data error)
+                                   {:seon.error/kind
+                                    (or (:seon.error/kind (ex-data error))
+                                        :seon.fresh-operator/init-failed)
+                                    :seon.error/message (ex-message error)}))
+                     "\n"))
+          (throw error))))
+    (init! root arguments)))
 
 (defn- row-state
   [row]
@@ -3189,6 +3229,8 @@
     "  init --changed PATH...\n"
     "                 incrementally publish safe changed source files;\n"
     "                 fall back to one complete scratch publication\n"
+    "  init --result-file PATH [init arguments]\n"
+    "                 write typed publication evidence as EDN, apart from console output\n"
     "  init NAME [--force]\n"
     "                 fork a dormant named cluster from current-src;\n"
     "                 refuse an existing cluster unless --force destroys it\n"
@@ -3217,7 +3259,7 @@
             "start" (start! root command-arguments)
             "config" (config! root command-arguments)
             "export" (export! root command-arguments)
-            "init" (init! root command-arguments)
+            "init" (init-result! root command-arguments)
             "status" (status! root command-arguments)
             "open" (open! root command-arguments)
             "stop" (stop! root command-arguments)

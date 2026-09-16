@@ -31,23 +31,29 @@
   (doseq [^java.io.File file files]
     (when (.exists file) (.delete file))))
 
-(deftest publication-diagnostics-survive-trailing-output
-  (let [failure {:cause "missing schema" :data {:schema :example/input}}
-        envelope (pr-str {:seon.fresh-operator/events
-                          [{:exception true :val (pr-str failure)}
-                           {:tag :out :val "cleanup"}]})
-        cases [{:out (str envelope "\nfinished") :err "warning"}
-               {:out "progress" :err (str envelope "\nwarning")}
-               {:out envelope :err ""}
-               {:out "no structured failure" :err "warning"}]
-        program (str "(binding [*in* (java.io.StringReader. \"{}\") "
-                     "*out* (java.io.StringWriter.)] (load-file \"bin/seon-hook\")) "
-                     "(prn (mapv publication-exception " (pr-str cases) "))")
-        result (run-process {::command ["bb" "-e" program]
-                             ::directory repo-root})]
-    (is (zero? (::exit result)) (::stderr result))
-    (is (= [failure failure failure nil]
-           (edn/read-string (::stdout result))))))
+(deftest publication-diagnostics-come-from-the-operator-result
+  (let [directory (fixture-directory)
+        path (io/file directory "operator.edn")
+        failure {:seon.error/kind :publication-failed
+                 :seon.error/message "missing schema"
+                 :seon.fresh-operator/exception-data {:schema :example/input}}
+        program
+        (str "(require '[seon.fresh-operator :as operator]) "
+             "(binding [*in* (java.io.StringReader. \"{}\") "
+             "*out* (java.io.StringWriter.)] (load-file \"bin/seon-hook\")) "
+             "(with-redefs [operator/init! (fn [& _] "
+             "(println \"unreadable console {[\") "
+             "(throw (ex-info \"missing schema\" " (pr-str failure) ")))] "
+             "(binding [*out* (java.io.StringWriter.)] "
+             "(try (#'operator/init-result! \".\" [\"--result-file\" "
+             (pr-str (str path)) "]) (catch Exception _ nil)))) "
+             "(prn (publication-result " (pr-str (str path)) "))")]
+    (try
+      (let [result (run-process {::command ["bb" "-e" program]
+                                 ::directory repo-root})]
+        (is (zero? (::exit result)) (::stderr result))
+        (is (= failure (edn/read-string (::stdout result)))))
+      (finally (test-support/delete-recursively! directory)))))
 
 (def ^:private queued-editor-probe
   '(do
@@ -383,7 +389,11 @@
                  " :markdown-lint {:enabled false}\n"
                  " :docstring-lint {:enabled false}\n"
                  " :current-source {:enabled false}\n"
-                 " :review {:enabled true :interval-seconds 1}}\n"))
+                 " :review "
+                 (pr-str (assoc (:review (edn/read-string
+                                          (slurp (io/file repo-root ".claude/seon-hook.edn"))))
+                                :enabled true :interval-seconds 1 :skills []))
+                 "}\n"))
       (spit source "# Review me\n")
       (let [first-result (invoke)
             worker-file (io/file state ".review-worker.edn")

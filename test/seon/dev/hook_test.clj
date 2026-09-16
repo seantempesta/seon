@@ -1,9 +1,66 @@
 (ns seon.dev.hook-test
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is]]
+            [seon.cluster :as cluster]
+            [seon.fresh-operator :as operator]
             [seon.operator.state :as operator.state]
             [seon.test-support :as test-support]))
+
+(deftest source-progress-wording-is-not-the-hook-contract
+  (let [directory (doto (io/file "tmp" (str "hook-progress-" (random-uuid))) .mkdirs)
+        result-file (io/file directory "operator.edn")
+        phases ["incremental scalar publication" "completely renamed phase\nwith a newline"]]
+    (try
+      (let [publish
+            (fn [fail?]
+              (with-redefs-fn
+                {#'operator/refresh-instrument-form (constantly nil)
+                 #'cluster/refresh-source!
+                 (fn [& _]
+                   (doseq [phase phases] (#'cluster/report-source-progress! phase))
+                   (when fail?
+                     (throw (ex-info "publication refused" {:seon.probe/reason :invalid})))
+                   {:seon.source/commit-id "publication-probe"})}
+                #(binding [*out* (java.io.StringWriter.)]
+                   (eval (read-string
+                          (#'operator/init-form "." nil false ["probe.clj"]
+                                                false false "default"))))))
+            result (publish false)
+            failure (publish true)
+            _ (spit result-file (pr-str result))
+            program
+            (str "(binding [*in* (java.io.StringReader. \"{}\") "
+                 "*out* (java.io.StringWriter.)] (load-file \"bin/seon-hook\")) "
+                 "(let [events (atom [])] "
+                 "(with-redefs [process/process (fn [request] "
+                 "(let [path (second (drop-while #(not= \"--result-file\" %) (:cmd request)))] "
+                 "(spit path (slurp " (pr-str (str result-file)) ")) "
+                 "(future {:exit 0 :out \"not EDN {[ console noise\" :err \"warning\"}))) "
+                 "log! (fn [& event] (swap! events conj event))] "
+                 "(prn {:seon.probe/feedback (publish-source-paths [\"probe.clj\"] "
+                 "{:current-source {:cluster \"default\" :timeout-seconds 1 :check-tests false}} \"rename\") "
+                 ":seon.probe/progress (mapv #(edn/read-string (last %)) @events)})))")
+            observed (operator.state/run-process!
+                      {:seon.operator.subprocess/argv ["bb" "-e" program]
+                       :seon.operator.subprocess/directory (io/file ".")
+                       :seon.operator.subprocess/extra-env
+                       {"SEON_HOOK_STATE_DIR" (.getCanonicalPath directory)}
+                       :seon.operator.subprocess/deadline-ms
+                       (* 1000 test-support/event-backstop-seconds)})]
+        (is (zero? (:seon.operator.subprocess/exit observed))
+            (:seon.operator.subprocess/error-output observed))
+        (is (= phases
+               (:seon.probe/progress (edn/read-string (:seon.operator.subprocess/output observed)))))
+        (is (str/starts-with?
+             (:seon.probe/feedback (edn/read-string (:seon.operator.subprocess/output observed)))
+             "converged:"))
+        (is (= :seon.fresh-operator/publication-failed (:seon.error/kind failure)))
+        (is (= {:seon.probe/reason :invalid} (:seon.fresh-operator/exception-data failure)))
+        (is (= (:seon.fresh-operator/progress result) (:seon.fresh-operator/progress failure)))
+        (is (= "publication-probe" (:seon.source/commit-id result))))
+      (finally (test-support/delete-recursively! directory)))))
 
 (def ^:private source-worker-probe
   '(do

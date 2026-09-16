@@ -85,10 +85,16 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn- load-config []
-  (let [f (io/file config-path)]
-    (if (.exists f)
-      (try (edn/read-string (slurp f)) (catch Exception _ {}))
-      {})))
+  (edn/read-string (slurp config-path)))
+
+(defn- required-positive-config [config path]
+  (let [value (get-in config path)]
+    (when-not (pos-int? value)
+      (throw (ex-info "Hook configuration requires a positive integer."
+                      {:seon.hook/config-path path
+                       :seon.hook/config-file config-path
+                       :seon.hook/config-value value})))
+    value))
 
 (defn- output! [response]
   (when (seq response)
@@ -905,12 +911,11 @@
   "Build one bounded batch prompt with the standing rubric included once.
 
    The rubric is the configured skills, re-read on every review."
-  [files {:keys [skills max-code-length max-batch-length max-rubric-length]
-          :or {skills []
-               max-code-length 40000
-               max-batch-length 200000
-               max-rubric-length 60000}}]
-  (let [loaded-skills (load-skills skills max-rubric-length)
+  [files {:keys [skills] :as config}]
+  (let [max-code-length (required-positive-config config [:max-code-length])
+        max-batch-length (required-positive-config config [:max-batch-length])
+        max-rubric-length (required-positive-config config [:max-rubric-length])
+        loaded-skills (load-skills skills max-rubric-length)
         files (vec files)
         {:keys [kept]}
         (reduce
@@ -1108,19 +1113,16 @@
         (let [prompt
               (build-review-prompt
                files
-               {:skills (get review-config :skills [])
-                :max-code-length
-                (get review-config :max-code-length 40000)
-                :max-batch-length
-                (get review-config :max-batch-length 200000)
-                :max-rubric-length
-                (get review-config :max-rubric-length 60000)})
+               review-config)
               _ (log! "REVIEW_BATCH"
                       (str "count=" (count files))
                       (str "files="
                            (str/join "," (map #(-> % :path io/file .getName)
                                                files))))
-              review (call-agy prompt 60000)]
+              review (call-agy
+                      prompt
+                      (* 1000 (required-positive-config
+                               review-config [:call-timeout-seconds])))]
           (when (seq review)
             (write-full-review! review))))
       ;; This batch is consumed even if Gemini is unavailable. Entries added
@@ -1161,28 +1163,21 @@
         (schema-resource-path? file-path)
         ((requiring-resolve 'seon.test.selection/widening-path?) relative))))
 
-(defn- publication-exception
-  [result]
-  (some (fn [line]
-          (try
-            (let [envelope (edn/read-string line)]
-              (when (map? envelope)
-                (some (fn [event]
-                        (when (:exception event)
-                          (try (edn/read-string (:val event))
-                               (catch Exception _ nil))))
-                      (reverse (:seon.fresh-operator/events envelope)))))
-            (catch Exception _ nil)))
-        (concat (reverse (str/split-lines (or (:out result) "")))
-                (reverse (str/split-lines (or (:err result) ""))))))
+(defn- publication-result [path]
+  (let [result (edn/read-string (slurp path))]
+    (when-not (and (map? result)
+                   (or (:seon.error/kind result)
+                       (:seon.source/commit-id result)))
+      (throw (ex-info "Operator returned no typed publication evidence."
+                      {:seon.hook/result-path (str path)})))
+    result))
 
 (defn- publication-failure-message
-  [result]
+  [result failure]
   (let [output (str (:out result) "\n" (:err result))
         evidence (root-file "logs/current-source-failure.log")
         omitted (max 0 (- (count output) hook-log-cap))
-        failure (publication-exception result)
-        failure-data (:data failure)
+        failure-data (:seon.fresh-operator/exception-data failure)
         failure-data (if (:seon.fn/findings failure-data)
                        (update failure-data :seon.fn/findings
                                #(filterv (fn [finding]
@@ -1195,23 +1190,29 @@
                (subs output omitted)))
     (str "ADVISORY — current-src publication failed. Diagnostic: "
          (.getPath evidence) ". "
-         (if failure
-           (str (:cause failure) " " (pr-str failure-data))
-           (str "Operator exit " (:exit result) "."))
+         (if-let [message (:seon.error/message failure)]
+           (str (pr-str (:seon.error/kind failure)) " " message
+                (when (seq failure-data) (str " " (pr-str failure-data))) ".")
+           (str "Operator exit " (:exit result)
+                " with no typed failure in its result."))
          " Inspect the published head before relying on it.")))
 
 (defn- publish-source-paths
   "Publish one admitted union of paths and return its terminal feedback."
   [paths config publication-id]
   (try
-        (let [child
+        (let [timeout-ms (* 1000 (required-positive-config config [:current-source :timeout-seconds]))
+              result-path (io/file source-results-path (str publication-id "-operator.edn"))
+              _ (io/make-parents result-path)
+              _ (when (.exists result-path) (.delete result-path))
+              child
               (process/process
                {:cmd (into
                       (cond-> [(str (root-file "bin/seon"))]
                         (get-in config [:current-source :root])
                         (into ["--root" (str (root-file
                                              (get-in config [:current-source :root])))])
-                        true (conj "init")
+                        true (into ["init" "--result-file" (str result-path)])
                         (get-in config [:current-source :cluster])
                         (into ["--dev" (get-in config [:current-source :cluster])])
                         true (conj "--changed"))
@@ -1221,25 +1222,24 @@
                 :err :string
                 :continue true})
               result (deref child
-                            (* 1000 (get-in config [:current-source :timeout-seconds] 180))
+                            timeout-ms
                             ::timeout)
               result (if (= ::timeout result)
                        (do (process/destroy-tree child)
                            @child
                            {:exit 124 :err "Publication did not finish within its declared bound."})
-                       result)]
-          (doseq [line (str/split-lines (str (:out result) "\n" (:err result)))
-                  :when (and (str/starts-with? line "● current-src:")
-                             (or (str/includes? line "incremental scalar publication")
-                                 (str/includes? line "incremental manifest reconciliation")
-                                 (str/includes? line "complete publication:")
-                                 (str/includes? line "development reload ")))]
+                       result)
+              terminal (if (.isFile result-path)
+                         (publication-result result-path)
+                         {:seon.error/kind :seon.hook/publication-result-unavailable
+                          :seon.error/message (str "Operator returned no result; exit " (:exit result))})]
+          (doseq [progress (:seon.fresh-operator/progress terminal)]
             (log! "SOURCE_PROGRESS" (str "publication=" publication-id)
-                  (str "paths=" (pr-str paths)) line))
-          (if (zero? (:exit result))
-            (if-let [terminal (last (remove str/blank? (str/split-lines (:out result))))]
+                  (str "paths=" (pr-str paths))
+                  (pr-str (:seon.source/progress progress))))
+          (if (and (zero? (:exit result)) (not (:seon.error/kind terminal)))
               (str (if (get-in config [:current-source :cluster]) "converged: " "published: ")
-                   terminal
+                   (pr-str (dissoc terminal :seon.fresh-operator/progress))
                    (when (and (get-in config [:current-source :check-tests] true)
                               (get-in config [:current-source :cluster]))
                      (let [check (process/process
@@ -1248,17 +1248,16 @@
                                          (get-in config [:current-source :cluster])]
                                    :dir repo-root :out :string :err :string :continue true})
                            checked (deref check
-                                          (* 1000 (get-in config [:current-source :timeout-seconds] 180))
+                                          timeout-ms
                                           ::timeout)]
                        (if (= ::timeout checked)
                          (do (process/destroy-tree check)
                              @check
                              "\ncheck unavailable: post-adoption feedback bound fired; adoption remains converged.")
                          (str "\n" (:out checked) (:err checked))))))
-              "refused: the operator returned no publication evidence.")
             (clip-feedback
              config
-             (str "refused: " (publication-failure-message result)))))
+             (str "refused: " (publication-failure-message result terminal)))))
         (catch Exception error
           (clip-feedback
            config
