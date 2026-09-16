@@ -866,3 +866,12 @@ non-temporal-collection-marks-current-blob-references` and `reset-returns-a-
 cluster-to-source-state` at 10:18:11–12Z. Read-only investigation launched
 (`store-wipe-2026-09-17.md`); every gate that includes the platform tier or
 registry-test is HELD until it reports.
+
+### 2026-09-16 ~11:20Z — default reforked after the wipe (pid 38993, 99 MB)
+
+Debug page on the new pid: 0.41 s first request, 25 ms warm. Steward's
+fixture-write-sweep landed (588 sites / 96 files, four dead fixtures
+repaired; request `fixture-write-sweep.txt`). ALL cold gates stay held —
+not only platform/registry — until the wipe investigation names the root
+resolution, because any destructive fixture with the same defect would
+empty the store again.
