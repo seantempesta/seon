@@ -1058,10 +1058,9 @@ turn, `record-evaluated-*` deleted. Awaiting the owner's answer on
 
 **Detector render fixed** (`65986edf7`, reviewed): `render-ai` was handed the
 raw pulled row while `render-html` got the derived status; one `status-view`
-now serves both. **Orchestrator-only marker REMOVED (23:00Z):** it blocked
+now serves both. **Orchestrator-only mode DELETED (23:25Z, bin/_test-slot):** it blocked
 `bin/test-fast` for lanes too, so lanes were committing untested; the two
-slots stay as the load cap. Gate commands still pass
-`SEON_TEST_ORCHESTRATOR=1` harmlessly.
+slots stay as the load cap. `SEON_TEST_ORCHESTRATOR` no longer exists.
 
 **Batch-110 triage landed** (`c60980f3e`, note `batch-110-triage-2026-09-16.md`):
 nine distinct failing tests, not 38. The stale "ended without
