@@ -412,3 +412,12 @@ Queue, in order:
   (issue `the-development-cluster-jvm-cannot-run-an-in-process-regression`).
   Old JVM 7595 died of a dev-panic core fault (root's turn completion
   backstop 600 s) after the index refusals. Orphan JVM: none now.
+- 12:45Z In-process regressions DO work on the reforked JVM (refutes the
+  fixer's note): `(seon.test/run (#'seon.test/resolve-test 'ns/test) conn)`
+  ran registry-test in 1,340 ms. That test is RED at HEAD: its fixture
+  builds a bare non-temporal store with no schema population/projection and
+  admission now refuses `:seon.schema/key` — fixture defect from the stricter
+  admission; store-test's branch marker may be a real owner defect (branch
+  connections inheriting the root's projection). Opus fixer launched for
+  both + the note's refutation. Batch 27 (platform cold, with recording)
+  queued by the gate session behind batch 26 phase B.
