@@ -57,3 +57,25 @@ model better.
 
 **Gate after the three changes:** the namespaces in
 `tmp/orchestrator/gate-requests/issue-task-loop.txt`.
+
+## Addendum — `2d997b88f` (2026-09-17 20:00Z)
+
+The three required changes landed as ruled: (1) `issue-status-read?` is
+gone; the opening's generated reads carry `:seon.eval/origin` (the entity
+whose render declared them, retained across since-diff refreshes) and the
+guard consults that fact; the identity source is now
+`:seon.render/source-blocks` with per-block origin, an accretive render
+output; (2) the toolkit derives from the session namespace's
+`:seon.ns/requires`; the name list is deleted; (3) `turns-remaining` is a
+key of `:seon.issue/status-view`, declared "never stored", and off the
+entity schema.
+
+Two follow-ups before the gate, both in this lane's files: (a) declare
+`:seon.eval/origin` as a plain `:seon.db/ref` — the `[:or ref [:map [:db/id
+:int]]]` alternative admits a pulled shape into the entity schema, where every
+other ref is declared plain and the writer already normalises a pulled map to
+its id; (b) `seon.issue/adopt-tx` (`src/seon/issue.clj:701`) compares lookup
+refs against `{:db/id n}` and therefore retracts and re-asserts ~7,270
+datoms per adoption (measured: 166,808 retractions vs 14,572 assertions
+across 24 adoptions) — compare resolved identities so an unchanged issue
+writes zero datoms; regression counts datoms per re-adoption.
