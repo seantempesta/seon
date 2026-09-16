@@ -645,3 +645,47 @@ The followup documentation commit retains the exact canonical test forms.
 All lane-owned shell commands ended; completed probe futures were removed from
 `user`, and `tmp/write-admission-repair` was removed after retaining the evidence.
 The gate request is appended for orchestrator review; no gate was run here.
+
+## Batch 106/107 followup — vanished-turn decision before schema edits
+
+Read the full review/addendum and the supplied gate excerpts. The orchestrator
+resolved the publication cost boundary in `b023e93a9`/`8d48f1c51`; the old scope
+question is closed. One read-only default probe observed PID 41413 and confirmed
+that the ref diagnostic reaches a metadata-bearing `:and` whose sole child is
+`:seon.db/ref`; Malli's generic unknown-message fallback is being used for that
+wrapper. No further development prepl evaluations are planned for this slice.
+
+The vanished-turn evidence does **not yet show terminal settlement creating an
+orphan**. `turn_test.clj:278` first retracts the turn while its evaluation still
+exists; Datahike removes incoming refs and the resulting evaluation lacks its
+required `:seon.cluster.eval/run`. That setup transaction precedes `settle!`
+(`:286`). The refusal's entity value has only the pre-existing evaluation fields,
+not terminal fields. `turn.clj:3694–3726` already records refusal evidence through
+`error/recording` independently of the turn; `open-run-tx-call` gates the separate
+evaluation/close transaction at the writer. These are the options for review:
+
+1. **Keep the evaluation's run required; delete a history's evaluations and
+   turn atomically (recommended).** Guarantee: every retained evaluation belongs
+   to a turn, and a late terminal refusal is still recorded by the existing
+   independent error-fact path. Cost: correct the history-deletion producer and
+   make this regression remove the whole history being simulated, then verify
+   the terminal error fact. Give up retaining orphan evaluation rows whose
+   agent/history joins no longer resolve. No schema change or new recorder.
+2. **Make the evaluation run optional for orphaned history.** Guarantee: retained
+   evaluations remain valid after their turn disappears; late refusal recording
+   still uses the current mechanism. Cost: schema documentation and an inventory
+   of every run/agent/history join, since optionality alone does not make those
+   evaluations discoverable. Give up the invariant that each retained evaluation
+   belongs to a turn. This is a model change, not an admission exemption.
+3. **Retain a valid turn record and retract only its history content.** Guarantee:
+   evaluation provenance and joins survive while terminal settlement can observe
+   a closed turn. Cost: change the history-wipe lifecycle and its regression;
+   complete turn retention must satisfy all required attributes. Give up complete
+   deletion of that turn's identity. No second error/evaluation fact family.
+
+No evaluation schema or vanished-turn regression is changed pending this ruling.
+Fixture repairs, diagnostic structure, and runtime program retirement proceed
+independently. Runtime deletion currently preserves `:seon.fn/ns`/`:seon.test/ns`
+while removing admission source (`turn.clj:1322`), unlike reconciliation's
+identity-only desired row; it will use the same exact replacement shape so the
+one existing tombstone validator handles both writers.
