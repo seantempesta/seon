@@ -124,3 +124,27 @@ the source adoption comparison remains a required precondition for testing.
   replace the regression's former expectation of a second-conflict refusal.
 
 Verification is pending below; no green result is inferred from these edits.
+
+### In-process verification, PID 37572
+
+Adoption and publication both named
+`6aaa3a4f-2026-53b5-91f3-64eb5ab33f71` before the daemon-thread runs.
+`latest-test-evidence-survives-rebuilding-from-an-older-base` passed
+**24 assertions, 0 failures, 0 errors**. Its real competing publications
+produced four expected stale-head observations across its two cases, and
+both recordings committed. This also verifies preserved membership unknowns,
+portable failure components, and normalized run provenance.
+
+The expiry regression returned **0 pass / 0 fail / 1 error** before its
+assertions: the shared canonical base had already cached
+`:seon.sci.eval/namespace-unloadable` for
+`seon.dev.dependency-cache-test`, caused by absent
+`clojure.tools.build.api`. This is the established boundary in
+[in-process-test-runs-poison-the-shared-fixture-base.md](../../../seon/issues/in-process-test-runs-poison-the-shared-fixture-base.md),
+not a new permit leak. The owning fix subsequently landed as `653d4d4ef`.
+No foreign source or test file was edited by this lane.
+
+Priority commits: `d2a0ad636` (expiry), `3c6a6bb8f` (failure identities),
+`800fa67af` (committed comparisons), `02ef8370a` (rebuild evidence),
+`e2eb91fcd` (repeated contention), `e8a017620` (allowance from published
+schema facts). The gate request excludes the unfinished working-tree readers.
