@@ -7,6 +7,14 @@ tags: [issue, mcp, runtime]
 
 # Default component probe timed out after development adoption
 
+Turn-test-reds, 2026-09-16 04:50 UTC: the final read-only MCP runtime-status
+probe returned health and Flow unknown with `Read timed out` after 30 seconds.
+It selected default PID 53378, start 04:10:35Z, PREPL 61867. No cause or
+adoption convergence is inferred. This lane never stopped, reforked, or
+restarted default; its completed isolated in-process test proofs do not
+establish default health. See the
+[continuation landing](../../prds/context-generation/research/turn-test-reds-cache-2026-09-16.md).
+
 Attempt/evaluation facts, 2026-09-16: default changed from PID 69622 to 7595
 (start 01:36:02Z, PREPL 51919). After loading the canonical test namespace,
 the MCP JVM call to `seon.test/run` for

@@ -96,8 +96,8 @@ evaluation completion, and changed evaluation call-edge datom counts.
 Seed refusals and downstream failures require separate live probes; the
 larger tally is not attributed wholesale to any one class.
 
-The gate request remains unchanged until the current replays incorporate
-these reds. No `bin/test`, `bin/test-fast`, or test JVM was launched.
+The completed batch was incorporated before rewriting the gate request.
+No `bin/test`, `bin/test-fast`, or test JVM was launched.
 
 ## Schema consumer slice
 
@@ -242,3 +242,143 @@ interrupted turn. An interrupted turn does not answer its wake.
 
 Candidate **44765 27/0/0**; source-reloaded fresh-base **44774 27/0/0**.
 The existing recovery writer and direct evaluation owner are used unchanged.
+
+
+## Final batch-23 member verdicts
+
+Dated census: **44 cluster-turn members: 29 green unchanged, 11 repaired
+(92 passing assertions), four unresolved**. These are focused in-process
+proofs, not a claim that the namespace or platform gate is green. Each test
+used a fresh canonical database branch and fresh SCI context; each probe batch
+rebuilt its canonical base from the source manifest. The isolated source basis
+was `c1d7d4695` plus only this lane's test edits. Later foreign production edits
+are excluded from these results. Proof after edits used explicit file reload;
+default adoption convergence is not claimed.
+
+All [94 complete saved result values](turn-test-reds-batch23-evidence-2026-09-16.edn)
+are retained (181941 bytes), including failures and seed refusals. The
+[probe forms](turn-test-reds-batch23-probes-2026-09-16.clj) preserve the actual
+MCP forms as data, including both unlanded candidates. Counts below are
+pass/fail/error; numeric run identities belong to the isolated branch unless
+explicitly described as default in the earlier record. A green unchanged
+replay dissolves that cold observation at this basis; it does not assign a
+cause to every prior failure or prove unrelated interleavings impossible.
+
+| Test in `seon.cluster.turn-test` | Verdict | Recorded run; counts |
+|---|---|---|
+| `a-batched-turn-commits-only-queryable-definition-facts` | dissolved at fresh-base replay; unchanged | 44604; 7/0/0 |
+| `a-combined-evaluation-projects-every-terminal-receipt-datom` | dissolved at fresh-base replay; unchanged | 44605; 10/0/0 |
+| `a-lost-model-call-leaves-a-durable-readable-reason` | unresolved; original assertion retained | 44784; 3/1/0 |
+| `a-prose-prefixed-contracted-defn-settles-and-doc-answers` | dissolved at fresh-base replay; unchanged | 44611; 4/0/0 |
+| `a-real-evaluation-that-runs-away-is-stopped-and-recorded` | dissolved at fresh-base replay; unchanged | 44612; 2/0/0 |
+| `a-refused-contract-commits-a-receipt-and-no-row` | dissolved at fresh-base replay; unchanged | 44613; 2/0/0 |
+| `a-refused-definition-stays-in-its-agents-defs` | repaired; class and commit below | 44739; 4/0/0 |
+| `a-refused-delivery-becomes-a-durable-error-fact` | repaired; class and commit below | 44729; 6/0/0 |
+| `a-run-prompts-from-its-opening-database-value` | repaired; class and commit below | 44677; 11/0/0 |
+| `a-turn-delivers-what-a-form-asks-to-send-and-still-finishes` | dissolved at fresh-base replay; unchanged | 44616; 9/0/0 |
+| `a-whole-turn-runs-a-REAL-sci-evaluation-end-to-end` | dissolved at fresh-base replay; unchanged | 44621; 14/0/0 |
+| `a-whole-turn-runs-from-trigger-to-closed-run` | dissolved at fresh-base replay; unchanged | 44622; 6/0/0 |
+| `absent-foreign-ns-unmap-commits-and-mutates-the-run-sci-ctx` | dissolved at fresh-base replay; unchanged | 44623; 4/0/0 |
+| `agent-code-with-defn-and-println-folds-green-without-in-ns` | dissolved at fresh-base replay; unchanged | 44624; 6/0/0 |
+| `an-unreadable-reply-is-a-settled-form-with-paid-attempt-evidence` | dissolved at fresh-base replay; unchanged | 44625; 28/0/0 |
+| `another-agent-calls-the-live-cluster-definition-without-reinstall` | dissolved at fresh-base replay; unchanged | 44630; 1/0/0 |
+| `another-agent-sees-a-flat-contract-violation-after-live-install` | dissolved at fresh-base replay; unchanged | 44631; 2/0/0 |
+| `concurrent-streams-share-one-conn-test` | repaired; class and commit below | 44678; 11/0/0 |
+| `contracted-redefinition-exactly-replaces-the-row` | dissolved at fresh-base replay; unchanged | 44632; 5/0/0 |
+| `delimiter-repair-is-span-local-and-precedes-intent` | unresolved; original assertion retained | 44708; 14/1/0 |
+| `evaluation-follows-the-readers-parse-time-namespace` | dissolved at fresh-base replay; unchanged | 44638; 3/0/0 |
+| `function-install-reads-the-case-count-from-cluster-facts` | dissolved at fresh-base replay; unchanged | 44639; 4/0/0 |
+| `generated-fixed-point-closes-the-run` | repaired; class and commit below | 44692; 4/0/0 |
+| `generated-membership-failure-never-advances-the-run-to-call` | repaired; class and commit below | 44693; 4/0/0 |
+| `generated-model-attempt-traces-preserve-presence-and-episode-laws` | blocked by incomplete identity upsert | 44594; seed refused |
+| `generated-phase-failures-converge-through-one-terminal-exit` | repaired; class and commit below | 44764; 5/0/0 |
+| `import-addition-is-ordinary-data-and-reacquires-exactly` | dissolved at fresh-base replay; unchanged | 44643; 2/0/0 |
+| `import-only-ns-unmap-installs-exactly-after-its-context-commit` | dissolved at fresh-base replay; unchanged | 44644; 4/0/0 |
+| `incompatible-clusters-alternate-runtime-schema-validation-without-bleed` | dissolved at fresh-base replay; unchanged | 44649; 9/0/0 |
+| `mixed-plan-publishes-only-the-contracted-function` | dissolved at fresh-base replay; unchanged | 44650; 4/0/0 |
+| `ns-unmap-retracts-the-owned-function-after-the-terminal-commit` | dissolved at fresh-base replay; unchanged | 44651; 7/0/0 |
+| `qualified-dynamic-ns-unmap-is-durable-in-a-fresh-context` | dissolved at fresh-base replay; unchanged | 44652; 2/0/0 |
+| `reasoning-starvation-persists-usage-finish-and-the-named-error` | dissolved at fresh-base replay; unchanged | 44653; 11/0/0 |
+| `refused-import-only-ns-unmap-leaves-the-run-sci-ctx-unchanged` | dissolved at fresh-base replay; unchanged | 44658; 3/0/0 |
+| `refused-runtime-schema-registration-mutates-neither-row-nor-projection` | dissolved at fresh-base replay; unchanged | 44659; 5/0/0 |
+| `refused-terminal-program-transactions-settle-and-do-not-refire` | blocked by incomplete identity upsert | 44594; seed refused |
+| `reply-reading-follows-evaluated-alias-and-dynamic-require-state` | dissolved at fresh-base replay; unchanged | 44660; 2/0/0 |
+| `runtime-schema-key-changes-pass-the-one-usage-guarded-decision` | repaired; class and commit below | 44593; 6/0/0 |
+| `runtime-schema-registration-commits-the-evaluated-form-and-attribute` | dissolved at fresh-base replay; unchanged | 44661; 10/0/0 |
+| `runtime-schema-unregister-removes-one-unused-global-schema` | repaired; class and commit below | 44592; 4/0/0 |
+| `runtime-tests-install-run-redefine-and-delete-exactly` | dissolved at fresh-base replay; unchanged | 44662; 6/0/0 |
+| `streaming-writes-zero-datoms-test` | repaired; class and commit below | 44707; 10/0/0 |
+| `successful-call-persists-the-providers-open-usage-document` | dissolved at fresh-base replay; unchanged | 44668; 11/0/0 |
+| `turn-intent-is-the-complete-crash-falsifier` | repaired; class and commit below | 44774; 27/0/0 |
+
+## Class disposition and committed regression
+
+| Cause | Tests | Disposition | Regression / commit |
+|---|---|---|---|
+| Committed cache identity on speculative values; stale deletion projection | schema declaration/deletion | structural repair at transaction entry and existing writer | fork `49ea5933`, main `c1d7d4695`; fork 17 and canonical 8 assertions |
+| Retired serialized-result observation | unregister, schema key changes | exact saved shown text | both member observables; `b3266e25b` |
+| Fake evaluation envelope | opening snapshot, concurrent streams | real SCI and current generated forms | both independent snapshot/channel observables; `2c1ecba79` |
+| Retired generated-entry injection | fixed point, membership failure | inject at current declared-source seam | terminal and refusal observables; `f1b47d219` |
+| Transient streaming observation after provider completion | streaming datoms | observe partial inside provider, exact terminal completion | existing streaming regression; `261ac0ca5` |
+| Diagnostic kind confused with human text | refused delivery | assert kind and exact shown message separately | delivery regression; `b8050b94f` |
+| Missing persistent SCI context; retired private storage | refused definition | same real agent context across turns | isolation and next-turn call regression; `559241e6b` |
+| Invalid occurrence attribute and incomplete evaluation seed | phase property | declared occurrence ref and full source evidence | unchanged 24 trials / seed 2026080601; `94da1b2ce` |
+| Caught phase exception mistaken for process interruption | crash recovery | cut after intent / before settlement | zero/two-prefix parameterized recovery regression; `c4c3ca475` |
+| Sparse config identity maps | two seed-blocked members above | skip downstream per owner; complete seed refusals retained | run 44594; [residual](../../../seon/issues/identity-upserts-still-require-complete-entity-maps.md), `656c68276` |
+| Bookkeeping exceeds declared bound | delimiter repair | unlanded corrected candidate; retain 300 ms assertion | run 44708: 7198.085124 ms; [residual](../../../seon/issues/turn-bookkeeping-exceeds-recorded-regression-bound.md) |
+| Provider diagnostic absent from subsequent prompt | lost model call | unlanded real-fixture candidate; retain visibility assertion | run 44784; [residual](../../../seon/issues/provider-failure-diagnostic-is-absent-from-next-prompt.md) |
+
+## Remaining visibility decision: three priced options
+
+The provider-failure candidate verifies closure, durable diagnostic, and a new
+trigger; the next real prompt still omits the reason. No automatic retry
+behavior is inferred. Resolving this through context/error owners exceeds this
+bounded lane. These are estimates, not implementation commitments:
+
+1. **Recommended smallest scope, subject to an explicit owner ruling:** make
+   durable operator-visible diagnostics the contract and retire automatic
+   prompt visibility. About 30–60 minutes for ruling, docs and regression;
+   guarantees durable inspectability, gives up automatic agent visibility.
+2. Include the existing attempt/error diagnostic through the existing generated
+   context renderer. About 2–4 hours across context/error owners; guarantees
+   the next prompt includes the reason, costs prompt space and owner work.
+3. Surface an explicit diagnostic read through existing context/help. About
+   1–2 hours; guarantees on-demand access, gives up automatic inclusion.
+
+No option is silently selected and no new production path was added.
+
+## Foreign verification boundaries and gate request
+
+The two batch-23 `seon.turn-test` reds were also replayed without edits:
+`settlement-mints-rows-for-unindexed-call-targets`, run 44670, **9/1/0**, expects
+no call edge but sees `seon.bootstrap/help`; and
+`virtual-turns-use-the-proc-and-compaction-is-agent-scoped`, run 44671,
+**87/3/1**, has old datom counts and a renderer-ref contract expecting an integer
+but receiving a map. These files/owners are held by other lanes. Their full
+results are in the evidence artifact; no production attribution beyond those
+observations is claimed.
+
+The gate request now contains only existing test namespaces:
+`seon.cluster.turn-test`, `seon.sci.eval-test`, `seon.turn-test`, and
+`seon.datahike-fork-test`. The orchestrator owns the next cold gate and platform
+proof. No test JVM was launched by this continuation.
+
+Final default MCP runtime status returned health/Flow unknown after a 30-second
+read timeout, PID 53378 / start 04:10:35Z / PREPL 61867. The
+[existing issue](../../../seon/issues/default-component-probe-times-out-after-adoption.md)
+records it. No default lifecycle operation occurred. Markdown hooks report 29
+unrelated historical gitlink citations in `agents-md-audit-2026-09-15.md`;
+those foreign audit bytes were preserved.
+
+
+## Cleanup
+
+The last owned test future reported `:completed`. The owned operator root
+`tmp/turn-test-cache-wt/tmp/turn-test-cache-root` completed `down`; PID 52846
+exited, the store flock was free, and its three-branch roster was readable.
+All 94 saved EDN values were verified against the committed evidence artifact
+before scratch deletion. The worktree's `reference-code` symlink was unlinked
+without following it; the owned worktree/root and scratch directory were removed.
+Shared dependency files, foreign worktrees, foreign processes and dirty source
+paths were preserved. No background command or test future remains owned by
+this continuation.

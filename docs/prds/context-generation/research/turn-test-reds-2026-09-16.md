@@ -413,3 +413,15 @@ proof to the orchestrator. This lane lands the five bounded repair slices
 above; the complete remaining class is explicitly open.
 
 Handoff recorded 2026-09-16 02:12 UTC, within the 90-minute assignment bound.
+
+
+## Batch-23 continuation handoff — 2026-09-16
+
+The [continuation landing](turn-test-reds-cache-2026-09-16.md) supersedes the
+earlier residual census for the 44 batch-23 red cluster-turn members. The
+transaction-cache structural repair landed in Datahike `49ea5933` and main
+`c1d7d4695`. Eleven additional members have 92 passing focused assertions;
+29 replay green unchanged; four remain explicitly unresolved. The continuation
+contains every member verdict, exact runs, complete returned evidence, three
+priced options for provider diagnostic visibility, and the four-namespace gate
+request. No cold namespace/platform result is claimed.

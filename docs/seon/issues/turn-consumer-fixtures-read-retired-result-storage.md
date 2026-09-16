@@ -7,6 +7,21 @@ tags: [issue, test, runtime, class/p3, wave/contract-gate]
 
 # Turn consumers retain obsolete fixture and observation contracts
 
+## Batch-23 continuation — 2026-09-16
+
+The transaction-cache class is repaired in maintained Datahike `49ea5933`
+and main `c1d7d4695`; schema deletion now derives projection at the writer.
+Eleven additional turn members pass 92 focused assertions before and after
+source reload. Their class commits and all 44 cold-red member verdicts are
+in the [continuation landing](../../prds/context-generation/research/turn-test-reds-cache-2026-09-16.md).
+Twenty-nine other cold-red members pass unchanged on fresh canonical bases.
+
+Four remain unresolved: two incomplete config-identity seeds (rechecked after
+`20d30a0bd`), the unchanged 300 ms bookkeeping bound, and provider diagnostic
+visibility in the next prompt. The two unlanded candidates retain their
+failures; assertions were not relaxed. This umbrella remains open. Cold
+namespace/platform proof is requested from the orchestrator, not claimed.
+
 ## Agent consumer repair — 2026-09-15
 
 Commit `e4f8bbe07` repairs the recorded agent failures: canonical process
