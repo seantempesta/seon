@@ -946,8 +946,12 @@
                           (schema/canonical-schema-rows
                            (assoc (schema/registered-schemas)
                                   schema-key definition)))]
-            (cond-> (assoc row :seon.schema.admission/source
-                               (:seon.schema.admission/source candidate))
+            (cond-> (assoc (merge (select-keys candidate
+                                              [:seon.schema/generatable?
+                                               :seon.schema/shape])
+                                 row)
+                           :seon.schema.admission/source
+                           (:seon.schema.admission/source candidate))
               (:seon.schema/ns candidate)
               (assoc :seon.schema/ns (:seon.schema/ns candidate))))
 

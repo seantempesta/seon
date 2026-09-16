@@ -100,10 +100,9 @@
   (let [digest (.digest (MessageDigest/getInstance "SHA-256") source-bytes)]
     (apply str (map #(format "%02x" (bit-and 0xff %)) digest))))
 
-(defn- source-context
-  [file]
-  (let [source-bytes (Files/readAllBytes (.toPath ^java.io.File file))
-        text (String. source-bytes StandardCharsets/UTF_8)
+(defn- text-context
+  [text]
+  (let [source-bytes (.getBytes ^String text StandardCharsets/UTF_8)
         line-starts (into [0] (keep-indexed (fn [i c] (when (= \newline c) (inc i)))) text)]
     {:bytes source-bytes
      :seon.fn.file/digest (sha-256 source-bytes)
@@ -114,6 +113,11 @@
                       (map (fn [[start end]]
                              (alength (.getBytes (subs text start end) StandardCharsets/UTF_8)))
                            (partition 2 1 line-starts))))}))
+
+(defn- source-context
+  [file]
+  (text-context (String. (Files/readAllBytes (.toPath ^java.io.File file))
+                         StandardCharsets/UTF_8)))
 
 (defn- source-contexts
   [files]
@@ -609,7 +613,7 @@
         refers-by-target (group-by :seon.ns.refer/target-ns refers)
         targets
         (sort-by str
-                 (into (set (map :seon.ns/name requires))
+                 (into (into #{} (map #(if (map? %) (:seon.ns/name %) (second %))) requires)
                        (concat (keys aliases-by-target)
                                (keys refers-by-target))))]
     (mapcat
@@ -695,15 +699,17 @@
         (loop [remaining requests
                source (if (seq prelude) (str prelude "\n") "")
                spans []]
-          (if-let [{:keys [namespace-name form-source]} (first remaining)]
+          (if-let [{:keys [namespace-name form-source]
+                    supplied-namespace :seon.fn/namespace-row} (first remaining)]
             (let [namespace-row
-                  (db/pull database
+                  (or supplied-namespace
+                      (db/pull database
                            '[:seon.ns/name
                              {:seon.ns/requires [:seon.ns/name]}
                              {:seon.ns/aliases [*]}
                              {:seon.ns/imports [*]}
                              {:seon.ns/refers [*]}]
-                           [:seon.ns/name namespace-name])
+                           [:seon.ns/name namespace-name]))
                   referenced-namespaces
                   (analyzer/referenced-program-namespaces
                    namespace-name [form-source])
@@ -730,6 +736,7 @@
                             usage))
                         usages)))]
     {:seon.fn/analysis analysis
+     :seon.fn/source source
      :seon.fn/source-spans spans
      :seon.fn/function-rows
      (resolvable-runtime-function-rows database analysis requests)}))
@@ -801,7 +808,10 @@
               (assoc :seon.fn/call-arities
                      (into #{} (get call-arities program-symbol)))
               subject (assoc :seon.test/subject subject))))
-        merged-row (when program-row (merge program-row program-facts))]
+        merged-row (when program-row
+                     (merge (dissoc program-row :seon.fn/calls :seon.fn/pending-calls
+                                    :seon.fn/keywords :seon.fn/writes :seon.fn/call-arities)
+                            program-facts))]
     [(if program-row
        {}
        (let [calls (into #{}
@@ -993,6 +1003,42 @@
      {}
      (concat (::analyzer/namespace-definitions analysis)
              (::analyzer/var-definitions analysis)))))
+
+(defn source-rows
+  "Construct source declarations through the indexer's analysis and row owners.
+
+  The supplied namespace is the caller's current resolver context, including
+  uncommitted aliases. Prelude declarations resolve calls but never become
+  submitted rows. A submitted form has no file coordinates."
+  {:malli/schema
+   [:=> [:cat :seon.db/database-value :seon.program/shapes
+         :seon.ns/ns
+         :string [:set :keyword]]
+     :seon.program/rows]}
+  [database row-shapes namespace-row source declared-attributes]
+  (let [namespace-name (:seon.ns/name namespace-row)
+        {analysis :seon.fn/analysis
+         text :seon.fn/source
+         spans :seon.fn/source-spans
+         function-rows :seon.fn/function-rows}
+        (runtime-analysis-batch
+         database [{:namespace-name namespace-name
+                    :form-source source
+                    :seon.fn/namespace-row namespace-row}])
+        [first-row last-row] (first spans)
+        functions (into (first-party-function-symbols analysis)
+                        (map :seon.fn/sym) function-rows)
+        rows (analysis-rows-by-file
+              (source-analysis analysis first-row last-row)
+              functions {"<stdin>" (text-context text)} declared-attributes)]
+    (into []
+          (comp
+           (filter #(or (:seon.fn/sym %) (:seon.test/sym %)))
+           (map #(program/declaration-row
+                  (program/canonical-row
+                   row-shapes (dissoc % :seon.fn/file :seon.fn/form-span))
+                  :all :agent)))
+          (get rows "<stdin>"))))
 
 (defn- lint-rows
   [directory file context rows findings]

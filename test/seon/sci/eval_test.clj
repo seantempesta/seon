@@ -244,20 +244,27 @@
   the-evaluator-remains-live-after-its-namespace-reloads
   (test-support/preserving-instrumentation-state
     (fn []
-      (let [request {:seon.cluster.eval/source "(+ 1 2)",
-                     :seon.sci.admit/caps caps,
-                     :seon.sci.eval/time-limit-ms 10000,
+      (let [projection (schema/handed-projection)
+            request {:seon.cluster.eval/source "(+ 1 2)"
+                     :seon.sci.admit/caps caps
+                     :seon.sci.eval/time-limit-ms 10000
                      :seon.config/on-core-error :panic}
             before (eval/evaluate request)]
-        (is
-          (= 3 (:seon.sci.admit/value before))
-          "the first evaluation realizes the process guard")
-        (require 'seon.sci.eval :reload)
-        (let [after ((requiring-resolve 'seon.sci.eval/evaluate) request)]
-          (is
-            (= 3 (:seon.sci.admit/value after))
-            "ordinary arm data has no reload-sensitive class identity")
-          (is (nil? (:seon.cluster.eval/error after))))))))
+        (try
+          (is (= 3 (:seon.sci.admit/value before))
+              "the first evaluation realizes the process guard")
+          (require 'seon.sci.eval :reload)
+          (let [after ((requiring-resolve 'seon.sci.eval/evaluate) request)]
+            (is (= 3 (:seon.sci.admit/value after))
+                "ordinary arm data has no reload-sensitive class identity")
+            (is (nil? (:seon.cluster.eval/error after))))
+          (finally
+            ;; Restoration must not reinstall the superseded roots. Arm the
+            ;; definitions the loader just installed, under the handed world.
+            (let [report (instrument/apply!
+                          {:seon.config/on-core-error :panic
+                           :seon.schema/projection projection})]
+              (is (nil? (:seon.error/kind report)) (pr-str report)))))))))
 
 (deftest isolated-one-off-evaluations-do-not-share-definitions
   (run "(def leaked 1)")

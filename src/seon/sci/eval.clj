@@ -116,6 +116,7 @@
             [seon.db :as db]
             [seon.id :as id]
             [seon.effect :as effect]
+            [seon.fn]
             [seon.env :as env]
             [seon.error :as error]
             [seon.instrument :as instrument]
@@ -302,7 +303,7 @@
    ;; registration delta in `declared-row`; validating this source expression
    ;; here would execute zero times and reject ordinary `(do ... schema)`.
    (when (:seon.schema/key event)
-     (assoc (select-keys event [:seon.schema/key :seon.schema/form :seon.schema/ns])
+     (assoc (select-keys event [:seon.schema/key :seon.schema/form])
             :seon.schema.admission/source :agent))
    (when (:seon.ns/name event)
      (program/declaration-row event :contracted :agent))))
@@ -389,8 +390,8 @@
            (= left right))))
 
 (defn- definition-row
-  "Derive one form's program row from the generation-stamped SCI Var."
-  [ctx projection before source]
+  "Analyze the accepted source; SCI contributes only runtime contract facts."
+  [ctx database projection before source namespace-row]
   (some
    (fn [[qualified {sci-var :seon.sci.eval/var
                     value :seon.sci.eval/value}]]
@@ -398,41 +399,27 @@
                 (not (same-intern-value?
                       (get before qualified absent-intern) value)))
        (let [metadata (meta sci-var)
-             namespace-ref [:seon.ns/name (symbol (namespace qualified))]
-             test? (boolean (:test metadata))
-             function? (fn? value)
+             analysed-row
+             (when (or (:test metadata) (fn? value))
+               (some #(when (= (str qualified)
+                               (or (:seon.fn/sym %) (:seon.test/sym %))) %)
+                     (seon.fn/source-rows
+                      database
+                      (program/shapes-in (:seon.schema.projection/forms projection))
+                      namespace-row source
+                      (set (keys (:seon.schema.projection/forms projection))))))
              event
-             (cond
-               test?
-               (cond-> {:seon.test/sym (str qualified)
-                        :seon.test/ns namespace-ref
-                        :seon.test/source source}
-                 (find metadata :seon.test/fixture-observation)
-                 (assoc :seon.test/fixture-observation (:seon.test/fixture-observation metadata))
-                 ;; Same one rule as the static seam: a namespace form may
-                 ;; declare the cost for every deftest it holds.
-                 true (merge (program/test-markers
-                              metadata (meta (:ns metadata)))))
-
-               function?
-               (cond-> {:seon.fn/sym (str qualified)
-                        :seon.fn/ns namespace-ref
-                        :seon.fn/source source
-                        :seon.fn/arglists (pr-str (or (:arglists metadata) '()))
-                        :seon.fn/private? (boolean (:private metadata))}
-                 (string? (:doc metadata))
-                 (assoc :seon.fn/doc (:doc metadata))
-                 (:macro metadata) (assoc :seon.fn/macro? true)
+             (when analysed-row
+               (cond-> analysed-row
                  (:malli/schema metadata)
                  (assoc :seon.fn/spec
                         (pr-str (accretion/data-contract! (:malli/schema metadata))))
                  (contains? #{:io :compute} (:seon.workload metadata))
-                 (assoc :seon.fn/workload (:seon.workload metadata)))
-
-               :else nil)
+                 (assoc :seon.fn/workload (:seon.workload metadata))
+                 (:test metadata)
+                 (merge (program/test-markers metadata (meta (:ns metadata))))))
              row (when event
-                   (assoc (program/declaration-row event :all :agent)
-                          ::evaluated? true))]
+                   (assoc event ::evaluated? true))]
          (if (:seon.fn/spec row)
            (let [definition (edn/read-string (:seon.fn/spec row))]
              (schema/projection-with-function-contract
@@ -1955,13 +1942,21 @@
               ;; Validate the actual evaluated value while the overlay is
               ;; isolated. The terminal transaction repeats this pure
               ;; candidate validation against its mid-transaction db value.
-              (schema/projection-with-schema
-               projection schema-key definition
-               {:seon.schema.admission/source :agent})
-              (accretion/schema-row
-               (assoc (:seon.schema.projection/forms projection)
-                      schema-key definition)
-               (assoc raw-row :seon.schema/form (pr-str definition)))))
+              (let [candidate-projection
+                    (schema/projection-with-schema
+                     projection schema-key definition
+                     {:seon.schema.admission/source :agent})
+                    forms (:seon.schema.projection/forms candidate-projection)]
+                (program/with-contract-facts
+                 {:seon.program/row
+                  (accretion/schema-row
+                   forms (assoc raw-row :seon.schema/form (pr-str definition)))
+                  :seon.program/compile-options
+                  (:seon.schema.projection/compile-options candidate-projection)
+                  :seon.program/predicate-functions
+                  (schema/predicate-functions-in candidate-projection)
+                  :seon.program/schema-keys (set (keys forms))
+                  :seon.program/schema-forms forms}))))
           raw-row)
         base-declared-row
         (if (:seon.fn/spec base-declared-row)
@@ -2474,8 +2469,12 @@
               :seon.sci.eval/namespace-name namespace-name
               :seon.sci.eval/namespace-unmap? namespace-unmap?
               :seon.cluster.eval/source source})
-            var-row (definition-row execution-ctx projection
-                                    before-intern-values source)
+            var-row
+            (when-let [database (:seon.db/db request)]
+              (definition-row execution-ctx database projection
+                              before-intern-values source
+                              (assoc (binding-rows before-reader-context)
+                                     :seon.ns/name namespace-name)))
             row (or var-row reader-row)
             next-projection
             (cond

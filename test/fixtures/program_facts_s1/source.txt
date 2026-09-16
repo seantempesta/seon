@@ -1,0 +1,5 @@
+(ns sample.s1 (:require [clojure.test :refer [deftest is]] [seon.schema :as schema]))
+(declare right)
+(defn left "Count down through the paired function." {:malli/schema [:=> [:cat :sample.s1/value] :int] :seon.fn/doc-order 3} [x] (if (pos? x) (right (dec x)) 0))
+(defn right {:malli/schema [:=> [:cat :sample.s1/value] :int]} [x] (left x))
+(deftest ^{:seon.test/usage true} paired (is (= 0 (right 4))))

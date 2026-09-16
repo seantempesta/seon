@@ -1,0 +1,2046 @@
+#:seon.test{:selected
+            ["seon.fn-test/analyze-form-refuses-an-unresolvable-namespace-reference"
+             "seon.fn-test/defining-forms-share-one-form-local-kondo-batch"
+             "seon.fn-test/fixture-observations-survive-static-and-runtime-admission"
+             "seon.fn-test/indexed-declarations-carry-exact-file-bytes"
+             "seon.fn-test/ordinary-form-analysis-keeps-call-edges-without-a-declaration"
+             "seon.fn-test/settled-agent-form-has-static-index-edge-parity"
+             "seon.fn-test/settled-form-records-calls-across-every-program-namespace"
+             "seon.fn-test/static-index-and-runtime-admission-agree-on-analysis-facets"
+             "seon.program-test/declaration-admission-refuses-ambiguous-or-incomplete-rows"
+             "seon.program-test/every-declaration-row-satisfies-its-own-output-contract"
+             "seon.program-test/indexed-and-evaluated-declarations-are-the-same-entities"
+             "seon.program-test/reader-events-have-one-canonical-declaration-row"
+             "seon.program-test/runtime-schema-declarations-project-namespaced-properties"
+             "seon.program-test/typed-cross-namespace-deletion-retracts-function-and-test"
+             "seon.sci.eval-test/a-base-created-function-uses-the-invoking-threads-arm"
+             "seon.sci.eval-test/a-blocking-host-call-is-NOT-stopped-by-the-time-limit"
+             "seon.sci.eval-test/a-failed-evaluation-records-reconstructable-throwable-data"
+             "seon.sci.eval-test/a-foreign-armed-context-is-refused-as-a-value"
+             "seon.sci.eval-test/a-live-context-preserves-definition-value-class-and-metadata"
+             "seon.sci.eval-test/a-previously-defined-function-uses-the-current-evaluation-limit"
+             "seon.sci.eval-test/a-re-entrant-evaluation-inherits-the-governing-arm"
+             "seon.sci.eval-test/a-refusal-keeps-its-own-kind-at-both-entrances"
+             "seon.sci.eval-test/a-selected-render-inherits-the-live-arm-or-owns-one-when-unarmed"
+             "seon.sci.eval-test/a-set-print-length-survives-to-the-turns-next-form"
+             "seon.sci.eval-test/a-storable-declarations-committed-row-is-recognised-by-its-value"
+             "seon.sci.eval-test/a-turn-fork-registers-an-empty-assigned-agent-namespace"
+             "seon.sci.eval-test/acquired-source-context-forks-have-branch-custody-and-private-defs"
+             "seon.sci.eval-test/acquisition-binds-loaded-first-party-compiled-vars"
+             "seon.sci.eval-test/agent-contracts-apply-on-acquire-and-cold-recovery"
+             "seon.sci.eval-test/agent-owned-sci-var-metadata-remains-mutable"
+             "seon.sci.eval-test/agent-print-vars-are-captured-before-sci-bindings-unwind"
+             "seon.sci.eval-test/an-acquired-function-uses-the-current-evaluation-limit"
+             "seon.sci.eval-test/an-agent-cannot-catch-the-interrupt"
+             "seon.sci.eval-test/an-inherited-arm-keeps-the-governing-deadline"
+             "seon.sci.eval-test/an-instrumented-multi-arity-miss-reads-like-clojure"
+             "seon.sci.eval-test/an-interpreted-infinite-loop-dies-at-the-limit"
+             "seon.sci.eval-test/an-unbound-var-remains-structured-after-production-admission"
+             "seon.sci.eval-test/analysis-failure-exposes-scis-unresolved-symbol-as-data"
+             "seon.sci.eval-test/bare-dir-and-program-derived-doc-are-repl-native"
+             "seon.sci.eval-test/both-entrances-classify-one-failure-identically"
+             "seon.sci.eval-test/call-preparation-receives-the-form-scoped-environment"
+             "seon.sci.eval-test/compiled-runtime-metadata-cannot-be-changed-by-agent-code"
+             "seon.sci.eval-test/compiled-runtime-roots-cannot-be-redefined-by-agent-code"
+             "seon.sci.eval-test/contracted-defn-renders-the-var-it-declared"
+             "seon.sci.eval-test/disarm-clears-the-current-threads-flag-exactly"
+             "seon.sci.eval-test/evaluate-invokes-eval-form-exactly-once-on-every-path"
+             "seon.sci.eval-test/evaluation-custody-is-derived-only-from-the-cluster-context"
+             "seon.sci.eval-test/evaluation-projection-prefers-the-live-context"
+             "seon.sci.eval-test/every-public-capability-function-in-the-graph-resolves-in-the-ctx"
+             "seon.sci.eval-test/generated-sources-compose-fork-guard-and-admission"
+             "seon.sci.eval-test/host-interop-is-observed-during-analysis"
+             "seon.sci.eval-test/instrumented-generated-form-does-not-advise-an-absent-program-row"
+             "seon.sci.eval-test/isolated-one-off-evaluations-do-not-share-definitions"
+             "seon.sci.eval-test/public-walk-is-callable-through-an-agent-sci-eval"
+             "seon.sci.eval-test/require-context-rows-persist-namespace-lookup-refs"
+             "seon.sci.eval-test/runtime-function-rows-carry-parsed-contract-facts"
+             "seon.sci.eval-test/schema-and-contract-declarations-have-bounded-allocation"
+             "seon.sci.eval-test/static-and-runtime-contracted-definitions-publish-identical-facts"
+             "seon.sci.eval-test/the-diagnostics-are-recorded-and-are-not-limits"
+             "seon.sci.eval-test/the-dispositions-are-callable-and-come-back-as-values"
+             "seon.sci.eval-test/the-evaluator-remains-live-after-its-namespace-reloads"
+             "seon.turn-test/a-refused-generated-form-records-its-refusal"
+             "seon.turn-test/a-refused-turn-write-is-bounded-and-commits-exactly-one-fault"
+             "seon.turn-test/generated-read-evidence-rejects-turn-activity"
+             "seon.turn-test/generated-system-runs-grow-only-after-their-settled-prefix"
+             "seon.turn-test/recovery-cannot-stamp-a-settled-receipt"
+             "seon.turn-test/refreshes-only-terminal-system-reads-once"
+             "seon.turn-test/settlement-mints-rows-for-unindexed-call-targets"
+             "seon.turn-test/settlement-refuses-a-divergent-program-change-since-opening"
+             "seon.turn-test/test-first-subjects-resolve-when-the-function-arrives"
+             "seon.turn-test/transitions-agree-with-the-model"
+             "seon.turn-test/virtual-turns-use-the-proc-and-compaction-is-agent-scoped"],
+            :attempts
+            [#:seon.test{:fail-count 0,
+                         :pass-count 2,
+                         :run-at #inst "2026-09-16T18:10:27.835-00:00",
+                         :reach-digest
+                         "414846a66d01626641fa26c7fa0266bfbc99daa76fcd8a1a9dda80d369390269",
+                         :run #:db{:id 59392},
+                         :run-basis-t 536871217,
+                         :error-count 0,
+                         :sym
+                         "seon.fn-test/analyze-form-refuses-an-unresolvable-namespace-reference"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 5,
+                         :run-at #inst "2026-09-16T18:10:50.249-00:00",
+                         :failures
+                         [{:seon.test.failure/last-run #:db{:id 59393},
+                           :seon.test.failure/first-run
+                           #:db{:id 59393},
+                           :seon.test.failure/type :error,
+                           :seon.test.failure/message
+                           "Worker-global state changed: #:seon.test.runner{:snapshot-instrumented #:seon.test.runner{:drift-removed [\"seon.plan/add!\" \"seon.plan/blocked\" \"seon.plan/complete!\" \"seon.plan/current\" \"seon.plan/item\" \"seon.plan/items\" \"seon.plan/plan\" \"seon.plan/ready\" \"seon.plan/ready-subjects\" \"seon.plan/run-issue-tests!\"], :drift-removed-count 14}}",
+                           :seon.test.failure/id "c847ad5b248e",
+                           :seon.test.failure/last-seen-at
+                           #inst "2026-09-16T18:10:50.249-00:00",
+                           :seon.test.failure/seen-count 1,
+                           :db/id 59394,
+                           :seon.test.failure/ordinal 0,
+                           :seon.test.failure/test #:db{:id 18959}}],
+                         :reach-digest
+                         "0bff777035c24018829e1e16d8eedd85e4b59a070d261c01a39b9471b072f68b",
+                         :failure-message
+                         "Worker-global state changed: #:seon.test.runner{:snapshot-instrumented #:seon.test.runner{:drift-removed [\"seon.plan/add!\" \"seon.plan/blocked\" \"seon.plan/complete!\" \"seon.plan/current\" \"seon.plan/item\" \"seon.plan/items\" \"seon.plan/plan\" \"seon.plan/ready\" \"seon.plan/ready-subjects\" \"seon.plan/run-issue-tests!\"], :drift-removed-count 14}}",
+                         :run #:db{:id 59393},
+                         :run-basis-t 536871218,
+                         :error-count 1,
+                         :sym
+                         "seon.fn-test/defining-forms-share-one-form-local-kondo-batch"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 11,
+                         :run-at #inst "2026-09-16T18:11:07.990-00:00",
+                         :reach-digest
+                         "e33aceb22c4e6e5f997836131bda999174afd4b866a0933dccb06e0f423b2e65",
+                         :run #:db{:id 59395},
+                         :run-basis-t 536871220,
+                         :error-count 0,
+                         :sym
+                         "seon.fn-test/fixture-observations-survive-static-and-runtime-admission"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 12,
+                         :run-at #inst "2026-09-16T18:11:32.694-00:00",
+                         :reach-digest
+                         "e5279945403c1f93b1b8be0377cadd2c0a12ef328c96b79095b1ade9c68c149d",
+                         :run #:db{:id 59396},
+                         :run-basis-t 536871221,
+                         :error-count 0,
+                         :sym
+                         "seon.fn-test/indexed-declarations-carry-exact-file-bytes"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 12,
+                         :run-at #inst "2026-09-16T18:12:03.291-00:00",
+                         :reach-digest
+                         "d885ca145d6acf36b9ea500187c8ca86b094687ee616aa7d54ae136c53dc850b",
+                         :run #:db{:id 59398},
+                         :run-basis-t 536871222,
+                         :error-count 0,
+                         :sym
+                         "seon.fn-test/ordinary-form-analysis-keeps-call-edges-without-a-declaration"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 4,
+                         :run-at #inst "2026-09-16T18:12:38.417-00:00",
+                         :reach-digest
+                         "9fd8242c3d26b55c4d82f7180f06bfa0656c2b41dbe10323a80dc24f7f7413d8",
+                         :run #:db{:id 59400},
+                         :run-basis-t 536871224,
+                         :error-count 0,
+                         :sym
+                         "seon.fn-test/settled-agent-form-has-static-index-edge-parity"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 12,
+                         :run-at #inst "2026-09-16T18:13:14.009-00:00",
+                         :reach-digest
+                         "cfa212d969428a03b2c1addfcc4d1a012c16030ea22528ce23af7ea352717f55",
+                         :run #:db{:id 59403},
+                         :run-basis-t 536871226,
+                         :error-count 0,
+                         :sym
+                         "seon.fn-test/settled-form-records-calls-across-every-program-namespace"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 5,
+                         :run-at #inst "2026-09-16T18:13:52.280-00:00",
+                         :reach-digest
+                         "6569f3ce074f01957bf3a3436e95782964cde437a5fde82fb4888dbc64781fa7",
+                         :run #:db{:id 59406},
+                         :run-basis-t 536871228,
+                         :error-count 0,
+                         :sym
+                         "seon.fn-test/static-index-and-runtime-admission-agree-on-analysis-facets"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 6,
+                         :run-at #inst "2026-09-16T18:14:28.519-00:00",
+                         :reach-digest
+                         "dac5561d2792f7033feab1fd4a3399f575e356702e15c87705acb022e29c6e04",
+                         :run #:db{:id 59408},
+                         :run-basis-t 536871231,
+                         :error-count 0,
+                         :sym
+                         "seon.program-test/declaration-admission-refuses-ambiguous-or-incomplete-rows"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 79,
+                         :run-at #inst "2026-09-16T18:15:05.941-00:00",
+                         :failures
+                         [{:seon.test.failure/last-run #:db{:id 59410},
+                           :seon.test.failure/first-run
+                           #:db{:id 59410},
+                           :seon.test.failure/type :error,
+                           :seon.test.failure/message
+                           "Worker-global state changed: #:seon.test.runner{:snapshot-instrumented #:seon.test.runner{:drift-removed [\"seon.bootstrap/help-value\" \"seon.cluster.agent/render-identity-ai\" \"seon.issue.opening/source\" \"seon.plan/settle-call\" \"seon.turn/episode-runs\" \"seon.turn/next-agent-work\" \"seon.turn/system-turn\" \"seon.turn/turn\"], :drift-removed-count 8}}",
+                           :seon.test.failure/id "b52465a4a37e",
+                           :seon.test.failure/last-seen-at
+                           #inst "2026-09-16T18:15:05.941-00:00",
+                           :seon.test.failure/seen-count 1,
+                           :db/id 59411,
+                           :seon.test.failure/ordinal 0,
+                           :seon.test.failure/test #:db{:id 19173}}],
+                         :reach-digest
+                         "5edb6d25240d0e37a1a256e3eb4afe4313025f438f2c536ad97950c6c184e9c2",
+                         :failure-message
+                         "Worker-global state changed: #:seon.test.runner{:snapshot-instrumented #:seon.test.runner{:drift-removed [\"seon.bootstrap/help-value\" \"seon.cluster.agent/render-identity-ai\" \"seon.issue.opening/source\" \"seon.plan/settle-call\" \"seon.turn/episode-runs\" \"seon.turn/next-agent-work\" \"seon.turn/system-turn\" \"seon.turn/turn\"], :drift-removed-count 8}}",
+                         :run #:db{:id 59410},
+                         :run-basis-t 536871233,
+                         :error-count 1,
+                         :sym
+                         "seon.program-test/every-declaration-row-satisfies-its-own-output-contract"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 21,
+                         :run-at #inst "2026-09-16T18:16:01.102-00:00",
+                         :reach-digest
+                         "ff63f76ee2333eaeace12b71b984924b317873fcb62ab83cbd59ea48cee2a86d",
+                         :run #:db{:id 59606},
+                         :run-basis-t 536871236,
+                         :error-count 0,
+                         :sym
+                         "seon.program-test/indexed-and-evaluated-declarations-are-the-same-entities"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 16,
+                         :run-at #inst "2026-09-16T18:22:47.882-00:00",
+                         :reach-digest
+                         "3bff2603aa089fa709449c09550df56e4a712e8ad50486d9ff50d526ef490b1a",
+                         :run #:db{:id 59615},
+                         :run-basis-t 536871241,
+                         :error-count 0,
+                         :sym
+                         "seon.program-test/reader-events-have-one-canonical-declaration-row"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 5,
+                         :run-at #inst "2026-09-16T18:24:31.830-00:00",
+                         :reach-digest
+                         "ad927a9870125d05197a4a20ed3540714f72a42825f6dec802018b8815071ff3",
+                         :run #:db{:id 59630},
+                         :run-basis-t 536871246,
+                         :error-count 0,
+                         :sym
+                         "seon.program-test/runtime-schema-declarations-project-namespaced-properties"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 7,
+                         :run-at #inst "2026-09-16T18:26:19.885-00:00",
+                         :reach-digest
+                         "52ad3e7a0a177a45e6d2dfc4ba4f549f573081c5072867db4447bd4eb234d1a7",
+                         :run #:db{:id 59702},
+                         :run-basis-t 536871251,
+                         :error-count 0,
+                         :sym
+                         "seon.program-test/typed-cross-namespace-deletion-retracts-function-and-test"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 5,
+                         :run-at #inst "2026-09-16T18:27:56.596-00:00",
+                         :reach-digest
+                         "b30720f694b53c569d2d43fd8ca680037d7f885c42900f0b6d6112a2f7ba440a",
+                         :run #:db{:id 59704},
+                         :run-basis-t 536871256,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/a-base-created-function-uses-the-invoking-threads-arm"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 1,
+                         :run-at #inst "2026-09-16T18:29:08.335-00:00",
+                         :reach-digest
+                         "f3eee6fdcfb9bce3d82ef67568601a9a597f268c281aaa9999453f9ff8d3d7fe",
+                         :run #:db{:id 59706},
+                         :run-basis-t 536871259,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/a-blocking-host-call-is-NOT-stopped-by-the-time-limit"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 4,
+                         :run-at #inst "2026-09-16T18:30:45.635-00:00",
+                         :reach-digest
+                         "44971fe09e0775a73b0c5bc2bb73a86ea07b6c1f337658be095ab7feac70d80c",
+                         :run #:db{:id 59708},
+                         :run-basis-t 536871261,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/a-failed-evaluation-records-reconstructable-throwable-data"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 3,
+                         :run-at #inst "2026-09-16T18:32:07.471-00:00",
+                         :reach-digest
+                         "9b13506a1cd3345e235d2b9e4636e0164c20dd8b205061917e5730a7c161a95f",
+                         :run #:db{:id 59713},
+                         :run-basis-t 536871263,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/a-foreign-armed-context-is-refused-as-a-value"}
+             #:seon.test{:failing-assertions
+                         ["74c0fa5b5170291b66ea835efec2099c0e69d8408b882c7f33dbf0d2ef0aa51c"],
+                         :fail-count 1,
+                         :pass-count 3,
+                         :run-at #inst "2026-09-16T18:32:42.965-00:00",
+                         :failures
+                         [{:seon.test.failure/last-run #:db{:id 59716},
+                           :seon.test.failure/first-run
+                           #:db{:id 59716},
+                           :seon.test.failure/expected
+                           "(ok? definition)",
+                           :seon.test.failure/file
+                           {:db/id 3782,
+                            :seon.fn.file/relative-path
+                            "test/seon/sci/eval_test.clj"},
+                           :seon.test.failure/expected-size 16,
+                           :seon.test.failure/type :fail,
+                           :seon.test.failure/id "4dc2ef8d3051",
+                           :seon.test.failure/last-seen-at
+                           #inst "2026-09-16T18:32:42.965-00:00",
+                           :seon.test.failure/actual-size 3489,
+                           :seon.test.failure/line 278,
+                           :seon.test.failure/seen-count 1,
+                           :db/id 59717,
+                           :seon.test.failure/ordinal 0,
+                           :seon.test.failure/actual
+                           "(not (ok? {:seon.cluster.eval/triage-edn \"#:clojure.error{:class clojure.lang.ExceptionInfo, :line 425, :cause \\\"seon.db/db refused connection at []: expected must be a Datahike connection object, live or released, got nil. Fix: must be a Datahike connection object, live or released\\\", :symbol seon.instrument/throwing-report$fn, :source \\\"instrument.clj\\\", :phase :execution}\", :seon.cluster.eval/error \"seon.db/db refused connection at []: expected must be a Datahike connection object, live or released, got nil. Fix: must be a Datahike connection object, live or released\", :seon.eval/duration-ms 4, :seon.print/options #:seon.print{:length nil, :level nil}, :seon.sci.admit/value {:seon.error/message \"seon.db/db refused connection at []: expected must be a Datahike connection object, live or released, got nil. Fix: must be a Datahike connection object, live or released\", :seon.instrument/contract-violated \"seon.db/db\", :seon.error/data {:seon.error/diagnostic-evidence #:seon.instrument{:problem-count 2, :caller \"seon.sci.eval (eval.clj:2472)\"}, :seon.error/diagnostic-expected [:or :seon.db/connection :seon.error/value], :seon.instrument/arglists ([] [connection]), :seon.instrument/problem-count 2, :seon.instrument/fn \"seon.db/db\", :seon.error/diagnostic-member :arguments, :seon.sci.eval/throwable \"clojure.lang.ExceptionInfo\", :seon.error/diagnostic-evidence-availability :seon.error/known, :seon.instrument/malli :malli.core/invalid-input, :seon.error/problems [#:seon.error{:path [], :argument \"connection\", :expected [:fn {:error/message \"must be a Datahike connection object, live or released\", :gen/gen #clojure.test.check.generators.Generator{:gen #object[clojure.test.check.generators$gen_fmap$fn__9035 0x1d40f40a \"clojure.test.check.generators$gen_fmap$fn__9035@1d40f40a\"]}, :seon.schema/identity-only true, :seon.schema/identity-projection seon.db/connection-identity} #'seon.db/connection-object?], :expected-description \"must be a Datahike connection object, live or released\", :offending nil, :actual-description \"nil\", :fix \"must be a Datahike connection object, live or released\", :schema-path [0 0 0]} #:seon.error{:path [], :argument \"connection\", :expected [:map [:seon.error/kind :seon.error/kind] [:seon.error/message :seon.error/message] [:seon.error/doc {:optional true} :seon.error/doc] [:seon.error/data {:optional true} :seon.error/data]], :expected-description \"a map\", :offending nil, :actual-description \"nil\", :fix \"Supply a map at [].\", :schema-path [0 1 0]}], :seon.sci.admit/record #:seon.eval{:fn-entries 0, :host-interop-count 0, :duration-ms 4, :allocated-bytes -1, :outcome :error}, :seon.error/diagnostic-layer :instrumentation, :seon.error/diagnostic-offending [nil], :seon.error/diagnostic-operation seon.db/db, :seon.error/diagnostic-cause :malli.core/invalid-input, :seon.instrument/caller \"seon.sci.eval (eval.clj:2472)\", :seon.instrument/arm :input}, :seon.error/kind :seon.instrument/contract-violated}, :seon.sci.eval/ending-ns user, :seon.cluster.eval/ns [:seon.ns/name user], :seon.sci.admit/record #:seon.eval{:fn-entries 0, :host-interop-count 0, :duration-ms 4, :allocated-bytes -1, :outcome :error}, :seon.eval/shown \"#:seon.error{:kind :seon.render.value/projection-failed, :message \\\"seon.sci.kernel/invoke refused argument 0 (0-based) at [:seon.db/db]: expected must be an immutable Datahike database value, got nil. Fix: must be an immutable Datahike database value Contract: :seon.sci.eval/invocation-request.\\\"}\"}))",
+                           :seon.test.failure/test #:db{:id 19617}}],
+                         :reach-digest
+                         "3633540324756518f8fc8511db5cc038f473750842fca36c9901e038efdcffeb",
+                         :failure-message
+                         "expected: (ok? definition)\nactual: (not (ok? {:seon.cluster.eval/error \"seon.db/db refused connection at []: expected must be a Datahike connection object, live or released, got nil. Fix: must be a Datahike connection object, live or released\", :seon.cluster.eval/ns [:seon.ns/name user], :seon.cluster.eval/triage-edn \"#:clojure.error{:class clojure.lang.ExceptionInfo, :line 425, :cause \\\"seon.db/db refused connection at []: expected must be a Datahike connection object, live or released, got nil. Fix: must be a Datahike connection object, live or released\\\", :symbol seon.instrument/throwing-report$fn, :source \\\"instrument.clj\\\", :phase :execution}\", :seon.eval/duration-ms 4, :seon.eval/shown \"#:seon.error{:kind :seon.render.value/projection-failed, :message \\\"seon.sci.kernel/invoke refused argument 0 (0-based) at [:seon.db/db]: expected must be an immutable Datahike database value, got nil. Fix: must be an immutable Datahike database value Contract: :seon.sci.eval/invocation-request.\\\"}\", :seon.print/options #:seon.print{:length nil, :level nil}, :seon.sci.admit/record #:seon.eval{:allocated-bytes -1, :duration-ms 4, :fn-entries 0, :host-interop-count 0, :outcome :error}, :seon.sci.admit/value {:seon.error/data {:seon.error/diagnostic-cause :malli.core/invalid-input, :seon.error/diagnostic-evidence #:seon.instrument{:caller \"seon.sci.eval (eval.clj:2472)\", :problem-count 2}, :seon.error/diagnostic-evidence-availability :seon.error/known, :seon.error/diagnostic-expected [:or :seon.db/connection :seon.error/value], :seon.error/diagnostic-layer :instrumentation, :seon.error/diagnostic-member :arguments, :seon.error/diagnostic-offending [nil], :seon.error/diagnostic-operation seon.db/db, :seon.error/problems [#:seon.error{:actual-description \"nil\", :argument \"connection\", :expected [:fn {:seon.print/bound-by :seon.render.profile/max-depth, :seon.print/elision-unit :subtree, :seon.print/omitted 4, :seon.print/prefix \"map depth 8 \", :seon.print/requery-refusal \"the value has no result handle\", :seon.render.data/next-offset 0, :seon.render.data/path [1 1 :seon.sci.admit/value :seon.error/data :seon.error/problems 0 :seon.error/expected 1], :seon.render.data/total 4} #'seon.db/connection-object?], :expected-description \"must be a Datahike connection object, live or released\", :fix \"must be a Datahike connection object, live or released\", :offending nil, :path [], :schema-path [0 0 0]} #:seon.error{:actual-description \"nil\", :argument \"connection\", :expected [:map {:seon.print/bound-by :seon.render.profile/max-depth, :seon.print/elision-unit :subtree, :seon.print/omitted 2, :seon.print/prefix \"vector depth 8 \", :seon.print/requery-refusal \"the value has no result handle\", :seon.render.data/next-offset 0, :seon.render.data/path [1 1 :seon.sci.admit/value :seon.error/data :seon.error/problems 1 :seon.error/expected 1], :seon.render.data/total 2} {:seon.print/bound-by :seon.render.profile/max-depth, :seon.print/elision-unit :subtree, :seon.print/omitted 2, :seon.print/prefix \"vector depth 8 \", :seon.print/requery-refusal \"the value has no result handle\", :seon.render.data/next-offset 0, :seon.render.data/path [1 1 :seon.sci.admit/value :seon.error/data :seon.error/problems 1 :seon.error/expected 2], :seon.render.data/total 2} {:seon.print/bound-by :seon.render.profile/max-depth, :seon.print/elision-unit :subtree, :seon.print/omitted 3, :seon.print/prefix \"vector depth 8 \", :seon.print/requery-refusal \"the value has no result handle\", :seon.render.data/next-offset 0, :seon.render.data/path [1 1 :seon.sci.admit/value :seon.error/data :seon.error/problems 1 :seon.error/expected 3], :seon.render.data/total 3} {:seon.print/bound-by :seon.render.profile/max-depth, :seon.print/elision-unit :subtree, :seon.print/omitted 3, :seon.print/prefix \"vector depth 8 \", :seon.print/requery-refusal \"the value has no result handle\", :seon.render.data/next-offset 0, :seon.render.data/path [1 1 :seon.sci.admit/value :seon.error/data :seon.error/problems 1 :seon.error/expected 4], :seon.render.data/total 3}], :expected-description \"a map\", :fix \"Supply a map at [].\", :offending nil, :path [], :schema-path [0 1 0]}], :seon.instrument/arglists ([] [connection]), :seon.instrument/arm :input, :seon.instrument/caller \"seon.sci.eval (eval.clj:2472)\", :seon.instrument/fn \"seon.db/db\", :seon.instrument/malli :malli.core/invalid-input, :seon.instrument/problem-count 2, :seon.sci.admit/record #:seon.eval{:allocated-bytes -1, :duration-ms 4, :fn-entries 0, :host-interop-count 0, :outcome :error}, :seon.sci.eval/throwable \"clojure.lang.ExceptionInfo\"}, :seon.error/kind :seon.instrument/contract-violated, :seon.error/message \"seon.db/db refused connection at []: expected must be a Datahike connection object, live or released, got nil. Fix: must be a Datahike connection object, live or released\", :seon.instrument/contract-violated \"seon.db/db\"}, :seon.sci.eval/ending-ns user}))",
+                         :run #:db{:id 59716},
+                         :run-basis-t 536871267,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/a-live-context-preserves-definition-value-class-and-metadata"}
+             #:seon.test{:failing-assertions
+                         ["87b5229d08204a94bea401cb03be4b0a8d15244b42559fe136f177be8d61b96b"],
+                         :fail-count 1,
+                         :pass-count 4,
+                         :run-at #inst "2026-09-16T18:33:01.621-00:00",
+                         :failures
+                         [{:seon.test.failure/last-run #:db{:id 59719},
+                           :seon.test.failure/first-run
+                           #:db{:id 59719},
+                           :seon.test.failure/expected
+                           "(ok? definition)",
+                           :seon.test.failure/file
+                           {:db/id 3782,
+                            :seon.fn.file/relative-path
+                            "test/seon/sci/eval_test.clj"},
+                           :seon.test.failure/expected-size 16,
+                           :seon.test.failure/type :fail,
+                           :seon.test.failure/id "17564bd228c9",
+                           :seon.test.failure/last-seen-at
+                           #inst "2026-09-16T18:33:01.621-00:00",
+                           :seon.test.failure/actual-size 3489,
+                           :seon.test.failure/line 1228,
+                           :seon.test.failure/seen-count 1,
+                           :db/id 59720,
+                           :seon.test.failure/ordinal 0,
+                           :seon.test.failure/actual
+                           "(not (ok? {:seon.cluster.eval/triage-edn \"#:clojure.error{:class clojure.lang.ExceptionInfo, :line 425, :cause \\\"seon.db/db refused connection at []: expected must be a Datahike connection object, live or released, got nil. Fix: must be a Datahike connection object, live or released\\\", :symbol seon.instrument/throwing-report$fn, :source \\\"instrument.clj\\\", :phase :execution}\", :seon.cluster.eval/error \"seon.db/db refused connection at []: expected must be a Datahike connection object, live or released, got nil. Fix: must be a Datahike connection object, live or released\", :seon.eval/duration-ms 2, :seon.print/options #:seon.print{:length nil, :level nil}, :seon.sci.admit/value {:seon.error/message \"seon.db/db refused connection at []: expected must be a Datahike connection object, live or released, got nil. Fix: must be a Datahike connection object, live or released\", :seon.instrument/contract-violated \"seon.db/db\", :seon.error/data {:seon.error/diagnostic-evidence #:seon.instrument{:problem-count 2, :caller \"seon.sci.eval (eval.clj:2472)\"}, :seon.error/diagnostic-expected [:or :seon.db/connection :seon.error/value], :seon.instrument/arglists ([] [connection]), :seon.instrument/problem-count 2, :seon.instrument/fn \"seon.db/db\", :seon.error/diagnostic-member :arguments, :seon.sci.eval/throwable \"clojure.lang.ExceptionInfo\", :seon.error/diagnostic-evidence-availability :seon.error/known, :seon.instrument/malli :malli.core/invalid-input, :seon.error/problems [#:seon.error{:path [], :argument \"connection\", :expected [:fn {:error/message \"must be a Datahike connection object, live or released\", :gen/gen #clojure.test.check.generators.Generator{:gen #object[clojure.test.check.generators$gen_fmap$fn__9035 0x1d40f40a \"clojure.test.check.generators$gen_fmap$fn__9035@1d40f40a\"]}, :seon.schema/identity-only true, :seon.schema/identity-projection seon.db/connection-identity} #'seon.db/connection-object?], :expected-description \"must be a Datahike connection object, live or released\", :offending nil, :actual-description \"nil\", :fix \"must be a Datahike connection object, live or released\", :schema-path [0 0 0]} #:seon.error{:path [], :argument \"connection\", :expected [:map [:seon.error/kind :seon.error/kind] [:seon.error/message :seon.error/message] [:seon.error/doc {:optional true} :seon.error/doc] [:seon.error/data {:optional true} :seon.error/data]], :expected-description \"a map\", :offending nil, :actual-description \"nil\", :fix \"Supply a map at [].\", :schema-path [0 1 0]}], :seon.sci.admit/record #:seon.eval{:fn-entries 0, :host-interop-count 0, :duration-ms 2, :allocated-bytes -1, :outcome :error}, :seon.error/diagnostic-layer :instrumentation, :seon.error/diagnostic-offending [nil], :seon.error/diagnostic-operation seon.db/db, :seon.error/diagnostic-cause :malli.core/invalid-input, :seon.instrument/caller \"seon.sci.eval (eval.clj:2472)\", :seon.instrument/arm :input}, :seon.error/kind :seon.instrument/contract-violated}, :seon.sci.eval/ending-ns user, :seon.cluster.eval/ns [:seon.ns/name user], :seon.sci.admit/record #:seon.eval{:fn-entries 0, :host-interop-count 0, :duration-ms 2, :allocated-bytes -1, :outcome :error}, :seon.eval/shown \"#:seon.error{:kind :seon.render.value/projection-failed, :message \\\"seon.sci.kernel/invoke refused argument 0 (0-based) at [:seon.db/db]: expected must be an immutable Datahike database value, got nil. Fix: must be an immutable Datahike database value Contract: :seon.sci.eval/invocation-request.\\\"}\"}))",
+                           :seon.test.failure/test #:db{:id 19618}}],
+                         :reach-digest
+                         "ce9112916a4533610f3a16ea25f9a1145c6429db5d9433bbfa59a71b6413f793",
+                         :failure-message
+                         "expected: (ok? definition)\nactual: (not (ok? {:seon.cluster.eval/error \"seon.db/db refused connection at []: expected must be a Datahike connection object, live or released, got nil. Fix: must be a Datahike connection object, live or released\", :seon.cluster.eval/ns [:seon.ns/name user], :seon.cluster.eval/triage-edn \"#:clojure.error{:class clojure.lang.ExceptionInfo, :line 425, :cause \\\"seon.db/db refused connection at []: expected must be a Datahike connection object, live or released, got nil. Fix: must be a Datahike connection object, live or released\\\", :symbol seon.instrument/throwing-report$fn, :source \\\"instrument.clj\\\", :phase :execution}\", :seon.eval/duration-ms 2, :seon.eval/shown \"#:seon.error{:kind :seon.render.value/projection-failed, :message \\\"seon.sci.kernel/invoke refused argument 0 (0-based) at [:seon.db/db]: expected must be an immutable Datahike database value, got nil. Fix: must be an immutable Datahike database value Contract: :seon.sci.eval/invocation-request.\\\"}\", :seon.print/options #:seon.print{:length nil, :level nil}, :seon.sci.admit/record #:seon.eval{:allocated-bytes -1, :duration-ms 2, :fn-entries 0, :host-interop-count 0, :outcome :error}, :seon.sci.admit/value {:seon.error/data {:seon.error/diagnostic-cause :malli.core/invalid-input, :seon.error/diagnostic-evidence #:seon.instrument{:caller \"seon.sci.eval (eval.clj:2472)\", :problem-count 2}, :seon.error/diagnostic-evidence-availability :seon.error/known, :seon.error/diagnostic-expected [:or :seon.db/connection :seon.error/value], :seon.error/diagnostic-layer :instrumentation, :seon.error/diagnostic-member :arguments, :seon.error/diagnostic-offending [nil], :seon.error/diagnostic-operation seon.db/db, :seon.error/problems [#:seon.error{:actual-description \"nil\", :argument \"connection\", :expected [:fn {:seon.print/bound-by :seon.render.profile/max-depth, :seon.print/elision-unit :subtree, :seon.print/omitted 4, :seon.print/prefix \"map depth 8 \", :seon.print/requery-refusal \"the value has no result handle\", :seon.render.data/next-offset 0, :seon.render.data/path [1 1 :seon.sci.admit/value :seon.error/data :seon.error/problems 0 :seon.error/expected 1], :seon.render.data/total 4} #'seon.db/connection-object?], :expected-description \"must be a Datahike connection object, live or released\", :fix \"must be a Datahike connection object, live or released\", :offending nil, :path [], :schema-path [0 0 0]} #:seon.error{:actual-description \"nil\", :argument \"connection\", :expected [:map {:seon.print/bound-by :seon.render.profile/max-depth, :seon.print/elision-unit :subtree, :seon.print/omitted 2, :seon.print/prefix \"vector depth 8 \", :seon.print/requery-refusal \"the value has no result handle\", :seon.render.data/next-offset 0, :seon.render.data/path [1 1 :seon.sci.admit/value :seon.error/data :seon.error/problems 1 :seon.error/expected 1], :seon.render.data/total 2} {:seon.print/bound-by :seon.render.profile/max-depth, :seon.print/elision-unit :subtree, :seon.print/omitted 2, :seon.print/prefix \"vector depth 8 \", :seon.print/requery-refusal \"the value has no result handle\", :seon.render.data/next-offset 0, :seon.render.data/path [1 1 :seon.sci.admit/value :seon.error/data :seon.error/problems 1 :seon.error/expected 2], :seon.render.data/total 2} {:seon.print/bound-by :seon.render.profile/max-depth, :seon.print/elision-unit :subtree, :seon.print/omitted 3, :seon.print/prefix \"vector depth 8 \", :seon.print/requery-refusal \"the value has no result handle\", :seon.render.data/next-offset 0, :seon.render.data/path [1 1 :seon.sci.admit/value :seon.error/data :seon.error/problems 1 :seon.error/expected 3], :seon.render.data/total 3} {:seon.print/bound-by :seon.render.profile/max-depth, :seon.print/elision-unit :subtree, :seon.print/omitted 3, :seon.print/prefix \"vector depth 8 \", :seon.print/requery-refusal \"the value has no result handle\", :seon.render.data/next-offset 0, :seon.render.data/path [1 1 :seon.sci.admit/value :seon.error/data :seon.error/problems 1 :seon.error/expected 4], :seon.render.data/total 3}], :expected-description \"a map\", :fix \"Supply a map at [].\", :offending nil, :path [], :schema-path [0 1 0]}], :seon.instrument/arglists ([] [connection]), :seon.instrument/arm :input, :seon.instrument/caller \"seon.sci.eval (eval.clj:2472)\", :seon.instrument/fn \"seon.db/db\", :seon.instrument/malli :malli.core/invalid-input, :seon.instrument/problem-count 2, :seon.sci.admit/record #:seon.eval{:allocated-bytes -1, :duration-ms 2, :fn-entries 0, :host-interop-count 0, :outcome :error}, :seon.sci.eval/throwable \"clojure.lang.ExceptionInfo\"}, :seon.error/kind :seon.instrument/contract-violated, :seon.error/message \"seon.db/db refused connection at []: expected must be a Datahike connection object, live or released, got nil. Fix: must be a Datahike connection object, live or released\", :seon.instrument/contract-violated \"seon.db/db\"}, :seon.sci.eval/ending-ns user}))",
+                         :run #:db{:id 59719},
+                         :run-basis-t 536871270,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/a-previously-defined-function-uses-the-current-evaluation-limit"}
+             #:seon.test{:failing-assertions
+                         ["11429cd269dc0cf1aa0e7cea990630bfd2a9b0a76e4a2485fa2023a2bf5e8f30"
+                          "426a780c30178334dd99b9d07dcdabe058eceda16197b255bcd3d3164a927915"
+                          "d7d1169253c4daf1d76c645eb5911da9e823a469714aa26c547cef2b22a468a0"],
+                         :fail-count 3,
+                         :pass-count 0,
+                         :run-at #inst "2026-09-16T18:33:19.423-00:00",
+                         :failures
+                         [{:seon.test.failure/last-run #:db{:id 59722},
+                           :seon.test.failure/first-run
+                           #:db{:id 59722},
+                           :seon.test.failure/expected
+                           "(ok? evaluation)",
+                           :seon.test.failure/file
+                           {:db/id 3782,
+                            :seon.fn.file/relative-path
+                            "test/seon/sci/eval_test.clj"},
+                           :seon.test.failure/expected-size 16,
+                           :seon.test.failure/type :fail,
+                           :seon.test.failure/message
+                           "the inherited arm evaluates, it does not throw",
+                           :seon.test.failure/id "fd305950a647",
+                           :seon.test.failure/last-seen-at
+                           #inst "2026-09-16T18:33:19.423-00:00",
+                           :seon.test.failure/actual-size 3489,
+                           :seon.test.failure/line 1911,
+                           :seon.test.failure/seen-count 1,
+                           :db/id 59723,
+                           :seon.test.failure/ordinal 0,
+                           :seon.test.failure/actual
+                           "(not (ok? {:seon.cluster.eval/triage-edn \"#:clojure.error{:class clojure.lang.ExceptionInfo, :line 425, :cause \\\"seon.db/db refused connection at []: expected must be a Datahike connection object, live or released, got nil. Fix: must be a Datahike connection object, live or released\\\", :symbol seon.instrument/throwing-report$fn, :source \\\"instrument.clj\\\", :phase :execution}\", :seon.cluster.eval/error \"seon.db/db refused connection at []: expected must be a Datahike connection object, live or released, got nil. Fix: must be a Datahike connection object, live or released\", :seon.eval/duration-ms 3, :seon.print/options #:seon.print{:length nil, :level nil}, :seon.sci.admit/value {:seon.error/message \"seon.db/db refused connection at []: expected must be a Datahike connection object, live or released, got nil. Fix: must be a Datahike connection object, live or released\", :seon.instrument/contract-violated \"seon.db/db\", :seon.error/data {:seon.error/diagnostic-evidence #:seon.instrument{:problem-count 2, :caller \"seon.sci.eval (eval.clj:2472)\"}, :seon.error/diagnostic-expected [:or :seon.db/connection :seon.error/value], :seon.instrument/arglists ([] [connection]), :seon.instrument/problem-count 2, :seon.instrument/fn \"seon.db/db\", :seon.error/diagnostic-member :arguments, :seon.sci.eval/throwable \"clojure.lang.ExceptionInfo\", :seon.error/diagnostic-evidence-availability :seon.error/known, :seon.instrument/malli :malli.core/invalid-input, :seon.error/problems [#:seon.error{:path [], :argument \"connection\", :expected [:fn {:error/message \"must be a Datahike connection object, live or released\", :gen/gen #clojure.test.check.generators.Generator{:gen #object[clojure.test.check.generators$gen_fmap$fn__9035 0x1d40f40a \"clojure.test.check.generators$gen_fmap$fn__9035@1d40f40a\"]}, :seon.schema/identity-only true, :seon.schema/identity-projection seon.db/connection-identity} #'seon.db/connection-object?], :expected-description \"must be a Datahike connection object, live or released\", :offending nil, :actual-description \"nil\", :fix \"must be a Datahike connection object, live or released\", :schema-path [0 0 0]} #:seon.error{:path [], :argument \"connection\", :expected [:map [:seon.error/kind :seon.error/kind] [:seon.error/message :seon.error/message] [:seon.error/doc {:optional true} :seon.error/doc] [:seon.error/data {:optional true} :seon.error/data]], :expected-description \"a map\", :offending nil, :actual-description \"nil\", :fix \"Supply a map at [].\", :schema-path [0 1 0]}], :seon.sci.admit/record #:seon.eval{:fn-entries 0, :host-interop-count 0, :duration-ms 3, :allocated-bytes -1, :outcome :error}, :seon.error/diagnostic-layer :instrumentation, :seon.error/diagnostic-offending [nil], :seon.error/diagnostic-operation seon.db/db, :seon.error/diagnostic-cause :malli.core/invalid-input, :seon.instrument/caller \"seon.sci.eval (eval.clj:2472)\", :seon.instrument/arm :input}, :seon.error/kind :seon.instrument/contract-violated}, :seon.sci.eval/ending-ns user, :seon.cluster.eval/ns [:seon.ns/name user], :seon.sci.admit/record #:seon.eval{:fn-entries 0, :host-interop-count 0, :duration-ms 3, :allocated-bytes -1, :outcome :error}, :seon.eval/shown \"#:seon.error{:kind :seon.render.value/projection-failed, :message \\\"seon.sci.kernel/invoke refused argument 0 (0-based) at [:seon.db/db]: expected must be an immutable Datahike database value, got nil. Fix: must be an immutable Datahike database value Contract: :seon.sci.eval/invocation-request.\\\"}\"}))",
+                           :seon.test.failure/test #:db{:id 19619}}
+                          {:seon.test.failure/last-run #:db{:id 59722},
+                           :seon.test.failure/first-run
+                           #:db{:id 59722},
+                           :seon.test.failure/expected
+                           "(= 3 (:seon.sci.admit/value evaluation))",
+                           :seon.test.failure/file
+                           {:db/id 3782,
+                            :seon.fn.file/relative-path
+                            "test/seon/sci/eval_test.clj"},
+                           :seon.test.failure/expected-size 40,
+                           :seon.test.failure/type :fail,
+                           :seon.test.failure/id "943adbaf1508",
+                           :seon.test.failure/last-seen-at
+                           #inst "2026-09-16T18:33:19.423-00:00",
+                           :seon.test.failure/actual-size 2289,
+                           :seon.test.failure/line 1912,
+                           :seon.test.failure/seen-count 1,
+                           :db/id 59724,
+                           :seon.test.failure/ordinal 0,
+                           :seon.test.failure/actual
+                           "(not (= 3 {:seon.error/message \"seon.db/db refused connection at []: expected must be a Datahike connection object, live or released, got nil. Fix: must be a Datahike connection object, live or released\", :seon.instrument/contract-violated \"seon.db/db\", :seon.error/data {:seon.error/diagnostic-evidence #:seon.instrument{:problem-count 2, :caller \"seon.sci.eval (eval.clj:2472)\"}, :seon.error/diagnostic-expected [:or :seon.db/connection :seon.error/value], :seon.instrument/arglists ([] [connection]), :seon.instrument/problem-count 2, :seon.instrument/fn \"seon.db/db\", :seon.error/diagnostic-member :arguments, :seon.sci.eval/throwable \"clojure.lang.ExceptionInfo\", :seon.error/diagnostic-evidence-availability :seon.error/known, :seon.instrument/malli :malli.core/invalid-input, :seon.error/problems [#:seon.error{:path [], :argument \"connection\", :expected [:fn {:error/message \"must be a Datahike connection object, live or released\", :gen/gen #clojure.test.check.generators.Generator{:gen #object[clojure.test.check.generators$gen_fmap$fn__9035 0x1d40f40a \"clojure.test.check.generators$gen_fmap$fn__9035@1d40f40a\"]}, :seon.schema/identity-only true, :seon.schema/identity-projection seon.db/connection-identity} #'seon.db/connection-object?], :expected-description \"must be a Datahike connection object, live or released\", :offending nil, :actual-description \"nil\", :fix \"must be a Datahike connection object, live or released\", :schema-path [0 0 0]} #:seon.error{:path [], :argument \"connection\", :expected [:map [:seon.error/kind :seon.error/kind] [:seon.error/message :seon.error/message] [:seon.error/doc {:optional true} :seon.error/doc] [:seon.error/data {:optional true} :seon.error/data]], :expected-description \"a map\", :offending nil, :actual-description \"nil\", :fix \"Supply a map at [].\", :schema-path [0 1 0]}], :seon.sci.admit/record #:seon.eval{:fn-entries 0, :host-interop-count 0, :duration-ms 3, :allocated-bytes -1, :outcome :error}, :seon.error/diagnostic-layer :instrumentation, :seon.error/diagnostic-offending [nil], :seon.error/diagnostic-operation seon.db/db, :seon.error/diagnostic-cause :malli.core/invalid-input, :seon.instrument/caller \"seon.sci.eval (eval.clj:2472)\", :seon.instrument/arm :input}, :seon.error/kind :seon.instrument/contract-violated}))",
+                           :seon.test.failure/test #:db{:id 19619}}
+                          {:seon.test.failure/last-run #:db{:id 59722},
+                           :seon.test.failure/first-run
+                           #:db{:id 59722},
+                           :seon.test.failure/expected
+                           "(ok? (run-in ctx \"(+ 2 2)\" 1000))",
+                           :seon.test.failure/file
+                           {:db/id 3782,
+                            :seon.fn.file/relative-path
+                            "test/seon/sci/eval_test.clj"},
+                           :seon.test.failure/expected-size 33,
+                           :seon.test.failure/type :fail,
+                           :seon.test.failure/message
+                           "the inherited arm left the outer owner's disarm intact",
+                           :seon.test.failure/id "0d5df831df06",
+                           :seon.test.failure/last-seen-at
+                           #inst "2026-09-16T18:33:19.423-00:00",
+                           :seon.test.failure/actual-size 3489,
+                           :seon.test.failure/line 1914,
+                           :seon.test.failure/seen-count 1,
+                           :db/id 59725,
+                           :seon.test.failure/ordinal 0,
+                           :seon.test.failure/actual
+                           "(not (ok? {:seon.cluster.eval/triage-edn \"#:clojure.error{:class clojure.lang.ExceptionInfo, :line 425, :cause \\\"seon.db/db refused connection at []: expected must be a Datahike connection object, live or released, got nil. Fix: must be a Datahike connection object, live or released\\\", :symbol seon.instrument/throwing-report$fn, :source \\\"instrument.clj\\\", :phase :execution}\", :seon.cluster.eval/error \"seon.db/db refused connection at []: expected must be a Datahike connection object, live or released, got nil. Fix: must be a Datahike connection object, live or released\", :seon.eval/duration-ms 1, :seon.print/options #:seon.print{:length nil, :level nil}, :seon.sci.admit/value {:seon.error/message \"seon.db/db refused connection at []: expected must be a Datahike connection object, live or released, got nil. Fix: must be a Datahike connection object, live or released\", :seon.instrument/contract-violated \"seon.db/db\", :seon.error/data {:seon.error/diagnostic-evidence #:seon.instrument{:problem-count 2, :caller \"seon.sci.eval (eval.clj:2472)\"}, :seon.error/diagnostic-expected [:or :seon.db/connection :seon.error/value], :seon.instrument/arglists ([] [connection]), :seon.instrument/problem-count 2, :seon.instrument/fn \"seon.db/db\", :seon.error/diagnostic-member :arguments, :seon.sci.eval/throwable \"clojure.lang.ExceptionInfo\", :seon.error/diagnostic-evidence-availability :seon.error/known, :seon.instrument/malli :malli.core/invalid-input, :seon.error/problems [#:seon.error{:path [], :argument \"connection\", :expected [:fn {:error/message \"must be a Datahike connection object, live or released\", :gen/gen #clojure.test.check.generators.Generator{:gen #object[clojure.test.check.generators$gen_fmap$fn__9035 0x1d40f40a \"clojure.test.check.generators$gen_fmap$fn__9035@1d40f40a\"]}, :seon.schema/identity-only true, :seon.schema/identity-projection seon.db/connection-identity} #'seon.db/connection-object?], :expected-description \"must be a Datahike connection object, live or released\", :offending nil, :actual-description \"nil\", :fix \"must be a Datahike connection object, live or released\", :schema-path [0 0 0]} #:seon.error{:path [], :argument \"connection\", :expected [:map [:seon.error/kind :seon.error/kind] [:seon.error/message :seon.error/message] [:seon.error/doc {:optional true} :seon.error/doc] [:seon.error/data {:optional true} :seon.error/data]], :expected-description \"a map\", :offending nil, :actual-description \"nil\", :fix \"Supply a map at [].\", :schema-path [0 1 0]}], :seon.sci.admit/record #:seon.eval{:fn-entries 0, :host-interop-count 0, :duration-ms 1, :allocated-bytes -1, :outcome :error}, :seon.error/diagnostic-layer :instrumentation, :seon.error/diagnostic-offending [nil], :seon.error/diagnostic-operation seon.db/db, :seon.error/diagnostic-cause :malli.core/invalid-input, :seon.instrument/caller \"seon.sci.eval (eval.clj:2472)\", :seon.instrument/arm :input}, :seon.error/kind :seon.instrument/contract-violated}, :seon.sci.eval/ending-ns user, :seon.cluster.eval/ns [:seon.ns/name user], :seon.sci.admit/record #:seon.eval{:fn-entries 0, :host-interop-count 0, :duration-ms 1, :allocated-bytes -1, :outcome :error}, :seon.eval/shown \"#:seon.error{:kind :seon.render.value/projection-failed, :message \\\"seon.sci.kernel/invoke refused argument 0 (0-based) at [:seon.db/db]: expected must be an immutable Datahike database value, got nil. Fix: must be an immutable Datahike database value Contract: :seon.sci.eval/invocation-request.\\\"}\"}))",
+                           :seon.test.failure/test #:db{:id 19619}}],
+                         :reach-digest
+                         "9ef901cecd4257d63b2bbc52b3defdcfed176d28002d0f8e5445ec42792c6924",
+                         :failure-message
+                         "the inherited arm evaluates, it does not throw\nexpected: (ok? evaluation)\nactual: (not (ok? {:seon.cluster.eval/error \"seon.db/db refused connection at []: expected must be a Datahike connection object, live or released, got nil. Fix: must be a Datahike connection object, live or released\", :seon.cluster.eval/ns [:seon.ns/name user], :seon.cluster.eval/triage-edn \"#:clojure.error{:class clojure.lang.ExceptionInfo, :line 425, :cause \\\"seon.db/db refused connection at []: expected must be a Datahike connection object, live or released, got nil. Fix: must be a Datahike connection object, live or released\\\", :symbol seon.instrument/throwing-report$fn, :source \\\"instrument.clj\\\", :phase :execution}\", :seon.eval/duration-ms 3, :seon.eval/shown \"#:seon.error{:kind :seon.render.value/projection-failed, :message \\\"seon.sci.kernel/invoke refused argument 0 (0-based) at [:seon.db/db]: expected must be an immutable Datahike database value, got nil. Fix: must be an immutable Datahike database value Contract: :seon.sci.eval/invocation-request.\\\"}\", :seon.print/options #:seon.print{:length nil, :level nil}, :seon.sci.admit/record #:seon.eval{:allocated-bytes -1, :duration-ms 3, :fn-entries 0, :host-interop-count 0, :outcome :error}, :seon.sci.admit/value {:seon.error/data {:seon.error/diagnostic-cause :malli.core/invalid-input, :seon.error/diagnostic-evidence #:seon.instrument{:caller \"seon.sci.eval (eval.clj:2472)\", :problem-count 2}, :seon.error/diagnostic-evidence-availability :seon.error/known, :seon.error/diagnostic-expected [:or :seon.db/connection :seon.error/value], :seon.error/diagnostic-layer :instrumentation, :seon.error/diagnostic-member :arguments, :seon.error/diagnostic-offending [nil], :seon.error/diagnostic-operation seon.db/db, :seon.error/problems [#:seon.error{:actual-description \"nil\", :argument \"connection\", :expected [:fn {:seon.print/bound-by :seon.render.profile/max-depth, :seon.print/elision-unit :subtree, :seon.print/omitted 4, :seon.print/prefix \"map depth 8 \", :seon.print/requery-refusal \"the value has no result handle\", :seon.render.data/next-offset 0, :seon.render.data/path [1 1 :seon.sci.admit/value :seon.error/data :seon.error/problems 0 :seon.error/expected 1], :seon.render.data/total 4} #'seon.db/connection-object?], :expected-description \"must be a Datahike connection object, live or released\", :fix \"must be a Datahike connection object, live or released\", :offending nil, :path [], :schema-path [0 0 0]} #:seon.error{:actual-description \"nil\", :argument \"connection\", :expected [:map {:seon.print/bound-by :seon.render.profile/max-depth, :seon.print/elision-unit :subtree, :seon.print/omitted 2, :seon.print/prefix \"vector depth 8 \", :seon.print/requery-refusal \"the value has no result handle\", :seon.render.data/next-offset 0, :seon.render.data/path [1 1 :seon.sci.admit/value :seon.error/data :seon.error/problems 1 :seon.error/expected 1], :seon.render.data/total 2} {:seon.print/bound-by :seon.render.profile/max-depth, :seon.print/elision-unit :subtree, :seon.print/omitted 2, :seon.print/prefix \"vector depth 8 \", :seon.print/requery-refusal \"the value has no result handle\", :seon.render.data/next-offset 0, :seon.render.data/path [1 1 :seon.sci.admit/value :seon.error/data :seon.error/problems 1 :seon.error/expected 2], :seon.render.data/total 2} {:seon.print/bound-by :seon.render.profile/max-depth, :seon.print/elision-unit :subtree, :seon.print/omitted 3, :seon.print/prefix \"vector depth 8 \", :seon.print/requery-refusal \"the value has no result handle\", :seon.render.data/next-offset 0, :seon.render.data/path [1 1 :seon.sci.admit/value :seon.error/data :seon.error/problems 1 :seon.error/expected 3], :seon.render.data/total 3} {:seon.print/bound-by :seon.render.profile/max-depth, :seon.print/elision-unit :subtree, :seon.print/omitted 3, :seon.print/prefix \"vector depth 8 \", :seon.print/requery-refusal \"the value has no result handle\", :seon.render.data/next-offset 0, :seon.render.data/path [1 1 :seon.sci.admit/value :seon.error/data :seon.error/problems 1 :seon.error/expected 4], :seon.render.data/total 3}], :expected-description \"a map\", :fix \"Supply a map at [].\", :offending nil, :path [], :schema-path [0 1 0]}], :seon.instrument/arglists ([] [connection]), :seon.instrument/arm :input, :seon.instrument/caller \"seon.sci.eval (eval.clj:2472)\", :seon.instrument/fn \"seon.db/db\", :seon.instrument/malli :malli.core/invalid-input, :seon.instrument/problem-count 2, :seon.sci.admit/record #:seon.eval{:allocated-bytes -1, :duration-ms 3, :fn-entries 0, :host-interop-count 0, :outcome :error}, :seon.sci.eval/throwable \"clojure.lang.ExceptionInfo\"}, :seon.error/kind :seon.instrument/contract-violated, :seon.error/message \"seon.db/db refused connection at []: expected must be a Datahike connection object, live or released, got nil. Fix: must be a Datahike connection object, live or released\", :seon.instrument/contract-violated \"seon.db/db\"}, :seon.sci.eval/ending-ns user}))\n\nexpected: (= 3 (:seon.sci.admit/value evaluation))\nactual: (not (= 3 {:seon.error/data {:seon.error/diagnostic-cause :malli.core/invalid-input, :seon.error/diagnostic-evidence #:seon.instrument{:caller \"seon.sci.eval (eval.clj:2472)\", :problem-count 2}, :seon.error/diagnostic-evidence-availability :seon.error/known, :seon.error/diagnostic-expected [:or :seon.db/connection :seon.error/value], :seon.error/diagnostic-layer :instrumentation, :seon.error/diagnostic-member :arguments, :seon.error/diagnostic-offending [nil], :seon.error/diagnostic-operation seon.db/db, :seon.error/problems [#:seon.error{:actual-description \"nil\", :argument \"connection\", :expected [:fn {:error/message \"must be a Datahike connection object, live or released\", :gen/gen {:seon.print/bound-by :seon.render.profile/max-depth, :seon.print/elision-unit :subtree, :seon.print/omitted 1, :seon.print/prefix \"map depth 8 \", :seon.print/requery-refusal \"the value has no result handle\", :seon.render.data/next-offset 0, :seon.render.data/path [1 2 :seon.error/data :seon.error/problems 0 :seon.error/expected 1 :gen/gen], :seon.render.data/total 1}, :seon.schema/identity-only true, :seon.schema/identity-projection seon.db/connection-identity} #'seon.db/connection-object?], :expected-description \"must be a Datahike connection object, live or released\", :fix \"must be a Datahike connection object, live or released\", :offending nil, :path [], :schema-path [0 0 0]} #:seon.error{:actual-description \"nil\", :argument \"connection\", :expected [:map [:seon.error/kind :seon.error/kind] [:seon.error/message :seon.error/message] [:seon.error/doc {:seon.print/bound-by :seon.render.profile/max-depth, :seon.print/elision-unit :subtree, :seon.print/omitted 1, :seon.print/prefix \"map depth 8 \", :seon.print/requery-refusal \"the value has no result handle\", :seon.render.data/next-offset 0, :seon.render.data/path [1 2 :seon.error/data :seon.error/problems 1 :seon.error/expected 3 1], :seon.render.data/total 1} :seon.error/doc] [:seon.error/data {:seon.print/bound-by :seon.render.profile/max-depth, :seon.print/elision-unit :subtree, :seon.print/omitted 1, :seon.print/prefix \"map depth 8 \", :seon.print/requery-refusal \"the value has no result handle\", :seon.render.data/next-offset 0, :seon.render.data/path [1 2 :seon.error/data :seon.error/problems 1 :seon.error/expected 4 1], :seon.render.data/total 1} :seon.error/data]], :expected-description \"a map\", :fix \"Supply a map at [].\", :offending nil, :path [], :schema-path [0 1 0]}], :seon.instrument/arglists ([] [connection]), :seon.instrument/arm :input, :seon.instrument/caller \"seon.sci.eval (eval.clj:2472)\", :seon.instrument/fn \"seon.db/db\", :seon.instrument/malli :malli.core/invalid-input, :seon.instrument/problem-count 2, :seon.sci.admit/record #:seon.eval{:allocated-bytes -1, :duration-ms 3, :fn-entries 0, :host-interop-count 0, :outcome :error}, :seon.sci.eval/throwable \"clojure.lang.ExceptionInfo\"}, :seon.error/kind :seon.instrument/contract-violated, :seon.error/message \"seon.db/db refused connection at []: expected must be a Datahike connection object, live or released, got nil. Fix: must be a Datahike connection object, live or released\", :seon.instrument/contract-violated \"seon.db/db\"}))\n\nthe inherited arm left the outer owner's disarm intact\nexpected: (ok? (run-in ctx \"(+ 2 2)\" 1000))\nactual: (not (ok? {:seon.cluster.eval/error \"seon.db/db refused connection at []: expected must be a Datahike connection object, live or released, got nil. Fix: must be a Datahike connection object, live or released\", :seon.cluster.eval/ns [:seon.ns/name user], :seon.cluster.eval/triage-edn \"#:clojure.error{:class clojure.lang.ExceptionInfo, :line 425, :cause \\\"seon.db/db refused connection at []: expected must be a Datahike connection object, live or released, got nil. Fix: must be a Datahike connection object, live or released\\\", :symbol seon.instrument/throwing-report$fn, :source \\\"instrument.clj\\\", :phase :execution}\", :seon.eval/duration-ms 1, :seon.eval/shown \"#:seon.error{:kind :seon.render.value/projection-failed, :message \\\"seon.sci.kernel/invoke refused argument 0 (0-based) at [:seon.db/db]: expected must be an immutable Datahike database value, got nil. Fix: must be an immutable Datahike database value Contract: :seon.sci.eval/invocation-request.\\\"}\", :seon.print/options #:seon.print{:length nil, :level nil}, :seon.sci.admit/record #:seon.eval{:allocated-bytes -1, :duration-ms 1, :fn-entries 0, :host-interop-count 0, :outcome :error}, :seon.sci.admit/value {:seon.error/data {:seon.error/diagnostic-cause :malli.core/invalid-input, :seon.error/diagnostic-evidence #:seon.instrument{:caller \"seon.sci.eval (eval.clj:2472)\", :problem-count 2}, :seon.error/diagnostic-evidence-availability :seon.error/known, :seon.error/diagnostic-expected [:or :seon.db/connection :seon.error/value], :seon.error/diagnostic-layer :instrumentation, :seon.error/diagnostic-member :arguments, :seon.error/diagnostic-offending [nil], :seon.error/diagnostic-operation seon.db/db, :seon.error/problems [#:seon.error{:actual-description \"nil\", :argument \"connection\", :expected [:fn {:seon.print/bound-by :seon.render.profile/max-depth, :seon.print/elision-unit :subtree, :seon.print/omitted 4, :seon.print/prefix \"map depth 8 \", :seon.print/requery-refusal \"the value has no result handle\", :seon.render.data/next-offset 0, :seon.render.data/path [1 1 :seon.sci.admit/value :seon.error/data :seon.error/problems 0 :seon.error/expected 1], :seon.render.data/total 4} #'seon.db/connection-object?], :expected-description \"must be a Datahike connection object, live or released\", :fix \"must be a Datahike connection object, live or released\", :offending nil, :path [], :schema-path [0 0 0]} #:seon.error{:actual-description \"nil\", :argument \"connection\", :expected [:map {:seon.print/bound-by :seon.render.profile/max-depth, :seon.print/elision-unit :subtree, :seon.print/omitted 2, :seon.print/prefix \"vector depth 8 \", :seon.print/requery-refusal \"the value has no result handle\", :seon.render.data/next-offset 0, :seon.render.data/path [1 1 :seon.sci.admit/value :seon.error/data :seon.error/problems 1 :seon.error/expected 1], :seon.render.data/total 2} {:seon.print/bound-by :seon.render.profile/max-depth, :seon.print/elision-unit :subtree, :seon.print/omitted 2, :seon.print/prefix \"vector depth 8 \", :seon.print/requery-refusal \"the value has no result handle\", :seon.render.data/next-offset 0, :seon.render.data/path [1 1 :seon.sci.admit/value :seon.error/data :seon.error/problems 1 :seon.error/expected 2], :seon.render.data/total 2} {:seon.print/bound-by :seon.render.profile/max-depth, :seon.print/elision-unit :subtree, :seon.print/omitted 3, :seon.print/prefix \"vector depth 8 \", :seon.print/requery-refusal \"the value has no result handle\", :seon.render.data/next-offset 0, :seon.render.data/path [1 1 :seon.sci.admit/value :seon.error/data :seon.error/problems 1 :seon.error/expected 3], :seon.render.data/total 3} {:seon.print/bound-by :seon.render.profile/max-depth, :seon.print/elision-unit :subtree, :seon.print/omitted 3, :seon.print/prefix \"vector depth 8 \", :seon.print/requery-refusal \"the value has no result handle\", :seon.render.data/next-offset 0, :seon.render.data/path [1 1 :seon.sci.admit/value :seon.error/data :seon.error/problems 1 :seon.error/expected 4], :seon.render.data/total 3}], :expected-description \"a map\", :fix \"Supply a map at [].\", :offending nil, :path [], :schema-path [0 1 0]}], :seon.instrument/arglists ([] [connection]), :seon.instrument/arm :input, :seon.instrument/caller \"seon.sci.eval (eval.clj:2472)\", :seon.instrument/fn \"seon.db/db\", :seon.instrument/malli :malli.core/invalid-input, :seon.instrument/problem-count 2, :seon.sci.admit/record #:seon.eval{:allocated-bytes -1, :duration-ms 1, :fn-entries 0, :host-interop-count 0, :outcome :error}, :seon.sci.eval/throwable \"clojure.lang.ExceptionInfo\"}, :seon.error/kind :seon.instrument/contract-violated, :seon.error/message \"seon.db/db refused connection at []: expected must be a Datahike connection object, live or released, got nil. Fix: must be a Datahike connection object, live or released\", :seon.instrument/contract-violated \"seon.db/db\"}, :seon.sci.eval/ending-ns user}))",
+                         :run #:db{:id 59722},
+                         :run-basis-t 536871272,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/a-re-entrant-evaluation-inherits-the-governing-arm"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 3,
+                         :run-at #inst "2026-09-16T18:33:38.484-00:00",
+                         :reach-digest
+                         "6c09cf9823ee729ddb0b3cbf07394ab47ee856ac2e50d6d9472405da943e8969",
+                         :run #:db{:id 59728},
+                         :run-basis-t 536871274,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/a-refusal-keeps-its-own-kind-at-both-entrances"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 8,
+                         :run-at #inst "2026-09-16T18:33:57.133-00:00",
+                         :reach-digest
+                         "6624f0d8e8713c0b366e3e65cf3e6bbce36327a323023138ed2011d7ac4ce993",
+                         :run #:db{:id 59730},
+                         :run-basis-t 536871277,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/a-selected-render-inherits-the-live-arm-or-owns-one-when-unarmed"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 5,
+                         :run-at #inst "2026-09-16T18:34:19.372-00:00",
+                         :reach-digest
+                         "103683701a7bced1c22b581dc097b44da34aa49f2d92e8c619828e7051aa99a5",
+                         :run #:db{:id 59735},
+                         :run-basis-t 536871279,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/a-set-print-length-survives-to-the-turns-next-form"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 3,
+                         :run-at #inst "2026-09-16T18:35:50.064-00:00",
+                         :failures
+                         [{:seon.test.failure/last-run #:db{:id 59738},
+                           :seon.test.failure/first-run
+                           #:db{:id 59738},
+                           :seon.test.failure/type :error,
+                           :seon.test.failure/message
+                           "Worker-global state changed: #:seon.test.runner{:snapshot-instrumented #:seon.test.runner{:drift-added [\"seon.sci.eval/evaluate\"], :drift-added-count 1}}",
+                           :seon.test.failure/id "1a2894c6f63b",
+                           :seon.test.failure/last-seen-at
+                           #inst "2026-09-16T18:35:50.064-00:00",
+                           :seon.test.failure/seen-count 1,
+                           :db/id 59739,
+                           :seon.test.failure/ordinal 0,
+                           :seon.test.failure/test #:db{:id 19623}}],
+                         :reach-digest
+                         "f6b300363ec8f7f2b64d21a064b783cc75e0de4bcad59ee1f002fae38fb3b4ba",
+                         :failure-message
+                         "Worker-global state changed: #:seon.test.runner{:snapshot-instrumented #:seon.test.runner{:drift-added [\"seon.sci.eval/evaluate\"], :drift-added-count 1}}",
+                         :run #:db{:id 59738},
+                         :run-basis-t 536871284,
+                         :error-count 1,
+                         :sym
+                         "seon.sci.eval-test/a-storable-declarations-committed-row-is-recognised-by-its-value"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 6,
+                         :run-at #inst "2026-09-16T18:36:13.074-00:00",
+                         :reach-digest
+                         "e52599501a00488a0838945268c42d25e92b9065d9e8079390db44742f0e4806",
+                         :run #:db{:id 59749},
+                         :run-basis-t 536871287,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/a-turn-fork-registers-an-empty-assigned-agent-namespace"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 4,
+                         :run-at #inst "2026-09-16T18:37:24.483-00:00",
+                         :reach-digest
+                         "8cbbf44221511fa100b02cefb0a5232c3286418e36d7ced5ed7454e913834f29",
+                         :run #:db{:id 59752},
+                         :run-basis-t 536871290,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/acquired-source-context-forks-have-branch-custody-and-private-defs"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 6,
+                         :run-at #inst "2026-09-16T18:37:53.889-00:00",
+                         :failures
+                         [{:seon.test.failure/last-run #:db{:id 59756},
+                           :seon.test.failure/first-run
+                           #:db{:id 59756},
+                           :seon.test.failure/type :error,
+                           :seon.test.failure/message
+                           "Worker-global state changed: #:seon.test.runner{:snapshot-instrumented #:seon.test.runner{:drift-removed [\"seon.issue/status\"], :drift-removed-count 1}}",
+                           :seon.test.failure/id "347383d5435f",
+                           :seon.test.failure/last-seen-at
+                           #inst "2026-09-16T18:37:53.889-00:00",
+                           :seon.test.failure/seen-count 1,
+                           :db/id 59757,
+                           :seon.test.failure/ordinal 0,
+                           :seon.test.failure/test #:db{:id 19628}}],
+                         :reach-digest
+                         "9b40b6da6c3ee0c069dd9fe9c60763262fdccc29f46386d08095b23290010337",
+                         :failure-message
+                         "Worker-global state changed: #:seon.test.runner{:snapshot-instrumented #:seon.test.runner{:drift-removed [\"seon.issue/status\"], :drift-removed-count 1}}",
+                         :run #:db{:id 59756},
+                         :run-basis-t 536871293,
+                         :error-count 1,
+                         :sym
+                         "seon.sci.eval-test/acquisition-binds-loaded-first-party-compiled-vars"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 4,
+                         :run-at #inst "2026-09-16T18:39:53.614-00:00",
+                         :reach-digest
+                         "fd1807849e4e7dc680b001a04fefff5a12475fe6b8c899e17d4a1aa843a190f1",
+                         :run #:db{:id 59761},
+                         :run-basis-t 536871297,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/agent-contracts-apply-on-acquire-and-cold-recovery"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 4,
+                         :run-at #inst "2026-09-16T18:40:18.514-00:00",
+                         :reach-digest
+                         "4bb9ecb5536d03984b56ee2a2316d8a5416b8c5b799ea788dec16eecfe25f66a",
+                         :run #:db{:id 59763},
+                         :run-basis-t 536871300,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/agent-owned-sci-var-metadata-remains-mutable"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 2,
+                         :run-at #inst "2026-09-16T18:40:35.051-00:00",
+                         :reach-digest
+                         "43da18f8ac2d0885643197bcb9a6dfbf4a3a264af19e38a465ab845e462cad89",
+                         :run #:db{:id 59776},
+                         :run-basis-t 536871302,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/agent-print-vars-are-captured-before-sci-bindings-unwind"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 4,
+                         :run-at #inst "2026-09-16T18:40:53.488-00:00",
+                         :reach-digest
+                         "215ea4b6a33398ab9821e6e101e19f062ee75bf0667c9cc539295671b9a7dd07",
+                         :run #:db{:id 59777},
+                         :run-basis-t 536871304,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/an-acquired-function-uses-the-current-evaluation-limit"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 3,
+                         :run-at #inst "2026-09-16T18:42:14.305-00:00",
+                         :reach-digest
+                         "66eb603c03c540ea86395b5b8c79d73dc207ba3e5494064e3a787c889170d202",
+                         :run #:db{:id 59779},
+                         :run-basis-t 536871305,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/an-agent-cannot-catch-the-interrupt"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 2,
+                         :run-at #inst "2026-09-16T18:42:35.807-00:00",
+                         :reach-digest
+                         "9c7f801ca8d9a88dc3d19eabf50105902abe42908aa5d5c34459bb269640b3fe",
+                         :run #:db{:id 59782},
+                         :run-basis-t 536871307,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/an-inherited-arm-keeps-the-governing-deadline"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 8,
+                         :run-at #inst "2026-09-16T18:43:04.068-00:00",
+                         :reach-digest
+                         "ab43c89b8d6a225695a0704c93602902caf69eb1ed1335f45205bea57c7ff987",
+                         :run #:db{:id 59785},
+                         :run-basis-t 536871310,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/an-instrumented-multi-arity-miss-reads-like-clojure"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 6,
+                         :run-at #inst "2026-09-16T18:44:33.929-00:00",
+                         :reach-digest
+                         "fdd11db8cfe42232a60205c4a6217022a3290e8d1213e729783dd5bfc41a703a",
+                         :run #:db{:id 59786},
+                         :run-basis-t 536871312,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/an-interpreted-infinite-loop-dies-at-the-limit"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 5,
+                         :run-at #inst "2026-09-16T18:45:03.387-00:00",
+                         :reach-digest
+                         "7824e87121d0871d3ca77efe4c374a83f7ac7ddb49984580b1e6079d6b6be031",
+                         :run #:db{:id 59789},
+                         :run-basis-t 536871313,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/an-unbound-var-remains-structured-after-production-admission"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 2,
+                         :run-at #inst "2026-09-16T18:45:20.869-00:00",
+                         :reach-digest
+                         "eafda340c20531c89d4788f58fd2cdb0173de3b4f5dd860d289939e62f736311",
+                         :run #:db{:id 59790},
+                         :run-basis-t 536871315,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/analysis-failure-exposes-scis-unresolved-symbol-as-data"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 19,
+                         :run-at #inst "2026-09-16T18:45:39.411-00:00",
+                         :reach-digest
+                         "3cfd8a7e0e77c1adcc28bca083b3c04de560364e60df95821ff0c63468cf4136",
+                         :run #:db{:id 59792},
+                         :run-basis-t 536871316,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/bare-dir-and-program-derived-doc-are-repl-native"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 17,
+                         :run-at #inst "2026-09-16T18:45:59.853-00:00",
+                         :reach-digest
+                         "acb308170cd2ec4aec101f3a70e2fc54540661c2ccd6ba64e3311e0e8bddb6ac",
+                         :run #:db{:id 59794},
+                         :run-basis-t 536871318,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/both-entrances-classify-one-failure-identically"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 2,
+                         :run-at #inst "2026-09-16T18:46:20.633-00:00",
+                         :reach-digest
+                         "829035272b2d65cff3e9795961d91947d515ed7e99e6581d35ba262dc4cf5813",
+                         :run #:db{:id 59798},
+                         :run-basis-t 536871320,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/call-preparation-receives-the-form-scoped-environment"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 10,
+                         :run-at #inst "2026-09-16T18:47:32.433-00:00",
+                         :reach-digest
+                         "33e98135f0382f981b7a21c5efd7c4216c103dc7813683d2b3632a838bb15664",
+                         :run #:db{:id 59801},
+                         :run-basis-t 536871324,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/compiled-runtime-metadata-cannot-be-changed-by-agent-code"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 18,
+                         :run-at #inst "2026-09-16T18:47:52.177-00:00",
+                         :reach-digest
+                         "47fce0d50cec314611d43fabba3f7f480455fdda79336aa28c87e98f5b42a809",
+                         :run #:db{:id 59805},
+                         :run-basis-t 536871327,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/compiled-runtime-roots-cannot-be-redefined-by-agent-code"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 4,
+                         :run-at #inst "2026-09-16T18:48:09.920-00:00",
+                         :reach-digest
+                         "8584943d1bb9a3955fb8c9082314f7452ad0d880c13948fa70b7465002a258d0",
+                         :run #:db{:id 59806},
+                         :run-basis-t 536871331,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/contracted-defn-renders-the-var-it-declared"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 4,
+                         :run-at #inst "2026-09-16T18:48:25.432-00:00",
+                         :reach-digest
+                         "51edec5f6d112db4cc9057c8228e97aeac3b85882c3f0528c8e44d73b08af482",
+                         :run #:db{:id 63584},
+                         :run-basis-t 536871332,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/disarm-clears-the-current-threads-flag-exactly"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 8,
+                         :run-at #inst "2026-09-16T18:48:46.366-00:00",
+                         :reach-digest
+                         "381c158ace1bcbba29d18d772d3a6184b5504de8bfd8be3867959603c4bd4c84",
+                         :run #:db{:id 63587},
+                         :run-basis-t 536871334,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/evaluate-invokes-eval-form-exactly-once-on-every-path"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 9,
+                         :run-at #inst "2026-09-16T18:49:17.137-00:00",
+                         :reach-digest
+                         "350130b997a486e1a811d286bc03a6d81f9fd5269f323e6d9fd77412029028dd",
+                         :run #:db{:id 63599},
+                         :run-basis-t 536871337,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/evaluation-custody-is-derived-only-from-the-cluster-context"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 7,
+                         :run-at #inst "2026-09-16T18:49:38.165-00:00",
+                         :reach-digest
+                         "a2da612cd5631fbd8b6c3f9421bdc5e1af6bab7279b1cc7da48c35cb5f2a4a61",
+                         :run #:db{:id 63604},
+                         :run-basis-t 536871339,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/evaluation-projection-prefers-the-live-context"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 3,
+                         :run-at #inst "2026-09-16T18:49:53.806-00:00",
+                         :reach-digest
+                         "0750ccfbbf38d5fbc386017a961ea7550770438136b5ab8a1958b9eeb58e641e",
+                         :run #:db{:id 63606},
+                         :run-basis-t 536871342,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/every-public-capability-function-in-the-graph-resolves-in-the-ctx"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 1,
+                         :run-at #inst "2026-09-16T18:50:07.533-00:00",
+                         :reach-digest
+                         "8b7591357148423595fab3972c0553690b8815d52b1e2b4bbea4f25a1052632a",
+                         :run #:db{:id 63608},
+                         :run-basis-t 536871344,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/generated-sources-compose-fork-guard-and-admission"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 2,
+                         :run-at #inst "2026-09-16T18:50:26.256-00:00",
+                         :reach-digest
+                         "d54fdb2ffad5cc4b8a249cc03a3851c5157bf838c675bcef61e955c6a5b20f8e",
+                         :run #:db{:id 63610},
+                         :run-basis-t 536871346,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/host-interop-is-observed-during-analysis"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 3,
+                         :run-at #inst "2026-09-16T18:50:39.656-00:00",
+                         :reach-digest
+                         "451e76c6b2a3088f37efce4b61493f76927b4c563a76619d564706b94fa3be05",
+                         :run #:db{:id 64026},
+                         :run-basis-t 536871348,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/instrumented-generated-form-does-not-advise-an-absent-program-row"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 2,
+                         :run-at #inst "2026-09-16T18:51:35.249-00:00",
+                         :reach-digest
+                         "f8c0b1798d74e481f87861ad8f96d91e6bcb8b2742524f202f94055b163e4a1a",
+                         :run #:db{:id 64028},
+                         :run-basis-t 536871354,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/isolated-one-off-evaluations-do-not-share-definitions"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 11,
+                         :run-at #inst "2026-09-16T18:51:47.655-00:00",
+                         :failures
+                         [{:seon.test.failure/last-run #:db{:id 64030},
+                           :seon.test.failure/first-run
+                           #:db{:id 64030},
+                           :seon.test.failure/type :error,
+                           :seon.test.failure/message
+                           "Worker-global state changed: #:seon.test.runner{:snapshot-instrumented #:seon.test.runner{:drift-removed [\"seon.cluster.registry/active-branch-connection\" \"seon.cluster.registry/branch!\" \"seon.cluster.registry/branch-commit-id\" \"seon.cluster.registry/cluster-branch\" \"seon.cluster.registry/collect!\" \"seon.cluster.registry/connection-branch-commit-id\" \"seon.cluster.registry/ensure-cluster!\" \"seon.cluster.registry/referenced-blobs\" \"seon.cluster.registry/reset-cluster!\" \"seon.cluster.registry/retire-branch!\"], :drift-removed-count 43}}",
+                           :seon.test.failure/id "8dcfcf1b95da",
+                           :seon.test.failure/last-seen-at
+                           #inst "2026-09-16T18:51:47.655-00:00",
+                           :seon.test.failure/seen-count 1,
+                           :db/id 64031,
+                           :seon.test.failure/ordinal 0,
+                           :seon.test.failure/test #:db{:id 19666}}],
+                         :reach-digest
+                         "d773bccc459583c793373dc727fc70b0fa215ef37013c2924d3ff2aead4e83c2",
+                         :failure-message
+                         "Worker-global state changed: #:seon.test.runner{:snapshot-instrumented #:seon.test.runner{:drift-removed [\"seon.cluster.registry/active-branch-connection\" \"seon.cluster.registry/branch!\" \"seon.cluster.registry/branch-commit-id\" \"seon.cluster.registry/cluster-branch\" \"seon.cluster.registry/collect!\" \"seon.cluster.registry/connection-branch-commit-id\" \"seon.cluster.registry/ensure-cluster!\" \"seon.cluster.registry/referenced-blobs\" \"seon.cluster.registry/reset-cluster!\" \"seon.cluster.registry/retire-branch!\"], :drift-removed-count 43}}",
+                         :run #:db{:id 64030},
+                         :run-basis-t 536871356,
+                         :error-count 1,
+                         :sym
+                         "seon.sci.eval-test/public-walk-is-callable-through-an-agent-sci-eval"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 2,
+                         :run-at #inst "2026-09-16T18:52:03.158-00:00",
+                         :reach-digest
+                         "fc060500d65d785b76cd8218e32bd9bea86378d30b31ae188f7c59cf5160be40",
+                         :run #:db{:id 64033},
+                         :run-basis-t 536871359,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/require-context-rows-persist-namespace-lookup-refs"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 3,
+                         :run-at #inst "2026-09-16T18:52:20.302-00:00",
+                         :reach-digest
+                         "2716103c94436f18c1a62bf2590cd5b492cefd7ba778ae0df23f362a0f61a18b",
+                         :run #:db{:id 64035},
+                         :run-basis-t 536871361,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/runtime-function-rows-carry-parsed-contract-facts"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 5,
+                         :run-at #inst "2026-09-16T18:52:41.754-00:00",
+                         :reach-digest
+                         "0d3b90faa0d08ff1c2e546cfecacdde9cf8f54c20c85464f6670b4eb42369e41",
+                         :run #:db{:id 64037},
+                         :run-basis-t 536871363,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/schema-and-contract-declarations-have-bounded-allocation"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 4,
+                         :run-at #inst "2026-09-16T18:53:21.295-00:00",
+                         :failures
+                         [{:seon.test.failure/last-run #:db{:id 64039},
+                           :seon.test.failure/first-run
+                           #:db{:id 64039},
+                           :seon.test.failure/type :error,
+                           :seon.test.failure/message
+                           "Worker-global state changed: #:seon.test.runner{:snapshot-instrumented #:seon.test.runner{:drift-removed [\"seon.cluster.source/upsert!\"], :drift-removed-count 1}}",
+                           :seon.test.failure/id "4cb6ca9faf8f",
+                           :seon.test.failure/last-seen-at
+                           #inst "2026-09-16T18:53:21.295-00:00",
+                           :seon.test.failure/seen-count 1,
+                           :db/id 64040,
+                           :seon.test.failure/ordinal 0,
+                           :seon.test.failure/test #:db{:id 19672}}],
+                         :reach-digest
+                         "07fb3fcb2a8d3e26f792877a8442fab0f5a561ebd88ee818f5e10ebb16ed2fc0",
+                         :failure-message
+                         "Worker-global state changed: #:seon.test.runner{:snapshot-instrumented #:seon.test.runner{:drift-removed [\"seon.cluster.source/upsert!\"], :drift-removed-count 1}}",
+                         :run #:db{:id 64039},
+                         :run-basis-t 536871365,
+                         :error-count 1,
+                         :sym
+                         "seon.sci.eval-test/static-and-runtime-contracted-definitions-publish-identical-facts"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 7,
+                         :run-at #inst "2026-09-16T18:55:34.421-00:00",
+                         :reach-digest
+                         "02079249a76c8d1fec23349691ff4569997fb2a130072dbdbd77787abba281e9",
+                         :run #:db{:id 65126},
+                         :run-basis-t 536871368,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/the-diagnostics-are-recorded-and-are-not-limits"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 4,
+                         :run-at #inst "2026-09-16T18:56:36.627-00:00",
+                         :reach-digest
+                         "d8e8740a0717c035e22e4d398f7614b6e07502cb243653faedf2a2f4e211801e",
+                         :run #:db{:id 65129},
+                         :run-basis-t 536871370,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/the-dispositions-are-callable-and-come-back-as-values"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 3,
+                         :run-at #inst "2026-09-16T18:57:12.811-00:00",
+                         :failures
+                         [{:seon.test.failure/last-run #:db{:id 65137},
+                           :seon.test.failure/first-run
+                           #:db{:id 65137},
+                           :seon.test.failure/type :error,
+                           :seon.test.failure/message
+                           "Worker-global state changed: #:seon.test.runner{:snapshot-instrumented #:seon.test.runner{:drift-removed [\"seon.sci.eval/accept-candidate!\" \"seon.sci.eval/acquire!\" \"seon.sci.eval/agent-namespace\" \"seon.sci.eval/auto-check-candidate\" \"seon.sci.eval/bind-result!\" \"seon.sci.eval/build-base-ctx\" \"seon.sci.eval/cluster-ctx\" \"seon.sci.eval/committed-row?\" \"seon.sci.eval/ctx?\" \"seon.sci.eval/directory-value\"], :drift-removed-count 24}}",
+                           :seon.test.failure/id "072d3d87bd4e",
+                           :seon.test.failure/last-seen-at
+                           #inst "2026-09-16T18:57:12.811-00:00",
+                           :seon.test.failure/seen-count 1,
+                           :db/id 65138,
+                           :seon.test.failure/ordinal 0,
+                           :seon.test.failure/test #:db{:id 19678}}],
+                         :reach-digest
+                         "d6b97545820c7dfc1f009cdb29cd024216decdbe214395436c298dece5d70248",
+                         :failure-message
+                         "Worker-global state changed: #:seon.test.runner{:snapshot-instrumented #:seon.test.runner{:drift-removed [\"seon.sci.eval/accept-candidate!\" \"seon.sci.eval/acquire!\" \"seon.sci.eval/agent-namespace\" \"seon.sci.eval/auto-check-candidate\" \"seon.sci.eval/bind-result!\" \"seon.sci.eval/build-base-ctx\" \"seon.sci.eval/cluster-ctx\" \"seon.sci.eval/committed-row?\" \"seon.sci.eval/ctx?\" \"seon.sci.eval/directory-value\"], :drift-removed-count 24}}",
+                         :run #:db{:id 65137},
+                         :run-basis-t 536871372,
+                         :error-count 1,
+                         :sym
+                         "seon.sci.eval-test/the-evaluator-remains-live-after-its-namespace-reloads"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 5,
+                         :run-at #inst "2026-09-16T18:57:31.887-00:00",
+                         :reach-digest
+                         "5e67a6f24c7733eca9485e4030e503dd6a893f5abb86307c89ed237cc9a59810",
+                         :run #:db{:id 65140},
+                         :run-basis-t 536871377,
+                         :error-count 0,
+                         :sym
+                         "seon.turn-test/a-refused-generated-form-records-its-refusal"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 14,
+                         :run-at #inst "2026-09-16T18:57:49.660-00:00",
+                         :reach-digest
+                         "a700f655cec0aac967ac87c1ac7b25487ecef3267e02410b89329713af90aa43",
+                         :run #:db{:id 65142},
+                         :run-basis-t 536871380,
+                         :error-count 0,
+                         :sym
+                         "seon.turn-test/a-refused-turn-write-is-bounded-and-commits-exactly-one-fault"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 6,
+                         :run-at #inst "2026-09-16T18:58:08.257-00:00",
+                         :reach-digest
+                         "76f21837387c6ba9beaef62b08039f4265a3bbff2bb4c823963e8dac671370a9",
+                         :run #:db{:id 65145},
+                         :run-basis-t 536871382,
+                         :error-count 0,
+                         :sym
+                         "seon.turn-test/generated-read-evidence-rejects-turn-activity"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 9,
+                         :run-at #inst "2026-09-16T18:58:28.519-00:00",
+                         :reach-digest
+                         "c6f75321c194a00d7e0fa4589d6325c6423812e9a8890b9d5df16f4d0d73ddeb",
+                         :run #:db{:id 65147},
+                         :run-basis-t 536871385,
+                         :error-count 0,
+                         :sym
+                         "seon.turn-test/generated-system-runs-grow-only-after-their-settled-prefix"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 4,
+                         :run-at #inst "2026-09-16T18:58:44.183-00:00",
+                         :reach-digest
+                         "b726537117b32c058966d94411f60479f2473fefddf96fdf0a207c97a1fe2f4b",
+                         :run #:db{:id 65151},
+                         :run-basis-t 536871387,
+                         :error-count 0,
+                         :sym
+                         "seon.turn-test/recovery-cannot-stamp-a-settled-receipt"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 8,
+                         :run-at #inst "2026-09-16T18:59:00.995-00:00",
+                         :reach-digest
+                         "2a3cea9f53b9b67e2633b9180a492db3cd69ce47e56d582f3db1eb0205696615",
+                         :run #:db{:id 65154},
+                         :run-basis-t 536871390,
+                         :error-count 0,
+                         :sym
+                         "seon.turn-test/refreshes-only-terminal-system-reads-once"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 10,
+                         :run-at #inst "2026-09-16T18:59:24.236-00:00",
+                         :reach-digest
+                         "95a2913dee94092ec1c089531d17350628604de198f2d3de443dc3b077088f64",
+                         :run #:db{:id 66184},
+                         :run-basis-t 536871393,
+                         :error-count 0,
+                         :sym
+                         "seon.turn-test/settlement-mints-rows-for-unindexed-call-targets"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 4,
+                         :run-at #inst "2026-09-16T19:00:32.761-00:00",
+                         :reach-digest
+                         "84ef75e3ca5cb488b0892024cd4e36aabc0f6d45b5df4973ad4a1cb6623987d9",
+                         :run #:db{:id 66187},
+                         :run-basis-t 536871399,
+                         :error-count 0,
+                         :sym
+                         "seon.turn-test/settlement-refuses-a-divergent-program-change-since-opening"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 6,
+                         :run-at #inst "2026-09-16T19:00:53.642-00:00",
+                         :failures
+                         [{:seon.test.failure/last-run #:db{:id 66189},
+                           :seon.test.failure/first-run
+                           #:db{:id 66189},
+                           :seon.test.failure/type :error,
+                           :seon.test.failure/message
+                           "Worker-global state changed: #:seon.test.runner{:snapshot-instrumented #:seon.test.runner{:drift-added [\"seon.cluster.registry/active-branch-connection\" \"seon.cluster.registry/branch!\" \"seon.cluster.registry/branch-commit-id\" \"seon.cluster.registry/connection-branch-commit-id\" \"seon.cluster.registry/roster\" \"seon.cluster.source/activation-refusal\" \"seon.cluster.source/current\" \"seon.cluster.source/digest\" \"seon.cluster.source/identity-tombstone-rows\" \"seon.cluster.source/upsert!\"], :drift-added-count 44}}",
+                           :seon.test.failure/id "10d9e3479e29",
+                           :seon.test.failure/last-seen-at
+                           #inst "2026-09-16T19:00:53.642-00:00",
+                           :seon.test.failure/seen-count 1,
+                           :db/id 66190,
+                           :seon.test.failure/ordinal 0,
+                           :seon.test.failure/test #:db{:id 19951}}],
+                         :reach-digest
+                         "042c9f51efc7ffcb971712c724ff940c28f69ecf7bfc2e885160989c763dd565",
+                         :failure-message
+                         "Worker-global state changed: #:seon.test.runner{:snapshot-instrumented #:seon.test.runner{:drift-added [\"seon.cluster.registry/active-branch-connection\" \"seon.cluster.registry/branch!\" \"seon.cluster.registry/branch-commit-id\" \"seon.cluster.registry/connection-branch-commit-id\" \"seon.cluster.registry/roster\" \"seon.cluster.source/activation-refusal\" \"seon.cluster.source/current\" \"seon.cluster.source/digest\" \"seon.cluster.source/identity-tombstone-rows\" \"seon.cluster.source/upsert!\"], :drift-added-count 44}}",
+                         :run #:db{:id 66189},
+                         :run-basis-t 536871402,
+                         :error-count 1,
+                         :sym
+                         "seon.turn-test/test-first-subjects-resolve-when-the-function-arrives"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 1,
+                         :run-at #inst "2026-09-16T19:01:14.201-00:00",
+                         :reach-digest
+                         "f6269ad05642dc1a740562d2a379604f755ace78259001ff617f91a489f13482",
+                         :run #:db{:id 66268},
+                         :run-basis-t 536871405,
+                         :error-count 0,
+                         :sym
+                         "seon.turn-test/transitions-agree-with-the-model"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 246,
+                         :run-at #inst "2026-09-16T19:01:37.197-00:00",
+                         :reach-digest
+                         "63abcf69e0e6c5359033edcb33dc2e92999d861dfe4630184e2fe3a324ce0c60",
+                         :run #:db{:id 66395},
+                         :run-basis-t 536871416,
+                         :error-count 0,
+                         :sym
+                         "seon.turn-test/virtual-turns-use-the-proc-and-compaction-is-agent-scoped"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 5,
+                         :run-at #inst "2026-09-16T19:02:22.234-00:00",
+                         :failures
+                         [{:seon.test.failure/last-run #:db{:id 67171},
+                           :seon.test.failure/first-run
+                           #:db{:id 67171},
+                           :seon.test.failure/type :error,
+                           :seon.test.failure/message
+                           "Worker-global state changed: #:seon.test.runner{:snapshot-instrumented #:seon.test.runner{:drift-removed [\"seon.cluster.source/record-results!\" \"seon.cluster.source/upsert!\"], :drift-removed-count 2}}",
+                           :seon.test.failure/id "9f40d997a34e",
+                           :seon.test.failure/last-seen-at
+                           #inst "2026-09-16T19:02:22.234-00:00",
+                           :seon.test.failure/seen-count 1,
+                           :db/id 67172,
+                           :seon.test.failure/ordinal 0,
+                           :seon.test.failure/test #:db{:id 18959}}],
+                         :reach-digest
+                         "0bff777035c24018829e1e16d8eedd85e4b59a070d261c01a39b9471b072f68b",
+                         :failure-message
+                         "Worker-global state changed: #:seon.test.runner{:snapshot-instrumented #:seon.test.runner{:drift-removed [\"seon.cluster.source/record-results!\" \"seon.cluster.source/upsert!\"], :drift-removed-count 2}}",
+                         :run #:db{:id 67171},
+                         :run-basis-t 536871441,
+                         :error-count 1,
+                         :sym
+                         "seon.fn-test/defining-forms-share-one-form-local-kondo-batch"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 79,
+                         :run-at #inst "2026-09-16T19:03:21.345-00:00",
+                         :reach-digest
+                         "80125fe85aa90657c41a42ac8201af721fc0239ec3bdba837e0f242e71070eb0",
+                         :run #:db{:id 67193},
+                         :run-basis-t 536871477,
+                         :error-count 0,
+                         :sym
+                         "seon.program-test/every-declaration-row-satisfies-its-own-output-contract"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 21,
+                         :run-at #inst "2026-09-16T19:03:46.040-00:00",
+                         :failures
+                         [{:seon.test.failure/last-run #:db{:id 67326},
+                           :seon.test.failure/first-run
+                           #:db{:id 67326},
+                           :seon.test.failure/type :error,
+                           :seon.test.failure/message
+                           "Worker-global state changed: #:seon.test.runner{:snapshot-instrumented #:seon.test.runner{:drift-added [\"seon.cluster.source/record-results!\" \"seon.cluster.source/upsert!\" \"seon.cluster/activation-missing\" \"seon.cluster/banner\" \"seon.cluster/cluster-name?\" \"seon.cluster/cluster-paths\" \"seon.cluster/derive-activation\" \"seon.cluster/ensure-cluster-entity!\" \"seon.cluster/ensure-entity!\" \"seon.cluster/ensure-entity-call\"], :drift-added-count 64}}",
+                           :seon.test.failure/id "3bb8afd3b054",
+                           :seon.test.failure/last-seen-at
+                           #inst "2026-09-16T19:03:46.040-00:00",
+                           :seon.test.failure/seen-count 1,
+                           :db/id 67327,
+                           :seon.test.failure/ordinal 0,
+                           :seon.test.failure/test #:db{:id 55434}}],
+                         :reach-digest
+                         "275d3966ffa3fc9dd4002dfed7839b3a45c32ab860397d35bfe825332108a680",
+                         :failure-message
+                         "Worker-global state changed: #:seon.test.runner{:snapshot-instrumented #:seon.test.runner{:drift-added [\"seon.cluster.source/record-results!\" \"seon.cluster.source/upsert!\" \"seon.cluster/activation-missing\" \"seon.cluster/banner\" \"seon.cluster/cluster-name?\" \"seon.cluster/cluster-paths\" \"seon.cluster/derive-activation\" \"seon.cluster/ensure-cluster-entity!\" \"seon.cluster/ensure-entity!\" \"seon.cluster/ensure-entity-call\"], :drift-added-count 64}}",
+                         :run #:db{:id 67326},
+                         :run-basis-t 536871483,
+                         :error-count 1,
+                         :sym
+                         "seon.program-test/indexed-and-evaluated-declarations-are-the-same-entities"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 4,
+                         :run-at #inst "2026-09-16T19:04:20.665-00:00",
+                         :reach-digest
+                         "3f47b35fb5f4fe703d5ab090dc0fc587071691b4512297de500b0da2e6aa1500",
+                         :run #:db{:id 67381},
+                         :run-basis-t 536871501,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/a-live-context-preserves-definition-value-class-and-metadata"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 5,
+                         :run-at #inst "2026-09-16T19:04:41.664-00:00",
+                         :reach-digest
+                         "0c21542085d4efd7c6910b357534f053f07cad33715bcbcd5d30e41ebbdb1cd3",
+                         :run #:db{:id 67451},
+                         :run-basis-t 536871511,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/a-previously-defined-function-uses-the-current-evaluation-limit"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 3,
+                         :run-at #inst "2026-09-16T19:04:59.139-00:00",
+                         :reach-digest
+                         "b6811b25055736298ee8bf6dd822bdbc48ff73e3d15f4ec692e65695e3e0a966",
+                         :run #:db{:id 67544},
+                         :run-basis-t 536871523,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/a-re-entrant-evaluation-inherits-the-governing-arm"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 3,
+                         :run-at #inst "2026-09-16T19:05:19.042-00:00",
+                         :reach-digest
+                         "f6b300363ec8f7f2b64d21a064b783cc75e0de4bcad59ee1f002fae38fb3b4ba",
+                         :run #:db{:id 68823},
+                         :run-basis-t 536871535,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/a-storable-declarations-committed-row-is-recognised-by-its-value"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 6,
+                         :run-at #inst "2026-09-16T19:06:12.036-00:00",
+                         :reach-digest
+                         "eec7a43cd291b18c8b9046c812c52613731fa08ad3ce577b9e3e708dba062483",
+                         :run #:db{:id 68892},
+                         :run-basis-t 536871569,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/acquisition-binds-loaded-first-party-compiled-vars"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 11,
+                         :run-at #inst "2026-09-16T19:06:31.451-00:00",
+                         :reach-digest
+                         "d773bccc459583c793373dc727fc70b0fa215ef37013c2924d3ff2aead4e83c2",
+                         :run #:db{:id 68946},
+                         :run-basis-t 536871578,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/public-walk-is-callable-through-an-agent-sci-eval"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 4,
+                         :run-at #inst "2026-09-16T19:06:48.587-00:00",
+                         :reach-digest
+                         "07fb3fcb2a8d3e26f792877a8442fab0f5a561ebd88ee818f5e10ebb16ed2fc0",
+                         :run #:db{:id 69136},
+                         :run-basis-t 536871583,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/static-and-runtime-contracted-definitions-publish-identical-facts"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 3,
+                         :run-at #inst "2026-09-16T19:07:28.820-00:00",
+                         :failures
+                         [{:seon.test.failure/last-run #:db{:id 69214},
+                           :seon.test.failure/first-run
+                           #:db{:id 69214},
+                           :seon.test.failure/type :error,
+                           :seon.test.failure/message
+                           "Worker-global state changed: #:seon.test.runner{:snapshot-instrumented #:seon.test.runner{:drift-removed [\"seon.sci.eval/accept-candidate!\" \"seon.sci.eval/acquire!\" \"seon.sci.eval/agent-namespace\" \"seon.sci.eval/auto-check-candidate\" \"seon.sci.eval/bind-result!\" \"seon.sci.eval/build-base-ctx\" \"seon.sci.eval/cluster-ctx\" \"seon.sci.eval/committed-row?\" \"seon.sci.eval/ctx?\" \"seon.sci.eval/directory-value\"], :drift-removed-count 24}}",
+                           :seon.test.failure/id "072d3d87bd4e",
+                           :seon.test.failure/last-seen-at
+                           #inst "2026-09-16T19:07:28.820-00:00",
+                           :seon.test.failure/seen-count 1,
+                           :db/id 69215,
+                           :seon.test.failure/ordinal 0,
+                           :seon.test.failure/test #:db{:id 19678}}],
+                         :reach-digest
+                         "d6b97545820c7dfc1f009cdb29cd024216decdbe214395436c298dece5d70248",
+                         :failure-message
+                         "Worker-global state changed: #:seon.test.runner{:snapshot-instrumented #:seon.test.runner{:drift-removed [\"seon.sci.eval/accept-candidate!\" \"seon.sci.eval/acquire!\" \"seon.sci.eval/agent-namespace\" \"seon.sci.eval/auto-check-candidate\" \"seon.sci.eval/bind-result!\" \"seon.sci.eval/build-base-ctx\" \"seon.sci.eval/cluster-ctx\" \"seon.sci.eval/committed-row?\" \"seon.sci.eval/ctx?\" \"seon.sci.eval/directory-value\"], :drift-removed-count 24}}",
+                         :run #:db{:id 69214},
+                         :run-basis-t 536871604,
+                         :error-count 1,
+                         :sym
+                         "seon.sci.eval-test/the-evaluator-remains-live-after-its-namespace-reloads"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 6,
+                         :run-at #inst "2026-09-16T19:07:46.449-00:00",
+                         :reach-digest
+                         "042c9f51efc7ffcb971712c724ff940c28f69ecf7bfc2e885160989c763dd565",
+                         :run #:db{:id 69383},
+                         :run-basis-t 536871611,
+                         :error-count 0,
+                         :sym
+                         "seon.turn-test/test-first-subjects-resolve-when-the-function-arrives"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 5,
+                         :run-at #inst "2026-09-16T19:08:37.165-00:00",
+                         :reach-digest
+                         "0bff777035c24018829e1e16d8eedd85e4b59a070d261c01a39b9471b072f68b",
+                         :run #:db{:id 69386},
+                         :run-basis-t 536871614,
+                         :error-count 0,
+                         :sym
+                         "seon.fn-test/defining-forms-share-one-form-local-kondo-batch"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 21,
+                         :run-at #inst "2026-09-16T19:08:56.335-00:00",
+                         :reach-digest
+                         "275d3966ffa3fc9dd4002dfed7839b3a45c32ab860397d35bfe825332108a680",
+                         :run #:db{:id 69389},
+                         :run-basis-t 536871617,
+                         :error-count 0,
+                         :sym
+                         "seon.program-test/indexed-and-evaluated-declarations-are-the-same-entities"}
+             #:seon.test{:fail-count 0,
+                         :pass-count 4,
+                         :run-at #inst "2026-09-16T19:09:25.475-00:00",
+                         :reach-digest
+                         "07d97e53119183024187b9292b25d35e6e21eca543fda14c40ce38a83ae63ab6",
+                         :run #:db{:id 69391},
+                         :run-basis-t 536871619,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/the-evaluator-remains-live-after-its-namespace-reloads"}],
+            :latest
+            {"seon.fn-test/analyze-form-refuses-an-unresolvable-namespace-reference"
+             #:seon.test{:fail-count 0,
+                         :pass-count 2,
+                         :run-at #inst "2026-09-16T18:10:27.835-00:00",
+                         :reach-digest
+                         "414846a66d01626641fa26c7fa0266bfbc99daa76fcd8a1a9dda80d369390269",
+                         :run #:db{:id 59392},
+                         :run-basis-t 536871217,
+                         :error-count 0,
+                         :sym
+                         "seon.fn-test/analyze-form-refuses-an-unresolvable-namespace-reference"},
+             "seon.fn-test/defining-forms-share-one-form-local-kondo-batch"
+             #:seon.test{:fail-count 0,
+                         :pass-count 5,
+                         :run-at #inst "2026-09-16T19:08:37.165-00:00",
+                         :reach-digest
+                         "0bff777035c24018829e1e16d8eedd85e4b59a070d261c01a39b9471b072f68b",
+                         :run #:db{:id 69386},
+                         :run-basis-t 536871614,
+                         :error-count 0,
+                         :sym
+                         "seon.fn-test/defining-forms-share-one-form-local-kondo-batch"},
+             "seon.fn-test/fixture-observations-survive-static-and-runtime-admission"
+             #:seon.test{:fail-count 0,
+                         :pass-count 11,
+                         :run-at #inst "2026-09-16T18:11:07.990-00:00",
+                         :reach-digest
+                         "e33aceb22c4e6e5f997836131bda999174afd4b866a0933dccb06e0f423b2e65",
+                         :run #:db{:id 59395},
+                         :run-basis-t 536871220,
+                         :error-count 0,
+                         :sym
+                         "seon.fn-test/fixture-observations-survive-static-and-runtime-admission"},
+             "seon.fn-test/indexed-declarations-carry-exact-file-bytes"
+             #:seon.test{:fail-count 0,
+                         :pass-count 12,
+                         :run-at #inst "2026-09-16T18:11:32.694-00:00",
+                         :reach-digest
+                         "e5279945403c1f93b1b8be0377cadd2c0a12ef328c96b79095b1ade9c68c149d",
+                         :run #:db{:id 59396},
+                         :run-basis-t 536871221,
+                         :error-count 0,
+                         :sym
+                         "seon.fn-test/indexed-declarations-carry-exact-file-bytes"},
+             "seon.fn-test/ordinary-form-analysis-keeps-call-edges-without-a-declaration"
+             #:seon.test{:fail-count 0,
+                         :pass-count 12,
+                         :run-at #inst "2026-09-16T18:12:03.291-00:00",
+                         :reach-digest
+                         "d885ca145d6acf36b9ea500187c8ca86b094687ee616aa7d54ae136c53dc850b",
+                         :run #:db{:id 59398},
+                         :run-basis-t 536871222,
+                         :error-count 0,
+                         :sym
+                         "seon.fn-test/ordinary-form-analysis-keeps-call-edges-without-a-declaration"},
+             "seon.fn-test/settled-agent-form-has-static-index-edge-parity"
+             #:seon.test{:fail-count 0,
+                         :pass-count 4,
+                         :run-at #inst "2026-09-16T18:12:38.417-00:00",
+                         :reach-digest
+                         "9fd8242c3d26b55c4d82f7180f06bfa0656c2b41dbe10323a80dc24f7f7413d8",
+                         :run #:db{:id 59400},
+                         :run-basis-t 536871224,
+                         :error-count 0,
+                         :sym
+                         "seon.fn-test/settled-agent-form-has-static-index-edge-parity"},
+             "seon.fn-test/settled-form-records-calls-across-every-program-namespace"
+             #:seon.test{:fail-count 0,
+                         :pass-count 12,
+                         :run-at #inst "2026-09-16T18:13:14.009-00:00",
+                         :reach-digest
+                         "cfa212d969428a03b2c1addfcc4d1a012c16030ea22528ce23af7ea352717f55",
+                         :run #:db{:id 59403},
+                         :run-basis-t 536871226,
+                         :error-count 0,
+                         :sym
+                         "seon.fn-test/settled-form-records-calls-across-every-program-namespace"},
+             "seon.fn-test/static-index-and-runtime-admission-agree-on-analysis-facets"
+             #:seon.test{:fail-count 0,
+                         :pass-count 5,
+                         :run-at #inst "2026-09-16T18:13:52.280-00:00",
+                         :reach-digest
+                         "6569f3ce074f01957bf3a3436e95782964cde437a5fde82fb4888dbc64781fa7",
+                         :run #:db{:id 59406},
+                         :run-basis-t 536871228,
+                         :error-count 0,
+                         :sym
+                         "seon.fn-test/static-index-and-runtime-admission-agree-on-analysis-facets"},
+             "seon.program-test/declaration-admission-refuses-ambiguous-or-incomplete-rows"
+             #:seon.test{:fail-count 0,
+                         :pass-count 6,
+                         :run-at #inst "2026-09-16T18:14:28.519-00:00",
+                         :reach-digest
+                         "dac5561d2792f7033feab1fd4a3399f575e356702e15c87705acb022e29c6e04",
+                         :run #:db{:id 59408},
+                         :run-basis-t 536871231,
+                         :error-count 0,
+                         :sym
+                         "seon.program-test/declaration-admission-refuses-ambiguous-or-incomplete-rows"},
+             "seon.program-test/every-declaration-row-satisfies-its-own-output-contract"
+             #:seon.test{:fail-count 0,
+                         :pass-count 79,
+                         :run-at #inst "2026-09-16T19:03:21.345-00:00",
+                         :reach-digest
+                         "80125fe85aa90657c41a42ac8201af721fc0239ec3bdba837e0f242e71070eb0",
+                         :run #:db{:id 67193},
+                         :run-basis-t 536871477,
+                         :error-count 0,
+                         :sym
+                         "seon.program-test/every-declaration-row-satisfies-its-own-output-contract"},
+             "seon.program-test/indexed-and-evaluated-declarations-are-the-same-entities"
+             #:seon.test{:fail-count 0,
+                         :pass-count 21,
+                         :run-at #inst "2026-09-16T19:08:56.335-00:00",
+                         :reach-digest
+                         "275d3966ffa3fc9dd4002dfed7839b3a45c32ab860397d35bfe825332108a680",
+                         :run #:db{:id 69389},
+                         :run-basis-t 536871617,
+                         :error-count 0,
+                         :sym
+                         "seon.program-test/indexed-and-evaluated-declarations-are-the-same-entities"},
+             "seon.program-test/reader-events-have-one-canonical-declaration-row"
+             #:seon.test{:fail-count 0,
+                         :pass-count 16,
+                         :run-at #inst "2026-09-16T18:22:47.882-00:00",
+                         :reach-digest
+                         "3bff2603aa089fa709449c09550df56e4a712e8ad50486d9ff50d526ef490b1a",
+                         :run #:db{:id 59615},
+                         :run-basis-t 536871241,
+                         :error-count 0,
+                         :sym
+                         "seon.program-test/reader-events-have-one-canonical-declaration-row"},
+             "seon.program-test/runtime-schema-declarations-project-namespaced-properties"
+             #:seon.test{:fail-count 0,
+                         :pass-count 5,
+                         :run-at #inst "2026-09-16T18:24:31.830-00:00",
+                         :reach-digest
+                         "ad927a9870125d05197a4a20ed3540714f72a42825f6dec802018b8815071ff3",
+                         :run #:db{:id 59630},
+                         :run-basis-t 536871246,
+                         :error-count 0,
+                         :sym
+                         "seon.program-test/runtime-schema-declarations-project-namespaced-properties"},
+             "seon.program-test/typed-cross-namespace-deletion-retracts-function-and-test"
+             #:seon.test{:fail-count 0,
+                         :pass-count 7,
+                         :run-at #inst "2026-09-16T18:26:19.885-00:00",
+                         :reach-digest
+                         "52ad3e7a0a177a45e6d2dfc4ba4f549f573081c5072867db4447bd4eb234d1a7",
+                         :run #:db{:id 59702},
+                         :run-basis-t 536871251,
+                         :error-count 0,
+                         :sym
+                         "seon.program-test/typed-cross-namespace-deletion-retracts-function-and-test"},
+             "seon.sci.eval-test/a-base-created-function-uses-the-invoking-threads-arm"
+             #:seon.test{:fail-count 0,
+                         :pass-count 5,
+                         :run-at #inst "2026-09-16T18:27:56.596-00:00",
+                         :reach-digest
+                         "b30720f694b53c569d2d43fd8ca680037d7f885c42900f0b6d6112a2f7ba440a",
+                         :run #:db{:id 59704},
+                         :run-basis-t 536871256,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/a-base-created-function-uses-the-invoking-threads-arm"},
+             "seon.sci.eval-test/a-blocking-host-call-is-NOT-stopped-by-the-time-limit"
+             #:seon.test{:fail-count 0,
+                         :pass-count 1,
+                         :run-at #inst "2026-09-16T18:29:08.335-00:00",
+                         :reach-digest
+                         "f3eee6fdcfb9bce3d82ef67568601a9a597f268c281aaa9999453f9ff8d3d7fe",
+                         :run #:db{:id 59706},
+                         :run-basis-t 536871259,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/a-blocking-host-call-is-NOT-stopped-by-the-time-limit"},
+             "seon.sci.eval-test/a-failed-evaluation-records-reconstructable-throwable-data"
+             #:seon.test{:fail-count 0,
+                         :pass-count 4,
+                         :run-at #inst "2026-09-16T18:30:45.635-00:00",
+                         :reach-digest
+                         "44971fe09e0775a73b0c5bc2bb73a86ea07b6c1f337658be095ab7feac70d80c",
+                         :run #:db{:id 59708},
+                         :run-basis-t 536871261,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/a-failed-evaluation-records-reconstructable-throwable-data"},
+             "seon.sci.eval-test/a-foreign-armed-context-is-refused-as-a-value"
+             #:seon.test{:fail-count 0,
+                         :pass-count 3,
+                         :run-at #inst "2026-09-16T18:32:07.471-00:00",
+                         :reach-digest
+                         "9b13506a1cd3345e235d2b9e4636e0164c20dd8b205061917e5730a7c161a95f",
+                         :run #:db{:id 59713},
+                         :run-basis-t 536871263,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/a-foreign-armed-context-is-refused-as-a-value"},
+             "seon.sci.eval-test/a-live-context-preserves-definition-value-class-and-metadata"
+             #:seon.test{:fail-count 0,
+                         :pass-count 4,
+                         :run-at #inst "2026-09-16T19:04:20.665-00:00",
+                         :reach-digest
+                         "3f47b35fb5f4fe703d5ab090dc0fc587071691b4512297de500b0da2e6aa1500",
+                         :run #:db{:id 67381},
+                         :run-basis-t 536871501,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/a-live-context-preserves-definition-value-class-and-metadata"},
+             "seon.sci.eval-test/a-previously-defined-function-uses-the-current-evaluation-limit"
+             #:seon.test{:fail-count 0,
+                         :pass-count 5,
+                         :run-at #inst "2026-09-16T19:04:41.664-00:00",
+                         :reach-digest
+                         "0c21542085d4efd7c6910b357534f053f07cad33715bcbcd5d30e41ebbdb1cd3",
+                         :run #:db{:id 67451},
+                         :run-basis-t 536871511,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/a-previously-defined-function-uses-the-current-evaluation-limit"},
+             "seon.sci.eval-test/a-re-entrant-evaluation-inherits-the-governing-arm"
+             #:seon.test{:fail-count 0,
+                         :pass-count 3,
+                         :run-at #inst "2026-09-16T19:04:59.139-00:00",
+                         :reach-digest
+                         "b6811b25055736298ee8bf6dd822bdbc48ff73e3d15f4ec692e65695e3e0a966",
+                         :run #:db{:id 67544},
+                         :run-basis-t 536871523,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/a-re-entrant-evaluation-inherits-the-governing-arm"},
+             "seon.sci.eval-test/a-refusal-keeps-its-own-kind-at-both-entrances"
+             #:seon.test{:fail-count 0,
+                         :pass-count 3,
+                         :run-at #inst "2026-09-16T18:33:38.484-00:00",
+                         :reach-digest
+                         "6c09cf9823ee729ddb0b3cbf07394ab47ee856ac2e50d6d9472405da943e8969",
+                         :run #:db{:id 59728},
+                         :run-basis-t 536871274,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/a-refusal-keeps-its-own-kind-at-both-entrances"},
+             "seon.sci.eval-test/a-selected-render-inherits-the-live-arm-or-owns-one-when-unarmed"
+             #:seon.test{:fail-count 0,
+                         :pass-count 8,
+                         :run-at #inst "2026-09-16T18:33:57.133-00:00",
+                         :reach-digest
+                         "6624f0d8e8713c0b366e3e65cf3e6bbce36327a323023138ed2011d7ac4ce993",
+                         :run #:db{:id 59730},
+                         :run-basis-t 536871277,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/a-selected-render-inherits-the-live-arm-or-owns-one-when-unarmed"},
+             "seon.sci.eval-test/a-set-print-length-survives-to-the-turns-next-form"
+             #:seon.test{:fail-count 0,
+                         :pass-count 5,
+                         :run-at #inst "2026-09-16T18:34:19.372-00:00",
+                         :reach-digest
+                         "103683701a7bced1c22b581dc097b44da34aa49f2d92e8c619828e7051aa99a5",
+                         :run #:db{:id 59735},
+                         :run-basis-t 536871279,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/a-set-print-length-survives-to-the-turns-next-form"},
+             "seon.sci.eval-test/a-storable-declarations-committed-row-is-recognised-by-its-value"
+             #:seon.test{:fail-count 0,
+                         :pass-count 3,
+                         :run-at #inst "2026-09-16T19:05:19.042-00:00",
+                         :reach-digest
+                         "f6b300363ec8f7f2b64d21a064b783cc75e0de4bcad59ee1f002fae38fb3b4ba",
+                         :run #:db{:id 68823},
+                         :run-basis-t 536871535,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/a-storable-declarations-committed-row-is-recognised-by-its-value"},
+             "seon.sci.eval-test/a-turn-fork-registers-an-empty-assigned-agent-namespace"
+             #:seon.test{:fail-count 0,
+                         :pass-count 6,
+                         :run-at #inst "2026-09-16T18:36:13.074-00:00",
+                         :reach-digest
+                         "e52599501a00488a0838945268c42d25e92b9065d9e8079390db44742f0e4806",
+                         :run #:db{:id 59749},
+                         :run-basis-t 536871287,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/a-turn-fork-registers-an-empty-assigned-agent-namespace"},
+             "seon.sci.eval-test/acquired-source-context-forks-have-branch-custody-and-private-defs"
+             #:seon.test{:fail-count 0,
+                         :pass-count 4,
+                         :run-at #inst "2026-09-16T18:37:24.483-00:00",
+                         :reach-digest
+                         "8cbbf44221511fa100b02cefb0a5232c3286418e36d7ced5ed7454e913834f29",
+                         :run #:db{:id 59752},
+                         :run-basis-t 536871290,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/acquired-source-context-forks-have-branch-custody-and-private-defs"},
+             "seon.sci.eval-test/acquisition-binds-loaded-first-party-compiled-vars"
+             #:seon.test{:fail-count 0,
+                         :pass-count 6,
+                         :run-at #inst "2026-09-16T19:06:12.036-00:00",
+                         :reach-digest
+                         "eec7a43cd291b18c8b9046c812c52613731fa08ad3ce577b9e3e708dba062483",
+                         :run #:db{:id 68892},
+                         :run-basis-t 536871569,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/acquisition-binds-loaded-first-party-compiled-vars"},
+             "seon.sci.eval-test/agent-contracts-apply-on-acquire-and-cold-recovery"
+             #:seon.test{:fail-count 0,
+                         :pass-count 4,
+                         :run-at #inst "2026-09-16T18:39:53.614-00:00",
+                         :reach-digest
+                         "fd1807849e4e7dc680b001a04fefff5a12475fe6b8c899e17d4a1aa843a190f1",
+                         :run #:db{:id 59761},
+                         :run-basis-t 536871297,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/agent-contracts-apply-on-acquire-and-cold-recovery"},
+             "seon.sci.eval-test/agent-owned-sci-var-metadata-remains-mutable"
+             #:seon.test{:fail-count 0,
+                         :pass-count 4,
+                         :run-at #inst "2026-09-16T18:40:18.514-00:00",
+                         :reach-digest
+                         "4bb9ecb5536d03984b56ee2a2316d8a5416b8c5b799ea788dec16eecfe25f66a",
+                         :run #:db{:id 59763},
+                         :run-basis-t 536871300,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/agent-owned-sci-var-metadata-remains-mutable"},
+             "seon.sci.eval-test/agent-print-vars-are-captured-before-sci-bindings-unwind"
+             #:seon.test{:fail-count 0,
+                         :pass-count 2,
+                         :run-at #inst "2026-09-16T18:40:35.051-00:00",
+                         :reach-digest
+                         "43da18f8ac2d0885643197bcb9a6dfbf4a3a264af19e38a465ab845e462cad89",
+                         :run #:db{:id 59776},
+                         :run-basis-t 536871302,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/agent-print-vars-are-captured-before-sci-bindings-unwind"},
+             "seon.sci.eval-test/an-acquired-function-uses-the-current-evaluation-limit"
+             #:seon.test{:fail-count 0,
+                         :pass-count 4,
+                         :run-at #inst "2026-09-16T18:40:53.488-00:00",
+                         :reach-digest
+                         "215ea4b6a33398ab9821e6e101e19f062ee75bf0667c9cc539295671b9a7dd07",
+                         :run #:db{:id 59777},
+                         :run-basis-t 536871304,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/an-acquired-function-uses-the-current-evaluation-limit"},
+             "seon.sci.eval-test/an-agent-cannot-catch-the-interrupt"
+             #:seon.test{:fail-count 0,
+                         :pass-count 3,
+                         :run-at #inst "2026-09-16T18:42:14.305-00:00",
+                         :reach-digest
+                         "66eb603c03c540ea86395b5b8c79d73dc207ba3e5494064e3a787c889170d202",
+                         :run #:db{:id 59779},
+                         :run-basis-t 536871305,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/an-agent-cannot-catch-the-interrupt"},
+             "seon.sci.eval-test/an-inherited-arm-keeps-the-governing-deadline"
+             #:seon.test{:fail-count 0,
+                         :pass-count 2,
+                         :run-at #inst "2026-09-16T18:42:35.807-00:00",
+                         :reach-digest
+                         "9c7f801ca8d9a88dc3d19eabf50105902abe42908aa5d5c34459bb269640b3fe",
+                         :run #:db{:id 59782},
+                         :run-basis-t 536871307,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/an-inherited-arm-keeps-the-governing-deadline"},
+             "seon.sci.eval-test/an-instrumented-multi-arity-miss-reads-like-clojure"
+             #:seon.test{:fail-count 0,
+                         :pass-count 8,
+                         :run-at #inst "2026-09-16T18:43:04.068-00:00",
+                         :reach-digest
+                         "ab43c89b8d6a225695a0704c93602902caf69eb1ed1335f45205bea57c7ff987",
+                         :run #:db{:id 59785},
+                         :run-basis-t 536871310,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/an-instrumented-multi-arity-miss-reads-like-clojure"},
+             "seon.sci.eval-test/an-interpreted-infinite-loop-dies-at-the-limit"
+             #:seon.test{:fail-count 0,
+                         :pass-count 6,
+                         :run-at #inst "2026-09-16T18:44:33.929-00:00",
+                         :reach-digest
+                         "fdd11db8cfe42232a60205c4a6217022a3290e8d1213e729783dd5bfc41a703a",
+                         :run #:db{:id 59786},
+                         :run-basis-t 536871312,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/an-interpreted-infinite-loop-dies-at-the-limit"},
+             "seon.sci.eval-test/an-unbound-var-remains-structured-after-production-admission"
+             #:seon.test{:fail-count 0,
+                         :pass-count 5,
+                         :run-at #inst "2026-09-16T18:45:03.387-00:00",
+                         :reach-digest
+                         "7824e87121d0871d3ca77efe4c374a83f7ac7ddb49984580b1e6079d6b6be031",
+                         :run #:db{:id 59789},
+                         :run-basis-t 536871313,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/an-unbound-var-remains-structured-after-production-admission"},
+             "seon.sci.eval-test/analysis-failure-exposes-scis-unresolved-symbol-as-data"
+             #:seon.test{:fail-count 0,
+                         :pass-count 2,
+                         :run-at #inst "2026-09-16T18:45:20.869-00:00",
+                         :reach-digest
+                         "eafda340c20531c89d4788f58fd2cdb0173de3b4f5dd860d289939e62f736311",
+                         :run #:db{:id 59790},
+                         :run-basis-t 536871315,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/analysis-failure-exposes-scis-unresolved-symbol-as-data"},
+             "seon.sci.eval-test/bare-dir-and-program-derived-doc-are-repl-native"
+             #:seon.test{:fail-count 0,
+                         :pass-count 19,
+                         :run-at #inst "2026-09-16T18:45:39.411-00:00",
+                         :reach-digest
+                         "3cfd8a7e0e77c1adcc28bca083b3c04de560364e60df95821ff0c63468cf4136",
+                         :run #:db{:id 59792},
+                         :run-basis-t 536871316,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/bare-dir-and-program-derived-doc-are-repl-native"},
+             "seon.sci.eval-test/both-entrances-classify-one-failure-identically"
+             #:seon.test{:fail-count 0,
+                         :pass-count 17,
+                         :run-at #inst "2026-09-16T18:45:59.853-00:00",
+                         :reach-digest
+                         "acb308170cd2ec4aec101f3a70e2fc54540661c2ccd6ba64e3311e0e8bddb6ac",
+                         :run #:db{:id 59794},
+                         :run-basis-t 536871318,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/both-entrances-classify-one-failure-identically"},
+             "seon.sci.eval-test/call-preparation-receives-the-form-scoped-environment"
+             #:seon.test{:fail-count 0,
+                         :pass-count 2,
+                         :run-at #inst "2026-09-16T18:46:20.633-00:00",
+                         :reach-digest
+                         "829035272b2d65cff3e9795961d91947d515ed7e99e6581d35ba262dc4cf5813",
+                         :run #:db{:id 59798},
+                         :run-basis-t 536871320,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/call-preparation-receives-the-form-scoped-environment"},
+             "seon.sci.eval-test/compiled-runtime-metadata-cannot-be-changed-by-agent-code"
+             #:seon.test{:fail-count 0,
+                         :pass-count 10,
+                         :run-at #inst "2026-09-16T18:47:32.433-00:00",
+                         :reach-digest
+                         "33e98135f0382f981b7a21c5efd7c4216c103dc7813683d2b3632a838bb15664",
+                         :run #:db{:id 59801},
+                         :run-basis-t 536871324,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/compiled-runtime-metadata-cannot-be-changed-by-agent-code"},
+             "seon.sci.eval-test/compiled-runtime-roots-cannot-be-redefined-by-agent-code"
+             #:seon.test{:fail-count 0,
+                         :pass-count 18,
+                         :run-at #inst "2026-09-16T18:47:52.177-00:00",
+                         :reach-digest
+                         "47fce0d50cec314611d43fabba3f7f480455fdda79336aa28c87e98f5b42a809",
+                         :run #:db{:id 59805},
+                         :run-basis-t 536871327,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/compiled-runtime-roots-cannot-be-redefined-by-agent-code"},
+             "seon.sci.eval-test/contracted-defn-renders-the-var-it-declared"
+             #:seon.test{:fail-count 0,
+                         :pass-count 4,
+                         :run-at #inst "2026-09-16T18:48:09.920-00:00",
+                         :reach-digest
+                         "8584943d1bb9a3955fb8c9082314f7452ad0d880c13948fa70b7465002a258d0",
+                         :run #:db{:id 59806},
+                         :run-basis-t 536871331,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/contracted-defn-renders-the-var-it-declared"},
+             "seon.sci.eval-test/disarm-clears-the-current-threads-flag-exactly"
+             #:seon.test{:fail-count 0,
+                         :pass-count 4,
+                         :run-at #inst "2026-09-16T18:48:25.432-00:00",
+                         :reach-digest
+                         "51edec5f6d112db4cc9057c8228e97aeac3b85882c3f0528c8e44d73b08af482",
+                         :run #:db{:id 63584},
+                         :run-basis-t 536871332,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/disarm-clears-the-current-threads-flag-exactly"},
+             "seon.sci.eval-test/evaluate-invokes-eval-form-exactly-once-on-every-path"
+             #:seon.test{:fail-count 0,
+                         :pass-count 8,
+                         :run-at #inst "2026-09-16T18:48:46.366-00:00",
+                         :reach-digest
+                         "381c158ace1bcbba29d18d772d3a6184b5504de8bfd8be3867959603c4bd4c84",
+                         :run #:db{:id 63587},
+                         :run-basis-t 536871334,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/evaluate-invokes-eval-form-exactly-once-on-every-path"},
+             "seon.sci.eval-test/evaluation-custody-is-derived-only-from-the-cluster-context"
+             #:seon.test{:fail-count 0,
+                         :pass-count 9,
+                         :run-at #inst "2026-09-16T18:49:17.137-00:00",
+                         :reach-digest
+                         "350130b997a486e1a811d286bc03a6d81f9fd5269f323e6d9fd77412029028dd",
+                         :run #:db{:id 63599},
+                         :run-basis-t 536871337,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/evaluation-custody-is-derived-only-from-the-cluster-context"},
+             "seon.sci.eval-test/evaluation-projection-prefers-the-live-context"
+             #:seon.test{:fail-count 0,
+                         :pass-count 7,
+                         :run-at #inst "2026-09-16T18:49:38.165-00:00",
+                         :reach-digest
+                         "a2da612cd5631fbd8b6c3f9421bdc5e1af6bab7279b1cc7da48c35cb5f2a4a61",
+                         :run #:db{:id 63604},
+                         :run-basis-t 536871339,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/evaluation-projection-prefers-the-live-context"},
+             "seon.sci.eval-test/every-public-capability-function-in-the-graph-resolves-in-the-ctx"
+             #:seon.test{:fail-count 0,
+                         :pass-count 3,
+                         :run-at #inst "2026-09-16T18:49:53.806-00:00",
+                         :reach-digest
+                         "0750ccfbbf38d5fbc386017a961ea7550770438136b5ab8a1958b9eeb58e641e",
+                         :run #:db{:id 63606},
+                         :run-basis-t 536871342,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/every-public-capability-function-in-the-graph-resolves-in-the-ctx"},
+             "seon.sci.eval-test/generated-sources-compose-fork-guard-and-admission"
+             #:seon.test{:fail-count 0,
+                         :pass-count 1,
+                         :run-at #inst "2026-09-16T18:50:07.533-00:00",
+                         :reach-digest
+                         "8b7591357148423595fab3972c0553690b8815d52b1e2b4bbea4f25a1052632a",
+                         :run #:db{:id 63608},
+                         :run-basis-t 536871344,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/generated-sources-compose-fork-guard-and-admission"},
+             "seon.sci.eval-test/host-interop-is-observed-during-analysis"
+             #:seon.test{:fail-count 0,
+                         :pass-count 2,
+                         :run-at #inst "2026-09-16T18:50:26.256-00:00",
+                         :reach-digest
+                         "d54fdb2ffad5cc4b8a249cc03a3851c5157bf838c675bcef61e955c6a5b20f8e",
+                         :run #:db{:id 63610},
+                         :run-basis-t 536871346,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/host-interop-is-observed-during-analysis"},
+             "seon.sci.eval-test/instrumented-generated-form-does-not-advise-an-absent-program-row"
+             #:seon.test{:fail-count 0,
+                         :pass-count 3,
+                         :run-at #inst "2026-09-16T18:50:39.656-00:00",
+                         :reach-digest
+                         "451e76c6b2a3088f37efce4b61493f76927b4c563a76619d564706b94fa3be05",
+                         :run #:db{:id 64026},
+                         :run-basis-t 536871348,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/instrumented-generated-form-does-not-advise-an-absent-program-row"},
+             "seon.sci.eval-test/isolated-one-off-evaluations-do-not-share-definitions"
+             #:seon.test{:fail-count 0,
+                         :pass-count 2,
+                         :run-at #inst "2026-09-16T18:51:35.249-00:00",
+                         :reach-digest
+                         "f8c0b1798d74e481f87861ad8f96d91e6bcb8b2742524f202f94055b163e4a1a",
+                         :run #:db{:id 64028},
+                         :run-basis-t 536871354,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/isolated-one-off-evaluations-do-not-share-definitions"},
+             "seon.sci.eval-test/public-walk-is-callable-through-an-agent-sci-eval"
+             #:seon.test{:fail-count 0,
+                         :pass-count 11,
+                         :run-at #inst "2026-09-16T19:06:31.451-00:00",
+                         :reach-digest
+                         "d773bccc459583c793373dc727fc70b0fa215ef37013c2924d3ff2aead4e83c2",
+                         :run #:db{:id 68946},
+                         :run-basis-t 536871578,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/public-walk-is-callable-through-an-agent-sci-eval"},
+             "seon.sci.eval-test/require-context-rows-persist-namespace-lookup-refs"
+             #:seon.test{:fail-count 0,
+                         :pass-count 2,
+                         :run-at #inst "2026-09-16T18:52:03.158-00:00",
+                         :reach-digest
+                         "fc060500d65d785b76cd8218e32bd9bea86378d30b31ae188f7c59cf5160be40",
+                         :run #:db{:id 64033},
+                         :run-basis-t 536871359,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/require-context-rows-persist-namespace-lookup-refs"},
+             "seon.sci.eval-test/runtime-function-rows-carry-parsed-contract-facts"
+             #:seon.test{:fail-count 0,
+                         :pass-count 3,
+                         :run-at #inst "2026-09-16T18:52:20.302-00:00",
+                         :reach-digest
+                         "2716103c94436f18c1a62bf2590cd5b492cefd7ba778ae0df23f362a0f61a18b",
+                         :run #:db{:id 64035},
+                         :run-basis-t 536871361,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/runtime-function-rows-carry-parsed-contract-facts"},
+             "seon.sci.eval-test/schema-and-contract-declarations-have-bounded-allocation"
+             #:seon.test{:fail-count 0,
+                         :pass-count 5,
+                         :run-at #inst "2026-09-16T18:52:41.754-00:00",
+                         :reach-digest
+                         "0d3b90faa0d08ff1c2e546cfecacdde9cf8f54c20c85464f6670b4eb42369e41",
+                         :run #:db{:id 64037},
+                         :run-basis-t 536871363,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/schema-and-contract-declarations-have-bounded-allocation"},
+             "seon.sci.eval-test/static-and-runtime-contracted-definitions-publish-identical-facts"
+             #:seon.test{:fail-count 0,
+                         :pass-count 4,
+                         :run-at #inst "2026-09-16T19:06:48.587-00:00",
+                         :reach-digest
+                         "07fb3fcb2a8d3e26f792877a8442fab0f5a561ebd88ee818f5e10ebb16ed2fc0",
+                         :run #:db{:id 69136},
+                         :run-basis-t 536871583,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/static-and-runtime-contracted-definitions-publish-identical-facts"},
+             "seon.sci.eval-test/the-diagnostics-are-recorded-and-are-not-limits"
+             #:seon.test{:fail-count 0,
+                         :pass-count 7,
+                         :run-at #inst "2026-09-16T18:55:34.421-00:00",
+                         :reach-digest
+                         "02079249a76c8d1fec23349691ff4569997fb2a130072dbdbd77787abba281e9",
+                         :run #:db{:id 65126},
+                         :run-basis-t 536871368,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/the-diagnostics-are-recorded-and-are-not-limits"},
+             "seon.sci.eval-test/the-dispositions-are-callable-and-come-back-as-values"
+             #:seon.test{:fail-count 0,
+                         :pass-count 4,
+                         :run-at #inst "2026-09-16T18:56:36.627-00:00",
+                         :reach-digest
+                         "d8e8740a0717c035e22e4d398f7614b6e07502cb243653faedf2a2f4e211801e",
+                         :run #:db{:id 65129},
+                         :run-basis-t 536871370,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/the-dispositions-are-callable-and-come-back-as-values"},
+             "seon.sci.eval-test/the-evaluator-remains-live-after-its-namespace-reloads"
+             #:seon.test{:fail-count 0,
+                         :pass-count 4,
+                         :run-at #inst "2026-09-16T19:09:25.475-00:00",
+                         :reach-digest
+                         "07d97e53119183024187b9292b25d35e6e21eca543fda14c40ce38a83ae63ab6",
+                         :run #:db{:id 69391},
+                         :run-basis-t 536871619,
+                         :error-count 0,
+                         :sym
+                         "seon.sci.eval-test/the-evaluator-remains-live-after-its-namespace-reloads"},
+             "seon.turn-test/a-refused-generated-form-records-its-refusal"
+             #:seon.test{:fail-count 0,
+                         :pass-count 5,
+                         :run-at #inst "2026-09-16T18:57:31.887-00:00",
+                         :reach-digest
+                         "5e67a6f24c7733eca9485e4030e503dd6a893f5abb86307c89ed237cc9a59810",
+                         :run #:db{:id 65140},
+                         :run-basis-t 536871377,
+                         :error-count 0,
+                         :sym
+                         "seon.turn-test/a-refused-generated-form-records-its-refusal"},
+             "seon.turn-test/a-refused-turn-write-is-bounded-and-commits-exactly-one-fault"
+             #:seon.test{:fail-count 0,
+                         :pass-count 14,
+                         :run-at #inst "2026-09-16T18:57:49.660-00:00",
+                         :reach-digest
+                         "a700f655cec0aac967ac87c1ac7b25487ecef3267e02410b89329713af90aa43",
+                         :run #:db{:id 65142},
+                         :run-basis-t 536871380,
+                         :error-count 0,
+                         :sym
+                         "seon.turn-test/a-refused-turn-write-is-bounded-and-commits-exactly-one-fault"},
+             "seon.turn-test/generated-read-evidence-rejects-turn-activity"
+             #:seon.test{:fail-count 0,
+                         :pass-count 6,
+                         :run-at #inst "2026-09-16T18:58:08.257-00:00",
+                         :reach-digest
+                         "76f21837387c6ba9beaef62b08039f4265a3bbff2bb4c823963e8dac671370a9",
+                         :run #:db{:id 65145},
+                         :run-basis-t 536871382,
+                         :error-count 0,
+                         :sym
+                         "seon.turn-test/generated-read-evidence-rejects-turn-activity"},
+             "seon.turn-test/generated-system-runs-grow-only-after-their-settled-prefix"
+             #:seon.test{:fail-count 0,
+                         :pass-count 9,
+                         :run-at #inst "2026-09-16T18:58:28.519-00:00",
+                         :reach-digest
+                         "c6f75321c194a00d7e0fa4589d6325c6423812e9a8890b9d5df16f4d0d73ddeb",
+                         :run #:db{:id 65147},
+                         :run-basis-t 536871385,
+                         :error-count 0,
+                         :sym
+                         "seon.turn-test/generated-system-runs-grow-only-after-their-settled-prefix"},
+             "seon.turn-test/recovery-cannot-stamp-a-settled-receipt"
+             #:seon.test{:fail-count 0,
+                         :pass-count 4,
+                         :run-at #inst "2026-09-16T18:58:44.183-00:00",
+                         :reach-digest
+                         "b726537117b32c058966d94411f60479f2473fefddf96fdf0a207c97a1fe2f4b",
+                         :run #:db{:id 65151},
+                         :run-basis-t 536871387,
+                         :error-count 0,
+                         :sym
+                         "seon.turn-test/recovery-cannot-stamp-a-settled-receipt"},
+             "seon.turn-test/refreshes-only-terminal-system-reads-once"
+             #:seon.test{:fail-count 0,
+                         :pass-count 8,
+                         :run-at #inst "2026-09-16T18:59:00.995-00:00",
+                         :reach-digest
+                         "2a3cea9f53b9b67e2633b9180a492db3cd69ce47e56d582f3db1eb0205696615",
+                         :run #:db{:id 65154},
+                         :run-basis-t 536871390,
+                         :error-count 0,
+                         :sym
+                         "seon.turn-test/refreshes-only-terminal-system-reads-once"},
+             "seon.turn-test/settlement-mints-rows-for-unindexed-call-targets"
+             #:seon.test{:fail-count 0,
+                         :pass-count 10,
+                         :run-at #inst "2026-09-16T18:59:24.236-00:00",
+                         :reach-digest
+                         "95a2913dee94092ec1c089531d17350628604de198f2d3de443dc3b077088f64",
+                         :run #:db{:id 66184},
+                         :run-basis-t 536871393,
+                         :error-count 0,
+                         :sym
+                         "seon.turn-test/settlement-mints-rows-for-unindexed-call-targets"},
+             "seon.turn-test/settlement-refuses-a-divergent-program-change-since-opening"
+             #:seon.test{:fail-count 0,
+                         :pass-count 4,
+                         :run-at #inst "2026-09-16T19:00:32.761-00:00",
+                         :reach-digest
+                         "84ef75e3ca5cb488b0892024cd4e36aabc0f6d45b5df4973ad4a1cb6623987d9",
+                         :run #:db{:id 66187},
+                         :run-basis-t 536871399,
+                         :error-count 0,
+                         :sym
+                         "seon.turn-test/settlement-refuses-a-divergent-program-change-since-opening"},
+             "seon.turn-test/test-first-subjects-resolve-when-the-function-arrives"
+             #:seon.test{:fail-count 0,
+                         :pass-count 6,
+                         :run-at #inst "2026-09-16T19:07:46.449-00:00",
+                         :reach-digest
+                         "042c9f51efc7ffcb971712c724ff940c28f69ecf7bfc2e885160989c763dd565",
+                         :run #:db{:id 69383},
+                         :run-basis-t 536871611,
+                         :error-count 0,
+                         :sym
+                         "seon.turn-test/test-first-subjects-resolve-when-the-function-arrives"},
+             "seon.turn-test/transitions-agree-with-the-model"
+             #:seon.test{:fail-count 0,
+                         :pass-count 1,
+                         :run-at #inst "2026-09-16T19:01:14.201-00:00",
+                         :reach-digest
+                         "f6269ad05642dc1a740562d2a379604f755ace78259001ff617f91a489f13482",
+                         :run #:db{:id 66268},
+                         :run-basis-t 536871405,
+                         :error-count 0,
+                         :sym
+                         "seon.turn-test/transitions-agree-with-the-model"},
+             "seon.turn-test/virtual-turns-use-the-proc-and-compaction-is-agent-scoped"
+             #:seon.test{:fail-count 0,
+                         :pass-count 246,
+                         :run-at #inst "2026-09-16T19:01:37.197-00:00",
+                         :reach-digest
+                         "63abcf69e0e6c5359033edcb33dc2e92999d861dfe4630184e2fe3a324ce0c60",
+                         :run #:db{:id 66395},
+                         :run-basis-t 536871416,
+                         :error-count 0,
+                         :sym
+                         "seon.turn-test/virtual-turns-use-the-proc-and-compaction-is-agent-scoped"}},
+            :counts
+            #:seon.test{:pass-count 759, :fail-count 0, :error-count 0}}

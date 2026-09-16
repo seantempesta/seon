@@ -1,6 +1,15 @@
 (ns seon.program-test
   "Recurring proof for the one build/runtime declaration contract."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.core.async :as async]
+            [clojure.java.io :as io]
+            [clojure.string :as str]
+            [seon.cluster :as cluster]
+            [seon.cluster.agent :as agent]
+            [seon.eval]
+            [seon.fn]
+            [seon.fn-test]
+            [seon.test.accretion :as accretion]
+            [clojure.test :refer [deftest is testing]]
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
@@ -1053,3 +1062,130 @@
     (is (= before (program/shapes))
         "an unchanged stamp answers the same derivation, so the per-row
          caller pays one stamp and never a resource merge")))
+
+(deftest indexed-and-evaluated-declarations-are-the-same-entities
+  (let [source (slurp (io/resource "test/fixtures/program_facts_s1/source.txt"))
+        fixture-forms (:seon.schema.edn/forms
+                       (#'schema.edn/resource-population
+                        "test/fixtures/program_facts_s1/schema.edn"))
+        identities [[:seon.ns/name 'sample.s1]
+                    [:seon.fn/sym "sample.s1/left"]
+                    [:seon.fn/sym "sample.s1/right"]
+                    [:seon.test/sym "sample.s1/paired"]
+                    [:seon.schema/key :sample.s1/value]]
+        rows-from
+        (fn [connection]
+          (let [database (db/db connection)
+                shapes (program/shapes-in
+                        (:seon.schema.projection/forms (db/carried-projection database)))
+                identity-attributes (db/identity-attributes database)]
+            (into {}
+                  (map (fn [identity]
+                         (let [pulled (db/pull database '[*] identity)]
+                           (is (some? (:db/id pulled)) (pr-str identity))
+                           [identity
+                            (apply dissoc
+                                   (#'seon.fn/normalized-index-row
+                                    (assoc-in shapes [(first identity) :seon.program/owned-attributes]
+                                              (vec (keys pulled)))
+                                    database pulled identity-attributes)
+                                   (into [:db/id :seon.schema.admission/source
+                                          :seon.fn/file :seon.fn/form-span]
+                                         (filter #(= "seon.fn.file" (namespace %)))
+                                         (keys pulled)))])))
+                  identities)))
+        indexed
+        (#'seon.fn-test/with-provenance-file
+         "sample/s1.clj" source
+         (fn [connection file _]
+           (let [database (db/db connection)
+                 forms (merge (:seon.schema.projection/forms (db/carried-projection database))
+                              fixture-forms)
+                 artifact (seon.fn/build-artifact
+                           {:seon.fn/source-path (.getPath file)
+                            :seon.fn.file/first-party-functions
+                            (vec (db/q '[:find [?sym ...] :where [_ :seon.fn/sym ?sym]] database))
+                            :seon.schema.projection/forms forms})
+                 projection (reduce-kv
+                             (fn [projection key definition]
+                               (schema/projection-with-schema projection key definition
+                                                              {:seon.schema.admission/source :core}))
+                             (db/carried-projection database) fixture-forms)
+                 rows (mapv
+                       #(program/with-contract-facts
+                         {:seon.program/row %
+                          :seon.program/compile-options (:seon.schema.projection/compile-options projection)
+                          :seon.program/predicate-functions (schema/predicate-functions-in projection)
+                          :seon.program/schema-keys (set (keys forms))
+                          :seon.program/schema-forms forms})
+                       (into (:seon.fn.file/rows artifact)
+                             (map #(accretion/schema-row forms %))
+                             (schema/canonical-schema-rows fixture-forms)))
+                 selected (filterv #(or (:seon.fn.file/relative-path %)
+                                        (some #{(program/row-identity %)} identities)) rows)]
+             (test-support/transacted!
+              connection (seon.fn/reconcile-tx database selected []))
+             (rows-from connection))))
+        evaluated
+        (test-support/with-database
+         (fn [connection]
+           (test-support/seed-cluster!
+            connection "program-parity"
+            {:seon.config.ai/no-provider true :seon.config.test/auto-check-cases 0})
+           (test-support/transacted!
+            connection
+            (agent/creation-tx {:seon.agent/id "program-parity"
+                                :seon.ns/name 'my.agents.program-parity
+                                :seon.cluster/name "program-parity"}))
+           (let [ctx (test-support/fork-cluster-ctx connection "program-parity")
+                 handle (test-support/cluster-handle
+                         {:seon.env/environment (test-support/environment "program-parity" connection)
+                          :seon.db/connection connection :seon.cluster/name "program-parity"
+                          :seon.db.process/id cluster/boot-process-identity
+                          :seon.sci.eval/ctx ctx})
+                 events (reader/read {:seon.sci.reader/text source
+                                      :seon.sci.reader/ns 'my.agents.program-parity
+                                      :seon.config.eval.result/max-source (count source)})
+                 sources (mapv :seon.sci.reader/source events)
+                 registration (pr-str (list 'seon.schema/register! :sample.s1/value
+                                             (:sample.s1/value fixture-forms)))
+                 submitted (turn/virtual-turn!
+                            {:seon.turn.loop/cluster handle :seon.agent/routing (agent/routing)
+                             :seon.agent/id "program-parity"
+                             :seon.cluster.reply/text
+                             (str/join "\n" (into [(first sources) registration] (rest sources)))})
+                 turn-id (:seon.turn/id submitted)]
+             (try
+               (is (string? turn-id) (pr-str submitted))
+               (when-not turn-id (throw (ex-info "Parity turn refused" submitted)))
+               (loop [pass 0]
+                 (when-not (:seon.turn/closed-tx
+                            (db/pull (db/db connection) [:seon.turn/closed-tx]
+                                     [:seon.turn/id turn-id]))
+                   (when (<= 24 pass)
+                     (throw (ex-info "Parity turn did not close" {:seon.turn/id turn-id})))
+                   (when-let [work (turn/next-agent-work
+                                    (db/db connection) {:seon.agent/id "program-parity"})]
+                     (turn/turn {:seon.turn.loop/cluster handle :seon.turn.work/next work}
+                                (java.util.Date.)))
+                   (recur (inc pass))))
+               (let [evaluations (seon.eval/of-agent (db/db connection) "program-parity")]
+                 (is (seq evaluations))
+                 (is (empty? (filter :seon.cluster.eval/error evaluations))
+                     (pr-str (mapv #(select-keys % [:seon.cluster.eval/source
+                                                   :seon.cluster.eval/error]) evaluations))))
+               (rows-from connection)
+               (finally
+                 (doseq [channel [(:seon.cluster.wake/channel handle)
+                                  (:seon.render/context-channel handle)
+                                  (:seon.turn.loop/completion handle)]]
+                   (async/close! channel)))))))]
+    (doseq [identity identities]
+      (is (= (get indexed identity) (get evaluated identity))
+          (pr-str {:seon.program/identity identity
+                   :seon.program/indexed (get indexed identity)
+                   :seon.program/evaluated (get evaluated identity)})))
+    (doseq [identity [[:seon.fn/sym "sample.s1/left"]
+                      [:seon.fn/sym "sample.s1/right"]
+                      [:seon.test/sym "sample.s1/paired"]]]
+      (is (seq (:seon.fn/calls (get evaluated identity))) (pr-str identity)))))
