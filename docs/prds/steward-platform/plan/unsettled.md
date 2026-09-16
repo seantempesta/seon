@@ -1339,6 +1339,17 @@ deletion API and no tombstone. Integrator resumed on released groups with
 these; owner rulings requested: living-ref rule, Q2 merge-then-delete, the
 eval-path design as revised.
 
+**04:05Z edges continuation stopped clean:** `062e26975` issue-deletion
+regressions green (both `index-tx`/`adopt-tx` retract; citations cascade;
+as-of answers; retention refusal atomic). Schema publication seam still held
+by the `declaration-required` hunks (environment agent told to drop them);
+when free it goes to `reset-batch-integration`. New issue filed by it:
+`the-issue-ai-render-no-longer-teaches-its-requery-form` (issue_test.clj:65;
+the AI status render lost `(my.issue/status …)` since 3772e2f68 — T3/C5 say
+the AI render shows the form to run; small render fix, launch when the
+implementer count drops). requiring-resolve census+fix landed (27 commits,
+`7bdd299a2`…`f3fd5b973`; `seon.plan/issue-done-query` mirror filed).
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
