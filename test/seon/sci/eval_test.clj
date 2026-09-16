@@ -716,6 +716,67 @@
     (is (some? (host-namespace! 'my.web))
         "a row it can serve is loaded rather than skipped")))
 
+(deftest process-membership-ignores-a-thread-context-classloader
+  ;; The same seam, one level down: "what can this process serve" must be a
+  ;; property of the PROCESS, not of whoever is on the stack. `io/resource`'s
+  ;; one-argument arity asks `clojure.lang.RT/baseLoader`, i.e. the CURRENT
+  ;; THREAD's context classloader, so a caller that binds one silently
+  ;; redefines membership. `seon.test/with-test-loader` binds exactly such a
+  ;; loader over the `:test` source paths, and acquiring an evaluation context
+  ;; inside its extent made every `test/` namespace row locatable in a
+  ;; development JVM; the install then died requiring the first row whose own
+  ;; dependency is an alias extra-dep rather than a source path
+  ;; (`seon.dev.dependency-cache-test` -> `dev-cache` ->
+  ;; `clojure.tools.build.api`, 2026-09-16) and poisoned the shared fixture
+  ;; base for every lane in that JVM. A namespace whose require would fail
+  ;; must never be able to fail acquisition by being reachable only through a
+  ;; caller's loader.
+  ;;
+  ;; The probe namespace has NO file on any classpath: it exists only inside
+  ;; the temporary directory this test adds to a `DynamicClassLoader`, so the
+  ;; property holds by construction and nothing can be left loaded.
+  (let [locatable? (ns-resolve 'seon.sci.eval 'classpath-locatable?)
+        host-namespace! (ns-resolve 'seon.sci.eval 'host-namespace!)
+        probe-namespace 'seon.sci.eval-test.loader-only-probe
+        root (.toFile (java.nio.file.Files/createTempDirectory
+                       "seon-loader-only-probe"
+                       (make-array java.nio.file.attribute.FileAttribute 0)))]
+    (try
+      (let [source (io/file root "seon" "sci" "eval_test" "loader_only_probe.clj")]
+        (io/make-parents source)
+        ;; Unloadable for the same reason the real row was: it requires a
+        ;; namespace this process's classpath does not carry.
+        (spit source
+              (str "(ns " probe-namespace
+                   " (:require [seon.sci.eval-test.absent-dependency]))\n"))
+        (let [loader (doto (clojure.lang.DynamicClassLoader.
+                            (clojure.lang.RT/baseLoader))
+                       (.addURL (.toURL (.toURI root))))
+              thread (Thread/currentThread)
+              previous (.getContextClassLoader thread)
+              answers (try
+                        (.setContextClassLoader thread loader)
+                        (with-bindings {clojure.lang.Compiler/LOADER loader}
+                          {:reachable-through-the-caller-loader
+                           (boolean (io/resource
+                                     "seon/sci/eval_test/loader_only_probe.clj"))
+                           :locatable? (locatable? probe-namespace)
+                           :host-namespace (host-namespace! probe-namespace)})
+                        (finally
+                          (.setContextClassLoader thread previous)))]
+          (is (true? (:reachable-through-the-caller-loader answers))
+              "the bound loader genuinely serves the probe source")
+          (is (false? (:locatable? answers))
+              "process membership does not follow the caller's loader")
+          (is (nil? (:host-namespace answers))
+              "an unloadable row reachable only through a caller's loader is
+               not this process's callable surface, never a refused
+               acquisition")
+          (is (nil? (find-ns probe-namespace))
+              "and it was never required into this JVM")))
+      (finally
+        (run! io/delete-file (reverse (file-seq root)))))))
+
 (deftest schema-and-contract-declarations-have-bounded-allocation
   (test-support/with-database
     (fn [connection]

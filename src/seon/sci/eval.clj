@@ -973,7 +973,7 @@
                  (assoc host-meta :name local-name :ns sci-namespace))))
 
 (defn- classpath-locatable?
-  "Whether THIS process's classpath can serve one namespace's source.
+  "Whether THIS PROCESS's own classpath can serve one namespace's source.
 
   Graph membership and PROCESS membership are two different facts, and
   conflating them refused every cluster boot on 2026-08-08. The program graph
@@ -983,16 +983,32 @@
   that row names source this process genuinely cannot load. Requiring it was
   a correct refusal of a wrong premise.
 
-  Asking the classpath asks the process itself. It is a computed fact, not a
-  path convention and not a maintained list, so it stays true when the source
-  roots, the aliases, or the packaging change — and a namespace this process
-  CAN serve is still bound whether or not anything happened to load it."
+  The loader is the PROCESS's launch classpath, never the calling thread's.
+  `io/resource`'s one-argument arity asks `clojure.lang.RT/baseLoader`, which
+  returns the current thread's CONTEXT classloader, so any caller that binds
+  one silently redefines what this process can serve.
+  `seon.test/with-test-loader` binds exactly such a loader over the `:test`
+  alias source paths so an in-process run can resolve a test Var; acquiring an
+  evaluation context inside its extent made every `test/` namespace row
+  locatable, and the install died requiring the first one whose dependency is
+  an alias EXTRA-dep rather than a source path
+  (`seon.dev.dependency-cache-test` -> `dev-cache` ->
+  `clojure.tools.build.api`, 2026-09-16). A gate worker launched `-M:test`
+  carries `test/` and those dependencies on its own `-cp`, so its membership
+  is unchanged.
+
+  Asking the process's classpath asks the process itself. It is a computed
+  fact, not a path convention and not a maintained list, so it stays true when
+  the source roots, the aliases, or the packaging change — and a namespace
+  this process CAN serve is still bound whether or not anything happened to
+  load it."
   [namespace-name]
   (let [stem (-> (str namespace-name)
                  (str/replace "-" "_")
-                 (str/replace "." "/"))]
+                 (str/replace "." "/"))
+        loader (ClassLoader/getSystemClassLoader)]
     (boolean
-     (some (fn [suffix] (io/resource (str stem suffix)))
+     (some (fn [suffix] (io/resource (str stem suffix) loader))
            [".clj" ".cljc" "__init.class"]))))
 
 (defn- host-namespace!
