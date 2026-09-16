@@ -92,3 +92,16 @@ keeping every old database snapshot forever—the current temporal indices carry
 historical datoms—but Seon's exact-commit branch creation does require the
 selected commit record to survive until the branch is published. No cutoff or
 background schedule should land by guess.
+
+## Re-observed 2026-09-16 (orchestrator)
+
+The development store reached 71.6 GB / 382,425 files, 93.3% `pss/leaf`
+copy-on-write index nodes, ~67 GB unreachable, created 2026-09-08 and grown
+through the one weekly `root/maintenance/compact` window since
+(`docs/prds/context-generation/research/store-footprint-2026-09-16.md`,
+commit `cfef57241`). A GC that never reclaims in practice reads absence of
+signal as health. The per-minute blob-retention sweep that starved writers
+is being removed (`blob-retention-sweep-starves-every-roster-writer.md`),
+and the development store is reset at the next refork; the standing fix is
+this issue: a real cutoff plus a cadence tied to an observed footprint
+signal (the `bin/seon status --verbose` footprint), not a weekly cron.
