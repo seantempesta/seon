@@ -30,7 +30,11 @@
       (support/with-published-file-database
        root :my-web-test
        (fn [connection]
-          (support/apply-config!
+          ;; SEED THE CLUSTER, not just its config row. `seon.fs.jvm` and the
+          ;; effect door read their dials through the cluster's own facts, so a
+          ;; branch carrying a config row and no cluster entity answers nil for
+          ;; every dial and the handler dereferences it.
+          (support/seed-cluster!
            connection "default"
            {:seon.config.eval.result/blob-threshold 8})
           (body connection)))
@@ -356,10 +360,12 @@
     (fn [connection]
       (with-server
         (fn [{:keys [base-url]}]
-          (support/apply-config! connection "default" (web-manifest base-url))
+          ;; `apply-config!` is EXACT: one manifest carries every dial this
+          ;; test needs, or the earlier one is reconciled away.
           (support/apply-config!
            connection "default"
            (assoc (web-manifest base-url)
+                  :seon.config.eval.result/blob-threshold 8
                   :seon.config.web/max-inline-bytes 4096))
           (support/transacted!
                   connection
@@ -400,6 +406,10 @@
     (fn [connection]
       (with-server
         (fn [{:keys [base-url]}]
+          (support/apply-config!
+           connection "default"
+           (assoc (web-manifest base-url)
+                  :seon.config.eval.result/blob-threshold 8))
           (support/transacted!
                   connection
                   [{:seon.agent/id "web-agent"}
