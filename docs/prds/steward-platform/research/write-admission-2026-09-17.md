@@ -757,3 +757,38 @@ The final grammar snapshot (including the invalid-type distinction) is green:
 **2 tests, 21 assertions, 0 failures, 0 errors**. The final `seon.turn-test`
 snapshot is running at this implementation checkpoint. All fast runs use
 `--paths` to exclude protected `src/seon/fn.clj` and other lanes' edits.
+
+### Final followup verification and handoff
+
+The final turn snapshot passes **30 tests, 425 assertions, 0 failures, 0 errors**.
+`a-terminal-refusal-settles-when-its-run-has-vanished` now reaches actual terminal
+settlement, records the original refusal, and recreates neither the deleted turn
+nor its evaluation. All batch 106/107 findings assigned to this lane are fixed;
+no evaluation schema change is needed. The live-fixture concurrency issue is
+still separate and open.
+
+Together with the green db/grammar rerun (49 / 372) and final grammar run
+(2 / 21), the first run's green schema, maintenance-schema, and program namespaces
+cover the requested subjects. Both program deletion regressions passed. These
+are **fast iterations under armed contracts**, not orchestrator gate evidence.
+No further test broadening or gate is claimed. The final turn and grammar
+snapshots include the final production code. The single read-only development
+probe observed PID 41413; the lane made no other prepl evaluation, restarted no
+development process, and did not edit protected `src/seon/fn.clj`.
+
+Decision/research checkpoint: **`cd6495f49`**. Implementation: **`2df9ecccc`**.
+The final documentation checkpoint records these outcomes. All commits use
+explicit owned paths and the requested co-author trailer. The diagnostic issue
+is resolved and archived; the broader fixture class retains its open status.
+
+Raw fast output is retained for review at:
+
+- `tmp/orchestrator/gate-results/write-admission-batch107-fast.log`
+- `tmp/orchestrator/gate-results/write-admission-batch107-fast-final.log`
+- `tmp/orchestrator/gate-results/write-admission-batch107-grammar-final.log`
+- `tmp/orchestrator/gate-results/write-admission-batch107-turn-final.log`
+
+All lane-started shells ended. The fast harness removed its snapshots; the
+lane's `tmp/write-admission-batch107` scratch directory was removed after copying
+those review logs. The supplied batch 106/107 logs and retained roots were not
+edited or manually cleaned. Stop for orchestrator review before any gate.
