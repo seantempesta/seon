@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 created: 2026-09-17
 tags: [turn-loop, bounded-execution, store, writer, class]
@@ -60,3 +60,41 @@ Recovery: `bin/seon reset --force` (fifth reset of the day).
 
 Related: `in-process-test-runs-poison-the-shared-fixture-base`,
 `the-store-grows-without-collection` (owner options page).
+
+## Resolution (2026-09-17, write-storm lane)
+
+Landing note with the storm's numbers and the live before/after:
+[bounded-write-retry-and-registry-preservation-2026-09-17](../../prds/steward-platform/research/bounded-write-retry-and-registry-preservation-2026-09-17.md).
+
+**Class 2, bounded write retry** (`f86ec57ed`). A turn pass whose DURABLE write
+was refused names the refusal in its report (`:seon.turn.loop/refusal`);
+`seon.turn/step` counts consecutive refusals in the proc's own state, and at
+the declared per-agent dial `:seon.config.agent/write-refusal-bound` it parks
+the agent, commits ONE fault through the cluster's fault committer naming the
+refusal, the agent, the count and the bound, and stops offering the
+self-rewake. A cluster declaring no bound refuses loudly rather than reading
+absence as "no bound". Regression:
+`seon.turn-test/a-refused-turn-write-is-bounded-and-commits-exactly-one-fault`
+asserts the transaction count from the database — past the bound, `:max-tx` is
+unchanged across further wakes.
+
+**Class 1, the registry leak.** The literal reading of the first defect is
+refuted: `seon.schema/register!` refuses outside an isolated candidate delta,
+and the packaged declaration forms are re-derived from classpath resources with
+no cache, so neither can be leaked into. The demonstrable root cause is
+CUSTODY: an in-process test body runs on a thread that inherited the agent
+evaluation's `seon.db/*conn*` binding (conveyed by `bound-fn` at
+`src/seon/test.clj:128`), so a fixture helper using an elided `seon.db` arity
+wrote the LIVE cluster's datoms — which is how the suite's synthetic
+declaration became a durable fact on `default`. Fixed at three owners:
+`seon.test.runner/run-var!` runs every test Var inside
+`seon.db/call-without-custody`; the runner's drift detector gained
+`::snapshot-schema-keys` so registry drift is reported BY KEY in both
+directions; and `seon.test/run` restores a live cluster's projection when a run
+changed its key set, naming the restored keys.
+`seon.test-support/preserving-schema-registry` is the scoped helper, used by
+`seon.schema-usage-guard-test`'s own fixture bracket. That suite's separate
+~20-red cold failure had the same shape and a different cause — `install-forms!`
+wrote the schema rows without advancing the fixture's projection state, so the
+next `row-tx` compiled a declaration against a population missing its
+references; it now installs through one seam both see.
