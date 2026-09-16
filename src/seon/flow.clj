@@ -23,6 +23,13 @@
            [java.util.concurrent Executor Executors Future FutureTask]
            [java.util.concurrent.atomic AtomicLong]))
 
+;;; OPTIONAL LATE DEPENDENCY. `seon.operator.runtime` lives in
+;;; `resources/seon/operator/runtime.clj`, off the source path, and is loaded
+;;; by the operator, not by this namespace. Resolved once at first use rather
+;;; than on every graph start (AGENTS §2.1).
+(defonce ^:private operator-runtime-root-executors
+  (delay (requiring-resolve 'seon.operator.runtime/root-executors)))
+
 (set! *warn-on-reflection* true)
 
 (defn- executor?
@@ -669,7 +676,7 @@
            (when (and (not @accepting?) (empty? next-submissions))
              (deliver drained ::drained))))
         root-executors
-        ((requiring-resolve 'seon.operator.runtime/root-executors))
+        (@operator-runtime-root-executors)
         task-executor (:io root-executors)
         {::keys [graph started]}
         (start-graph!
@@ -1089,7 +1096,7 @@
 (defn- projection-executor
   [projection]
   (let [^Executor delegate
-        (:io ((requiring-resolve 'seon.operator.runtime/root-executors)))]
+        (:io (@operator-runtime-root-executors))]
     (reify Executor
       (execute [_ command]
         (.execute
@@ -1132,7 +1139,7 @@
   [error-channel]
   (let [completion (async/promise-chan)
         ^Executor io-executor
-        (:io ((requiring-resolve 'seon.operator.runtime/root-executors)))]
+        (:io (@operator-runtime-root-executors))]
     (.execute
      io-executor
      ^Runnable
@@ -1243,7 +1250,7 @@
   (let [error-channel (:error-chan started)
         completion (async/promise-chan)
         io-executor
-        (:io ((requiring-resolve 'seon.operator.runtime/root-executors)))]
+        (:io (@operator-runtime-root-executors))]
     (.execute
      ^Executor io-executor
      ^Runnable
