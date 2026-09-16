@@ -402,3 +402,16 @@ dev JVM lacks (the test loader adds :test paths, not its extra-deps). Every
 db-backed in-process run on default is blocked until reach-closure decides:
 the evaluation context stops loading test namespaces, or the loader carries
 the :test alias's deps. Handed to the steward's reach-closure resume.
+
+### 2026-09-16 12:40Z — base poison root cause (`653d4d4ef`, steward): thread context classloader
+
+Refutes the reach-closure hypothesis. `seon.sci.eval/classpath-locatable?`
+used one-arg `io/resource`, i.e. the calling THREAD's context classloader; an
+in-process `seon.test/run` binds the test DynamicClassLoader around its body,
+so the first base construction inside it saw all 214 test namespaces as
+servable and required them until `dev_cache.clj` → tools.build failed. The
+fix resolves through the system classloader; regression
+`seon.sci.eval-test/process-membership-ignores-a-thread-context-classloader`.
+A poisoned delay cannot be un-poisoned in place: default restarted. Queued
+for the next batch: seon.sci.eval-test. Follow-on issue filed by the steward
+(host-namespace! find-ns branch admits any already-loaded namespace).
