@@ -1578,7 +1578,9 @@
                        :seon.fn.file/path (.getCanonicalPath file) :seon.fn/index-refused true})))
     (let [canonical-path (.getCanonicalPath file)
           contexts (source-contexts [file])
-          analysis (analyzer/analyze {::analyzer/paths [canonical-path]})
+          analysis (analyzer/analyze
+                    {::analyzer/sources
+                     {canonical-path (:text (get contexts canonical-path))}})
           first-party-functions
           (into (set known-functions)
                 (first-party-function-symbols analysis))
@@ -1672,9 +1674,9 @@
   [request]
   (let [roots (:seon.fn/roots request)
         files (source-files roots)
-        paths (mapv #(.getCanonicalPath ^java.io.File %) files)
         contexts (source-contexts files)
-        analysis (analyzer/analyze {::analyzer/paths paths})
+        analysis (analyzer/analyze
+                  {::analyzer/sources (update-vals contexts :text)})
         first-party-functions (first-party-function-symbols analysis)
         findings-by-file
         (group-by ::analyzer/filename

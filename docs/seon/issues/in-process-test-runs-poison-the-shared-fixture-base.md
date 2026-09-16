@@ -166,3 +166,36 @@ resolution wants a handed projection that the loader thread does not carry.
 No in-process regression was possible in that JVM; the lane relied on the
 cold gate. Not investigated further (out of that lane's scope), filed so the
 next lane does not spend its budget rediscovering it.
+
+## Second shape, 2026-09-16 (source-analysis lane, pid 17352)
+
+The delay is not the only thing that poisons. Running a whole test namespace
+through `seon.test/run` in-process, one deftest at a time, left the base
+delay REALIZED and intact — `@@seon.test-support/database-base` still returns
+its `::configuration`/`::connection`/`seon.sci.eval/ctx` map — while its
+Datahike connection's writer was shut down. Every later `with-database` fork
+from it refuses with
+
+    :seon.error/kind :seon.db/unknown-failure
+    :seon.db/transaction-outcome-unknown true
+    "Writer is shut down; release and reconnect."
+
+so tests that passed minutes earlier in the same JVM now error, and the
+`realized?` check the operating rule prescribes reports the base healthy.
+That is this project's absence-of-signal class inside the health check
+itself: a realized delay is not a live connection.
+
+Trigger, observed: `seon.fn-test/indexing-uses-a-prebuilt-manifest-without-analysis`
+hit `seon.test/run`'s declared 20,000 ms bound inside `with-database`. The
+bound firing left the fixture's writer released. It also leaked that test's
+`with-redefs` of `seon.fn.analyzer/analyze` (with-redefs never unwinds when
+the run is abandoned), so the NEXT deftest in the sweep failed with that
+test's `"analysis must not run"` throw — a red with no relation to its own
+subject. In isolation that victim,
+`seon.fn-test/settled-form-records-calls-across-every-program-namespace`,
+ran 12/0/0.
+
+Two derived defects worth separating: a base health probe must test the
+connection, not `realized?`; and a bound firing inside `with-database`
+should release the fixture rather than leave a half-live one for every
+later lane in the JVM.

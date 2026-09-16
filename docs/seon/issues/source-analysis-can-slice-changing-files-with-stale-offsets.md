@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, source, operator, class/p1, wave/publication-velocity]
 ---
@@ -36,6 +36,20 @@ source text, and `src/seon/cluster.clj:1636` checks the source digest only
 after building the manifest. A changing-source refusal therefore cannot
 replace this earlier raw slicing exception. The exact race still needs a
 bounded regression before changing the source owner.
+
+## Resolved 2026-09-16 (steward-platform)
+
+The root cause was one analysis reading each file TWICE: `source-contexts`
+captured the text the spans slice, and clj-kondo re-read the same paths to
+produce those spans. `seon.fn.analyzer/analyze` takes the captured text now
+and clj-kondo reads it from a private mirror, so there is exactly one read
+of the live file per analysis and offsets and text are the same bytes by
+construction. 50a7110b7 had already made the span read total, so a span that
+somehow still does not fit names the file, the span, and the two digests
+instead of throwing a bare index exception. Regression:
+`seon.fn-test/a-file-changed-after-capture-analyzes-to-the-captured-spans`.
+Full detail, including the measured cache decision, is in
+[the span-read issue](source-analysis-throws-when-a-file-changes-between-snapshot-and-span-read.md).
 
 The path-limited snapshot iteration passed. That isolates this investigation
 but does not repair live publication: source bytes and analysis offsets must

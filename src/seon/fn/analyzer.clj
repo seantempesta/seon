@@ -50,9 +50,41 @@
     (set? (::fixed-arities entry))
     (update ::fixed-arities (comp vec sort))))
 
+(def ^:private mirror-directory "tmp/analysis-mirror")
+
+(def ^:private mirror-prefix
+  ;; One canonical prefix per process: `analyzed-source-path` runs once per
+  ;; produced analysis entry, and the checkout does not move under a JVM.
+  (delay (str (.getCanonicalPath (io/file "." mirror-directory))
+              java.io.File/separator)))
+
+(defn- analyzed-source-path
+  "The checkout file a linted path carries the bytes of.
+
+  `analyze` never hands clj-kondo a live source file: it writes the captured
+  text to one private mirror under `tmp/analysis-mirror/<analysis>/` whose
+  tail is the source's own absolute path, so the rows clj-kondo reports and
+  the text they are sliced against are the same bytes by construction. Every
+  rule that asks where an analyzed file came from — cache ownership, cache
+  obsolescence, the filename on an emitted row — asks this, so a mirrored
+  analysis answers exactly as a direct one would. A path that is not a mirror
+  is its own answer."
+  [^String path]
+  (let [prefix @mirror-prefix]
+    (if (str/starts-with? path prefix)
+      (let [tail (subs path (count prefix))
+            separator (str/index-of tail java.io.File/separator)]
+        (if separator (subs tail separator) path))
+      path)))
+
+(defn- source-located
+  [entry]
+  (cond-> entry
+    (string? (::filename entry)) (update ::filename analyzed-source-path)))
+
 (defn- location
   [entry]
-  (present-values entry (into [:filename] location-keys)))
+  (source-located (present-values entry (into [:filename] location-keys))))
 
 (defn- namespace-definition
   [entry]
@@ -122,7 +154,7 @@
   (not= :cljs (::lang entry)))
 
 (defn- finding [entry]
-  (present-values entry finding-keys))
+  (source-located (present-values entry finding-keys)))
 
 (defn- manifest-source-roots
   "The canonical source-root directories this checkout's own manifest declares.
@@ -157,11 +189,13 @@
   "True when this analyzed path is the checkout's own declared source.
   A fixture root, a scratch file, or the synthesized `-` stdin buffer is not:
   its analysis is isolated by construction, so it can never leave a stub
-  under a first-party namespace name in the shared dependency cache."
+  under a first-party namespace name in the shared dependency cache. A mirror
+  answers for the checkout file whose captured bytes it carries, so mirroring
+  a file does not change whether its analysis owns the cache."
   [path]
   (let [checkout (.getCanonicalFile (io/file "."))
         roots (source-roots-of (.getPath checkout))
-        candidate (.getCanonicalPath (io/file path))]
+        candidate (.getCanonicalPath (io/file (analyzed-source-path path)))]
     (boolean
      (some (fn [root]
              (or (= root candidate)
@@ -190,6 +224,8 @@
                   :let [entry (with-open [input (io/input-stream file)]
                                 (transit/read (transit/reader input :json)))
                         filename (:filename entry)
+                        source (when (string? filename)
+                                 (analyzed-source-path filename))
                         namespace-name (symbol (subs (.getName file) 0
                                                      (- (count (.getName file))
                                                         (count ".transit.json"))))
@@ -197,10 +233,10 @@
                   :when (and (string? filename)
                              (or (= "<stdin>" filename)
                                  (and canonical-source
-                                      (not= (.getCanonicalPath (io/file filename))
+                                      (not= (.getCanonicalPath (io/file source))
                                             (.getCanonicalPath (io/file canonical-source))))
                                  (and (not (str/includes? filename ".jar:"))
-                                      (not (.exists (io/file filename))))))]
+                                      (not (.exists (io/file source))))))]
             (java.nio.file.Files/deleteIfExists (.toPath file)))))))))
 
 (defn- invoke-kondo
@@ -216,7 +252,11 @@
            :config analysis-config}
           options)
         result (clj-kondo/run! options)
-        sources (into {} (map (juxt :name :filename))
+        sources (into {}
+                      (map (juxt :name #(let [filename (:filename %)]
+                                          (cond-> filename
+                                            (string? filename)
+                                            analyzed-source-path))))
                       (get-in result [:analysis :namespace-definitions]))]
     ;; A current namespace declaration outranks a retained copy in any other
     ;; language's cache, even when that old build artifact still exists.
@@ -225,13 +265,60 @@
       (clj-kondo/run! options)
       result)))
 
+(defn- delete-tree!
+  "Delete one directory this namespace created, never following a symlink."
+  [^java.io.File root]
+  (let [path (.toPath root)]
+    (when (java.nio.file.Files/exists
+           path (into-array java.nio.file.LinkOption
+                            [java.nio.file.LinkOption/NOFOLLOW_LINKS]))
+      (java.nio.file.Files/walkFileTree
+       path
+       (proxy [java.nio.file.SimpleFileVisitor] []
+         (visitFile [file _attributes]
+           (java.nio.file.Files/deleteIfExists ^java.nio.file.Path file)
+           java.nio.file.FileVisitResult/CONTINUE)
+         (postVisitDirectory [directory _exception]
+           (java.nio.file.Files/deleteIfExists ^java.nio.file.Path directory)
+           java.nio.file.FileVisitResult/CONTINUE))))))
+
+(defn- write-mirror!
+  "Write each captured source text under one private analysis mirror.
+
+  The mirror path keeps the source's own absolute path as its tail, so the
+  namespace a file declares still matches the path clj-kondo sees and
+  `analyzed-source-path` reads the source back out of it."
+  [^java.io.File root sources]
+  (mapv
+   (fn [[^String path ^String text]]
+     (let [relative (cond-> path
+                      (str/starts-with? path (str java.io.File/separator))
+                      (subs 1))
+           mirror (io/file root relative)]
+       (io/make-parents mirror)
+       (java.nio.file.Files/write
+        (.toPath mirror)
+        (.getBytes text java.nio.charset.StandardCharsets/UTF_8)
+        (into-array java.nio.file.OpenOption []))
+       (.getCanonicalPath mirror)))
+   (sort-by key sources)))
+
 (defn analyze
-  "Analyze complete source roots or individual files without evaluation."
+  "Analyze captured source text, complete source roots, or individual files.
+
+  `::sources` is the one race-free form: a map of canonical source path to the
+  exact text the caller captured. clj-kondo reads that text from a private
+  mirror instead of re-reading the file, so the rows and columns it reports
+  and the text a caller slices with them are the same bytes even while the
+  file is being edited. `::paths` remains for whole directories, the
+  synthesized stdin buffer, and callers that own no capture."
   {:malli/schema
    [:=>
     [:cat
      [:map
-      [::paths [:vector {:min 1} [:string {:min 1}]]]]]
+      [::paths {:optional true} [:vector {:min 1} [:string {:min 1}]]]
+      [::sources {:optional true}
+       [:map-of {:min 1} [:string {:min 1}] :string]]]]
     [:map
      [::namespace-definitions [:vector :map]]
      [::namespace-usages [:vector :map]]
@@ -239,21 +326,38 @@
      [::var-usages [:vector :map]]
      [::keywords [:vector :map]]
      [::findings [:vector :map]]]]}
-  [{::keys [paths]}]
+  [{::keys [paths sources]}]
+  (when-not (or (seq paths) (seq sources))
+    (throw (ex-info "Analysis requires either captured sources or paths."
+                    {:seon.error/kind ::analysis-refused})))
   ;; A trusted diagnostic must preserve each call as one coherent record.
   ;; clj-kondo's parallel analysis has combined an outer call's location and
   ;; arity with an inner call's resolved var, then emitted the corruption
   ;; twice. Its sequential path retains the same linters and dependency cache.
-  (let [result (invoke-kondo
-                ;; ONE cache rule, decided here: only the checkout's own
-                ;; declared source may read or write the shared dependency
-                ;; cache. A synthesized stdin buffer (2026-08-29) and a
-                ;; fixture root under `tmp/` (2026-09-16) are the same
-                ;; defect — kondo keys the cache by namespace name, so a
-                ;; decoy `seon.error` would answer for the real one in every
-                ;; later analysis in this JVM.
-                (cond-> {:lint paths}
-                  (not (every? checkout-source? paths)) (assoc :cache false)))
+  (let [mirror-root (when (seq sources)
+                      (let [parent (io/file "." mirror-directory)]
+                        (.mkdirs parent)
+                        (.toFile
+                         (java.nio.file.Files/createTempDirectory
+                          (.toPath parent) "analysis"
+                          (into-array java.nio.file.attribute.FileAttribute [])))))
+        lint-paths (if mirror-root (write-mirror! mirror-root sources) paths)
+        result (try
+                 (invoke-kondo
+                  ;; ONE cache rule, decided here: only the checkout's own
+                  ;; declared source may read or write the shared dependency
+                  ;; cache. A synthesized stdin buffer (2026-08-29) and a
+                  ;; fixture root under `tmp/` (2026-09-16) are the same
+                  ;; defect — kondo keys the cache by namespace name, so a
+                  ;; decoy `seon.error` would answer for the real one in every
+                  ;; later analysis in this JVM. A mirror is not a decoy: it
+                  ;; carries the checkout file's own captured bytes, and
+                  ;; `checkout-source?` reads the source path back out of it.
+                  (cond-> {:lint lint-paths}
+                    (not (every? checkout-source? lint-paths))
+                    (assoc :cache false)))
+                 (finally
+                   (when mirror-root (delete-tree! mirror-root))))
         analysis (:analysis result)]
     {::namespace-definitions
      (filterv jvm-entry?

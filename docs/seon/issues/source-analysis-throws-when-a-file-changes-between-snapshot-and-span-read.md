@@ -108,3 +108,64 @@ Follow-up, not in that slice: the two snapshot-before/after compares
 no `:seon.error/diagnostic-cause`, so they still hard-fail the publication.
 Giving them the declared cause would fold them into the same single retry and
 changes the full-refresh path's behaviour; it needs its own slice.
+
+## Class dissolved 2026-09-16 (steward-platform)
+
+The refusal above was the backstop; the class was the DOUBLE READ. One
+analysis read each file twice — `source-contexts` captured the text spans
+are sliced from, and clj-kondo re-read the same paths to produce rows and
+columns — so an edit landing between the two reads produced offsets for
+text the capture no longer matched.
+
+`seon.fn.analyzer/analyze` now takes `::seon.fn.analyzer/sources`, a map of
+canonical path to the captured text, writes each to one private mirror under
+`tmp/analysis-mirror/<analysis>/<absolute source path>`, lints the mirror,
+and deletes it. There is exactly ONE read of the live file per analysis, and
+clj-kondo's rows describe the captured bytes by construction.
+`seon.fn/build-artifact` and `seon.fn/build-manifest` pass their captured
+text; `::paths` remains for whole directories, the synthesized stdin buffer,
+and callers that own no capture.
+
+`analyzed-source-path` (`src/seon/fn/analyzer.clj`) reads the source path
+back out of a mirror path, and every rule that asks where an analyzed file
+came from asks it: the emitted `::filename` on each row and finding, the
+cache-ownership rule (`checkout-source?`), and the cache-obsolescence scan.
+So a mirrored analysis answers exactly as a direct one did — same filenames
+downstream, same shared clj-kondo cache.
+
+Measured on pid 17352, 2026-09-16:
+
+- `src/seon/fn.clj` (103,386 bytes), single-file analysis: 495 ms before,
+  452–524 ms after — no meaningful change.
+- `build-manifest` over `src` + `test` (336 files, 7.3 MB): 5,711 ms before,
+  5,164 ms after; identical finding tally, including the single
+  `unresolved-var`.
+- The class probe: `src/seon/fn.clj` captured, then grown on disk by a
+  concurrent write, then analyzed. All 108 declarations slice exactly out of
+  the captured text, no refusal, every row named the real path, and the
+  appended declaration was correctly absent from the analysis.
+
+**Deliberate departure from the filed fix shape.** The shape suggested
+keeping `:cache false` for a private analysis root (the b50f4ddc7 rule).
+Measured, that loses signal: cache-off drops one `unresolved-var` finding
+over the full tree and 60 of 1,412 external arity annotations on
+`src/seon/fn.clj` alone — invalid-arity and unresolved-var are blocking
+finding classes, so a silent cache-off would be this project's
+absence-of-signal defect in a new place. b50f4ddc7's rule is about a DECOY
+under a first-party namespace name; a mirror is not a decoy — it carries the
+checkout file's own captured bytes — so `checkout-source?` resolves the
+mirror to its source and the cache stays on, proven: mirrored analysis
+yields 1,412 arity annotations, exactly the direct cache-on figure.
+
+In-process proof (`seon.test/run` on pid 17352, test namespaces reloaded
+through `seon.test`'s own loader):
+`seon.fn-test/a-file-changed-after-capture-analyzes-to-the-captured-spans`
+6/0/0 (new class regression),
+`seon.fn-test/a-span-past-the-captured-source-is-the-typed-refusal` 17/0/0,
+and all seven `seon.fn.analyzer-test` tests green, including
+`canonical-analysis-rejects-obsolete-cache-authorities` and
+`complete-roots-and-individual-files-have-parity`.
+
+Boundary: the `tmp/analysis-mirror` parent is created under the checkout and
+its per-analysis child is deleted in a `finally`; a killed JVM leaves one
+child directory for ordinary `tmp/` hygiene.
