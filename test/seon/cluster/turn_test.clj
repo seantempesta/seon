@@ -15,7 +15,6 @@
             [seon.cluster.message :as my.message]
             [seon.run :as my.turn]
             [seon.ai :as ai]
-            [seon.bootstrap :as bootstrap]
             [seon.flow :as seon.flow]
             [seon.render.web :as web]
             [seon.cluster :as cluster]
@@ -2902,7 +2901,7 @@
         (pr-str used))))
 
 (deftest generated-fixed-point-closes-the-run
-  (with-cluster fake-evaluate
+  (with-cluster
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
             run-id "generated-fixed-point"]
@@ -2925,26 +2924,24 @@
          (turn/receipt-settle-tx
           {:seon.turn/id run-id
            :seon.cluster.eval/ordinal 0
-           :seon.cluster.eval/result-edn "{:introduced 'my.turn}"}))
+           :seon.eval/shown "{:introduced 'my.turn}"}))
         (let [request {:seon.agent/id "agent-a"
                        :seon.db.process/id process}
               generated (turn/next-agent-work @connection request)
               report
-              (with-redefs [bootstrap/next-entry (constantly nil)]
-                (turn/turn
+              (with-redefs-fn {#'turn/declared-sources
+                              (fn [& _] {:seon.turn/forms []})}
+                #(turn/turn
                  {:seon.turn.loop/cluster cluster
                   :seon.turn.work/next generated}
                  now))]
-          ;; A GENERATED RUN THAT HAS NOTHING LEFT TO GENERATE IS FINISHED.
-          ;; The `:generate` -> `:call` edge is deleted: it was written by
-          ;; `run/generation-complete-call`, whose only caller was this arm,
-          ;; and no production path reached it — `generated-run-tx`'s only
-          ;; caller is `bootstrap/seed-tx`, whose run id always makes
-          ;; `generate-turn`'s bootstrap? arm true.
+          ;; Exhausting the declared system sources closes the turn.
           (is (= :closed (:seon.turn.loop/outcome report)))
-          (is (inst? (:seon.turn/closed-tx
-                      (db/pull @connection [:seon.turn/closed-tx]
-                               [:seon.turn/id run-id]))))
+          (is (inst? (:db/txInstant
+                       (db/pull @connection [:db/txInstant]
+                                (get-in (db/pull @connection [:seon.turn/closed-tx]
+                                                 [:seon.turn/id run-id])
+                                        [:seon.turn/closed-tx :db/id])))))
           (is (not= run-id
                     (:seon.turn/id (turn/next-agent-work @connection
                                                                request)))
@@ -2960,7 +2957,7 @@
                        @connection run-id))))))))
 
 (deftest generated-membership-failure-never-advances-the-run-to-call
-  (with-cluster fake-evaluate
+  (with-cluster
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
             run-id "generated-membership-failure"]
@@ -2983,7 +2980,7 @@
          (turn/receipt-settle-tx
           {:seon.turn/id run-id
            :seon.cluster.eval/ordinal 0
-           :seon.cluster.eval/result-edn "{:introduced 'my.turn}"}))
+           :seon.eval/shown "{:introduced 'my.turn}"}))
         (let [request {:seon.agent/id "agent-a"
                        :seon.db.process/id process}
               generated (turn/next-agent-work @connection request)
@@ -2994,8 +2991,8 @@
                :seon.error/data
                {:seon.render.walk/lookup [:seon.agent/id "agent-a"]}}
               report
-              (with-redefs [bootstrap/next-entry (constantly failure)]
-                (turn/turn
+              (with-redefs-fn {#'turn/declared-sources (constantly failure)}
+                #(turn/turn
                  {:seon.turn.loop/cluster cluster
                   :seon.turn.work/next generated}
                  now))

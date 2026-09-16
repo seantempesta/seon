@@ -157,3 +157,19 @@ Candidate runs **44565 11/0/0** and **44583 11/0/0**; after source-file reload,
 fresh canonical base/context runs **44677 11/0/0** and **44678 11/0/0**.
 The fake evaluator was the stale fixture seam; no production turn semantics
 changed and no assertion was loosened.
+
+## Generated-source fixture slice
+
+`generated-fixed-point-closes-the-run` and
+`generated-membership-failure-never-advances-the-run-to-call` retained injections
+into `bootstrap/next-entry` after `6aca09cce` moved the production arm to the
+shared `declared-sources` generator. Their terminal seed also wrote the retired
+result field. The tests now inject exhaustion/refusal at that existing generator,
+seed saved shown text, use real SCI, and read a closure transaction's actual
+`:db/txInstant`. The unused bootstrap require is removed.
+
+The exhaustion test still requires closure, no further work for that turn, and
+system authorship. The refusal test still requires error outcome, no provider
+call phase, closure, and the exact durable occurrence message. Candidate runs
+**44679 4/0/0**, **44680 4/0/0**; source-reloaded fresh-base runs
+**44692 4/0/0**, **44693 4/0/0**. No generated-source production path changed.
