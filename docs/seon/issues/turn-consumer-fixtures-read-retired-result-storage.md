@@ -300,3 +300,9 @@ regression passes 15 assertions both before and after isolated adoption
 (runs 41652 and 41665). The broader seeded-absence and generated-scenario
 constructor residuals remain open. In total, 27 previously red turn tests have
 passing focused proofs; the full census above predates this final helper fix.
+
+Backup setup repair landed as `4b3322b04`; the current-protocol replacement
+slice is `517e045d5`. The class remains open for the 16 unresolved census
+members (including the unexplained projection interleaving). Final cold
+verification is requested in `tmp/orchestrator/gate-requests/turn-test-reds.txt`
+for `seon.cluster.turn-test` and `seon.sci.eval-test`.

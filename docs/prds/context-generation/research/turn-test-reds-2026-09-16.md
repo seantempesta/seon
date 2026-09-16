@@ -364,3 +364,47 @@ count with “expected an integer, got an integer.” The exact boundary is in
 [the status issue](../../../seon/issues/runtime-status-refuses-error-occurrence-count.md).
 No default stop, refork or restart was performed by this lane; no foreign
 status/problem/error owner was edited to repair the observation.
+
+## Landed commits and owned paths
+
+`ecdd61ffe`, `767a4238f`, `78b7ad4fb`, `517e045d5`, `4b3322b04`.
+
+- `docs/prds/context-generation/research/turn-test-reds-2026-09-16.md`
+- `docs/prds/context-generation/research/turn-test-reds-backup-before-after-2026-09-16.edn`
+- `docs/prds/context-generation/research/turn-test-reds-baseline-2026-09-16.edn`
+- `docs/prds/context-generation/research/turn-test-reds-before-edit-2026-09-16.edn`
+- `docs/prds/context-generation/research/turn-test-reds-candidate-2026-09-16.edn`
+- `docs/prds/context-generation/research/turn-test-reds-deletion-after-adoption-2026-09-16.edn`
+- `docs/prds/context-generation/research/turn-test-reds-delimiter-candidate-2026-09-16.clj`
+- `docs/prds/context-generation/research/turn-test-reds-delimiter-result-2026-09-16.edn`
+- `docs/prds/context-generation/research/turn-test-reds-final-census-2026-09-16.edn`
+- `docs/prds/context-generation/research/turn-test-reds-fixtures-after-adoption-2026-09-16.edn`
+- `docs/prds/context-generation/research/turn-test-reds-observations-after-edit-2026-09-16.edn`
+- `docs/prds/context-generation/research/turn-test-reds-probe-2026-09-16.clj`
+- `docs/prds/context-generation/research/turn-test-reds-protocol-after-adoption-2026-09-16.edn`
+- `docs/prds/context-generation/research/turn-test-reds-residual-observations-2026-09-16.edn`
+- `docs/prds/context-generation/research/turn-test-reds-unregister-candidate-2026-09-16.clj`
+- `docs/prds/context-generation/research/turn-test-reds-unregister-trace-2026-09-16.edn`
+- `docs/seon/issues/archive/turn-declaration-deletion-refuses-after-commit.md`
+- `docs/seon/issues/runtime-schema-unregister-retains-installed-attribute.md`
+- `docs/seon/issues/runtime-status-refuses-error-occurrence-count.md`
+- `docs/seon/issues/turn-bookkeeping-exceeds-recorded-regression-bound.md`
+- `docs/seon/issues/turn-consumer-fixtures-read-retired-result-storage.md`
+- `src/seon/sci/eval.clj`
+- `test/seon/cluster/turn_test.clj`
+
+## Cleanup and handoff
+
+The isolated operator completed `down`: PID 3851 exited, the store flock was
+free and its branch roster readable. Its worktree and lane scratch directory
+were then removed; the shared `reference-code` source remains present. All
+owned command sessions and serial test futures completed before cleanup.
+Foreign worktrees, processes, source edits and test roots were preserved.
+
+The gate request is `tmp/orchestrator/gate-requests/turn-test-reds.txt`, with
+`seon.cluster.turn-test` and `seon.sci.eval-test` on separate lines. No cold
+`bin/test` or platform result is claimed: the assignment delegates that final
+proof to the orchestrator. This lane lands the five bounded repair slices
+above; the complete remaining class is explicitly open.
+
+Handoff recorded 2026-09-16 02:12 UTC, within the 90-minute assignment bound.
