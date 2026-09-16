@@ -25,11 +25,12 @@
          (repl/source-text
            (list 'seon.db/pull
              (list 'quote
-               [:seon.test/sym :seon.test/pass-count :seon.test/fail-count
-                :seon.test/error-count :seon.test/run-basis-t :seon.test/reach-digest
-                :seon.test/failing-assertions :seon.test/failure-message
-                {:seon.test/run [:seon.test.run/id :seon.test.run/basis-t]}
-                {:seon.fn/calls [:seon.fn/sym]}])
+               (cond-> [:seon.test/sym :seon.test/pass-count :seon.test/fail-count
+                        :seon.test/error-count :seon.test/run-basis-t
+                        :seon.test/failing-assertions :seon.test/failure-message
+                        {:seon.test/run [:seon.test.run/id :seon.test.run/basis-t]}
+                        {:seon.fn/calls [:seon.fn/sym]}]
+                 (:seon.test/reach-digest entity) (conj :seon.test/reach-digest)))
              [:seon.test/sym test-name])))))
 
 (defn render-html
@@ -60,4 +61,3 @@
              :when target]
          [:li [:a {:href (route/path :seon.render.route/namespace
                            {:namespace (namespace (symbol target))})} target]]))]))
-

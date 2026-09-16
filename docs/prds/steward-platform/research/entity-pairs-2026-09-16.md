@@ -25,6 +25,15 @@ shows present result facts without clipping. No source is copied into AI.
 Guarantee: a function or test reached by the existing walk selects its
 entity-schema pair and renders even when optional result facts are absent.
 
+Implementation commits: `ac34ce5a3` and `ff351811b`. The latter contains
+only the test entity-map render properties, committed with `--only` from
+an isolated HEAD-plus-owned-hunk file snapshot. The shared working file
+was never replaced; its remaining diff contains only the foreign changes.
+The
+landing's initial truncated authority reads were subsequently completed:
+AGENTS.md, issue README, issue-family spec, namespace data model, and mining
+report were read end to end. No class issue/member list was assigned to P2.
+
 ### Recorded in-process proof
 
 All four renderer definitions were evaluated through MCP JVM before their
@@ -65,6 +74,18 @@ while producing its queries. The test test covers absent, pass, fail, and
 error result facts. No separate registry, walker, or execution path was
 introduced.
 
+Final optional-fact slice: `render-ai` now includes `:seon.test/reach-digest`
+in its generated pull only when the entity carries that fact. This keeps
+the pair usable before the separate reach-digest schema addition lands.
+The new form was evaluated through MCP; complete absent/present outputs
+were inspected; the same test-pair regression recorded **24/0/0** before
+editing (run 56890, basis 536871339, 02:12:34Z, 1514 ms) and after editing
+(run 56891, basis 536871340, 02:12:53Z, 1540 ms). The post-edit run exercised
+the loaded definition; the hook queued adoption as
+`16759c6b-310b-4ee3-9855-6e8fa1a9283e`, so it is not a claim of whole-cluster
+convergence. A preceding run 56885 also recorded 24/0/0 against the
+publication-reloaded definition.
+
 ### Live adoption and browser boundary
 
 The default JVM (PID 7595) contains the four armed Vars and indexed
@@ -90,9 +111,20 @@ stdout event: function AI for `seon.id/id` took **1.081541 ms**, with all
 four exact relationship query comments and the single `doc` form. The
 ordinary projection error is independently recorded in
 [the existing MCP issue](../../../seon/issues/mcp-jvm-small-result-projection-fails-during-live-adoption.md).
+An independent real test HTML probe returned its complete block in
+**2.320875 ms**: pass 1 / fail 0 / error 0, run basis 536870921, and eleven
+called-function links. Its script is in the committed probe file. A fresh
+MCP session was needed after `session-lost`; runtime status still reported
+PID 7595, so the tool's restart wording is not proof of a process restart.
 Publication was explicitly requested
 for the four owned source/schema paths; it waited behind a foreign
 `init --dev default` lifecycle lock. No foreign process was operated.
+
+The explicit publication finished with exit 1 after a retry, at
+`6aa9fac8-ce2b-51d8-875f-ece21d30a70c`, refusing
+`:seon.cluster/source-changed-during-adoption` after JVM instrumentation.
+Its shell has exited. No default stop, restart, refork, or foreign process
+operation was performed.
 
 ### Gate request and exact boundaries
 
