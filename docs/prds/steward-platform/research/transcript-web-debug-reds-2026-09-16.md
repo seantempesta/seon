@@ -178,3 +178,158 @@ proof; the gate request names both namespaces.
 - `src/seon/render/transcript.clj` (stale `bounded-result` comment only)
 - `docs/prds/steward-platform/research/transcript-web-debug-reds-2026-09-16.md`
 - `docs/seon/issues/restorable-node-has-no-caller-after-the-shown-text-cut.md`
+
+---
+
+# Second pass — batch 35 (HEAD 68a3f080b)
+
+The first pass's two classes cleared 6 of 13 transcript tests and none of the
+web-debug block. Batch 35 ran the fixtures for the first time against a
+database that actually accepted them, so the remaining reds are new evidence,
+not the old ones. `tmp/orchestrator/gate-results/batch-35/named.md`,
+retained root `tmp/test-runs/run.V7UPqN`.
+
+**The dominant class is one shape: `seon.db/transact!` refuses a fixture row
+by RETURNING a flat error value, logs nothing, and the fixture ignores the
+answer.** The test then renders an empty history and fails several assertions
+away from its cause. This is the project's named recurring failure class — a
+check that reads absence of signal as health — living in the fixtures
+themselves. Every seed in `transcript_test.clj` now goes through
+`transacted!`, which asserts `:db-after` and prints the refusal message, so
+the next schema change that invalidates a fixture says so at the seed.
+
+Each refusal below was reproduced WITHOUT the poisoned fixture base, by
+calling the same pre-write validator `transact!` uses against `default`'s live
+database value and projection:
+
+```clojure
+(#'seon.db/write-error (seon.db/db (seon.operator/connection "default"))
+                       (#'seon.db/carried-projection …) <the fixture's tx-data>)
+```
+
+## C — a test row must declare its source
+
+```
+seon.db/transact! refused transaction data at [2 :seon.schema.admission/source]:
+expected the required key :seon.schema.admission/source with either :core or :agent
+```
+
+`{:seon.test/sym "target-fact"}` is no longer a complete test entity.
+`malformed-receipt-bytes-…` (ai `""`, 4 fails) and
+`every-generated-history-is-ordered-and-total` (property shrank to one event,
+because EVERY generated case shared the refused base row) both seed one. Both
+now supply `:seon.schema.admission/source :core`; the row is only an `about`
+target, and what the test needs is that it is a real one.
+
+## D — one evaluation, one map
+
+```
+seon.db/transact! refused transaction data at [3 :seon.cluster.eval/at]:
+expected the required key :seon.cluster.eval/at
+```
+
+`seed-pinned-bootstrap-history!` wrote each bootstrap evaluation as a PAIR of
+maps — a frozen-source half and a settled half — from the era when those were
+two entities. Each map is validated on its own, so the source-only half is
+refused for the `:seon.cluster.eval/at` the receipt schema requires
+(`resources/seon/schemas/seon.cluster.eval.edn`). Merged into one map per
+(run, ordinal), which is the ruled shape anyway.
+
+## E — a fault is recorded by its owner, and the fact is not transaction data
+
+```
+seon.db/transact! refused transaction data at [0 :seon.error/at]:
+expected an installed attribute, got an undeclared attribute
+```
+
+This is the REAL cause of all 7 web-debug assertions, and the first pass's
+about-ref repair did not touch it. `:seon.error/at` is declared on
+`:seon.error/fact` but is not an installed attribute: the durable row is
+`:seon.error/error` (signature, id, kind, fn, frame, exception-class —
+`resources/seon/schemas/seon.error.edn:183`), and `commit-tx` projects the
+fact into it (`src/seon/error.clj:1343`). `normalize`'s docstring claim that
+its result "is transactable as-is" is false for any database.
+
+The fixture now calls the owner, `seon.error/recording`
+(`src/seon/error.clj:1369`), transacts its `:seon.db/tx-data`, and points
+`:seon.message/about` at the `:seon.error/ref` it hands back — in a SECOND
+transaction, so the message names an entity that already exists. Verified
+against `default`: both transactions pass `write-error`, and `recording`
+returns `[:seon.error/signature "5bc7a34d…"]`.
+
+## F — the history run's declared shape contradicted its producer
+
+```
+ERROR seon.render.transcript/agent-history refused return value at
+[:seon.render.transcript/runs 0 :seon.turn/opened-tx]:
+expected an integer, got a map
+```
+
+`:seon.render.transcript/run` declared `:seon.turn/opened-tx` as
+`:seon.turn/opened-tx`, a `:seon.db/ref` (an integer), while
+`history-run-selector` pulls `{:seon.turn/opened-tx [:db/id :db/txInstant]}`
+because `run-heading` states the instant it carries
+(`src/seon/render/transcript.clj:945`, `:1005`). The contract only fired once
+the fixture produced a non-empty `runs`, which is why the first pass never saw
+it. Reproduced live on `default`, where the same call refuses identically.
+Fixed at the declaration: a new `:seon.render.transcript/pulled-transaction`
+describes what the selector actually returns.
+
+## G — the fixture's clock was a literal epoch, and wall-clock overtook it
+
+`populated-history-…` asserted messages and evaluations interleave by stored
+time, but a message is ordered by its TRANSACTION instant
+(`message-order-facts`, `src/seon/render/transcript.clj:259`) while the
+evaluations were pinned to `1785500000000 + n` — about 2026-07-31. Once the
+date passed it, every message sorted after every evaluation, exactly as the
+gate reported (`["eval-result" "eval-wait" "eval-error" "outside-0" …]`).
+
+The fixture now transacts each message in its own transaction, reads the
+instant Datahike stamped from the report's own datoms, asserts those instants
+strictly increase, and places each evaluation between two observed instants.
+The clock is derived, not remembered, so the test cannot expire again.
+
+## H — two expectations still describing retired presentation
+
+- `populated-history-…` and `malformed-…` expected
+  `seon.cluster.message/format-ai` in the AI text. The entry is the
+  agent-facing read form the message schema declares,
+  `(my.message/read #:my.message{:id …})`
+  (`seon.render.transcript/message-form`, `src/seon/render/transcript.clj:790`)
+  — the `my.*` / `seon.*` split, not a regression.
+- `populated-history-…` expected the comment ABOVE the prompt line; the one
+  grammar puts the agent's whole input after `ns=> `
+  (`seon.repl/input-text`, `src/seon/repl.clj:205`). Same correction as
+  `one-reply-…` took in the first pass.
+- `the-transcript-is-whole-…` grepped the cut for the prose "more
+  characters" / "requery ". The cut IS an elision value — ordinary data with
+  `:seon.print/bound-by`, `:seon.print/elision-unit`, `:seon.print/omitted`
+  and `:seon.print/requery-form` — and the sentence was a rendering of it.
+  The assertions now name the declared keys.
+
+## I — the history no longer hides an older turn
+
+`supersession-chains-vanish-from-the-history` expected only the bootstrap and
+newest runs; all six evaluations now render. That is the ruling, not a
+regression: "All turns are shown by default; previous prompt bytes remain
+unchanged until compaction" (AGENTS, the agent's history), and
+`candidate-entity-ids` (`src/seon/render/transcript.clj:142`) bounds by query
+work alone. The surviving property — nothing silently elided, every durable
+evaluation still pullable — is what the test asserts now.
+
+## Verification boundary for this pass
+
+- The cold gate is the proof surface. `default`'s shared fixture base is
+  poisoned by another lane (evaluation-context acquisition fails loading a
+  test namespace), so NO db-backed test was run in process and
+  `database-base` was never forced.
+- What WAS verified in process, read-only, on `default`: every refusal above
+  through `#'seon.db/write-error` against the live database value and
+  projection, before and after the fix; `seon.error/recording`'s tx-data and
+  ref; the `agent-history` contract violation reproduced live; and both test
+  namespaces compiling through `seon.test`'s own loader after every edit.
+- The schema fix (F) could not be proven adopted: the edit hook's publication
+  worker is timing out under contention from another lane
+  (`logs/current-source-failure.log`, "Publication did not finish within its
+  declared bound"), so `agent-history`'s wrapper on `default` is still armed
+  from the old declaration.
