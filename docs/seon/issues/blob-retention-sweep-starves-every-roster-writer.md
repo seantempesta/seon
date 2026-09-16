@@ -93,3 +93,26 @@ firing again.
 
 `docs/prds/context-generation/research/gate-recording-refusals-2026-09-16.md`,
 section "Second landing — 2026-09-16, lane `gate-recording-latency`".
+
+## Retention-sweep lane — 2026-09-16
+
+Confirmed on the same default PID 53378: inventory alone took
+70,308.003625 ms for 3,625 blobs / 66,549,759 physical bytes, below the
+536,870,912-byte budget. Current-reference derivation took 172.702375 ms.
+A 60,422.284833 ms reachability sample returned 115 sweep-in-progress and
+4 admitted verdicts (96.64% closed). The installed database has no
+`seon.blob` attributes; a new empty catalog would not prove zero usage.
+
+The proposed outside-permit candidate decision needs deletion-time validation:
+a publisher can make the selected digest reachable before the sweep acquires
+its permit. A cluster-local catalog also loses inventory when that branch is
+retired, while physical bytes remain. Datahike already owns whole-store GC,
+but its Konserve sweep also enumerates keys and does not enforce this byte
+budget. No production change or schedule retirement was made.
+
+The [decision and exact live evidence](../../prds/context-generation/research/retention-sweep-2026-09-16.md)
+record three options under the AGENTS.md §2.5 cross-owner design gate.
+The issue remains open. Acceptance for a query-based replacement must include
+complete root inventory after branch retirement, zero enumeration/permit under
+budget, oldest-unreferenced deletion over budget, and protection when a
+candidate becomes referenced between selection and deletion.
