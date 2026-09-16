@@ -52,10 +52,10 @@
    :seon.cluster.eval/interrupted-at
    :seon.cluster.eval/output
    :seon.cluster.eval/comment
-   ;; THE FORM'S OWN PRINT OPTIONS. `bounded-result` reads these off the
-   ;; entry; without them in the pull, every store-derived render printed
-   ;; under the shipped default while the in-memory one printed under the
-   ;; agent's choice, so the page and the stored bytes disagreed.
+   ;; THE FORM'S OWN PRINT OPTIONS, as evidence of the session's dynamic
+   ;; bindings at evaluation time. They do NOT re-bound the shown text:
+   ;; presentation is decided once, by the render profile, when the
+   ;; evaluation stores what it showed (`src/seon/render/value.clj:448`).
    :seon.print/length
    :seon.print/level
    :seon.eval/duration-ms

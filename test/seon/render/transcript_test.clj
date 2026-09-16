@@ -36,64 +36,37 @@
 
 (declare unit)
 
-(deftest admitted-top-level-string-is-terminal-text
-  (let [bounded-result (ns-resolve 'seon.render.transcript 'bounded-result)
-        render-unit {:seon.print/options {}}
-        string-node {:seon.print/face :seon.print/string
-                     :seon.print/value "Agent: juniper\nNamespace: my.agents.juniper"}
-        nested-node {:seon.print/face :seon.print/map
-                     :seon.print/entries
-                     [[{:seon.print/face :seon.print/keyword
-                        :seon.print/value :text}
-                       string-node]]}
-        ;; A TRUNCATED STRING CARRIES WHAT IT CUT AND WHAT CUT IT — the
-        ;; declared face requires both, and the gate now runs under the
-        ;; contracts that say so.
-        truncated-node {:seon.print/face :seon.print/truncated-string
-                        :seon.print/value "Agent: juni"
-                        :seon.print/length 42
-                        :seon.print/bound-by
-                        :seon.config.eval.result/max-string}]
-    ;; TERMINAL, AND STILL ONE LINE OF DATA. The node is taken as-is — no
-    ;; renderer, no floor — but it prints quoted like every other face
-    ;; (see the truncated case below), because splicing a string's own
-    ;; newlines into `#:seon.repl{:value …}` breaks the one response map
-    ;; the agent reads back into lines it cannot tell from its own forms.
-    (is (= "\"Agent: juniper\\nNamespace: my.agents.juniper\""
-           (bounded-result render-unit {} (pr-str string-node))))
-    (is (= "{:text \"Agent: juniper\\nNamespace: my.agents.juniper\"}"
-           (bounded-result render-unit {} (pr-str nested-node))))
-    (is (= "\"Agent: juni…\""
-           (bounded-result render-unit {} (pr-str truncated-node))))))
+;;; `admitted-top-level-string-is-terminal-text` lived here while the
+;;; transcript re-rendered a stored PRINT NODE into agent-visible text
+;;; through its own private `bounded-result`. The shown-text cut
+;;; (ff9507c1b) dissolved that step: an evaluation stores the exact text
+;;; its value renderer produced (`:seon.eval/shown`) and every projection
+;;; emits it unchanged (`seon.repl/value-text`, `src/seon/repl.clj:117`).
+;;; The surviving class — saved shown text is terminal and no later
+;;; profile re-prints it — is proven at its owner by
+;;; `seon.repl-test/history-preserves-shown-text-without-applying-a-later-profile`,
+;;; and at this namespace's own boundary by
+;;; `historical-shown-text-keeps-its-original-elision` below.
 
 (deftest selected-run-keeps-status-outside-agent-visible-text
-  (let [selected-identities
-        (ns-resolve 'seon.render.transcript 'selected-run-identities)
-        unit {:seon.db/db ::database
-              :seon.turn/id "selected-run"
-              :seon.turn/agent
-              {:seon.agent/id "selected-agent"}
+  ;; STATUS CANNOT LEAK INTO AGENT-VISIBLE TEXT BECAUSE THE TURN CONCERN
+  ;; EMITS NONE. The turn's evaluations reach the agent through the prompt
+  ;; (`seon.repl/text`), so this pair's AI arm is empty by construction
+  ;; rather than by a composition that has to keep the two apart
+  ;; (`src/seon/render/transcript.clj:783`). The composition this test used
+  ;; to assert — a `seon-run-transcript` section wrapping a status article
+  ;; and a transcript section — is the retired second grammar.
+  (let [unit {:seon.turn/id "selected-run"
+              :seon.turn/agent {:seon.agent/id "selected-agent"}
               :seon.sci.admit/caps caps}]
-    (with-redefs-fn
-      {selected-identities
-       (constantly
-        {:seon.render.transcript/selected-run-id "selected-run"
-         :seon.render.transcript/selected-agent-id "selected-agent"
-         :seon.render.transcript/selected-run-error nil})
-       #'turn/render-ai (constantly "Run selected-run · opened at epoch")
-       #'transcript/render-ai
-       (constantly "my.agents.selected=> (+ 1 2)\n3")
-       #'turn/render-html
-       (constantly [:article {:class "seon-run-status"} "Run selected-run"])
-       #'transcript/render-html
-       (constantly [:section {:class "seon-transcript"} "(+ 1 2)\n3"])}
-      (fn []
-        (is (= "my.agents.selected=> (+ 1 2)\n3"
-               (transcript/render-run-ai unit)))
-        (is (= [:section {:class "seon-run-transcript"}
-                [:article {:class "seon-run-status"} "Run selected-run"]
-                [:section {:class "seon-transcript"} "(+ 1 2)\n3"]]
-               (transcript/render-run-html unit)))))))
+    (is (= "" (transcript/render-run-ai unit)))
+    (is (= "" (transcript/render-run-ai (assoc unit :seon.db/db ::database))))
+    ;; AN UNAVAILABLE OBSERVATION IS THE TYPED UNKNOWN, never silence: no
+    ;; database means the HTML arm refuses and names what was missing.
+    (let [refusal (transcript/render-run-html unit)]
+      (is (= :seon.render.transcript/selected-run-unavailable
+             (:seon.error/kind refusal)))
+      (is (str/includes? (:seon.error/message refusal) "selected run")))))
 
 (deftest durable-history-entries-never-invent-executions
   (let [history (ns-resolve 'seon.render.transcript 'history)
@@ -165,7 +138,7 @@
          :seon.cluster.eval/at (java.util.Date. 1)
          :seon.cluster.eval/read-basis-transaction 17
          :seon.cluster.eval/output "once\n"
-         :seon.cluster.eval/result-edn "1"
+         :seon.eval/shown "1"
          :seon.cluster.eval/source "(swap! executions inc)"}
         {:seon.cluster.eval/id "terminal-error"
          :seon.cluster.eval/run [:seon.turn/id "terminal-values"]
@@ -177,22 +150,16 @@
          :seon.cluster.eval/run [:seon.turn/id "terminal-values"]
          :seon.cluster.eval/ordinal 2
          :seon.cluster.eval/at (java.util.Date. 3)
-         :seon.cluster.eval/result-edn
-         (pr-str {:seon.print/face :seon.print/string
-                  :seon.print/value "alpha\nbeta"})
+         ;; THE STORED TEXT IS WHAT THE VALUE RENDERER SHOWED — a string
+         ;; result was shown quoted, so its own newlines can never be read
+         ;; back as lines of the session.
+         :seon.eval/shown (pr-str "alpha\nbeta")
          :seon.cluster.eval/source "(identity \"alpha\\nbeta\")"}
         {:seon.cluster.eval/id "terminal-nested-string"
          :seon.cluster.eval/run [:seon.turn/id "terminal-values"]
          :seon.cluster.eval/ordinal 3
          :seon.cluster.eval/at (java.util.Date. 4)
-         :seon.cluster.eval/result-edn
-         (pr-str
-          {:seon.print/face :seon.print/map
-           :seon.print/entries
-           [[{:seon.print/face :seon.print/keyword
-              :seon.print/value :text}
-             {:seon.print/face :seon.print/string
-              :seon.print/value "alpha\nbeta"}]]})
+         :seon.eval/shown (pr-str {:text "alpha\nbeta"})
          :seon.cluster.eval/source "(identity {:text \"alpha\\nbeta\"})"}])
       (let [receipt-render repl/response
             receipt-calls (atom 0)
@@ -204,7 +171,11 @@
                           (fn [unit]
                             (swap! receipt-calls inc)
                             (receipt-render unit))]
-              (transcript/render-run-ai
+              ;; THE AGENT'S OWN HISTORY IS THE AI PROJECTION. The turn
+              ;; concern emits no text of its own (`render-run-ai`), so the
+              ;; stored evaluations are read back where the agent reads
+              ;; them: its transcript.
+              (transcript/render-ai
                (assoc (unit connection)
                       :seon.turn/id "terminal-values"
                       :seon.turn/agent
@@ -343,12 +314,10 @@
      :seon.cluster.eval/ns [:seon.ns/name 'my.agents.transcript]
      :seon.cluster.eval/output "side effect\n"
      :seon.cluster.eval/read-basis-transaction 41
-     ;; THE STORED NODE IS THE ADMITTED PRINT NODE production writes, not a
-     ;; bare datum: the handle is derived from the node's face (a face that
-     ;; kept only a name never held the value), so a fixture that stores raw
-     ;; EDN is asserting a shape the writer never produces.
-     :seon.cluster.eval/result-edn
-     "#:seon.print{:face :seon.print/number, :value 42}"
+     ;; THE STORED TEXT IS THE SHOWN TEXT production writes: the evaluation
+     ;; keeps what its value renderer showed, never a print node a later
+     ;; reader would have to re-render (turn PRD §15; `:seon.eval/shown`).
+     :seon.eval/shown "42"
      :seon.cluster.eval/source "(do (println \"side effect\") (+ 20 22))"}
     {:seon.message/id "send-2" :seon.message/from [:seon.agent/id agent-id] :seon.message/to [:seon.agent/id peer-id] :seon.message/content "Check the repaired namespace." :seon.message/inbox [:seon.agent/id peer-id]}
     {:seon.turn/id "run-wait" :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}
@@ -356,8 +325,8 @@
      :seon.cluster.eval/run [:seon.turn/id "run-wait"]
      :seon.cluster.eval/ordinal 0
      :seon.cluster.eval/at (at 3500)
-     :seon.cluster.eval/result-edn
-     "{:my.turn/disposition :wait :my.turn/note \"waiting for the peer review\"}"
+     :seon.eval/shown
+     "{:my.turn/disposition :wait, :my.turn/note \"waiting for the peer review\"}"
      :seon.cluster.eval/source "(seon.run/wait \"waiting for the peer review\")"}
     {:seon.message/id "decline-3" :seon.message/from [:seon.agent/id agent-id] :seon.message/to [:seon.agent/id peer-id] :seon.message/about [:seon.problems/id "problem-transcript"] :seon.message/content "I cannot make the requested edit." :my.message/reason "The namespace is owned by another agent." :seon.message/inbox [:seon.agent/id peer-id]}
     {:seon.turn/id "run-error" :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}
@@ -365,8 +334,9 @@
      :seon.cluster.eval/run [:seon.turn/id "run-error"]
      :seon.cluster.eval/ordinal 0
      :seon.cluster.eval/at (at 4500)
-     :seon.cluster.eval/result-edn
-     "{:seon.error/kind :seon.sci.eval/refused}"
+     ;; AN ERROR IS TERMINAL: `:value` and `:error` are mutually exclusive
+     ;; facts of one evaluation (`src/seon/repl.clj:155`), so a failed
+     ;; evaluation stores no shown text beside its error.
      :seon.cluster.eval/error "No such namespace: missing.function"
      :seon.cluster.eval/triage-edn (arithmetic-triage-edn)
      :seon.error/kind :seon.sci.eval/refused
@@ -525,7 +495,7 @@
                [:seon.turn/id bootstrap-run-id]
                :seon.cluster.eval/ordinal ordinal
                :seon.cluster.eval/at (at 0)
-               :seon.cluster.eval/result-edn (pr-str ordinal)}]))
+               :seon.eval/shown (str ordinal)}]))
          (range bootstrap-count))
         messages
         (concat
@@ -606,7 +576,7 @@
            :seon.cluster.eval/run [:seon.turn/id bootstrap-run-id]
            :seon.cluster.eval/ordinal 0
            :seon.cluster.eval/at (at 1)
-           :seon.cluster.eval/result-edn ":bootstrap"
+           :seon.eval/shown ":bootstrap"
            :seon.cluster.eval/source "(identity :bootstrap)"}
 
           {:seon.turn/id "original" :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}
@@ -614,7 +584,7 @@
            :seon.cluster.eval/run [:seon.turn/id "original"]
            :seon.cluster.eval/ordinal 0
            :seon.cluster.eval/at (at 101)
-           :seon.cluster.eval/result-edn ":original"
+           :seon.eval/shown ":original"
            :seon.cluster.eval/source "(identity :original)"}
           {:seon.cluster.eval/id "original-comment"
            :seon.cluster.eval/run [:seon.turn/id "original"]
@@ -627,7 +597,7 @@
            :seon.cluster.eval/run [:seon.turn/id "curated"]
            :seon.cluster.eval/ordinal 0
            :seon.cluster.eval/at (at 201)
-           :seon.cluster.eval/result-edn ":curated"
+           :seon.eval/shown ":curated"
            :seon.cluster.eval/source "(identity :curated)"}
 
           {:seon.turn/id "proof" :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}
@@ -635,7 +605,7 @@
            :seon.cluster.eval/run [:seon.turn/id "proof"]
            :seon.cluster.eval/ordinal 0
            :seon.cluster.eval/at (at 301)
-           :seon.cluster.eval/result-edn ":proof"
+           :seon.eval/shown ":proof"
            :seon.cluster.eval/source "(identity :proof)"}
           {:seon.cluster.eval/id "proof-comment"
            :seon.cluster.eval/run [:seon.turn/id "proof"]
@@ -670,14 +640,18 @@
          :seon.cluster.eval/run [:seon.turn/id "run-malformed"]
          :seon.cluster.eval/ordinal 0
          :seon.cluster.eval/at (at 1000)
-         :seon.cluster.eval/result-edn "{"
+         ;; UNREADABLE BYTES ARE STILL THE BYTES THE AGENT SAW. Shown text
+         ;; is an observation, not a serialization: nothing reads it back,
+         ;; so a stored fragment reaches the history exactly as stored
+         ;; rather than through a second "malformed" face.
+         :seon.eval/shown "{"
          :seon.cluster.eval/source "("}])
       (let [ai (transcript/render-ai (unit connection))]
         ;; the message is the form that reads it, naming its own identity
         (is (str/includes? ai "seon.cluster.message/format-ai"))
         (is (str/includes? ai "\"about-test\""))
         (is (str/includes? ai "user=> ("))
-        (is (str/includes? ai ":seon.cluster.eval/result-edn \"{\""))
+        (is (str/includes? ai ":value {"))
         (assert-no-session-narration ai)))))
 
 (deftest about-identity-resolution-pulls-one-deterministic-ordered-id-vector
@@ -718,41 +692,13 @@
         (is (= basis-before (:max-tx @connection))
             "rendering twice commits no fault or other transaction")))))
 
-(deftest receipt-content-enters-the-shared-capped-floor
-  (support/with-database
-    (fn [connection]
-      (let [result (into {}
-                         (map (fn [index]
-                                [(keyword "audit" (str "field-" index))
-                                 (str "long-value-" index)]))
-                         (range 40))
-            narrow-caps (assoc caps
-                               :seon.config.eval.result/max-collection 3
-                               :seon.config.eval.result/max-string 8)]
-        (db/transact!
-         connection
-         [{:seon.agent/id agent-id}
-          {:seon.turn/id "run-capped" :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}
-          {:seon.cluster.eval/id "eval-capped"
-           :seon.cluster.eval/run [:seon.turn/id "run-capped"]
-           :seon.cluster.eval/ordinal 0
-           :seon.cluster.eval/at (at 1000)
-           :seon.cluster.eval/result-edn (pr-str result)
-           :seon.cluster.eval/source "(identity result)"}])
-        (let [ai (transcript/render-ai
-                  (unit connection narrow-caps))]
-          ;; THE CUT IS THE ONE ELISION VALUE, and it says what it omitted,
-          ;; the bound that made it, and the identity to ask again with —
-          ;; the word "elided" was the retired transcript marker's prose.
-          (is (str/includes? ai "…"))
-          (is (str/includes? ai "more children of 40"))
-          (is (str/includes? ai
-                             (str "bounded by "
-                                  :seon.render.profile/max-children)))
-          (is (str/includes? ai "requery "))
-          (is (str/includes? ai "eval-capped"))
-          (is (not (str/includes? ai ":audit/field-39")))
-          (assert-no-session-narration ai))))))
+;;; `receipt-content-enters-the-shared-capped-floor` asserted that the
+;;; transcript re-applied the caller's caps to a STORED result — a second
+;;; clipping spot, and the exact shape the one-clipping-spot ruling
+;;; retired (owner, 2026-09-08; AGENTS §2.4). The projection is made ONCE,
+;;; at evaluation time, and the evaluation stores the resulting shown text
+;;; including its elision values; history renders those bytes unchanged.
+;;; The surviving class is the test immediately below.
 
 (deftest historical-shown-text-keeps-its-original-elision
   (support/with-database
@@ -919,19 +865,19 @@
                 :seon.cluster.eval/source source
                 :seon.cluster.eval/at event-at}
          (= :receipt-result event-kind)
-         (assoc :seon.cluster.eval/result-edn (pr-str source-index))
+         (assoc :seon.eval/shown (pr-str source-index))
          (= :receipt-error event-kind)
          (assoc :seon.cluster.eval/error content)
          (= :receipt-interrupted event-kind)
          (assoc :seon.cluster.eval/interrupted-at event-at)
          (= :receipt-wait event-kind)
-         (assoc :seon.cluster.eval/result-edn
+         (assoc :seon.eval/shown
                 (pr-str {:my.turn/disposition :wait
                          :my.turn/note content}))
          (= :receipt-invalid event-kind)
-         (assoc :seon.cluster.eval/result-edn "{")
+         (assoc :seon.eval/shown "{")
          (= :receipt-mixed event-kind)
-         (assoc :seon.cluster.eval/result-edn
+         (assoc :seon.eval/shown
                 (pr-str {:seon.error/kind :generated/refusal})
                 :seon.cluster.eval/error content
                 :seon.error/kind :generated/refusal
@@ -1046,7 +992,7 @@
              "the printed value is the one REPL response, output as its own key")
          (let [facts (db/pull database
                               [:seon.cluster.eval/ordinal
-                               :seon.cluster.eval/result-edn
+                               :seon.eval/shown
                                :seon.cluster.eval/comment
                                :seon.cluster.eval/output
                                {:seon.cluster.eval/ns [:seon.ns/name]}
@@ -1067,7 +1013,7 @@
                         ;; bound, exactly as `evaluate-sources` assoc's it; a
                         ;; stored one derives the same handle from its entity
                         ;; id, so the two projections are the same bytes.
-                        (assoc (select-keys facts [:seon.cluster.eval/result-edn
+                        (assoc (select-keys facts [:seon.eval/shown
                                                    :seon.cluster.eval/comment
                                                    :seon.cluster.eval/output])
                                :seon.repl/handle
@@ -1099,7 +1045,7 @@
                :seon.cluster.eval/run [:seon.turn/id run-id]
                :seon.cluster.eval/ordinal 0
                :seon.cluster.eval/at (java.util.Date. (+ 100 (* 1000 ordinal)))
-               :seon.cluster.eval/result-edn (str (inc ordinal))
+               :seon.eval/shown (str (inc ordinal))
                :seon.cluster.eval/source (str "(+ " ordinal " 1)")}]))
          (range 3))))
       (let [database @connection
@@ -1125,17 +1071,25 @@
               "the actual namespace prompt and the stored result")
           (is (< (.indexOf ai "history-run-2") (.indexOf ai "history-run-0"))
               "newest first in the text as well"))
-        (testing "the AI projection renders the saved history without another read form"
-          (is (= ai (transcript/render-history-ai rows database))))
-        (testing "the HTML projection states the same runs, labeled historical"
-          (is (= [:h2 "History (3 runs)"] (nth html 2)))
-          (is (= "Historical run — its results are stored, not fresh"
-                 (last (nth (nth html 3) 2))))
-          (is (str/includes? (hiccup/->string html) "(+ 2 1)"))
+        (testing "the attribute's own AI projection emits no duplicate bytes"
+          ;; THE PROMPT IS THIS CONCERN'S AI PROJECTION. `format-history-ai`
+          ;; is what the turn loop renders; the declared `:seon.render/ai`
+          ;; pair deliberately emits nothing so a walk cannot print the same
+          ;; history a second time (`src/seon/render/transcript.clj:1043`).
+          (is (= "" (transcript/render-history-ai rows database))))
+        (testing "the HTML projection heads the same turns, newest first"
+          (is (= [:h2 "Turns (3)"] (nth html 2)))
+          (is (= ["Turn history-run-2" "Turn history-run-1" "Turn history-run-0"]
+                 (mapv #(second (nth % 2)) (drop 3 html)))
+              "one header per derived turn, in the derivation's order")
           (is (= (mapv :seon.turn/id runs)
-                 (into [] (comp (drop 3) (map #(last (last (nth % 3)))))
-                       html))
-              "one entry per derived run, in the derivation's order"))))))
+                 (mapv #(str/replace (second (nth % 2)) "Turn " "")
+                       (drop 3 html))))
+          ;; A TURN HEADER STATES THE TURN, NOT ITS EVALUATIONS — those
+          ;; belong to the prompt pane (`render-run-html`'s docstring). The
+          ;; header says how many there were, which is the queryable fact.
+          (is (str/includes? (hiccup/->string html) "Evaluations"))
+          (is (not (str/includes? (hiccup/->string html) "(+ 2 1)"))))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; ONE GENERATOR, END TO END
@@ -1226,24 +1180,24 @@
                ;;    in-memory record cannot derive from itself: production's
                ;;    `evaluate-sources` resolves the frozen evaluation's
                ;;    entity id after each form and assoc's `:seon.repl/handle`
-               ;;    when — and only when — the node actually held the value
-               ;;    (ruling 59c). This fixture persists into a second run id
-               ;;    rather than standing up custody, so the handles come from
-               ;;    the evaluations that were actually stored, derived
-               ;;    through the SAME predicate the loop uses. Everything else
+               ;;    when — and only when — the evaluation settled a value.
+               ;;    With the live object retained in the fork, that question
+               ;;    is simply "did this evaluation store shown text?"; the
+               ;;    node predicate it used to ask died with the node. This
+               ;;    fixture persists into a second run id rather than
+               ;;    standing up custody, so the handles come from the
+               ;;    evaluations that were actually stored. Everything else
                ;;    must be identical BY DERIVATION.
                stored-handles
                (mapv (fn [ordinal]
                        (let [stored (db/pull
                                      stored-db
-                                     [:db/id :seon.cluster.eval/id :seon.cluster.eval/result-edn
-                                      :seon.cluster.eval/result-blob]
+                                     [:db/id :seon.cluster.eval/id :seon.eval/shown]
                                      [:seon.cluster.eval/id
                                       (turn/receipt-identity
                                        "one-grammar-stored" ordinal)])]
                          (when (and (int? (:db/id stored))
-                                    (admit/restorable-node
-                                     (:seon.cluster.eval/result-edn stored)))
+                                    (string? (:seon.eval/shown stored)))
                            (admit/result-handle (:seon.cluster.eval/id stored)))))
                      (range (count outcomes)))
                page-unit (assoc (unit connection)
@@ -1306,25 +1260,31 @@
                    (str "the prompt must carry these bytes verbatim:\n"
                         entry-bytes))))
 
-           (testing "a handle names only a value the node actually held"
-             ;; RULING 59c, and the reason page and store agree. `(def x 1)`
-             ;; admits to a Var face and `(in-ns …)` to an object face — names,
-             ;; not values — so neither carries `:result`, in memory or from
-             ;; the store. A handle a later turn cannot resolve is worse than
-             ;; no handle.
-             (is (not (str/includes? (nth stored-bytes 0) ":result"))
-                 (str "a Var face named a handle: " (nth stored-bytes 0)))
-             (is (not (str/includes? (nth stored-bytes 2) ":result"))
-                 (str "an object face named a handle: " (nth stored-bytes 2)))
-             (is (str/includes? (nth stored-bytes 1) ":result result/e")
-                 (str "an ordinary value keeps its handle: "
-                      (nth stored-bytes 1))))
+           (testing "a handle names a value the fork really holds"
+             ;; RULING 59c's exclusion was about ADMITTED PRINT NODES: a Var
+             ;; or object face kept a NAME, not the value, so a handle
+             ;; pointing at it would not resolve. The live-result cut removed
+             ;; the node entirely — `bind-result!` interns the ACTUAL object
+             ;; under the evaluation's own handle, Vars and namespace objects
+             ;; included (`src/seon/sci/eval.clj:519`) — so every settled
+             ;; evaluation's handle resolves and every one of them carries it.
+             (doseq [index (range (count stored-bytes))
+                     :let [entry-bytes (nth stored-bytes index)]
+                     :when (str/includes? entry-bytes "#:seon.repl{")]
+               (is (str/includes? entry-bytes ":result result/e")
+                   (str "a settled evaluation without its handle: "
+                        entry-bytes))))
 
            (testing "the response the agent reads back"
              (let [joined (str/join "\n" stored-bytes)]
-               (is (str/includes? joined "my.agents.one-grammar=> (def x 1)"))
-               (is (str/includes? joined ";; a definition worth keeping")
-                   "the agent's comment, verbatim, above the prompt it introduces")
+               ;; THE PROMPT LINE OPENS THE AGENT'S INPUT, comment included:
+               ;; the comment is part of what the agent typed at that prompt,
+               ;; so it follows `ns=> ` and the form sits on the next line
+               ;; (`seon.repl/input-text`, `src/seon/repl.clj:205`).
+               (is (str/includes?
+                    joined
+                    "my.agents.one-grammar=> ;; a definition worth keeping\n(def x 1)")
+                   "the agent's comment, verbatim, on the prompt it introduces")
                (is (str/includes? joined ":out \"hi\\n\"")
                    ":out is its own key, never folded into :value")
                (is (str/includes? joined ":value 41"))
@@ -1365,7 +1325,8 @@
              ;; turn's fork now carries the binding from one form to the
              ;; next (`a-set-of-print-length-does-not-survive-the-next-form`,
              ;; resolved). The FOLLOWING form therefore stores the length it
-             ;; inherited and prints under it.
+             ;; inherited — the binding is real, and SCI's own printing
+             ;; inside the form runs under it.
              (let [follower (db/pull stored-db
                                      [:seon.print/length]
                                      [:seon.cluster.eval/id
@@ -1375,8 +1336,16 @@
                (is (= 2 (:seon.print/length follower))
                    "the following form inherits the session's print length")
                (is (str/includes? clipped "(vec (range 40))"))
-               (is (str/includes? clipped ":value [0 1 ...]")
-                   (str "the value is printed under the agent's own choice: "
+               ;; BUT PRESENTATION IS BOUNDED ONCE, BY THE RENDER PROFILE.
+               ;; `*print-length*` as a second elision mechanism is exactly
+               ;; what the one-clipping-spot ruling retired: the value
+               ;; renderer nulls it before emitting
+               ;; (`src/seon/render/value.clj:448`) and the cut it does make
+               ;; is an elision value naming its own bound, never `...`.
+               (is (not (str/includes? clipped "..."))
+                   (str "a second, unnamed elision mechanism: " clipped))
+               (is (str/includes? clipped ":seon.render.profile/max-children")
+                   (str "the cut must name the bound that made it: "
                         clipped))))
 
            (testing "ruling 45: nothing emitted is comment-shaped"
