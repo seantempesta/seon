@@ -135,22 +135,22 @@
     :seon.repl/subject [:seon.agent/id "worker"]
     :seon.repl/entry {:seon.repl/form '(help)}}
    {:seon.repl/key :run-namespace
-    :seon.repl/subject 'my.turn
+    :seon.repl/subject [:seon.ns/name 'my.turn]
     :seon.repl/entry {:seon.repl/form '(dir (quote my.turn))}}
    {:seon.repl/key :complete-doc
-    :seon.repl/subject 'my.turn/complete
+    :seon.repl/subject [:seon.fn/sym "my.turn/complete"]
     :seon.repl/entry {:seon.repl/form '(doc (quote my.turn/complete))}}
    {:seon.repl/key :message-namespace
-    :seon.repl/subject 'my.message
+    :seon.repl/subject [:seon.ns/name 'my.message]
     :seon.repl/entry {:seon.repl/form '(dir (quote my.message))}}
    {:seon.repl/key :inbox-doc
-    :seon.repl/subject 'my.message/inbox
+    :seon.repl/subject [:seon.fn/sym "my.message/inbox"]
     :seon.repl/entry {:seon.repl/form '(doc (quote my.message/inbox))}}
    {:seon.repl/key :read-doc
-    :seon.repl/subject 'my.message/read
+    :seon.repl/subject [:seon.fn/sym "my.message/read"]
     :seon.repl/entry {:seon.repl/form '(doc (quote my.message/read))}}
    {:seon.repl/key :inbox
-    :seon.repl/subject 'my.message/inbox
+    :seon.repl/subject [:seon.fn/sym "my.message/inbox"]
     :seon.repl/entry {:seon.repl/form '(my.message/inbox)}}
    {:seon.repl/key :message
     :seon.repl/subject [:seon.message/id "task-1"]
@@ -220,9 +220,9 @@
           (settled-node [{:seon.message/id "task-1"}])}
          {:seon.repl/key :read-doc
           :seon.sci.admit/print-node (settled-node nil)}]
-        candidates (remove #(contains? #{:run-namespace :complete-doc}
-                                       (:seon.repl/key %))
-                           episode-candidates)
+        candidates (into [] (remove #(contains? #{:run-namespace :complete-doc}
+                                                (:seon.repl/key %)))
+                         episode-candidates)
         episode (walk/ordered-episode (episode-request candidates settled))]
     (is (= [:root :message-namespace :inbox-doc :read-doc :inbox :message]
            (mapv :seon.repl/key episode)))
