@@ -41,79 +41,79 @@
 
 (defn- bounded-result [test-var timeout-ms]
   (let [test-symbol (str (:ns (meta test-var)) "/" (:name (meta test-var)))
-        task (FutureTask. ^java.util.concurrent.Callable
-                          (bound-fn [] (with-test-loader #(runner/run-var! test-var))))
-        thread (.unstarted (Thread/ofVirtual) ^Runnable task)]
+        task (FutureTask. (bound-fn [] (with-test-loader #(runner/run-var! test-var))))
+        thread (.unstarted (Thread/ofVirtual) task)]
     (.start thread)
     (try
-      (let [result
-            (await/await!
-             {:seon.await/future task
-              :seon.await/bound
-              {:seon.await/config-attribute :seon.test-support/event-backstop-seconds
-               :seon.await/config-value timeout-ms}
-              :seon.await/diagnostic
-              {:seon.error/diagnostic-layer :test
-               :seon.error/diagnostic-operation ::run
-               :seon.error/diagnostic-member test-symbol
-               :seon.error/diagnostic-expected :test-completion
-               :seon.error/diagnostic-offending :pending
-               :seon.error/diagnostic-evidence {:seon.test/sym test-symbol}}})]
+      (let [result (await/await!
+                     {:seon.await/future task,
+                      :seon.await/bound
+                      {:seon.await/config-attribute :seon.test/remaining-ms,
+                       :seon.await/config-value timeout-ms},
+                      :seon.await/diagnostic
+                      {:seon.error/diagnostic-layer :test,
+                       :seon.error/diagnostic-operation :seon.test/run,
+                       :seon.error/diagnostic-member test-symbol,
+                       :seon.error/diagnostic-expected :test-completion,
+                       :seon.error/diagnostic-offending :pending,
+                       :seon.error/diagnostic-evidence {:seon.test/sym test-symbol}}})]
         (if (:seon.error/kind result)
-          {:seon.test/sym test-symbol :seon.test/pass-count 0
-           :seon.test/fail-count 0 :seon.test/error-count 1
+          {:seon.test/sym test-symbol,
+           :seon.test/pass-count 0,
+           :seon.test/fail-count 0,
+           :seon.test/error-count 1,
            :seon.test/failure-message (:seon.error/message result)}
           result))
-      (catch Exception failure
+      (catch
+        Exception
+        failure
         (when (instance? InterruptedException failure) (throw failure))
-        {:seon.test/sym test-symbol :seon.test/pass-count 0
-         :seon.test/fail-count 0 :seon.test/error-count 1
+        {:seon.test/sym test-symbol,
+         :seon.test/pass-count 0,
+         :seon.test/fail-count 0,
+         :seon.test/error-count 1,
          :seon.test/failure-message
-         (str "Test execution failed: "
-              (or (some-> failure ex-cause ex-message) (ex-message failure)))})
+         (str
+           "Test execution failed: "
+           (or (some-> failure ex-cause ex-message) (ex-message failure)))})
       (finally (when-not (.isDone task) (.cancel task true))))))
 
 (defn run
-  "Run one declared test Var, commit its result facts, and return them.
-
-  The connection is ordinarily supplied by call preparation from the calling
-  agent's environment. The returned value is pulled from the transaction's
-  `:db-after`, so it cannot disagree with the facts that were committed."
+  "Run one declared test Var, commit its result facts, and return them.\n\n  The connection is ordinarily supplied by call preparation from the calling\n  agent's environment. The returned value is pulled from the transaction's\n  `:db-after`, so it cannot disagree with the facts that were committed."
   {:malli/schema
    [:function
-    [:=> [:cat :seon.test/var :seon.db/connection]
-     [:or :seon.test/result :seon.error/value]]
-    [:=> [:cat :seon.test/var :seon.db/connection :seon.test/run-options]
+    [:=> [:cat :seon.test/var :seon.db/connection] [:or :seon.test/result :seon.error/value]]
+    [:=>
+     [:cat :seon.test/var :seon.db/connection :seon.test/run-options]
      [:or :seon.test/result :seon.error/value]]]}
   ([test-var connection]
-   (let [provenance (runner/provenance (db/db connection))]
-     (if (:seon.error/kind provenance) provenance
-         (run test-var connection
-              {:seon.test.run/provenance provenance
-               :seon.test/remaining-ms (event-backstop-ms)}))))
+    (let [provenance (runner/provenance (db/db connection))]
+      (if (:seon.error/kind provenance)
+        provenance
+        (run
+          test-var
+          connection
+          {:seon.test.run/provenance provenance,
+           :seon.test/remaining-ms (event-backstop-ms)}))))
   ([test-var connection options]
-  (let [database (db/db connection)]
-    (if (:seon.error/kind database)
-      database
-      (let [provenance (:seon.test.run/provenance options)
-            result (if (:seon.error/kind provenance)
-                     provenance
-                     (schema/call-with-projection
-                      (db/carried-projection database)
-                      #(bounded-result test-var (min (event-backstop-ms)
-                                                     (:seon.test/remaining-ms options)))))]
-        (if (:seon.error/kind result)
-          result
-          (let [committed
-                (runner/commit-results!
-                 connection
-                 {:seon.test.runner/results [result]
-                  :seon.test/run-basis-t (:seon.test.run/basis-t provenance)
-                  :seon.test/run-at (:seon.test.run/at provenance)
-                  :seon.test.run/provenance provenance})]
-            (if (:seon.error/kind committed)
-              committed
-              (first committed)))))))))
+    (let [database (db/db connection)]
+      (if (:seon.error/kind database)
+        database
+        (let [provenance (:seon.test.run/provenance options)
+              result (if (:seon.error/kind provenance)
+                       provenance
+                       (schema/call-with-projection
+                         (db/carried-projection database)
+                         #(bounded-result test-var (:seon.test/remaining-ms options))))]
+          (if (:seon.error/kind result)
+            result
+            (let [committed (runner/commit-results!
+                              connection
+                              {:seon.test.runner/results [result],
+                               :seon.test/run-basis-t (:seon.test.run/basis-t provenance),
+                               :seon.test/run-at (:seon.test.run/at provenance),
+                               :seon.test.run/provenance provenance})]
+              (if (:seon.error/kind committed) committed (first committed)))))))))
 
 (defn- identity-tests [database changed]
   (let [[attribute value :as program-identity]
@@ -303,8 +303,8 @@
   and the changed identities it reaches. Empty or deferred checks do not mint
   run provenance or compute a program digest; no program was tested.
   Selection, loading, and execution
-  share the total :seon.test/check-time-limit-ms fact; each test also has
-  the declared event backstop. Timeout requests interruption and reports it."
+  share the total :seon.test/check-time-limit-ms fact; each test receives
+  the remaining allowance. Timeout requests interruption and reports it."
   {:malli/schema [:=> [:cat :seon.test/check-request]
                   [:or :seon.test/check-result :seon.error/value]]}
   [{connection :seon.db/connection cluster :seon.boot/cluster-name :as request}]

@@ -608,30 +608,25 @@
       projection-state #(d/connect configuration))
      :seon.sci.eval/projection-state projection-state})))
 
-(defn- with-fresh-database
-  ([database-id extra-schema body]
-   (with-fresh-database database-id extra-schema {} body))
-  ([database-id extra-schema options body]
+(defn- with-fresh-database [database-id extra-schema options body]
   ((requiring-resolve 'seon.test.runner/fixture-observation!)
-   'seon.test-support/with-fresh-database options)
-  (let [configuration
-        {:store {:backend :memory :id (or database-id (random-uuid))}
-         :keep-history? true
-         :schema-flexibility :write}
+    'seon.test-support/with-fresh-database
+    options)
+  (let [configuration {:store {:backend :memory, :id (or database-id (random-uuid))},
+                       :keep-history? true,
+                       :schema-flexibility :write}
         _ (d/create-database configuration)
         provisional-connection (d/connect configuration)]
     (try
       (populate-database! provisional-connection)
-      (let [{connection :seon.test-support/connection
-             projection-state :seon.sci.eval/projection-state}
-            (reconnect-with-projection configuration provisional-connection)]
+      (let [{connection :seon.test-support/connection,
+             projection-state :seon.sci.eval/projection-state} (reconnect-with-projection
+                                                                 configuration
+                                                                 provisional-connection)]
         (try
           (run-database-body connection projection-state extra-schema body)
-          (finally
-            (d/release connection))))
-      (finally
-        (d/release provisional-connection)
-        (d/delete-database configuration))))))
+          (finally (d/release connection))))
+      (finally (d/release provisional-connection) (d/delete-database configuration)))))
 
 (defn- with-branched-database
   [extra-schema body]
@@ -667,26 +662,12 @@
         (release-branch! branch)))))
 
 (defn with-database
-  "Run `body` on a fresh branch of one canonical in-memory base.
-
-   The production source population is installed once per new test JVM.
-   Every invocation gets a distinct active branch, connection, datoms, schema
-   evolution, transaction history, and writer. Optional
-   `:seon.test-support/extra-schema` rows are synthetic declarations whose
-   installation is itself part of a test.
-
-   `:seon.test-support/database-id` preserves the legacy physical-store
-   identity contract through an isolated slower path. Store-global blob tests
-   request `:seon.test-support/fresh-store?` because blob keys are outside
-   Datahike branch facts."
-  ([body]
-   (with-database {} body))
-  ([{:seon.test-support/keys [database-id extra-schema fresh-store?] :as options} body]
-   (if (or database-id fresh-store?)
-     (if (find options :seon.test/fixture-observation)
-       (with-fresh-database database-id extra-schema options body)
-       (with-fresh-database database-id extra-schema body))
-     (with-branched-database extra-schema body))))
+  "Run `body` on a fresh branch of one canonical in-memory base.\n\n   The production source population is installed once per new test JVM.\n   Every invocation gets a distinct active branch, connection, datoms, schema\n   evolution, transaction history, and writer. Optional\n   `:seon.test-support/extra-schema` rows are synthetic declarations whose\n   installation is itself part of a test.\n\n   `:seon.test-support/database-id` preserves the legacy physical-store\n   identity contract through an isolated slower path. Store-global blob tests\n   request `:seon.test-support/fresh-store?` because blob keys are outside\n   Datahike branch facts."
+  ([body] (with-database {} body))
+  ([{:seon.test-support/keys [database-id extra-schema fresh-store?], :as options} body]
+    (if (or database-id fresh-store?)
+      (with-fresh-database database-id extra-schema options body)
+      (with-branched-database extra-schema body))))
 
 (defn seed-cluster!
   "Seed one complete cluster/config path for tests that create agents."
