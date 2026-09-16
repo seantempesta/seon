@@ -9,11 +9,8 @@
                           :seon.operator.collect/dry-run?]]
                         :dry-run? :boolean
                         :option-key :keyword
-                        :request-schema :keyword
                         :unrecognized-option [:= true]
                         :unrecognized-option-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must name the unrecognized collection option key"} [:seon.operator.collect/unrecognized-option :seon.operator.collect/unrecognized-option] [:seon.operator.collect/option-key :seon.operator.collect/option-key] [:seon.error/message :seon.error/message]]
-                        :request-schema-absent [:= true]
-                        :request-schema-absent-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must name the request schema whose declaration is absent"} [:seon.operator.collect/request-schema-absent :seon.operator.collect/request-schema-absent] [:seon.operator.collect/request-schema :seon.operator.collect/request-schema] [:seon.error/message :seon.error/message]]
                         :store-id :seon.store/id
                         :managed-root :seon.operator/managed-root
                         :branch

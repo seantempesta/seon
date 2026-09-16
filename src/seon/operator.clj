@@ -1038,25 +1038,24 @@
           (throw failure)
           (incomplete-collection! base-result failure))))))
 
-(defn- documented-request-keys
-  "The keys the declared request schema documents, read from the declaration.
+(def ^:private documented-request-keys
+  "The keys `collect!` consults, and therefore the ones it documents.
 
-  Derived, never mirrored: the authored form under `resources/seon/schemas/`
-  IS the list, so a key added there is documented here in the same edit. An
-  absent declaration refuses by name — an empty set would make the misspelling
-  check below silently pass everything, which is the class it exists to end."
-  [schema-key]
-  (let [form (get (schema.edn/packaged-forms) schema-key)]
-    (when-not (and (vector? form) (= :map (first form)))
-      (throw
-       (ex-info "The request schema declaration is absent or not a map."
-                {:seon.error/kind
-                 :seon.operator.collect/request-schema-absent
-                 :seon.operator.collect/request-schema schema-key
-                 :seon.operator.collect/request-schema-absent true})))
-    (into #{}
-          (keep (fn [child] (when (vector? child) (first child))))
-          (rest form))))
+  This is the ONE place they are named: the entry point reads its options
+  through this set, and the misspelling check below derives its family from
+  the same set, so the two can never disagree. It is not a mirror of the
+  declaration either —
+  `seon.operator-test/the-documented-collection-request-keys-are-the-declared-ones`
+  fails on drift against `:seon.operator.collect/request` in
+  `resources/seon/schemas/`.
+
+  It is a value rather than a read of the authored schema population at call
+  time. Reading that population here made a collection fail because ANOTHER
+  namespace's declaration sat in the wrong resource file — an entry point
+  fetching its world at call time, which §2.1 exists to prevent."
+  #{:seon.operator/repository-root
+    :seon.operator/managed-root
+    :seon.operator.collect/dry-run?})
 
 (defn- refuse-misspelled-options!
   "Refuse a request key carrying a documented key's name in another namespace.
@@ -1072,11 +1071,10 @@
   and is ignored, which is what the scheduler's merged maintenance request
   needs. What is refused is only a key that means to be a documented one."
   [request]
-  (let [documented (documented-request-keys :seon.operator.collect/request)
-        by-name (into {} (map (juxt name identity)) documented)]
+  (let [by-name (into {} (map (juxt name identity)) documented-request-keys)]
     (doseq [supplied (keys request)
             :when (and (keyword? supplied)
-                       (not (contains? documented supplied)))
+                       (not (contains? documented-request-keys supplied)))
             :let [declared (get by-name (name supplied))]
             :when declared]
       (throw

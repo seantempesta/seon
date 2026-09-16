@@ -94,12 +94,14 @@ performed a REAL collection on `default` once.
 - `inventory-facts` projects one registry inventory into the result's keys, so
   the real path and the dry run report the same four numbers.
 - `refuse-misspelled-options!` refuses a request key that carries a documented
-  key's name in another namespace, by name, before anything is acquired. The
-  documented keys are DERIVED from the declared request schema
-  (`documented-request-keys` over `seon.schema.edn/packaged-forms`), never
-  mirrored; an absent declaration refuses rather than passing everything. Maps
+  key's name in another namespace, by name, before anything is acquired. Maps
   stay OPEN: an unrelated key (the scheduler merges its own declared
   maintenance values into this request) is ignored, as before.
+  `documented-request-keys` is the ONE place those keys are named — the entry
+  point reads its options through it and the misspelling family derives from
+  it — and it is kept honest by a checker, not by care:
+  `the-documented-collection-request-keys-are-the-declared-ones` fails on drift
+  against `:seon.operator.collect/request`, reading only that one resource.
 
 **`src/seon/cluster/registry.clj`**
 
@@ -200,6 +202,64 @@ through `seon.operator/collect!` in that cluster's own JVM.
    field by the 1,229 the second pass swept on `default`.
 
 The scratch root was downed and deleted.
+
+## Fixed after the first cold gate (batch 101)
+
+Two defects of my own, both found by running what I had committed:
+
+1. **The namespace did not compile.** `with-redefs` takes SYMBOLS and wraps
+   each in `(var …)`, so the `#'operator/branch-digests` I wrote in its
+   binding vector became `(var (var …))` — `class clojure.lang.Cons cannot be
+   cast to class clojure.lang.Symbol`, at LOAD, before any test ran. clj-kondo
+   does not catch it and my live proofs never loaded the test namespace. The
+   two arms now share one `with-redefs-fn` closure over a VAR map, which is
+   the form that reaches a private seam.
+2. **The entry point fetched its world at call time.** Deriving the documented
+   keys through `seon.schema.edn/packaged-forms` read the WHOLE authored
+   schema population on every call, so another lane's declaration sitting in
+   the wrong resource file made `collect!` throw
+   `Schema attribute :seon.issue/turns-remaining … belongs in seon.issue.edn`
+   — three of my own regressions red on a defect in a namespace I never
+   touched. That is precisely the §2.1 failure the law names. The keys are now
+   a value in `seon.operator`, with a drift checker reading only
+   `seon.operator.collect.edn`. The `request-schema-absent` error class it
+   needed is deleted with it.
+
+## In-process proof (default, pid 53320, armed)
+
+All five namespaces LOAD through `#'seon.test/with-test-loader`
+(`require … :reload`): `seon.operator-test`, `seon.cluster.registry-test`,
+`seon.blob-publication-test`, `seon.maintenance-test`,
+`seon.maintenance-schema-test`.
+
+`seon.test/run`, three-argument arity, `:seon.test/remaining-ms 180000`, after
+re-arming through `seon.instrument/apply!` with the cluster's own projection
+(a `require :reload` of `seon.operator` leaves it UNARMED, which is what made
+`public-contracts-refuse-invalid-input-and-output` red at first — the test
+doing its job, not a defect in the change):
+
+| test | pass | fail | error |
+|---|---|---|---|
+| `seon.operator-test/a-nonzero-verification-pass-is-reported-and-decides-nothing` | 6 | 0 | 0 |
+| `…/collection-refuses-and-names-a-root-that-does-not-reopen` | 8 | 0 | 0 |
+| `…/collection-refuses-an-undocumented-option-key-by-name` | 4 | 0 | 0 |
+| `…/collection-ignores-an-unrelated-request-key` | 2 | 0 | 0 |
+| `…/the-documented-collection-request-keys-are-the-declared-ones` | 2 | 0 | 0 |
+| `…/collection-reports-and-verifies-the-exact-store` | 8 | 0 | 0 |
+| `…/collection-dry-run-returns-the-bounded-physical-inventory` | 17 | 0 | 0 |
+| `…/scheduled-collection-yields-the-installation-control-lock` | 2 | 0 | 0 |
+| `…/parked-datahike-collection-yields-lock-and-retains-store-custody` | 5 | 0 | 0 |
+| `…/cluster-cleanup-uses-one-stop-retire-delete-and-collect-composition` | 6 | 0 | 0 |
+| `…/public-contracts-refuse-invalid-input-and-output` | 5 | 0 | 0 |
+| `seon.cluster.registry-test/retiring-one-cluster-reclaims-only-its-own-tail` | 20 | 0 | 0 |
+| `seon.cluster.registry-test/dry-run-enumerates-candidates-without-deleting` | 8 | 0 | 0 |
+| `seon.maintenance-test/collection-results-project-branch-maps-to-components` | 3 | 0 | 0 |
+| `seon.maintenance-test/a-successful-cleanup-persists-its-verified-collection-result` | 4 | 0 | 0 |
+| `seon.maintenance-schema-test/the-cleanup-collection-slot-declares-both-arms-it-can-carry` | 4 | 0 | 0 |
+
+`seon.blob-publication-test/publication-and-collection-are-exclusive-in-both-orderings`
+is REFUSED in process as `:seon.test/destructive-in-process` (it reaches
+`seon.test-support/populate-published-root!`). It compiles; it must run cold.
 
 ## Boundary
 

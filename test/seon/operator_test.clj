@@ -1287,45 +1287,66 @@
   (let [repository-root (owned-root)
         managed-root (.getCanonicalPath
                       (io/file repository-root "managed"))
-        digest (apply str (repeat 64 "a"))]
+        digest (apply str (repeat 64 "a"))
+        ;; `with-redefs-fn` takes VARS, which is what reaching a private seam
+        ;; needs: `with-redefs`'s binding vector takes symbols and wraps each
+        ;; in `(var …)`, so a `#'` there is `(var (var x))` and the namespace
+        ;; does not compile.
+        collecting
+        (fn [held-before body]
+          (with-redefs-fn
+            {#'registry/collect! (staged-collect [2 0])
+             #'operator/branch-digests (fn [_ _] #{digest})
+             #'operator/konserve-key-set (fn [_] held-before)}
+            (fn []
+              (body
+               (operator/collect!
+                {:seon.operator/repository-root repository-root
+                 :seon.operator/managed-root managed-root})))))]
     (try
       ;; The store HELD this digest before the collection and cannot read it
       ;; after: exactly the root a collection must never lose.
-      (with-redefs [registry/collect! (staged-collect [2 0])
-                    #'operator/branch-digests (fn [_ _] #{digest})
-                    #'operator/konserve-key-set (fn [_] #{digest})]
-        (let [result
-              (operator/collect!
-               {:seon.operator/repository-root repository-root
-                :seon.operator/managed-root managed-root})
-              partial-result
-              (get-in result
-                      [:seon.error/data :seon.operator.collect/result])]
-          (is (= :seon.operator/collection-incomplete
-                 (:seon.error/kind result)))
-          (is (= digest
-                 (:seon.operator.collect/unverified-digest partial-result))
-              "the refusal names the digest that did not read")
-          (is (str/includes? (:seon.error/message result) digest))
-          (is (false?
-               (:seon.operator.collect/roots-verified? partial-result)))
-          (is (false? (:seon.operator.collect/complete? partial-result)))))
+      (collecting
+       #{digest}
+       (fn [result]
+         (let [partial-result
+               (get-in result
+                       [:seon.error/data :seon.operator.collect/result])]
+           (is (= :seon.operator/collection-incomplete
+                  (:seon.error/kind result)))
+           (is (= digest
+                  (:seon.operator.collect/unverified-digest partial-result))
+               "the refusal names the digest that did not read")
+           (is (str/includes? (:seon.error/message result) digest))
+           (is (false?
+                (:seon.operator.collect/roots-verified? partial-result)))
+           (is (false? (:seon.operator.collect/complete? partial-result))))))
       (testing "a referenced digest the store never held is counted, not a refusal"
         ;; `:seon.db/read-result-digest` is digest-SHAPED and is not a
         ;; konserve key, so a shape test refuses a collection that lost
         ;; nothing (measured on a freshly forked cluster, 2026-09-17).
-        (with-redefs [registry/collect! (staged-collect [2 0])
-                      #'operator/branch-digests (fn [_ _] #{digest})
-                      #'operator/konserve-key-set (fn [_] #{})]
-          (let [result
-                (operator/collect!
-                 {:seon.operator/repository-root repository-root
-                  :seon.operator/managed-root managed-root})]
-            (is (nil? (:seon.error/kind result)))
-            (is (true? (:seon.operator.collect/roots-verified? result)))
-            (is (= 1 (:seon.operator.collect/unstored-digests result))))))
+        (collecting
+         #{}
+         (fn [result]
+           (is (nil? (:seon.error/kind result)))
+           (is (true? (:seon.operator.collect/roots-verified? result)))
+           (is (= 1 (:seon.operator.collect/unstored-digests result))))))
       (finally
         (test-support/delete-recursively! repository-root)))))
+
+(deftest the-documented-collection-request-keys-are-the-declared-ones
+  ;; The checker that keeps `seon.operator/documented-request-keys` from
+  ;; becoming a mirror: it must equal the explicit keys of the DECLARED
+  ;; request schema. Only that one resource is read, so a misplaced
+  ;; declaration elsewhere cannot decide this.
+  (let [declared
+        (get (edn/read-string
+              (slurp (io/resource "seon/schemas/seon.operator.collect.edn")))
+             :seon.operator.collect/request)]
+    (is (= :map (first declared)))
+    (is (= (into #{} (keep #(when (vector? %) (first %))) (rest declared))
+           @#'operator/documented-request-keys)
+        "a key added to the request schema is consulted by the entry point")))
 
 (deftest collection-refuses-an-undocumented-option-key-by-name
   ;; Datahike's `gc-storage!` ignores option keys it does not know, so the
