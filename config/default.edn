@@ -88,7 +88,7 @@
  ; selection. Its visible budget is estimated tokens; its other bounds are
  ; structural, and its blob threshold reuses the storage decision above.
  ; Unit: estimated tokens (`seon.ai.tokens/estimate`).
- :seon.config.render.agent/token-budget 1024
+ :seon.config.render.agent/token-budget 15000
  ; Unit: nested structural nodes retained in the visible face.
  :seon.config.render.agent/max-depth 8
  ; Unit: children retained per collection node.
@@ -384,7 +384,7 @@
  ; 32,768 is the first power-of-two boundary below both observations, so
  ; either a lower-distance walk fits or prompt derivation refuses before
  ; opening an unbounded provider request.
- :seon.config.ai/prompt-token-budget 32768
+ :seon.config.ai/prompt-token-budget 1000000
 
  ; Unit: characters per provider prompt token before this cluster has its own
  ; attempt facts. Provenance: 17 recorded DeepSeek prompt samples across the
