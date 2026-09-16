@@ -300,11 +300,11 @@
             first-run "first-answer"
             request {:seon.agent/id agent-id
                      :seon.db.process/id process}]
+        (test-support/apply-config! connection "loop-test"
+                                    {:seon.config.run/max-episode-runs 100})
         (test-support/transacted!
                      connection
                      [{:seon.agent/id agent-id}
-                      {:seon.config/cluster "loop-test"
-                       :seon.config.run/max-episode-runs 100}
                       {:seon.message/id trigger-id :seon.message/to [:seon.agent/id agent-id] :seon.message/content "answer once" :seon.message/inbox [:seon.agent/id agent-id]}])
         (is (= :open (:seon.turn.work/situation
                       (turn/next-agent-work (db/db connection) request)))

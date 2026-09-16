@@ -1621,8 +1621,8 @@ handle))}}
   (with-server
     (fn [connection server context]
       ;; the dial as a fact, the way production ships it
-      (support/transacted! connection [{:seon.config/cluster "web-test"
-                                      :seon.config.render/coalesce-ms 250}])
+      (support/apply-config! connection "web-test"
+                             {:seon.config.render/coalesce-ms 250})
       (let [tab (open-feed server (str "/feed/" agent-id))]
         (try
           (read-complete-paint! tab connection)

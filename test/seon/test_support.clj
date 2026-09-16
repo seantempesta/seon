@@ -792,16 +792,52 @@
       (with-fresh-database database-id extra-schema options body)
       (with-branched-database extra-schema body))))
 
-(defn seed-cluster!
-  "Seed one complete cluster/config path for tests that create agents."
-  [connection cluster-name]
+(defn program-fn-row
+  "One first-party program row for a fixture that needs only the identity.
+
+   A bare `{:seon.fn/sym \"ns/name\"}` is refused: the fn schema requires
+   `:seon.schema.admission/source` (where the definition was admitted from)
+   and `:seon.fn/ns`, so a fixture writing the bare row has been seeding
+   nothing. The namespace must already exist — in the canonical fixture every
+   first-party namespace does."
+  [function-symbol]
+  {:seon.fn/sym (str function-symbol)
+   :seon.fn/ns [:seon.ns/name (symbol (namespace (symbol (str function-symbol))))]
+   :seon.schema.admission/source :core})
+
+(defn apply-config!
+  "Set one cluster's config dials through the production path.
+
+   A fixture that upserts `{:seon.config/cluster name :seon.config.x/dial v}`
+   is writing a PARTIAL config entity. Write admission reads an identity-keyed
+   map against the WHOLE config schema, so it refuses the row for
+   `:seon.config/applied-manifest-digest` — a digest only `compile-manifest`
+   can compute from the complete effective config. Such a seed has been
+   landing nothing; the dial the test thought it set stayed at its default.
+
+   `config/apply!` compiles the manifest and exact-reconciles the one desired
+   row, exactly as `bin/seon config apply` does. It is EXACT: the manifest is
+   the cluster's whole overlay, not an addition to an earlier one."
+  [connection cluster-name manifest]
   (checked-fixture-result
    (config/apply! {:seon.db/connection connection
-                  :seon.boot/cluster-name cluster-name}))
-  (checked-fixture-result
-   (cluster/ensure-cluster-entity!
-    connection cluster-name cluster/boot-process-identity))
-  nil)
+                   :seon.boot/cluster-name cluster-name
+                   :seon.config/manifest manifest})))
+
+(defn seed-cluster!
+  "Seed one complete cluster/config path for tests that create agents.
+
+   The manifest arity carries the cluster's config overlay through
+   `apply-config!`, so a test that needs a dial never hand-writes a partial
+   config row."
+  ([connection cluster-name]
+   (seed-cluster! connection cluster-name {}))
+  ([connection cluster-name manifest]
+   (apply-config! connection cluster-name manifest)
+   (checked-fixture-result
+    (cluster/ensure-cluster-entity!
+     connection cluster-name cluster/boot-process-identity))
+   nil))
 
 (defn preserving-instrumentation-state
   "Scope a test's deliberate instrumentation changes to that test.

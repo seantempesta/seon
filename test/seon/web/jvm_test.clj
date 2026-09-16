@@ -30,10 +30,9 @@
       (support/with-published-file-database
        root :my-web-test
        (fn [connection]
-          (support/transacted!
-                  connection
-                  [{:seon.config/cluster "default"
-                    :seon.config.eval.result/blob-threshold 8}])
+          (support/apply-config!
+           connection "default"
+           {:seon.config.eval.result/blob-threshold 8})
           (body connection)))
       (finally
         (when (.exists root)

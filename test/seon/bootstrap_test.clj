@@ -19,11 +19,9 @@
 (def ^:private namespace-name 'my.agents.bootstrap-agent)
 
 (defn- seed-cluster! [connection cluster-name]
-  (support/seed-cluster! connection cluster-name)
-  (support/transacted!
-          connection
-          [{:seon.config/cluster cluster-name
-            :seon.config.bootstrap/beyond-closure-token-budget 1024}])
+  (support/seed-cluster!
+   connection cluster-name
+   {:seon.config.bootstrap/beyond-closure-token-budget 1024})
   (cluster/ensure-cluster-entity!
    connection cluster-name cluster/boot-process-identity))
 

@@ -118,9 +118,8 @@
 
 (defn- configure-cap!
   [connection limit]
-  (support/transacted! connection
-                     [{:seon.config/cluster "work-test"
-                       :seon.config.run/max-episode-runs limit}]))
+  (support/apply-config! connection "work-test"
+                         {:seon.config.run/max-episode-runs limit}))
 
 (defn- add-outside-trigger!
   [connection id at]
@@ -142,6 +141,8 @@
                     {:seon.cluster.eval/id (str id "-" ordinal)
                      :seon.cluster.eval/run [:seon.turn/id id]
                      :seon.cluster.eval/ordinal ordinal
+                     ;; The freeze has a time; the evaluation schema requires it.
+                     :seon.cluster.eval/at at
                      :seon.cluster.eval/source (str "(+ " ordinal " 1)")})
                   result-values))})
   ;; ONE ENTITY PER (run, ordinal): the terminal fact accretes onto the
