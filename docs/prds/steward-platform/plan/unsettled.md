@@ -459,3 +459,6 @@ Queue, in order:
   peer (`7c7395c8a`: the send is the authority, not a census pre-read).
   Batch 27 running on `7c7395c8a` (platform with recording + nine
   namespaces); my two Opus agents told to pause probes ~15 min.
+- 13:55Z PLATFORM GREEN on `7c7395c8a` (batch 27 run A): 86 tests / 579
+  assertions / 0 failures / 0 errors, registry-test and store-test included.
+  Recording notice pending; run B (nine namespaces) next; probe pause held.
