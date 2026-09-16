@@ -2295,24 +2295,9 @@
                 :else value))]
       (normalize-map (program/canonical-row forms row)))))
 
-(defn reconcile-tx
-  "Replace source definitions while retaining identities and agent facts.
-
-  Immutable source identities identify definitions removed by an edit.
-  The current writer database decides their exact replacement, so a concurrent
-  agent transaction cannot make an earlier read authoritative."
-  {:malli/schema
-   [:function
-    [:=> [:cat :seon.db/database-value [:vector :map]
-          :seon.fn.file/identities]
-     [:vector :seon.schema/value]]
-    [:=> [:cat :seon.db/database-value [:vector :map]
-          :seon.fn.file/identities :map]
-     [:vector :seon.schema/value]]]}
-  ([database rows previous-identities]
-   (reconcile-tx database rows previous-identities
-                 (schema.edn/packaged-forms)))
-  ([database rows previous-identities forms]
+(defn- reconcile-tx-in
+  "Replace source definitions, owning rows by the population `forms` declares."
+  [forms database rows previous-identities]
   (let [identity-attributes (db/identity-attributes database)
         desired-identities (into #{} (map program/row-identity) rows)
         removed (remove desired-identities previous-identities)
@@ -2350,7 +2335,20 @@
     (into (into (into (into [] (mapcat :seon.fn/retractions) changes)
                           identity-operations)
                     entities)
-          keyword-operations))))
+          keyword-operations)))
+
+(defn reconcile-tx
+  "Replace source definitions while retaining identities and agent facts.
+
+  Immutable source identities identify definitions removed by an edit.
+  The current writer database decides their exact replacement, so a concurrent
+  agent transaction cannot make an earlier read authoritative."
+  {:malli/schema
+   [:=> [:cat :seon.db/database-value [:vector :map]
+          :seon.fn.file/identities]
+    [:vector :seon.schema/value]]}
+  [database rows previous-identities]
+  (reconcile-tx-in (declaration-forms nil) database rows previous-identities))
 
 (defn- published-index-rows
   "Read compiled rows with portable program refs and complete owned components."
@@ -2438,8 +2436,8 @@
                           (fn [database]
                             (schema/call-with-projection
                              projection
-                             #(reconcile-tx database rows previous-identities
-                                            forms)))]]}
+                             #(reconcile-tx-in forms database rows
+                                              previous-identities)))]]}
                  process (assoc :tx-meta {:seon.db/process process})))
               :seon.fn/population)
              changed-entities (into #{} (map :e) (:tx-data report))
