@@ -974,26 +974,21 @@ Decisions I made under F8 that he may veto: write admission = final-report
 validator in the fork (option 2); fault entity stays evidence-free; the
 persistent-sorted-set pin stays; collections run when the store passes 2×.
 
-**THE BLOCKER — status at 2026-09-16 21:00Z.** The validator defect is
-fixed and reviewed (`b1508dc8a`, addendum in
-`review-write-admission-35c5d2fa8-2026-09-17.md`). It uncovered the next one:
-publication then exceeded the operator's 180 s bound because
-`seon.cluster.source/identity-ref` parsed every schema resource from disk per
-evidence ref inside the transaction; fixed at `b023e93a9` (forms acquired once).
-Default was stopped and restarted on that code and `bin/seon init --dev
-default` launched, log `tmp/orchestrator/restart-adopt-b023e93a9.log`. If
-adoption converged: run the gate queue below. If not: `jstack` the new pid,
-read the writer thread, fix the next fetch-at-call-time site — do not raise
-the bound. The recorder's missing `:seon.schema.admission/source` on test
-entities (batch 105) is unproven either way until the first cold gate.
-The `write-admission-validates-all` lane is stopped (resumable).
+**BLOCKER CLEARED at 2026-09-16 21:00Z.** Validator fix `b1508dc8a`
+(reviewed), publication cost fix `b023e93a9` + recorder caller `8d48f1c51`
+(orchestrator). Default restarted (pid 41413) and `bin/seon init --dev
+default` converged: publication 20:54→20:59Z, adoption to 21:00Z, commit
+`6aab0333-dc9b-5928-9501-a3817f3980a6`, log `tmp/orchestrator/adopt-2.log`.
+The adoption fell back to "development source basis unavailable; reconciling
+against the live cluster" (fix A) because the previous basis was collected —
+expected once. Gates 106 (call-graph) and 107 (write-admission) launched at
+21:06Z on HEAD `f42af6261`, logs `tmp/orchestrator/gate-results/batch-10{6,7}.log`.
+The recorder's missing `:seon.schema.admission/source` on test entities
+(batch 105) is proven or refuted by these gates' recording step.
 
-**Running codex lanes (names survive compaction):** `call-graph-fidelity-fix`
-landed `3f0be21ed` (macro usages are references, file-scoped unresolved
-selection, batched `gate-sets`) and is resumed on one review correction: the
-reference fallback consulted `:seon.fn/references` only when a target had no
-resolved caller, which drops tests reaching through apply/requiring-resolve
-callers; it must always walk both edge kinds. Stop for review after that.
+**Codex lanes:** none running. `call-graph-fidelity-fix` landed `3f0be21ed`
++ `51d904a9b` (reviewed, approved; addendum in its review note).
+`write-admission-validates-all` stopped after `b1508dc8a`. Both resumable.
 A running codex lane cannot take `resume`; `bin/codex-agent stop <name>` first
 (verify pids gone), then `resume`. Opus subagents cannot be resumed after
 compaction — relaunch with the landing note as grounding.
