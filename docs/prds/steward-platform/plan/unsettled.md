@@ -958,3 +958,101 @@ Queue, in order:
 - 22:30Z REVIEWED/approved: S11 `a56739309` (select/compose pure; one elision value; re-fit deleted; thinking block; reach assertion correctly replaced by behaviour) and write-volume attribution `19ee62479` (conflict count = attempts; bound stays and names writers; boot errors not claimed as load). GATE QUEUE (all blocked until the validator fix lands and a base can build): 106 call-graph (after its fixes), 107 write-admission, 108 S7, 109 detectors, 110 S11, 111 write-volume (boot/source), 102 rerun. Small slices queued: captured-history selected-vs-join compare (render.clj); `:entity-id/syntax` id string in transcript render; `:defined-by` on the declaration row; call-graph widening scope (in the resumed lane).
 - 22:40Z status: default alive, zero writer errors, store 352 MB / 3,002 keys (collection holding); six lane `init --dev default` processes queued on the lifecycle lock, each destined to be rejected until the validator fix lands (left alone — foreign processes; harmless); two astra lanes running (write-admission urgent, call-graph reds); destructive Opus lane on its three reds; root run.DV1rK3 swept, run.f5RQ09 kept for the lanes.
 - 22:50Z destructive lane's batch-105 fixes `67c1364b6` + `a1ba2033b` reviewed/approved (one-line `:seon.fn/destroys` declarations — the multi-line ones were ugly output in the making; exclusion entry carries the text; the agent-fork fixture admits its test canonically, the typed unknown stands). Gate queued (112: test-reaching, test-runner). Still running: write-admission (urgent), call-graph.
+
+## RESUME HERE (written 2026-09-17 23:00Z before a context compaction)
+
+**Owner state.** Sean is up and answering in chat. He read Part 1 of
+`owner-decisions-2026-09-17.md`; every ruling he gave is in
+`program-facts-are-the-runtime-prd-2026-09-17.md` §1 (R1-R5), §1b (T1-T5),
+§1c (C1-C8), §1d (D1-D3), §1e (F1-F8) and in
+`test-system-is-the-database-prd-2026-09-17.md` (D1, E1, E2, §0b). He
+answered question 12 YES (isolated workers run an immutable snapshot of the
+named cluster for the destructive tier; recording goes to the cluster). Still
+his: pushing the Datahike fork (5 commits ahead of origin/main, plus
+`73afe782`) and the SCI fork (5–7 ahead) — outward action, ask before doing.
+Decisions I made under F8 that he may veto: write admission = final-report
+validator in the fork (option 2); fault entity stays evidence-free; the
+persistent-sorted-set pin stays; collections run when the store passes 2×.
+
+**THE BLOCKER.** The final-report validator (Seon `35c5d2fa8`, fork
+`73afe782`) rejects every complete program publication: it validates a
+cardinality-many attribute's expanded members one at a time against the
+whole `[:set …]` schema (`[4501 :seon.fn/keywords #{…}]: expected a set, got
+a keyword`, entity `my.agent/identity`); the refusal reaches the log as a
+generic "Transaction report validation rejected". Consequences: no adoption
+converges, no cold base builds (batch 106 failed at base preparation),
+`seon.test/run` refuses every lane with "No function in this program declares
+:seon.fn/destroys". A second real writer defect it exposed: the test recorder
+creates test entities without `:seon.schema.admission/source` (batch 105's
+recording refused at `[47871 …]`). The codex lane
+`write-admission-validates-all` is resumed on exactly this (fix the
+validator's multivalued handling and make the flat refusal travel; then fix
+the recorder; never bypass). Check `bin/codex-agent status` /
+`tmp/orchestrator/write-admission-validates-all-summary.txt` first thing.
+
+**Running codex lanes (names survive compaction):** `write-admission-validates-all`
+(above), `call-graph-fidelity-fix` (batch-105 fn-test reds: macro usages
+counted as calls with arity; absent symbol widens to the world; gate-set
+scans references; NPE atom nil; per-call reference re-derivation — plus the
+widening-scope follow-up in `review-call-graph-fidelity-fix-2026-09-17.md`).
+A running codex lane cannot take `resume`; `bin/codex-agent stop <name>` first
+(verify pids gone), then `resume`. Opus subagents cannot be resumed after
+compaction — relaunch with the landing note as grounding.
+
+**Gate mechanics (I run them):** `SEON_TEST_ORCHESTRATOR=1 bin/test --paths
+src/seon/schedule.clj -- <namespaces written out>` (never a shell variable;
+verify each namespace maps to a file), log to
+`tmp/orchestrator/gate-results/batch-N.log`, retained roots under
+`tmp/test-runs/run.*` swept once read; two slots; a green tally can still exit
+1 when recording into default's prepl is silent (facts unrecorded, note it).
+Review every slice's diff and write
+`docs/prds/steward-platform/research/review-*.md` BEFORE its gate (PRD §4b
+rule 4).
+
+**Gate queue, in order, once a base can build (HEAD after the validator fix):**
+106 call-graph (`seon.fn-test seon.program-test seon.fn.analyzer-test
+seon.test-reaching-test`) after its fixes land; 107 write-admission
+(`seon.db-test seon.schema-test seon.maintenance-schema-test seon.turn-test`);
+108 S7 (`seon.issue-test seon.issue-settlement-test seon.turn-test
+seon.turn-loop-test`); 109 detectors (`seon.issue.detect-test
+seon.issue-generate-test seon.issue-test`); 110 S11 (`seon.cluster.prompt-test
+seon.render.transcript-run-test seon.concurrency-independence-test
+seon.render.web-debug-test seon.repl-test`); 111 write-volume
+(`seon.cluster.boot-test seon.cluster.source-test`); 112 destructive
+(`seon.test-reaching-test seon.test-runner-test`); 102 rerun (S1:
+`seon.program-test seon.fn-test seon.turn-test seon.sci.eval-test`). Every
+one of these has an approved review note already.
+
+**Landed today and reviewed (all in git; commits in the ledger lines above):**
+render no-fallback; collector completeness (3 commits, proven 71/436);
+S1 analysis on both seams; S7 task loop + 2 follow-ups; destructive tests
+derived + fixes; call-graph fix (7 commits, gate pending); write-volume fix
+(edit = 168 datoms, was 538,569); write admission (blocked by its own bug);
+first-task detectors; fault-storage occurrence model; S11 composable history;
+two real collections (3.75 GB, 5.3 GB reclaimed; store 352 MB now); reset #8
+(pid 53320).
+
+**Queued slices (launch after the blocker clears; astra for the first two):**
+symbols-everywhere (inventory in `symbols-everywhere-inventory-2026-09-17.md`;
+13 attributes, ~600 sites; RESET from scratch at landing; collides with
+fn.clj/program.cljc/issue.clj — sequence after call-graph and S7 gates);
+S2 required derivables (`:seon.fn/calls` required; reset); S8 derived
+cutoff + 2× trigger on `root/maintenance/footprint`; S9 stage 1 (one `select`
+over `since` + one frontier walk; owner answered custody); S10 conversational
+reply (needs S7 + S11; reply is a fact: `:seon.message/about`; add
+`my.message/reply`); S6 identity list derived from forms; small: captured-history
+compare (render.clj), `:entity-id/syntax` in transcript render, `:defined-by`
+on the declaration row, the reporter dropping ex-data
+(`a-fixture-refusal-loses-its-diagnostic-at-the-test-reporter`), pull's 1000
+cap on reach reads. First agent tasks (F7): generate `public-without-contract`
+(8 src) and `public-without-reaching-test` (139 src, after the widening fix)
+issues on default and `start!` three with budget 8 — paid runs, deliberate.
+
+**Peer session** ("Agent debug page data curation", uds:/tmp/cc-socks/18871.sock)
+is released from the gate queue and stopped on the owner's word; do not
+route gates to it.
+
+**Systemic notes:** six lane `init --dev` processes queue on the operator
+lifecycle lock; keep ≤3 editing lanes; Opus lanes die on API safeguards flags
+mid-slice (four today) — relaunch on Opus with neutral wording from the
+working tree, never Sonnet.
