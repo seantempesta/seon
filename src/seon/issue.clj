@@ -4,10 +4,31 @@
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
+            [seon.ai :as ai]
+            [seon.cluster.message :as message]
             [seon.db :as db]
             [seon.id :as id]
             [seon.repl :as repl]
-            [seon.schema.form :as schema.form]))
+            [seon.schema.form :as schema.form]
+            [seon.test :as seon.test]))
+
+;;; LOAD-CYCLE BOUNDARIES. `seon.plan` reads `seon.issue/done-query` at load
+;;; (`src/seon/plan.clj:599`) and `seon.turn` requires `seon.plan`, so this
+;;; namespace cannot require `seon.turn` or `seon.cluster.agent` back. One
+;;; resolution per var, realized at first use, instead of a
+;;; `requiring-resolve` on every call (AGENTS §2.1).
+(defonce ^:private turn-turns-left
+  (delay (requiring-resolve 'seon.turn/turns-left)))
+(defonce ^:private turn-episode-runs
+  (delay (requiring-resolve 'seon.turn/episode-runs)))
+(defonce ^:private turn-generated-run-tx
+  (delay (requiring-resolve 'seon.turn/generated-run-tx)))
+(defonce ^:private turn-next-id
+  (delay (requiring-resolve 'seon.turn/next-id)))
+(defonce ^:private turn-open-call
+  (delay (requiring-resolve 'seon.turn/open-call)))
+(defonce ^:private cluster-agent-creation-tx
+  (delay (requiring-resolve 'seon.cluster.agent/creation-tx)))
 
 (def ^:private citable-character
   "ASCII characters that join letters and digits into one citable token."
@@ -382,11 +403,9 @@
         tx (into (mapv #(hash-map :seon.issue/id %)
                        (remove by-slug (sort present)))
                  (concat (mapcat :seon.issue/tx results)
-                         (mapcat (fn [issue]
-                                   (into (mapv (fn [entity] [:db/retractEntity entity])
-                                               (sort (component-ids (:seon.issue/files issue))))
-                                         (replacement-tx issue {:seon.issue/id (:seon.issue/id issue)})))
-                                 removed)))]
+                         (map (fn [issue]
+                                [:db/retractEntity [:seon.issue/id (:seon.issue/id issue)]])
+                              removed)))]
     (with-meta tx {:seon.issue/refusals (vec (mapcat :seon.issue/refusals results))
                    :seon.issue/ambiguous (vec (mapcat :seon.issue/ambiguous results))
                    :seon.issue/unresolved (into (sorted-map) (keep :seon.issue/unresolved) results)})))
@@ -624,7 +643,7 @@
                                        (not (:seon.test/run test-value)) :unrun
                                        (or (pos? (get test-value :seon.test/fail-count 0))
                                            (pos? (get test-value :seon.test/error-count 0))) :red
-                                       (true? ((requiring-resolve 'seon.test/verified?)
+                                       (true? (seon.test/verified?
                                                database (:seon.test/sym test-value))) :verified
                                        :else :unverified)]
                            (assoc test-value :seon.issue.test/state state)))
@@ -632,7 +651,7 @@
         (cond-> (assoc row :seon.issue/tests test-rows
                            :seon.issue/turns-remaining
                            (if-let [agent-id (get-in row [:seon.issue/agent :seon.agent/id])]
-                             ((requiring-resolve 'seon.turn/turns-left) database agent-id) 0)
+                             (@turn-turns-left database agent-id) 0)
                            :seon.issue/status (if (:seon.issue/resolved-tx row) :resolved (:seon.issue/status row))
                            :seon.issue/functions (mapv #(vector :seon.fn/sym (:seon.fn/sym %)) (:seon.issue/functions row))
                            :seon.issue/errors (mapv (fn [error]
@@ -754,7 +773,7 @@
                     desired row]
                 (if prior (replacement-tx prior desired) [desired])))
             rows)
-           (mapcat #(replacement-tx % {:seon.issue/id (:seon.issue/id %)})
+           (map #(vector :db/retractEntity [:seon.issue/id (:seon.issue/id %)])
                    (remove #(contains? ids (:seon.issue/id %)) current))))))
 
 (defn adopt!
@@ -848,7 +867,7 @@
     (when-not cluster-name (refuse! :seon.issue/no-cluster "The database has no cluster identity."))
     (when (db/pull database [:seon.agent/id] [:seon.agent/id agent-id])
       (refuse! :seon.issue/worker-exists "The derived worker identity already exists."))
-    (let [creation ((requiring-resolve 'seon.cluster.agent/creation-tx)
+    (let [creation (@cluster-agent-creation-tx
                     {:seon.agent/id agent-id :seon.ns/name namespace-name :seon.cluster/name cluster-name})
           step-id (id/id [:seon.issue/step issue-id])
           creation (mapv
@@ -876,7 +895,7 @@
                    :seon.issue/budget (:seon.issue/budget request)}
                   {:seon.ns/name namespace-name
                    :seon.ns/requires [[:seon.ns/name 'my.issue] [:seon.ns/name 'my.test]]})
-            ((requiring-resolve 'seon.turn/generated-run-tx)
+            (@turn-generated-run-tx
              database {:seon.agent/id agent-id :seon.turn/id (id/id [:seon.issue/opening issue-id])
                        :seon.turn/opened-tx "datomic.tx"
                        :seon.turn/starting-ns [:seon.ns/name namespace-name]
@@ -909,7 +928,7 @@
           (refuse! :seon.issue/already-started
                    (str "Issue " issue-id " requires a larger budget and must still be open to resume.")))
         (let [cluster-name (db/q '[:find ?name . :where [_ :seon.cluster/name ?name]] database)
-              turn-id ((requiring-resolve 'seon.turn/next-id) database cluster-name agent-id)
+              turn-id (@turn-next-id database cluster-name agent-id)
               open-turn (db/q '[:find ?turn . :in $ ?id :where
                                 [?agent :seon.agent/id ?id]
                                 [?turn :seon.turn/agent ?agent]
@@ -925,14 +944,14 @@
            [{:seon.issue/id issue-id :seon.issue/budget (:seon.issue/budget request)}
             [:db/retract [:seon.issue/id issue-id] :seon.issue/budget-exhausted-tx]
             {:seon.agent/id agent-id
-             :seon.agent/settings (assoc ((requiring-resolve 'seon.ai/agent-overlay) database agent-id)
+             :seon.agent/settings (assoc (ai/agent-overlay database agent-id)
                                         :seon.config.run/max-episode-runs (:seon.issue/budget request))}]
             (nil? listener)
             (conj {:seon.runtime/agent [:seon.agent/id agent-id]
                    :seon.runtime/listens [{:seon.listen/attribute :seon.issue/budget
                                           :seon.listen/entity [:seon.issue/id issue-id]}]})
             (nil? open-turn)
-            (conj [:db.fn/call (requiring-resolve 'seon.turn/open-call)
+            (conj [:db.fn/call @turn-open-call
                    {:seon.turn/id turn-id :seon.turn/agent [:seon.agent/id agent-id]
                     :seon.turn/opened-tx "datomic.tx"}])))))))
 
@@ -949,12 +968,12 @@
                          (not-join [?agent]
                            [?turn :seon.turn/agent ?agent]
                            (not [?turn :seon.turn/closed-tx]))] database agent-id)]
-    (if (and issue-id (zero? ((requiring-resolve 'seon.turn/turns-left) database agent-id)))
+    (if (and issue-id (zero? (@turn-turns-left database agent-id)))
       (let [view (status {:seon.db/db database :seon.issue/id issue-id})
-            spent ((requiring-resolve 'seon.turn/episode-runs) database agent-id)
+            spent (@turn-episode-runs database agent-id)
             limit (db/q '[:find ?limit . :where [?config :seon.config/cluster _]
                            [?config :seon.config.message/max-chain ?limit]] database)
-            delivery ((requiring-resolve 'seon.cluster.message/delivery)
+            delivery (message/delivery
                       database
                       {:seon.agent/id agent-id :seon.config.message/max-chain limit
                        :my.message/value
