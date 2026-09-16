@@ -1,11 +1,23 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, test, operator, wave/dev-tooling-face-hygiene]
 ---
 
 # Preserve fixture observations before deferring expensive adoption checks
+
+Resolved by **`b8d2fb66b`**, with default adoption and live probes recorded in
+the [option 1 landing](../../prds/context-generation/research/hook-publication-race-2026-09-15.md#approved-option-1--landed).
+Static and runtime admission now preserve the declaration through the canonical
+test-row shape. At default basis **536872577**, **55** observation rows are
+queryable. The previously timed-out examples test is deferred in **3.492875 ms**;
+the mixed live check records the ordinary test's eight passing assertions and
+prints the observation's reason and exact `bin/test-check` command.
+The two canonical regressions pass **11/11** and **9/9** after adoption.
+The orchestrator owns the final paths-limited and platform gates.
+
+The account below records the pre-fix investigation.
 
 ## Problem
 
@@ -40,7 +52,8 @@ would have hidden the production indexing omission.
 
 Record declared metadata in the existing program-row owners before changing
 `src/seon/test.clj` to partition runnable and deferred observations. The
-assignment expressly protects `src/seon/fn.clj`; this lane did not edit it.
+original assignment protected `src/seon/fn.clj`; the owner's option 1 approval
+released it for this fix.
 This is related to, but distinct from, the existing
 [runtime usage metadata issue](sci-test-declarations-drop-explicit-usage-metadata.md).
 

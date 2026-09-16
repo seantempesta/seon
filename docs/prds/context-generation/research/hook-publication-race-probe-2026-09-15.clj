@@ -30,3 +30,17 @@
 (comment
   (seon.test/run #'seon.dev.hook-test/idle-edit-starts-without-quiet-delay
                  (seon.operator/connection "default")))
+
+;; Option 1: recurring canonical probes and a mixed real check after adoption.
+(comment
+  (seon.test/run #'seon.fn-test/fixture-observations-survive-static-and-runtime-admission
+                 (seon.operator/connection "default"))
+  (seon.test/run #'seon.test-reaching-test/declared-observations-defer-before-cheap-reaching-tests
+                 (seon.operator/connection "default"))
+  (let [connection (seon.operator/connection "default")
+        result (seon.test/check
+                {:seon.db/connection connection
+                 :seon.test/changed
+                 ["my.examples-test/public-docstring-examples-run-in-the-canonical-agent-context"
+                  "seon.id-test/data-shape-and-explicit-length-determine-identity"]})]
+    {:seon.probe/check result :seon.probe/feedback (seon.test/feedback result)}))

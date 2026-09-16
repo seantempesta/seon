@@ -1,19 +1,21 @@
 ---
 type: research
-status: active
+status: resolved
 date: 2026-09-15
 tags: [operator, test, runtime]
 ---
 
 # Hook publication and check feedback
 
-Implementation commit: **`c0006a125`** on `steward-platform`.
+Implementation commits: **`c0006a125`** and **`b8d2fb66b`** on `steward-platform`.
 
-**Incomplete class:** the false JVM-absence prerequisite is removed and its
-regression passes. Expensive-check deferral remains open at the protected
-program-row owner; no production check change was landed. The exact residual
-is [fixture-observation declaration loss](../../../seon/issues/hook-checks-cannot-query-fixture-observation-declarations.md).
-No class or residual member is represented as closed.
+**Assigned class closed:** incremental publication uses the live advertisement
+without a census prerequisite; automatic checks exclude declared observations
+before preparing or running tests. Both members have live probes and canonical
+regressions. The [declaration-loss member](../../../seon/issues/hook-checks-cannot-query-fixture-observation-declarations.md)
+is resolved. Final paths-limited and platform gates remain the orchestrator's
+proof obligation. The historical investigation and options below precede the
+owner's approval; the final option 1 section records the completed work.
 
 ## Authorities and dependency ledger
 
@@ -207,3 +209,118 @@ retaining the evidence. The operator shell exited normally. No lane shell,
 scratch root, or worktree remains. Final `bin/seon status` still reports
 default PID **69622**, alive, with no orphan Seon JVMs. The gate-request file
 and shared publication records remain for the orchestrator.
+
+## Approved option 1 — landed
+
+The owner released the static row owner and approved option 1 on September 15.
+Commit **`b8d2fb66b`** completes that scope. Guarantee: **an authored fixture
+observation survives both declaration paths into its canonical program row,
+and automatic checks exclude every such selected row before fixture preparation
+and execution, reporting its reason and exact explicit command.**
+
+The existing mechanisms were extended in place:
+
+- `src/seon/fn.clj:371` and `src/seon/sci/eval.clj:410` copy the existing
+  observation metadata into the static and runtime test declarations.
+- `src/seon/program.cljc:69` retains that attribute in the one owned test-row
+  shape. The first live parity probe falsified the initial two-path-only
+  candidate: canonical projection still stripped the supplied attribute.
+  The regression also corrected its own attempt to transact the evaluation's
+  transient `:seon.sci.eval/evaluated?` marker; the final probe transacts only
+  the declaration row, as the installation owner does.
+- `src/seon/test.clj:220` partitions selected rows before provenance, fixture
+  preparation, namespace loading, and execution. Only runnable tests enter
+  those operations. `feedback` prints every deferred row's declaration and
+  command. `check`, `check-adoption`, the digest owner and their bounds were
+  left intact. `src/seon/test.clj` and its schema had no foreign diff when
+  edited; the reviewed commit contains only this lane's small additions.
+- `resources/seon/schemas/seon.test.edn:121` declares the optional deferred
+  result and command shapes. Existing keys retain their meanings.
+- `bin/test-check` accepts `CLUSTER --test NS/TEST [--time-limit-ms N]` and
+  uses the existing preparation, resolution and `seon.test/run` owners over
+  the existing prepl transport. It starts no JVM. The configured check limit
+  supplies the default explicit-run allowance; a caller can declare a larger
+  positive allowance without changing cluster configuration. A failed explicit
+  test exits nonzero. Ordinary adoption-check invocation is preserved.
+- `test/my/examples_test.clj:41` now declares its actual HTTP, filesystem and
+  background-effect observation. Its body is unchanged. No unjustified call
+  edge was removed and no claim is made that it reaches every render function.
+
+The admission regression uses canonical database fixtures, real static source
+analysis, a real SCI context, and installed contracts. The check regression
+extends the existing reaching-test fixture: an observation row comes from
+real source indexing, the ordinary test passes and records its run, the
+observation has no run, and an explicit call to the existing runner executes
+it. This replaces the earlier rejected hand-inserted-metadata candidate as
+the recurring proof. No second hook harness was introduced.
+
+### Exact in-process runs
+
+Each candidate function form was evaluated through MCP JVM mode before source
+editing. The two canonical invocations, before and after adoption, were:
+
+```clojure
+(seon.test/run #'seon.fn-test/fixture-observations-survive-static-and-runtime-admission
+               (seon.operator/connection "default"))
+(seon.test/run #'seon.test-reaching-test/declared-observations-defer-before-cheap-reaching-tests
+               (seon.operator/connection "default"))
+```
+
+| Probe | Recorded run | Pass / fail / error | Enclosing MCP duration |
+|---|---:|---:|---:|
+| Admission candidate before canonical-shape fix | 67598 | 6 / 5 / 0 | 6822 ms |
+| Admission candidate, complete seam | 67760 | 11 / 0 / 0 | 7643 ms |
+| Admission after adoption | 68065 | 11 / 0 / 0 | 6372 ms |
+| Check candidate | 67764 | 9 / 0 / 0 | 17310 ms |
+| Check after adoption | 68067 | 9 / 0 / 0 | 16216 ms |
+| CLI execution form evaluated through MCP | 68063 | 8 / 0 / 0 | 15542 ms |
+| Edited CLI over the same live JVM | 68064 | 8 / 0 / 0 | recorded at 00:39:09Z |
+
+The CLI probe command was
+`bin/test-check default --test seon.id-test/data-shape-and-explicit-length-determine-identity --time-limit-ms 10000`.
+It exited **0**. Its generated form was evaluated through MCP before the file
+edit; it uses `seon.test/run` with explicit connection, provenance and bound.
+Complete returned data is retained in the
+[option 1 evidence](hook-publication-race-option1-evidence-2026-09-15.edn).
+
+### Live result, gates and boundaries
+
+Default basis **536872577** contains **55** observation declarations, compared
+with **0** before this change. Checking the examples test alone returned no
+executed tests, no run provenance and one fully named deferred observation in
+**3.492875 ms**. A mixed real check selected that test plus the identity test:
+it ran only the identity test, recorded **8** passing assertions (run **68068**),
+and reported the examples test's exact deferred command in **8619.659167 ms**.
+The elapsed time includes the existing provenance/preparation work; that
+performance remains the reach-digest lane's responsibility.
+
+Hook batch `e1ec7b1e-0afc-4255-b37f-0719d79ad1ef` converged at
+`6aa9e4fe-78cf-52e0-9370-0eb1dc46cc5b`. Its widened check returned in
+**7.10225 ms**. A subsequent complete `bin/seon init --dev default` exited **0**;
+at basis **536872584**, both default and current-src equal
+**`6aa9e594-cf98-58c8-9ac4-fba18975c3d8`**, digest
+`99a0c49bcc1c5e1069721aac8429c6c0cbaade4c4b11131129a23f70a4c78f5d`.
+This is in-place development adoption, not a new fork.
+
+During concurrent editing, earlier publication attempts reported source-digest
+change and an `exact-source` index-bound exception during full analysis.
+The latter's cause was not isolated; the existing
+[source-offset issue](../../../seon/issues/source-analysis-can-slice-changing-files-with-stale-offsets.md)
+owns that failure signature. Their successor and the complete publication converged;
+no second retry mechanism was added. No foreign file was changed to obtain
+this result. The foreign dirty operator, MCP, cluster and web-context test
+paths were preserved. No default lifecycle operation was performed.
+
+Static lint of the eight Clojure/script files: **0 errors, 62 warnings**, **407 ms**.
+`git diff --check` passed. The Markdown hook still names the twelve pre-existing
+dependency-citation failures in `agents-md-audit-2026-09-15.md`.
+No test JVM, `bin/test`, or `bin/test-fast` was launched. The updated request at
+`tmp/orchestrator/gate-requests/hook-publication-race.txt` names the affected
+namespaces for the orchestrator's serial paths-limited and platform gates;
+neither gate is claimed green here. The issue index remains its owner's file.
+
+Option 1 cleanup: both lane-launched operator/CLI shells exited normally.
+The temporary candidate forms, lint output and adoption log were removed
+after retaining the complete probe values and measured results above.
+No lane background shell, scratch cluster or worktree remains. The authored
+regression Vars stay loaded normally. Default PID **69622** remains alive.
