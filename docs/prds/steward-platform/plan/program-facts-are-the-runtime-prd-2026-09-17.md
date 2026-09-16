@@ -60,6 +60,51 @@ R5. Writing agent-authored or agent-overridden definitions back to the `.clj`
 
 ---
 
+## 1b. Task-loop rulings (owner, 2026-09-17 10:20Z)
+
+The point of structured tasks is that the agent always knows what it is
+supposed to be doing and the system, not the agent, decides when it is done.
+
+T1. **Done is a query.** An issue's done condition is its cited tests
+    verifying or its detector no longer naming the subject.
+    `:seon.issue/resolved-tx` is written by settlement only. `start!` admits
+    an issue with either tests or a detector and refuses one with neither
+    (decision 4 of `owner-decisions-2026-09-17.md`, now ruled by
+    implication of T1).
+
+T2. **Continuation derives from the issue.** An issue-assigned agent takes
+    another turn while its issue is open and its provider-turn budget
+    remains, and stops when settlement writes `resolved-tx` or the budget is
+    spent. `my.turn/complete` and `my.turn/wait` have no effect on an
+    issue-assigned agent's session; they remain the disposition of a
+    conversational agent answering a message. The undisposed-turn notice
+    (decision 8b) is therefore dissolved for issue agents, and the
+    continuation predicate fails closed by construction because T1 refuses
+    an issue with no done condition.
+
+T3. **The agent sees its tests and their results every turn.** The opening
+    names the exact tests (or the detector) that will run after every turn.
+    After each turn the system appends one concise evaluation to the agent's
+    history with the results of those tests — which passed, which failed
+    with the failure's shown text, what is still open — so the agent always
+    knows where it is and what remains. This is an ordinary generated read
+    (`my.issue/status`) re-evaluated by the system turn when its evidence
+    changed, not a new render path; its render pair is curated (Part 2b of
+    the decisions document).
+
+T4. **Budget exhaustion is loud and resumable.** When an issue-assigned agent
+    exhausts its budget with the issue still open, the session closes with a
+    typed outcome recorded on the issue (`:seon.issue/budget-exhausted-tx`
+    or an equivalent fact chosen at implementation with a docstring), and
+    the root agent receives a message naming the issue, the turns spent and
+    the last status. Root may resume the issue with a larger budget through
+    the same `start!`/resume path; nothing about exhaustion is silent and
+    nothing resumes on its own.
+
+T5. **Waking is out of scope for now** (owner: "I don't think we have a good
+    system for waking right now, but we can work on that later"). Slices in
+    this document use the existing wake mechanics unchanged.
+
 ## 2. What exists today, with the seams named
 
 Verified on `steward-platform` at `a36d55c3b`/`849bbce0b` on 2026-09-17.
@@ -158,9 +203,22 @@ I1. **One shape per kind of code.** A function, namespace, schema key or test
     is one entity with the attributes declared in `resources/seon/schemas/`,
     whichever seam wrote it. The only attributes allowed to differ between
     the two seams are `:seon.schema.admission/source` and the file
-    coordinates (`:seon.fn.file/*`), which an agent form does not have until
-    it is written back. Absence of file coordinates is meaningful, never
-    defaulted.
+    coordinates — `:seon.fn/file` (a ref to the file entity), `:seon.fn/form-span`
+    (byte offsets) and any `:seon.fn.file/*` fact — which an agent form does
+    not have until it is written back. Absence of file coordinates is
+    meaningful, never defaulted. (Amended 2026-09-17 10:30Z after the S1
+    lane's probe: the coordinate attributes are the two above.)
+
+    **Schema keys.** Schemas are declared once under `resources/seon/schemas/`
+    (AGENTS.md §3). An agent declares one by evaluating
+    `(seon.schema/register! key form)`, which the SCI reader recognises as a
+    schema declaration event (`src/seon/sci/reader.cljc:347-374`); the
+    indexer does NOT read `register!` from `.clj` source and must not learn
+    to. Parity for a schema key is therefore between the resource seam and
+    the evaluation seam: the same `:seon.schema` entity results from a
+    declaration in a schema resource and from an agent's `register!`. S5
+    writes an agent-declared schema back into the schema resources, never
+    into a `.clj` file.
 
 I2. **Derivable means required.** Any attribute the analyzer derives for every
     declaration of a kind — `:seon.fn/calls` first — is a required key of
@@ -361,6 +419,33 @@ cleanup path (AGENTS.md §6).
 **Boundary.** Own scratch checkout and cluster for the write; cold gate on
 the effect, edit, cluster and fn namespaces.
 
+### S7 — The issue task loop (T1–T4)
+
+**Change.** In `src/seon/issue.clj` and `src/seon/turn.clj`: `start-tx`
+admits tests-or-detector and refuses neither by name (decision 4);
+`next-agent-work` / the continuation predicate for an agent with an open
+issue derives from `issue open ∧ budget remaining` (T2) and ignores
+dispositions; settlement runs the issue's done-query at the ordinary close
+(tests today, detector added) and writes `resolved-tx`; the system turn
+appends the concise per-turn status evaluation (T3) whenever the done-query's
+evidence changed; on exhaustion the typed outcome is written on the issue and
+one message is sent to root (T4); the resume path accepts a larger budget.
+The opening (decision 2) states the done condition and the tests in one
+block and drops any `my.turn/complete` teaching for issue agents.
+
+**Acceptance.** (1) an issue with a detector and no tests starts; one with
+neither is refused by name; (2) an issue agent whose last form returns
+neither disposition takes another turn while the issue is open; (3) the
+agent's history after turn *n* contains the status evaluation naming the
+failing test's shown text; after the fix lands it names the pass and
+settlement wrote `resolved-tx`; (4) a budget of two turns exhausts, the issue
+carries the typed outcome, root has one message naming it, and a resume with
+budget four continues from the same issue. All on the canonical harness
+through the virtual-turn helpers already in `test/seon/turn_test.clj`.
+
+**Boundary.** In-process on `default` with Juniper; cold gate on
+`seon.issue-test seon.turn-test seon.turn-loop-test seon.issue-settlement-test`.
+
 ### S6 — The identity list derives from the declarations (I6; open issue)
 
 `seon.program/identity-attributes` is a literal vector while
@@ -442,7 +527,9 @@ These are in addition to AGENTS.md §0–§10 and §7's launching rules.
 | 4 | S3 acquisition by provenance | makes R4 real; depends on S1 so overrides carry edges | 1 day |
 | 5 | S4a fork/discard | cheap; unblocks experimental work | 1 day |
 | 6 | S5 write-back gated | closes the JVM gap; depends on S1, S3 | 2–3 days |
-| 7 | S4b merge by replay | depends on S5's gate | 2–3 days |
+| 7 | S4b merge by replay | DEFERRED with S4a | — |
+| 2b | S7 issue task loop | the first structured task (render pairs) needs it; independent of S1 | 1–2 days |
+| 2c | decision 9, no render fallback | the render-pair task needs every uncurated attribute visible | ½ day |
 
 S1 goes to one astra lane (design-sensitive); S2, S6 to Opus; S3 to astra;
 S4a Opus; S5 and S4b astra with design review at `high` effort. No slice
