@@ -2198,3 +2198,88 @@
         (is (= (str "bin/test: persistent results NOT recorded: "
                     ":seon.test-runner-test/probe bare")
                (#'runner/recording-failure-notice "persistent results" bare)))))))
+
+(defn- synthetic-results
+  "A gate-sized captured-result vector: one green row per synthetic test."
+  [test-count]
+  (mapv (fn [ordinal]
+          {:seon.test/sym (str "seon.staged-completion-fixture.ns"
+                               (quot ordinal 50) "-test/case-" ordinal)
+           :seon.test/pass-count 1
+           :seon.test/fail-count 0
+           :seon.test/error-count 0})
+        (range test-count)))
+
+(deftest gate-completions-travel-as-a-file-not-as-code
+  ;; The class this kills: DATA TRAVELLING AS CODE. persistent-results-form
+  ;; inlined the entire completion as a literal inside the form it sent over
+  ;; the prepl, so the cluster compiled ONE method whose bytecode grew with
+  ;; the result count and passed the JVM's 64 KB ceiling at gate size —
+  ;; "Method code too large!", reported only as a recording refusal. The
+  ;; completion is now staged as EDN and the sent form carries just its path,
+  ;; so the form is O(1) in the number of results.
+  (test-support/with-database
+    (fn [connection]
+      (let [results (synthetic-results 2000)
+            run-result {:seon.test.run/id "staged-completion-regression"
+                        :seon.test.run/at at
+                        :seon.test.runner/results results
+                        :seon.test/run-basis-t (db/basis-t @connection)
+                        :seon.test/run-at at}
+            file (#'runner/stage-completion! run-result)]
+        (try
+          (let [form (#'runner/persistent-results-form (str file))
+                staged (#'runner/staged-completion file)]
+            (is (> (count (pr-str run-result)) 65536)
+                "the completion itself exceeds the JVM method-code ceiling")
+            (is (< (count form) 1024)
+                (str "the sent form must stay O(1); it was " (count form)
+                     " bytes"))
+            (is (not (str/includes? form "case-1999"))
+                "no result travels inside the sent form")
+            (is (str/includes? form (str file))
+                "the sent form names the staged completion's absolute path")
+            (is (= results (:seon.test.runner/results staged))
+                "the staged file reads back as the exact completion")
+            (is (= at (:seon.test/run-at staged))
+                "instants survive the EDN round trip")
+            (is (= 2000
+                   (count (runner/commit-results!
+                           connection
+                           (assoc (select-keys staged
+                                               [:seon.test.runner/results
+                                                :seon.test/run-basis-t
+                                                :seon.test/run-at])
+                                  :seon.test.run/provenance
+                                  (runner/provenance @connection)))))
+                "every staged result commits as a test row"))
+          (finally
+            (io/delete-file file true)))))))
+
+(deftest a-missing-or-unreadable-staged-completion-is-named
+  ;; A check that reads absence of signal as health would commit an empty
+  ;; completion here — retracting every recorded result. Absence is typed.
+  (let [missing (#'runner/staged-completion "/nonexistent/gate-completion.edn")]
+    (is (= :seon.test.runner/staged-completion-unreadable
+           (:seon.error/kind missing)))
+    (is (str/includes? (:seon.error/message missing)
+                       "/nonexistent/gate-completion.edn"))
+    (is (= "/nonexistent/gate-completion.edn"
+           (:seon.test.runner/completion-path missing))))
+  (let [file (#'runner/stage-completion! {:seon.test.run/id "unreadable-probe"})]
+    (try
+      (spit file "{:seon.test.runner/results [")
+      (let [truncated (#'runner/staged-completion file)]
+        (is (= :seon.test.runner/staged-completion-unreadable
+               (:seon.error/kind truncated)))
+        (is (str/includes? (:seon.error/message truncated) "did not read as EDN")
+            (:seon.error/message truncated)))
+      (spit file "[1 2 3]")
+      (let [not-a-map (#'runner/staged-completion file)]
+        (is (= :seon.test.runner/staged-completion-unreadable
+               (:seon.error/kind not-a-map)))
+        (is (str/includes? (:seon.error/message not-a-map)
+                           "did not read as a completion map")
+            (:seon.error/message not-a-map)))
+      (finally
+        (io/delete-file file true)))))

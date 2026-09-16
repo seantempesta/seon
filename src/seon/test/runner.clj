@@ -1942,24 +1942,77 @@
                             :seon.test.run/git-sha :seon.test.run/program-digest
                             :seon.test.run/basis-t :seon.test.run/branch])}))
 
-(defn- persistent-results-form
+(defn- staged-completion
+  "The gate completion staged at `path`, or a typed refusal naming it.
+
+  A missing or unreadable file is named — never read as an empty completion."
+  [path]
+  (let [file (io/file (str path))]
+    (if-not (.isFile file)
+      {:seon.error/kind ::staged-completion-unreadable
+       :seon.error/message (str "No staged gate completion file at " path ".")
+       ::completion-path (str path)}
+      (try
+        (let [value (edn/read-string (slurp file))]
+          (if (map? value)
+            value
+            {:seon.error/kind ::staged-completion-unreadable
+             :seon.error/message
+             (str "The staged gate completion at " path
+                  " did not read as a completion map but as "
+                  (.getName (class value)) ".")
+             ::completion-path (str path)}))
+        (catch Throwable failure
+          {:seon.error/kind ::staged-completion-unreadable
+           :seon.error/message
+           (str "The staged gate completion at " path
+                " did not read as EDN: " (ex-message failure))
+           ::completion-path (str path)})))))
+
+(defn- commit-staged-completion!
+  "Read one staged completion off disk and commit it through the held store.
+
+  The cluster end of the recording seam: the coordinator sends a path, never
+  the completion itself, so the compiled form stays O(1) in the result count."
+  [held-store path]
+  (let [completion (staged-completion path)]
+    (if (:seon.error/kind completion)
+      completion
+      (commit-persistent-results! held-store completion))))
+
+(defn- stage-completion!
+  "Write one completion as EDN under the run root; the sent form names its path.
+
+  Inlining the completion as a literal compiled one method per gate whose
+  bytecode exceeded the JVM's 64 KB limit once a run carried enough results."
   [run-result]
+  (let [directory (io/file (or (System/getProperty "seon.test.root")
+                               (System/getProperty "seon.test.source-root")
+                               ".")
+                           "tmp")]
+    (.mkdirs directory)
+    (let [file (io/file directory
+                        (str "gate-completion-"
+                             (or (:seon.test.run/id run-result) "run")
+                             "-" (System/nanoTime) ".edn"))]
+      (spit file (pr-str run-result))
+      (.getCanonicalFile file))))
+
+(defn- persistent-results-form
+  "The prepl form recording one staged completion: O(1) in the result count."
+  [completion-path]
   (pr-str
    `(try
-      (require 'seon.cluster.registry
-               'seon.cluster.source
-               'seon.cluster.store
-               'seon.db
-               'seon.schema
-               'seon.test.runner)
+      (require 'seon.test.runner)
       (let [store#
             (some :seon.store/store
                   (vals @(var-get
                           (ns-resolve 'seon.cluster
                                       (symbol "running-instances")))))]
         (if store#
-          ((deref (ns-resolve 'seon.test.runner 'commit-persistent-results!))
-           store# '~run-result)
+          ((deref (ns-resolve 'seon.test.runner
+                              (symbol "commit-staged-completion!")))
+           store# ~(str completion-path))
           {:seon.error/kind
            :seon.test.runner/live-store-unavailable
            :seon.error/message
@@ -1974,19 +2027,23 @@
   "Commit one bare-gate completion through the authoritative store holder."
   [operator-root run-result]
   (let [run-result (completion-reach-digests run-result)
-        {live? :seon.fresh-operator/live-process?
-         value :seon.fresh-operator/value}
-        ((requiring-resolve 'seon.fresh-operator/live-root-value!)
-         operator-root (persistent-results-form run-result))]
-    (if live?
-      value
-      (let [held-store
-            (store/open-store!
-             {:seon.store/dir (str (io/file operator-root "data" "store"))})]
-        (try
-          (commit-persistent-results! held-store run-result)
-          (finally
-            (store/release-store! held-store)))))))
+        completion-file (stage-completion! run-result)]
+    (try
+      (let [{live? :seon.fresh-operator/live-process?
+             value :seon.fresh-operator/value}
+            ((requiring-resolve 'seon.fresh-operator/live-root-value!)
+             operator-root (persistent-results-form (str completion-file)))]
+        (if live?
+          value
+          (let [held-store
+                (store/open-store!
+                 {:seon.store/dir (str (io/file operator-root "data" "store"))})]
+            (try
+              (commit-persistent-results! held-store run-result)
+              (finally
+                (store/release-store! held-store))))))
+      (finally
+        (io/delete-file completion-file true)))))
 
 (defn- configured-persistent-results-root
   [launcher-root explicit-root]

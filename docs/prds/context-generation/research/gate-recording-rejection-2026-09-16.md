@@ -208,3 +208,116 @@ after reloading the test namespaces through `seon.test`'s own loader:
 | `seon.dev.fresh-operator-test/unreadable-prepl-exception-value-is-named-not-swallowed` | 4 pass, 0 fail, 0 error |
 | `seon.dev.fresh-operator-test/eval-failure-falls-back-to-sigterm` (stale fixed-sentence expectation replaced) | 8 pass, 0 fail, 0 error |
 | `seon.test-runner-test/recording-refusal-notice-names-the-cluster-cause` | 9 pass, 0 fail, 0 error |
+
+## The real cause: data travelled as code (2026-09-16, recording-size lane)
+
+Batch 44 (`tmp/orchestrator/gate-results/batch-44/platform.log`) printed the
+cause the previous slice made visible:
+
+```
+bin/test: persistent results NOT recorded: :seon.fresh-operator/prepl-exception
+The cluster threw during the prepl operation:
+clojure.lang.Compiler$CompilerException: Method code too large!
+  … java.lang.IndexOutOfBoundsException at clojure.asm.MethodWriter.computeMethodInfoSize
+```
+
+`persistent-results-form` inlined the ENTIRE completion — every test's
+results, its structured failure facts (larger since `8199364a2`) and the
+reach digests — as a quoted literal inside the `(try (let …))` form sent over
+the prepl. The cluster therefore compiled ONE method whose bytecode grew with
+the result count, and a gate-sized run passed the JVM's 64 KB per-method
+ceiling. Batch 37 (21 tests) recorded; batches of 86–178 tests did not. This
+is the transport law read backwards: durable facts were riding a compiled
+form instead of a payload.
+
+### The fix — the completion is staged as EDN, the form names its path
+
+`src/seon/test/runner.clj`, the persistent-results region:
+
+- `stage-completion!` writes the completion as EDN under the coordinator's
+  run root (`seon.test.root`, else `seon.test.source-root`, else `.`) in
+  `tmp/gate-completion-<run-id>-<nanos>.edn`;
+- `persistent-results-form` now takes only that path — the sent form resolves
+  the held store and calls `commit-staged-completion!` with the path;
+- `commit-staged-completion!` (the cluster end) reads the file through
+  `staged-completion` and commits it through the existing
+  `commit-persistent-results!` path;
+- `staged-completion` is TOTAL: a missing file, a truncated/unreadable file,
+  and a value that is not a completion map each return a typed
+  `:seon.test.runner/staged-completion-unreadable` value carrying
+  `:seon.test.runner/completion-path` — absence is never read as an empty
+  completion (which would retract every recorded result);
+- `record-persistent-results!` deletes the staged file in a `finally` after
+  the reply; the cluster deletes nothing.
+
+Instants round-trip: the completion carries only strings, symbols, keywords,
+ints and `#inst`, all of which `clojure.edn/read-string` reads by default.
+
+### Measured
+
+Same synthetic 2000-result completion (206,601 bytes of EDN), measured in the
+live `default` JVM:
+
+| | sent form |
+|---|---|
+| before (completion inlined) | **207,166 bytes** |
+| after (path named) | **889 bytes** |
+
+The form's size is now independent of the result count — its only variable
+part is the absolute path.
+
+### Live proof through the operator path (`seon.fresh-operator/live-root-value!`)
+
+Driven from a probe JVM (`clojure -Sdeps '{:paths ["src" "resources" "script"]}'`)
+against the owner's live `default` — `bin/test`'s exact send. Nothing was
+stopped, restarted or reforked.
+
+| sent | form bytes | wall ms | reply |
+|---|---|---|---|
+| OLD transport, 500 results inlined | 57,420 | 158 | `500` — compiles |
+| OLD transport, 2000 results inlined | 207,166 | — | **`Method code too large!`** — the batch-44 line, reproduced on demand |
+| NEW transport, 500-result completion staged | **901** | **261** | the cluster read the staged file and reached `record-results!`, which returned its contract refusal as a VALUE (`:seon.test/run-basis-t` absent — the probe's own completion was incomplete) |
+
+So the cause is confirmed by construction: the same data inlined blows the
+method-code ceiling, and named by path it does not. The new send carries a
+57,661-byte completion in a 901-byte form.
+
+Verification boundary: the live send was deliberately not given a valid
+`:seon.test/run-basis-t`, so no synthetic rows were written to `default`'s
+`:current-src`. The commit of a staged completion is proven in-process at
+2000 results against the canonical fixture (below). `bin/test` itself was not
+run by this lane.
+
+### Regressions
+
+`test/seon/test_runner_test.clj`:
+
+- `gate-completions-travel-as-a-file-not-as-code` — stages a 2000-result
+  completion, asserts the completion itself exceeds 65,536 bytes, the sent
+  form is under 1 KB and contains no result, the file reads back as the exact
+  completion including its `#inst`, and all 2000 results commit as test rows
+  against the canonical fixture;
+- `a-missing-or-unreadable-staged-completion-is-named` — the three absence
+  cases return the typed refusal naming the path.
+
+### In-process runs (live `default`, no test JVM)
+
+`(seon.test/run (#'seon.test/resolve-test 'sym) (seon.operator/connection "default"))`
+after reloading `seon.test-runner-test` through `seon.test`'s own loader:
+
+| test | result |
+|---|---|
+| `seon.test-runner-test/gate-completions-travel-as-a-file-not-as-code` | 7 pass, 0 fail, 0 error |
+| `seon.test-runner-test/a-missing-or-unreadable-staged-completion-is-named` | 7 pass, 0 fail, 0 error |
+| `seon.test-runner-test/recording-refusal-notice-names-the-cluster-cause` | 9 pass, 0 fail, 0 error |
+| `seon.test-runner-test/persistent-recording-failure-refuses-a-successful-gate` | 10 pass, 0 fail, 0 error |
+| `seon.test-runner-test/explicit-result-root-directs-bare-gate-evidence` | 2 pass, 0 fail, 0 error |
+| `seon.test-runner-test/result-recording-is-total-under-concurrent-test-retraction` | 5 pass, 0 fail, 0 error (one earlier run reported 1 error under concurrent lane load and did not reproduce; that test does not reach the changed region) |
+| `seon.test-runner-test/result-facts-live-on-the-test-row-and-reruns-replace-them` | 10 pass, 0 fail, 0 error |
+
+One design note the live proof produced: `requiring-resolve` does NOT resolve
+`seon.cluster/running-instances` in the cluster (it returns nil where
+`ns-resolve` returns the var), so the sent form keeps the original
+`(ns-resolve 'seon.cluster (symbol "running-instances"))` spelling. A form
+written with `requiring-resolve` fails with `@nil` — caught by the live send,
+not by any in-process test.
