@@ -361,3 +361,16 @@ applied-manifest digest, dissolve the zero-op reconcile plan cost, one
 `apply!` per fixture cluster. Steward owns the 13 s publication issue
 indexing (`issue-indexing-at-publication-costs-13-seconds.md`) and filed
 `request-profile-is-derived-64-times-per-turn.md`.
+
+### 2026-09-16 10:30Z — publications refused by a foreign analyzer error; recording races current-src
+
+Hook log: every current-src publication since 06:23Z refused — static
+analysis finds "Unresolved var: support/test-context" at
+`test/seon/test_failure_facts_test.clj:120` (reach-closure's new regression
+file); the config-apply-cost lane's edits were refused for it at 06:24:21.
+Gate recording on the fresh store is rejected with two
+`datahike.versioning` "Branch head changed before force-branch!"
+(`:stale-branch-head` on `:current-src`) during batch 34 A: the recorder's
+scratch fork/retire (`source.clj:300-323`) pre-reads the current-src head
+and races the hook's publications — the pre-read-vs-authority class again.
+Both handed to the steward's reach-closure lane.
