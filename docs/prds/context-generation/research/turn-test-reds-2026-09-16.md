@@ -6,6 +6,11 @@ tags: [research, test, runtime, class/p3]
 
 # Turn test reds — 2026-09-16
 
+Continuation: [batch-19 class work and batch-20 seed verification](turn-test-reds-batch19-2026-09-16.md)
+records the later occurrence/configuration/prompt slices, exact blocked members,
+and the independently verified transaction-cache boundary. This earlier record's
+counts remain its dated census, not the current gate result.
+
 Bounded assignment on `steward-platform`; starting HEAD
 `a55bdfc8065c556c988d10afdb8b4b79685579b3`. Started 00:51 UTC, 90-minute limit.
 This record is updated per verified slice. The namespace is not yet green.
@@ -111,7 +116,6 @@ The other 11 observation candidates produced ten green tests and one residual
 schema-unregister assertion: its Datahike attribute remains installed after
 its program definition disappears. No weakening of that assertion is retained.
 
-
 The [exact fresh-base probe](turn-test-reds-probe-2026-09-16.clj) is preserved.
 It uses the canonical `create-base`/`close-base!` owners, scoped fixture delays,
 real `seon.test/run` and recorded results. The snapshot root is explicitly
@@ -122,7 +126,6 @@ serial future and restored in `finally`. This was necessary for fresh SCI
 acquisition to load `seon.dev.dependency-cache-test` and its tools.build
  dependency. The first four-test candidate had three green tests and one
 classpath setup error before this correction; it is not the final verdict.
-
 
 ### Slice 2 — current evaluation observations
 

@@ -38,11 +38,11 @@ failure after successful setup. The namespace remains red.
 | Cause | Tests | Disposition | Regression |
 |---|---|---|---|
 | Error identity mistaken for occurrence evidence | Partial-stream truncation, reasoning-only diagnostic, backup attempt, cold SCI acquisition | Resolved by `2209387e2`; 36/0/0 before and after adoption | Existing exact payload, attempt-link and acquisition assertions |
-| Compiled config upsert cannot express explicit absence | Shared `with-cluster` constructor | Reconcile through `config/apply!`; candidate 9/0/0 | Strengthened `one-successful-call-leaves-exactly-one-attempt-fact` asserts absence of the seeded backup |
+| Compiled config upsert cannot express explicit absence | Shared `with-cluster` constructor | Resolved by `c01df3773` through `config/apply!`; 9/0/0 before and after adoption | Strengthened `one-successful-call-leaves-exactly-one-attempt-fact` asserts absence of the seeded backup |
 | Partial config entity maps refused before test work | `refused-terminal-program-transactions-settle-and-do-not-refire`, `generated-model-attempt-traces-preserve-presence-and-episode-laws` | **Blocked by write-validation-class**; downstream assertions skipped after capturing the complete refused seed | Existing tests retained; no config-map workaround applied to these members |
 | Retired generated settlement fixture | `generated-fixed-point-closes-the-run`, `generated-membership-failure-never-advances-the-run-to-call` | Setup reaches `receipt-settle-call`, which returns `no-terminal-fact`; not attributed to raw write validation | Retained until current system-turn coverage verifies green |
 | Retired phase/private-state/recovery observations | Generated phase property, private-definition refusal, crash-intent test | Seeds commit; unresolved fixture/observation work | Original assertions retained |
-| Prompt fixture uses a now-legal triggerless turn as its failure | Prompt-refusal test | Resolved fixture: inject the actual prompt acquisition refusal on a real opened turn; 4/0/0 before and after adoption | Same no-provider, no-attempt and durable-error assertions |
+| Prompt fixture uses a now-legal triggerless turn as its failure | Prompt-refusal test | Resolved by `7c097f8f2`: inject the actual prompt acquisition refusal on a real opened turn; 4/0/0 before and after adoption | Same no-provider, no-attempt and durable-error assertions |
 | Fake evaluation and retired result observations | Opening-database prompt, streaming pair, lost-call diagnostic, delimiter repair, schema refinement/unregister | Seeds commit; distinct current-observation candidates and boundaries recorded below | No failing candidate is retained |
 
 ## Seed verification after the owner's batch-20 finding
@@ -54,7 +54,9 @@ not edited. The snapshot includes `26ec13420`; these results do not claim
 verification of the other lane's subsequent writer repair.
 
 Fifteen fresh canonical branches and SCI contexts each committed all three
-common setup writes: **45 committed writes, zero refusals**. Every remaining
+common setup writes: **45 committed writes, zero refusals**; the
+[common-seed measurements](turn-test-reds-batch19-common-seeds-2026-09-16.edn)
+retain every case and the later direct constructor value. Every remaining
 batch-19 member was then replayed individually through `seon.test/run` with
 a scoped observer that records a refused transaction's complete value and
 stops that execution before later assertions. Runs 48489–48511 are serial;
@@ -202,3 +204,71 @@ Default publication of the config fixture was independently refused at the
 foreign `:seon.issue/agent` scratch-schema boundary (hook requests
 `6121a3dc-6237-4c3d-a162-5b7235d24e76` and
 `7649a713-b8d3-4a77-bb54-c25e39c5f27a`). No default restart/refork was attempted.
+
+## Evidence, residual members, and gate boundary
+
+The [seed-check values](turn-test-reds-batch19-seed-checks-2026-09-16.edn)
+contain all 15 replay results and every distinct complete refused transaction.
+These diagnostic replays stop on refusal: their **28/34/12** tally is not a
+namespace gate or comparable to the ordinary baseline. The
+[seed probe](turn-test-reds-batch19-seed-probe-2026-09-16.clj) retains its exact
+historical MCP forms as source data. Load the base helper and scoped test
+classloader from the original batch-19 probe before replaying them in an
+owned isolated root. The same convention applies to the
+[schema-cache probe](turn-test-reds-batch19-schema-cache-probe-2026-09-16.clj)
+and [complete cache values](turn-test-reds-batch19-schema-cache-2026-09-16.edn).
+
+The [other boundary values](turn-test-reds-batch19-boundaries-2026-09-16.edn)
+retain the exact `seon.eval/of-agent` output refusal and the 120000 ms property
+timeout. The [opening probe](turn-test-reds-batch19-opening-probe-2026-09-16.clj)
+captures the durable occurrence after the real turn. The separate
+[timeout/cleanup issue](../../../seon/issues/in-process-test-timeout-precedes-fixture-release.md)
+records that cancellation returned before the fixture connection released.
+That earlier owned JVM was shut down before restarting this isolated root;
+default was untouched.
+
+Unrepaired batch-19 members, all in `seon.cluster.turn-test`:
+
+| Exact test | Latest verified disposition |
+|---|---|
+| `refused-terminal-program-transactions-settle-and-do-not-refire` | Blocked by write-validation-class; partial config seed refusal captured; skip downstream assertions |
+| `generated-model-attempt-traces-preserve-presence-and-episode-laws` | Blocked by write-validation-class; scenario config seed refused; do not retain the unverified oracle/config candidate |
+| `delimiter-repair-is-span-local-and-precedes-intent` | Retired result reads and system/agent query mixing; previous semantic candidate exposed the unchanged 300 ms performance bound; no candidate retained |
+| `a-run-prompts-from-its-opening-database-value` | Fake evaluator replaces actual message reads with 1; real-evaluation candidate meets the protected renderer-ref boundary |
+| `runtime-schema-key-changes-pass-the-one-usage-guarded-decision` | Retired result observation; real turn meets renderer-ref boundary; unresolved owner ruling remains separate |
+| `turn-intent-is-the-complete-crash-falsifier` | Seed succeeds; current opening fails before the intended cut in this snapshot; older recovery expectations also need current wake semantics |
+| `generated-fixed-point-closes-the-run` | Retired settlement seed returns `no-terminal-fact`; retained pending verified replacement coverage |
+| `generated-membership-failure-never-advances-the-run-to-call` | Same retired settlement refusal; retained pending verified replacement coverage |
+| `generated-phase-failures-converge-through-one-terminal-exit` | Seeds succeed; legacy phase property remains red; covering current-phase test was not green in this isolated snapshot |
+| `streaming-writes-zero-datoms-test` | Seeds succeed; old fake result does not complete the intended turn; partial-observation ordering and exact reply candidate not retained without green proof |
+| `concurrent-streams-share-one-conn-test` | Seeds succeed; fake completion causes extra provider calls; real-evaluation candidate meets renderer-ref boundary |
+| `a-lost-model-call-leaves-a-durable-readable-reason` | Seeds succeed; query still asks error identity for occurrence message, and fake generated reads do not show the real diagnostic |
+| `a-refused-definition-stays-in-its-agents-defs` | Seeds succeed; queries retired `:seon.def/*` and result storage; refusal injection names old single-evaluation settlement |
+| `runtime-schema-unregister-removes-one-unused-global-schema` | Seeds succeed; retired observation masks installed-attribute residual; direct writer probe proves the separate cache boundary |
+
+No retired test was deleted in this continuation without verified covering
+coverage. The umbrella issue stays open. All failing candidate edits remain
+outside source; neither assertions nor bounds were relaxed.
+
+The requested gate file now contains exactly `seon.cluster.turn-test`,
+`seon.sci.eval-test`, and `seon.turn-test`, each verified under `test/`.
+No test JVM, `bin/test`, or `bin/test-fast` was launched. Cold namespace and
+platform proof remains the orchestrator's gate, not these focused results.
+The six retained focused regressions total **49 passing assertions**, each
+green before its edit and after isolated adoption; they are not one combined
+suite result. `git diff --check` passed for the owned source/doc changes.
+
+At 03:43 UTC a read-only MCP probe with explicit default custody found source
+commit `6aaa0c28-fb31-5521-9bd8-c9c64e5f123f` and both `error/recording` and
+`:seon.error/fact` in the installed attempt-recorder program row. This verifies
+that row, not complete convergence or an executed default regression. The
+later prompt hook request `141d5156-152c-4655-b6fb-abbacb23ba9d` returned operator
+124; no passing default adoption is inferred from a queued edit.
+
+Cleanup: the last in-process test completed before operator `down` sent SIGTERM
+to owned PID 33326. The operator reported the flock free and a readable roster;
+the process-table check found no remaining PID 33326. The owned scratch
+worktree/root was removed after unlinking only its `reference-code` symlink.
+The shared dependency checkout and all other worktrees were preserved.
+No lane-owned background shell or development JVM remains. The class stops
+at the priced dependency-owner decision above; it is not marked complete.

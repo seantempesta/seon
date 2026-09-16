@@ -1,0 +1,17 @@
+{:common-seed-results [
+ {:label "attempt-property" :committed-writes 3 :refusals []}
+ {:label "concurrent-streams" :committed-writes 3 :refusals []}
+ {:label "crash-intent" :committed-writes 3 :refusals []}
+ {:label "delimiter-repair" :committed-writes 3 :refusals []}
+ {:label "generated-fixed-point" :committed-writes 3 :refusals []}
+ {:label "generated-membership" :committed-writes 3 :refusals []}
+ {:label "generated-phases" :committed-writes 3 :refusals []}
+ {:label "lost-call" :committed-writes 3 :refusals []}
+ {:label "opening-database" :committed-writes 3 :refusals []}
+ {:label "private-definition" :committed-writes 3 :refusals []}
+ {:label "prompt-refusal" :committed-writes 3 :refusals []}
+ {:label "refused-terminal" :committed-writes 3 :refusals []}
+ {:label "schema-refinement" :committed-writes 3 :refusals []}
+ {:label "schema-unregister" :committed-writes 3 :refusals []}
+ {:label "streaming" :committed-writes 3 :refusals []}]
+ :constructor-call {:label "configured-value" :committed-writes 4 :refusals [] :value {:agent {:db/id 43017 :seon.agent/id "agent-a" :seon.agent/namespace {:db/id 43018}} :configuration {:seon.config.ai/model "probe"}}}}

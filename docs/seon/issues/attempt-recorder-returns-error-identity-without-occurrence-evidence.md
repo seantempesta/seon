@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, runtime, test, class/p3]
 ---
@@ -27,6 +27,13 @@ The latter three retain distinct observables. All use fresh canonical branches,
 SCI contexts and armed contracts. The first candidate correctly exposed that
 raw pulled refs need projection too; the final candidate uses the error owner's
 existing prepared diagnostic instead of adding another projection mechanism.
+
+Resolved by `2209387e2`. After source adoption
+`6aaa0591-f886-5b55-ac01-4c9d24d84214`, fresh canonical in-process runs
+48355–48358 repeat **36 passes / 0 failures / 0 errors**. The live recorder
+returns the complete diagnostic with stable error identity, lookup refs,
+message and payload; success returns nil. Default publication remains a
+separate, explicitly recorded boundary.
 
 Commit and adopted-definition proof are recorded in
 [the landing note](../../prds/context-generation/research/turn-test-reds-batch19-2026-09-16.md).

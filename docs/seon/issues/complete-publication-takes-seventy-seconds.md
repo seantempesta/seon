@@ -7,6 +7,18 @@ tags: [issue, operator, database, class/n9, wave/publication-velocity]
 
 # Complete source publication takes ~70 s against the ten-second law
 
+## Turn-test continuation observation, 2026-09-16
+
+Hook publication `733b79b5-89d6-40d5-9b05-ee872281ad71`, queued for the turn
+recorder/test edits, coalesced with a foreign source-owner edit and ended with
+operator exit 124. Its result names `logs/current-source-failure.log`, whose
+complete diagnostic is `Publication did not finish within its declared bound.`
+Default remained PID 7595 and answered read-only MCP JVM probes. At 02:59 UTC
+its recorded source was `6aa9fe1b-203b-5ca1-bea2-9047ea996105`. This does not
+identify the timed-out phase or attribute it to either lane. The isolated
+HEAD-plus-owned-paths development adoption completed and supplied the lane's
+after-edit proof; default was not restarted or reforked.
+
 ## Problem
 
 `seon.cluster/refresh-source!` (the complete `current-src` publication) took

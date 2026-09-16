@@ -55,3 +55,14 @@ derive the projection from that transaction's actual program facts, including
 prior rows in the same batch, before comparing desired declarations. A guard
 on this single attribute would leave the class intact. `src/seon/turn.clj`
 remains protected; no foreign code or live session was changed.
+
+## Candidate falsified by a dependency boundary — 2026-09-16
+
+After the turn owner became available, the in-process candidate reused
+`schema/projection-from-database` at deletion, matching declaration admission.
+A composed declaration/deletion regression still returned 4/3/0 (run 48567).
+The complete observer proves the normal query misses the just-written schema
+while the same read with query-result caching disabled sees its exact form.
+The mid-transaction value incorrectly retains committed cache identity.
+See [the dependency issue](transaction-functions-retain-committed-query-cache-identity.md).
+No candidate production edit or relaxed deletion assertion was retained.
