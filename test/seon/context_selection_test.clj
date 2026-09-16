@@ -36,11 +36,14 @@
                    {:seon.agent/id "selection-b"}]
                   (concat
                    (map (fn [[agent-id run-id closed?]]
+                          ;; :seon.turn/closed-tx is a REF to the closing
+                          ;; transaction (ae0e54841), so a closed seeded turn
+                          ;; names this transaction, never an instant.
                           (cond-> {:seon.turn/id run-id
                                    :seon.turn/agent
-                                   [:seon.agent/id agent-id]}
-                            closed? (assoc :seon.turn/closed-tx
-                                           #inst "2026-09-06T00:00:00Z")))
+                                   [:seon.agent/id agent-id]
+                                   :seon.turn/opened-tx "datomic.tx"}
+                            closed? (assoc :seon.turn/closed-tx "datomic.tx")))
                         runs)
                    (for [[_ run-id _] runs
                          :when (not= "selection-empty" run-id)
@@ -48,7 +51,9 @@
                      (cond-> {:seon.cluster.eval/id (str run-id "-" ordinal)
                               :seon.cluster.eval/run
                               [:seon.turn/id run-id]
-                              :seon.cluster.eval/ordinal ordinal}
+                              :seon.cluster.eval/ordinal ordinal
+                              :seon.cluster.eval/at
+                              #inst "2026-09-06T00:00:00Z"}
                        (not= "selection-pending" run-id)
                        (assoc :seon.eval/shown (pr-str ordinal)))))))
            _ (is (nil? (:seon.error/kind seed)))
