@@ -34,7 +34,7 @@ peer session (batches 30–57; ledger
    before the first platform task; three tests moved to the bulk tier), and
    `seon.test/run`/`check` refuse such a test in process under a development
    root with a typed refusal naming the owner (the seam that actually wiped
-   the store). Both halves await cold proof in batches 66–67. Issue:
+   the store). Both halves proven cold in batch 66 (platform green with the checker running first; the in-process refusal regressions green; store intact across the run). Issue:
    `a-platform-tier-test-wiped-the-checkouts-store`.
 
 1. **The store grows without collection.** `data/store` went 107 MB → 12 GB in
