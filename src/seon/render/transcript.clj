@@ -783,11 +783,22 @@
     :seon.error/diagnostic-evidence identities}))
 
 (defn render-run-ai
-  "The prompt owns evaluation text; a turn concern emits no AI text."
+  "Render the selected turn's state and evaluations without selecting other turns."
   {:malli/schema [:=> [:cat :seon.render/unit]
                   [:or :string :seon.error/value]]}
-  [_unit]
-  "")
+  [unit]
+  (let [{run-id ::selected-run-id agent-id ::selected-agent-id
+         identity-error ::selected-run-error :as identities}
+        (selected-run-identities unit)]
+    (cond
+      identity-error identity-error
+      (and (:seon.db/db unit) run-id agent-id)
+      (str/join "\n\n"
+                (remove str/blank?
+                        [(turn/render-ai unit)
+                         (render-ai (assoc unit :seon.agent/id agent-id
+                                           ::selected-run-id run-id))]))
+      :else (missing-selected-run unit identities))))
 
 (defn message-form
   "Return the ordinary message read form for one message entity."
@@ -886,7 +897,7 @@
         [:dt "Reply"] [:dd (if (find row :seon.turn/reply-size) "Recorded" "None")]]])))
 
 (defn render-run-html
-  "Show a turn's header; its evaluations belong in the prompt pane."
+  "Show the selected turn's header, state and evaluations."
   {:malli/schema [:=> [:cat :seon.render/unit]
                   [:or :seon.render/hiccup :seon.error/value]]}
   [unit]
@@ -897,7 +908,11 @@
     (cond
       identity-error identity-error
       (and (:seon.db/db unit) run-id agent-id)
-      (turn-header (:seon.db/db unit) run-id)
+      [:section {:class "seon-turn"}
+       (turn-header (:seon.db/db unit) run-id)
+       [:p (turn/render-ai unit)]
+       (render-html (assoc unit :seon.agent/id agent-id
+                          ::selected-run-id run-id))]
       :else (missing-selected-run unit identities))))
 
 (defn render-session-ai

@@ -91,3 +91,22 @@ assertion also completed green in `tmp/s11-prompt-concurrency-fast.log`.
 The initial `--paths` invocation encountered the orchestrator-only marker;
 the authorized plain fast runner in the isolated worktree supplied the proof.
 No cold gate or post-edit default evaluation is claimed.
+
+## Red (3) — selected-turn rendering restored, 2026-09-16
+
+The file was released by `eec636a97`; a fresh `git status` showed
+`src/seon/render/transcript.clj` clean before editing. The exact required
+hunks were `render-run-ai` (formerly line 785) and `render-run-html`
+(formerly line 888). Both now resolve the selected turn's identities,
+retain the existing missing-selection diagnostic, and render only that
+turn's evaluations. State text comes from the existing `seon.turn/render-ai`,
+including the closed-without-reply interruption evidence; no second status
+derivation or history clipping was introduced. HTML retains its header.
+This does not restore the separate undisposed-turn notice dissolved in T2.
+
+Verification: isolated `bin/test-fast seon.render.transcript-run-test
+seon.repl-test` passed 17 tests / 93 assertions, zero failures or errors
+(`tmp/s11-render-fast.log`). The unchanged selected-turn regression checks
+both direct and schema-selected AI/HTML calls, presence of the selected
+evaluations and interruption explanation, exclusion of the other turn, and
+the missing-identity diagnostic. No browser-paint proof is claimed.
