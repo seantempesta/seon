@@ -577,7 +577,13 @@
   `retrying-base` knows nothing about the canonical population: it keys, holds
   and retires whatever `construct` returns, and `close-base!` releases it. A
   synthetic construction therefore proves the cache-miss and retirement rules
-  without paying the canonical base's construction each time."
+  without paying the canonical base's construction each time.
+
+  The marker is the publication's own VALUE. It was briefly `pr-str`'d, and
+  that compared printed BYTES across threads: construction runs on the base's
+  daemon thread, where `*print-namespace-maps*` holds its root `false`, while
+  the assertion ran in a worker whose test thread has the REPL's `true`, so one
+  value printed two ways and the regression failed cold only."
   [published constructed]
   (fn []
     (let [publication @published
@@ -588,13 +594,14 @@
           connection (d/connect configuration)]
       (d/transact connection [{:db/id -1
                                :seon.test-support-test/publication
-                               (pr-str publication)}])
+                               (first (:seon.source/commit-id publication))}])
       (swap! constructed conj publication)
       {:seon.test-support/configuration configuration
        :seon.test-support/connection connection
        :seon.test-support/closed (atom false)})))
 
 (defn- base-publication-datom
+  "The publication marker this base carries, as DATA."
   [base]
   (d/q '[:find ?publication .
          :where [_ :seon.test-support-test/publication ?publication]]
@@ -619,8 +626,7 @@
       (is (= {:seon.source/commit-id #{:first}}
              (:seon.test-support/publication-key first-base))
           "the base records the publication it was built from")
-      (is (= (pr-str {:seon.source/commit-id #{:first}})
-             (base-publication-datom first-base)))
+      (is (= :first (base-publication-datom first-base)))
       (let [again (test-support/acquire-base! base)]
         (is (identical? first-base (:seon.test-support/value again))
             "an unchanged publication is the same base")
@@ -633,8 +639,7 @@
           (is (= {:seon.source/commit-id #{:second}}
                  (:seon.test-support/publication-key second-base))
               "the next run's base is built from the new publication")
-          (is (= (pr-str {:seon.source/commit-id #{:second}})
-                 (base-publication-datom second-base))
+          (is (= :second (base-publication-datom second-base))
               "and carries a row only the new publication has")
           (is (= [{:seon.source/commit-id #{:first}}
                   {:seon.source/commit-id #{:second}}]
@@ -644,8 +649,7 @@
           ;; to delete a branch under an active connection, so retirement must
           ;; wait for the last holder.
           (is (false? @(:seon.test-support/closed first-base)))
-          (is (= (pr-str {:seon.source/commit-id #{:first}})
-                 (base-publication-datom first-base)))
+          (is (= :first (base-publication-datom first-base)))
           (test-support/release-base! base first-held)
           (is (true? (test-support/await-event!
                       (:seon.test-support/closed first-base)
@@ -654,13 +658,40 @@
               "the retired base is closed once its last holder releases it")
           (is (false? @(:seon.test-support/closed second-base))
               "the base this run holds is untouched by that retirement")
-          (is (= (pr-str {:seon.source/commit-id #{:second}})
-                 (base-publication-datom second-base)))
+          (is (= :second (base-publication-datom second-base)))
           (finally
             (test-support/release-base! base second-held)
             (#'test-support/close-base! second-base))))
       (finally
-        (#'test-support/close-base! first-base)))))
+        (#'test-support/close-base! first-base))))
+  ;; THE WORKER PATH. An isolated worker's `seon.test.published-base` snapshot
+  ;; is immutable for the JVM's life, so its key never moves: there is nothing
+  ;; to follow, the base is constructed once, and it stays realized across the
+  ;; whole run. That is the same object under a constant key.
+  (let [constructed (atom [])
+        published (atom {:seon.source/commit-id #{:snapshot}})
+        base (#'test-support/retrying-base (constantly
+                                            {:seon.test-support/published-base
+                                             "/snapshot/checkout"})
+                                           (publication-base published constructed))
+        held (test-support/acquire-base! base)
+        value (:seon.test-support/value held)]
+    (try
+      (is (true? (realized? base)))
+      (reset! published {:seon.source/commit-id #{:ignored}})
+      (let [again (test-support/acquire-base! base)]
+        (is (identical? value (:seon.test-support/value again))
+            "an immutable snapshot key never misses, whatever else moves")
+        (is (true? (realized? base))
+            "and the worker's base stays realized across its whole run")
+        (test-support/release-base! base again))
+      (is (= 1 (count @constructed)) "exactly one construction in a worker")
+      (is (= :snapshot (base-publication-datom value)))
+      (is (false? @(:seon.test-support/closed value))
+          "nothing is retired while the key stands")
+      (finally
+        (test-support/release-base! base held)
+        (#'test-support/close-base! value)))))
 
 (deftest ^{:seon.test/platform
            "Moving part: the derivation that decides whether a shared base is
@@ -686,7 +717,28 @@
             (System/getProperty "seon.test.published-base")
             (#'test-support/published-commit-ids)))
         "the supplied arity is the whole derivation")
-    (doseq [commit (#'test-support/published-commit-ids)]
-      (is (uuid? commit) "a head this JVM holds is a commit ID"))
+    ;; Which case this JVM is in is DERIVED from the same facts the mechanism
+    ;; reads, never a flag: an isolated worker has the snapshot property and no
+    ;; store head can move its key; a development JVM has held stores.
+    (let [snapshot (System/getProperty "seon.test.published-base")
+          commits (#'test-support/published-commit-ids)]
+      (cond
+        snapshot
+        (do (is (= {:seon.test-support/published-base snapshot}
+                   (#'test-support/publication-key))
+                "a worker's key IS its immutable snapshot")
+            (is (= (#'test-support/publication-key)
+                   (#'test-support/publication-key snapshot commits))
+                "and no store head this JVM holds can move it"))
+        commits
+        (do (is (= {:seon.source/commit-id commits}
+                   (#'test-support/publication-key))
+                "a development JVM keys on the heads it holds")
+            (doseq [commit commits]
+              (is (uuid? commit) "a head this JVM holds is a commit ID")))
+        :else
+        (is (= {:seon.test-support/published-base :seon.test-support/no-store}
+               (#'test-support/publication-key))
+            "no snapshot and no held store is its own key member")))
     (is (identical? @test-support/source-manifest @test-support/source-manifest)
         "the manifest is derived once per publication, not per fixture")))
