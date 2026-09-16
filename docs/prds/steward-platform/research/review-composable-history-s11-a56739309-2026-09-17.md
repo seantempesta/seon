@@ -70,3 +70,24 @@ contacted. No production fixes or tests were run before this stop; reds
 `bin/seon status` reported default alive (PID 41413); no prepl evaluation
 was used. This note records the boundary only, not acceptance or a green
 verification claim.
+
+## Red (1) — carry the composition profile, 2026-09-16
+
+The one permitted read-only default JVM evaluation reproduced the exact
+`select` return-contract refusal for the missing `:seon.render.profile/id`.
+`seon.print/elision` copies a supplied profile identity; it does not invent
+one (`src/seon/print.cljc:982`). `acquire-context-report` now resolves the
+request profile once, passes it to acquisition and to `select`, and returns
+a profile refusal without attempting composition. `select` takes that profile
+explicitly and carries its identity into the omission. The regression uses
+`:seon.cluster.prompt-test/composition-profile`, so a hard-coded agent profile
+would fail. The calibration fixture now supplies the history unit represented
+by its text; the missing-units refusal remains intact.
+
+Verification: `bin/test-fast seon.cluster.prompt-test` in the isolated
+HEAD-plus-owned-edits worktree passed 13 tests / 96 assertions, zero failures
+or errors (`tmp/s11-prompt-fast.log`). The strengthened nondefault-profile
+assertion also completed green in `tmp/s11-prompt-concurrency-fast.log`.
+The initial `--paths` invocation encountered the orchestrator-only marker;
+the authorized plain fast runner in the isolated worktree supplied the proof.
+No cold gate or post-edit default evaluation is claimed.

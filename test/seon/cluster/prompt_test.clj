@@ -210,7 +210,9 @@
   ;; coordinate and a requery form, never a character offset inside a form.
   (let [calibration (tokens/prior-calibration 3.2)
         units (planted-units)
-        selection (prompt/select units 200 calibration "walker")
+        profile (assoc (render/agent-render-profile (config/defaults))
+                       :seon.render.profile/id ::composition-profile)
+        selection (prompt/select units 200 calibration "walker" profile)
         retained (:seon.render.history/units selection)
         elision (:seon.print/elision selection)
         text (prompt/compose selection)]
@@ -226,6 +228,7 @@
       (is (not (str/includes? text (:seon.render.history/bytes unit)))
           "a dropped unit contributes nothing"))
     (is (some? elision) "the omission is named")
+    (is (= ::composition-profile (:seon.render.profile/id elision)))
     (is (= (- (count units) (count retained)) (:seon.print/omitted elision)))
     (is (= :evaluations (:seon.print/elision-unit elision)))
     (is (= :seon.config.ai/prompt-token-budget (:seon.print/bound-by elision)))
@@ -245,7 +248,8 @@
   (testing "a cut never omits its whole subject: the newest unit always survives"
     (let [calibration (tokens/prior-calibration 3.2)
           units (planted-units)
-          selection (prompt/select units 1 calibration "walker")]
+          selection (prompt/select units 1 calibration "walker"
+                                 (render/agent-render-profile (config/defaults)))]
       (is (= 1 (count (:seon.render.history/units selection))))
       (is (= (:seon.render.history/bytes (last units))
              (:seon.render.history/bytes
@@ -261,7 +265,8 @@
                             :seon.render/distance 2))
            units (vec (:seon.render.history/entries acquired))
            calibration (tokens/prior-calibration 3.2)
-           selection (prompt/select units 1000000 calibration "walker")]
+           selection (prompt/select units 1000000 calibration "walker"
+                                 (render/agent-render-profile (config/defaults)))]
        (is (seq units))
        (is (nil? (:seon.print/elision selection)) "nothing was dropped")
        (is (= (count units) (count (:seon.render.history/units selection))))
@@ -275,7 +280,8 @@
   ;; S11 change (1): the estimate is DERIVED at composition, never stored.
   (let [calibration (tokens/prior-calibration 3.2)
         units (planted-units)
-        selection (prompt/select units 1000000 calibration "walker")]
+        selection (prompt/select units 1000000 calibration "walker"
+                                 (render/agent-render-profile (config/defaults)))]
     (doseq [unit (:seon.render.history/units selection)]
       (is (= (tokens/estimate (:seon.render.history/bytes unit) calibration)
              (:seon.ai.tokens/estimate unit))))
@@ -333,7 +339,8 @@
   (let [calibration (tokens/prior-calibration 3.2)
         unit (history-unit 0 (str "my.agents.walker=> (long-one)\n"
                                   (apply str (repeat 4000 \y))))
-        selection (prompt/select [unit] 1 calibration "walker")
+        selection (prompt/select [unit] 1 calibration "walker"
+                                 (render/agent-render-profile (config/defaults)))
         text (prompt/compose selection)]
     (is (str/includes? text (:seon.render.history/bytes unit))
         "the rendered unit crosses composition whole, under any budget")
@@ -441,6 +448,7 @@
          (with-redefs [render/acquire-context!
                        (fn [render-request]
                          {:seon.cluster.prompt/text text
+                          :seon.render.history/entries [(history-unit 0 text)]
                           :seon.db/db (:seon.db/db render-request)})]
            (let [result (prompt/prompt @connection
                                        (request connection ctx))]

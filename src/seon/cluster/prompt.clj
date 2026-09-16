@@ -234,9 +234,10 @@
   omitted units are the oldest ones, so the retained history resumes at that
   index of the requeried evaluation sequence, and the requery form retrieves
   the whole sequence to read from."
-  [agent-id dropped total]
+  [agent-id dropped total profile]
   (print/elision
    {:seon.print/omitted dropped
+    :seon.render.profile/id (:seon.render.profile/id profile)
     :seon.print/elision-unit :evaluations
     :seon.print/bound-by :seon.config.ai/prompt-token-budget
     :seon.render.data/path []
@@ -269,15 +270,15 @@
   (str/join (selection-segments selection)))
 
 (defn- selection-of
-  [priced total dropped agent-id]
+  [priced total dropped agent-id profile]
   (cond-> {:seon.render.history/units (subvec priced dropped)}
     (pos? dropped)
-    (assoc :seon.print/elision (dropped-elision agent-id dropped total))))
+    (assoc :seon.print/elision (dropped-elision agent-id dropped total profile))))
 
 (defn select
   "Choose the newest whole history units `budget` admits, oldest dropped first.
 
-  PURE: the units, the budget, the calibration and the agent identity are all
+  PURE: the units, budget, calibration, agent identity and render profile are all
   arguments (2.1); nothing is fetched at call time. Each returned unit carries
   `:seon.ai.tokens/estimate`, derived here from its own stored shown text —
   never stored, because the calibration this prices against drifts as attempts
@@ -295,13 +296,14 @@
   only the newest unit is left."
   {:malli/schema [:=> [:cat [:vector :seon.render.history/unit]
                        :seon.config.ai/prompt-token-budget
-                       :seon.ai.tokens/calibration :seon.agent/id]
+                       :seon.ai.tokens/calibration :seon.agent/id
+                       :seon.render.profile/profile]
                   :seon.render.history/selection]}
-  [units budget calibration agent-id]
+  [units budget calibration agent-id profile]
   (let [priced (mapv #(priced-unit % calibration) units)
         total (count priced)]
     (loop [kept (retained-count priced budget calibration)]
-      (let [selection (selection-of priced total (- total kept) agent-id)]
+      (let [selection (selection-of priced total (- total kept) agent-id profile)]
         (if (or (<= kept 1)
                 (<= (tokens/estimate (compose selection) calibration) budget))
           selection
@@ -312,11 +314,14 @@
   frame reads the same resolved dial through it rather than deriving the
   agent's overlay a second time for the same number."
   [database request budget calibration settings]
-  (let [distance (long (get request :seon.render/distance default-depth))
-        acquired (render/acquire-context!
+  (let [profile (render/request-profile (assoc request :seon.db/db database))
+        distance (long (get request :seon.render/distance default-depth))
+        acquired (if (:seon.error/kind profile) profile
+                   (render/acquire-context!
                   (assoc request
+                         :seon.render/profile profile
                          :seon.db/db database
-                         :seon.render/distance distance))]
+                         :seon.render/distance distance)))]
     (cond
       (:seon.error/kind acquired)
       acquired
@@ -333,7 +338,7 @@
 
       :else
       (let [selection (select (vec (:seon.render.history/entries acquired))
-                              budget calibration (:seon.agent/id request))
+                              budget calibration (:seon.agent/id request) profile)
             history (compose selection)
             frame (str (when (seq history) "\n\n")
                        (repl/frame (:seon.db/db acquired) (:seon.agent/id request)
