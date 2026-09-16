@@ -115,6 +115,8 @@ definition facts, the identity survives as a tombstone, so refs to
 identities are stable forever; and THE POPULATION INVARIANT — every
 name the SCI context can resolve has a program row, minted where the
 context learns it, so call edges cannot dangle by construction.
+Retired by owner ruling 2026-09-16 (program-facts PRD §1f G1/G2);
+replaced when the edge schema lands.
 
 **The recurring failure class of this whole project is a check that reads
 ABSENCE OF SIGNAL as health** — a query against a descriptor that no longer
@@ -450,6 +452,56 @@ workload tag) may be an enum-valued attribute — rare, justified in the
 schema's docstring, and still an attribute describing the entity, never a
 table-picker.
 
+**Deletion is retraction, and the past is a history query** (ruled
+2026-09-16, program-facts PRD §1f G1). A deleted function, test,
+namespace, schema key or issue is `[:db/retractEntity …]`. No entity is
+kept alive for the sake of another entity's refs, and there is no
+retirement attribute; `history` / `as-of` / `since` answer what was true
+before. Datahike's `retractEntity` also sweeps EVERY incoming ref datom
+and cascades into `:db/isComponent` children, which is exactly why the
+next rule exists — read the datahike skill before you delete anything.
+
+**A fact that must outlive its target stores a VALUE, not a ref** (ruled
+2026-09-16, §1f G2). Call edges and test reach become
+`[:set :qualified-symbol]`; a symbol denotes itself, so deleting the named
+function touches no caller's datom and "A calls a name with no row" is one
+Datalog clause instead of an impossibility. Refs stay where a genuine
+entity relation exists (`:seon.fn/ns`, `/file`, `/ast`, `/arities`). TARGET
+until the `edges-are-symbols-deletion-is-retraction` lane lands the schema
+change: `:seon.fn/calls` is still `[:set :seon.db/ref]`
+(`resources/seon/schemas/seon.fn.edn:23`) and `:seon.test/reach` still a
+ref vector (`resources/seon/schemas/seon.test.edn:2`).
+
+**If a reader will ever need to distinguish "we looked and found nothing"
+from "we never looked", the looking is an event and the event is a datom**
+(ruled 2026-09-16, §1f G4). A cardinality-many attribute with no members
+has NO datoms — `#{}` in transaction data emits nothing — so the two
+states are byte-identical. Never encode an event in a collection's
+cardinality, and never repair it with a submission-time-only check: the
+whole-entity validator rebuilds the row from the resulting datoms, where
+the empty collection is already gone, so a submission-only check is a
+pre-read the authority re-decides.
+
+**A component is part of its parent's value** (ruled 2026-09-16, §1f G5).
+Pull expands a component without being asked and `retractEntity` destroys
+it with the parent, so the validation unit is the parent pulled with its
+components expanded, validated as one value against the parent's schema.
+Do not invent identity attributes on component rows to make a selector
+see them. TARGET: 29 marked component maps are currently unselected
+(`docs/prds/steward-platform/research/schema-key-audit-2026-09-16.md`).
+
+**An entity schema describes the STORED entity only.** A reference has
+three grammars — transaction data, datom, pull result — and one Malli key
+cannot describe all three. A reader's pulled shape DERIVES from the entity
+schema under that reader's selector; it is never a per-attribute
+`[:map [:db/id :int]]` widening and never a second hand-written pulled
+schema. Evidence, including the twelve hand-written mirrors this class has
+already cost:
+[entity schema versus pulled shape](docs/prds/steward-platform/research/entity-schema-vs-pulled-shape-2026-09-16.md).
+The Datahike behaviour behind all five rules is measured in
+[the deletion study](docs/prds/steward-platform/research/datahike-deletion-and-the-program-graph-2026-09-16.md)
+and carried with `file:line` in `.claude/skills/datahike/SKILL.md`.
+
 **Presence, absence, and the `contains?` trap.** `contains?` answers "is
 this key/index present" — on a vector it checks INDICES
 (`(contains? [:x :y] 1)` is true; `(contains? [:x :y] :x)` is false), and
@@ -470,7 +522,7 @@ two delivery paths for one noun is the defect.
 argument-map arities; agent calls can elide db/conn to the calling agent's
 cluster's current database. `transact!` with an explicit connection returns
 the transaction report; its elided arity returns transaction identity and datoms
-(`src/seon/db.clj:3213`). Failures return flat `:seon.error` values.
+(`src/seon/db.clj:3343`). Failures return flat `:seon.error` values.
 Direct `datahike.api` calls survive only inside `seon.db`, the
 store/registry and classified branch-custody owners, and system-side
 listeners
@@ -986,6 +1038,17 @@ has done its job.
   development cluster's prepl at once, the peer session's gate included;
   research lanes run from files, `git`, and gate logs with at most one
   read-only evaluation.
+- **A slice is not proven until its cold gate.** An in-process run
+  (`seon.test/run` from the development JVM) and `bin/test-fast` are
+  ITERATION: they share the worker's arming but not its isolation, retained
+  run roots, platform tier, or recorded result facts. Landing evidence is
+  `bin/test --paths <your files…> -- <namespaces…>` plus `--platform`. A
+  lane that reports green from an in-process run has reported nothing.
+- **The `orchestrator-only` test mode is gone** (`fa971495f`): it refused
+  every lane invocation including `bin/test-fast`, so lanes committed
+  untested. Lanes gate their own slices; the two-slot bound
+  (`bin/_test-slot`) remains the load cap. Do not reintroduce the marker and
+  do not repeat it in a spec.
 - **Resets are the recovery for schema breakage, not an event.** Eight
   resets on 2026-09-17, each under two minutes, took the store from 21 GB to
   102 MB; none lost anything a reseed did not restore. Database data is
