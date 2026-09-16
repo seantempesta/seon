@@ -35,8 +35,10 @@
   deletes its own incomplete genesis and refuses a complete store, so it is
   not an owner and the 42 file-store fixtures reaching it stay in process.
 
-  The text is shown to an agent reading the test, so it names the thing
-  destroyed (\"an operator root's whole data/ directory\"), not the mechanism."}],
+  The text is shown to an agent reading the test on ONE line, so it is a
+  single line naming the thing destroyed (\"an operator root's whole data/
+  directory\"), never the mechanism and never wrapped source prose: a newline
+  reaches the reader escaped inside the rendered form."}],
           :references [:set {:description "Function references without a resolved call shape. Selection follows these conservatively; no invocation or arity is asserted."} :seon.db/ref],
           :unresolved-references [:set {:description "Known function targets mentioned outside an attributable definition. A changed target widens selection; absence of a caller never proves no test is needed."} :seon.fn/sym],
           :writes

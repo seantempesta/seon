@@ -12,6 +12,7 @@
             [seon.env :as env]
             [seon.error :as error]
             [seon.instrument :as instrument]
+            [seon.fn :as functions]
             [seon.sci.eval :as eval]
             [seon.cluster.boot-test]
             [seon.test-runner-failure-fixture]
@@ -1015,11 +1016,33 @@
                 :seon.sci.admit/caps
                 (config/result-caps (config/defaults))
                 :seon.sci.eval/time-limit-ms 5000
-                :seon.config/on-core-error :panic}))
+                :seon.config/on-core-error :panic
+                :seon.db/db (db/db connection)
+                :seon.db/connection connection}))
+            ;; An agent-authored deftest becomes a `:seon.test` row through the
+            ;; canonical path — evaluate, analyze the evaluation's program row,
+            ;; commit it — exactly as a turn admits a declaration. Without the
+            ;; row the test has no call graph, and `seon.test/run` answers the
+            ;; typed unknown rather than guessing that it is safe to run here.
+            admit!
+            (fn [source]
+              (let [evaluation (evaluate source)
+                    analysis (functions/analyze-forms
+                              (db/db connection)
+                              [{:seon.cluster.eval/source source
+                                :seon.cluster.eval/ns [:seon.ns/name 'user]
+                                :seon.program/row (:seon.program/row evaluation)}])
+                    row (when-not (:seon.error/kind analysis)
+                          (second (first analysis)))]
+                (is (map? row) (pr-str evaluation))
+                (when row
+                  (is (:db-after (db/transact!
+                                  connection
+                                  [(dissoc row :seon.sci.eval/evaluated?)]))))))
             _ (evaluate
                "(require '[clojure.test :refer [deftest is]])")
-            _ (evaluate
-               "(deftest agent-fork-example (is (= 4 (+ 2 2))))")
+            _ (admit!
+               "(clojure.test/deftest agent-fork-example (clojure.test/is (= 4 (+ 2 2))))")
             result
             (:seon.sci.admit/value
              (evaluate "(seon.test/run #'agent-fork-example)"))

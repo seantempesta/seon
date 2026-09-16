@@ -410,6 +410,12 @@
 
 (def ^:private destructive-owner "seon.test-support/populate-published-root!")
 
+(defn- owner-destroys
+  "What the declared owner says it destroys, read from its program row."
+  [database]
+  (:seon.fn/destroys (db/pull database [:seon.fn/destroys]
+                              [:seon.fn/sym destructive-owner])))
+
 (defn- with-destructive-test
   "A probe whose indexed reach is the declared destructive owner.
 
@@ -524,6 +530,7 @@
                 (is (= [cheap-symbol] (:seon.test/tests result)) (pr-str result))
                 (is (= [{:seon.test/sym test-symbol
                          :seon.fn/sym destructive-owner
+                         :seon.fn/destroys (owner-destroys (db/db connection))
                          :seon.test/destructive-path [test-symbol destructive-owner]
                          :seon.test/command ["bin/test" "--" (namespace (symbol test-symbol))]}]
                        excluded)
@@ -609,15 +616,21 @@
           (let [database (db/db connection)
                 unit {:seon.db/db database
                       :seon.render/value {:seon.test/sym test-symbol}}
-                what (:seon.fn/destroys (db/pull database [:seon.fn/destroys]
-                                                 [:seon.fn/sym destructive-owner]))
+                what (owner-destroys database)
+                ;; THE RULED LINE: where it runs, the declared call path, what
+                ;; the owner destroys in its own words, and the cold command.
+                ;; A declaration carrying a newline would reach the agent
+                ;; escaped inside the rendered form, so the line is one line.
+                line (str "runs: isolated snapshot, under its own operator root ("
+                          test-symbol " -> " destructive-owner ": " what
+                          "). Cold invocation: bin/test -- "
+                          (namespace (symbol test-symbol)))
                 ai (render.test/render-ai unit)
                 html (pr-str (render.test/render-html unit))]
-            (is (.contains ai "runs: isolated snapshot") ai)
-            (is (.contains ai destructive-owner) ai)
-            (is (.contains ai what) ai)
-            (is (.contains html "runs: isolated snapshot") html)
-            (is (.contains html destructive-owner) html))
+            (is (= line (sut/host-text database test-symbol)))
+            (is (not (.contains what "\n")) what)
+            (is (.contains ai line) ai)
+            (is (.contains html line) html))
           (let [cheap (str "render.probe" (id/id) "/cheap")]
             (support/transacted! connection
                                  [{:seon.test/sym cheap
