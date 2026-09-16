@@ -392,7 +392,7 @@ assertions but recorded one instrumentation-drift error while 75 wrappers
 changed during concurrent adoption. The serial repeat was green. Its reach
 digest is `4252a6ed5918f0b6b08b957b27d8d68fcab086607f00d3b9da86d42fbe1502e2`.
 
-Full publication-seal convergence is not claimed: the observed adopted seal
+At the preceding checkpoint, full publication-seal convergence was not yet proven: the observed adopted seal
 was `6aaa0c28-fb31-5521-9bd8-c9c64e5f123f`, while published head was
 `6aaa1002-d1ce-5ae5-b2be-9cccc5c5deae`. Publication reported both concurrent
 source changes and its declared completion bound. The declaration and behavior
@@ -410,3 +410,20 @@ performed. The one explicit publication shell exited; no scratch root/worktree
 or other lane-owned background process was created. Foreign edits were preserved,
 including the write-validation changes that landed before the database edit.
 `git diff --check` passed. Final isolated and platform gates are requested above.
+
+### Final convergence — 03:54Z
+
+The final explicit `bin/seon init --dev default --changed ...` request exited
+0 after waiting for the existing lifecycle-lock holder. Default's adopted seal
+and `seon.cluster.source/current` both read
+**`6aaa1292-4a05-5bbf-b622-09c3867f1e69`**. Published source digest:
+`29439caad51aeb8d0fd5658ba1e6a898633cac2b793385bf72d7d283144bda05`.
+This closes the publication-convergence boundary above without a restart.
+
+The exact same two `seon.test/run` invocations then verified the adopted code,
+serially: P5 **19/0/0**, run 74034, basis 536872067, 03:54:27Z, **11725 ms**;
+P6 **33/0/0**, run 74035, basis 536872068, 03:54:39Z, **6764 ms**.
+The temporary candidate-projection Var was removed. Both lane-owned publication
+shells have exited. The remaining boundaries are the filed generated-read
+refusal, the original baseline timeout observation, and the orchestrator's
+isolated/platform gates. No additional implementation work is deferred inside P5/P6.
