@@ -75,6 +75,36 @@
                       (resolve-resource resource)))]
       (f resource-root))))
 
+(deftest packaged-population-is-derived-once-per-resource-stamp
+  (let [resources (#'schema.edn/schema-resource-paths schema.edn/default-resource)
+        files (into {} (map (fn [resource]
+                              [(.getName (io/file resource))
+                               (slurp (io/resource resource))])) resources)
+        population @#'schema.edn/resource-population
+        parses (atom 0)]
+    (with-temporary-resources
+      files
+      (fn [resource-root]
+        (let [directory (io/file (io/resource resource-root))
+              touched (first (sort-by #(.getName ^java.io.File %)
+                                     (.listFiles directory)))]
+          (try
+            (with-redefs-fn
+              {#'schema.edn/default-resource resource-root
+               #'schema.edn/resource-population
+               (fn [resource] (swap! parses inc) (population resource))}
+              (fn []
+                (let [forms (schema.edn/packaged-forms)]
+                  (is (seq forms))
+                  (dotimes [_ 999]
+                    (is (identical? forms (schema.edn/packaged-forms)))))
+                (schema.edn/declaration-digest)
+                (is (= 1 @parses))
+                (is (.setLastModified touched (+ 2000 (.lastModified touched))))
+                (schema.edn/packaged-forms)
+                (is (= 2 @parses))))
+            (finally (test-support/delete-recursively! directory))))))))
+
 (deftest production-schema-edn-is-a-resource-not-source
   (let [paths ((deref #'schema.edn/schema-resource-paths)
                schema.edn/default-resource)

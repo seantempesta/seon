@@ -364,20 +364,37 @@
                          (.listFiles (io/file url)))))
       [[(.toExternalForm url) -1 (.getLastModified (.openConnection url))]])))
 
+(defonce ^:private packaged-population-cache (atom nil))
+
+(defn- packaged-population
+  []
+  (let [resource-url (str (io/resource default-resource))
+        stamp (declaration-stamp)]
+    (locking packaged-population-cache
+      (let [cached @packaged-population-cache]
+        (if (and (= resource-url (::resource-url cached))
+                 (= stamp (::stamp cached)))
+          (::population cached)
+          (let [population (resource-population default-resource)]
+            (reset! packaged-population-cache
+                    {::resource-url resource-url ::stamp stamp
+                     ::population population})
+            population))))))
+
 (defn declaration-digest
   "Stable digest of the merged schema declaration set."
   {:malli/schema [:=> [:cat] :seon.source/digest]}
   []
   (schema/sha-256
    [(.getBytes (schema/canonical-data-string
-                (::declared-forms (resource-population default-resource)))
+                (::declared-forms (packaged-population)))
                "UTF-8")]))
 
 (defn packaged-forms
   "Canonical schema forms declared by Seon's bootstrap and schema resources."
   {:malli/schema [:=> [:cat] :map]}
   []
-  (::forms (resource-population default-resource)))
+  (::forms (packaged-population)))
 
 (defn load!
   "Read one schema resource location as declaration facts.
