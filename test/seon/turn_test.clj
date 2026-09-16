@@ -1934,9 +1934,20 @@
                   (first (turn/step state :seon.agent/episode ::wake))))
               initial {:seon.agent/id agent-id
                        :seon.turn.loop/cluster cluster}
-              parked (reduce (fn [state _] (pass! state))
-                             initial
-                             (range bound))]
+              ;; Every pass BELOW the bound re-fires, which is the ordinary
+              ;; behaviour being bounded — not the defect. Drain what those
+              ;; passes offered so the assertion below is about the PARKED
+              ;; pass alone; a sliding-1 mailbox otherwise still holds the
+              ;; previous pass's wake and reads as a re-fire that never
+              ;; happened.
+              before-park (reduce (fn [state _] (pass! state))
+                                  initial
+                                  (range (dec bound)))
+              _ (is (some? (async/poll! wake-channel))
+                    "a pass below the bound still re-fires")
+              _ (is (nil? (async/poll! wake-channel))
+                    "the mailbox is drained before the parking pass")
+              parked (pass! before-park)]
           (is (some? (:seon.turn.loop/parked parked))
               "the agent is parked once the declared bound is reached")
           (is (= :seon.turn.loop/write-refusals-exhausted
@@ -1949,9 +1960,9 @@
               "a parked proc offers no self-rewake")
           (let [fault (support/await-event! fault-channel ::write-refusal-fault)]
             (is (= :seon.turn.loop/write-refusals-exhausted
-                   (:seon.error/kind (ex-data (::flow/ex fault)))))
+                   (:seon.error/kind (ex-data (:clojure.core.async.flow/ex fault)))))
             (is (= agent-id (:seon.agent/id fault)))
-            (is (str/includes? (ex-message (::flow/ex fault))
+            (is (str/includes? (ex-message (:clojure.core.async.flow/ex fault))
                                (str bound)))
             (is (nil? (async/poll! fault-channel))
                 "the bound fires exactly once, never once per attempt"))

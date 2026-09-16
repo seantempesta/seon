@@ -60,6 +60,21 @@
   ([row] (row-tx {} row))
   ([request row] [[:db.fn/call #'turn/row-tx request row]]))
 
+(defn- probe-projection
+  "A projection carrying the canonical declaration population PLUS this
+  suite's synthetic keys.
+
+  AGENTS §5.1: never hand-roster schema. A projection built from a bare
+  `{probe-key form}` map is not a smaller world, it is a BROKEN one — every
+  instrumented `seon.schema` call made against it has to compile its OWN
+  contract (`:seon.schema/registry-key` and friends) out of a population that
+  holds one probe key, and refuses `:malli.core/invalid-schema` naming a
+  declaration the suite never touched. That is the same disease as the
+  2026-09-17 write storm, one layer down: an authority handed a projection
+  that cannot resolve what it must compile."
+  [probe-forms]
+  (schema/build-projection (merge (schema/snapshot) probe-forms)))
+
 (defn- schema-row
   [schema-key definition]
   {:seon.schema/key schema-key
@@ -122,7 +137,7 @@
              [:seon.schema/key schema-key]))))
 
 (deftest unregister-stages-removal-in-the-evaluation-delta
-  (let [projection (schema/build-projection {base-key :int})
+  (let [projection (probe-projection {base-key :int})
         delta (schema/begin-registration-delta projection)]
     (is (= base-key
            (schema/call-with-registration-delta
@@ -136,8 +151,9 @@
 (deftest schema-removal-refuses-schema-and-function-dependencies
   (let [projection
         (schema/build-projection
-         {base-key :int
-          direct-key base-key}
+         (merge (schema/snapshot)
+                {base-key :int
+                 direct-key base-key})
          {'seon.schema-usage-guard/accept
           [:=> [:cat direct-key] :int]})
         blockers (schema/schema-removal-blockers projection base-key)
@@ -175,7 +191,14 @@
       (with-database
         (fn [connection]
           (install-forms! connection selected-forms)
-          (when extra-row (test-support/transacted! connection [extra-row]))
+          ;; A fn row's `:seon.fn/ns` is a REF. The namespace it names has to
+          ;; be a fact before the row can resolve it; a fixture that writes
+          ;; the row alone is refused at the write, and the refusal is about
+          ;; the fixture, not the behaviour under test.
+          (when extra-row
+            (test-support/transacted!
+             connection
+             [{:seon.ns/name 'seon.schema-usage-guard} extra-row]))
           (let [before @connection
                 result
                 (transact-result
