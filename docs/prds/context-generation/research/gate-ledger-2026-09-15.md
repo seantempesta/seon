@@ -594,3 +594,11 @@ Boundary: proofs on reloaded source before default's adoption converged;
 afterwards the in-process cluster-turn fixture stopped deriving work
 (`next-agent-work` → nil) with another lane's wake/agent edits dirty — theirs;
 the cold gate is the proof (batch 53).
+
+### 2026-09-16 23:00Z — gate-set-cost astra lane launched
+
+`seon.fn/gate-set` costs ~6 s per installing definition (one recursive-rule
+query over the whole call graph per call). Lane spec
+`tmp/orchestrator/wave2/gate-set-cost.spec`: prefer the reach-closure facts
+as a lookup; else one derivation per turn; results must equal the current
+derivation; the 300 ms bookkeeping assertion stays and must pass.
