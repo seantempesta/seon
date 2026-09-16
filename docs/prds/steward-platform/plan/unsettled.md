@@ -1006,7 +1006,18 @@ same second hit the tools.deps classpath race again (issue updated).
 **Batch 108 GREEN (21:36Z, HEAD `16408995e`):** `seon.db-test seon.schema-test
 seon.maintenance-schema-test seon.turn-test` — 105 tests, 1,028 assertions,
 0 failures, 0 errors, exit 0, results recorded. First green gate since the
-validator landed. Batch 109 (call-graph namespaces, same HEAD) running.
+validator landed. **Batch 109 GREEN (21:50Z, same HEAD):** `seon.fn-test seon.program-test
+seon.fn.analyzer-test seon.test-reaching-test` — 120 tests, 882 assertions, 0/0,
+exit 0. Call-graph fidelity and write admission are both landed AND gated.
+Batches 110 (S7: `seon.issue-test seon.issue-settlement-test seon.turn-test
+seon.turn-loop-test`) and 111 (detectors + S11: `seon.issue.detect-test
+seon.issue-generate-test seon.cluster.prompt-test
+seon.render.transcript-run-test seon.concurrency-independence-test
+seon.render.web-debug-test seon.repl-test`) launched, staggered 100 s.
+Remaining queue after those: write-volume (`seon.cluster.boot-test
+seon.cluster.source-test`), destructive (`seon.test-reaching-test
+seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
+seon.turn-test seon.sci.eval-test`).
 
 **Research landed (2026-09-16 evening), both read in full by the orchestrator:**
 `evaluation-write-path-and-retired-identities-2026-09-16.md` (six eval
