@@ -201,21 +201,27 @@
                     {:seon.turn/id "gauge-run"
                      :seon.turn/agent [:seon.agent/id "gauge-agent"]
                      :seon.turn/opened-tx "datomic.tx"}])
+      ;; A REGISTERED id. The gauges are an observation of a model the config
+      ;; descriptors declare. This test named "deepseek-v4-flash", which no
+      ;; shipped descriptor carries (they are deepseek-flash, deepseek-v4-pro,
+      ;; deepseek/deepseek-v4-flash-20260731, kimi-k3, muse-spark-1.1), so
+      ;; ai/model-observation-tx had nothing to observe and every gauge read
+      ;; back nil.
       ((private-loop-fn 'record-attempt!)
        {:seon.db/connection connection}
        {:seon.ai/target
         {:seon.ai/endpoint "https://api.deepseek.com/chat/completions"
-         :seon.ai/model "deepseek-v4-flash"}
+         :seon.ai/model "deepseek-flash"}
         :seon.ai/settings
         (ai/settings (test-support/effective-config)
-                     {:seon.config.ai/model "deepseek-v4-flash"})
+                     {:seon.config.ai/model "deepseek-flash"})
         :seon.turn/id "gauge-run"
         :seon.agent/id "gauge-agent"
         :seon.ai.attempt/ordinal 0
         :seon.ai.model/last-latency-ms 200
         :seon.ai/usage {"completion_tokens" 20}}
        now)
-      (let [model (ai/model-row @connection "deepseek-v4-flash")]
+      (let [model (ai/model-row @connection "deepseek-flash")]
         (is (= now (:seon.ai.model/last-used-at model)))
         (is (= 200 (:seon.ai.model/last-latency-ms model)))
         (is (= 100.0 (:seon.ai.model/last-tokens-per-second model)))
