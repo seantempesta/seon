@@ -580,3 +580,9 @@ Queue, in order:
   close runs only stale; an unchanged closure completes from the record).
   Adoption converged `6aaa25da`. Lane rule added: a new arity is not
   callable in-process until adoption lands.
+- 17:55Z cold-arming fix landed (`eeafb9dba`): live bisect confirmed
+  `98b5f2afe`; `seon.schema/direct-references` defaults an omitted predicate
+  map to `{}`; fresh-thread arming with zero bindings gives the identical
+  digest; instrument suite 27/132 green. Gates may resume. The store reset
+  waits for the indexer lane's commit (its in-flight `seon.issue.edn`
+  refuses publication and a reset republishes the tree).
