@@ -95,14 +95,6 @@
            :seon.render/profile
            ((requiring-resolve 'seon.render/agent-render-profile) configuration))))
 
-(defn- report-value
-  [options reported-value]
-  (value/render-ai
-   {:seon.render/value reported-value
-    :seon.render.value/root 'seon.test.runner/assertion
-    :seon.render/profile (or (:seon.render/profile options)
-                             (:seon.render/profile (report-options)))}))
-
 (defn- throwable-signature
   [^Throwable failure]
   (loop [current failure]
@@ -126,6 +118,30 @@
       (println "    at" frame))
     (when signature
       (println "  signature:" signature))))
+
+(defn- report-value
+  "One reported assertion value, rendered for a human reading the gate log.
+
+  A THROWABLE IS A DIAGNOSTIC, NOT AN AGENT PROJECTION. The AI profile's token
+  budget is shared across the whole rendered value, so a large `ex-data`
+  squeezes the exception's own message out of the report: a fixture refusal
+  arrived as `{:seon.print/omitted 3458 :seon.print/prefix \"Fixture write was
+  refused at the write: …\"}` and named less than the runner knew. A check that
+  reports less than it observed is the failure class this project keeps
+  meeting, so the reported throwable is plain text — its complete message plus
+  frames bounded by the DECLARED print length, never the agent's budget
+  (AGENTS §2.4). The identity path (`printable`) has always done this.
+
+  Ordinary values keep the profile: they are the ones that can be a whole
+  database value."
+  [options reported-value]
+  (if (instance? Throwable reported-value)
+    (throwable-face options reported-value (throwable-signature reported-value))
+    (value/render-ai
+     {:seon.render/value reported-value
+      :seon.render.value/root 'seon.test.runner/assertion
+      :seon.render/profile (or (:seon.render/profile options)
+                               (:seon.render/profile (report-options)))})))
 
 (defn- failure-message
   [options event]

@@ -15,7 +15,8 @@
             [malli.instrument :as mi]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
-            [seon.test-support :as test-support]))
+            [seon.test-support :as test-support]
+            [seon.test.runner :as runner]))
 
 (deftest ^{:seon.test/platform
            "Moving part: the one test bracket every other test forks through."}
@@ -138,6 +139,33 @@
          (is (= "admitted-fixture-write"
                 (db/q '[:find ?id . :where [_ :seon.agent/id ?id]]
                       (db/db connection)))))))))
+
+(deftest ^{:seon.test/platform
+           "Moving part: the one test bracket every other test forks through."}
+  a-long-refusal-reaches-the-failure-message-whole
+  ;; A TEST DIAGNOSTIC IS NOT AN AGENT PROJECTION. The AI profile's token
+  ;; budget is shared across the rendered value, so write admission's refusal
+  ;; — whose `ex-data` carries the entity schema it was read against — used to
+  ;; arrive in the gate log as
+  ;; `{:seon.print/omitted 3458 :seon.print/prefix "Fixture write was refused
+  ;; at the write: …"}`. The report named less than the runner knew, which is
+  ;; the absence-as-health class wearing the reporter's clothes (AGENTS §2.4).
+  (test-support/with-database
+   (fn [connection]
+     (let [failure (try
+                     (test-support/transacted!
+                      connection
+                      [{:seon.cluster/name "unclipped-refusal-fixture"}])
+                     nil
+                     (catch clojure.lang.ExceptionInfo error error))
+           reported (#'runner/report-value (#'runner/report-options) failure)]
+       (is (some? failure) "the fixture write is refused")
+       (is (< 204 (count (ex-message failure)))
+           "the refusal is longer than the profile's string bound, or this proves nothing")
+       (is (str/includes? reported (ex-message failure))
+           "the reporter carries write admission's complete refusal")
+       (is (not (str/includes? reported ":seon.print/omitted"))
+           "no elision value stands in for a test diagnostic")))))
 
 (defn- file-digests
   [root]
