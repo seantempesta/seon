@@ -4,6 +4,8 @@
             [clojure.string :as str]
             [clojure.test :as test :refer [deftest is]]
             [sci.core :as sci]
+            [seon.db :as db]
+            [seon.env :as env]
             [seon.fn :as program-fn]
             [seon.id :as id]
             [seon.instrument :as instrument]
@@ -486,3 +488,121 @@
       "each attribute is decided on its own")
   (is (= {} (program/test-markers {:seon.test/long nil} {}))
       "a declared nil is no declaration"))
+
+;;; ---------------------------------------------------------------------------
+;;; The schema restore derives from FACTS
+;;; ---------------------------------------------------------------------------
+
+(defn- probe-environment
+  "One cluster snapshot entry shaped exactly like `live-cluster-schema-states`:
+  the connection whose facts decide the projection, and the projection value."
+  [connection projection]
+  (env/environment {:seon.boot/cluster-name "restore-probe"
+                    :seon.db/connection connection
+                    :seon.schema/projection projection
+                    :seon.db/basis-t (db/basis-t (db/db connection))}))
+
+(defn- declare-schema-key!
+  "Commit one synthetic declaration the way the canonical rows express it."
+  [connection schema-key]
+  (test-support/transacted!
+   connection (schema/canonical-schema-rows {schema-key :string})))
+
+(defn- retract-schema-key!
+  "Retract one declaration's definition fact. The identity row survives as a
+  tombstone (ruling 47); the projection loses the key because its form is gone."
+  [connection schema-key]
+  (let [row (db/pull (db/db connection) [:db/id :seon.schema/form]
+                     [:seon.schema/key schema-key])]
+    (test-support/transacted!
+     connection [[:db/retract (:db/id row) :seon.schema/form
+                  (:seon.schema/form row)]])))
+
+(deftest ^{:seon.test/platform
+           "Moving part: the live cluster projection an in-process run leaves behind."}
+  a-committed-retraction-survives-the-restore-and-is-named-a-committed-change
+  ;; 2026-09-17: a probe turn deliberately retracted four declarations from
+  ;; `default` DURING a run, and the restore put them back from its entering
+  ;; snapshot — a mirror acting against the writer (AGENTS §2.1). The
+  ;; projection then disagreed with the cluster's own committed facts until
+  ;; someone advanced it by hand.
+  (test-support/with-database
+    (fn [connection]
+      (let [retracted :seon.test.runner-test.probe/retracted-during-run
+            added :seon.test.runner-test.probe/added-during-run]
+        (declare-schema-key! connection retracted)
+        (let [entering (schema/projection-from-database (db/db connection))
+              state (atom (probe-environment connection entering))
+              before {"restore-probe" [state @state]}]
+          (is (contains? (:seon.schema.projection/forms entering) retracted)
+              "the run enters with the declaration its facts declared")
+          ;; The run commits both directions while it is in flight.
+          (retract-schema-key! connection retracted)
+          (declare-schema-key! connection added)
+          (let [report (runner/restore-live-cluster-schema! before)
+                row (first report)
+                forms (:seon.schema.projection/forms (:seon.schema/projection @state))]
+            (is (= 1 (count report)) (pr-str report))
+            (is (= "restore-probe" (:seon.cluster/name row)))
+            (is (not (contains? forms retracted))
+                "the declaration its own writer retracted STAYS retracted")
+            (is (contains? forms added)
+                "and the one its writer added is in the projection the cluster now holds")
+            (is (= [(str retracted)] (:seon.test.runner/committed-removed row))
+                "the retraction is named a committed change, by key")
+            (is (= [(str added)] (:seon.test.runner/committed-added row))
+                "so is the addition")
+            (is (nil? (:seon.test.runner/drift-added row)))
+            (is (nil? (:seon.test.runner/drift-removed row)))
+            (is (empty? (runner/schema-restore-drift report))
+                "a committed change is the writer doing its job, never a test error")))))))
+
+(deftest ^{:seon.test/platform
+           "Moving part: the live cluster projection an in-process run leaves behind."}
+  a-registration-that-committed-nothing-is-restored-away-and-named-drift
+  ;; The other direction, and the original disease: a run registers a
+  ;; declaration into the projection a live cluster's writer compiles
+  ;; against, commits nothing, and every later write on that cluster is
+  ;; refused. The facts never held the key, so the facts remove it.
+  (test-support/with-database
+    (fn [connection]
+      (let [leaked :seon.test.runner-test.probe/never-committed
+            entering (schema/projection-from-database (db/db connection))
+            state (atom (probe-environment connection entering))
+            before {"restore-probe" [state @state]}]
+        (swap! state update-in [:seon.schema/projection :seon.schema.projection/forms]
+               assoc leaked [:string {:seon.db/identity true}])
+        (let [report (runner/restore-live-cluster-schema! before)
+              row (first report)]
+          (is (= 1 (count report)) (pr-str report))
+          (is (= [(str leaked)] (:seon.test.runner/drift-added row))
+              "the leaked key is named, not merely counted")
+          (is (nil? (:seon.test.runner/committed-removed row)))
+          (is (not (contains? (:seon.schema.projection/forms
+                               (:seon.schema/projection @state))
+                              leaked))
+              "and the cluster is left holding what its facts declare")
+          (is (= report (runner/schema-restore-drift report))
+              "an uncommitted registration IS the run's own failure"))))))
+
+(deftest ^{:seon.test/platform
+           "Moving part: the live cluster projection an in-process run leaves behind."}
+  a-run-that-touched-no-declaration-reports-nothing
+  (test-support/with-database
+    (fn [connection]
+      (let [entering (schema/projection-from-database (db/db connection))
+            state (atom (probe-environment connection entering))]
+        (is (empty? (runner/restore-live-cluster-schema!
+                     {"restore-probe" [state @state]}))
+            "no schema activity, nothing to report")
+        (is (= entering (:seon.schema/projection @state))
+            "and nothing to change"))))
+  ;; A snapshot with no connection has no authority to derive from. That is
+  ;; the typed unknown, never silence (AGENTS §2.4).
+  (let [environment (env/environment {:seon.boot/cluster-name "restore-probe"})
+        report (runner/restore-live-cluster-schema!
+                {"restore-probe" [(atom environment) environment]})]
+    (is (= 1 (count report)))
+    (is (string? (:seon.test.runner/schema-authority-unavailable (first report))))
+    (is (empty? (runner/schema-restore-drift report))
+        "an unavailable observation is not a test failure")))

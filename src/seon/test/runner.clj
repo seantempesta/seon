@@ -1140,32 +1140,14 @@
          :seon.error/message (or (ex-message failure)
                                  (.getName (class failure)))}))))
 
-(defn live-cluster-schema-keys
-  "Every schema declaration key visible to a live cluster's own projection.
-
-  DERIVED from the running instances the operator holds, never a list: a key
-  present here is one that cluster's writer will compile on its next
-  transaction. Keys are ordinary declaration keys, qualified or not:
-  `resources/seon/schemas/malli.edn` genuinely declares `:inst`."
-  {:malli/schema [:=> [:cat] [:set :keyword]]}
-  []
-  (or (some->> (resolve-loaded 'seon.operator.runtime/running-instances)
-               var-get deref vals
-               (mapcat
-                (fn [instance]
-                  (let [state (get-in instance
-                                      [:seon.sci.eval/ctx env/state-carrier])]
-                    (keys (get-in (some-> state deref)
-                                  [:seon.schema/projection
-                                   :seon.schema.projection/forms])))))
-               (into #{}))
-      #{}))
-
 (defn live-cluster-schema-states
   "Each running cluster's projection state and the environment it holds now.
 
-  The pair is what a restore needs: the atom to write and the value to put
-  back. Nothing is remembered between calls."
+  The pair is what a restore needs: the atom to write, and the environment
+  value carrying the CONNECTION whose facts decide what belongs in it. The
+  environment's key set is evidence about what the run entered with, never
+  the thing a restore puts back — that is derived from the connection.
+  Nothing is remembered between calls."
   {:malli/schema [:=> [:cat] :map]}
   []
   (into {}
@@ -1176,39 +1158,106 @@
         (some-> (resolve-loaded 'seon.operator.runtime/running-instances)
                 var-get deref)))
 
+(defn- projection-form-keys
+  "The declaration keys one projection value holds."
+  [projection]
+  (set (keys (:seon.schema.projection/forms projection))))
+
 (defn restore-live-cluster-schema!
-  "Put back a live cluster's schema projection when a test run changed its KEYS.
+  "Advance each live cluster's schema projection to the one ITS OWN FACTS
+  declare, and name every key on which the run's exit state disagreed.
 
-  An in-process run happens inside the JVM that serves a live cluster, so a
-  test that reaches that cluster's projection leaves every later write to
-  compile a declaration population nobody declared. The runner's drift
-  detector re-arms instrumentation for exactly this reason; the schema
-  registry gets the same treatment, and the returned rows name the keys in
-  both directions so the leak is attributed to the run that caused it.
+  A live cluster's declarations are database facts; its projection is a
+  compiled view of them. So the question after an in-process run is never
+  `what did this projection hold before?` — it is `what do the cluster's
+  committed facts say now?`. `projection-from-database` at the connection's
+  current basis answers exactly that, and `env/advance-projection!` is the
+  same seam adoption and evaluation advance through: ONE restore path.
 
-  Only a KEY SET change is restored. An ordinary adoption that advanced the
-  same keys is left alone; an adoption that genuinely added a key during a
-  test run is reverted and named here, and re-running adoption is the cheap
-  repair — a poisoned projection is not."
+  Putting the ENTERING SNAPSHOT back was a mirror acting against the writer.
+  On 2026-09-17 a probe turn deliberately retracted four declarations from
+  `default` during a run; the snapshot restore reasserted them, and the
+  cluster's projection disagreed with its own committed facts until an
+  explicit advance repaired it
+  (`docs/seon/issues/the-drift-restore-undoes-a-committed-schema-retraction.md`).
+
+  The snapshot is still taken, and still matters — as EVIDENCE for naming,
+  not as the thing restored. Comparing the run's exit key set with the
+  derived one classifies every difference by whether the entering set held
+  the key:
+
+  - present at exit, absent from the facts, not entering: the run registered
+    it and committed nothing — `::drift-added`, restored away;
+  - present at exit, absent from the facts, entering: a committed transaction
+    retracted it — `::committed-removed`, and it STAYS retracted;
+  - in the facts, absent at exit, entering: the run dropped it in memory —
+    `::drift-removed`, restored back;
+  - in the facts, absent at exit, not entering: a committed transaction added
+    it — `::committed-added`.
+
+  A cluster whose snapshot carries no connection has no authority to derive
+  from; that is reported as `::schema-authority-unavailable` — the typed
+  unknown, never silence (AGENTS §2.4). A run that touched no declarations
+  reports nothing at all."
   {:malli/schema [:=> [:cat :map] [:vector :map]]}
   [before]
-  (let [projection-keys
-        (fn [environment]
-          (set (keys (get-in environment [:seon.schema/projection
-                                          :seon.schema.projection/forms]))))]
-    (into []
-          (keep
-           (fn [[cluster-name [state environment]]]
-             (let [expected (projection-keys environment)
-                   found (projection-keys @state)]
-               (when (not= expected found)
-                 (swap! state merge
-                        (select-keys environment
-                                     [:seon.schema/projection :seon.db/basis-t]))
-                 {:seon.cluster/name cluster-name
-                  ::drift-added (vec (sort (map str (set/difference found expected))))
-                  ::drift-removed (vec (sort (map str (set/difference expected found))))}))))
-          before)))
+  (into
+   []
+   (keep
+    (fn [[cluster-name [state entering-environment]]]
+      (let [connection (:seon.db/connection entering-environment)
+            exit-projection (:seon.schema/projection @state)
+            database (when connection (db/db connection))]
+        (if (or (nil? connection) (:seon.error/kind database))
+          {:seon.cluster/name cluster-name
+           ::schema-authority-unavailable
+           (if connection
+             (str "The cluster's declaration facts could not be read: "
+                  (:seon.error/message database))
+             "The snapshot carries no connection, so the cluster's declaration facts could not be read.")}
+          ;; The ENTERING projection is the reusable value, never the exit
+          ;; one: reuse is decided by the fingerprint the value CARRIES, and
+          ;; a projection a run edited in memory still carries the
+          ;; fingerprint of the rows it was built from. Reusing it would let
+          ;; the run's own edit answer the question the facts must answer.
+          (let [derived (schema/projection-from-database
+                         database (:seon.schema/projection entering-environment))
+                entering-keys (projection-form-keys
+                               (:seon.schema/projection entering-environment))
+                exit-keys (projection-form-keys exit-projection)
+                derived-keys (projection-form-keys derived)]
+            (when-not (identical? derived exit-projection)
+              (env/advance-projection! state (db/basis-t database) derived))
+            (let [uncommitted (set/difference exit-keys derived-keys)
+                  absent (set/difference derived-keys exit-keys)
+                  named (fn [declaration-keys]
+                          (vec (sort (map str declaration-keys))))
+                  drift-added (set/difference uncommitted entering-keys)
+                  committed-removed (set/intersection uncommitted entering-keys)
+                  drift-removed (set/intersection absent entering-keys)
+                  committed-added (set/difference absent entering-keys)
+                  row (cond-> {:seon.cluster/name cluster-name}
+                        (seq drift-added)
+                        (assoc ::drift-added (named drift-added))
+                        (seq drift-removed)
+                        (assoc ::drift-removed (named drift-removed))
+                        (seq committed-added)
+                        (assoc ::committed-added (named committed-added))
+                        (seq committed-removed)
+                        (assoc ::committed-removed (named committed-removed)))]
+              (when (next row) row))))))
+    before)))
+
+(defn schema-restore-drift
+  "The restore rows naming a run's OWN uncommitted change, and only those.
+
+  A committed addition or retraction is the writer doing its job during a
+  run; a key the run registered or dropped in memory is the run failing to
+  own nothing global. Only the second is a test error, so the caller that
+  turns rows into a verdict asks here rather than reading the row keys."
+  {:malli/schema [:=> [:cat [:vector :map]] [:vector :map]]}
+  [rows]
+  (filterv #(or (seq (::drift-added %)) (seq (::drift-removed %))) rows))
 
 (defn- ambient-snapshot
   "Facts about this worker JVM's process-global state, DERIVED.
@@ -1242,14 +1291,13 @@
          (or (some-> (resolve-loaded 'seon.cluster/running-instances)
                      var-get deref keys set)
              #{})
-         ;; THE SCHEMA DECLARATION REGISTRY EVERY LIVE CLUSTER WRITES
-         ;; AGAINST, by key. The packaged forms are derived from classpath
-         ;; resources and hold no mutable state, so the only shared schema
-         ;; registry in a JVM is each running cluster's projection. A check
-         ;; that never looks at it answers "fine" while a leaked key refuses
-         ;; every write the cluster attempts — the absence-of-signal shape
-         ;; this project keeps paying for (2026-09-17 write storm).
-         ::snapshot-schema-keys (live-cluster-schema-keys)}]
+         ;; A LIVE CLUSTER'S SCHEMA REGISTRY IS NOT A MEMBER HERE.
+         ;; Its authority is the cluster's own declaration facts, so a
+         ;; before/after key-set diff cannot tell a run's leak from a
+         ;; committed retraction — it reported the latter as drift.
+         ;; `restore-live-cluster-schema!` derives that answer from the
+         ;; facts and is the ONE owner of it.
+         }]
     (if-let [sizes (sci-base-namespace-sizes
                      (some-> (resolve-loaded 'seon.test-support/database-base) var-get))]
       (assoc snapshot ::snapshot-sci-base sizes)
@@ -1281,14 +1329,7 @@
   that disappeared is a test stopping something it did not start."
   {::snapshot-instrumented #{::drift-added ::drift-removed}
    ::snapshot-registered #{::drift-removed}
-   ::snapshot-live-clusters #{::drift-added ::drift-removed}
-   ;; BOTH directions are leaks. A key a test ADDED makes the cluster's
-   ;; writer compile a declaration that references something the registry no
-   ;; longer holds; a key it REMOVED makes every existing fact using it
-   ;; unwritable. `bounded-drift` names the keys, which is the whole point:
-   ;; the storm cost five hours because nothing named
-   ;; `:seon.schema-usage-guardb/entity-id` as the thing that had appeared.
-   ::snapshot-schema-keys #{::drift-added ::drift-removed}})
+   ::snapshot-live-clusters #{::drift-added ::drift-removed}})
 
 (defn- ambient-drift
   "What one task changed in the worker's process-global state, or nothing.

@@ -335,10 +335,12 @@
                         (str (:ns (meta test-var)) "/" (:name (meta test-var))))
               ;; AN IN-PROCESS RUN HAPPENS INSIDE A LIVE CLUSTER'S JVM.
               ;; Whatever a test leaves in that cluster's schema projection
-              ;; refuses every later write it attempts, so the registry is
-              ;; snapshotted and put back the way the drift detector re-arms
-              ;; instrumentation — and the restored keys are NAMED, never
-              ;; silently swallowed.
+              ;; refuses every later write it attempts, so afterwards the
+              ;; projection is advanced to the one the cluster's OWN FACTS
+              ;; declare and every disagreeing key is NAMED. The snapshot is
+              ;; evidence for that naming, not the thing put back: a run that
+              ;; coincides with a committed retraction must not have it
+              ;; reasserted (AGENTS §2.1).
               registry-before (runner/live-cluster-schema-states)
               result (cond
                        refusal refusal
@@ -349,14 +351,20 @@
                          #(bounded-result test-var (:seon.test/remaining-ms options)
                                           (select-keys options [:seon.db/connection]))))
               restored (runner/restore-live-cluster-schema! registry-before)
-              result (if (or (:seon.error/kind result) (empty? restored))
+              drifted (runner/schema-restore-drift restored)
+              ;; A COMMITTED change is the writer doing its job during the
+              ;; run, so it is named on the way past and is nobody's failure.
+              _ (when (seq (remove (set drifted) restored))
+                  (println "Live cluster schema facts changed during the run:"
+                           (pr-str (vec (remove (set drifted) restored)))))
+              result (if (or (:seon.error/kind result) (empty? drifted))
                        result
                        (-> result
                            (update :seon.test/error-count (fnil inc 0))
                            (update :seon.test/failure-message
                                    #(str (when % (str % "\n"))
                                          "Live cluster schema registry changed and was restored: "
-                                         (pr-str restored)))))]
+                                         (pr-str drifted)))))]
           (if (:seon.error/kind result)
             result
             (let [committed (runner/commit-results!
