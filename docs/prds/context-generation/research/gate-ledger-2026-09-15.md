@@ -853,3 +853,16 @@ in-process run left pid 17352's fixture base with a shut-down writer (base
 poison, restart clears); `init --dev` now fails in branch publication with
 "no branch or commit :db to branch from" (cluster/*, steward's) — adoption on
 default refusing since 10:17Z.
+
+### 2026-09-16 ~11:00Z (UTC; earlier headers today are ~3 h low) — INCIDENT: data/store wiped to 28 KB
+
+The steward found `data/store` at 28 KB with no `:db`/`current-src` branch
+("no branch or commit :db to branch from", first logged 10:17Z); it was
+3.6 GB an hour earlier. Evidence copy: `tmp/orchestrator/refork/store-wiped-
+2026-09-17T1100Z/`; default reforked (data disposable). No lane of this
+session ran a GC/reset/force-init on the main root after the 05:30 reset.
+Lead: batch 61 A (platform tier) ran `seon.cluster.registry-test/
+non-temporal-collection-marks-current-blob-references` and `reset-returns-a-
+cluster-to-source-state` at 10:18:11–12Z. Read-only investigation launched
+(`store-wipe-2026-09-17.md`); every gate that includes the platform tier or
+registry-test is HELD until it reports.
