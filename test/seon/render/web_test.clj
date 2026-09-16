@@ -42,6 +42,7 @@
             [seon.context :as seon.context]
             [seon.db :as db]
             [seon.eval :as evaluation]
+            [seon.error :as error]
             [seon.flow :as flow]
             [seon.problems :as problems]
             [seon.render :as render]
@@ -2193,6 +2194,43 @@ handle))}}
              (str (vals (get @(:seon.render.web/latest-packages after) "agent-a")))
              "could not be derived")
             "and the page still says so where its content would have been")))))
+
+(deftest session-acquisition-failure-replaces-the-loading-panel
+  (with-server
+    (fn [connection server _context]
+      (let [id (turn/next-id @connection "web-test" "root")
+            refusal (error/diagnostic
+                     {:seon.error/kind :seon.instrument/contract-violated
+                      :seon.error/message "fixture prompt acquisition refused"
+                      :seon.error/diagnostic-layer :instrument
+                      :seon.error/diagnostic-operation 'seon.eval/of-agent
+                      :seon.error/diagnostic-member :seon.eval/origin
+                      :seon.error/diagnostic-expected :int
+                      :seon.error/diagnostic-offending {:db/id 12345}
+                      :seon.error/diagnostic-cause :malli.core/invalid-output
+                      :seon.error/diagnostic-evidence {:seon.turn/id id}})]
+        (support/transacted!
+         connection
+         (turn/open-tx {:seon.turn/id id
+                        :seon.turn/agent [:seon.agent/id "root"]
+                        :seon.turn/opened-tx "datomic.tx"}))
+        (with-redefs [render/acquire-context!
+                      (fn [_] (throw (ex-info (:seon.error/message refusal) refusal)))]
+          (let [response (fetch server (str "/agent/root/debug?turn=" id "&prompt=true")
+                                {"datastar-request" "true"})
+                body (.body response)]
+            (is (= 200 (.statusCode response)))
+            (is (str/includes? body "id=\"surface-debug-session_2f_root\""))
+            (doseq [evidence ["fixture prompt acquisition refused" "seon.eval/of-agent"
+                              "seon.eval/origin" "int" "12345"]]
+              (is (str/includes? body evidence) evidence))
+            (is (not (str/includes? body "Loading the selected turn")))))
+        (doseq [failure [(IllegalStateException. "unrelated runtime failure")
+                         (ex-info "unrelated typed failure" {:seon.error/kind ::unrelated})]]
+          (with-redefs [render/acquire-context! (fn [_] (throw failure))]
+            (is (= 500 (.statusCode
+                        (fetch server (str "/agent/root/debug?turn=" id "&prompt=true")
+                               {"datastar-request" "true"}))))))))))
 
 (deftest debug-algorithm-carries-the-render-evaluation-inputs
   (with-server

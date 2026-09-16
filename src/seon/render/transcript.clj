@@ -1408,7 +1408,13 @@
         selected (or (some #(when (= (:seon.turn/id request) (:seon.turn/id %)) %) rows)
                      (last rows))
         selected-id (:seon.turn/id selected)
-        acquired (render/acquire-context! (assoc request :seon.turn/id selected-id))
+        acquired (try
+                   (render/acquire-context! (assoc request :seon.turn/id selected-id))
+                   (catch clojure.lang.ExceptionInfo failure
+                     (let [refusal (ex-data failure)]
+                       (if (= :seon.instrument/contract-violated (:seon.error/kind refusal))
+                         refusal
+                         (throw failure)))))
         entries (:seon.render.history/entries acquired)
         prompt (:seon.cluster.prompt/text acquired)
         by-eid (into {} (map (juxt :db/id identity)) rows)
@@ -1451,7 +1457,9 @@
         (str (format "%,d" (utf8-size prompt)) " bytes · ≈" (format "%,d" (tokens/estimate prompt))
              " tokens · " (count entries) " emissions · oldest → newest")])]
      (if (:seon.error/kind acquired)
-       [:p {:class "seon-emission-error"} (:seon.error/message acquired)]
+       [:div {:class "seon-emission-error"}
+        (error/render-html (assoc request :seon.render/value acquired))
+        (value/render-html (assoc request :seon.render/value acquired))]
        [:div
         (when (and (not raw?) (seq rereads))
           [:div {:class "seon-session-rereads"}
