@@ -100,7 +100,12 @@
         (stop-process-tree! child)
         (test-support/delete-recursively! root)))))
 
-(deftest ^{:seon.test/fixture-observation "Cache reuse is verified against a real published file store and its immutable manifest across launcher invocations."} ^{:seon.test/platform "Consecutive launchers reuse the immutable published base."}
+;; NOT :seon.test/platform: the fixture reaches
+;; seon.test-support/populate-published-root!, which deletes and reclones a
+;; store directory. The platform tier runs first on every bin/test invocation,
+;; so a destructive fixture there deletes before any evidence exists
+;; (docs/seon/issues/a-platform-tier-test-wiped-the-checkouts-store.md).
+(deftest ^{:seon.test/fixture-observation "Cache reuse is verified against a real published file store and its immutable manifest across launcher invocations."}
   consecutive-cache-invocations-reuse-the-published-base
   (let [root (doto (io/file project-root "tmp" (str "base-reuse-" (random-uuid))) .mkdirs)
         supplied (System/getProperty "seon.test.published-base")

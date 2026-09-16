@@ -1,6 +1,4 @@
-(ns ^{:seon.test/platform
-       "Moving part: the one test bracket every other test forks through."}
-    seon.test-support-test
+(ns seon.test-support-test
   (:require [clojure.core.async :as async]
             [clojure.java.io :as io]
             [clojure.string :as str]
@@ -19,7 +17,9 @@
             [seon.schema.edn :as schema.edn]
             [seon.test-support :as test-support]))
 
-(deftest failed-base-construction-retries-without-caller-interruption
+(deftest ^{:seon.test/platform
+           "Moving part: the one test bracket every other test forks through."}
+  failed-base-construction-retries-without-caller-interruption
   (test-support/with-database
     (fn [connection]
       (let [attempts (atom 0)
@@ -74,7 +74,9 @@
               (when (::test-support/connection constructed)
                 (#'test-support/close-base! constructed)))))))))
 
-(deftest fixture-setup-refusals-stop-before-the-body
+(deftest ^{:seon.test/platform
+           "Moving part: the one test bracket every other test forks through."}
+  fixture-setup-refusals-stop-before-the-body
   (let [body-ran (atom false)
         failure (try
                   (test-support/with-database
@@ -95,7 +97,9 @@
           (db/q '[:find ?digest . :where [_ :seon.source/digest ?digest]]
                 (db/db connection)))))))
 
-(deftest a-refused-fixture-write-is-reported-at-the-write
+(deftest ^{:seon.test/platform
+           "Moving part: the one test bracket every other test forks through."}
+  a-refused-fixture-write-is-reported-at-the-write
   ;; The recurring failure class: a fixture that discards `transact!`'s answer
   ;; reads ABSENCE OF SIGNAL as health. One write path means admission's
   ;; refusal stops the fixture where it happened, naming the diagnostic and
@@ -143,6 +147,14 @@
            (vec (.digest (java.security.MessageDigest/getInstance "SHA-256")
                          (java.nio.file.Files/readAllBytes (.toPath file))))])))
 
+;; The one test in this namespace that is NOT :seon.test/platform: it reaches
+;; seon.test-support/populate-published-operator-root!, which deletes and
+;; reclones a store directory. The platform tier runs first on every bin/test
+;; invocation, so a destructive fixture there deletes before the run has
+;; produced any evidence
+;; (docs/seon/issues/a-platform-tier-test-wiped-the-checkouts-store.md);
+;; seon.test.runner/verify-platform-tier-carries-no-destructive-drill! refuses
+;; the tier when this declaration drifts back.
 (deftest ^{:seon.test/fixture-observation "The assertions compare physical store bytes and private backend paths during simultaneous fixture acquisitions."} simultaneous-fixture-bases-never-open-the-published-store
   (let [root (str "tmp/fixture-base-isolation/" (random-uuid))
         begin (java.util.concurrent.CountDownLatch. 1)
@@ -205,7 +217,9 @@
             (is (not (.exists (io/file (::private-root result))))))))
       (finally (test-support/delete-recursively! root)))))
 
-(deftest a-canonical-database-is-the-production-source-population
+(deftest ^{:seon.test/platform
+           "Moving part: the one test bracket every other test forks through."}
+  a-canonical-database-is-the-production-source-population
   (test-support/with-database
     (fn [connection]
       (let [database @connection
@@ -250,7 +264,9 @@
           (is (= before (:max-tx @connection))
               "clock-free schema reconciliation is idempotent"))))))
 
-(deftest an-instrumentation-test-restores-the-entering-contracts-on-failure
+(deftest ^{:seon.test/platform
+           "Moving part: the one test bracket every other test forks through."}
+  an-instrumentation-test-restores-the-entering-contracts-on-failure
   (let [roots (into {} (map (juxt identity deref)) (instrument/instrumented))
         schemas (m/function-schemas)]
     (is (seq roots) "the regression must enter with real armed contracts")
@@ -269,7 +285,9 @@
     (is (every? (fn [[v callable]] (identical? callable @v)) roots))
     (is (= schemas (m/function-schemas)))))
 
-(deftest config-reconciliation-cannot-retract-the-schema-population
+(deftest ^{:seon.test/platform
+           "Moving part: the one test bracket every other test forks through."}
+  config-reconciliation-cannot-retract-the-schema-population
   (test-support/with-database
     (fn [connection]
       (let [before
@@ -292,7 +310,9 @@
         (is (pos-int? (:seon.reconcile/operations result)))
         (is (= (set before) (set after)))))))
 
-(deftest explicit-synthetic-schema-rows-extend-only-that-database
+(deftest ^{:seon.test/platform
+           "Moving part: the one test bracket every other test forks through."}
+  explicit-synthetic-schema-rows-extend-only-that-database
   (let [options
         {::test-support/extra-schema
          (test-support/file-store-probe-schema ::marker)}]
@@ -316,7 +336,9 @@
           "reading the leaked-attribute candidate is a typed refusal naming
            attribute-not-installed — stronger leak evidence than absence"))))
 
-(deftest shared-support-observes-events-refusals-and-cleanup
+(deftest ^{:seon.test/platform
+           "Moving part: the one test bracket every other test forks through."}
+  shared-support-observes-events-refusals-and-cleanup
   (let [events (async/chan 1)
         path (str "tmp/test-support/" (random-uuid))
         file (java.io.File. path "nested/value.edn")]
@@ -347,7 +369,9 @@
     (test-support/delete-recursively! path)
     (is (not (.exists (java.io.File. path))))))
 
-(deftest shared-property-reporting-is-a-clojure-test-assertion
+(deftest ^{:seon.test/platform
+           "Moving part: the one test bracket every other test forks through."}
+  shared-property-reporting-is-a-clojure-test-assertion
   (let [property (prop/for-all [value gen/small-integer]
                    (> (inc value) value))
         passed (tc/quick-check 10 property :seed 20260728)
@@ -369,7 +393,9 @@
     (is (str/includes? (:message (last @reports)) ":seed 20260728")
         "the report retains the seed needed to replay the counterexample")))
 
-(deftest recursive-cleanup-never-follows-a-symlink-out-of-tmp
+(deftest ^{:seon.test/platform
+           "Moving part: the one test bracket every other test forks through."}
+  recursive-cleanup-never-follows-a-symlink-out-of-tmp
   ;; The 2026-07-29 data-loss incident: a scratch root under tmp/ linked the
   ;; source tree for its classpath, and cleanup walked the link and deleted 55
   ;; tracked paths. A sandbox check on the ROOT is worthless if the walk can
@@ -401,7 +427,9 @@
       (finally
         (test-support/delete-recursively! (str outside))))))
 
-(deftest fixture-resources-close-through-setup-and-cleanup-failures
+(deftest ^{:seon.test/platform
+           "Moving part: the one test bracket every other test forks through."}
+  fixture-resources-close-through-setup-and-cleanup-failures
   (doseq [acquired-count (range 4)
           failing-cleanup [nil 0 1 2]]
     (let [events (atom [])
@@ -425,7 +453,9 @@
                      (map #(vector ::closed %) (reverse (range acquired-count))))
              @events)))))
 
-(deftest the-canonical-base-populates-from-an-empty-store
+(deftest ^{:seon.test/platform
+           "Moving part: the one test bracket every other test forks through."}
+  the-canonical-base-populates-from-an-empty-store
   ;; THE COLD-GATE PROOF: a test JVM with no published base realizes this path
   ;; at its first `with-database`. The population owner now hands its own
   ;; declaration projection to every transaction it makes, so nothing here

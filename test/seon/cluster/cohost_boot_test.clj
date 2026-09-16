@@ -1,6 +1,4 @@
-(ns ^{:seon.test/platform
-       "Moving part: two sovereign clusters cohosted in one JVM."}
-    seon.cluster.cohost-boot-test
+(ns seon.cluster.cohost-boot-test
   "Two sovereign clusters in ONE JVM, with instrumentation live.
 
   The class this kills: a value read back out of the database violates the
@@ -24,7 +22,16 @@
   in each cluster's own sci ctx.
 
   Filesystem fixtures live under the project-local `tmp/`, never a system
-  temp directory."
+  temp directory.
+
+  NOT `:seon.test/platform`, although it is a moving part: its fixture reaches
+  `seon.test-support/populate-published-root!`, which deletes and reclones a
+  store directory. The platform tier runs FIRST on every `bin/test`
+  invocation, so a destructive fixture there deletes before the run has
+  produced any evidence — which is how the development store was lost on
+  2026-09-17 (`docs/seon/issues/a-platform-tier-test-wiped-the-checkouts-store.md`).
+  `seon.test.runner/verify-platform-tier-carries-no-destructive-drill!`
+  refuses the tier when this declaration drifts back."
   (:require [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [seon.cluster :as cluster]
