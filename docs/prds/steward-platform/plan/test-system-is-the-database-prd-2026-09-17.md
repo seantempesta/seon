@@ -179,6 +179,22 @@ owner's answer to its options. No code.
 
 ### Stage 1 — One selection function, one run entity with members
 
+**Measured design inputs (selection-efficiency research, 2026-09-17):**
+Datahike has no VAET index; every ref attribute is implicitly indexed, so
+AVET is the reverse index, and `seon.fn/gate-set`'s iterative frontier walk
+over it is the correct reverse-reach mechanism — 14.181 ms for the worst seed
+(1,009 tests), 1.562 ms for a leaf. The recursive Datalog rule it replaced
+measured 6,753 ms on the same seed and `datahike.query/solve-rule` does not
+memoise (`query.cljc:1321`): no rule in `select`. The change half is answered
+by `(db/since (db/history db) basis)` over `:seon.fn/source`, `:seon.fn/spec`
+and `:seon.fn/calls`: 24–25 ms flat at 1 to 200 transactions back. Therefore
+`select` = changed identities via `since` + ONE shared-`seen` frontier walk
+seeded by all of them (not per-symbol `gate-set` calls), plus platform and
+named members, ≈ under 50 ms. The recorded `:seon.test/reach` closure is not
+the authority (281 of 1,829 tests; read through `pull`, which caps
+cardinality-many at 1000 — see the issue filed). The run entity carries the
+tested basis and branch; a cluster ref is added (stage-0 fact model).
+
 **Change.** `seon.test/select` (name to be confirmed against existing
 vocabulary in stage 0): `(select db request) → {:seon.test.run/members
 [{:seon.test/sym … :seon.test.run/reason …} …] :seon.test.run/basis-t …}`

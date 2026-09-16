@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, render, performance, wave/render-producers]
 ---
@@ -42,3 +42,14 @@ Measure the existing query owner after improvement on the same function and
 representative sparse/dense reach sets, with canonical armed regressions.
 Preserve subject and pending-subject reach semantics. Keep P2's explicit-read
 queries; do not introduce a second traversal or cache in renderers.
+
+
+## Re-observed 2026-09-17 (orchestrator)
+
+Stale: the recursive rule this note timed (7.2 s) was replaced at `1d141d26a`
+by `seon.fn/gate-set`'s iterative frontier walk over AVET, measured on
+`default` at 14.181 ms for the worst seed (`seon.db/transact!`, 1,009 tests)
+and 1.562 ms for a leaf
+(`docs/prds/steward-platform/research/selection-efficiency-2026-09-17.md`
+§1b). The remaining rule-based readers (`currently-failing-functions`,
+`functions-without-tests`) are named there for the same replacement.
