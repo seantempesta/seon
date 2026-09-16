@@ -112,37 +112,93 @@ attribute revisions is invalidated by any commit touching that attribute, and
 (`src/seon/db.clj:740-752`). That is the one shape that could re-walk on a
 genuinely unrelated commit.
 
-## Verdict (provisional — one probe outstanding)
+## Live probe (default cluster, pid 88182) — the defect is real and measured
 
-The fixture, not the wake/interest derivation, is the near-certain cause: the
-transaction the test calls "unrelated" mints an agent identity and retracts a
-ref to the subject agent, and the sibling test measures that transaction adding
-work to a page about an unrelated namespace. The correct repair is to make the
-transaction genuinely neutral (no new identity attribute, no retraction of an
-edge pointing at the subject) rather than to relax the expectation, which states
-the ruled behaviour correctly.
+Agent `juniper` on `default`, `render/acquire-context!` called twice on the
+caller's thread, then one deliberately neutral commit — `{:db/doc "..."}`: no
+identity attribute, no `:seon.wake/listen` attribute, nothing any render pair
+declares.
 
-The remaining question is only whether a genuinely neutral commit ALSO re-walks,
-which would be a second, real defect in evidence granularity (the wildcard shape
-above) hiding behind the fixture.
+Before the fix (basis 536871126 → 536871127):
 
-### The one probe that settles it
+| retained calls | current at the same db | current after the neutral commit |
+|---|---|---|
+| 26 | 26 | 25 — `:seon.render.web/root-acquisition` stale |
 
-On a live cluster, with the acquisition cache warm for one agent:
+The one stale call is the history root, so `derive-context!`'s `reusable?`
+(`src/seon/render/web.clj:2429-2437`) is false and the whole history is walked
+and re-rendered. **Every commit on the cluster re-walks every acquired agent
+history**, whatever it contains.
 
-1. `(render/acquire-context! request)` twice, retaining `::web/ai-calls` for the key;
-2. transact one datom that asserts no identity attribute and touches no entity
-   reachable from the agent (e.g. `:seon.ns/doc` on an unrelated namespace row);
-3. call `db/read-evidence-current?` on each retained call's
-   `:seon.render.call/read-evidence` and report which call, if any, reports false,
-   with its `:datahike.read/dependency-plan` and `:seon.db/read-index-patterns`.
+### Root cause
 
-If every retained call stays current, the expectation is right and only the
-fixture needs repair. If one call reports false, its read is the coarse-evidence
-defect and the fix belongs in that read, not in the test.
+The root call's evidence for `seon.eval/of-agent`'s query carries
+`:datahike.read/attributes :all` (the wildcard `pull` in its `:find`), no index
+patterns, no retained `:seon.db/read-result` (the request is not a bounded read
+request) and — measured — no `:seon.db/read-result-digest`. With all four
+absent, `read-evidence-current?` (`src/seon/db.clj:939-961`) has nothing to
+compare but the commit id, which every commit changes.
 
-This probe was not run: the default JVM was at its prober cap for the duration
-of this assignment, and test JVMs were out of scope.
+The missing digest is the bug. `stable-value` (`src/seon/db.clj:422-424`) admits
+`inst?`, `uuid?` and `char?` as stable read data and reported this very result
+stable, while `read-result-digest` (`src/seon/db.clj:435-446`) encodes through
+`seon.schema/canonical-data-string`, which threw on all three
+(`src/seon/schema.clj:563-568`). Measured directly: the `of-agent` result's value
+types include `java.util.Date` and `java.util.UUID`, `stable-value` returns
+`true`, and the digest attempt raises
+`:seon.schema/noncanonical-projection-data` ("Schema projection fingerprint
+contains non-EDN data"), which `read-result-digest` swallows into `nil`.
+
+Two functions disagreed about what ordinary data is, and the disagreement read
+as "no evidence available", which the cache reads as "stale" — the project's
+recurring absence-of-signal class, here paying for itself in a full re-walk per
+commit.
+
+### The fix (commit `dfd2aae54`, `src/seon/schema.clj`)
+
+`canonical-data-string` now encodes the three EDN literals it lacked:
+`(inst? → "i" (inst-ms value))`, `(uuid? → "u")`, `(char? → "c")`. The tags are
+new, so nothing that encoded before encodes differently; values that previously
+threw are the only behaviour change. This deletes the disagreement rather than
+adding a second digester beside it.
+
+After the fix, same probe, same neutral commit (basis 536871150 → 536871151):
+
+| root evidence entries carrying a digest | current at the same db | current after the neutral commit |
+|---|---|---|
+| 21 of 21 | 29 of 29 | **29 of 29** |
+
+No call goes stale, so no re-walk. Verified in the running `default` JVM after
+`bin/seon init --dev default --changed src/seon/schema.clj` converged
+(`:current-src` commit `6aaaa74c-2fb7-5a2b-bfbe-8985587cd08e`).
+
+## Verdict
+
+1. **Not a wake or interest defect.** The failing test pauses the graph and calls
+   the acquisition directly; `:seon.agent/id` carries no `:seon.wake/listen`.
+2. **The expectation is right, and a real defect stood behind it.** An unrelated
+   commit was re-walking the agent history on the live cluster — measured above —
+   because an ordinary read result containing an instant could not be digested.
+   Fixed at the one owning seam, `seon.schema/canonical-data-string`.
+3. **The fixture is also imprecise and should be re-read after the re-gate.**
+   `d7e5a0268`'s replacement transaction mints `{:seon.agent/id
+   "context-bystander"}` — a half-agent next to the real creation path
+   (`src/seon/cluster/agent.clj:122-148`) — and retracts `[message
+   :seon.message/to root]` while the message stays in root's inbox. The sibling
+   test measures the consequence on a page about `seon.flow`: `:discovery`
+   28 → 29 and `:invocation` 86 → 131 with `:observation` unchanged. I did not
+   rewrite either fixture: the sibling also asserts that the same transaction
+   still advances a render pass (`test/seon/render/web_test.clj:1063`), so a
+   neutral datom like `{:db/doc "..."}` may not wake the render proc at all, and
+   choosing the replacement needs the test JVM this assignment excluded.
+
+## Re-gate
+
+`seon.render.web-context-test`, `seon.render.web-test`, `seon.schema-test`,
+`seon.db-test`, plus `bin/test --platform`. `seon.schema/canonical-data-string`
+also feeds projection fingerprints and the preprocessed-base composition proof,
+so the schema and cluster-publication namespaces are the ones that would notice
+an encoding mistake.
 
 ## Files read end to end for this note
 
@@ -150,6 +206,7 @@ of this assignment, and test JVMs were out of scope.
 `test/seon/render/web_test.clj`, `src/seon/render/web.clj` (`derive-context!`),
 `src/seon/render.clj` (`acquire-context!`), `src/seon/render/walk.clj`
 (`history`), `src/seon/eval.clj`, `src/seon/db.clj` (read evidence, index
-patterns, `read-evidence-current?`), `src/seon/cluster/agent.clj`
+patterns, `read-evidence-current?`, `stable-value`, `read-result-digest`),
+`src/seon/schema.clj` (`canonical-data-string`), `src/seon/cluster/agent.clj`
 (`creation-tx`), and the wake-listen declarations under
 `resources/seon/schemas/`.
