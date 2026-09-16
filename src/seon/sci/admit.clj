@@ -54,6 +54,12 @@
 ;;; Schemas — resources/seon/schema.edn
 ;;; ---------------------------------------------------------------------------
 
+;;; LOAD-CYCLE BOUNDARY. `seon.sci.kernel` requires `seon.sci.admit`, so this
+;;; namespace cannot require it back. One resolution, realized at first use,
+;;; instead of a `requiring-resolve` on every call (AGENTS §2.1).
+(defonce ^:private sci-kernel-interrupted?
+  (delay (requiring-resolve 'seon.sci.kernel/interrupted?)))
+
 (defn interrupt-fn?
   "True for the zero-argument fn sci calls on every fn-body entrance.
   Admission is HANDED this fn; it never builds one, never owns the
@@ -398,7 +404,7 @@
   ;; resolved at call time because the guarded kernel requires this
   ;; namespace: the owner of "is this sci's interrupt?" sits above
   ;; admission, and admission must not swallow its one throwable
-  (when ((requiring-resolve 'seon.sci.kernel/interrupted?) failure)
+  (when (@sci-kernel-interrupted? failure)
     (throw failure))
   ;; nor the storage bound: reaching it ends the whole admission
   (when (over-bound? failure)
