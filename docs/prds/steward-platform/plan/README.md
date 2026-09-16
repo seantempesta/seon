@@ -7,6 +7,10 @@ tags: [plan, steward, roadmap]
 
 # Self-building Seon — the index of real tasks
 
+> Owner, 2026-09-16 01:20Z: the DATA comes first. Read
+> [namespace-data-model-2026-09-16.md](namespace-data-model-2026-09-16.md)
+> before this index; sections B–F here are its consumers.
+
 Owner (2026-09-16 01:05Z): "no fake tasks … index all the real tasks we need
 to achieve this level of self building and repair." This page is that index.
 It is the ONE ordered list for the steward platform; `unsettled.md` records

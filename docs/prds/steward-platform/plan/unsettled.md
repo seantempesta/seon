@@ -40,3 +40,14 @@
   Owner rulings folded in: the chatting test is relative to the user's newest
   message; workers add tests, never remove (pending confirmation); batches on
   forked clusters merged by exact row replacement; write-back by file span.
+- 01:20Z owner: data first — good schemas, solid names, linked in the graph;
+  issues rot because unlinked and unassigned; namespace-centric.
+  [namespace-data-model-2026-09-16.md](namespace-data-model-2026-09-16.md)
+  written from mined evidence: no production namespace has a steward
+  (2/411), no test links to its subject (0 holders), faults name functions
+  as strings, 240 issue notes link to code only in prose. Proposed:
+  test subject/namespace-under-test/reach-digest, fn file/span, error fn
+  ref + steward, `seon.issue` rows indexed from notes, `seon.lint`,
+  eval elisions; the namespace view as one pull; landing order; four
+  decisions. reach-digest beat 1 landed (`24d12bd48`): 39 s full pass,
+  median closure 668 functions — must be incremental.
