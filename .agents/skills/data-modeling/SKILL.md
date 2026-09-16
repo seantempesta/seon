@@ -14,9 +14,9 @@ Start by querying the merged registry before declaring another shape.
 
 The classpath resources under `resources/seon/schemas/` form one
 population. Duplicate keys refuse; `packaged-forms` returns the
-declarations (`src/seon/schema/edn.clj:303`, `:348`).
+declarations (`src/seon/schema/edn.clj:316`, `:393`).
 The schema bridge consumes a supplied projection and derives Datahike
-facets (`src/seon/schema/datahike.clj:231`).
+facets (`src/seon/schema/datahike.clj:232`).
 
 | Intent | Declaration | Derived behavior |
 |---|---|---|
@@ -25,9 +25,22 @@ facets (`src/seon/schema/datahike.clj:231`).
 | Owned child | `[:seon.db/ref {:seon.db/component true}]` | Component ownership |
 | Many members | `[:set :seon.db/ref]` | Cardinality-many, unordered |
 | Optional value | Optional map entry, omitted when absent | No stored nil |
+| Relation to a NAME that must outlive the target | `[:set :qualified-symbol]` — a VALUE edge, not a ref | Cardinality-many symbols; retracting the named entity touches no edge (`reference-code/datahike/src/datahike/db/transaction.cljc:998-1015` sweeps incoming REF datoms only) |
+| "We looked" — an analysis actually ran | A required positive fact naming what it read (file digest, evaluation) | Presence is `analyzed?`; an empty result is then ordinary absence of edges |
 
 The bridge's type, cardinality, and property owners are
-`src/seon/schema/datahike.clj:122`, `:194`, and `:231`.
+`src/seon/schema/datahike.clj:123`, `:205`, and `:232`.
+
+The two added rows are one rule. A `:seon.db/ref` asserts a relation
+between two ENTITIES; what an analyzer knows is a NAME appearing in text,
+and a name denotes itself. And `#{}` stores nothing — `explode` emits one
+datom per member (`transaction.cljc:739-770`, `:718-737`), so "found
+nothing" and "never ran" are the same bytes unless the looking is its own
+datom. If a reader will ever need to distinguish them, declare the event.
+Grounding:
+[the deletion study](../../../docs/prds/steward-platform/research/datahike-deletion-and-the-program-graph-2026-09-16.md)
+§8 and program-facts PRD §1f G2/G4.
+
 Cardinality-many does not acquire order because a Malli declaration used
 a vector. Store an ordinal on ordered members.
 
@@ -38,7 +51,7 @@ whole owned concerns. Derived concerns are queries, not stored mirrors.
 
 An entity map's `:seon.db/attributes` property contributes its entry
 attributes to storage derivation; it does not stamp a kind on an entity.
-The decomposition owner is `src/seon/schema/datahike.clj:314`.
+The decomposition owner is `src/seon/schema/datahike.clj:319`.
 
 ## Contracts and honest generators
 
@@ -48,21 +61,21 @@ Malli input/output contracts. Adding optional data is accretion;
 requiring more or promising less changes the contract.
 
 Stored nilable shapes refuse at
-`src/seon/schema/datahike.clj:165`. Clearing is a retraction;
+`src/seon/schema/datahike.clj:170`. Clearing is a retraction;
 omission from an upsert is not a clear operation.
 Do not generalize allowances for in-memory polymorphic results to
 stored attributes.
 
 Authored incomplete contracts and predicate requirements are checked at
-`src/seon/schema/internal.cljc:60`. Malli generator overrides are
-selected at `reference-code/malli/src/malli/generator.cljc:468`;
-mapping an output occurs at `:475`. Neither proves the generated
+`src/seon/schema/internal.cljc:119`. Malli generator overrides are
+selected at `reference-code/malli/src/malli/generator.cljc:466`;
+mapping an output occurs at `:474`. Neither proves the generated
 value satisfies the target schema. Use fixed seeds, generate and
 validate against the same projection, and exercise meaningful domain
 partitions. The clojure-testing skill owns the fixture and assertion.
 
 Config composites already derive from leaf declarations
-(`src/seon/schema/edn.clj:67`). A new dial belongs in its owning
+(`src/seon/schema/edn.clj:66`). A new dial belongs in its owning
 schema family, not a manually maintained second composite.
 
 ## Record and render contract — target
@@ -93,10 +106,14 @@ time; no result blob, print-node encoding, or separate result byte cap.
 
 Use `seon.id/evaluation` for branch/turn/ordinal identity and
 `seon.id/symbol-in` for its result handle
-(`src/seon/id.clj:49`, `:42`). Do not add a random-id generator.
+(`src/seon/id.clj:55`, `:47`). Do not add a random-id generator.
 
 Read evidence is a dependency observation, not a copied result:
-`src/seon/db.clj:468`. Every distinct read form's latest evidence
+`src/seon/db.clj:784`. Every distinct read form's latest evidence
 feeds the since-query diff; changed reads append, writes/effects never
-rerun. Compaction retracts evaluations and regenerates the opening,
-without retracting installed program identity tombstones.
+rerun. Compaction retracts evaluations and regenerates the opening.
+Program identity tombstones are RETIRED by owner ruling 2026-09-16
+(program-facts PRD §1f G1/G3): deletion is `[:db/retractEntity …]` and the
+past is a temporal query. The tombstone machinery
+(`seon.db/write-tombstone-validator`, `src/seon/db.clj:2913`) is still in
+the tree until the edge schema lands; do not build on it.

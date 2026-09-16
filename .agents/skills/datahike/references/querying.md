@@ -130,8 +130,10 @@ A PLAIN ref with no sub-pattern pulls back as `{:db/id N}` — name it with a
 sub-pattern (`{::parent [::name]}`) to pull its fields. A COMPONENT ref expands
 to a nested map under `[*]`. Pull also supports reverse-ref navigation
 (`::parent` → `{:my.ns/_parent [...]}`)
-(`reference-code/datahike/src/datahike/pull_api.cljc:276-319`;
-`reference-code/datahike/test/datahike/test/pull_api_test.cljc:250-277`).
+(`reference-code/datahike/src/datahike/pull_api.cljc:298-302` for
+`{:db/id N}`, `:335-337` for a sub-selector, `:346-351` for the unasked
+component expansion). SKILL.md's "three grammars of a reference" is the
+complete table.
 
 ## Inspecting the index (debugging only)
 
