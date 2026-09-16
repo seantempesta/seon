@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, test-fixture, runtime, contracts]
 ---
@@ -73,3 +73,39 @@ namespace INSIDE the run, so a `test-var` resolved before the call runs the
 PREVIOUS definition. Two runs reported an error from test code the file no
 longer contained. Reload through `seon.test`'s loader and resolve the Var
 AFTER the reload, in the same evaluation.
+
+## Resolved — 2026-09-17, the shared base follows adoption
+
+`seon.test-support/database-base` is now KEYED by the publication it was built
+from, and so is `seon.test-support/source-manifest`. `publication-key` is the
+isolated worker's immutable snapshot path when `seon.test.published-base` is
+set, and otherwise the `:current-src` head of this JVM's held stores
+(`seon.operator.runtime/root-store-holder` → `seon.cluster.source/current`,
+measured 1.05 ms per read). A converged `bin/seon init --dev` advances that
+head, so it is a base cache MISS by construction: the next run builds a base
+from the current publication. Nothing is rebuilt by hand and no JVM is
+restarted. A retired base is closed only after its last holder releases it, so
+a run holding the old base completes on it and no branch is deleted under an
+active connection; `fork-cluster-ctx` forks the base the enclosing fixture
+holds. The daemon-thread construction property is unchanged — a caller's bound
+never interrupts a construction and a failure is retried, never cached — and at
+most one construction now runs at a time.
+
+Regressions: `seon.test-support-test/the-shared-base-follows-the-published-commit`
+(11 assertions) and
+`seon.test-support-test/the-publication-key-derives-from-the-published-head`
+(8 assertions).
+
+The acceptance this note originally stated — a regression that adopts an
+accreted arity and calls it through a fresh canonical fixture — cannot run in a
+`bin/test` worker, which has no adoption seam and whose published snapshot is
+immutable for the JVM's life. It is replaced by those two regressions plus the
+live in-process proof in default PID 88182: the head advanced under the JVM,
+`realized?` answered false for the superseded base, and the next branched
+fixture built a new base and completed (9/0, 67389.731625 ms). Evidence and the
+measured adoption churn are in
+[the landing note](../../prds/steward-platform/research/shared-base-follows-adoption-2026-09-17.md).
+
+The second trap recorded above — `seon.test/run` reloading the test namespace
+INSIDE the run — is unchanged and still requires resolving the Var after the
+reload.
