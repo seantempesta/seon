@@ -461,6 +461,18 @@ before. Datahike's `retractEntity` also sweeps EVERY incoming ref datom
 and cascades into `:db/isComponent` children, which is exactly why the
 next rule exists — read the datahike skill before you delete anything.
 
+**Required versus optional IS the deletion dial** — there is no policy
+property and there never was one. A swept retraction lands in the report's
+`:tx-data`, and Seon's final-report validator re-validates every entity the
+transaction touched, the swept ones included (`src/seon/db.clj:3014`,
+`:2958`). So a **required** ref in the referrer's entity map REFUSES the
+deletion and an **optional** one lets it SWEEP silently. Choose deliberately
+and say which of the five behaviours you chose in the attribute's docstring:
+cascade (component), sweep, refuse, value, or a pending edge its settlement
+moves to a durable sibling. One hole to know: the validator selects schemas
+from the row's identity attributes, so an entity with NO identity attribute is
+never validated at all.
+
 **A fact that must outlive its target stores a VALUE, not a ref** (ruled
 2026-09-16, §1f G2). Call edges and test reach become
 `[:set :qualified-symbol]`; a symbol denotes itself, so deleting the named
@@ -471,6 +483,18 @@ until the `edges-are-symbols-deletion-is-retraction` lane lands the schema
 change: `:seon.fn/calls` is still `[:set :seon.db/ref]`
 (`resources/seon/schemas/seon.fn.edn:23`) and `:seon.test/reach` still a
 ref vector (`resources/seon/schemas/seon.test.edn:2`).
+
+**The discriminator is one question: does the fact STATE something about a living entity, or OBSERVE a
+TOKEN?** A statement is a ref — a component when the target contains the
+referrer, otherwise a peer whose deletion policy is the required/optional dial
+above. An observation — a name the analyzer, the author or the reporter saw —
+is a VALUE, and whether anything by that name exists is a separate derivable
+question. [TARGET] **A function with live callers is not deletable until the
+callers are fixed** (owner, 2026-09-16): edges surviving as values is what
+makes the breaking call graph readable, not permission to drop the function
+silently. The retraction and the repair belong in one transaction, or the
+deletion refuses and hands the agent the breakage to fix first — equally for
+an SCI evaluation, an edit-hook file deletion, and a complete republish.
 
 **If a reader will ever need to distinguish "we looked and found nothing"
 from "we never looked", the looking is an event and the event is a datom**
@@ -498,7 +522,12 @@ schema under that reader's selector; it is never a per-attribute
 schema. Evidence, including the twelve hand-written mirrors this class has
 already cost:
 [entity schema versus pulled shape](docs/prds/steward-platform/research/entity-schema-vs-pulled-shape-2026-09-16.md).
-The Datahike behaviour behind all five rules is measured in
+**And pull silently truncates a cardinality-many result at 1,000 members** —
+no marker, no refusal, just a shorter collection
+(`reference-code/datahike/src/datahike/pull_api.cljc:16`, `:315`, `:323`).
+That is this project's named failure class living inside the dependency; a
+pull that can exceed the bound reports the cut as an elision naming it.
+The Datahike behaviour behind all these rules is measured in
 [the deletion study](docs/prds/steward-platform/research/datahike-deletion-and-the-program-graph-2026-09-16.md)
 and carried with `file:line` in `.claude/skills/datahike/SKILL.md`.
 
@@ -689,6 +718,10 @@ grep a named authority); write the dependency ledger (exact libraries and
 mechanisms, pinned `reference-code/` paths, first-party call sites that
 demonstrate the idiom) and read that source; probe the critical assumption
 in the REPL; then strengthen the one existing mechanism in place.
+**A dependency's semantics are READ from the vendored source at design time,
+never inferred from observed behaviour** — cite the seam by `file:line`, because
+what a dependency does in the cases you happened to run is not what it
+guarantees.
 
 **Where work lives.** Never a session scratchpad or system temp directory —
 deleted without warning, invisible to every other lane. Probes go in `tmp/`
