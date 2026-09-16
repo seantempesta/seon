@@ -40,3 +40,19 @@ edit. The ten-second-start rule applies to adoption too.
 
 Related: `complete-publication-takes-seventy-seconds`,
 `issue-indexing-at-publication-costs-13-seconds`.
+
+## S11 follow-up observation — 2026-09-16 22:06 UTC
+
+The S11 follow-up's explicit `init --dev default --changed
+src/seon/render/transcript.clj` reported waiting for the lifecycle lock held
+by PID 69608, whose changed-path publication began at 21:55:31 UTC. It then
+reported `current-src: request accepted`, but the caller was still waiting
+after eight minutes. `logs/current-source-failure.log` was modified at
+22:04:31 UTC and contained exactly `Publication did not finish within its
+declared bound.` This establishes unverified adoption, not a cause inside
+the S11 edits. The lane used isolated fast tests and claimed no post-edit
+default or browser proof. Raw operator output: `tmp/s11-publication.log`.
+The explicit caller subsequently exited with `Source changed while incremental
+publication was being analyzed.` Its before/after digests were
+`259ae978a6a4d85011bc77f5ad249405a5fbfdeb149e303028e63108d103eec5` and
+`a9b821678cb32cfa17338813ca23d23f0f46781f3b669a2612c6ca995d9d03cd`.
