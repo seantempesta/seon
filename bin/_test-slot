@@ -11,7 +11,7 @@
 # directories whose mkdir is atomic; a slot whose holder pid is dead is
 # reclaimed. SEON_TEST_SLOTS overrides the count; SEON_TEST_SLOT_WAIT_SECONDS
 # the bound.
-test_slot_count=${SEON_TEST_SLOTS:-2}
+test_slot_count=${SEON_TEST_SLOTS:-3}
 test_slot_wait_seconds=${SEON_TEST_SLOT_WAIT_SECONDS:-1800}
 test_slot_parent="${source_root:-$PWD}/tmp/test-slots"
 held_test_slot=
