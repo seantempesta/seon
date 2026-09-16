@@ -263,3 +263,49 @@ wrappers; the cold gate remains the proof.
 `seon.render.web-test/declared-units-are-components-in-schema-order`
 (`:db/id` and `:db/txInstant` now reaching the declared list). None touch the
 print floor; none were changed here.
+
+
+## Batch 57 — the last red was a second sighting of the open-map shadow
+
+`seon.print-test` and `seon.render.value-test` are GREEN COLD on `b7e0bda66`.
+The one red left,
+`seon.render.web-test/declared-units-are-components-in-schema-order`, was
+`declared-entity-units` returning the six agent units PLUS `:db/id` and
+`:db/txInstant`.
+
+No pull selector was widened: the fixture's pull is `'[*]` and has been since
+the test was written. Measured in process on `default`, the contributor is
+ONE shape:
+
+```clojure
+;; contributors carrying :db/id into the agent entity's unit list
+[[":seon.render.transcript/pulled-transaction" [:db/id :db/txInstant]]]
+;; and the registry declares neither attribute in its own right
+{:db-id-declared? false :db-tx-declared? false}
+```
+
+`:seon.render.transcript/pulled-transaction` is `[:map [:db/id :int]
+[:db/txInstant {:optional true} :inst]]`
+(`resources/seon/schemas/seon.render.transcript.edn:16`). Maps are OPEN, so
+EVERY entity a `'[*]` pull returns satisfies it, and its entries were folded
+into every page's unit list. This is the same class the `sci-pull` lane fixed
+at the AI-pair seam — a small open map shadowing a whole entity family —
+reaching a different consumer.
+
+The expectation is right and the mechanism was wrong: `:db/id` is the
+database's address for an entity, not one of its units, and other surfaces
+already forbid showing it
+(`seon.render-coverage-test` asserts `(not (str/includes? ai ":db/id"))`).
+
+Fixed at the root in `seon.render.web/declared-unit?`: an attribute is a unit
+only when the REGISTRY DECLARES IT — `(projection-form projection
+(forward-attribute attribute))` is present. That is a derivation over data
+the function already holds, not a reserved-name list or a `:db/` prefix
+test. Measured after:
+
+```clojure
+(declared-entity-units projection database entity)
+;; => [:seon.agent/id :seon.agent/plan :seon.agent/namespace
+;;     :seon.agent/settings :seon.agent/runtime :seon.message/inbound-content]
+(declared-entity-units projection database "ordinary value") ;; => []
+```

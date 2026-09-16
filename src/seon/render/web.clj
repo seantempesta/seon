@@ -640,6 +640,20 @@
   [projection schema-key]
   (get-in projection [:seon.schema.projection/forms schema-key]))
 
+(defn- declared-unit?
+  "Does the registry declare this attribute in its own right?
+
+  A UNIT IS AN ATTRIBUTE THE REGISTRY DECLARES, NOT EVERY QUALIFIED KEY A
+  MATCHED SHAPE MENTIONS. Maps are open (AGENTS.md §2.5), so the small
+  `:seon.render.transcript/pulled-transaction` shape — `[:map [:db/id :int]
+  [:db/txInstant …]]` — is satisfied by EVERY entity a `'[*]` pull returns,
+  and its entries were folded into every page's unit list. `:db/id` is the
+  database's address for the entity, not one of the entity's units, and the
+  registry says so itself: it carries no form. So the rule is a derivation
+  over data already at hand, never a name-based exclusion or a reserved list."
+  [projection attribute]
+  (some? (projection-form projection (forward-attribute attribute))))
+
 (defn- declared-entity-units
   "Every attribute declared by the entity's matching schemas, in schema order."
   [projection database value]
@@ -653,7 +667,8 @@
                    (keep #(some->> (projection-form projection %)
                                    schema.form/map-entries
                                    (map first)
-                                   (filter qualified-keyword?)))
+                                   (filter qualified-keyword?)
+                                   (filter (partial declared-unit? projection))))
                    cat
                    (distinct))
              (concat (schema/matching-shapes-in
