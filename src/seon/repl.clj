@@ -12,9 +12,20 @@
             [clojure.main :as main]
             [clojure.pprint :as pprint]
             [clojure.string :as str]
+            [seon.ai :as ai]
+            [seon.db :as db]
             [seon.render.value :as value]
             [seon.schema.edn :as schema.edn]
             [seon.sci.admit :as admit]))
+
+;;; LOAD-CYCLE BOUNDARIES. `seon.turn` and `seon.cluster.agent` both require
+;;; `seon.repl` transitively, so this namespace cannot require them back. One
+;;; resolution per var, realized at first use, instead of a
+;;; `requiring-resolve` on every call (AGENTS §2.1).
+(defonce ^:private turn-episode-runs
+  (delay (requiring-resolve 'seon.turn/episode-runs)))
+(defonce ^:private cluster-agent-armed
+  (delay (requiring-resolve 'seon.cluster.agent/armed)))
 
 (schema.edn/load! {})
 
@@ -52,15 +63,15 @@
     [:=> [:cat :seon.db/db :seon.agent/id] :string]
     [:=> [:cat :seon.db/db :seon.agent/id :seon.config/agent-overlay] :string]]}
   ([database agent-id]
-   (frame database agent-id ((requiring-resolve 'seon.ai/agent-overlay) database agent-id)))
+   (frame database agent-id (ai/agent-overlay database agent-id)))
   ([database agent-id overrides]
    (let [maximum (or (:seon.config.run/max-episode-runs overrides)
-                      ((requiring-resolve 'seon.db/q)
+                      (db/q
                        '[:find ?limit . :where
                          [?config :seon.config/cluster _]
                          [?config :seon.config.run/max-episode-runs ?limit]] database))
          remaining (long (max 0 (- (or maximum 0)
-                                    ((requiring-resolve 'seon.turn/episode-runs)
+                                    (@turn-episode-runs
                                      database agent-id))))]
      (str "turns left: " remaining " of " maximum))))
 
@@ -368,7 +379,7 @@
         (or (when (map? namespace-ref) (:seon.ns/name namespace-ref))
             (when (and database namespace-ref)
               (:seon.ns/name
-               ((requiring-resolve 'seon.db/pull)
+               (db/pull
                 database [:seon.ns/name]
                 (if (map? namespace-ref) (:db/id namespace-ref) namespace-ref)))))
         renderer-ref (:seon.eval/renderer-fn unit)
@@ -376,14 +387,14 @@
         (or (get-in unit [:seon.eval/renderer-fn :seon.fn/sym])
             (when (and database renderer-ref)
               (:seon.fn/sym
-               ((requiring-resolve 'seon.db/pull)
+               (db/pull
                 database [:seon.fn/sym]
                 (if (map? renderer-ref) (:db/id renderer-ref) renderer-ref)))))
         evaluation-id (:seon.cluster.eval/id unit)
         changed? (or (:seon.repl/changed-since? unit)
                      (when (and database evaluation-id)
                        (integer?
-                        ((requiring-resolve 'seon.db/q)
+                        (db/q
                          '[:find ?earlier . :in $ ?evaluation-id :where
                            [?evaluation :seon.cluster.eval/id ?evaluation-id]
                            [?evaluation :seon.cluster.eval/run ?turn]
@@ -454,7 +465,7 @@
   (let [routing (:seon.agent/routing unit)
         agent-id (:seon.agent/id unit)
         ctx (or (get-in (when (and routing agent-id)
-                         ((requiring-resolve 'seon.cluster.agent/armed) routing agent-id))
+                         (@cluster-agent-armed routing agent-id))
                        [:seon.turn.loop/cluster :seon.sci.eval/agent-ctx])
                 (:seon.sci.eval/agent-ctx unit))
         objects (some-> (:seon.sci.eval/result-objects ctx) deref)]
