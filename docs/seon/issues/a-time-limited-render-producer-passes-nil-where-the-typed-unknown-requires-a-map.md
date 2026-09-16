@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 created: 2026-09-17
 tags: [render, contracts, totality, class-p4]
@@ -59,3 +59,19 @@ Found by the render-root-address lane (2026-09-17), whose owned paths are
 `src/seon/render/value.clj` and `test/seon/render_coverage_test.clj`.
 `src/seon/render.clj` was explicitly excluded. Full evidence:
 [render-root-address-2026-09-17.md](../../prds/context-generation/research/render-root-address-2026-09-17.md).
+
+## Resolution (2026-09-17, render-repl-cold-reds lane)
+
+Fixed as filed: `:seon.error/value` moved under the `cond->` in
+`seon.render/invocation-unknown` (`src/seon/render.clj:1022`), so an absent
+value is no key rather than a stored nil.
+
+The producer that actually threw was not the time-limited one: the live
+probe showed `:seon.sci.admit/value` is also absent when ADMISSION refuses
+an over-bound failure value, which is the contract-refusal case. Either way
+the fix shape is the same and the throw is gone.
+`seon.render-coverage-test/a-refused-render-producer-contributes-a-stable-typed-unknown`
+went from 12 pass / 0 fail / 1 error to 22 pass / 1 fail / 0 error in-process
+on `default`. The remaining failure is a distinct root cause, filed as
+[a-render-producers-contract-refusal-is-too-large-to-admit-so-the-typed-unknown-loses-its-kind.md](a-render-producers-contract-refusal-is-too-large-to-admit-so-the-typed-unknown-loses-its-kind.md);
+it was previously unreachable because this throw aborted the deftest first.

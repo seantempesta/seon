@@ -1020,8 +1020,11 @@
                          (get-in result [:seon.sci.admit/record
                                          :seon.eval/outcome]))]
     (unknown (cond-> {:seon.render.unknown/reason reason
-                      :seon.render.unknown/producer selected
-                      :seon.error/value (:seon.sci.admit/value result)}
+                      :seon.render.unknown/producer selected}
+               ;; A producer stopped by `time-limit` never produced a
+               ;; value: absent is no key, never a stored nil.
+               (:seon.sci.admit/value result)
+               (assoc :seon.error/value (:seon.sci.admit/value result))
                output (assoc :seon.render/output output)
                (:seon.render.call/id request)
                (assoc :seon.render.call/id (:seon.render.call/id request))))))
