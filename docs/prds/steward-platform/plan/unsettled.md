@@ -432,3 +432,18 @@ Queue, in order:
   `two-platform-tests-lose-the-workers-handed-projection`). If the
   in-process `seon.test/run` path also lacks the handed projection, it is
   the third instance of the same class.
+- 13:20Z Opus triage of generated-read + attempt reds (`31173071d`,
+  `eb254719d`): generated-read all clear (two resolved by error-graph's
+  derived steward, one test deleted by it); attempt: two fixed at the test
+  (raw plan probe bypassed the encoding seam; 8-char id mirror), one green.
+  Two REAL residuals: (1) renderer-fn — the schema now admits the pulled ref
+  shape but the ARMED wrapper still enforces the bare ref: wrappers bake
+  referenced schema definitions at arm time and adoption re-arms only when
+  the function's own authored contract changes → class
+  `arming-includes-referenced-schemas` (astra, queued); (2) issue-test
+  opening: the last opening evaluation `(my.issue/status …)` is appended and
+  never evaluated (ordinal 3 has no shown, no error) — absence read as
+  health at `src/seon/issue.clj:257` meeting `seon.turn/generate-turn`;
+  Opus fixer launched (issue.clj free). Also: `database-base` delay caches
+  a failed construction forever (issue filed; daemon-thread rule added to
+  repl-rule.txt).
