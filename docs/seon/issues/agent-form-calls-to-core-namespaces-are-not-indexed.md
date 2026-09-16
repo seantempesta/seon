@@ -154,3 +154,28 @@ cached fixture; its result is 1 pass, 0 failures, 1 error before the ordinary-fo
 assertions. The fixture issue is linked from the landing. The isolated gate
 exited 75 before launching tests under the orchestrator-only policy; the
 namespace and platform gates are queued, not claimed green.
+
+## Reach-digest historical-test probe — 2026-09-16
+
+Default at basis **536872536**, source commit
+`6aa9dfe0-ab4c-58fa-892d-7bab168f2c65`, still holds test entity 42768,
+`my.agents.juniper/largest-customer-test`, with exactly three call refs:
+`clojure.test/is`, `clojure.core/let`, `clojure.core/=`. Its stored source
+calls `(largest-customer rows)`, but the tested function is absent from its
+transitive closure; there is no subject or pending-subject fact.
+
+MCP JVM read-only probes used
+`(seon.db/db (seon.operator/connection "default"))`. The test's current
+source/contract/schema closure digest equals its reconstructed digest at
+recorded run basis **536871342**:
+`3b0fdce40c7fd0aa752f1eff4363421b4202793dea68208bca2b4657549b19a5`.
+Thus digest equality does not repair incomplete historical analysis. An
+empty-or-single-edge census also misses this exact case: it has three edges.
+
+This adds a historical declaration-test verification boundary; it does not
+refute the newer ordinary-evaluation persistence proof above. No fresh
+equivalent test was admitted and no edge was inserted by this probe. Before
+trusting reach-based reuse, verify the n7 repaired analyzer on a freshly
+admitted Juniper-shaped test, and separately decide how historical test rows
+are reanalyzed. Exact source, measurements, and reproducible probe:
+[reach-digest beat 1](../../prds/steward-platform/research/reach-digest-2026-09-16.md).
