@@ -2,6 +2,7 @@
   "One structural value renderer: profile-bounded AI and complete HTML."
   (:require [clojure.string :as str]
             [seon.id :as id]
+            [seon.db :as db]
             [clojure.edn :as edn]
             [seon.print :as print]
             [seon.cluster.wake :as wake]
@@ -79,6 +80,37 @@
     :seon.print/namespace-maps?
     :seon.print/table?})
 
+(defn- identity-address
+  "The value's OWN address, when the caller supplied none.
+
+  A DERIVATION, not an invented id: the address is the value's installed
+  `:db.unique/identity` attribute and its value, read from the database the
+  request carries — the same authority `seon.render/target-profile`
+  (`src/seon/render.clj:110`) already uses for requery identity. It closes a
+  real production hole: `seon.render/producer-argument`
+  (`src/seon/render.clj:196`) removes `:seon.render.call/id` before invoking a
+  DECLARED producer, and the page's walk request
+  (`src/seon/render/web.clj:2977`) supplies no `:seon.render.value/root`, so a
+  declared producer that delegates its own value to this floor — `seon.ai/
+  attempt-html`, whose contract promises `:seon.render/hiccup` — reached
+  `node-id` with nothing and returned a refusal where its own contract
+  required Hiccup.
+
+  There is deliberately NO digest-of-the-value fallback. `surface-id`
+  (`src/seon/render/block.clj:61`) states the requirement this obeys: the map
+  from address to DOM id must be injective, and two distinct anonymous roots
+  that happen to hold equal values would morph over each other under a content
+  digest. A value with no identity has no address, and the refusal below
+  remains the honest answer for it."
+  [unit]
+  (let [value (:seon.render/value unit)
+        database (:seon.db/db unit)]
+    (when (and database (map? value))
+      (some (fn [attribute]
+              (when-some [entry (find value attribute)]
+                [attribute (val entry)]))
+            (db/identity-attributes database)))))
+
 (defn node-id
   "Stable element id for one root selector and `get-in` path."
   {:malli/schema [:=> [:cat :seon.render/unit :seon.render.data/path]
@@ -89,7 +121,8 @@
             (:seon.render.value/root unit)
             (when-some [eid (:db/id unit)] [:db/id eid])
             (when-some [block-name (:seon.render.block/name unit)]
-              [:seon.render.block/name block-name]))]
+              [:seon.render.block/name block-name])
+            (identity-address unit))]
     (if-not root-address
       {:seon.error/kind ::missing-root-identity
        :seon.error/message

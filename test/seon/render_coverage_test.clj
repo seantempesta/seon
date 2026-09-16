@@ -65,43 +65,62 @@
    (config/compile-manifest {:seon.boot/cluster-name cluster-name}))
   (cluster/ensure-cluster-entity!
    connection cluster-name cluster/boot-process-identity)
-  (db/transact!
-   connection
-   (into
-    (agent/creation-tx
-     {:seon.agent/id agent-id
-      :seon.cluster/name cluster-name
-      :seon.ns/name 'my.agents.render-coverage})
-    [{:seon.fn/sym owner-symbol}
-     {:seon.turn/id run-id
-      :seon.turn/agent [:seon.agent/id agent-id]}
-     {:seon.effect/id "effect-pending"
-      :seon.effect/run [:seon.turn/id run-id]
-      :seon.effect/owner [:seon.fn/sym owner-symbol]
-      :seon.effect/form-ordinal 3
-      :seon.effect/ordinal 0
-      :seon.effect/request-edn request-edn
-      :seon.effect/opened-at opened-at}
-     {:seon.effect/id "effect-returned"
-      :seon.effect/run [:seon.turn/id run-id]
-      :seon.effect/owner [:seon.fn/sym owner-symbol]
-      :seon.effect/form-ordinal 3
-      :seon.effect/ordinal 1
-      :seon.effect/request-edn request-edn
-      :seon.effect/opened-at opened-at
-      :seon.effect/result-edn result-edn
-      :seon.effect/result-blob blob-digest
-      :seon.effect/result-size 99
-      :seon.effect/duration-ms 12
-      :seon.effect/settled-at settled-at}
-     {:seon.effect/id "effect-interrupted"
-      :seon.effect/run [:seon.turn/id run-id]
-      :seon.effect/owner [:seon.fn/sym owner-symbol]
-      :seon.effect/form-ordinal 3
-      :seon.effect/ordinal 2
-      :seon.effect/request-edn request-edn
-      :seon.effect/opened-at opened-at
-      :seon.effect/interrupted-at interrupted-at}]))
+  ;; ASSERT THE TRANSACTION REPORT. `seon.db/write-error` validates every map
+  ;; keyed by an identity attribute against that attribute's entity schema, so
+  ;; one inadmissible map refuses the WHOLE seed and every later assertion then
+  ;; reads absence as render behaviour: a bare `{:seon.fn/sym owner-symbol}`
+  ;; (missing the required `:seon.schema.admission/source`,
+  ;; `resources/seon/schemas/seon.fn.edn:92`) and a turn row without its
+  ;; required `:seon.turn/opened-tx` refused this seed entirely, and the 23
+  ;; resulting reds read as a value-renderer defect. `my.fs/read` already IS a
+  ;; declaration in the canonical population, so the row is deleted rather than
+  ;; repaired — the fixture reuses the real one.
+  ;; TWO transactions, because the effect rows reference the turn by lookup
+  ;; ref and Datahike resolves a lookup ref against the database the
+  ;; transaction STARTS from — an entity minted in the same transaction is
+  ;; `:entity-id/missing`.
+  (let [written!
+        (fn [tx]
+          (let [report (db/transact! connection tx)]
+            (is (nil? (:seon.error/kind report)) (pr-str report))
+            report))]
+    (written!
+     (into
+      (agent/creation-tx
+       {:seon.agent/id agent-id
+        :seon.cluster/name cluster-name
+        :seon.ns/name 'my.agents.render-coverage})
+      [{:seon.turn/id run-id
+        :seon.turn/agent [:seon.agent/id agent-id]
+        :seon.turn/opened-tx "datomic.tx"}]))
+    (written!
+     [{:seon.effect/id "effect-pending"
+       :seon.effect/run [:seon.turn/id run-id]
+       :seon.effect/owner [:seon.fn/sym owner-symbol]
+       :seon.effect/form-ordinal 3
+       :seon.effect/ordinal 0
+       :seon.effect/request-edn request-edn
+       :seon.effect/opened-at opened-at}
+      {:seon.effect/id "effect-returned"
+       :seon.effect/run [:seon.turn/id run-id]
+       :seon.effect/owner [:seon.fn/sym owner-symbol]
+       :seon.effect/form-ordinal 3
+       :seon.effect/ordinal 1
+       :seon.effect/request-edn request-edn
+       :seon.effect/opened-at opened-at
+       :seon.effect/result-edn result-edn
+       :seon.effect/result-blob blob-digest
+       :seon.effect/result-size 99
+       :seon.effect/duration-ms 12
+       :seon.effect/settled-at settled-at}
+      {:seon.effect/id "effect-interrupted"
+       :seon.effect/run [:seon.turn/id run-id]
+       :seon.effect/owner [:seon.fn/sym owner-symbol]
+       :seon.effect/form-ordinal 3
+       :seon.effect/ordinal 2
+       :seon.effect/request-edn request-edn
+       :seon.effect/opened-at opened-at
+       :seon.effect/interrupted-at interrupted-at}]))
   nil)
 
 (defn- pulled
@@ -334,20 +353,32 @@
            (is (not (str/includes? interrupted-ai "Result")))
            (is (not (str/includes? interrupted-html "seon-effect-result")))
            (is (not (str/includes? interrupted-html "Duration")))))
+       ;; THE WALK SELECTS THE SAME PAIR. Rooted at the receipt, because the
+       ;; agent's declared `:seon.render/units`
+       ;; (`resources/seon/schemas/seon.agent.edn:5`) are plan, issues, inbox,
+       ;; settings, notes, namespace, runtime and steward errors — no turn and
+       ;; no effect. This clause previously walked from the agent at distance
+       ;; 2 and asserted an `:seon.effect/run` unit that the declared record
+       ;; cannot produce; it read as green only while the whole seed was
+       ;; refused and every render fell to one refusal. Nothing declares
+       ;; effect receipts as units of anything today — recorded in the landing
+       ;; note rather than invented here.
        (doseq [output [:seon.render/ai :seon.render/html]]
          (let [units (walk/neighborhood
                       {:seon.db/db database
                        :seon.sci.eval/ctx ctx
                        :seon.render.walk/lookup
-                       [:seon.agent/id agent-id]
+                       [:seon.effect/id "effect-returned"]
                        :seon.render/output output
                        :seon.sci.admit/caps caps
                        :seon.sci.eval/time-limit-ms 2000
                        :seon.config/on-core-error :panic
-                       :seon.render/distance 2})
-               face (walk-output-by-attribute units :seon.effect/run)]
+                       :seon.render/distance 1})
+               face (:seon.render/output (first units))]
            (is (some? face))
-           (is (str/includes? (str face) owner-symbol))))))))
+           (is (str/includes? (str face) owner-symbol))
+           (is (not (:seon.error/kind face))
+               "the walk's own request shape reaches a total render")))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; A producer that delegates its own value never re-selects itself
