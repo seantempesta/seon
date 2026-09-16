@@ -753,3 +753,15 @@ shortcut lost same-turn call edges and removed it; owed at the analyzer
 seam). The timing regression now bounds writes and installation separately
 at 300 ms each. Batch 59 (cold): cluster.turn, turn, evaluate-sources,
 cluster.prompt, render-coverage; platform recording after the reset.
+
+### 2026-09-17 05:30Z — default reset (pid 17352, 99 MB); batch 60 planned
+
+Steward reset default after the write-floor research reported; store 12 GB
+→ 99 MB. Steward's render-selection landed (`68f1ad52c` `b67a9dfe3`
+`33a4c2035`: selection's projection derived from the handed database value;
+the html-views golden was a frozen pre-pair dump). Batch 60 after 59:
+platform (recording) + render-simplification, html-views, error, render.web
+(dir-elision r3 `415ab40fc`), + fn-test when the gate-set contract lane
+lands. Steward's two Opus lanes: the three remaining 58b reds + the
+`invocation-unknown` nil issue; a sweep of raw `db/transact!` fixture writes
+onto `transacted!`.
