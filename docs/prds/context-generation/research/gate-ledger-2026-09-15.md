@@ -22,6 +22,7 @@ the same namespace twice for the same HEAD.
 | 2 | `f5ca25ba9`+ | p1-ambient-state (19) | ABORTED at 22:12Z by the orchestrator: the gate alone ran 9 pool workers + serial + 6 concurrent confirmation JVMs (load avg 75 on 18 cores, 26 GB compressed); runner capped, re-run as batch 2b. The killed batch-2 gate thread RELAUNCHED its run (uncapped) beside 2b; killed again at 22:45Z. Lesson: a gate thread's instruction must say "if the command is killed, do not rerun; report" | — |
 | 2b | `f5ca25ba9`+ | p1-ambient-state (19) | KILLED at 21:44Z by the superseded batch-2 thread (the two threads had swapped runs); partial log through seon.sci.eval-test, no tally | — |
 | 2c | `48605a1de` | p1-ambient-state (19), capped at 3 workers, nice 15 | 392/2437: 50 failures, 20 errors in 6 namespaces (sci.eval, render-simplification, schema.datahike, effect, render.value, cluster.mcp); 13 namespaces green; published-base 44 s, tests 748 s; results NOT recorded (live prepl unavailable) | p1-ambient-state: class = fixtures mint bare database values and the fallback now refuses; Datom-where-map in mcp-test; two effect events |
+| 18b | `806e6e8d8` | turn-test-reds (2 ns), relaunched once after 18 aborted pre-JVM on the tools.deps Maven model-validator race (known issue) | running | — |
 | 18 | `0eba2ae10` | turn-test-reds (2 ns; five slices: a production deletion fix `4b3322b04`, the test entity AI/HTML pair `ff351811b`, 27 repaired tests / 188 assertions, two obsolete tests replaced; 16 tests still unresolved) | running | — |
 | 17 | `47dcf6d92` | n7-eval-call-edges re-gate (2 ns) after `171c0c193` (4 tests green on a fresh base) | 89/458: fn-test GREEN; seon.cluster.turn-test still 44 tests red cold (103 blocks) — the lane verified 4 of ~89 tests; BASELINE at pre-wave 4c8740cf0: 59 tests, 56 failures, 44 errors — 43 tests fail in both, 7 baseline-only (fixed since), 1 HEAD-only. seon.cluster.turn-test was deeply red before the wave; not an N7 regression | n7-eval-call-edges CLOSED for its slice (the 1 HEAD-only test handed back); seon.cluster.turn-test opens as its own class lane |
 | 16 | `8bf2dceaf` | p1-ambient-state re-gate (5 ns) after `253206238`, `0edd57230` (supplied test bounds honored; one fresh-store fixture arity; render bounds caller-owned; SCI test state scoped) | 115/663 GREEN cold, no worker-global mutations; 114 s | p1-ambient-state CLOSED for its read/admission scope |
@@ -103,4 +104,14 @@ wave-2 spec templates. This session does not resume, stop, or gate them.
 Gate coordination across sessions rests on `tmp/test-slots` (two slots
 machine-wide, orchestrator-only mode); each session runs at most one gate
 at a time, so the machine sees at most two.
+
+## 01:50Z — default reforked by the other session; status refusal
+
+`default` is now pid 7595 (start 01:36Z), reforked by the steward session.
+`runtime_status` refuses: `seon.problems/problems refused return value at
+[... :seon.problems/occurrences]: expected an integer, got an integer` —
+a zero-occurrence signature against `[:int {:min 1}]`, and the grammar
+dropped the constraint. Issue filed
+(problems-refuses-its-own-zero-occurrence-signature.md); an Opus agent is
+fixing both under the REPL rule (cost rule: Opus for mechanical fixes).
 
