@@ -234,7 +234,14 @@ peer session (batches 30–57; ledger
    `my.turn/complete` or `my.turn/wait`" notice: where is it written — the
    turn-loop owner's call before two remaining turn-loop expectations are
    settled.
-9. Earlier parked: R1 identity strings→symbols; call-arities tuple vs
+9. **Render selection fallback:** may an attribute-scoped render request
+   fall back to the nearest declared pair (an agent pulled `[*]` renders
+   through the generic form rather than the situation pair declared on the
+   derived situation map; a namespace's requires floor resolves to the
+   namespace form)? A pre-existing red since `ae0e54841` pins this
+   (`the-selection-chain-regression-still-asserts-the-pre-inbox-edge-message-shapes`);
+   the deftest was deliberately left unchanged until you rule.
+10. Earlier parked: R1 identity strings→symbols; call-arities tuple vs
    interned family; `seon.commit` entity; retention removal; cold page slice 2.
 
 ## Still open
