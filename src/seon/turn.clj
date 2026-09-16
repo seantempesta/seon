@@ -5035,28 +5035,32 @@
 
   A DECLARED dial (`:seon.config.agent/write-refusal-bound`), not a tuned
   constant: the observable event it stands in for is \"this agent's durable
-  write is refused and re-firing cannot change that\". The per-agent overlay
-  wins over the cluster's effective config, exactly as the turn completion
-  allowance resolves."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.cluster/name
+  write is refused and re-firing cannot change that\". Resolution is exactly
+  the turn completion allowance's: the agent's own overlay wins, then the
+  value the cluster handle carries, then the cluster's effective config."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.turn.loop/cluster
                        :seon.agent/id]
                   :seon.config.agent/write-refusal-bound]}
-  [database cluster-name agent-id]
-  (or (:seon.config.agent/write-refusal-bound (ai/agent-overlay database agent-id))
-      (:seon.config.agent/write-refusal-bound (config/effective database cluster-name))
-      ;; ABSENCE IS NEVER "no bound". A cluster whose config singleton predates
-      ;; this dial would otherwise read as healthy and re-fire forever, which
-      ;; is the exact failure class this bound exists to end.
-      (throw
-       (ex-info
-        (str "Cluster " (pr-str cluster-name)
-             " declares no :seon.config.agent/write-refusal-bound, so a "
-             "refused turn write for agent " (pr-str agent-id)
-             " has no bound. Apply the config manifest.")
-        {:seon.error/kind :seon.config/required-absent
-         :seon.config/required-absent :seon.config.agent/write-refusal-bound
-         :seon.cluster/name cluster-name
-         :seon.agent/id agent-id}))))
+  [database cluster agent-id]
+  (let [cluster-name (:seon.cluster/name cluster)]
+    (or (:seon.config.agent/write-refusal-bound
+         (ai/agent-overlay database agent-id))
+        (:seon.config.agent/write-refusal-bound cluster)
+        (:seon.config.agent/write-refusal-bound
+         (config/effective database cluster-name))
+        ;; ABSENCE IS NEVER "no bound". A cluster whose config singleton
+        ;; predates this dial would otherwise read as healthy and re-fire
+        ;; forever, which is the exact failure class this bound exists to end.
+        (throw
+         (ex-info
+          (str "Cluster " (pr-str cluster-name)
+               " declares no :seon.config.agent/write-refusal-bound, so a "
+               "refused turn write for agent " (pr-str agent-id)
+               " has no bound. Apply the config manifest.")
+          {:seon.error/kind :seon.config/required-absent
+           :seon.config/required-absent :seon.config.agent/write-refusal-bound
+           :seon.cluster/name cluster-name
+           :seon.agent/id agent-id})))))
 
 (defn write-refusal-error
   "Describe the repeated write refusal that parked one agent's turn proc."
@@ -5278,8 +5282,7 @@
                                      0)
                           bound (when refusal
                                   (write-refusal-bound
-                                   (db/db connection)
-                                   (:seon.cluster/name cluster) agent-id))
+                                   (db/db connection) cluster agent-id))
                           parked? (boolean (and refusal bound (>= refusals bound)))]
                ;; Run closure is an armer wake because first-agent
                ;; supervision is derived from closed-run and root-idle facts.

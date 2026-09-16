@@ -1881,16 +1881,6 @@
 ;;; The declared write-refusal bound
 ;;; ---------------------------------------------------------------------------
 
-(defn- refusal-config-row
-  [cluster-name bound]
-  (:seon.config/desired-row
-   (config/compile-manifest
-    {:seon.boot/cluster-name cluster-name
-     :seon.config/manifest
-     {:seon.config.agent/turn-completion-backstop-ms
-      (* 1000 support/event-backstop-seconds)
-      :seon.config.agent/write-refusal-bound bound}})))
-
 (deftest a-refused-turn-write-is-bounded-and-commits-exactly-one-fault
   ;; THE STORM, AS A REGRESSION. On 2026-09-17 every turn write on `default`
   ;; was refused and the turn proc re-fired its own wake each time; each
@@ -1901,22 +1891,30 @@
   ;; committed fault naming the refusal, the agent, the count and the bound.
   (support/with-database
     (fn [connection]
-      (let [cluster-name (db/q '[:find ?name . :where [_ :seon.cluster/name ?name]]
-                               (db/db connection))
+      (let [cluster-name "bounded-write-refusals-cluster"
             agent-id "bounded-write-refusals"
             bound 2
             fault-channel (async/chan 8)
             completion (async/chan 1)]
-        (checked-transact! connection
-                           [{:seon.agent/id agent-id}
-                            (refusal-config-row cluster-name bound)])
+        (checked-transact! connection [{:seon.agent/id agent-id}])
         (async/>!! completion :seon.agent/ready)
+        ;; The dial rides the handle exactly as the turn completion allowance
+        ;; does: a fixture pins its own bound, and the caller wins.
         (let [cluster (assoc (support/cluster-handle
                               {:seon.db/connection connection
                                :seon.cluster/name cluster-name
+                               :seon.sci.eval/ctx
+                               (support/fork-cluster-ctx connection)
                                :seon.db.process/id
-                               (db/q '[:find ?id . :where [_ :seon.db.process/id ?id]]
-                                     (db/db connection))})
+                               cluster/boot-process-identity})
+                             :seon.config.agent/write-refusal-bound bound
+                             :seon.config.agent/turn-completion-backstop-ms
+                             (* 1000 support/event-backstop-seconds)
+                             ;; The turn bound is armed on a carried executor;
+                             ;; a handle without one is a refusal, not a
+                             ;; default (AGENTS §5.3).
+                             :seon.flow/executor
+                             (java.util.concurrent.Executors/newVirtualThreadPerTaskExecutor)
                              :seon.turn.loop/completion completion
                              :seon.agent/fault-channel fault-channel
                              :seon.agent/turn-backstop-state (atom nil))
