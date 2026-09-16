@@ -1574,8 +1574,8 @@
 
 (defn- initialize-contracts!
   "Load selected tests and acquire the one arming value for workers and test-fast."
-  [role namespaces]
-  ((requiring-resolve 'seon.test.arm/initialize-contracts!) role namespaces))
+  [role namespaces projection]
+  ((requiring-resolve 'seon.test.arm/initialize-contracts!) role namespaces projection))
 
 (defn- reassert-contracts!
   "Re-arm this worker JVM when a task left its contracts stripped.
@@ -1649,7 +1649,7 @@
         (case (::worker-command command)
           :initialize
           (let [namespaces (mapv symbol (::worker-namespaces command))
-                arming (initialize-contracts! worker-id namespaces)]
+                arming (initialize-contracts! worker-id namespaces (::projection arming))]
               (write-protocol! writer
                                {::worker-event :initialized
                                 ::worker-id worker-id
@@ -1704,12 +1704,22 @@
                      ::command command :seon.test.runner/unknown-worker-command true})))))))
 
 (defn- worker-command-loop!
-  "Announce readiness, then serve commands until stopped."
+  "Prime the canonical fixture before readiness, then serve commands until stopped."
   [worker-id ^BufferedReader reader ^PrintWriter writer]
-  (write-protocol! writer {::worker-event :ready
-                           ::worker-id worker-id
-                           ::exchange-id (str worker-id "/readiness")})
-  (serve-worker-commands! worker-id reader writer nil))
+  (let [projection (packaged-test-projection worker-id)
+        started (System/nanoTime)
+        base (schema/call-with-projection
+              projection
+              #(deref @(requiring-resolve 'seon.test-support/database-base)))]
+    (when (:seon.error/kind base)
+      (throw (ex-info "A test worker could not prepare its canonical fixture base."
+                      base)))
+    (write-protocol! writer {::worker-event :ready
+                            ::worker-id worker-id
+                            ::fixture-preparation-ms
+                            (quot (- (System/nanoTime) started) 1000000)
+                            ::exchange-id (str worker-id "/readiness")})
+    (serve-worker-commands! worker-id reader writer {::projection projection})))
 
 (defn- worker-main!
   [worker-id]
@@ -2931,6 +2941,8 @@
                        :seon.error/kind ::worker-launch-failure
                        ::underlying-failure-kind (:seon.error/kind ready)
                        :seon.test.runner/worker-launch-failure true))))
+    (println "bin/test: WORKER READY" (pr-str ready))
+    (flush)
     worker))
 
 (defn- initialize-worker!

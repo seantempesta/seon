@@ -237,16 +237,17 @@
 
 (defn- initialize-contracts!
   "Load selected tests and acquire the one arming value for workers and test-fast."
-  [role namespaces]
-  ;; Packaged acquisition loads the declared predicate owners before compiling.
-  ;; Carry that same value through selected namespace loading and arming.
-  (let [projection (packaged-test-projection role)
-        _ (schema/call-with-projection
-           projection
-           #(doseq [namespace-name namespaces] (require namespace-name)))
-        decision (arming-decision)
-        applied (arm-contracts! decision projection role namespaces)]
-    {:seon.test.runner/projection projection
-     :seon.test.runner/namespaces namespaces
-     :seon.test.runner/decision decision
-     :seon.test.runner/instrumented (:seon.instrument/instrumented applied)}))
+  ([role namespaces]
+   (initialize-contracts! role namespaces (packaged-test-projection role)))
+  ([role namespaces projection]
+   ;; Packaged acquisition loads the declared predicate owners before compiling.
+   ;; Carry that same value through fixture preparation, loading and arming.
+   (let [_ (schema/call-with-projection
+            projection
+            #(doseq [namespace-name namespaces] (require namespace-name)))
+         decision (arming-decision)
+         applied (arm-contracts! decision projection role namespaces)]
+     {:seon.test.runner/projection projection
+      :seon.test.runner/namespaces namespaces
+      :seon.test.runner/decision decision
+      :seon.test.runner/instrumented (:seon.instrument/instrumented applied)})))
