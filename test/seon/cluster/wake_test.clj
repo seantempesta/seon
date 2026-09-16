@@ -189,6 +189,23 @@
             "an agent that wakes on its own commits spins forever — and both
              sides of this are computed, never a reviewed list")))))
 
+(defn- declaring
+  "The attributes whose CANONICAL SCHEMA ROW carries `property`.
+
+  The expected side of the wake sets, read from the schema resources on
+  the classpath rather than written down here. A literal would be exactly
+  the hand list these derivations exist to abolish, and it went stale the
+  first time a family was declared (`:seon.issue/agent`, 2026-09-16).
+  Comparing resources against the installed database is a real oracle:
+  it fails when a declaration does not reach its row, when a row is not
+  installed, and when a family is added or removed without anyone
+  deciding it here."
+  [property]
+  (into #{}
+        (comp (filter (fn [row] (true? (get row property))))
+              (map :seon.schema/key))
+        (seon.schema/canonical-schema-rows)))
+
 (deftest the-listened-set-is-declared-not-listed
   ;; THE CLASS: a hand list of wake attributes drifts from the families
   ;; that own them. The set is one query over `:seon.wake/listen`, and a
@@ -199,48 +216,62 @@
       (let [database (db/db connection)
             listened (wake/wake-attributes database)
             opening (wake/turn-opening-attributes database)
-            inside (wake/inside-attributes database)]
-        (is (= #{:seon.message/inbox
-                 :seon.effect/to
-                 :seon.schedule.fire/agent}
-               listened)
+            inside (wake/inside-attributes database)
+            arming (wake/arming-attributes database)]
+        (is (= (declaring :seon.wake/listen) listened)
             "the families that wake an agent, derived from their
              own declarations")
-        (is (= #{:seon.message/inbox :seon.effect/to}
-               opening)
-            "a schedule firing surfaces in the next context; it never
-             pays for a model call by itself")
-        (is (= #{:seon.message/from
-                 :seon.message/about
-                 :seon.effect/to
-                }
-               inside)
+        (is (= (declaring :seon.wake/opens-turn?) opening)
+            "and the ones whose unanswered wake may pay for a model call")
+        (is (= (declaring :seon.wake/inside) inside)
             "and the population's own activity never refills the turn
              bound it spends")
-        (is (not (contains? listened :seon.agent/id))
-            "creating an agent is not a wake: its first message is its
-             first wake, and the armer belt arms an agent created and
-             addressed in one commit")))))
+        (is (= (declaring :seon.wake/arms) arming)
+            "and the one that means a new agent exists to arm")
+        ;; The RULINGS the declarations encode, each stated where a reader
+        ;; meets it. These are membership claims about one family, never a
+        ;; second copy of the set.
+        (is (contains? opening :seon.message/inbox)
+            "a message is an ask, so it opens a turn")
+        (is (contains? opening :seon.issue/agent)
+            "so is an issue assignment: it is a one-time explicit ask, and
+             a worker that never turns about its own issue is the whole
+             reason the assignment became a wake")
+        (is (and (contains? listened :seon.schedule.fire/agent)
+                 (not (contains? opening :seon.schedule.fire/agent)))
+            "a schedule firing surfaces in the next context; it never
+             pays for a model call by itself")
+        (is (and (contains? arming :seon.agent/id)
+                 (not (contains? listened :seon.agent/id)))
+            "creating an agent arms it and wakes nothing: the armer
+             derives (agents in facts) - (armed set), so the datom's
+             value is not a recipient and nothing is routed")))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; C3 — the handler's two absolute prohibitions, live
 ;;; ---------------------------------------------------------------------------
 
 (deftest an-unrouted-recipient-reaches-the-armer
-  ;; THE BELT, and the reason creating an agent is no longer a wake of
-  ;; its own: an agent created and addressed in ONE commit has no
-  ;; routing entry yet, so its message falls through to the armer, whose
-  ;; pass derives (agents in facts) − (armed set) and arms it. A fresh
-  ;; agent's first message IS its first wake.
+  ;; TWO WAYS TO THE ARMER, and neither is a second arming path.
+  ;;
+  ;; 1. CREATION ITSELF. `:seon.agent/id` is declared `:seon.wake/arms`,
+  ;;    so committing an agent offers the armer a payload-free wake. Before
+  ;;    that declaration an agent created and not addressed waited for the
+  ;;    next boot while `next-agent-work` reported work nobody could run
+  ;;    (`a-worker-started-while-the-cluster-runs-is-never-armed`).
+  ;; 2. THE BELT. An agent created and addressed in ONE commit has no
+  ;;    routing entry yet, so its message ALSO falls through here.
+  ;;
+  ;; Both end in the same derive-all pass: (agents in facts) − (armed set).
   (with-connection
     (fn [connection]
       (let [mailbox (async/chan (async/sliding-buffer 1))
             {:keys [armer key]} (route-probe! connection mailbox)]
         (try
           (test-support/transacted! connection [{:seon.agent/id "agent-b"}])
-          (is (nil? (async/poll! armer))
-              "creating an agent asserts no listened attribute, so it
-               wakes nobody by itself")
+          (is (some? (test-support/await-event! armer "creation arm wake"))
+              "creating an agent asserts its arming attribute, so the
+               armer takes a pass without anyone addressing it")
           (test-support/transacted!
                        connection
                        [{:seon.message/id "m-to-b" :seon.message/to [:seon.agent/id "agent-b"] :seon.message/content "hello" :seon.message/inbox [:seon.agent/id "agent-b"]}])
@@ -585,8 +616,9 @@
                     (case commit
                       :message (db/transact! connection (message-tx
                                                        (str "pm-" index)))
-                      ;; a bare agent creation asserts no listened
-                      ;; attribute, so it must wake NOBODY
+                      ;; a bare agent creation asserts its ARMING
+                      ;; attribute: it routes to nobody's mailbox and
+                      ;; offers the armer exactly one wake
                       :agent (db/transact! connection
                                          [{:seon.agent/id
                                            (str "pa-" index)}])
@@ -605,7 +637,9 @@
                      (= (count commits) rendered)
                      ;; routing is unchanged by the added delivery
                      (= (count (filter #{:message} commits)) mailed)
-                     (zero? armed)
+                     ;; and the armer hears every agent creation, and
+                     ;; nothing else: a turn's own commits reach neither
+                     (= (count (filter #{:agent} commits)) armed)
                      ;; and no fault was raised on any healthy path
                      (nil? (async/poll! faults))))
                   (finally
