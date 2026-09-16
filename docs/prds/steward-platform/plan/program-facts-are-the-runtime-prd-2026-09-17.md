@@ -446,6 +446,61 @@ through the virtual-turn helpers already in `test/seon/turn_test.clj`.
 **Boundary.** In-process on `default` with Juniper; cold gate on
 `seon.issue-test seon.turn-test seon.turn-loop-test seon.issue-settlement-test`.
 
+### S8 — Root runs the collector and the rest of its maintenance (owner, 2026-09-17 10:45Z)
+
+**Ruling.** The root agent owns storage reclamation and the other scheduled
+maintenance; it is not an operator chore and not a reset. Grounding is
+decision 3 of `owner-decisions-2026-09-17.md` and batch C's reading of
+`reference-code/datahike/src/datahike/gc.cljc` and
+`reference-code/konserve/src/konserve/gc.cljc`.
+
+**Change.**
+1. **The signal is the unreachable-key ratio, from numbers the dependency
+   already computes.** Numerator: `konserve.filestore/count-konserve-keys`
+   (`filestore.clj:221-227`). Denominator: the retained-file count Datahike's
+   own mark produces, which `seon.cluster.registry`'s dry run already returns
+   as `:seon.cluster.registry/retained-files` and the real collection path
+   currently discards — return the same inventory map from both. Stored as a
+   maintenance fact by the owner that landed on 2026-09-16
+   (`seon.maintenance/last-collection`), whose typed "never collected" answer
+   means "collect once to establish the denominator", never "fine".
+2. **The cutoff is derived, never tuned.** `remove-before` = the creation
+   instant of the oldest commit id any live fact still names — today the
+   published `:seon.source/commit-id` a cluster forks from — resolved through
+   the commit record's `:datahike/created-at`; with no such fact, the branch
+   heads alone (which `gc-storage!` retains unconditionally). Any live
+   experimental branch (S4, later) is in the roster and so is marked.
+3. **The trigger lives on the existing schedule row.** `root/maintenance/footprint`
+   (`src/seon/schedule.clj:46-50`, daily) compares the two numbers and calls
+   `seon.operator/collect!` with the derived cutoff when keys exceed the last
+   retained count by a declared multiple (a dial in the maintenance config
+   family, default to be ruled: two or three). `root/maintenance/compact`
+   (weekly) stays as the floor. No new counter, cache or index.
+4. **Defect to close in the same slice:** `gc-storage!` ignores unknown option
+   keys, so a caller passing `{:dry-run? true}` (not in the `:datahike.gc/*`
+   family) performs a REAL collection — it happened once on `default`. The
+   one Seon entry point refuses unrecognised option keys by name.
+5. **The rest of the portfolio** (`reap-dead-roots`, `rotate-logs`,
+   `process-census`) is reviewed for the same absence-as-health shape: each
+   row reports a typed result fact, and "nothing to do" is a value.
+
+**First step before any code:** one dry-run collection on `default` with the
+correct key (`{:seon.operator.collect/dry-run? true}`), which deletes nothing
+and returns candidate bytes, retained files and the mark's duration — the
+denominator and the real cost at today's size.
+
+**Acceptance.** (1) after a dry run, the maintenance fact carries retained and
+candidate counts and the mark duration; (2) with keys above the multiple, the
+scheduled row collects with the derived cutoff and the fact updates; below it,
+it records "no collection needed" with both numbers; (3) an unknown option key
+is refused by name; (4) the store on `default` stays under the multiple across
+a day of gates without a reset — measured, with the numbers in the landing
+note.
+
+**Boundary.** Scratch root for the destructive proof; cold gate on
+`seon.maintenance-test seon.maintenance-schema-test seon.cluster.registry-test`.
+The dry run on `default` is the only production-root action, on the owner's word.
+
 ### S6 — The identity list derives from the declarations (I6; open issue)
 
 `seon.program/identity-attributes` is a literal vector while
@@ -530,6 +585,7 @@ These are in addition to AGENTS.md §0–§10 and §7's launching rules.
 | 7 | S4b merge by replay | DEFERRED with S4a | — |
 | 2b | S7 issue task loop | the first structured task (render pairs) needs it; independent of S1 | 1–2 days |
 | 2c | decision 9, no render fallback | the render-pair task needs every uncurated attribute visible | ½ day |
+| 3b | S8 root runs the collector | eight resets a day is not a substrate; dry run first | 1 day + dry run |
 
 S1 goes to one astra lane (design-sensitive); S2, S6 to Opus; S3 to astra;
 S4a Opus; S5 and S4b astra with design review at `high` effort. No slice
