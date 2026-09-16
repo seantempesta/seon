@@ -88,6 +88,20 @@ publication-reloaded definition.
 
 ### Live adoption and browser boundary
 
+Final verification at 02:17:59Z / 02:18:01Z, after the optional-fact commit
+`54f9155f1`: test pair **24/0/0**, run 58698, basis 536871378, 1985 ms;
+function pair **17/0/0**, run 58699, basis 536871379, 1806 ms. All four Vars
+were then confirmed armed. These are the latest recorded regression results.
+
+An intervening armed run 57599 at 02:15:08Z recorded **18/6/0**, with both
+outputs falling through to the value renderer. Read-only probes falsified
+missing pair declarations: both default and the fixture stored them, and
+the fixture SCI projection held them. A later fresh canonical branch probe
+normalized the real ref collection and matched `:seon.test/test`; the two
+final reruns above passed. No selection/fixture owner or global fixture
+state was changed by this lane. The cause of this transient mismatch is
+unverified; the final green does not prove adoption atomicity.
+
 The default JVM (PID 7595) contains the four armed Vars and indexed
 function contracts. This proves loaded definitions, not complete adoption:
 the source marker query returned no `:seon.source/commit-id`, while
@@ -125,6 +139,14 @@ The explicit publication finished with exit 1 after a retry, at
 `:seon.cluster/source-changed-during-adoption` after JVM instrumentation.
 Its shell has exited. No default stop, restart, refork, or foreign process
 operation was performed.
+
+The final marker probe still returned no adopted commit, while published
+source was `6aa9fc0a-762b-5454-82d9-b6871ae63b9f`. Reopening the linked
+function's debug page in Chrome still showed no function pair block.
+[The residual debug issue](../../../seon/issues/entity-pair-debug-parity-remains-unverified-after-adoption.md)
+names that remaining proof. Lane scratch files and the isolated commit
+snapshot were deleted; the explicit publication shell has exited. The
+gate request is also written to `tmp/orchestrator/gate-requests/entity-pairs.txt`.
 
 ### Gate request and exact boundaries
 
