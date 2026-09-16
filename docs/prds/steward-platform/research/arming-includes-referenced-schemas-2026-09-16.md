@@ -6,6 +6,84 @@ tags: [research, instrumentation, schema, class/n3]
 
 # Referenced declarations in wrapper identity — 2026-09-16
 
+## Cold arming fix — eeafb9dba
+
+Batch 29 at bf58f1ab0 ran zero tests: a cold worker refused nil as the
+predicate-functions argument to seon.schema/compilable-form immediately
+after PACKAGED TEST PROJECTION ACQUIRED. Read the retained batch report
+tmp/orchestrator/gate-results/batch-29/named.md end to end.
+
+The in-process before/after probe identifies **98b5f2afe** as the triggering
+commit. Holding the current packaged forms and the other three candidate
+commits fixed, the parent's arm-var! body arms and returns "juniper";
+the new body refuses with the exact batch error. The old current-wrapper?
+predicate was inlined in the isolated parent function; no production root
+was rolled back. 1c98259ba changes a render selector; efaa45a68 and
+3596cfb96 remain loaded in BOTH cases. This is a controlled arming-seam
+comparison, not a claim to have reverted those foreign owners live.
+
+The real failing call is src/seon/schema.clj:608, reached by the new
+contract-definitions helper. The worker's actual
+seon.test.arm/packaged-test-projection calls declaration-projection, which
+correctly OMITS :seon.schema.projection/predicate-functions. It does not
+carry a key with nil. direct-references converted that absence into a nil
+argument. compiled-wrapper already used get with {} and was not the
+failing caller. The initial attribution to its line 557 is falsified.
+
+Commit eeafb9dba makes direct-references use the same explicit {} default.
+The canonical definitions and digest algorithm are unchanged. Guarantee:
+reference inspection always receives the predicate map supplied by its
+projection, or the empty map for a declaration-only projection, without
+consulting a development binding. No constructor change or new arming
+mechanism is necessary.
+
+Live proof used default PID 53378. A new daemon Thread acquired the actual
+packaged test projection with **zero thread bindings**, armed one wrapper,
+and returned "juniper". Its digest was
+ad621f23fc157e636e01807e0c76ae5b8b903fbe83825450b8c7b40c77332605,
+equal to the bound case. Before the fix, a fresh Thread reproduced the
+compilable-form refusal with caller evidence schema.clj:608. There is no
+predicate-functions dynamic Var; the regression explicitly clears the
+two schema projection bindings instead of inventing one.
+
+REPL sequence: evaluated the replacement direct-references form, called
+contract-definitions on the packaged :seon.agent/id contract and read its
+complete canonical definition, evaluated the new regression, then ran it
+before editing. The canonical instrumentation fixture restores entering
+roots and registry after every test. All runs used the test loader and
+two-argument seon.test/run on a future, polled in later short MCP calls.
+
+| In-process run | Result (pass/fail/error) |
+| --- | --- |
+| New cold regression before edits, 53865 | 5/0/0 |
+| Test namespace reloaded after edits, cold regression 53867 | 5/0/0 |
+| Referenced-declaration class regression 53868 | 8/0/0 |
+| Complete instrument-test, 27 derived test Vars, 53869–55842 | 132/0/0 |
+
+The complete namespace includes cold regression 55826 (5/0/0), class
+regression 55837 (8/0/0), and authored-contract regression 53882 (7/0/0).
+Runs started 05:24:34.524Z through 05:25:49.706Z, a 75.182-second span
+between first and last starts. Exact forms are in
+[cold-arming-probe-2026-09-16.edn](cold-arming-probe-2026-09-16.edn);
+every test's run identity, time and counts are in
+[cold-arming-results-2026-09-16.edn](cold-arming-results-2026-09-16.edn).
+git diff --check passed. No test JVM or lane gate was launched.
+
+Publication boundary: hook 1dcca2ec-bc63-4733-80a3-8807b3aa0369 exited 1.
+The shared publication currently refuses :seon.issue/cites on a schema
+population transaction; resources/seon/schemas/seon.issue.edn and the new
+seon.issue.citation.edn have concurrent edits and were untouched. At the
+final probe, published source was 6aaa281b-cb35-5a6d-b1f1-8813f08eb4b4,
+while default recorded 6aaa25da-35e2-5a96-892d-cf6554f5ce68. The host
+definition and loaded tests are verified; complete adoption and the cold
+worker gate are NOT claimed. The gate request now names eeafb9dba and
+the schema owner path. Default was never stopped, restarted or reforked.
+All probe tasks completed; ten temporary Vars were removed and verified
+absent. No owned background shell, test worker, or scratch root remains.
+The Markdown hook reported 29 repository citation findings, including
+stale dependency gitlinks in agents-md-audit-2026-09-15.md; those unrelated
+authority files were not changed by this bounded fix.
+
 ## Result and boundary
 
 Arming implementation commit: 98b5f2afe. Selector and residual evidence

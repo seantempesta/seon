@@ -39,3 +39,15 @@ tracked in
 [the fixture issue](../web-debug-fixture-transactions-and-budget-expectations-fail.md).
 The broader N3 class remains open for its other owners. Complete evidence and
 gate request: [landing note](../../../prds/steward-platform/research/arming-includes-referenced-schemas-2026-09-16.md).
+
+## Cold-worker correction — 2026-09-16
+
+Commit eeafb9dba fixes the cold arming regression triggered by 98b5f2afe:
+direct-references passed an omitted packaged-projection predicate map as
+nil to compilable-form. It now supplies {} for absence, as the existing
+compiled-wrapper path already did. The constructor emitted no nil key.
+A fresh thread with zero bindings arms successfully and derives the same
+digest as the bound case. The new cold regression passes 5 assertions;
+all 27 instrument-test tests pass 132 assertions in-process on default,
+including the original class regression's 8 assertions. Exact run facts
+and the independent publication boundary are in the landing note above.
