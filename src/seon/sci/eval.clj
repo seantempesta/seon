@@ -718,20 +718,20 @@
 
 (defn- remaining-definition-facts
   [db [identity-attribute identity-value :as program-identity]]
-  (let [committed
-        (dissoc (db/pull db '[*] program-identity)
-                :db/id :seon.schema.admission/source)
-        namespace-attribute
-        (get namespace-reference-attributes identity-attribute)
-        identity-row
-        (cond-> {identity-attribute identity-value}
-          (and namespace-attribute
-               (find committed namespace-attribute))
-          (assoc namespace-attribute (get committed namespace-attribute)))
-        attributes (program/changed-attributes committed identity-row)]
-    (when (seq attributes)
-      {:seon.program/identity program-identity
-       :seon.program/definition-attributes attributes})))
+  (when-let [row (db/pull db '[*] program-identity)]
+    (let [committed
+          (dissoc row :db/id :seon.schema.admission/source)
+          namespace-attribute
+          (get namespace-reference-attributes identity-attribute)
+          identity-row
+          (cond-> {identity-attribute identity-value}
+            (and namespace-attribute
+                 (find committed namespace-attribute))
+            (assoc namespace-attribute (get committed namespace-attribute)))
+          attributes (program/changed-attributes committed identity-row)]
+      (when (seq attributes)
+        {:seon.program/identity program-identity
+         :seon.program/definition-attributes attributes}))))
 
 (defn committed-row?
   "True when `row` is the effective declaration in the terminal database.

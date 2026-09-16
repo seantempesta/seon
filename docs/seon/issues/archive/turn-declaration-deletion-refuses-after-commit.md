@@ -41,3 +41,19 @@ contradicting ruling 47 (identity rows never retract; deletion
 retracts definition facts). It now verifies definition-fact absence.
 All four named turn tests green in the lane's five-namespace gate
 (149 tests / 901 assertions).
+
+## Recurrence probe — 2026-09-16
+
+The old tombstone repair is present at `a55bdfc80`, but its comparison passed
+nil to `changed-attributes` when a deletion named an identity that never
+existed (for example the test sibling of a function). The turn-test-reds slice
+branches on the actual pulled entity at `remaining-definition-facts`, so only
+existing definition maps are compared. Four real deletion regressions pass
+19 assertions both before source editing and after isolated development
+adoption, with fresh canonical bases and armed contracts.
+
+The separate schema-attribute removal observable is not claimed repaired;
+it is tracked in
+[the residual](../runtime-schema-unregister-retains-installed-attribute.md).
+Exact commits and recorded runs are in
+[the landing](../../../prds/context-generation/research/turn-test-reds-2026-09-16.md).

@@ -92,6 +92,20 @@
   [result-edn]
   (#'admit/semantic-value (edn/read-string result-edn)))
 
+(defn- agent-evaluations
+  "Read agent-authored evaluations in turn and ordinal order, excluding system reads."
+  [database]
+  (let [rows (db/q '[:find ?turn-t ?ordinal (pull ?evaluation [* {:seon.cluster.eval/ns [:seon.ns/name]}])
+                     :where
+                     [?evaluation :seon.cluster.eval/author :agent]
+                     [?evaluation :seon.cluster.eval/run ?turn]
+                     [?turn :seon.turn/id _ ?turn-t]
+                     [?evaluation :seon.cluster.eval/ordinal ?ordinal]]
+                   database)]
+    (when (:seon.error/kind rows)
+      (throw (ex-info "The evaluation observation was refused." rows)))
+    (mapv #(nth % 2) (sort-by #(subvec % 0 2) rows))))
+
 (defn- stable-program-identity-row?
   [row identity-attribute identity-value namespace-attribute]
   (and (= identity-value (get row identity-attribute))
@@ -615,34 +629,40 @@
 (deftest ns-unmap-retracts-the-owned-function-after-the-terminal-commit
   (with-cluster
     (fn [cluster]
-      (let [connection (:seon.db/connection cluster)]
+      (let [connection (:seon.db/connection cluster)
+            identity [:seon.fn/sym "my.agents.agent-a/obsolete"]
+            deletion {:seon.program/delete-identities
+                      [identity [:seon.test/sym "my.agents.agent-a/obsolete"]]
+                      :seon.program/source "(ns-unmap 'my.agents.agent-a 'obsolete)"}]
+        (is (true? (sci.eval/committed-row? (db/db connection) deletion))
+            "an identity that never existed has no remaining definition facts")
+        (with-redefs [ai/complete
+                      (fn [_]
+                        {:seon.ai/text
+                         (str "(defn ^{:malli/schema [:=> [:cat :int] :int]} obsolete [x] (inc x))\n"
+                              "(seon.run/complete \"installed\")")})]
+          (drive-agent! cluster "agent-a" 2))
+        (is (false? (sci.eval/committed-row? (db/db connection) deletion))
+            "a live definition cannot be reported deleted")
         (db/transact! connection
-                    [{:seon.ns/name 'my.agents.agent-a}
-                     {:seon.agent/id "agent-a"
-                      :seon.agent/namespace
-                      [:seon.ns/name 'my.agents.agent-a]}])
-        (with-redefs
-          [ai/complete
-           (fn [_]
-             {:seon.ai/text
-              (str
-               "(defn ^{:malli/schema [:=> [:cat :int] :int]} obsolete "
-               "[x] (inc x))\n"
-               "(ns-unmap 'my.agents.agent-a 'obsolete)")})]
-          (drive! cluster 10)
-          (is (= 2
-                 (count
-                  (db/q '[:find ?receipt
-                         :where
-                         [?receipt :seon.cluster.eval/result-edn _]]
-                       @connection)))
-              "the declaration and deletion both leave receipts")
-          ;; Ruling 47: unmap retracts definition facts; identity never retracts.
-          (is (stable-program-identity-row?
-               (db/pull @connection '[*]
-                        [:seon.fn/sym "my.agents.agent-a/obsolete"])
-               :seon.fn/sym "my.agents.agent-a/obsolete" :seon.fn/ns)
-              "the explicit delete leaves only stable identity facts"))))))
+                      [{:seon.message/id "delete-obsolete"
+                        :seon.message/to [:seon.agent/id "agent-a"]
+                        :seon.message/inbox [:seon.agent/id "agent-a"]
+                        :seon.message/content "Remove obsolete."}])
+        (with-redefs [ai/complete
+                      (fn [_]
+                        {:seon.ai/text
+                         "(ns-unmap 'my.agents.agent-a 'obsolete)\n(seon.run/complete \"deleted\")"})]
+          (drive-agent! cluster "agent-a" 2))
+        (let [evaluations (agent-evaluations (db/db connection))]
+          (is (= 4 (count evaluations)))
+          (is (= "nil" (:seon.eval/shown (nth evaluations 2))))
+          (is (every? #(nil? (:seon.cluster.eval/error %)) evaluations)))
+        (is (stable-program-identity-row?
+             (db/pull (db/db connection) '[*] identity)
+             :seon.fn/sym (second identity) :seon.fn/ns))
+        (is (true? (sci.eval/committed-row? (db/db connection) deletion))
+            "a tombstone and an absent sibling identity both verify as deleted")))))
 
 (deftest reply-reading-follows-evaluated-alias-and-dynamic-require-state
   (with-cluster
@@ -677,25 +697,23 @@
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
             function-sym "my.agents.agent-a/dynamic-obsolete"]
-        (with-redefs
-          [ai/complete
-           (fn [_]
-             {:seon.ai/text
-              (str
-               "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
-               "dynamic-obsolete [x] (inc x))\n"
-               "(clojure.core/ns-unmap "
-               "(find-ns 'my.agents.agent-a) (symbol \"dynamic-obsolete\"))")})]
-          (drive! cluster 10)
-          ;; Ruling 47: the qualified unmap removes definition facts, not identity.
+        (with-redefs [ai/complete
+                      (fn [_]
+                        {:seon.ai/text
+                         (str "(defn ^{:malli/schema [:=> [:cat :int] :int]} dynamic-obsolete [x] (inc x))\n"
+                              "(clojure.core/ns-unmap (find-ns 'my.agents.agent-a) (symbol \"dynamic-obsolete\"))\n"
+                              "(seon.run/complete \"deleted\")")})]
+          (drive-agent! cluster "agent-a" 2)
           (is (stable-program-identity-row?
-               (db/pull @connection '[*] [:seon.fn/sym function-sym])
+               (db/pull (db/db connection) '[*] [:seon.fn/sym function-sym])
                :seon.fn/sym function-sym :seon.fn/ns))
-          (let [fresh (sci.eval/cluster-ctx @connection)]
-            (is (nil? (sci.core/eval-string*
-                       fresh
+          (let [database (db/db connection)
+                fresh (sci.eval/cluster-ctx
+                       database connection
+                       (sci.eval/projection-state database (db/carried-projection database)))]
+            (is (nil? (sci.core/eval-string* fresh
                        "(resolve 'my.agents.agent-a/dynamic-obsolete)"))
-                "acquisition cannot resurrect the deleted function")))))))
+                "fresh acquisition cannot resurrect a deleted definition")))))))
 
 (deftest absent-foreign-ns-unmap-commits-and-mutates-the-run-sci-ctx
   (with-cluster
@@ -703,29 +721,20 @@
       (let [connection (:seon.db/connection cluster)
             original-evaluate sci.eval/evaluate
             evaluated-ctx (atom nil)]
-        (with-redefs
-          [ai/complete
-           (fn [_]
-             {:seon.ai/text
-              "(ns-unmap 'clojure.string 'upper-case)"})
-           sci.eval/evaluate
-           (fn [request]
-             (reset! evaluated-ctx (:seon.sci.eval/ctx request))
-             (original-evaluate request))]
-          (drive! cluster 10)
-          (is (nil?
-               (semantic-result
-                (db/q '[:find ?result .
-                        :where
-                        [?receipt :seon.cluster.eval/ordinal 0]
-                        [?receipt :seon.cluster.eval/result-edn ?result]]
-                     @connection)))
-              "an absent program identity is still a successful REPL ns-unmap")
-          (is (nil?
-               (sci.core/eval-string*
-                @evaluated-ctx
-                "(resolve 'clojure.string/upper-case)"))
-              "the committed deletion installs against the run-local ctx"))))))
+        (with-redefs [ai/complete
+                      (fn [_] {:seon.ai/text "(ns-unmap 'clojure.string 'upper-case)"})
+                      sci.eval/evaluate
+                      (fn [request]
+                        (reset! evaluated-ctx (:seon.sci.eval/ctx request))
+                        (original-evaluate request))]
+          (drive-agent! cluster "agent-a" 2)
+          (let [evaluations (agent-evaluations (db/db connection))]
+            (is (= 1 (count evaluations)))
+            (is (= "nil" (:seon.eval/shown (first evaluations))))
+            (is (nil? (:seon.cluster.eval/error (first evaluations)))))
+          (is (nil? (sci.core/eval-string* @evaluated-ctx
+                     "(resolve 'clojure.string/upper-case)"))
+              "the committed deletion updates the evaluated SCI context"))))))
 
 (deftest import-only-ns-unmap-installs-exactly-after-its-context-commit
   (with-cluster
@@ -1360,39 +1369,26 @@
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
             test-sym "my.agents.agent-a/versioned-test"]
-        (with-redefs
-          [ai/complete
-           (fn [_]
-             {:seon.ai/text
-              (str
-               "(require '[clojure.test :refer [deftest]])\n"
-               "(deftest versioned-test :v1)\n"
-               "((:test (meta (resolve 'versioned-test))))\n"
-               "(deftest versioned-test :v2)\n"
-               "((:test (meta (resolve 'versioned-test))))\n"
-               "(ns-unmap 'my.agents.agent-a 'versioned-test)\n"
-               "(resolve 'versioned-test)")})]
-          (drive! cluster 12)
-          (let [results
-                (into {}
-                      (map (fn [[ordinal result-edn]]
-                             [ordinal (semantic-result result-edn)]))
-                      (db/q '[:find ?ordinal ?result
-                             :where
-                             [?receipt :seon.cluster.eval/ordinal ?ordinal]
-                             [?receipt :seon.cluster.eval/result-edn ?result]]
-                           @connection))]
-            (is (= :v1 (get results 2))
-                "V1 resolves and its SCI :test function runs")
-            (is (= :v2 (get results 4))
-                "V2 replaces the live test exactly")
-            (is (nil? (get results 6))
-                "ns-unmap removes the live SCI binding")
-            ;; Ruling 47: test definition facts retract; identity never does.
+        (with-redefs [ai/complete
+                      (fn [_]
+                        {:seon.ai/text
+                         (str "(require '[clojure.test :refer [deftest]])\n"
+                              "(deftest versioned-test :v1)\n"
+                              "((:test (meta (resolve 'versioned-test))))\n"
+                              "(deftest versioned-test :v2)\n"
+                              "((:test (meta (resolve 'versioned-test))))\n"
+                              "(ns-unmap 'my.agents.agent-a 'versioned-test)\n"
+                              "(resolve 'versioned-test)")})]
+          (drive-agent! cluster "agent-a" 2)
+          (let [evaluations (agent-evaluations (db/db connection))]
+            (is (= 7 (count evaluations)))
+            (is (= ":v1" (:seon.eval/shown (nth evaluations 2))))
+            (is (= ":v2" (:seon.eval/shown (nth evaluations 4))))
+            (is (= "nil" (:seon.eval/shown (nth evaluations 6))))
+            (is (every? #(nil? (:seon.cluster.eval/error %)) evaluations))
             (is (stable-program-identity-row?
-                 (db/pull @connection '[*] [:seon.test/sym test-sym])
-                 :seon.test/sym test-sym :seon.test/ns)
-                "ns-unmap leaves only the committed test identity")))))))
+                 (db/pull (db/db connection) '[*] [:seon.test/sym test-sym])
+                 :seon.test/sym test-sym :seon.test/ns))))))))
 
 (deftest incompatible-clusters-alternate-runtime-schema-validation-without-bleed
   (with-cluster
