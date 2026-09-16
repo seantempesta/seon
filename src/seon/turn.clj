@@ -39,6 +39,27 @@
 
 (schema.edn/load! {})
 
+;;; `planned-sources` is defined below its first caller; this is a forward
+;;; reference inside one namespace, not a load cycle.
+(declare planned-sources)
+
+;;; LOAD-CYCLE BOUNDARIES. Each of these namespaces requires `seon.turn`
+;;; transitively, so this namespace cannot require them back. One resolution
+;;; per var, realized at first use, instead of a `requiring-resolve` on every
+;;; call (AGENTS §2.1: never fetch an input at call time).
+(defonce ^:private cluster-agent-acquire-context!
+  (delay (requiring-resolve 'seon.cluster.agent/acquire-context!)))
+(defonce ^:private cluster-agent-submit-source!
+  (delay (requiring-resolve 'seon.cluster.agent/submit-source!)))
+(defonce ^:private cluster-prompt-prompt
+  (delay (requiring-resolve 'seon.cluster.prompt/prompt)))
+(defonce ^:private context-capture-tx
+  (delay (requiring-resolve 'seon.context/capture-tx)))
+(defonce ^:private problems-assignment-value
+  (delay (requiring-resolve 'seon.problems/assignment-value)))
+(defonce ^:private problems-form-problem
+  (delay (requiring-resolve 'seon.problems/form-problem)))
+
 
 (defn- result-blob-threshold
   [db]
@@ -2022,7 +2043,7 @@
                               [{:seon.render/source text}]))]
              (reduce
               (fn [sources block]
-                (let [parsed ((requiring-resolve 'seon.turn/planned-sources)
+                (let [parsed (planned-sources
                               (:seon.render/source block) namespace-name
                               (get-in handle [:seon.sci.admit/caps
                                               :seon.config.eval.result/max-source]))]
@@ -2197,7 +2218,7 @@
     write? :seon.turn/write?}]
   (let [connection (:seon.db/connection handle)
         database (db/db connection)
-        namespace-name ((requiring-resolve 'seon.sci.eval/agent-namespace) database agent-id)
+        namespace-name (sci.eval/agent-namespace database agent-id)
         declared (when namespace-name
                    (declared-sources handle database agent-id namespace-name))]
     (cond
@@ -2222,7 +2243,7 @@
             turn-id (when (and write? (seq selected))
                       (next-id database (:seon.cluster/name handle) agent-id))
             agent-ctx (when turn-id
-                        ((requiring-resolve 'seon.cluster.agent/acquire-context!)
+                        (@cluster-agent-acquire-context!
                          handle agent-id))
             previews (second
                       (reduce
@@ -2353,7 +2374,7 @@
                         (do
                           (doseq [item evaluated
                                   :let [evaluation (:seon.sci.eval/evaluation item)]]
-                            ((requiring-resolve 'seon.sci.eval/bind-result!)
+                            (sci.eval/bind-result!
                              agent-ctx (:seon.repl/handle evaluation)
                              (:seon.sci.admit/value evaluation)))
                           (assoc result :seon.turn/id turn-id))
@@ -2411,7 +2432,7 @@
                   [:or :seon.agent/source-submission-result
                    :seon.error/value]]}
   [request]
-  ((requiring-resolve 'seon.cluster.agent/submit-source!)
+  (@cluster-agent-submit-source!
    (update request :seon.cluster.reply/text #(or % ""))))
 
 
@@ -3278,7 +3299,7 @@
           test-symbols (seon.fn/gate-set database function-symbol)
           seed (accretion/seed-for receipt-id)
           candidate
-          ((requiring-resolve 'seon.sci.eval/evaluate-candidate)
+          (sci.eval/evaluate-candidate
            {:seon.sci.eval/ctx base-ctx
             :seon.db/db database
             :seon.db/connection (:seon.db/connection cluster)
@@ -3328,11 +3349,11 @@
                              :seon.turn/form-facts
                              (assoc form-facts :db/id [:seon.cluster.eval/id receipt-id])})]
       (if (:seon.test.accretion/install? report)
-        (append-output ((requiring-resolve 'seon.sci.eval/accept-candidate!)
+        (append-output (sci.eval/accept-candidate!
                         {:seon.sci.eval/ctx base-ctx :seon.db/db database
                          :seon.sci.eval/evaluation evaluation})
                        (:seon.test.accretion/advisories report))
-        ((requiring-resolve 'seon.sci.eval/refuse-install)
+        (sci.eval/refuse-install
          form evaluation (accretion/install-refusal report))))
     (if (get-in evaluation [:seon.program/row :seon.fn/sym])
       (dissoc evaluation :seon.program/row :seon.test.accretion/candidate-ctx)
@@ -3356,7 +3377,7 @@
   (let [time-limit-ms (:seon.sci.eval/time-limit-ms request)
         message (str "Evaluation submission did not settle within "
                      time-limit-ms "ms.")]
-    ((requiring-resolve 'seon.sci.eval/unrun-evaluation)
+    (sci.eval/unrun-evaluation
      {:seon.sci.admit/value
       {:seon.error/kind :seon.flow/time-limit
        :seon.flow/time-limit :seon.turn.loop/turn
@@ -3427,7 +3448,7 @@
          (cond-> {:my.turn/result (:my.turn/result settled)
                   :seon.agent/id agent-id}
            trigger (assoc :seon.message/trigger trigger))))
-      (when problem ((requiring-resolve 'seon.problems/assignment-value) problem))))
+      (when problem (@problems-assignment-value problem))))
 
 (defn- delivery-rows
   "Delivery rows and refusal transaction data for one asked value."
@@ -4312,7 +4333,7 @@
             ;; terminal results; recovery never has to reconstruct or rerun it.
             (let [reply-text (:seon.ai/text completion)
                   database (db/db connection)
-                  namespace-name ((requiring-resolve 'seon.sci.eval/agent-namespace) database agent-id)
+                  namespace-name (sci.eval/agent-namespace database agent-id)
                   max-source
                   (get-in cluster
                           [:seon.sci.admit/caps
@@ -4380,7 +4401,7 @@
           rendered
           (when-not (:seon.config.ai/no-provider settings)
           (phase
-           #((requiring-resolve 'seon.cluster.prompt/prompt) prompt-db
+           #(@cluster-prompt-prompt prompt-db
                            {:seon.turn/id run-id
                             :seon.agent/id agent-id
                             :seon.db/connection connection
@@ -4406,7 +4427,7 @@
           (when-not (:seon.config.ai/no-provider settings)
           (db/transact!
            connection
-           ((requiring-resolve 'seon.context/capture-tx)
+           (@context-capture-tx
             (if (:seon.error/kind rendered)
               {:seon.turn/id run-id
                ;; The immutable opening value the refused derivation used,
@@ -4672,7 +4693,7 @@
             (when-let [fault (generated-read-fault database form evaluation)]
               (throw (ex-info (:seon.error/message fault) fault))))
           (when entity-id
-            ((requiring-resolve 'seon.sci.eval/bind-result!) ctx handle (:seon.sci.admit/value evaluation)))
+            (sci.eval/bind-result! ctx handle (:seon.sci.admit/value evaluation)))
           (let [results (conj results
                               {:seon.cluster.eval/ordinal ordinal
                                :seon.turn.loop/admitted-form form
@@ -4704,7 +4725,7 @@
     text :seon.cluster.reply/text
     caps :seon.sci.admit/caps}]
   (let [opened-at (Date.)
-        forked ((requiring-resolve 'seon.sci.eval/fork-for-turn)
+        forked (sci.eval/fork-for-turn
                 {:seon.sci.eval/ctx base-ctx
                  :seon.db/db database
                  :seon.db/connection (:seon.db/connection cluster)
@@ -4734,7 +4755,7 @@
         run-id (:seon.turn/id work)
         base-ctx (:seon.sci.eval/ctx cluster)
         forked
-        (phase #((requiring-resolve 'seon.sci.eval/fork-for-turn)
+        (phase #(sci.eval/fork-for-turn
                  (cond-> {:seon.sci.eval/ctx base-ctx
                   :seon.db/db (db/db connection)
                   :seon.db/connection connection
@@ -4767,7 +4788,7 @@
                 :seon.cluster.eval/ordinal first-ordinal
                 :seon.ns/name (or (fold-namespace database run-id evaluations
                                                  first-ordinal)
-                                  ((requiring-resolve 'seon.sci.eval/agent-namespace) database agent-id))
+                                  (sci.eval/agent-namespace database agent-id))
                 :seon.cluster.reply/sources
                 (into []
                       (comp (filter (fn [evaluation]
@@ -4836,7 +4857,7 @@
                          ; Its reader error belongs only in the author's history.
                          (when-not reader-event
                            (phase
-                            #((requiring-resolve 'seon.problems/form-problem)
+                            #(@problems-form-problem
                               database
                               {:seon.turn/id run-id
                                :seon.cluster.eval/ordinal ordinal
@@ -4862,7 +4883,7 @@
                       (or (:refused-outcome settlement)
                           (when (:seon.error/kind outcome) outcome)))
               (do
-                ((requiring-resolve 'seon.sci.eval/install-evaluated-rows!)
+                (sci.eval/install-evaluated-rows!
                  {:seon.sci.eval/ctx base-ctx
                   :seon.db/db (:db-after outcome)
                   :seon.sci.eval/installations
@@ -4871,7 +4892,7 @@
                          (fn [{evaluation :seon.sci.eval/evaluation}]
                            (let [row (:seon.program/row evaluation)]
                              (when (and row
-                                        ((requiring-resolve 'seon.sci.eval/committed-row?)
+                                        (sci.eval/committed-row?
                                          (:db-after outcome) row))
                                {:seon.program/row row
                                 :seon.sci.eval/evaluation evaluation}))))
@@ -4913,7 +4934,7 @@
         entry
         (phase
          #(let [database (db/db connection)
-                namespace-name ((requiring-resolve 'seon.sci.eval/agent-namespace)
+                namespace-name (sci.eval/agent-namespace
                                 database agent-id)
                 declared (declared-sources cluster database agent-id namespace-name)]
             (if (:seon.error/kind declared)
@@ -4964,7 +4985,7 @@
                        :seon.cluster.eval/source
                        (:seon.cluster.eval/source entry)
                        :seon.ns/name
-                       ((requiring-resolve 'seon.sci.eval/agent-namespace) (db/db connection) agent-id)}
+                       (sci.eval/agent-namespace (db/db connection) agent-id)}
                 (:seon.eval/origin entry)
                 (assoc :seon.eval/origin (:seon.eval/origin entry))
                 (:seon.cluster.eval/comment entry)
