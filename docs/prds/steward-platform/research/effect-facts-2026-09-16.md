@@ -379,3 +379,65 @@ expected a set, got a set … :seon.db/offending #{nil}
 lifecycle lock immediately before this one (pid 64390). A `#{nil}` ref set is
 that lane's to fix; reported, not worked around. It did not block either proof
 above, both of which ran against the reloaded code.
+
+---
+
+# Batch 46 B attribution (third pass)
+
+`seon.effect-test` and `seon.sci.eval-test` green cold — both batch-43 defects
+are closed at root. Three `seon.edit-test` reds remained, and they are ONE
+cause, mine.
+
+## The fixtures seeded no config row
+
+`seed-write-back-cluster!` transacted an agent and a turn and nothing else, so
+in a cold worker that branch declares no `:seon.config.fs/*` dials at all.
+`seon.effect-test` passed the identical code path only because its own
+`seed-effect-run!` already transacts `(cluster-config 60000)` — a compiled
+manifest row, which fills every declared default.
+
+Measured on `default`, jvm mode:
+
+```clojure
+;; the compiled row carries the dials the handler reads
+{:seon.config.fs/roots ["."] :seon.config.fs/working-root "."}
+
+;; with NO dials, the filesystem owner throws an unclassified NPE
+(#'seon.fs.jvm/read-complete {:my.fs/path "/etc/hosts" :my.fs/encoding :utf-8}
+                             {:seon.config/cluster "default"})
+;; => java.lang.NullPointerException
+;;    "Cannot invoke \"java.lang.Number.doubleValue()\" because \"x\" is null"
+;;    ex-data: nil
+```
+
+That single fact explains both symptoms:
+
+- `declared-root-directory!` handed `(java.io.File. nil)` a missing
+  `:seon.config.fs/working-root` → `NullPointerException` at `File.java:288`
+  in `changed-programs-since-basis-is-a-query` and
+  `form-edit-refs-the-program-entity-it-changed`. **The fixture read absence
+  as a path** — the exact class `AGENTS.md` names, committed by the fixture
+  written to prevent it.
+- `edit-refusals-keep-their-filesystem-evidence` saw
+  `:seon.effect/handler-failed` because the NPE above is **unclassified**, so
+  `seon.edit.jvm/filesystem-refusal` rethrew it exactly as designed. The
+  conversion under test was correct; the cluster beneath it had no world.
+
+Fixed by seeding the compiled row (as `bin/seon config apply` does), and by
+making both fixtures refuse BY NAME when `:seon.config.fs/working-root` is
+absent instead of passing nil to `java.io.File`.
+
+## Filed, not fixed here
+
+[An absent filesystem dial throws a bare NullPointerException](../../../seon/issues/filesystem-dials-absent-throws-a-bare-nullpointerexception.md)
+— `seon.fs.jvm` owes a typed refusal naming the missing dial before it reads
+any path. It is not this lane's file and the fix is not needed for these reds,
+but it is what turned a missing fixture row into an opaque handler failure and
+cost a gate cycle.
+
+## Not mine in batch 46
+
+`seon.fn-test/file-artifacts-and-manifests-are-byte-digested-and-deterministic`
+(the source-root lane holds uncommitted `src/seon/fn.clj` work in this tree)
+and `seon.cluster.turn-test/delimiter-repair-is-span-local-and-precedes-intent`
+(protected).
