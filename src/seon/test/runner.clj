@@ -109,16 +109,31 @@
       (when (instance? Throwable (:actual event))
         (throwable-signature (:actual event)))))
 
+(defn- throwable-text
+  "One reported throwable as its own diagnostic body.
+
+  Its complete message plus frames bounded by the DECLARED
+  `:seon.print/length`. THE SIGNATURE IS NOT PART OF THIS TEXT: the cause's
+  signature is the error face's own trailer, named once per distinct cause by
+  `report-error!`, and a second copy carried inside the reported value made
+  one whole face name the same signature twice."
+  [options ^Throwable failure]
+  (str/trim-newline
+   (with-out-str
+     (println (str (.getName (class failure)) ": "
+                   (or (ex-message failure) "")))
+     (doseq [frame (take (:seon.print/length options)
+                         (.getStackTrace failure))]
+       (println "    at" frame)))))
+
 (defn- throwable-face
+  "A whole face for a throwable NO error face of its own will carry.
+
+  A worker task that fails outside a test Var has no `report-error!` trailer,
+  so its signature is named here."
   [options ^Throwable failure signature]
-  (with-out-str
-    (println (str (.getName (class failure)) ": "
-                  (or (ex-message failure) "")))
-    (doseq [frame (take (:seon.print/length options)
-                        (.getStackTrace failure))]
-      (println "    at" frame))
-    (when signature
-      (println "  signature:" signature))))
+  (cond-> (str (throwable-text options failure) "\n")
+    signature (str "  signature: " signature "\n")))
 
 (defn- report-value
   "One reported assertion value, rendered for a human reading the gate log.
@@ -131,13 +146,16 @@
   reports less than it observed is the failure class this project keeps
   meeting, so the reported throwable is plain text — its complete message plus
   frames bounded by the DECLARED print length, never the agent's budget
-  (AGENTS §2.4). The identity path (`printable`) has always done this.
+  (AGENTS §2.4). The identity path (`printable`) has always done this. It is
+  the throwable's BODY (`throwable-text`), not a whole face: the error face's
+  signature trailer belongs to `report-error!`, which names it once per
+  distinct cause.
 
   Ordinary values keep the profile: they are the ones that can be a whole
   database value."
   [options reported-value]
   (if (instance? Throwable reported-value)
-    (throwable-face options reported-value (throwable-signature reported-value))
+    (throwable-text options reported-value)
     (value/render-ai
      {:seon.render/value reported-value
       :seon.render.value/root 'seon.test.runner/assertion
