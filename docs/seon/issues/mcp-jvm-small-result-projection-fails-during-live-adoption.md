@@ -41,3 +41,13 @@ Later normal small returns succeeded, including the 02:23Z cleanup form's
 printed confirmation and nil return. A separate ambient-snapshot evaluation
 hit its declared 20,000 ms bound. Neither observation establishes a cause
 for the earlier projection failure; this issue remains open.
+
+## Write-validation-class observation — 2026-09-16
+
+Two read-only inspections on default pid 7595 returned MCP timeout at
+30,000 ms: one write-admission/schema inspection, then
+`(dissoc *1 :seon.test/printed :seon.test/failing-assertions)`.
+Smaller select-keys results subsequently returned in 3–7 ms of JVM time.
+Large failure-message projection also delayed delivery well beyond the
+reported test execution time. No cause is attributed to adoption from this
+evidence, and no restart or alternate REPL transport was used.

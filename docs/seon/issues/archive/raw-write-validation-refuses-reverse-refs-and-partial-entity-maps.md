@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: blocker
 tags: [issue, database, schema, wave/schema-admission]
 ---
@@ -47,7 +47,7 @@ database. Measured consequences at `cecfaf428`:
 `about-identity-resolution-pulls-one-deterministic-ordered-id-vector` 2/7/1),
 and `seon.turn-loop-test/attempt-settlement-updates-the-registered-model-gauges`
 0/4/0. Evidence:
-[error-graph batch 20 triage](../../prds/steward-platform/research/error-graph-2026-09-16.md).
+[error-graph batch 20 triage](../../../prds/steward-platform/research/error-graph-2026-09-16.md).
 
 The selection rule is the defect: an entity schema that lists an identity
 attribute as OPTIONAL is not a claim that every row carrying that attribute is
@@ -60,3 +60,27 @@ Secondary, same seam: the refusal message splices an unresolved contract into
 prose — *"expected the required key :seon.turn/agent with a value satisfying
 unknown error"*, *"a value satisfying invalid type"*. An unavailable expectation
 is the typed unknown, never the words "unknown error" in a sentence.
+
+## Settlement — 2026-09-16
+
+Commit `20d30a0bd` resolves optional identity misclassification and reverse
+map refs at the existing write-admission owner. The canonical class
+regression passes 12/0/0 before and after development adoption on default
+pid 7595; the fixture refusal regression passes 6/0/0. The exact
+`{:seon.problems/id "x"}` map commits, the reverse lookup-ref edge is
+queried independently, and an incomplete evaluation map still refuses its
+required run key. Default's previously reported fault-map refusal no longer
+reproduces; its installed signature is already a unique identity.
+
+This compound note is superseded rather than claiming every partial upsert
+is now accepted. Residuals:
+
+- [Incomplete identity upserts](../identity-upserts-still-require-complete-entity-maps.md)
+  remain deliberately constrained by the assignment's complete-entity check.
+- [Composite refusal grammar](../refusal-grammar-describes-composite-schemas-as-unknown-error.md)
+  belongs to the existing error explanation owner.
+- [Stale test-local seeds](../transcript-and-turn-fixtures-retain-deleted-storage-and-turn-shapes.md)
+  still need conversion to the current storage/turn model.
+
+Full live probes, exact test runs and pending orchestrator gate:
+[landing note](../../../prds/steward-platform/research/write-validation-class-2026-09-16.md).
