@@ -113,3 +113,23 @@ is a schema change and a reset. The third retirement path,
 `seon.cluster.source/mintable-identity`, still mints a row carrying
 `:seon.schema.admission/source` and `:seon.fn/ns` (a live-looking row for a
 name this database never defined) and is the remaining shape mismatch.
+
+## Addendum — `5ae2337d1` + `eec636a97` (pulled-ref-is-a-ref) reviewed (orchestrator, 2026-09-16 23:35Z)
+
+Read: both diffs and the landing note `pulled-ref-is-a-ref-2026-09-16.md`.
+**Approved for gate.** `:seon.db/ref` declares the nested-map spelling once,
+grounded in Datahike's `explode`; the four per-attribute widenings and the two
+inline ones (`seon.turn/open?`, `seon.test/changed-since-green`) are deleted;
+`:seon.message/pulled-reference` is gone. The class regression drives 80
+reference-bearing map schemas from the projection (48 storable round-tripped,
+32 non-storable validated). The session panel now renders a contract
+violation with its full typed evidence and rethrows anything else — the page
+can no longer sit on "Loading…" and cannot hide the next instance of the
+class. Live: the prompt request for agent 2393cac275ae answers 200 with a
+21,708-byte prompt; the owner can now inspect the generated context.
+
+Two findings it filed rather than fixed, both on the audit's list: 17
+whole-map set/vector mismatches (stored cardinality-many pulled back as
+vectors against `[:set …]` declarations — the pulled-form derivation, step B,
+owns it) and `write-value`'s 0-substitution. Step B (derive the pulled form
+of an entity schema under a selector) is the next slice on this class.
