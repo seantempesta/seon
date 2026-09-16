@@ -288,3 +288,16 @@ guarded deletion — 1–2 days across owners; (3) manual-only retention —
 30–60 min, manual calls still pause writers. The orchestrator chose (1)
 under the dissolution law (owner not present; reversible by one revert) and
 resumed the lane. Flagged for the owner.
+
+### 2026-09-16 06:30Z — store footprint: 67 GB unreachable, GC never runs in practice
+
+Research `cfef57241` (`store-footprint-2026-09-16.md`): 71.6 GB / 382,425
+files, 93.3% `pss/leaf` copy-on-write index nodes; created 2026-09-08; grew
+2.8 → 15.4 → 52.9 GB per day 09-13 → 09-15; ~50 files / ~1.5 MB retained per
+transaction on `:cluster-default` at ~6 tx/min, dominated by edit-hook
+`:seon.fn.ast/*` upserts and the per-minute maintenance result rows. The only
+GC caller (`registry/collect!`) is weekly and the store grew through its
+window. Plan: retention-sweep removes the per-minute writer; the steward
+session resets default's store at the next refork (disposable-data rule);
+GC cadence appended to the existing issue
+`storage-gc-runs-without-a-cutoff-so-it-reclaims-almost-nothing.md`.
