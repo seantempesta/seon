@@ -148,13 +148,17 @@ One test at a time on a daemon thread, `seon.test/run` with
   path, and this defect never reached it. No provider call was made.
 - `default` carries no recorded `:seon.error/message` at all, so the
   cluster's fault facts are not evidence either way here.
-- **Adoption of `src/seon/bootstrap.clj` into `default` did not complete**
-  during this lane: three other lanes were publishing concurrently and the
-  first attempt ended
-  `:stale-branch-head {:branch :current-src}`. The in-process runs above
-  exercised the repaired definition, redefined at the JVM REPL before the
-  file edit and identical to the committed source apart from the helper's
-  name. Adoption freshness for `bootstrap.clj` on `default` is UNCLAIMED.
+- **Adoption of `src/seon/bootstrap.clj` into `default` completed** on the
+  second attempt. The first ended `:stale-branch-head {:branch
+  :current-src}` with three other lanes publishing concurrently;
+  `bin/seon init --dev default --changed src/seon/bootstrap.clj` retried and
+  landed. Adoption is confirmed by resolution, not by the exit code:
+  `seon.bootstrap/lookup-namespace-name` now resolves in pid 88182 and
+  `namespace-subject` no longer does. Against that ADOPTED definition,
+  Juniper's live pull produced 280 candidates, 0 with a non-lookup subject,
+  and the episode derives; the three `seon.bootstrap-test` tests re-ran
+  8/0/0, 5/0/0 and 268/0/0. `default` was never stopped, reforked or
+  restarted.
 - `src/seon/fn.clj`, `src/seon/program.cljc`, `src/seon/sci/eval.clj`,
   `test/seon/fn_test.clj`, `test/seon/program_test.clj`,
   `test/seon/loop_proof_test.clj` and `test/seon/sci/eval_test.clj` carried
