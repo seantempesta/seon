@@ -459,11 +459,16 @@
   the text it did show in `::prefix`; dropping it here is what turned an
   over-long value into a count of what the reader was not told.
 
-  SIZES SHOWN TO AN AGENT ARE ESTIMATED TOKENS (AGENTS.md §2.4). A character
-  cut's stored counts stay characters — that is the storage projection — and
-  this AI text reports them through `seon.ai.tokens/estimate-of-characters`,
-  saying `:tokens` so the reader knows which unit it is reading. Child and
-  subtree cuts already count members, which is their own honest unit.
+  THE SIZE AN AGENT BUDGETS BY IS ESTIMATED TOKENS (AGENTS.md §2.4), and
+  `:seon.ai.tokens/estimate` is that figure for the omitted remainder. The
+  declared fields are NOT rewritten into tokens, because `next-offset` and
+  `total` are the reader's COORDINATES into the value, not display sizes:
+  `seon.render.value-test/explicit-structural-results-retain-attributes-through-real-evaluation`
+  derives both from `(count original)` and then executes the requery form
+  against them. Restating a coordinate in a floored estimate would leave the
+  cut naming a position that does not exist — one honest number replaced by
+  three that no longer add up. A member cut has no derivable token size, so
+  the field is absent there rather than invented.
 
   A cut with no requery identity says so: `::requery-refusal` is the typed
   unknown §2.4 requires, not silence."
@@ -473,24 +478,13 @@
                            [::omitted ::elision-unit ::bound-by ::prefix
                             :seon.render.data/path :seon.render.data/next-offset
                             :seon.render.data/total ::requery-form
-                            ::requery-refusal])
-        size (fn [characters]
-               (when (int? characters)
-                 (max 1 (tokens/estimate-of-characters characters))))
-        offset (fn [characters]
-                 (when (int? characters)
-                   (tokens/estimate-of-characters characters)))]
+                            ::requery-refusal])]
     (literal
      (into (sorted-map)
            (cond-> shown
-             (= :characters (::elision-unit unit))
-             (into (into {::elision-unit :tokens}
-                         (remove (comp nil? val))
-                         {::omitted (size (::omitted shown))
-                          :seon.render.data/total
-                          (size (:seon.render.data/total shown))
-                          :seon.render.data/next-offset
-                          (offset (:seon.render.data/next-offset shown))})))))))
+             (and (= :characters (::elision-unit unit)) (int? (::omitted unit)))
+             (assoc :seon.ai.tokens/estimate
+                    (max 1 (tokens/estimate-of-characters (::omitted unit)))))))))
 
 (def ^:private scalar-faces
   #{::nil ::boolean ::number ::keyword ::symbol ::char ::string
@@ -1350,14 +1344,25 @@
           (<= (tokens/estimate (emit-text candidate options)) budget)
           candidate
 
-          (> child-limit 1)
-          (recur (dec child-limit) depth-limit string-limit)
+          ;; BREADTH AND TEXT DEGRADE TOGETHER. Spending one dimension to its
+          ;; floor before touching the other destroys that dimension to save
+          ;; the one that caused the overflow, and both orders were measured
+          ;; doing exactly that: shrinking members first deleted
+          ;; `:seon.effect/result-edn` outright to pay for its own length
+          ;; (`seon.render.value-test/background-poll-keeps-identity-while-payloads-grow`),
+          ;; and shrinking text first clipped a 36-character one-liner to
+          ;; nothing to pay for 116 siblings
+          ;; (`fit-preserves-breadth-and-long-strings`). Halving both at once
+          ;; is symmetric, keeps every member visible for as long as the text
+          ;; inside it, and converges in the logarithm of the budget instead
+          ;; of one child at a time. Depth is last because it costs the most:
+          ;; a cut level takes a whole subtree with it.
+          (or (> string-limit 1) (> child-limit 1))
+          (recur (max 1 (quot child-limit 2)) depth-limit
+                 (max 1 (quot string-limit 2)))
 
           (> depth-limit 1)
           (recur child-limit (dec depth-limit) string-limit)
-
-          (> string-limit 1)
-          (recur child-limit depth-limit (max 1 (quot string-limit 2)))
 
           :else candidate)))))
 

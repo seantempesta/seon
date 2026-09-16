@@ -62,9 +62,14 @@ Fixed at the one clipping spot, `src/seon/print.cljc`:
 - `enrich-node`'s `::truncated-string` branch carries the text admission
   already kept;
 - `fit`'s search floors structurally at one child, one level, one character,
-  halving the string limit instead of jumping to zero;
-- `render-elision-ai` surfaces `::prefix` and `::requery-refusal`, and reports
-  a character cut's sizes in estimated tokens.
+  and halves breadth and text TOGETHER instead of spending one to its floor
+  before touching the other — either order was measured destroying one
+  dimension to pay for the other;
+- `render-elision-ai` surfaces `::prefix` and `::requery-refusal`, and adds
+  `:seon.ai.tokens/estimate` — the omitted remainder's estimated token size.
+  The declared counts stay the value's own units, because `next-offset` and
+  `total` are the reader's coordinates and a requery executes against them;
+  batch 54 falsified an earlier cut of this change that rewrote them.
 
 Live on `default` pid 95853, SCI evaluation mode:
 `[(apply str (repeat 3000 "ab"))]` now shows a 1,638-character prefix with

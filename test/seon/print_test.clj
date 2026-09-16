@@ -353,11 +353,13 @@
            (:seon.print/requery-id fitted))
         "and it carries the identity the reader asks again with")
     (let [shown (edn/read-string (print/render-elision-ai fitted))]
-      ;; AGENTS.md §2.4: the AI-facing size is estimated tokens; the node's
-      ;; own counts stay characters, which is the storage projection.
-      (is (= :tokens (:seon.print/elision-unit shown)))
+      ;; AGENTS.md §2.4: the size an agent budgets by is estimated tokens.
+      ;; The declared counts stay characters — they are the reader's
+      ;; coordinates into the value, and a requery executes against them.
+      (is (= :characters (:seon.print/elision-unit shown)))
       (is (= (tokens/estimate-of-characters (:seon.print/omitted fitted))
-             (:seon.print/omitted shown)))
+             (:seon.ai.tokens/estimate shown)))
+      (is (= (:seon.print/omitted fitted) (:seon.print/omitted shown)))
       (is (= (:seon.print/prefix fitted) (:seon.print/prefix shown))))))
 
 (deftest fit-preserves-breadth-and-long-strings
@@ -388,8 +390,13 @@
         "and the cut is a declared elision value, never a silent drop")
     (is (= :seon.print/elided (:seon.print/face long-string-fit))
         "an over-budget string becomes a declared elision value")
-    (is (= 0 (:seon.render.data/next-offset long-string-fit))
-        "a string is replaced whole, never cut at the display width")
+    ;; The cut is not taken at the display width, and it is not taken at
+    ;; nothing either: the floor keeps what the budget admits and the offset
+    ;; names it.
+    (is (pos? (:seon.render.data/next-offset long-string-fit))
+        "the characters that fit are kept, never elided to nothing")
+    (is (< (:seon.render.data/next-offset long-string-fit) line-width)
+        "a string is never cut at the display width")
     (is (= (* 2 line-width) (:seon.render.data/total long-string-fit))
         "and the elision states the whole size it was cut from")))
 

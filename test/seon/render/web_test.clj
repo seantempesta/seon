@@ -1809,12 +1809,13 @@ handle))}}
            ;; The AI-facing size is estimated tokens (AGENTS.md §2.4), and a
            ;; cut never omits its whole subject: the prefix that fit is shown
            ;; and only the remainder is counted.
-           (is (= :tokens (:seon.print/elision-unit elision)))
+           (is (= :characters (:seon.print/elision-unit elision)))
            (is (pos? (count (:seon.print/prefix elision))))
-           (is (= (tokens/estimate-of-characters (count huge))
-                  (:seon.render.data/total elision)))
-           (is (< (:seon.print/omitted elision)
-                  (:seon.render.data/total elision)))
+           (is (= (count huge) (:seon.render.data/total elision)))
+           (is (= (- (count huge) (:seon.render.data/next-offset elision))
+                  (:seon.print/omitted elision)))
+           (is (= (tokens/estimate-of-characters (:seon.print/omitted elision))
+                  (:seon.ai.tokens/estimate elision)))
            (is (= 'seon.print/value-at
                   (first (:seon.print/requery-form elision)))))
          (is (<= (count huge) (count html-string))

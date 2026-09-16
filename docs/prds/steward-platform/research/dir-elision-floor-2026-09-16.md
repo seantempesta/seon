@@ -70,10 +70,9 @@ directory's shape and nothing else hijacks it.
   Below the floor the candidate may exceed the budget; that is the honest
   answer and its cut names the bound. The string step now HALVES rather than
   jumping to zero, so the retained prefix is as large as the budget allows.
-- `render-elision-ai` surfaces `::prefix` and `::requery-refusal`, and
-  reports a character cut's sizes through
-  `seon.ai.tokens/estimate-of-characters`, saying `:tokens`. The stored node
-  keeps characters.
+- `render-elision-ai` surfaces `::prefix` and `::requery-refusal`, and adds
+  `:seon.ai.tokens/estimate` — the omitted remainder's estimated token size,
+  the figure AGENTS.md §2.4 rules an agent budgets by.
 
 ## Live proof — `default` pid 95853 (post-refork), SCI evaluation mode
 
@@ -136,3 +135,131 @@ contract returns a bare string. The floor can only cut its output as TEXT, so
 that pair is a separate slice: `:seon.repl/directory`'s pair is asserted by
 `seon.data-shapes-test`, `seon.render.value-test` and
 `seon.render.web-debug-test`.
+
+
+## Correction after batch 54 — a coordinate is not a display size
+
+The first cut of this slice rewrote `:seon.print/omitted`,
+`:seon.render.data/total` and `:seon.render.data/next-offset` into estimated
+tokens and relabelled the unit `:tokens`. Batch 54 falsified that, and the
+evidence is worth keeping:
+
+| red | what it proved |
+|---|---|
+| `seon.render.value-test/explicit-structural-results-retain-attributes-through-real-evaluation` (×4) | `total` IS `(count original)` and `omitted` IS `total - next-offset`, derived from the value itself and then used to execute `(:seon.print/requery-form cut)` |
+| `seon.render.value-test/generated-values-have-deterministic-readable-executable-elisions` | the same invariant, generatively, over arbitrary values |
+| `an-oversized-string-shows-its-prefix-not-only-a-count` (this lane's own) | `1875 ≠ 1363 + 511` — three independently floored estimates stop adding up |
+
+So these fields are the reader's COORDINATES into the value, not display
+sizes. Restating one as a floored estimate names a position that does not
+exist, and the cut's own numbers contradict each other on the page. The
+declared fields now keep the value's own units, and the token figure rides
+alongside as `:seon.ai.tokens/estimate`, present only where it is derivable
+(a character cut) and absent on a member cut rather than invented.
+
+### The second correction — breadth and text degrade together
+
+Restoring the coordinates left one red standing and produced another, and the
+pair of them name the real shape of the search:
+
+- keeping the original order (children, then depth, then strings) let ONE
+  string be allotted the entire budget, so the search paid for its length by
+  deleting a whole map entry. `background-poll-keeps-identity-while-payloads-grow`
+  lost `:seon.effect/result-edn` outright — the reader could not even see
+  which attribute had been cut. Measured at the seam: entries retained were
+  `[:seon.effect/duration-ms :seon.effect/id]` and a `:children` elision.
+- inverting it (strings first) clipped a 36-character one-liner to nothing to
+  pay for 116 siblings: `fit-preserves-breadth-and-long-strings` went red on
+  "a one-line string remains readable before structural breadth", measured
+  `includes-text false, item-count 3`.
+
+Either order destroys one dimension to save the other. The search now HALVES
+BOTH at once and leaves depth last, because a cut level takes a whole subtree
+with it. Measured after: every entry retained, the 8,000-character string
+clipped to 1,638 with `total 8000 = 1638 + 6362`, whole text 647 tokens
+against a 1,024-token budget.
+
+### In-process runs, `default` pid 95853, reloaded `seon.print`
+
+| run | result |
+|---|---|
+| `seon.print-test/fit-preserves-breadth-and-long-strings` | 7 pass, 0 fail, 0 error |
+| `seon.print-test/fit-bounds-a-terminal-projection-and-names-what-it-omitted` | 11 pass, 0 fail, 0 error |
+| `seon.print-test/refitting-a-truncated-collection-preserves-its-honest-elision` | 5 pass, 0 fail, 0 error |
+| `seon.render.value-test/an-oversized-string-shows-its-prefix-not-only-a-count` | 11 pass, 0 fail, 0 error |
+| `seon.render.value-test/an-agent-facing-cut-reports-its-size-in-estimated-tokens` | 7 pass, 0 fail, 0 error |
+| `seon.render.value-test/dir-of-a-large-namespace-shows-members-and-how-to-continue` | 6 pass, 0 fail, 0 error |
+| `seon.render.value-test/background-poll-keeps-identity-while-payloads-grow` | 17 pass, 0 fail, 0 error |
+| `seon.render.value-test/documentation-body-is-whole-or-one-executable-elision` | 8 pass, 0 fail, 0 error |
+| `seon.render.value-test/explicit-structural-results-retain-attributes-through-real-evaluation` | 56 pass, 0 fail, 0 error |
+| `seon.render.value-test/generated-values-have-deterministic-readable-executable-elisions` | 2 pass, 0 fail, 0 error |
+
+Every batch-54 red attributed to this slice is green in process. ONE
+CAVEAT, stated rather than smoothed over: in the back-to-back sweep
+`an-oversized-string-shows-its-prefix-not-only-a-count` recorded 11 pass, 0
+fail and 1 ERROR once; re-run alone immediately afterwards it was 11/0/0. The
+error did not reproduce and its text was not captured, so it is unexplained,
+not resolved.
+
+### Final live bytes — `default` pid 95853, SCI evaluation mode
+
+```clojure
+(dir seon.turn)
+;; {:seon.ai.tokens/estimate 12386,
+;;  :seon.print/bound-by :seon.render.profile/token-budget,
+;;  :seon.print/elision-unit :characters,
+;;  :seon.print/omitted 39636,
+;;  :seon.print/prefix "#:seon.repl{:columns [:sym :arglists :doc :in :out :supplied], :rows [[seon.turn/append-generated-call …",
+;;  :seon.print/requery-refusal "the value has no result handle",
+;;  :seon.render.data/next-offset 1638,
+;;  :seon.render.data/path [],
+;;  :seon.render.data/total 41274}
+```
+
+1638 + 39636 = 41274: the coordinates add up, and the token cost rides
+alongside them.
+
+### Batch 55 — the render-coverage reds are NOT this slice
+
+`seon.render-coverage-test/effect-receipts-render-state-from-attribute-presence`
+run in process against the SAME fixture, three times in one JVM:
+
+| `seon.print` loaded | result |
+|---|---|
+| HEAD (this slice) | 12 pass, 20 fail, 3 error |
+| `bb33b93fa~1` (pre-slice), `load-file`d | 12 pass, 20 fail, 3 error |
+| HEAD again | 12 pass, 20 fail, 3 error |
+
+Identical, so the floor is not the cause. The refusal is minted by
+`seon.render.value/node-id` (`src/seon/render/value.clj:82`), which requires a
+caller-supplied root address — `:seon.render.call/id`, `:seon.render.value/root`,
+`:db/id` or `:seon.render.block/name`. The fixture's `render-request`
+(`test/seon/render_coverage_test.clj:37`) supplies none of them, so the
+fixture only ever passed while SELECTION found a declared producer for an
+effect receipt and never reached the floor. The candidate is `3f07beb88`
+("Rename agent attributes to seon.agent"), the one recent commit touching
+both `src/seon/render/value.clj` and that test. The peer's `15a15e9c1` is NOT
+a candidate: it touches `src/seon/turn.clj` only — it does not modify
+`src/seon/render.clj` at all, contrary to the dispatch note.
+
+Stopping there, as instructed. Worth the owner's attention, though: the
+coordinator's reading is right that an agent id is presentation context
+rather than a precondition, but `node-id` does not refuse on the agent id —
+it refuses on the ROOT ADDRESS, and `:seon.agent/id nil` in the refusal's
+evidence is a symptom shown beside it, not the cause.
+
+Adoption is STILL refused on `default` — now by `:seon.issue/title` changing
+`:db/index` from true to nil, another lane's in-flight resources edit, a
+different attribute from the pre-refork refusal. The runs above are against
+`(require 'seon.print :reload)`, which drops that namespace's contract
+wrappers; the cold gate remains the proof.
+
+### Reds attributed to other lanes at this HEAD
+
+`seon.cluster.agent-arming-test/starting-an-issue-leaves-one-unanswered-wake-its-first-reply-answers`
+(event backstop), `seon.cluster.turn-test/delimiter-repair-is-span-local-and-precedes-intent`
+(625 ms against a 300 ms bound), `seon.html-views-test/fault-pairs-preserve-ai`
+(a golden fault string), and
+`seon.render.web-test/declared-units-are-components-in-schema-order`
+(`:db/id` and `:db/txInstant` now reaching the declared list). None touch the
+print floor; none were changed here.

@@ -245,7 +245,11 @@
                 (is (nil? (:seon.cluster.eval/error result)) (pr-str result))
                 (is (= "poll-render-effect" (:seon.effect/id parsed)) shown)
                 (is (= 12 (:seon.effect/duration-ms parsed)))
-                (is (= size (get-in parsed [:seon.effect/result-edn :seon.print/omitted])))
+                (let [cut (get parsed :seon.effect/result-edn)]
+                  (is (= size (:seon.render.data/total cut)) shown)
+                  (is (= (- size (:seon.render.data/next-offset cut))
+                         (:seon.print/omitted cut))
+                      shown))
                 (is (= payload (get-in result [:seon.sci.admit/value :seon.effect/result-edn])))
                 (is (< (tokens/estimate shown) (:seon.render.profile/token-budget profile)))
                 (tokens/estimate shown)))
@@ -641,8 +645,12 @@
        (evaluation/bind-result! ctx handle documentation)
        (let [shown (edn/read-string (value/render-ai request))
              cut (:body shown)]
-         (is (= 0 (:seon.render.data/next-offset cut)))
-         (is (= (count body) (:seon.print/omitted cut)))
+         ;; The cut keeps the characters the profile admits and counts only
+         ;; the remainder; it no longer omits the whole body.
+         (is (= 24 (:seon.render.data/next-offset cut)))
+         (is (= (subs body 0 24) (:seon.print/prefix cut)))
+         (is (= (- (count body) 24) (:seon.print/omitted cut)))
+         (is (= (count body) (:seon.render.data/total cut)))
          (is (= [:body] (:seon.render.data/path cut)))
          (is (= body (sci/eval-form ctx (:seon.print/requery-form cut)))))))))
 
@@ -824,6 +832,10 @@
        (is (= (:seon.render.data/total cut)
               (+ (:seon.print/omitted cut) (:seon.render.data/next-offset cut)))
            shown)
+       (is (= 6000 (:seon.render.data/total cut)) shown)
+       (is (= (count (:seon.print/prefix cut))
+              (:seon.render.data/next-offset cut))
+           shown)
        ;; And the reader can ask again rather than being told a refusal.
        (is (= 'seon.print/value-at (first (:seon.print/requery-form cut)))
            shown)))))
@@ -840,28 +852,31 @@
                              :seon.render.data/total characters
                              :seon.render.profile/id :seon.render.profile/agent})
         shown (edn/read-string (print/render-elision-ai node))]
-    (is (= :tokens (:seon.print/elision-unit shown)) (pr-str shown))
     (is (= (tokens/estimate-of-characters characters)
-           (:seon.print/omitted shown))
+           (:seon.ai.tokens/estimate shown))
         (pr-str shown))
-    (is (= (tokens/estimate-of-characters characters)
-           (:seon.render.data/total shown))
-        (pr-str shown))
-    ;; The stored node keeps characters: that is the storage projection.
-    (is (= characters (:seon.print/omitted node)))
-    (is (= :characters (:seon.print/elision-unit node)))
-    ;; A member cut counts members, which is already its honest unit.
-    (is (= :children
-           (:seon.print/elision-unit
-            (edn/read-string
-             (print/render-elision-ai
-              (print/elision {:seon.print/omitted 268
-                              :seon.print/elision-unit :children
-                              :seon.render.data/path []
-                              :seon.render.data/next-offset 32
-                              :seon.render.data/total 300
-                              :seon.render.profile/id
-                              :seon.render.profile/agent}))))))))
+    ;; The declared fields stay the value's own units, because `next-offset`
+    ;; and `total` are the reader's COORDINATES, not display sizes. Restating
+    ;; a coordinate as a floored estimate names a position that does not
+    ;; exist; `generated-values-have-deterministic-readable-executable-elisions`
+    ;; executes the requery form against exactly these numbers.
+    (is (= :characters (:seon.print/elision-unit shown)))
+    (is (= characters (:seon.print/omitted shown)))
+    (is (= characters (:seon.render.data/total shown)))
+    (is (= "abc" (:seon.print/prefix shown)))
+    ;; A member cut has no derivable token size, so the field is absent
+    ;; rather than invented.
+    (let [members (edn/read-string
+                   (print/render-elision-ai
+                    (print/elision {:seon.print/omitted 268
+                                    :seon.print/elision-unit :children
+                                    :seon.render.data/path []
+                                    :seon.render.data/next-offset 32
+                                    :seon.render.data/total 300
+                                    :seon.render.profile/id
+                                    :seon.render.profile/agent})))]
+      (is (= :children (:seon.print/elision-unit members)))
+      (is (not (contains? members :seon.ai.tokens/estimate))))))
 
 (deftest dir-of-a-large-namespace-shows-members-and-how-to-continue
   ;; `dir` is the agent's index into a namespace. On `default` it answered

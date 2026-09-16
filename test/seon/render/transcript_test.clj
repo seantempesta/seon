@@ -524,9 +524,10 @@
                                         :seon.render.profile/token-budget))
                 (str "the cut must name the bound that made it: "
                      (subs cut 0 (min 400 (count cut)))))
-            ;; The AI-facing unit is estimated tokens (AGENTS.md §2.4); the
-            ;; node's stored counts remain characters.
-            (is (str/includes? cut (str :seon.print/elision-unit " :tokens")))
+            ;; The declared counts stay characters — the reader's coordinates
+            ;; — and the token size it budgets by rides alongside.
+            (is (str/includes? cut (str :seon.print/elision-unit " :characters")))
+            (is (str/includes? cut (str :seon.ai.tokens/estimate)))
             (is (str/includes? cut (str :seon.print/prefix))
                 "and the characters that fit are shown, not only counted")
             (is (str/includes? cut (str :seon.print/omitted)))
