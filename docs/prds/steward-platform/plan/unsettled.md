@@ -1122,6 +1122,27 @@ its write already converges at zero. Lane `incremental-publication-is-the-rule`
 launched on R2/R3/R4/R7; R6 (dev-cache lock across its hit check, 87 s wait)
 goes to `test-preparation-costs` on its next resume; R8 landed (`bb6673af4`).
 
+**Deletion research landed** (`bc7278b58`, `datahike-deletion-and-the-program-graph-2026-09-16.md`):
+the schema defect is `:seon.fn/calls [:set :seon.db/ref]` (and `:seon.test/reach`) —
+a ref declared for what is only a name in source text. Measured: retractEntity
+destroys one datom per caller (6 of 6), nothing else; tombstones answer joins
+like live functions; dangling eids are silently dropped by joins and
+re-definition mints a new eid. RECOMMENDED (owner ruling requested 23:55Z):
+edges + reach as qualified symbols, plain retraction, delete tombstones /
+minting / second validator; NO retired attribute (history answers the past);
+analysis provenance a required positive fact on every definition row
+("looking is an event and the event is a datom"); component trees validated
+as their parent's value. All in the one reset.
+
+**Workaround inventory landed** (`cac13e3e4`, `workaround-inventory-2026-09-16.md`,
+41 rows, four tiers). Launched: `no-default-cluster-fallback` (astra: seven
+silent "default" cluster substitutions incl. one WRITTEN as a fact and one
+pre-read in schedule; `config-dial?` prefix arm; S6 one identity-attribute
+derivation) and an Opus tier-0 lane (dead env vars, hardcoded bounds with the
+declared value in scope, two production regexes, `doc`/`dir` empty-contract
+lie, silent green-basis nil, self-namespace requiring-resolve, the 218 MB
+CLJS worktree).
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
