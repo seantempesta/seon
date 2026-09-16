@@ -275,3 +275,16 @@ astra `retention-sweep` (spec `tmp/orchestrator/wave2/retention-sweep.spec`:
 candidates from blob-write facts, permit only around deletes, event-driven
 budget check); Opus research `store-footprint-2026-09-16.md` (why 72 GB /
 380k keys; reset vs `gc-storage!`).
+
+### 2026-09-16 06:10Z — retention: option 1 (dissolve) chosen at the design gate
+
+retention-sweep's investigation (`e375a3a97`, `retention-sweep-2026-09-16.md`)
+measured inventory 70.3 s and the gate closed 96.6% even with blobs UNDER
+budget, and found Datahike's reachability GC already preserves referenced
+blobs (`registry.clj:519-548`, weekly `root/maintenance/compact`). Options:
+(1) remove automatic byte-budget retention, keep existing GC — 1–2 h,
+gives up byte-budget enforcement; (2) keep the policy on root facts with
+guarded deletion — 1–2 days across owners; (3) manual-only retention —
+30–60 min, manual calls still pause writers. The orchestrator chose (1)
+under the dissolution law (owner not present; reversible by one revert) and
+resumed the lane. Flagged for the owner.
