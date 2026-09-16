@@ -795,13 +795,15 @@
                                :seon.ai/finish-reason "stop"}
                               {:seon.ai/text "(identity 2)"
                                :seon.ai/finish-reason "stop"}])]
-       (config/apply!
-        {:seon.db/connection connection
-         :seon.boot/cluster-name cluster-name
-         :seon.config/manifest
-         {:seon.config.ai/model "before-apply"
-          :seon.config.ai.backup/model "backup-before-apply"}})
-       (test-support/seed-cluster! connection cluster-name)
+       ;; ONE APPLY. `config/apply!` EXACT-reconciles the desired row, so the
+       ;; overlay applied first and `seed-cluster!`'s empty manifest second
+       ;; left the shipped models behind — the call then read
+       ;; "deepseek-flash", not "before-apply". The cluster is seeded WITH its
+       ;; overlay.
+       (test-support/seed-cluster!
+        connection cluster-name
+        {:seon.config.ai/model "before-apply"
+         :seon.config.ai.backup/model "backup-before-apply"})
        (test-support/transacted!
                     connection
                     (cluster.agent/creation-tx
@@ -868,10 +870,9 @@
                         :seon.ai/settings))
                   "settings are beside usage, never inside it"))
 
-            (test-support/transacted!
-                         connection
-                         (turn/close-tx
-                          {:seon.turn/id "settings-run-1" :seon.db.process/id process :seon.turn/closed-tx "datomic.tx"}))
+            ;; `turn/turn` closed settings-run-1 itself; closing it again is
+            ;; the fixture writing what the mechanism wrote, and the writer
+            ;; says so (`run transition refused: run-closed`).
             (config/apply!
              {:seon.db/connection connection
               :seon.boot/cluster-name cluster-name
