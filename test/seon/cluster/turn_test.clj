@@ -3157,7 +3157,7 @@
 ;;; ---------------------------------------------------------------------------
 
 (deftest a-run-prompts-from-its-opening-database-value
-  (with-cluster fake-evaluate
+  (with-cluster
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
             requests (atom [])]
@@ -3181,7 +3181,7 @@
                                (Date.)))
           (let [prompt-a (:seon.ai/prompt (first @requests))]
             (is (str/includes? prompt-a "count the widgets"))
-            (is (str/includes? prompt-a "(my.message/read \"m-1\")")
+            (is (str/includes? prompt-a ":seon.message/_inbox")
                 "the opening message appears as its real REPL read form")
             (is (not (str/includes? prompt-a "message B"))
                 "a message committed after run A opened is absent by
@@ -3204,7 +3204,7 @@
           (let [prompt-b (:seon.ai/prompt (second @requests))]
             (is (str/includes? prompt-b "message B")
                 "B is visible in the opening database value of its own run")
-            (is (str/includes? prompt-b "(my.message/read \"m-2\")")
+            (is (str/includes? prompt-b ":seon.runtime/trigger")
                 "the next opening message also appears as a real read")))))))
 
 ;;; ---------------------------------------------------------------------------
@@ -3400,7 +3400,7 @@
   ;; FACTS and never from the channel; a displaced snapshot is
   ;; superseded by that agent's next offer; and the producers' fold
   ;; threads are NEVER parked, whatever the render side is doing.
-  (with-cluster fake-evaluate
+  (with-cluster
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
             stream-channel (async/chan (async/sliding-buffer 1))
@@ -3445,27 +3445,31 @@
                              [?agent :seon.agent/id ?agent-id]
                              [?run :seon.turn/agent ?agent]
                              [?form :seon.cluster.eval/run ?run]
-                             [?form :seon.cluster.eval/source ?source]]
+                             [?form :seon.cluster.eval/source ?source]
+                             [?form :seon.cluster.eval/author :agent]]
                            @connection agent-id)
-                      receipts
-                      (db/q '[:find [?edn ...]
+                      shown-results
+                      (db/q '[:find [?shown ...]
                              :in $ ?agent-id
                              :where
                              [?agent :seon.agent/id ?agent-id]
                              [?run :seon.turn/agent ?agent]
                              [?e :seon.cluster.eval/run ?run]
-                             [?e :seon.cluster.eval/result-edn ?edn]]
+                             [?e :seon.eval/shown ?shown]
+                             [?e :seon.cluster.eval/author :agent]]
                            @connection agent-id)]
-                  (is (seq receipts)
-                      (str agent-id " produced a terminal receipt"))
-                  ;; the FROZEN PLAN is the durable record of what the
+                  (is (= [(pr-str
+                           (seon.run/complete (second (edn/read-string text))))]
+                         shown-results)
+                      (str agent-id " stored its exact completion result"))
+                  ;; the stored reply is the durable record of what the
                   ;; provider settled on. It is a fact, committed once,
                   ;; and it is byte-identical to this agent's own text —
                   ;; while the channel, shared and lossy, carried only
                   ;; presentation that either arrived or did not
                   (is (= [text] sources)
                       (str agent-id "'s settled text came from FACTS: "
-                           "the frozen plan, not the shared conn")))))
+                           "the stored reply, not the shared channel")))))
 
             (testing "the producers' fold threads were NEVER parked"
               (is (= (set (keys texts)) @completed-producers)

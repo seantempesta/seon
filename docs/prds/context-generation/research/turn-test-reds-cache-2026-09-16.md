@@ -143,3 +143,17 @@ It was **not a test timeout**. Closing its temporary base briefly found an
 active fixture connection; after that connection released, this lane deleted
 only its own memory store `8eee9698-2a32-4db0-bb5a-77617907a1a4`.
 No default or foreign connection was stopped or released by this lane.
+
+## Real evaluation fixture slice
+
+`a-run-prompts-from-its-opening-database-value` and
+`concurrent-streams-share-one-conn-test` no longer inject the constant-result
+evaluator. The former asserts the current reverse-inbox and runtime-trigger
+read forms while retaining message-A/message-B snapshot separation. The latter
+queries only agent-authored evaluations and asserts each exact completion value
+and source, alongside all channel-loss and nonblocking-offer obligations.
+
+Candidate runs **44565 11/0/0** and **44583 11/0/0**; after source-file reload,
+fresh canonical base/context runs **44677 11/0/0** and **44678 11/0/0**.
+The fake evaluator was the stale fixture seam; no production turn semantics
+changed and no assertion was loosened.
