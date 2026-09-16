@@ -525,6 +525,8 @@
   (let [namespace-name (::analyzer/ns entry)
         qualified (symbol (str namespace-name) (str (::analyzer/name entry)))
         metadata (::analyzer/meta entry)
+        namespace-metadata (:namespace-meta
+                            (get namespace-contexts namespace-name))
         source (exact-source contexts entry)
         file [:seon.fn.file/path (::analyzer/filename entry)]
         span (exact-form-span contexts entry)
@@ -550,10 +552,9 @@
                :seon.fn/form-span span}
         (find metadata :seon.test/fixture-observation)
         (assoc :seon.test/fixture-observation (:seon.test/fixture-observation metadata))
-        (find metadata :seon.test/long)
-        (assoc :seon.test/long (:seon.test/long metadata))
-        (find metadata :seon.test/long-ms)
-        (assoc :seon.test/long-ms (:seon.test/long-ms metadata))
+        ;; A namespace of real-boot drills declares the cost once on the ns
+        ;; form; the one rule lives in seon.program.
+        true (merge (program/test-markers metadata namespace-metadata))
         (true? (:seon.test/usage metadata))
         (assoc :seon.test/usage true)
         (seq (get calls-by-caller (str qualified)))
@@ -991,7 +992,8 @@
         (into {}
               (map (fn [entry]
                      [(::analyzer/name entry)
-                      (namespace-context contexts entry)]))
+                      (assoc (namespace-context contexts entry)
+                             :namespace-meta (::analyzer/meta entry))]))
               (::analyzer/namespace-definitions analysis))]
     (reduce
      (fn [rows entry]

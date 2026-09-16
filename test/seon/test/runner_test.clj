@@ -7,6 +7,7 @@
             [seon.fn :as program-fn]
             [seon.id :as id]
             [seon.instrument :as instrument]
+            [seon.program :as program]
             [seon.test.arm :as arm]
             [seon.test.cache :as cache]
             [seon.schema :as schema]
@@ -431,3 +432,57 @@
         "an announcement never drops a declared allowance from the horizon")
     (swap! progress update ::runner/silence-allowances dissoc "task-a")
     (is (= {} (::runner/silence-allowances @progress)))))
+
+(deftest a-namespace-declared-long-reaches-every-test-row
+  ;; A namespace of real-boot drills declares the cost ONCE on its ns form
+  ;; (seon.cluster.armed-test, concurrency-streams, program-restart, …). The
+  ;; Var-side reader inherited that; the static indexer read only the deftest
+  ;; Var, so a published base answered NOT-LONG for twelve real drills and
+  ;; the row-reading checker refused every cold gate. One rule now serves both
+  ;; seams: seon.program/test-markers, deftest winning per attribute.
+  (let [root (doto (io/file "tmp" (str "ns-long-" (id/id))) .mkdirs)
+        file (io/file root "declarations.clj")
+        namespace-name (symbol (str "seon.fixture.ns-long-" (id/id)))
+        namespace-reason "Every test here boots a real cluster."
+        own-reason "This one also forks a published root."]
+    (try
+      (spit file
+            (str "(ns ^{:seon.test/long " (pr-str namespace-reason)
+                 " :seon.test/long-ms 600000} " namespace-name
+                 " (:require [clojure.test :refer [deftest is]]))\n"
+                 "(deftest inherits (is true))\n"
+                 "(deftest ^{:seon.test/long " (pr-str own-reason)
+                 "} overrides (is true))\n"))
+      (let [rows (:seon.fn.file/rows
+                  (program-fn/build-artifact
+                   {:seon.fn.file/path (str file)
+                    :seon.fn.file/first-party-functions []}))
+            by-symbol (into {} (keep (fn [row]
+                                       (when-let [s (:seon.test/sym row)]
+                                         [s row])))
+                            rows)]
+        (is (= 2 (count by-symbol)) (pr-str (keys by-symbol)))
+        (is (= {:seon.test/long namespace-reason :seon.test/long-ms 600000}
+               (select-keys (get by-symbol (str namespace-name "/inherits"))
+                            [:seon.test/long :seon.test/long-ms]))
+            "a namespace-declared long reaches the row of a test that declares nothing")
+        (is (= {:seon.test/long own-reason :seon.test/long-ms 600000}
+               (select-keys (get by-symbol (str namespace-name "/overrides"))
+                            [:seon.test/long :seon.test/long-ms]))
+            "the deftest's own reason wins while it still inherits the allowance"))
+      (finally
+        (test-support/delete-recursively! root)))))
+
+(deftest one-rule-answers-both-lifting-seams
+  ;; The static indexer and the loaded-Var indexer must not be able to
+  ;; disagree about what a test declared.
+  (is (= {} (program/test-markers nil nil)))
+  (is (= {:seon.test/long "ns"} (program/test-markers {} {:seon.test/long "ns"})))
+  (is (= {:seon.test/long "var"}
+         (program/test-markers {:seon.test/long "var"} {:seon.test/long "ns"}))
+      "the deftest wins on conflict")
+  (is (= {:seon.test/long "var" :seon.test/long-ms 42}
+         (program/test-markers {:seon.test/long "var"} {:seon.test/long-ms 42}))
+      "each attribute is decided on its own")
+  (is (= {} (program/test-markers {:seon.test/long nil} {}))
+      "a declared nil is no declaration"))

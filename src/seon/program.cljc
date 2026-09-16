@@ -99,6 +99,32 @@
        :seon.program/schema-row-properties
        owned)}))
 
+(def test-marker-attributes
+  "The declared test markers a namespace form may carry for its deftests.
+
+  Both are costs of the WHOLE namespace when declared there — a namespace of
+  real-boot drills declares once — so a deftest inherits what it does not
+  declare itself."
+  [:seon.test/long :seon.test/long-ms])
+
+(defn test-markers
+  "The declared markers for one test: its own metadata, then its namespace's.
+
+  THE ONE RULE both lifting seams read. `seon.fn/var-row` holds the analyzed
+  deftest form and its namespace form; `seon.sci.eval` holds the loaded Var
+  and its namespace. Reading the Var alone made a namespace-declared
+  `:seon.test/long` reach the loaded-Var reader and NEVER the published row,
+  so a statically indexed base answered NOT-LONG for twelve real-boot drills."
+  {:malli/schema [:=> [:cat [:maybe :map] [:maybe :map]] :map]}
+  [var-metadata namespace-metadata]
+  (into {}
+        (keep (fn [attribute]
+                (when-let [declared (or (find var-metadata attribute)
+                                        (find namespace-metadata attribute))]
+                  (when (some? (val declared))
+                    [attribute (val declared)]))))
+        test-marker-attributes))
+
 (defn shapes-in
   "Program-row shapes derived from the entity maps `forms` declares.
 

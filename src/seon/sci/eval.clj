@@ -409,10 +409,10 @@
                         :seon.test/source source}
                  (find metadata :seon.test/fixture-observation)
                  (assoc :seon.test/fixture-observation (:seon.test/fixture-observation metadata))
-                 (find metadata :seon.test/long)
-                 (assoc :seon.test/long (:seon.test/long metadata))
-                 (find metadata :seon.test/long-ms)
-                 (assoc :seon.test/long-ms (:seon.test/long-ms metadata)))
+                 ;; Same one rule as the static seam: a namespace form may
+                 ;; declare the cost for every deftest it holds.
+                 true (merge (program/test-markers
+                              metadata (meta (:ns metadata)))))
 
                function?
                (cond-> {:seon.fn/sym (str qualified)
