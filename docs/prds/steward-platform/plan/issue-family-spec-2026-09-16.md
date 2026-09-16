@@ -182,3 +182,31 @@ duplicate issues."
   hand first, later by schedule or on adoption; identity as above; one
   regression per detector on the canonical harness proving idempotence
   (two runs, one entity) and resolution/re-open.
+
+## 8. A set of issues seeds an agent; the steward triages (owner, 2026-09-16 05:05Z)
+
+- **`start!` takes a set of issues.** Request `{:seon.issue/ids #{…} :seon.issue/budget n}`;
+  one worker agent; objective = the issues' problems; one plan step per
+  issue carrying that issue's tests; `:seon.issue/agent` asserted on each;
+  refused if any issue is already assigned or has no tests. The session ends
+  when every issue in the set has `resolved-tx`, or on budget. A single
+  issue is the one-element case; the current slice's single-issue `start!`
+  stays as that case.
+- **The steward triages.** Its opening lists its namespace's open issues
+  (through the namespace view: `:seon.issue/_functions` per function,
+  `:seon.issue/_namespaces`), grouped by shared function and by
+  `:seon.issue/detector`, and teaches the exact call above. Grouping is a
+  judgment made at launch by an agent, never guessed at generation.
+- **Checklists are detectors.** The standard for a function / schema / test
+  / namespace (priority order: open errors, red or missing reaching tests,
+  incomplete contract, docstring with passing example, generators for
+  generative checking, lint, unresolved calls, file/span; schema: pair,
+  attribute descriptions, identity, fixture example, total render; test:
+  reaches a namespace under test, result on current digest, drift-free,
+  structured failures, fixture observation; namespace: steward, docstring,
+  no readerless duplicates, all public functions conform, no unlinked issue)
+  is the ordered set of detector functions, each generating fine-grained
+  issues with §7's identity. No separate standing-issue entity.
+- **Ripples**: generators re-run (by hand first, on adoption later); the
+  steward's opening is a generated read, so its next turn shows issues
+  opened and resolved since its last turn.
