@@ -1107,3 +1107,8 @@ across the same neutral commit. Landing note
 `web-context-rewalk-2026-09-16.md` (`40ce33bfc`); secondary issue
 `an-unrelated-fixture-transaction-mints-a-half-agent.md` (`cd2343a0c`).
 Re-gate as batch 83.
+
+Note (steward, 2026-09-16): `bin/seon init --dev … | tail` masks the exit
+code — a pipe's status is the last command's. Adoption is confirmed by
+resolution (`:seon.source/commit-id` vs `seon.cluster.source/current`),
+never by a piped exit code.
