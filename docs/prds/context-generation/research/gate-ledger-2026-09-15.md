@@ -428,3 +428,16 @@ value through `seon.db/db` (the raw-deref class again), and restored the
 shipped `:seon.test/check-time-limit-ms` decision missing from
 `config/default.edn`. One authorised cold iteration: 27 tests / 128
 assertions green. Re-gated in batch 39 with the transcript second pass.
+
+### 2026-09-16 13:50Z — custody-stability reds fixed (`3c115ff15`)
+
+Both were fixture/roster drift: the isolation fixture wrote messages without
+the now-required `:seon.message/to` (all writes refused, assertions passed
+over an empty database — absence read as health); it now upserts a real
+recipient. The custody-returning roster gained two reviewed members
+(`seon.cluster.agent/acquire-context!` → ctx,
+`seon.db/carry-connection-projection-state!` → connection). The lane kept the
+literal expected set as the dated reviewed record whose drift checker is the
+test itself (the derived side is already `:seon.fn.arity/output-refs`, so a
+query on both sides would be tautological) — accepted under §2.2's
+"enforced by a checker" clause. In-process 5/0/0 and 2/0/0. Batch 40.
