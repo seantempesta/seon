@@ -130,7 +130,7 @@
                                [?config :seon.config.run/max-episode-runs ?limit]]
                       database))
             turns-used
-            ((requiring-resolve 'seon.turn/episode-runs)
+            (turn/episode-runs
              database agent-id)
             ;; UNREAD AND THE TURN BOUND ARE ONE DERIVATION, BY `:t`.
             ;; A message is unanswered exactly while its transaction is
@@ -138,8 +138,7 @@
             ;; the turns taken since the latest wake from outside the
             ;; agent. Neither is stored and neither is counted here.
             unread
-            (count ((requiring-resolve
-                     'seon.turn/unanswered-triggers)
+            (count (turn/unanswered-triggers
                     database agent-id))]
         (cond->
          {:seon.agent/id agent-id
