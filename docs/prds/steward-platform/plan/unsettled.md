@@ -1186,6 +1186,16 @@ committed, lane after the tree frees), #29 → platform-tier agent. Twelve lanes
 and agents running; the tree is saturated, so several will stop at held files
 with hunks and resume as files free — expected, not failure.
 
+**01:00Z:** edges-are-symbols plan reviewed and approved (references retype
+too; measure walk parity) → step 2 implementing. Launched a schema DESIGN
+review (Opus, `schema-design-review-2026-09-17.md`) applying tonight's eight
+learnings to every family — refs that are names, states read from absence,
+duplicated schemas (two eval schemas, two pulled copies, three model
+entities, thirteen maintenance results, capture/contribution/eval), enum
+stamps, printed-EDN strings, two clocks per event, vectors that are sets —
+producing the reset batch's remaining edits. Also running: the Datahike skill
++ AGENTS.md learnings docs agent.
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
