@@ -1,11 +1,16 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: blocker
 tags: [test, database, wave/test-fixture]
 ---
 
 # Canonical fixture branch acquisition waits behind a held roster permit
+
+The root cause and dependency follow-up are owned by
+[an-interrupted-fixture-leaks-datahikes-roster-permit-and-wedges-the-jvm.md](an-interrupted-fixture-leaks-datahikes-roster-permit-and-wedges-the-jvm.md).
+`d2a0ad636` removes interruption from `seon.test/run` and `check` expiry;
+the canonical expiry regression retains this observation as its acceptance case.
 
 Observed 2026-09-16 after the owner's reset, default PID 27828.
 `seon.test/run` of
