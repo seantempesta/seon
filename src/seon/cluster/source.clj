@@ -365,24 +365,28 @@
   no source, span, or contract — it asserts only that the name once existed,
   exactly as an ordinary deletion leaves it. An identity no honest minimal row
   can assert is skipped; its holder reports the typed unknown instead."
-  {:malli/schema [:=> [:cat [:set :seon.program/identity]] [:vector :map]]}
-  [absent]
-  (let [forms (schema.edn/packaged-forms)]
-    (into [] (comp (mapcat #(mintable-identity forms %)) (distinct))
-          (sort-by pr-str absent))))
+  {:malli/schema [:=> [:cat :map [:set :seon.program/identity]] [:vector :map]]}
+  [forms absent]
+  (into [] (comp (mapcat #(mintable-identity forms %)) (distinct))
+        (sort-by pr-str absent)))
 
 (defn identity-ref
   "The portable ref for this identity, or nil when none exists.
 
   A tempid is used for an absent identity because the minted row lands in the
   SAME transaction; a lookup ref would be resolved against the value before it.
-  Nil means the identity is absent and cannot be minted honestly."
-  {:malli/schema [:=> [:cat [:set :seon.program/identity] :seon.program/identity]
+  Nil means the identity is absent and cannot be minted honestly.
+
+  `forms` is the packaged schema population, acquired ONCE by the operation
+  and handed in: reading the schema resources from disk per call put a full
+  EDN parse of every schema file inside the publication transaction for every
+  evidence ref (2026-09-16, publication exceeded its 180 s bound)."
+  {:malli/schema [:=> [:cat :map [:set :seon.program/identity] :seon.program/identity]
                   [:maybe [:or :seon.program/identity :string]]]}
-  [absent program-identity]
+  [forms absent program-identity]
   (cond
     (not (contains? absent program-identity)) program-identity
-    (seq (mintable-identity (schema.edn/packaged-forms) program-identity))
+    (seq (mintable-identity forms program-identity))
     (identity-tempid program-identity)))
 
 (defn- result-preservation-tx
@@ -459,6 +463,8 @@
   ref. Either way the rest of the evidence commits."
   [database-value evidence]
   (let [absent (absent-program-identities database-value (evidence-identities evidence))
+        forms (schema.edn/packaged-forms)
+        ref-of (partial identity-ref forms absent)
         reported-path?
         (some? (get (:schema database-value) :seon.test.failure/reported-file))
         portable-failure
@@ -467,20 +473,20 @@
                 owner (:seon.test.failure/test failure)
                 path (second site)]
             (cond-> failure
-              owner (assoc :seon.test.failure/test (identity-ref absent owner))
-              (and site (nil? (identity-ref absent site)))
+              owner (assoc :seon.test.failure/test (ref-of owner))
+              (and site (nil? (ref-of site)))
               (-> (dissoc :seon.test.failure/file)
                   (cond-> reported-path?
                     (assoc :seon.test.failure/reported-file path)))
-              (and site (identity-ref absent site))
-              (assoc :seon.test.failure/file (identity-ref absent site)))))]
-    (into (identity-tombstone-rows absent)
+              (and site (ref-of site))
+              (assoc :seon.test.failure/file (ref-of site)))))]
+    (into (identity-tombstone-rows forms absent)
           (map (fn [row]
                  (cond-> row
                    (program/row-identity row)
                    (assoc :db/id (identity-tempid (program/row-identity row)))
                    (:seon.test/reach row)
-                   (update :seon.test/reach #(into [] (keep (partial identity-ref absent)) %))
+                   (update :seon.test/reach #(into [] (keep ref-of) %))
                    (:seon.test/failures row)
                    (update :seon.test/failures #(mapv portable-failure %)))))
           evidence)))
