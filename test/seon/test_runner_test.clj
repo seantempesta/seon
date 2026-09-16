@@ -916,12 +916,17 @@
              :seon.test/run-at at}]
         (test-support/seed-cluster! connection "test")
         (let [committed (runner/commit-results! connection completion)]
-          (is (= (:seon.test.runner/results run-result)
-                 (mapv #(dissoc % :seon.test/reach-digest :seon.test/run-basis-t
-                                :seon.test/run
-                                :seon.test/run-at)
-                       committed))
-              "the completion value is pulled from the committed test rows"))
+          (is (= committed
+                 (mapv #(dissoc (db/pull @connection @#'runner/result-selector
+                                        [:seon.test/sym (:seon.test/sym %)]) :db/id)
+                       (:seon.test.runner/results run-result)))
+              "the returned projection equals the committed facts, including structured failures")
+          (is (= (mapv #(select-keys % [:seon.test/sym :seon.test/pass-count
+                                       :seon.test/fail-count :seon.test/error-count])
+                       (:seon.test.runner/results run-result))
+                 (mapv #(select-keys % [:seon.test/sym :seon.test/pass-count
+                                       :seon.test/fail-count :seon.test/error-count]) committed)))
+          (is (seq (mapcat :seon.test/failures committed))))
         (db/transact!
          connection
          (agent/creation-tx
@@ -1014,14 +1019,7 @@
             (:seon.sci.admit/value
              (evaluate "(seon.test/run #'agent-fork-example)"))
             stored (db/pull @connection
-                            [:seon.test/sym
-                             :seon.test/pass-count
-                             :seon.test/fail-count
-                             :seon.test/error-count
-                             :seon.test/reach-digest
-                             :seon.test/run
-                             :seon.test/run-basis-t
-                             :seon.test/run-at]
+                            @#'runner/result-selector
                             [:seon.test/sym (:seon.test/sym result)])]
         (is (= result stored))))))
 
