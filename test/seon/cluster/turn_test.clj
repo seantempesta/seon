@@ -3608,3 +3608,39 @@
                      @derivations
                      " time(s); it must receive the cluster's projection "
                      "state instead of re-deriving it per commit"))))))))
+
+(deftest generated-opening-preserves-one-provider-turn-budget
+  (with-cluster
+    (fn [cluster]
+      (let [connection (:seon.db/connection cluster)
+            calls (atom 0)
+            seeded (db/transact!
+                    connection
+                    (into [{:db/id [:seon.config/cluster "turn-test"]
+                            :seon.config.run/max-episode-runs 1}]
+                          (turn/generated-run-tx
+                           (db/db connection)
+                           {:seon.agent/id "agent-a"
+                            :seon.turn/id "budget-opening"
+                            :seon.turn/opened-tx "datomic.tx"
+                            :seon.turn/starting-ns [:seon.ns/name 'my.agents.agent-a]
+                            :seon.turn/trigger [:seon.message/id "m-1"]})))]
+        (is (nil? (:seon.error/kind seeded)) (pr-str (:seon.error/kind seeded)))
+        (when (:seon.error/kind seeded) (throw (ex-info "Budget fixture refused" seeded)))
+        (is (= 0 (turn/episode-runs (db/db connection) "agent-a")))
+        (is (= 1 (turn/turns-left (db/db connection) "agent-a")))
+        (with-redefs [ai/complete (fn [_] (swap! calls inc) {:seon.ai/text "(+ 20 22)"})]
+          (drive! cluster 80))
+        (let [database (db/db connection)
+              opening (db/pull database '[*] [:seon.turn/id "budget-opening"])
+              provider-turns (db/q '[:find (count ?turn) .
+                                     :where [?agent :seon.agent/id "agent-a"]
+                                     [?turn :seon.turn/agent ?agent]
+                                     [?turn :seon.turn/attempts _]] database)]
+          (is (some? (:seon.turn/closed-tx opening)))
+          (is (nil? (:seon.turn/attempts opening)))
+          (is (= 1 @calls) "budget one permits exactly one provider reply after the opening")
+          (is (= 1 provider-turns))
+          (is (= 1 (turn/episode-runs database "agent-a")))
+          (is (= 0 (turn/turns-left database "agent-a")))
+          (is (nil? (turn/next-agent-work database (request connection)))))))))

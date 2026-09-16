@@ -2672,9 +2672,9 @@
 (defn episode-runs
   "The agent's ordinary turns taken since its latest outside wake.
 
-  System turns have no provider attempt and freeze their plan in the identity
-  transaction; they do not consume this bound. Ordinary virtual turns open
-  first and freeze a reply later. Provider attempts always consume the bound.
+  Count turns with a provider attempt or a reply accepted after opening.
+  Generated openings and system replies frozen with their identity do not
+  consume this bound. An open turn alone is not a provider attempt.
 
   DERIVED FROM `:t` AND NOTHING ELSE. Datahike stamps every datom with
   its transaction, so a turn's own identity datom carries the basis it
@@ -2700,7 +2700,8 @@
               [(>= ?tx ?since)]
               (or-join [?run ?tx]
                 [?run :seon.turn/attempts _]
-                (not [?run :seon.turn/reply-size _ ?tx]))]
+                (and [?run :seon.turn/reply-size _ ?reply-tx]
+                     [(> ?reply-tx ?tx)]))]
             db agent-id (outside-wake-t db agent-id))
       0))
 

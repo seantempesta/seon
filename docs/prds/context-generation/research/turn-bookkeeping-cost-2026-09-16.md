@@ -944,3 +944,27 @@ forms. Preserve the current arity and contracts. No protected file was edited;
 the original batch analysis remains until that owner change is authorized.
 The direct settlement/write and definition-install bounds remain useful and
 are retained independently of the withdrawn optimization.
+
+Restoring the complete batch restored the same-turn edge: run **72332**,
+**20/0/0**. The direct-bound candidate was run **71587**, **20/0/0**.
+
+### Slice 3: provider budget
+
+`episode-runs` now positively requires a provider attempt, or an accepted
+reply whose datom transaction is later than the turn identity. Absence of a
+reply no longer counts as a provider turn. Failed provider attempts still
+count, and the outside-wake anchor remains unchanged. No schema changes.
+
+`seon.cluster.turn-test/generated-opening-preserves-one-provider-turn-budget`
+uses the canonical cluster fixture and production `generated-run-tx`, the
+same opening constructor used by `seon.issue/start-call`. It drives the
+ordinary turn transitions with real SCI and a virtual provider reply that
+does not request completion, so stopping after one reply proves the budget.
+It checks opening closure, absence of opening attempts, actual provider-call
+and durable provider-turn counts, remaining budget, and no further work.
+
+Before, run **71356**, **6/4/0**: the opening consumed the unit and **zero**
+provider calls occurred. The hot-loaded and re-armed candidate, run **71561**,
+**10/0/0**: opening cost **zero**, exactly **one** provider turn, zero budget
+remaining. Both tests loaded through the production test loader and ran with
+`seon.test/run` on futures. Final adopted verification follows.
