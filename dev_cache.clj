@@ -17,6 +17,7 @@
 (def selection-file "target/dev-dependency-cache-current.edn")
 (def process-reference-root "target/dev-dependency-cache-processes")
 (def lock-file "target/dev-dependency-cache.lock")
+(def reference-lock-file "target/dev-dependency-cache-references.lock")
 (def manifest-file "META-INF/seon-dev-cache.edn")
 (def cache-version 4)
 
@@ -401,9 +402,9 @@
    {:seon.dev-cache/digest (:seon.dev-cache/cache-digest manifest)
     :seon.dev-cache/path (.getCanonicalPath ^java.io.File directory)}))
 
-(defn- with-cache-lock
-  [transition]
-  (let [lock-path (canonical-file lock-file)]
+(defn- with-file-lock
+  [label path transition]
+  (let [lock-path (canonical-file path)]
     (.mkdirs (.getParentFile lock-path))
     (let [requested (System/nanoTime)]
       (with-open [file (RandomAccessFile. lock-path "rw")
@@ -412,8 +413,19 @@
         (let [acquired (System/nanoTime)]
           (try (transition)
                (finally
-                 (println "seon cache: lock wait-ms=" (quot (- acquired requested) 1000000)
+                 (println "seon cache:" label "lock wait-ms=" (quot (- acquired requested) 1000000)
                           "held-ms=" (quot (- (System/nanoTime) acquired) 1000000)))))))))
+
+(defn- with-cache-lock
+  "Serialize rebuilds. Held for the whole of a cold dependency build."
+  [transition]
+  (with-file-lock "rebuild" lock-file transition))
+
+(defn- with-reference-lock
+  "Serialize choosing a cache with recording the choice, against `reap`.
+  Held only across a validity check and one atomic reference write."
+  [transition]
+  (with-file-lock "reference" reference-lock-file transition))
 
 (defn- refresh!
   []
@@ -456,18 +468,25 @@
     (prn result)
     result))
 
-(defn- test-digest
+(defn- test-inputs
   [root dependency-digest]
   (when-not (resolve 'seon.test.selection/input-digests)
     (load-file (str (io/file root "src/seon/test/selection.clj"))))
-  (hex-digest [((resolve 'seon.test.selection/input-digests) root)
-               (slurp (io/file root "dev_cache.clj")) dependency-digest]))
+  [((resolve 'seon.test.selection/input-digests) root)
+   (slurp (io/file root "dev_cache.clj")) dependency-digest])
+
+(defn- test-digest
+  ([inputs] (hex-digest inputs))
+  ([root dependency-digest]
+   (test-digest (test-inputs root dependency-digest))))
 
 (defn- test-classpath!
   [selection]
-  ;; The selector already owns the complete gate inputs. Loading its pure
-  ;; namespace also works in tools.deps' tool classpath (which contains ".").
-  (let [digest (test-digest "." (:seon.dev-cache/digest selection))
+  ;; The selector already owns the complete gate inputs. Loading it here works
+  ;; in tools.deps' tool classpath (which contains "."); the `:dev-cache` alias
+  ;; declares that namespace's own dependencies.
+  (let [inputs (test-inputs "." (:seon.dev-cache/digest selection))
+        digest (test-digest inputs)
         file (io/file "target/test-classpaths" (str digest ".edn"))
         _
         (if (.isFile file)
@@ -486,34 +505,59 @@
                                 (cons (:seon.dev-cache/path selection) paths))]
             (atomic-write-edn! file value)
             value))]
+    ;; Retain the exact inputs hashed above, so base compatibility compares
+    ;; corresponding inputs rather than unrelated aggregate digests.
+    (atomic-write-edn! (io/file "target/test-classpaths" (str digest ".inputs.edn"))
+                       inputs)
     (assoc selection
            :seon.dev-cache/test-digest digest
            :seon.dev-cache/test-classpath-file (.getCanonicalPath file))))
 
+(defn- record-process-reference!
+  [pid selection]
+  (let [handle (.orElseThrow (java.lang.ProcessHandle/of (long pid)))
+        started (.orElseThrow (.startInstant (.info handle)))]
+    (atomic-write-edn!
+     (io/file process-reference-root (str pid ".edn"))
+     {:seon.boot/pid pid
+      :seon.boot/start-instant (java.util.Date/from started)
+      :seon.operator.process-record/cache-path
+      (:seon.dev-cache/path selection)})))
+
+(defn- claim-current-cache!
+  "Choose an already-valid immutable cache and record the claim, or nothing.
+  `reap` is the only deleter and takes the same reference lock, so a chosen
+  directory is referenced before it can be considered unreferenced."
+  [test? pid]
+  (with-reference-lock
+    (fn []
+      (when-let [{:seon.dev-cache/keys [directory manifest]} (current-cache)]
+        (let [selection (cache-result directory manifest :current)]
+          (when (and test? pid)
+            (record-process-reference! pid selection))
+          selection)))))
+
 (defn ensure-cache
   "Reuse matching dependency classes; optionally prepare the test classpath."
   [{:keys [test? pid]}]
-  (let [result
-        (with-cache-lock
-          (fn []
-            (let [selection
-                  (if-let [{:seon.dev-cache/keys [directory manifest]}
-                           (current-cache)]
-                    (cache-result directory manifest :current)
+  ;; A published cache directory is immutable and a rebuild only ever admits
+  ;; a NEW directory, so a valid cache is a hit without the rebuild lock: a
+  ;; peer's cold build cannot invalidate it and must not be waited out.
+  (let [selection
+        (or (claim-current-cache! test? pid)
+            (with-cache-lock
+              (fn []
+                (or (claim-current-cache! test? pid)
                     (do
                       (println "seon cache: inputs changed; rebuilding")
                       (flush)
-                      (refresh!)))]
-              (when (and test? pid)
-                (let [handle (.orElseThrow (java.lang.ProcessHandle/of (long pid)))
-                      started (.orElseThrow (.startInstant (.info handle)))]
-                  (atomic-write-edn!
-                   (io/file process-reference-root (str pid ".edn"))
-                   {:seon.boot/pid pid
-                    :seon.boot/start-instant (java.util.Date/from started)
-                    :seon.operator.process-record/cache-path
-                    (:seon.dev-cache/path selection)})))
-              (if test? (test-classpath! selection) selection))))]
+                      (let [selection (refresh!)]
+                        (with-reference-lock
+                          (fn []
+                            (when (and test? pid)
+                              (record-process-reference! pid selection))))
+                        selection))))))
+        result (if test? (test-classpath! selection) selection)]
     (prn result)
     result))
 
@@ -579,33 +623,35 @@
   (let [result
         (with-cache-lock
           (fn []
-            (let [references (read-live-process-references!)
-                  live-paths
-                  (into #{}
-                        (map #(-> (:seon.operator.process-record/cache-path %)
-                                  canonical-file
-                                  .getCanonicalPath))
-                        references)
-                  selected-path (some-> (selected-cache)
-                                        :seon.dev-cache/path
-                                        canonical-file
-                                        .getCanonicalPath)
-                  protected-paths (cond-> live-paths
-                                    selected-path (conj selected-path))
-                  reaped
-                  (into []
-                        (comp
-                         (remove #(contains? protected-paths
-                                             (.getCanonicalPath
-                                              ^java.io.File %)))
-                         (map (fn [directory]
-                                (let [path (.getCanonicalPath
-                                            ^java.io.File directory)]
-                                  (b/delete {:path path})
-                                  path))))
-                        (cache-directories))]
-              {:seon.dev-cache/live-processes (count references)
-               :seon.dev-cache/protected (count protected-paths)
-               :seon.dev-cache/reaped reaped})))]
+            (with-reference-lock
+              (fn []
+                (let [references (read-live-process-references!)
+                      live-paths
+                      (into #{}
+                            (map #(-> (:seon.operator.process-record/cache-path %)
+                                      canonical-file
+                                      .getCanonicalPath))
+                            references)
+                      selected-path (some-> (selected-cache)
+                                            :seon.dev-cache/path
+                                            canonical-file
+                                            .getCanonicalPath)
+                      protected-paths (cond-> live-paths
+                                        selected-path (conj selected-path))
+                      reaped
+                      (into []
+                            (comp
+                             (remove #(contains? protected-paths
+                                                 (.getCanonicalPath
+                                                  ^java.io.File %)))
+                             (map (fn [directory]
+                                    (let [path (.getCanonicalPath
+                                                ^java.io.File directory)]
+                                      (b/delete {:path path})
+                                      path))))
+                            (cache-directories))]
+                  {:seon.dev-cache/live-processes (count references)
+                   :seon.dev-cache/protected (count protected-paths)
+                   :seon.dev-cache/reaped reaped})))))]
     (prn result)
     result))
