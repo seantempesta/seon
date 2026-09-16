@@ -157,8 +157,11 @@ One test at a time on a daemon thread, `seon.test/run` with
   `namespace-subject` no longer does. Against that ADOPTED definition,
   Juniper's live pull produced 280 candidates, 0 with a non-lookup subject,
   and the episode derives; the three `seon.bootstrap-test` tests re-ran
-  8/0/0, 5/0/0 and 268/0/0. `default` was never stopped, reforked or
-  restarted.
+  8/0/0, 5/0/0 and 268/0/0. The retry then reported its own clean finish:
+  "development cluster converged", `:current-src` commit
+  `6aaaaa00-ce94-5f85-a584-503de7043c55`, digest
+  `be3c9dd206e3458bfb140be319ab82443ac8007e380d014678f3441bbb6c0ac1`,
+  exit 0. `default` was never stopped, reforked or restarted.
 - `src/seon/fn.clj`, `src/seon/program.cljc`, `src/seon/sci/eval.clj`,
   `test/seon/fn_test.clj`, `test/seon/program_test.clj`,
   `test/seon/loop_proof_test.clj` and `test/seon/sci/eval_test.clj` carried
