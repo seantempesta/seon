@@ -246,3 +246,27 @@ of the tree.
    standards exclude them by fact instead of over-reporting. Until then the over-report
    is honest, and the docstring detector already behaves the same way
    (decision 5 recorded the same two `seon.flow` constructors).
+
+## Platform observation the orchestrator should route (not filed, in-flight work)
+
+A COMPLETE publication on `default` is currently refused by write admission.
+Two attempts, 2026-09-17 20:11:58Z and 20:13:18Z (the second recorded in
+`logs/current-source-failure.log`), both reached the end of analysis and were
+then rejected:
+
+```
+● current-src: contract rows: 11035/11035
+● current-src: program population compiled: 39458 entities, 19504 identities, 35835 keyword facts
+:error datahike.writer :datahike/write-rejected {:kind :transaction/validation-rejected,
+                                                 :cause "Transaction report validation rejected."}
+✗ The cluster threw during the prepl operation: clojure.lang.ExceptionInfo:
+  Program indexing transaction was refused.
+```
+
+An INCREMENTAL `init --dev default --changed <path>` still lands (that is how
+this slice's rows reached the cluster), so the cluster's program facts are a
+partial population: attributes that only a complete publication writes are
+missing, which is exactly the `:seon.fn/destroys` zero above and why
+`seon.test/run` refuses for every lane on `default`. This is the
+write-admission work of ruling F2 / decision 6 and belongs to the lane holding
+it, so it is reported here rather than filed as a second note.
