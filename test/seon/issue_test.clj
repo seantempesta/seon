@@ -36,9 +36,9 @@
      (clojure.test/is (some #(= "agent-form-calls-to-core-namespaces-are-not-indexed" (:seon.issue/id %))
                            (:seon.issue/members class-value)))
      (clojure.test/is (empty? (:seon.issue/refusals report)) (pr-str (:seon.issue/refusals report)))
-     (clojure.test/is (contains? (:seon.issue/unresolved
-                                  (seon.db/pull d '[:seon.issue/unresolved]
-                                                [:seon.issue/id "agent-form-calls-to-core-namespaces-are-not-indexed"]))
+     (clojure.test/is (contains? (set (:seon.issue/unresolved
+                                       (seon.db/pull d '[:seon.issue/unresolved]
+                                                     [:seon.issue/id "agent-form-calls-to-core-namespaces-are-not-indexed"])))
                                  "my.run/complete")))
    (let [real (first (filter #(clojure.string/includes? (:seon.issue/text %) "seon.fn")
                              (seon.issue/notes ".")))
@@ -51,9 +51,9 @@
      (clojure.test/is (nil? (:seon.error/kind report)) (pr-str report))
      (clojure.test/is (= 3 (:seon.issue/count report)))
      (clojure.test/is (empty? (:seon.issue/refusals report)) (pr-str (:seon.issue/refusals report)))
-     (clojure.test/is (contains? (:seon.issue/unresolved
-                                  (seon.db/pull (seon.db/db connection) '[:seon.issue/unresolved]
-                                                [:seon.issue/id "probe-member"]))
+     (clojure.test/is (contains? (set (:seon.issue/unresolved
+                                       (seon.db/pull (seon.db/db connection) '[:seon.issue/unresolved]
+                                                     [:seon.issue/id "probe-member"])))
                                  "seon.issue-missing/absent"))
      (let [member (seon.db/pull (seon.db/db connection) '[*] [:seon.issue/id "probe-member"])
            class-row (seon.db/pull (seon.db/db connection) '[{:seon.issue/members [:seon.issue/id]}] [:seon.issue/id "probe-class"])]
@@ -142,7 +142,7 @@
      (clojure.test/is (nil? (:seon.error/kind report)) (pr-str report))
      (clojure.test/is (empty? (:seon.issue/refusals report)) (pr-str (:seon.issue/refusals report)))
      (clojure.test/is (= #{"com.cognitect/transit-clj" "java.lang.Thread/sleep" "seon.cluster.loop/settle!"}
-                        (:seon.issue/unresolved row)))
+                        (set (:seon.issue/unresolved row))))
      (clojure.test/is (some #(= "seon.db/pull" (:seon.fn/sym %)) (:seon.issue/functions row)))
      (clojure.test/is (= (count selected) (:seon.issue/count report)))
      (clojure.test/is (pos? (count (:seon.issue/unresolved report))))
