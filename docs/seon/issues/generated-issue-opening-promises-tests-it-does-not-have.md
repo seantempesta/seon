@@ -36,3 +36,24 @@ detector and never mentions `my.test/check`. The context trials in
 the richer candidates; this is the floor's correctness only.
 
 Related: `generated-issues-carry-no-tests-so-start-refuses-them`.
+
+## Landed (awaiting the gate)
+
+`e47d05dec`: `seon.issue/check-form` names the form that decides done — the
+tests when the issue has any, otherwise `(<detector> (seon.db/db))` — and
+emits NO form when nothing decides, because `(my.test/check
+{:seon.test/changed []})` is a check that passes by being empty.
+`seon.issue/render-ai` and the HTML block say the same, and
+`seon.issue-generate-test/a-generated-issue-names-its-detector-and-promises-no-tests`
+holds them to it. Observed on `default` for issue `7cf1077d99bb`:
+
+```
+;; My issue. Its detector decides done: it resolves on the run after
+;; (seon.issue.detect/public-without-doc (seon.db/db)) stops naming this subject.
+(my.issue/status {:seon.issue/id "7cf1077d99bb"})
+```
+
+and the block's `[:p "Done when: (seon.issue.detect/public-without-doc
+(seon.db/db))"]`. Status stays open until the regression is green in a cold
+gate: `default`'s fixture base predates `:seon.issue/detector`, so the lane
+could not run it in process.
