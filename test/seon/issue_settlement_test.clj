@@ -5,6 +5,7 @@
             [clojure.core.async :as async]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
+            [seon.cluster.wake :as wake]
             [seon.config :as config]
             [seon.db :as db]
             [seon.fn :as functions]
@@ -194,12 +195,20 @@
                                    [?message :seon.message/to ?root]
                                    [?message :seon.message/content ?text]] (db/db connection) aid)]
              (is (= 1 (count messages)) (pr-str messages))
-             (is (str/includes? (first messages) "after 2 provider turns")))
+             (is (str/includes? (first messages) "after 2 ordinary turns")))
            (let [resumed (seon.issue/start! {:seon.db/connection connection
                                            :seon.issue/id "settlement-fixture" :seon.issue/budget 4})]
              (is (nil? (:seon.error/kind resumed)) (pr-str resumed))
              (is (= aid (get-in resumed [:seon.issue/agent :seon.agent/id])))
-             (is (= 2 (turn/turns-left (db/db connection) aid))))
+             (is (= 2 (turn/turns-left (db/db connection) aid)))
+             (let [database (db/db connection)
+                   issue-eid (:db/id (db/pull database [:db/id] issue-ref))
+                   budget-datom (first (db/datoms database :eavt issue-eid :seon.issue/budget))
+                   matchers (get-in (#'wake/wake-matchers database)
+                                    [:seon.issue/budget :seon.cluster.wake/matches])]
+               (is (= [(:db/id (db/pull database [:db/id] [:seon.agent/id aid]))]
+                      (vec (keep #(% budget-datom) matchers)))
+                   "The committed budget datom addresses the resumed worker's existing wake route.")))
            ;; Editing one reached function makes exactly its test stale.
            (admit! connection ctx namespace-name
                    "(defn answer {:malli/schema [:=> [:cat] :int]} [] (throw (ex-info \"red\" {})))")

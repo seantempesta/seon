@@ -2,7 +2,6 @@
   "The live-fact generated bootstrap run shared by every new agent."
   (:require [clojure.edn :as edn]
             [clojure.string :as str]
-            [seon.cluster.instruction :as instruction]
             [seon.plan :as plan]
             [seon.ai :as ai]
             [seon.ai.tokens :as tokens]
@@ -38,13 +37,15 @@
                               [?issue :seon.issue/agent ?agent]] database agent-id))
         tools
         (db/q '[:find [?name ...]
-                :in $ [?name ...]
-                :where [?namespace :seon.ns/name ?name]
+                :in $ ?agent-id
+                :where [?agent :seon.agent/id ?agent-id]
+                       [?agent :seon.agent/namespace ?session]
+                       [?session :seon.ns/requires ?namespace]
+                       [?namespace :seon.ns/name ?name]
                        [?function :seon.fn/ns ?namespace]
                        [?function :seon.fn/private? false]
                        (not [?function :seon.fn/internal? true])]
-              database (cond->> (instruction/toolkit-namespaces database)
-                         issue? (remove #{'my.shell 'my.edit}))) ]
+              database agent-id)]
     {:seon.help/lines
     [(str "The prompt shows your namespace " namespace-name
           " and is drawn for you. Send only ;; thinking comments and forms.")

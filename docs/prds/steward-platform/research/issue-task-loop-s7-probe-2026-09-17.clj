@@ -63,7 +63,35 @@
   :seon.issue/id "65f46c0efa7f" :seon.issue/budget 2})
 
 (mapv #(select-keys % [:seon.cluster.eval/source :seon.eval/shown])
-      (filter #(clojure.string/includes? (:seon.cluster.eval/source % "")
-                                        "my.issue/status")
+      (filter :seon.eval/origin
               (seon.eval/of-agent
                (seon.db/db (seon.operator/connection "default")) "2393cac275ae")))
+
+; Review revision: origin is a declared ref, never classification of source text.
+(let [database (seon.db/db (seon.operator/connection "default"))]
+  {:origin-attribute (seon.db/pull database [:db/ident] [:db/ident :seon.eval/origin])
+   :stored-remaining (seon.db/pull database [:db/ident] [:db/ident :seon.issue/turns-remaining])
+   :origin-recognized (#'seon.turn/issue-origin-read?
+                       database {:seon.eval/origin [:seon.issue/id "65f46c0efa7f"]})
+   :spelling-alone (#'seon.turn/issue-origin-read?
+                    database {:seon.cluster.eval/source "(my.issue/status {:seon.issue/id \"65f46c0efa7f\"})"})
+   :spent (seon.turn/episode-runs database "2393cac275ae")
+   :remaining (seon.turn/turns-left database "2393cac275ae")
+   :messages (seon.db/q
+              '[:find [?content ...] :in $ ?id
+                :where [?issue :seon.issue/id ?id]
+                [?message :seon.message/about ?issue]
+                [?message :seon.message/content ?content]] database "65f46c0efa7f")})
+
+; The review probe resumed this SAME worker with total budget 5. It retained
+; pending turn 7d739af1dc0f, then completed three provider turns. Do not repeat.
+(comment
+  (seon.issue/start! {:seon.db/connection (seon.operator/connection "default")
+                     :seon.issue/id "65f46c0efa7f" :seon.issue/budget 5}))
+
+; A manual system-turn probe carries the live context's projection, like its proc.
+(let [handle (:seon.turn.loop/cluster (#'seon.cluster/mcp-instance "default"))]
+  (seon.schema/call-with-projection
+   (seon.sci.kernel/context-projection (:seon.sci.eval/ctx handle))
+   #(seon.turn/system-turn {:seon.turn.loop/cluster handle
+                           :seon.agent/id "2393cac275ae" :seon.turn/write? false})))

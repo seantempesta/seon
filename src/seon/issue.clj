@@ -592,7 +592,7 @@
   "Read the issue and test outcomes; verification uses the current test reach digest."
   {:malli/schema [:=> [:cat [:map [:seon.db/db :seon.db/database-value]
                              [:seon.issue/id :seon.issue/id]]]
-                  [:or :map :seon.error/value]]}
+                  [:or :seon.issue/status-view :seon.error/value]]}
   [{database :seon.db/db issue-id :seon.issue/id}]
   (let [row (db/pull database '[:db/id :seon.issue/id :seon.issue/title :seon.issue/status :seon.issue/severity
                                   :seon.issue/problem :seon.issue/path :seon.issue/opened :seon.issue/commits
@@ -891,15 +891,32 @@
           (refuse! :seon.issue/already-started
                    (str "Issue " issue-id " requires a larger budget and must still be open to resume.")))
         (let [cluster-name (db/q '[:find ?name . :where [_ :seon.cluster/name ?name]] database)
-              turn-id ((requiring-resolve 'seon.turn/next-id) database cluster-name agent-id)]
-          [{:seon.issue/id issue-id :seon.issue/budget (:seon.issue/budget request)}
-           [:db/retract [:seon.issue/id issue-id] :seon.issue/budget-exhausted-tx]
-           {:seon.agent/id agent-id
+              turn-id ((requiring-resolve 'seon.turn/next-id) database cluster-name agent-id)
+              open-turn (db/q '[:find ?turn . :in $ ?id :where
+                                [?agent :seon.agent/id ?id]
+                                [?turn :seon.turn/agent ?agent]
+                                (not [?turn :seon.turn/closed-tx])] database agent-id)
+              listener (db/q '[:find ?listen . :in $ ?agent-id ?issue-id :where
+                               [?agent :seon.agent/id ?agent-id]
+                               [?runtime :seon.runtime/agent ?agent]
+                               [?runtime :seon.runtime/listens ?listen]
+                               [?issue :seon.issue/id ?issue-id]
+                               [?listen :seon.listen/attribute :seon.issue/budget]
+                               [?listen :seon.listen/entity ?issue]] database agent-id issue-id)]
+          (cond->
+           [{:seon.issue/id issue-id :seon.issue/budget (:seon.issue/budget request)}
+            [:db/retract [:seon.issue/id issue-id] :seon.issue/budget-exhausted-tx]
+            {:seon.agent/id agent-id
              :seon.agent/settings (assoc ((requiring-resolve 'seon.ai/agent-overlay) database agent-id)
-                                        :seon.config.run/max-episode-runs (:seon.issue/budget request))}
-           [:db.fn/call (requiring-resolve 'seon.turn/open-call)
-            {:seon.turn/id turn-id :seon.turn/agent [:seon.agent/id agent-id]
-             :seon.turn/opened-tx "datomic.tx"}]])))))
+                                        :seon.config.run/max-episode-runs (:seon.issue/budget request))}]
+            (nil? listener)
+            (conj {:seon.runtime/agent [:seon.agent/id agent-id]
+                   :seon.runtime/listens [{:seon.listen/attribute :seon.issue/budget
+                                          :seon.listen/entity [:seon.issue/id issue-id]}]})
+            (nil? open-turn)
+            (conj [:db.fn/call (requiring-resolve 'seon.turn/open-call)
+                   {:seon.turn/id turn-id :seon.turn/agent [:seon.agent/id agent-id]
+                    :seon.turn/opened-tx "datomic.tx"}])))))))
 
 (defn exhaust-tx
   "Record the first exhausted close and deliver its status to root atomically."
@@ -926,7 +943,7 @@
                        {:seon.message/id (id/id [issue-id :budget-exhausted (:seon.issue/budget view)])
                         :my.message/to "root" :my.message/about issue-id
                         :my.message/content (str "Issue " issue-id " exhausted its budget after " spent
-                                                 " provider turns.\n" (status-text view))}})]
+                                                 " ordinary turns.\n" (status-text view))}})]
         (when-let [failure (first (:seon.error/values delivery))]
           (throw (ex-info (:seon.error/message failure) failure)))
         (into [[:db/add [:seon.issue/id issue-id] :seon.issue/budget-exhausted-tx "datomic.tx"]]

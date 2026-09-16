@@ -79,6 +79,8 @@
                  (:seon.error/kind form-problem))]
     (cond-> {:seon.turn/id id
              :seon.cluster.eval/ordinal ordinal}
+      (:seon.eval/origin settlement-evaluation)
+      (assoc :seon.eval/origin (:seon.eval/origin settlement-evaluation))
       (:seon.eval/renderer settlement-evaluation)
       (assoc :seon.eval/renderer (:seon.eval/renderer settlement-evaluation)
              :seon.eval/renderer-fn [:seon.fn/sym (str (:seon.eval/renderer settlement-evaluation))])
@@ -748,6 +750,7 @@
                :seon.cluster.eval/author :system
                :seon.cluster.eval/source source
                :seon.cluster.eval/ns [:seon.ns/name namespace-name]}
+        (:seon.eval/origin request) (assoc :seon.eval/origin (:seon.eval/origin request))
         comment (assoc :seon.cluster.eval/comment comment))))))
 
 (defn append-generated-tx
@@ -897,6 +900,7 @@
              :seon.cluster.eval/ordinal ordinal
              :seon.cluster.eval/at at}
       source (assoc :seon.cluster.eval/source source)
+      (:seon.eval/origin request) (assoc :seon.eval/origin (:seon.eval/origin request))
       ;; The agent's prose is its own fact beside the source it introduces,
       ;; so a prompt line holds exactly the one form it prompts for.
       comment (assoc :seon.cluster.eval/comment comment)
@@ -1448,6 +1452,7 @@
 
 (def ^:private receipt-terminal-attributes
   [:seon.eval/shown
+   :seon.eval/origin
    :seon.eval/renderer
    :seon.eval/renderer-fn
 
@@ -1520,6 +1525,8 @@
                               :seon.cluster.eval/author
                               :seon.cluster.eval/comment]
                              receipt-terminal-attributes))
+    (map? (:seon.eval/origin request))
+    (update :seon.eval/origin :db/id)
     (seq (:seon.cluster.eval/read-evidence request))
     (assoc :seon.cluster.eval/read-evidence
            (set (map #(dissoc % :db/id)
@@ -1589,6 +1596,11 @@
                                :seon.cluster.eval/id
                                (receipt-identity id ordinal)
                                :seon.cluster.eval/author :system)
+                  (:seon.eval/origin evaluation)
+                  (assoc :seon.eval/origin
+                         (:db/id (db/pull database [:db/id]
+                                          (let [origin (:seon.eval/origin evaluation)]
+                                            (if (map? origin) (:db/id origin) origin)))))
                   (nil? (:seon.cluster.eval/source evaluation))
                   (assoc :seon.cluster.eval/source
                          (:seon.cluster.eval/source source))))
@@ -2006,17 +2018,24 @@
          (fn [sources unit]
            (let [lookup (:seon.render.walk/lookup unit)
                  call-id [:seon.render/ai lookup (:seon.render/distance unit)]
-                 text (:seon.render.call/source (get @calls call-id))]
-             (if text
-               (let [parsed ((requiring-resolve 'seon.turn/planned-sources)
-                             text namespace-name
-                             (get-in handle [:seon.sci.admit/caps
-                                             :seon.config.eval.result/max-source]))]
-                 (if (:seon.error/kind parsed)
-                   (reduced parsed)
-                   (into sources
-                         (map #(assoc % :seon.render.walk/lookup lookup)) parsed)))
-               sources)))
+                 call (get @calls call-id)
+                 blocks (or (:seon.render/source-blocks call)
+                            (when-let [text (:seon.render.call/source call)]
+                              [{:seon.render/source text}]))]
+             (reduce
+              (fn [sources block]
+                (let [parsed ((requiring-resolve 'seon.turn/planned-sources)
+                              (:seon.render/source block) namespace-name
+                              (get-in handle [:seon.sci.admit/caps
+                                              :seon.config.eval.result/max-source]))]
+                  (if (:seon.error/kind parsed)
+                    (reduced parsed)
+                    (into sources
+                          (map #(cond-> (assoc % :seon.render.walk/lookup lookup)
+                                  (:seon.eval/origin block)
+                                  (assoc :seon.eval/origin (:seon.eval/origin block))))
+                          parsed))))
+              sources blocks)))
          [] units)]
           (if (:seon.error/kind sources) sources
               {:seon.turn/forms sources :seon.render.walk/units units})))))
@@ -2091,7 +2110,7 @@
               (cond-> (assoc (select-keys source
                                          [:seon.cluster.eval/source
                                           :seon.cluster.eval/comment
-                                          :seon.ns/name :seon.render.walk/lookup])
+                                          :seon.ns/name :seon.render.walk/lookup :seon.eval/origin])
                              :seon.turn/status status)
                 basis (assoc :seon.cluster.eval/read-basis-transaction basis)
                 (= status :changed)
@@ -2113,15 +2132,11 @@
                                                 :seon.cluster.eval/ordinal)
                                           (vals latest))))))))
 
-(defn- issue-status-read? [database source]
-  (try
-    (let [form (edn/read-string (:seon.cluster.eval/source source))
-          issue-id (when (= 'my.issue/status (first form))
-                     (:seon.issue/id (second form)))]
-      (boolean (and issue-id
-                    (:seon.issue/agent
-                     (db/pull database [:seon.issue/agent] [:seon.issue/id issue-id])))))
-    (catch Exception _ false)))
+(defn- issue-origin-read? [database source]
+  (when-let [origin (:seon.eval/origin source)]
+    (let [lookup (if (map? origin) (:db/id origin) origin)]
+      (some? (:seon.issue/agent
+              (db/pull database [:seon.issue/agent] lookup))))))
 
 (defn- generated-read-fault [database source evaluation]
   (let [inert (wake/inert-attributes database)
@@ -2160,7 +2175,7 @@
                                     (when-not (= :all attributes)
                                       (filter inert attributes)))))
                         evidence)]
-    (when (and (seq offending) (not (issue-status-read? database source)))
+    (when (and (seq offending) (not (issue-origin-read? database source)))
       (error/diagnostic
        {:seon.error/kind ::generated-read-depends-on-turns
         :seon.error/message "A generated context read depends on the agent's own turn-taking."
@@ -2267,6 +2282,8 @@
                                        (:seon.cluster.eval/read-evidence previous))
                                   [[:db/add (:db/id previous) :seon.cluster.eval/read-basis-transaction
                                     (:seon.cluster.eval/read-basis-transaction evaluation)]]
+                                  (when-let [origin (:seon.eval/origin source)]
+                                    [[:db/add (:db/id previous) :seon.eval/origin origin]])
                                   (receipt-read-evidence-tx previous evaluation))))
                              silent))
                   emitted (filterv #(not= :unchanged (:seon.turn/status (second %)))
@@ -2282,7 +2299,7 @@
                                   selected previews)
                   evaluated
                   (mapv (fn [source item]
-                          (if-let [previous (when-not (issue-status-read? database source)
+                          (if-let [previous (when-not (issue-origin-read? database source)
                                               (get latest (source-key source)))]
                             (let [evaluation (:seon.sci.eval/evaluation item)
                                   changed (db/diff
@@ -2744,7 +2761,7 @@
   Issue budgets are total across resumes; messages do not refill them."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        :seon.agent/id]
-                  :seon.turn.work/episode-runs]}
+                  [:or :seon.turn.work/episode-runs :seon.error/value]]}
   [db agent-id]
   (let [issue-t (db/q '[:find ?t . :in $ ?agent-id :where
                          [?agent :seon.agent/id ?agent-id]
@@ -2769,10 +2786,8 @@
                           [?run :seon.turn/closed-tx ?closed]
                           [(> ?closed ?tx)]] db agent-id since)
                  [])]
-    (doseq [result [issue-t replies closed]]
-      (when (:seon.error/kind result)
-        (throw (ex-info (:seon.error/message result) result))))
-    (count (into (set replies) closed))))
+    (or (some #(when (:seon.error/kind %) %) [issue-t replies closed])
+        (count (into (set replies) closed)))))
 
 (defn- max-episode-runs
   "Read the issue budget, otherwise the agent override or cluster default."
@@ -2788,10 +2803,12 @@
 
 (defn turns-left
   "The remaining turns under the same session bound that admits a turn."
-  {:malli/schema [:=> [:cat :seon.db/db :seon.agent/id] :my.agent/turns-left]}
+  {:malli/schema [:=> [:cat :seon.db/db :seon.agent/id] [:or :my.agent/turns-left :seon.error/value]]}
   [database agent-id]
-  (long (max 0 (- (or (max-episode-runs database agent-id) 0)
-                  (episode-runs database agent-id)))))
+  (let [limit (max-episode-runs database agent-id)
+        spent (episode-runs database agent-id)]
+    (or (some #(when (:seon.error/kind %) %) [limit spent])
+        (long (max 0 (- (or limit 0) spent))))))
 
 (defn- opening-deferred?
   "True when `agent-id` may open no turn at all: the turn count has
@@ -4067,6 +4084,7 @@
   (->> (db/q '[:find [(pull ?evaluation
                             [:seon.cluster.eval/ordinal
                              :seon.cluster.eval/source
+                             :seon.eval/origin
                              :seon.sci.eval/ending-ns
                              {:seon.cluster.eval/ns [:seon.ns/name]}]) ...]
                :in $ ?run-id
@@ -4081,6 +4099,9 @@
   "One evaluation row projected back into the source the evaluator takes."
   [evaluation]
   (cond-> {:seon.cluster.eval/source (:seon.cluster.eval/source evaluation)}
+    (:seon.eval/origin evaluation)
+    (assoc :seon.eval/origin (let [origin (:seon.eval/origin evaluation)]
+                              (if (map? origin) (:db/id origin) origin)))
     (get-in evaluation [:seon.cluster.eval/ns :seon.ns/name])
     (assoc :seon.cluster.eval/ns
            [:seon.ns/name
@@ -4637,10 +4658,11 @@
                  :seon.error/kind (:seon.error/kind evaluation)}
                 evaluation)
               evaluation
-              (assoc evaluation
-                     :seon.cluster.eval/at at
+              (merge (select-keys source [:seon.eval/origin])
+                     evaluation
+                     {:seon.cluster.eval/at at
                      :seon.cluster.eval/read-evidence (db/read-evidence @captured)
-                     :seon.cluster.eval/read-basis-transaction (db/basis-t database))
+                     :seon.cluster.eval/read-basis-transaction (db/basis-t database)})
               evaluation (cond-> evaluation
                            handle (assoc :seon.repl/handle handle))]
           (when (and entity-id
@@ -4945,6 +4967,8 @@
                        (:seon.cluster.eval/source entry)
                        :seon.ns/name
                        ((requiring-resolve 'seon.sci.eval/agent-namespace) (db/db connection) agent-id)}
+                (:seon.eval/origin entry)
+                (assoc :seon.eval/origin (:seon.eval/origin entry))
                 (:seon.cluster.eval/comment entry)
                 (assoc :seon.cluster.eval/comment
                        (:seon.cluster.eval/comment entry)))))]

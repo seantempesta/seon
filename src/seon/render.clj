@@ -11,7 +11,8 @@
   context and executes through `seon.sci.kernel`; there is no compiled renderer
   lane. A redefinition therefore changes the next call and a cold context
   re-derives the same symbol from its database program row."
-  (:require [datahike.db :as datahike.db]
+  (:require [clojure.string]
+            [datahike.db :as datahike.db]
             [malli.core :as m]
             [sci.core :as sci]
             [seon.ai.tokens :as tokens]
@@ -234,7 +235,7 @@
   [output]
   (letfn [(branches [output]
             (case output
-              :seon.render/source #{:source}
+              (:seon.render/source :seon.render/source-blocks) #{:source}
               (:nil :seon.error/value) #{}
               (case (when (vector? output) (first output))
                 (:maybe :or) (into #{} (mapcat branches)
@@ -1207,7 +1208,8 @@
                     [(render-invocation-argument projection request selected)])))]
     (case output
       :seon.render/ai
-      (if (or declared-absence? (string? rendered) (:seon.error/kind rendered))
+      (if (or declared-absence? (string? rendered) (:seon.error/kind rendered)
+              (valid-projection? projection :seon.render/source-blocks rendered))
         rendered
         {:seon.error/kind ::invalid-ai-output
          :seon.render/invalid-output :ai
@@ -1453,13 +1455,18 @@
                             [(render-invocation-argument projection request
                                                          selected)])))
                     raw (if invocation-reusable?
-                          (or (:seon.render.call/source retained-invocation)
+                          (or (when (:seon.render/source-blocks retained-invocation)
+                                (select-keys retained-invocation [:seon.render/source-blocks]))
+                              (:seon.render.call/source retained-invocation)
                               (:seon.render.call/output retained-invocation))
                           (raw-output
                            (assoc request
                                   :seon.render.call/selected-producer selected
                                   :seon.render.call/captured-reads captured)
                            output selected))
+                    source-blocks (when source-output? (:seon.render/source-blocks raw))
+                    raw (if source-blocks
+                          (clojure.string/join "\n\n" (map :seon.render/source source-blocks)) raw)
                     authored-source? (and source-output? (string? raw))
                     invocation-entry
                     (merge
@@ -1475,6 +1482,8 @@
                          (when-not source-output? raw)}
                          authored-source?
                          (assoc :seon.render.call/source raw)
+                         source-blocks
+                         (assoc :seon.render/source-blocks source-blocks)
 
                          (:seon.render.call/source-run-id request)
                          (assoc :seon.render.call/source-run-id

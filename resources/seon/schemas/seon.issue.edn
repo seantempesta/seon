@@ -34,9 +34,14 @@
              :created-by [:and {:description "The author agent. Its first assertion is the enduring retraction authority, including after unassignment."} :seon.db/ref]
              :detector  [:and {:description "The detector function's program entity for a generated issue. With the subject's own identity value it is the issue's identity, so a detector run upserts its issues instead of duplicating them. Absent on an authored issue."} :seon.db/ref]
              :budget    [:int {:min 1 :description "Total ordinary turns since assignment; start! resumes the same worker by increasing this budget and its settings overlay."}]
-             :turns-remaining [:int {:min 0 :description "Derived status data: remaining ordinary turns in the issue budget."}]
              :budget-exhausted-tx [:and {:description "The transaction that exhausted the still-open issue budget and notified root. Absence means not exhausted; resume retracts this fact after increasing the budget."} :seon.db/ref]
              :resolved-tx [:and {:description "The transaction recording that every cited test verified, or, with no tests, the detector stopped naming the issue's subject; absence means open. Written by settlement, never asserted by a model."} :seon.db/ref]
+             :status-view
+             [:map {:description "Read projection of issue status. This schema declares no stored attributes."}
+              [:seon.issue/id :seon.issue/id]
+              [:seon.issue/title :seon.issue/title]
+              [:seon.issue/turns-remaining
+               [:int {:min 0 :description "Remaining ordinary turns derived for this view, never stored."}]]]
              :issue [:map {:seon.db/attributes true
                            :seon.render/units [:seon.issue/functions :seon.issue/tests :seon.issue/errors :seon.issue/members]
                            :seon.render/ai seon.issue/render-ai :seon.render/html seon.issue/render-html}

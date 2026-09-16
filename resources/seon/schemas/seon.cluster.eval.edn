@@ -61,6 +61,7 @@
                      [:seon.sci.eval/ending-ns
                       {:optional true}
                       :seon.sci.eval/ending-ns]
+                     [:seon.eval/origin {:optional true} :seon.eval/origin]
                      [:seon.eval/renderer {:optional true} :seon.eval/renderer]
                      [:seon.eval/renderer-fn {:optional true} :seon.eval/renderer-fn]
              [:seon.eval/shown
@@ -125,6 +126,7 @@
                      [:seon.turn/id :seon.turn/id]
                      [:seon.cluster.eval/ordinal
                       :seon.cluster.eval/ordinal]
+                     [:seon.eval/origin {:optional true} :seon.eval/origin]
                      [:seon.eval/renderer {:optional true} :seon.eval/renderer]
                      [:seon.eval/renderer-fn {:optional true} :seon.eval/renderer-fn]
              [:seon.eval/shown

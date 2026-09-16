@@ -187,6 +187,7 @@
              [:seon.cluster.eval/at :seon.cluster.eval/at]
              [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal]
              [:seon.cluster.eval/source :seon.cluster.eval/source]
+             [:seon.eval/origin {:optional true} :seon.eval/origin]
              [:seon.cluster.eval/comment
               {:optional true}
               :seon.cluster.eval/comment]

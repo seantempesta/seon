@@ -65,6 +65,12 @@
                 {:optional true}
                 :seon.turn/id]],
               :source [:string {:min 1}],
+              :source-blocks
+              [:map {:description "Generated source blocks retaining the entity whose renderer declared each read. This is source output, not an alternate evaluation path."}
+               [:seon.render/source-blocks
+                [:vector [:map
+                          [:seon.render/source :seon.render/source]
+                          [:seon.eval/origin {:optional true} :seon.eval/origin]]]]],
               :candidate-request
               [:map
                [:seon.db/db :seon.db/database-value]
