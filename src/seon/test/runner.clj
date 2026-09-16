@@ -3855,7 +3855,8 @@
         (when-not (seq (:seon.fn.manifest/artifacts manifest))
           (throw (ex-info "Publication produced no program manifest." {::root root})))
         (spit (io/file root "manifest.edn") (pr-str manifest)))
-      (println "bin/test: shared published test base ready at" root))
+      (println "bin/test: shared published test base ready at" root)
+      (shutdown-agents))
 
     (let [[cluster-name root git-sha selection-mode & namespace-names]
           arguments]

@@ -157,7 +157,7 @@ alive. Clojure's `Agent.java:54` constructs the send-off cached executor and
 `:72` shuts it down; `core.clj:2268` exposes `shutdown-agents`.
 The publication branch of runner `-main` returns without that shutdown.
 At least **39.81 seconds** of this observation is exit waiting, not analysis.
-Filed as [publication idle threads](../../../seon/issues/test-base-publication-waits-for-idle-agent-threads.md).
+Filed as [publication idle threads](../../../seon/issues/archive/test-base-publication-waits-for-idle-agent-threads.md).
 
 ## Step 3: the premise is already dissolved at this HEAD
 
@@ -266,3 +266,23 @@ Owned files: `src/seon/test/runner.clj`, `src/seon/test/arm.clj`,
 `test/seon/test_preparation_test.clj`, this landing note, its `.py` evidence
 reader, and the three linked issue notes (publication idle exit, coordinator
 label, platform admission). Stop here for the assignment's step-2 design review.
+
+## Approved continuation: publication exit
+
+Owner approved step 1 and accepted step 3 as dissolved, then chose step-2
+option 1. Before reuse work, the publication branch now calls
+`shutdown-agents` after its completed-base message. This is the requested
+one-line code change; it stops idle agent executors without altering a bound.
+
+Real command: `bin/test --paths src/seon/schedule.clj src/seon/test/runner.clj -- seon.db-test`.
+Snapshot HEAD **5d3a3bda585a420117f884e0c33e8521d3d96bf3**; log
+`tmp/test-preparation-costs/exit-fix.log`. Normal `bin/_test-slot` admission,
+no slot bypass or concurrency override. Publication **91,575 ms work / elapsed**,
+versus **130,698 ms** in the preceding measured cold run. The ready message
+was followed by child exit and coordinator launch, with no idle-expiry wait.
+The difference includes load variation and is not an isolated CPU speedup.
+Database tests: **48 / 357 assertions / 0 failures / 0 errors**.
+The successful publication was opened by all three canonical worker fixtures.
+PHASE seconds: snapshot **3**; test-slot **0**; dependency-cache-and-classpath
+**2**; worker-checkouts **3**; published-base **91**; coordinator-and-tests
+**131**. Launcher exit **0**.
