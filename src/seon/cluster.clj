@@ -1577,7 +1577,8 @@
                      :seon.db/connection]]]
     :nil]}
   [{connection :seon.db/connection
-    manifest :seon.fn/manifest}]
+    manifest :seon.fn/manifest
+    roots :seon.fn/roots}]
   (let [forms (schema.edn/packaged-forms)]
     (schema/call-with-forms
      forms
@@ -1607,7 +1608,7 @@
                     :seon.db/process
                     [:seon.db.process/id boot-process-identity]}
              manifest (assoc :seon.fn/manifest manifest)
-             (nil? manifest) (assoc :seon.fn/roots seon.fn/source-roots))
+             (nil? manifest) (assoc :seon.fn/roots (or roots seon.fn/source-roots)))
            report-source-progress!)
           (report-source-progress! "program rows complete")
           ;; Initialization rows come LAST because they may name a program row
@@ -1637,6 +1638,20 @@
   (into seon.fn/source-roots
         ["config/default.edn" "docs/seon/issues"]))
 
+(defn- publication-roots
+  "The root sets one publication analyzes, digests, and compares against.
+
+  READ ONCE, AT THE TOP OF THE PUBLICATION, AND CARRIED AS A VALUE.
+  Development adoption reloads the program's namespaces — `seon.fn` and
+  `seon.cluster` among them — so every `def` above is re-evaluated while the
+  publication that triggered the reload is still running. A seam that re-reads
+  either root var after that point is acting on a value its own adoption
+  re-decided, and the post-adoption digest compare then reports a source change
+  that never happened."
+  []
+  {:seon.source/roots source-roots
+   :seon.fn/roots seon.fn/source-roots})
+
 (defonce ^:private source-refresh-monitor
   ;; One JVM may receive overlapping editor events. Serialize analysis,
   ;; publication, and artifact replacement as one operation; the Datahike
@@ -1650,11 +1665,17 @@
   (atom nil))
 
 (defn source-snapshot
-  "Snapshot source plus the merged schema declaration set."
-  {:malli/schema [:=> [:cat] :seon.source/snapshot]}
-  []
+  "Snapshot `roots` plus the merged schema declaration set.
+
+  The zero-arity reads the declared `source-roots`; a publication hands the
+  roots it captured at its own entry (`publication-roots`)."
+  {:malli/schema [:function
+                  [:=> [:cat] :seon.source/snapshot]
+                  [:=> [:cat :seon.source/roots] :seon.source/snapshot]]}
+  ([] (source-snapshot source-roots))
+  ([roots]
   (let [tree-snapshot
-        (source/snapshot {:seon.source/roots source-roots})
+        (source/snapshot {:seon.source/roots roots})
         schema-digest (schema.edn/declaration-digest)
         schema-path (.getCanonicalPath (io/file "resources/seon/schemas"))
         file-digests
@@ -1667,20 +1688,21 @@
                           "schema\u0000" schema-digest "\n")
                     StandardCharsets/UTF_8)])]
     {:seon.source/digest digest
-     :seon.source/file-digests (into (sorted-map) file-digests)}))
+     :seon.source/file-digests (into (sorted-map) file-digests)})))
 
 (defn- current-source-snapshot
-  []
-  (source-snapshot))
+  [roots]
+  (source-snapshot (:seon.source/roots roots)))
 
 (defn- publish-current-source!
-  [store source-digest manifest]
+  [store source-digest manifest roots]
   (source/publish!
    {:seon.store/store store
     :seon.source/digest source-digest
     :seon.source/populate `populate-source!
     :seon.source/activation `derive-activation
-    :seon.source/populate-request {:seon.fn/manifest manifest}}))
+    :seon.source/populate-request {:seon.fn/manifest manifest
+                                   :seon.fn/roots (:seon.fn/roots roots)}}))
 
 (defn- current-source!
   "The exact published source commit new clusters fork.
@@ -1867,9 +1889,9 @@
          (catch Throwable _ false))))
 
 (defn- stable-manifest
-  []
+  [roots]
   (report-source-progress! "source snapshot")
-  (let [snapshot-before (current-source-snapshot)
+  (let [snapshot-before (current-source-snapshot roots)
         cached @source-analysis-cache
         cached? (and (= snapshot-before (:seon.source/snapshot cached))
                      (valid-source-manifest? (:seon.fn/manifest cached)))
@@ -1880,10 +1902,10 @@
         manifest (if cached?
                    (:seon.fn/manifest cached)
                    (seon.fn/build-manifest
-                    {:seon.fn/roots seon.fn/source-roots}))
+                    {:seon.fn/roots (:seon.fn/roots roots)}))
         _ (report-source-progress! "analysis complete")
         _ (report-analysis-warnings! manifest)
-        snapshot-after (current-source-snapshot)]
+        snapshot-after (current-source-snapshot roots)]
     (when-not (= snapshot-before snapshot-after)
       (refused! "Source changed while current-src was being analyzed; retry."
                 {:seon.source/digest-before
@@ -1898,10 +1920,10 @@
       result)))
 
 (defn- full-source-refresh!
-  [root store]
+  [root store roots]
   (let [{source-digest :seon.source/digest
          snapshot :seon.source/snapshot
-         manifest :seon.fn/manifest} (stable-manifest)
+         manifest :seon.fn/manifest} (stable-manifest roots)
         cached (read-source-artifact root)
         unchanged
         (when (and (= source-digest (:seon.source/digest cached))
@@ -1913,7 +1935,7 @@
     (if unchanged
       unchanged
       (let [_ (report-source-progress! "branch publication started")
-            published (publish-current-source! store source-digest manifest)
+            published (publish-current-source! store source-digest manifest roots)
             _ (report-source-progress! "branch publication complete")]
         (write-source-artifact! root
                                 (source-artifact published manifest snapshot))
@@ -1933,7 +1955,7 @@
        distinct sort vec))
 
 (defn- incremental-source-refresh!
-  [root store changed-paths]
+  [root store changed-paths roots]
   (let [cached (read-source-artifact root)
         published (source/current store)
         manifest (:seon.fn/manifest cached)
@@ -1943,8 +1965,8 @@
                  (= expected-commit (:seon.source/commit-id cached))
                  (map? (:seon.source/file-digests cached)))
       (do (report-source-progress! "complete publication: missing or stale artifact")
-          (full-source-refresh! root store))
-      (let [snapshot-before (current-source-snapshot)
+          (full-source-refresh! root store roots))
+      (let [snapshot-before (current-source-snapshot roots)
             paths (changed-source-paths (:seon.source/file-digests cached)
                                         (:seon.source/file-digests snapshot-before)
                                         (map canonical-path changed-paths))
@@ -1988,7 +2010,7 @@
                  [{:seon.fn.change/action :full-rebuild
                    :seon.fn.change/reasons [:analysis-refused]}]
                  (throw failure))))
-            snapshot-after (current-source-snapshot)
+            snapshot-after (current-source-snapshot roots)
             digest-after (:seon.source/digest snapshot-after)
             reasons (into #{} (mapcat :seon.fn.change/reasons) changes)
             structural (set/difference reasons
@@ -2000,7 +2022,7 @@
                            :seon.source/digest-after digest-after}))]
         (if (or (empty? paths) (seq structural))
           (do (report-source-progress! (str "complete publication: " (pr-str (sort reasons))))
-              (full-source-refresh! root store))
+              (full-source-refresh! root store roots))
           (let [desired-artifacts
                 ;; Persist complete file analysis for the next edit. Only
                 ;; `:seon.fn.change/rows` is the safe database delta.
@@ -2124,7 +2146,7 @@
   (into [] (filter (comp adoption-identity-attribute? first)) identities))
 
 (defn- development-source-refresh!
-  [held-store instance before-publication published changed-paths]
+  [held-store instance before-publication published changed-paths roots]
   (let [connection (:seon.boot/cluster-connection instance)
         cluster-name (get-in instance [:seon.boot/advertisement :seon.boot/cluster-name])
         cluster-ref [:seon.cluster/name cluster-name]
@@ -2246,7 +2268,7 @@
            (refused! "Development JVM instrumentation did not restore contracts."
                      result)))))
     (when-not (= (:seon.source/digest published)
-                 (:seon.source/digest (current-source-snapshot)))
+                 (:seon.source/digest (current-source-snapshot roots)))
       (refused! "Source changed during development adoption; the next edit must converge it."
                 {:seon.source/commit-id (:seon.source/commit-id published)
                  :seon.error/diagnostic-cause ::source-changed-during-adoption}))
@@ -2301,7 +2323,10 @@
            config (resolve-bootstrap {:seon.boot/root root})
            store-dir (:seon.boot/store-dir config)
            _ (report-source-progress! "store acquisition")
-           held-store (acquire-root-store! store-dir)]
+           held-store (acquire-root-store! store-dir)
+           ;; The publication's own roots, read before any adoption reload can
+           ;; re-evaluate the vars that declare them.
+           roots (publication-roots)]
        (try
          (retrying-source-change
           (fn []
@@ -2311,12 +2336,13 @@
              (fn []
                (let [before-publication (source/current held-store)
                      published (if (seq changed-paths)
-                                 (incremental-source-refresh! root held-store changed-paths)
-                                 (full-source-refresh! root held-store))]
+                                 (incremental-source-refresh! root held-store
+                                                              changed-paths roots)
+                                 (full-source-refresh! root held-store roots))]
                  (when instance
                    (development-source-refresh! held-store instance
                                                 before-publication published
-                                                changed-paths))
+                                                changed-paths roots))
                  (dissoc published :seon.source/upsert-rows))))))
          (finally
            (release-root-store! store-dir)))))))

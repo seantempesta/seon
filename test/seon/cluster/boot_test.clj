@@ -1036,19 +1036,26 @@
                    (let [connection (:seon.boot/cluster-connection default)
                          _ (await-bootstrap! connection "root")
                          _ (await-bootstrap! (:seon.boot/cluster-connection beta) "root")
+                         ;; The stages this test observes the page through.
+                         ;; The expectation below DERIVES from this one set:
+                         ;; a hand-written response count also mirrored how
+                         ;; many times adoption runs, so a spurious second
+                         ;; adoption pass read as an arithmetic surprise.
+                         adoption-stages #{"development schema declarations"
+                                           "development loaded definitions"
+                                           "development SCI acquisition"
+                                           "development JVM instrumentation"}
                          responses (atom [])
                          url (str (get-in default [:seon.render.web/served :seon.render.web/url])
                                   (route/path ::route/agent-debug {:id "root"}))
                          observe-page! (fn [phase]
-                                         (when (contains? #{"development schema declarations"
-                                                            "development loaded definitions"
-                                                            "development SCI acquisition"
-                                                            "development JVM instrumentation"} phase)
+                                         (when (contains? adoption-stages phase)
                                            (let [request (.openConnection
                                                           (.toURL (java.net.URI. url)))]
                                              (.setConnectTimeout request 5000)
                                              (.setReadTimeout request 15000)
-                                             (try (swap! responses conj (.getResponseCode request))
+                                             (try (swap! responses conj
+                                                         [phase (.getResponseCode request)])
                                                   (finally (.disconnect request))))))
                          beta-digest (fn []
                                        (db/q '[:find ?digest .
@@ -1070,8 +1077,11 @@
                      (let [published (binding [cluster/*source-progress!* observe-page!]
                                        (cluster/refresh-source!
                                         root [(.getCanonicalPath path)] "default"))]
-                       (is (= [200 200 200 200] @responses)
+                       (is (= #{200} (set (map second @responses)))
                            "the real debug page remains served during every adoption stage")
+                       (is (= (zipmap adoption-stages (repeat 1))
+                              (frequencies (map first @responses)))
+                           "one publication adopts once: every stage runs exactly once")
                        (is (identical?
                             (get-in default [:seon.render.web/served :seon.render.web/server])
                             (get-in @@(ns-resolve 'seon.cluster 'running-instances)
@@ -1107,7 +1117,7 @@
         publications (atom 0)]
     (with-redefs-fn
       {#'cluster/stable-manifest
-       (fn [] {:seon.source/digest digest
+       (fn [_] {:seon.source/digest digest
                :seon.source/snapshot snapshot
                :seon.fn/manifest manifest})
        #'cluster/read-source-artifact (fn [_] artifact)
@@ -1118,7 +1128,8 @@
        #'cluster/publish-current-source!
        (fn [& _] (swap! publications inc) expected)}
       (fn []
-        (is (= expected (#'cluster/full-source-refresh! "root" ::store)))
+        (is (= expected (#'cluster/full-source-refresh!
+                         "root" ::store (#'cluster/publication-roots))))
         (is (zero? @publications)
             "matching artifact, file digests, live head, and database digest do not publish")))))
 
@@ -1138,11 +1149,12 @@
       {#'cluster/read-source-artifact (fn [_] malformed)
        #'source/current (fn [_] {:seon.source/commit-id commit-id})
        #'cluster/full-source-refresh!
-       (fn [_ _] (swap! full-builds inc) rebuilt)}
+       (fn [_ _ _] (swap! full-builds inc) rebuilt)}
       (fn []
         (is (= rebuilt
                (#'cluster/incremental-source-refresh!
-                "root" ::store ["src/example.clj"])))
+                "root" ::store ["src/example.clj"]
+                (#'cluster/publication-roots))))
         (is (= 1 @full-builds)
             "a malformed cache never reaches manifest-function-symbols")))))
 
