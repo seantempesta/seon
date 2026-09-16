@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, publication, program-graph, test-evidence, class/p1]
 ---
@@ -41,3 +41,24 @@ Two things are wrong here, and the second is the class:
 
 Repair belongs with the preservation step's owner (`seon.cluster`, which is
 protected while a peer edits it); this note is the record, not the fix.
+
+## Resolved — 2026-09-16, `64230d4de` / `b375b5dcc`
+
+Both writers now decide absence on the database value they transact into,
+inside the transaction function, and MINT the missing function identity as a
+tombstone (`seon.cluster.source/absent-program-identities`,
+`identity-tombstone-rows`, `identity-ref`; used by
+`seon.test.runner/record-tx` and `seon.cluster.source/preserved-evidence-tx`).
+Point 1 of this note is right and is the cause: the evidence named a
+declaration that the REBUILT branch never minted, not one that was retracted,
+so ruling 47's tombstone was not there to resolve. Point 2's remedy is the
+stronger one available — the evidence is kept, not dropped, because minting
+the identity restores the population invariant by construction. Only a FILE
+identity is not minted (`:seon.fn.file/file` requires the digest of the file
+the indexer walked); an unresolvable site keeps its line and reports its path
+through `:seon.test.failure/reported-file`.
+
+`bin/seon init --dev default` exits 0 on PID 45917, adopting `:current-src`
+commit `6aaa5523-5055-5df1-bcd7-d944ce8a43fc`. Evidence and the two
+regressions are in
+[the reach-closure landing note](../../prds/steward-platform/research/reach-closure-facts-2026-09-16.md).
