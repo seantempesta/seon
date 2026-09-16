@@ -8,6 +8,15 @@ tags: [program-graph, test, schema, wave/program-graph-indexing]
 
 # A schema-resource edit without adoption makes every in-process test run refuse
 
+## Bounded S6 assignment — 2026-09-16
+
+The no-default-cluster lane verified `src/seon/program.cljc` and the test
+schema resource were concurrently modified and obeyed the assignment's
+hunk-and-stop rule. The issue remains open; no implementation is claimed.
+[Exact unapplied root hunks and consumer boundary](../../prds/steward-platform/research/identity-attributes-declaration-hunks-2026-09-16.md)
+also identify the fixed identity enum and distinguish the program-family
+population from db/reconcile's domain identity population.
+
 ## Problem
 
 `seon.program/authored-shapes` (`src/seon/program.cljc:146`) derives program-row
