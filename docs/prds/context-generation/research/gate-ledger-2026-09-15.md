@@ -326,4 +326,4 @@ carries no projection state, so `seon.db/pull` returns
 `:seon.schema/missing-projection` (0 actual keys vs 77 expected); through
 `(seon.db/db connection)` all 76 decision keys match (evidence `147010c50`,
 issue `fresh-operator-config-proof-pulls-an-unprojected-database.md`).
-An Opus lane is correcting the test's reads; gated in the next batch.
+Fixed `8208754cb` (two read sites through `seon.db/db`); gated in batch 32 with seon.fn-test on the steward's `7cfe02790` (program/shapes hand list killed).
