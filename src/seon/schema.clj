@@ -282,6 +282,41 @@
       @selected)
     (derive-fn)))
 
+(defn predicate-functions-in
+  "Return the predicate bindings `projection` carries; `{}` when none are bound.
+
+   THE ONE DERIVATION for that question, and the only reader of
+   `:seon.schema.projection/predicate-functions`. A projection with no bound
+   predicates carries NO KEY, never a stored nil — [[declaration-projection]]
+   and every cold arm build exactly that shape — while [[compilable-form]]
+   declares a map, so a bare read handed it nil and refused every compile in a
+   worker where nothing bound a projection first. Translating the absence in
+   one place is what makes that unconstructable; `compilable-form` keeps
+   declaring `:map` so a future bare read still refuses loudly rather than
+   reading absence as \"no predicates\".
+
+   [[with-predicate-functions]] is the only writer."
+  {:malli/schema
+   [:=> [:catn [:seon.schema/projection :map]]
+    [:map-of :qualified-symbol [:fn clojure.core/ifn?]]]}
+  [projection]
+  (get projection :seon.schema.projection/predicate-functions {}))
+
+(defn with-predicate-functions
+  "Return `projection` carrying `predicate-functions` as its bound predicates.
+
+   THE ONE WRITER of `:seon.schema.projection/predicate-functions`, paired with
+   [[predicate-functions-in]]; `seon.schema-test` derives from the program
+   graph that no other first-party function names the key."
+  {:malli/schema
+   [:=> [:catn [:seon.schema/projection :map]
+               [:seon.schema/predicate-functions
+                [:map-of :qualified-symbol [:fn clojure.core/ifn?]]]]
+    :map]}
+  [projection predicate-functions]
+  (assoc projection
+         :seon.schema.projection/predicate-functions predicate-functions))
+
 (defn- bound-forms [forms predicate-functions]
   (update-vals forms #(compilable-form % predicate-functions)))
 
@@ -605,9 +640,7 @@
             {:registry registry})
         compiled
         (m/schema
-         (compilable-form
-          form
-          (get projection :seon.schema.projection/predicate-functions {}))
+         (compilable-form form (predicate-functions-in projection))
          compile-options)]
     (direct-references* compiled (set (keys forms)))))
 
@@ -1532,9 +1565,7 @@
                           (m/schema
                            (compilable-form
                             input-form
-                            (get projection
-                                 :seon.schema.projection/predicate-functions
-                                 {}))
+                            (predicate-functions-in projection))
                            (:seon.schema.projection/compile-options projection))]
                       (when (or (= input-form schema-key)
                                 (= input-form :seon.schema/value)
@@ -1844,31 +1875,32 @@
          forms function-contracts schema-admissions function-admissions
          function-source-admissions artifact-exports pure-predicate-symbols)
         projection
-        {:seon.schema.projection/forms forms
-     :seon.schema.projection/registry registry
-     :seon.schema.projection/compile-options options
-     :seon.schema.projection/schema-admissions schema-admissions
-     :seon.schema.projection/function-admissions function-admissions
-     :seon.schema.projection/function-source-admissions
-     function-source-admissions
-     :seon.schema.projection/artifact-exports artifact-exports
-     :seon.schema.projection/pure-predicate-symbols pure-predicate-symbols
-     :seon.schema.projection/predicate-functions predicate-functions
-     :seon.schema.projection/schema-dependencies schema-dependencies
-     :seon.schema.projection/canonical-keys canonical-keys
-     :seon.schema.projection/reverse-schema-dependencies
-     reverse-schema-dependencies
-     :seon.schema.projection/function-contracts function-contracts
-     :seon.schema.projection/function-dependencies function-dependencies
-     :seon.schema.projection/reverse-function-dependencies
-     reverse-function-dependencies
-     :seon.schema.projection/required-by-key required-by-key
-     :seon.schema.projection/shape-index shape-index
-     :seon.schema.projection/shape-rows shape-rows
-     :seon.schema.projection/catalog catalog
-         :seon.schema.projection/fingerprint-version
-         projection-fingerprint-version
-         :seon.schema.projection/fingerprint fingerprint}]
+        (with-predicate-functions
+         {:seon.schema.projection/forms forms
+          :seon.schema.projection/registry registry
+          :seon.schema.projection/compile-options options
+          :seon.schema.projection/schema-admissions schema-admissions
+          :seon.schema.projection/function-admissions function-admissions
+          :seon.schema.projection/function-source-admissions
+          function-source-admissions
+          :seon.schema.projection/artifact-exports artifact-exports
+          :seon.schema.projection/pure-predicate-symbols pure-predicate-symbols
+          :seon.schema.projection/schema-dependencies schema-dependencies
+          :seon.schema.projection/canonical-keys canonical-keys
+          :seon.schema.projection/reverse-schema-dependencies
+          reverse-schema-dependencies
+          :seon.schema.projection/function-contracts function-contracts
+          :seon.schema.projection/function-dependencies function-dependencies
+          :seon.schema.projection/reverse-function-dependencies
+          reverse-function-dependencies
+          :seon.schema.projection/required-by-key required-by-key
+          :seon.schema.projection/shape-index shape-index
+          :seon.schema.projection/shape-rows shape-rows
+          :seon.schema.projection/catalog catalog
+          :seon.schema.projection/fingerprint-version
+          projection-fingerprint-version
+          :seon.schema.projection/fingerprint fingerprint}
+         predicate-functions)]
     (when validate-render-contracts?
       (assert-render-contracts! projection (keys forms)))
     (with-compiled-cache projection compiled-function-contracts)))))
@@ -2139,22 +2171,19 @@
      (doseq [[_ form] compiled-forms]
        (m/schema form options))
      (with-compiled-cache
-      (assoc pure-data
-             :seon.schema.projection/registry registry
-             :seon.schema.projection/compile-options options
-             :seon.schema.projection/predicate-functions
-             predicate-functions)
+      (with-predicate-functions
+       (assoc pure-data
+              :seon.schema.projection/registry registry
+              :seon.schema.projection/compile-options options)
+       predicate-functions)
       (update-vals (bound-forms contracts predicate-functions)
                    #(m/function-schema % options))))))
 
 (defn- predicate-functions-with
   [projection definitions]
-  ;; A projection carrying no bound predicates has NO KEY, never a stored nil
-  ;; (`declaration-projection` builds exactly that shape), so the accumulator
-  ;; is seeded with the empty map the absence means. Returning the absence
-  ;; itself handed nil to `compilable-form`, whose declared input is a map.
-  (let [existing
-        (get projection :seon.schema.projection/predicate-functions {})]
+  ;; The accumulator is seeded through the one derivation, which answers the
+  ;; empty map the absent key means.
+  (let [existing (predicate-functions-in projection)]
     (reduce
      (fn [bindings predicate]
        (if (contains? bindings predicate)
@@ -2168,8 +2197,7 @@
 (defn- validate-one-contract!
   [projection identity definition admission]
   (let [forms (:seon.schema.projection/forms projection)
-        predicate-functions
-        (:seon.schema.projection/predicate-functions projection)
+        predicate-functions (predicate-functions-in projection)
         compile-options
         (:seon.schema.projection/compile-options projection)
         bound (compilable-form definition predicate-functions)
@@ -2514,16 +2542,17 @@
         (assoc (:seon.schema.projection/schema-admissions projection)
                schema-key admission)
         candidate
-        (assoc projection
-               :seon.schema.projection/forms forms
-               :seon.schema.projection/registry registry
-               :seon.schema.projection/compile-options compile-options
-               :seon.schema.projection/predicate-functions predicate-functions
-               :seon.schema.projection/canonical-keys canonical-keys
-               :seon.schema.projection/schema-admissions schema-admissions
-               :seon.schema.projection/schema-dependencies schema-dependencies
-               :seon.schema.projection/reverse-schema-dependencies
-               reverse-schema-dependencies)
+        (with-predicate-functions
+         (assoc projection
+                :seon.schema.projection/forms forms
+                :seon.schema.projection/registry registry
+                :seon.schema.projection/compile-options compile-options
+                :seon.schema.projection/canonical-keys canonical-keys
+                :seon.schema.projection/schema-admissions schema-admissions
+                :seon.schema.projection/schema-dependencies schema-dependencies
+                :seon.schema.projection/reverse-schema-dependencies
+                reverse-schema-dependencies)
+         predicate-functions)
         _ (doseq [affected (sort-by str affected-schema-keys)]
             (validate-one-contract!
              candidate affected (get forms affected)
@@ -2608,8 +2637,7 @@
       (:seon.schema.projection/artifact-exports projection)
       :seon.schema/pure-predicate-symbols
       (:seon.schema.projection/pure-predicate-symbols projection)
-      :seon.schema/predicate-functions
-      (:seon.schema.projection/predicate-functions projection)
+      :seon.schema/predicate-functions (predicate-functions-in projection)
       :seon.schema/validate-render-contracts? true})))
 
 (defn projection-with-function-contract
@@ -2648,10 +2676,10 @@
          (:seon.schema.projection/function-source-admissions projection)
          function-symbol admission)
         candidate
-        (assoc projection
+        (with-predicate-functions
+         (assoc projection
                :seon.schema.projection/registry registry
                :seon.schema.projection/compile-options compile-options
-               :seon.schema.projection/predicate-functions predicate-functions
                :seon.schema.projection/canonical-keys canonical-keys
                :seon.schema.projection/function-contracts contracts
                :seon.schema.projection/function-admissions function-admissions
@@ -2665,6 +2693,7 @@
                 (:seon.schema.projection/reverse-function-dependencies
                  projection)
                 function-symbol old-dependencies dependencies))
+         predicate-functions)
         _ (validate-one-contract! candidate function-symbol definition admission)
         _ (assert-render-contracts!
            candidate (schemas-rendered-by candidate function-symbol))
@@ -2915,10 +2944,9 @@
          materialized-keys
          (into #{} (filter keyword?) (keys forms))
          predicate-functions
-         (or (:seon.schema.projection/predicate-functions projection)
-             (predicate-functions-with
-              {:seon.schema.projection/predicate-functions {}}
-              (vals forms)))
+         (if-let [bound (not-empty (predicate-functions-in projection))]
+           bound
+           (predicate-functions-with {} (vals forms)))
          reference-graph
          (or (:seon.schema.projection/schema-dependencies projection)
              (canonical-reference-graph
@@ -3043,8 +3071,7 @@
        (compiled-function-arities
         (m/function-schema
          (compilable-form
-          contract (get projection
-                        :seon.schema.projection/predicate-functions {}))
+          contract (predicate-functions-in projection))
          {:registry (:seon.schema.projection/registry projection)}))
        []))))
 

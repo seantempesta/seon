@@ -436,7 +436,7 @@
 
 (defn- predicate-callable
   [projection predicate]
-  (or (get (:seon.schema.projection/predicate-functions projection)
+  (or (get ((mi/-f->original schema/predicate-functions-in) projection)
            predicate)
       (when (qualified-symbol? predicate)
         (some-> predicate requiring-resolve deref))))
@@ -567,7 +567,7 @@
                   projection
                   ((mi/-f->original schema/compilable-form)
                    contract
-                   (get projection :seon.schema.projection/predicate-functions {})))
+                   ((mi/-f->original schema/predicate-functions-in) projection)))
            report (throwing-report caps)]
        (m/-instrument
         {:schema bound :scope #{:input :output :guard}

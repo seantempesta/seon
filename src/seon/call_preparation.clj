@@ -580,15 +580,7 @@
                            (schema/compilable-form
                             (schema-shape/row-form
                              {:seon.schema.shape/form form})
-                            ;; a projection carrying no bound predicates has NO
-                            ;; KEY, never a stored nil, and `compilable-form`
-                            ;; declares a map: the absence IS the empty map.
-                            ;; Reading it bare refused every two-slot arity in a
-                            ;; cold worker, where nothing binds a projection
-                            ;; before the arm (same class as eeafb9dba).
-                            (get projection
-                                 :seon.schema.projection/predicate-functions
-                                 {}))
+                            (schema/predicate-functions-in projection))
                            (:seon.schema.projection/compile-options projection)))
                         (sort-by second rows))]))
           (group-by first (db/q database argument-shape-query sym)))))

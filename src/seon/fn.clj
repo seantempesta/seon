@@ -552,6 +552,8 @@
         (assoc :seon.test/fixture-observation (:seon.test/fixture-observation metadata))
         (find metadata :seon.test/long)
         (assoc :seon.test/long (:seon.test/long metadata))
+        (find metadata :seon.test/long-ms)
+        (assoc :seon.test/long-ms (:seon.test/long-ms metadata))
         (true? (:seon.test/usage metadata))
         (assoc :seon.test/usage true)
         (seq (get calls-by-caller (str qualified)))
@@ -1903,8 +1905,7 @@
          {:seon.schema/validate-render-contracts? true})
         _ (report-index-progress! progress! "contract projection complete")
         compile-options (:seon.schema.projection/compile-options projection)
-        predicate-functions
-        (:seon.schema.projection/predicate-functions projection)
+        predicate-functions (schema/predicate-functions-in projection)
         schema-keys (set (keys schema-forms))
         aliases-by-namespace
         (into {}
@@ -1962,8 +1963,7 @@
   (let [db @connection
         projection (schema/projection-from-database db)
         compile-options (:seon.schema.projection/compile-options projection)
-        predicate-functions
-        (:seon.schema.projection/predicate-functions projection)
+        predicate-functions (schema/predicate-functions-in projection)
         schema-keys (set (keys (:seon.schema.projection/forms projection)))
         aliases-by-namespace
         (into {}

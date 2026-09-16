@@ -410,7 +410,9 @@
                  (find metadata :seon.test/fixture-observation)
                  (assoc :seon.test/fixture-observation (:seon.test/fixture-observation metadata))
                  (find metadata :seon.test/long)
-                 (assoc :seon.test/long (:seon.test/long metadata)))
+                 (assoc :seon.test/long (:seon.test/long metadata))
+                 (find metadata :seon.test/long-ms)
+                 (assoc :seon.test/long-ms (:seon.test/long-ms metadata)))
 
                function?
                (cond-> {:seon.fn/sym (str qualified)
@@ -441,7 +443,7 @@
                :seon.program/compile-options
                (:seon.schema.projection/compile-options projection)
                :seon.program/predicate-functions
-               (:seon.schema.projection/predicate-functions projection)
+               (schema/predicate-functions-in projection)
                :seon.program/schema-keys
                (set (keys (:seon.schema.projection/forms projection)))}))
            row))))
@@ -1934,7 +1936,7 @@
             :seon.program/compile-options
             (:seon.schema.projection/compile-options projection)
             :seon.program/predicate-functions
-            (:seon.schema.projection/predicate-functions projection)
+            (schema/predicate-functions-in projection)
             :seon.program/schema-keys
             (set (keys (:seon.schema.projection/forms projection)))})
           base-declared-row)]

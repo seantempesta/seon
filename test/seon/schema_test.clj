@@ -5,7 +5,9 @@
             [clojure.walk :as walk]
             [datahike.api :as d]
             [malli.error :as me]
+            [seon.call-preparation :as call-preparation]
             [seon.db]
+            [seon.instrument :as instrument]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.schema.internal :as schema.internal]
@@ -693,3 +695,153 @@
                        :seon.ns/ns))
         (is (empty? (matches {:seon.fn.arity/order 0}))
             "a bare component entity matches no top-level family")))))
+
+;;; ---------------------------------------------------------------------------
+;;; One derivation for the projection's bound predicates
+
+(defn- cold-projection
+  "The canonical projection as a cold worker meets it: NO predicate key at all.
+
+  `declaration-projection` and every arm that builds a projection without
+  binding predicates produce exactly this shape — the key is absent, never a
+  stored nil — which is what nine bare reads turned into a nil argument to
+  `compilable-form`, whose declared input is a map."
+  [database]
+  (dissoc (schema/projection-from-database database)
+          :seon.schema.projection/predicate-functions))
+
+(deftest a-projection-with-no-bound-predicates-compiles-every-declared-shape
+  (test-support/with-database
+   (fn [connection]
+     (let [database @connection
+           bare (cold-projection database)
+           forms (:seon.schema.projection/forms bare)
+           contracts (:seon.schema.projection/function-contracts bare)
+           admission {:seon.schema.admission/source :core}
+           failure-of (fn [thunk]
+                        (try (thunk) nil
+                             (catch Throwable failure (ex-message failure))))]
+       (is (not (contains? bare :seon.schema.projection/predicate-functions))
+           "the cold shape carries no key, never a stored nil")
+       (is (= {} (schema/predicate-functions-in bare))
+           "the one derivation answers the empty map the absence means")
+       (is (seq forms) "the canonical population is non-vacuous")
+       (is (seq contracts) "the canonical contracts are non-vacuous")
+       (testing "seon.schema/direct-references compiles every declared form"
+         (is (= {}
+                (into (sorted-map)
+                      (keep (fn [[schema-key form]]
+                              (when-let [message
+                                         (failure-of
+                                          #(schema/direct-references bare form))]
+                                [schema-key message])))
+                      forms))))
+       (testing "arity discovery compiles every declared function contract"
+         (is (= {}
+                (into (sorted-map)
+                      (keep (fn [[function-symbol _]]
+                              (when-let [message
+                                         (failure-of
+                                          #(#'schema/function-arities-in
+                                            bare function-symbol))]
+                                [function-symbol message])))
+                      contracts))))
+       (testing "schema and contract replacement validate against the cold shape"
+         (let [schema-key (first (sort (keys forms)))
+               ;; Removal is admissible only for a key nothing references, so
+               ;; the subject is one this test just added; dropping the
+               ;; predicate key again restores the cold shape for the removal.
+               removable :seon.schema-test/cold-removable
+               added (schema/projection-with-schema
+                      bare removable :string admission)
+               cold-added (dissoc added
+                                  :seon.schema.projection/predicate-functions)
+               function-symbol (first (sort (keys contracts)))]
+           (is (nil? (failure-of
+                      #(schema/projection-with-schema
+                        bare schema-key (get forms schema-key) admission))))
+           (is (nil? (failure-of
+                      #(schema/projection-without-schema
+                        cold-added removable))))
+           (is (nil? (failure-of
+                      #(schema/projection-with-function-contract
+                        bare function-symbol
+                        (get contracts function-symbol) admission))))))
+       (testing "the arm's own two readers are total"
+         (is (nil? (#'instrument/predicate-callable
+                    bare 'seon.schema-test/no-such-predicate)))
+         (let [function-symbol (first (sort (keys contracts)))]
+           (is (some? (#'instrument/compiled-wrapper
+                       bare function-symbol
+                       (get contracts function-symbol)
+                       (fn [& _] nil)
+                       {})))))
+       (testing "call preparation's argument validators compile"
+         (let [with-slots
+               (->> (keys contracts)
+                    sort
+                    (filter (fn [function-symbol]
+                              (seq (seon.db/q
+                                    database
+                                    '[:find ?order ?index
+                                      :in $ ?sym
+                                      :where
+                                      [?function :seon.fn/sym ?sym]
+                                      [?function :seon.fn/arities ?arity]
+                                      [?arity :seon.fn.arity/order ?order]
+                                      [?arity :seon.fn.arity/arguments ?argument]
+                                      [?argument :seon.fn.argument/index ?index]
+                                      [?argument :seon.fn.argument/schema _]]
+                                    (str function-symbol)))))
+                    (take 25))]
+           (is (seq with-slots)
+               "the canonical program graph declares argument shapes")
+           (is (= {}
+                  (into (sorted-map)
+                        (keep (fn [function-symbol]
+                                (when-let [message
+                                           (failure-of
+                                            #(#'call-preparation/argument-validators
+                                              database
+                                              {:seon.schema/projection bare}
+                                              (str function-symbol)))]
+                                  [function-symbol message])))
+                        with-slots)))))))))
+
+(deftest one-derivation-owns-the-projection-predicate-bindings
+  ;; AGENTS §2.2. Nine spellings of
+  ;; `:seon.schema.projection/predicate-functions` each read the absent key as
+  ;; nil. The cure is one named reader and one named writer; this check is what
+  ;; fails when a tenth spelling appears, and it is a program-graph query over
+  ;; `:seon.fn/keywords` — the fact the graph exists to answer — never a text
+  ;; search over the tree.
+  (test-support/with-database
+   (fn [connection]
+     (let [named
+           (set (seon.db/q
+                 '[:find [?function-symbol ...]
+                   :in $ ?keyword
+                   :where
+                   [?function :seon.fn/keywords ?keyword]
+                   [?function :seon.fn/sym ?function-symbol]
+                   [?function :seon.fn/file ?file]
+                   [?file :seon.fn.file/root "src"]]
+                 @connection
+                 :seon.schema.projection/predicate-functions))]
+       (is (= #{"seon.schema/predicate-functions-in"
+                "seon.schema/with-predicate-functions"}
+              named)
+           (str "Only the reader and the writer may name "
+                ":seon.schema.projection/predicate-functions under src. "
+                "Every other first-party function asks "
+                "seon.schema/predicate-functions-in, which answers {} for the "
+                "absent key instead of handing compilable-form nil."))
+       (is (seq (seon.db/q
+                 '[:find [?caller-symbol ...]
+                   :where
+                   [?callee :seon.fn/sym "seon.schema/predicate-functions-in"]
+                   [?caller :seon.fn/calls ?callee]
+                   [?caller :seon.fn/sym ?caller-symbol]]
+                 @connection))
+           "the derivation has callers: an empty answer would be the check
+            reporting health from an absent subject")))))
