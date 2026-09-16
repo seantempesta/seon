@@ -1039,6 +1039,23 @@ plan"):** `schema-key-audit` (astra, table feeding the one reset),
 reuse, coordinator graph rebuild), Opus `platform-tier-is-a-fact` (D1 + the
 filename `find` D2).
 
+**Platform-tier-as-a-fact (22:50Z, note `platform-tier-is-a-fact-2026-09-16.md`,
+`378011355`):** stopped at the held `seon.test.edn`, with a corrected design:
+`:seon.test/platform` joins `seon.program/test-marker-attributes` (one lifting
+seam for both indexer and evaluator; 0 of 1,833 test rows carry it today); the
+bare namespace set derives from `:seon.ns/name` rows under the declared `test`
+source root MINUS a new `:seon.test/fixture` marker (231 namespaces, strict
+superset of `find`'s 217; `:seon.test/ns` alone would drop `seon.repl-parity-test`
+and turn the gate red on the two deliberate-failure fixtures). Relaunch with
+that design the moment `pulled-ref-is-a-ref` releases `seon.test.edn`,
+`src/seon/test/runner.clj`, `src/seon/test.clj`.
+
+**One-evaluation-path design committed** (`one-evaluation-path-design-2026-09-16.md`,
+`415de7290`): pure read/evaluate over a database value, one row constructor,
+the four fenced transaction functions composed in ONE commit for the system
+turn, `record-evaluated-*` deleted. Awaiting the owner's answer on
+`recover-call` = a settlement with `interrupted-at`.
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
