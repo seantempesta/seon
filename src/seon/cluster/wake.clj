@@ -402,7 +402,17 @@
 
 (defn- wake-matchers
   "Compile schema recipients and authored constraints by attribute once.
-  Constraint values use the same storage codec as their target attribute."
+  Constraint values use the same storage codec as their target attribute.
+
+  A compiled matcher reads its datom through the DECLARED datom keys
+  `:e`/`:a`/`:v` (`:seon.db/datom`), which Datahike's own `Datom` answers
+  (`reference-code/datahike/src/datahike/datom.cljc:116` `val-at-datom`).
+  Positional `nth` read that same fact through one shape-specific accessor:
+  it refuses the ordinary `:seon.db/datom` map `seon.db/datoms` returns, which
+  is the shape a caller holding one committed datom actually has.
+  The VALUE a matcher compares is the STORED form of the attribute, so a datom
+  carrying a decoded value compares equal only on an attribute the storage
+  codec leaves alone."
   [database]
   (let [projection (delay (schema/projection-from-database database))]
     (reduce
@@ -415,12 +425,12 @@
                                     @projection :seon.listen/value (val supplied))]
                        (if (db.utils/ref? database attribute)
                          (db.utils/entid database logical)
-                         (nth (first (schema.datahike/encode-transaction-in
-                                      @projection [[:db/add 1 attribute logical]])) 3))))]
+                         (schema.datahike/encode-attribute-value-in
+                          @projection attribute logical))))]
          (update-in matchers [attribute ::matches] (fnil conj [])
                     (fn [datom]
-                      (when (and (or (nil? entity) (= entity (nth datom 0)))
-                                 (or (nil? supplied) (= value (nth datom 2))))
+                      (when (and (or (nil? entity) (= entity (:e datom)))
+                                 (or (nil? supplied) (= value (:v datom))))
                         agent)))))
      (into {} (map #(vector % {::schema? true})) (wake-attributes database))
      (d/q '[:find ?agent (pull ?listen [:seon.listen/attribute
@@ -520,7 +530,7 @@
            ;; Rebuild once before dispatch, including deletions and changes
            ;; in the same transaction as a matching datom.
            (when (some (fn [datom]
-                         (let [attribute (nth datom 1)]
+                         (let [attribute (:a datom)]
                            (or (= "seon.wake" (namespace attribute))
                                (= "seon.listen" (namespace attribute))
                                (#{:seon.runtime/listens :seon.runtime/agent
@@ -530,7 +540,7 @@
              (vreset! matchers (wake-matchers (:db-after report)))
              (vreset! arming (arming-attributes (:db-after report))))
            (doseq [datom (:tx-data report)]
-             (let [attribute (nth datom 1)]
+             (let [attribute (:a datom)]
                (when (and (not @render?)
                           (contains? published-interest attribute))
                  (vreset! render? true))
@@ -539,10 +549,10 @@
                ;; asserts a declared arming attribute, so the armer takes
                ;; one derive-all pass; there is no second arming path and
                ;; no caller that arms its own agent.
-               (when (and (contains? @arming attribute) (nth datom 4))
+               (when (and (contains? @arming attribute) (:added datom))
                  (async/offer! armer-channel ::wake))
                (when-let [matcher (get @matchers attribute)]
-                 (doseq [agent-eid (into (if (::schema? matcher) #{(nth datom 2)} #{})
+                 (doseq [agent-eid (into (if (::schema? matcher) #{(:v datom)} #{})
                                         (keep #(% datom)) (::matches matcher))]
                    (if-let [channel (get (channels) agent-eid)]
                      (deliver! fault-channel key ::mailbox channel

@@ -178,6 +178,77 @@
            (wake/unlisten! {:seon.cluster.wake/connection connection :seon.cluster.wake/key key})
            (doseq [channel [mailbox faults armer render search]] (async/close! channel))))))))
 
+(deftest a-constrained-listen-matcher-reads-both-declared-datom-shapes
+  ;; A compiled matcher is a predicate over ONE datom, and the system has two
+  ;; declared datom shapes for the same fact: the host `Datom` a transaction
+  ;; report carries in `:tx-data`, and the `:seon.db/datom` map
+  ;; `seon.db/datoms` returns (`resources/seon/schemas/seon.db.edn:173`).
+  ;; Reading either by position refused the map with `nth not supported on
+  ;; this type: PersistentArrayMap`; reading it through the declared keys
+  ;; answers both. Both a REF-valued and a scalar-valued constraint are
+  ;; covered, because they take the two different encoding branches.
+  (test-support/with-database
+   {::test-support/extra-schema
+    [{:db/ident :example/amount :db/valueType :db.type/long
+      :db/cardinality :db.cardinality/one}]}
+   (fn [connection]
+     (test-support/transacted!
+      connection
+      [{:seon.agent/id "agent-a"}
+       {:db/id "runtime" :seon.runtime/agent [:seon.agent/id "agent-a"]}
+       [:db/add [:seon.agent/id "agent-a"] :seon.agent/runtime "runtime"]
+       {:seon.message/id "order-a" :seon.message/content "a"
+        :seon.message/to [:seon.agent/id "agent-a"]}])
+     (let [recipient (agent-eid connection)]
+       (test-support/transacted!
+        connection
+        [{:seon.runtime/agent [:seon.agent/id "agent-a"]
+          :seon.runtime/listens
+          [{:seon.listen/attribute :example/amount :seon.listen/value 3}
+           {:seon.listen/attribute :seon.message/to
+            :seon.listen/value [:seon.agent/id "agent-a"]}]}])
+       (let [scalar-report
+             (test-support/transacted!
+              connection [[:db/add [:seon.message/id "order-a"] :example/amount 3]])
+             ref-report
+             (test-support/transacted!
+              connection [{:seon.message/id "order-b" :seon.message/content "b"
+                           :seon.message/to [:seon.agent/id "agent-a"]}])
+             database (db/db connection)
+             matchers (#'wake/wake-matchers database)
+             fires (fn [attribute datom]
+                     (vec (keep #(% datom)
+                                (get-in matchers [attribute ::wake/matches]))))
+             committed (fn [report attribute]
+                         (first (filter #(= attribute (:a %)) (:tx-data report))))
+             order-b (db/q '[:find ?e . :where [?e :seon.message/id "order-b"]]
+                           database)]
+         (testing "the report's own host datom"
+           (let [scalar (committed scalar-report :example/amount)
+                 reference (committed ref-report :seon.message/to)]
+             (is (some? scalar))
+             (is (some? reference))
+             (is (= [recipient] (fires :example/amount scalar))
+                 "a scalar value constraint fires on the committed datom")
+             (is (= [recipient] (fires :seon.message/to reference))
+                 "a ref value constraint fires on the committed datom")
+             (is (= [] (fires :example/amount
+                              {:e (:e scalar) :a (:a scalar) :v 4
+                               :tx (:tx scalar) :added true}))
+                 "a non-matching value still never fires")))
+         (testing "the ordinary :seon.db/datom map seon.db/datoms returns"
+           (let [scalar (first (db/datoms database :eavt
+                                          (:e (committed scalar-report :example/amount))
+                                          :example/amount))
+                 reference (first (db/datoms database :eavt order-b
+                                             :seon.message/to))]
+             (is (map? scalar) (pr-str scalar))
+             (is (map? reference) (pr-str reference))
+             (is (= [recipient] (fires :example/amount scalar))
+                 "the same scalar fact read as a map fires the same matcher")
+             (is (= [recipient] (fires :seon.message/to reference))
+                 "the same ref fact read as a map fires the same matcher"))))))))
+
 (deftest a-turn-never-wakes-itself
   (with-connection
     (fn [connection]

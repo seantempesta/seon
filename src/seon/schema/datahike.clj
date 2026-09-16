@@ -557,6 +557,25 @@
   [transaction]
   (encode-transaction-in (schema/declaration-projection) transaction))
 
+(defn encode-attribute-value-in
+  "Encode one attribute value against exactly one projection.
+
+   The storage counterpart of [[decode-attribute-value-in]], and the way a
+   caller that holds ONE value obtains its stored form. [[encode-transaction-in]]
+   answers for a whole transaction, whose declared operations are
+   `[:or :map [:vector :seon.schema/value]]` (`seon.store.edn`); reading a
+   single encoded value back out of one by position assumes the vector branch
+   the contract does not promise."
+  {:malli/schema [:=> [:cat :map :keyword :seon.schema/value]
+                  :seon.schema/value]}
+  [projection attr value]
+  ;; `validate-logical-slot-in!` runs registered predicates such as
+  ;; `malli-form?`, which Malli invokes with the candidate value alone. Supply
+  ;; the projection's forms for the same reason `encode-transaction-in` does.
+  (schema/call-with-forms
+   (:seon.schema.projection/forms projection)
+   #(encode-value-in projection attr value)))
+
 (defn decode-attribute-value-in
   "Decode one attribute value against exactly one projection."
   {:malli/schema [:=> [:cat :map :keyword [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema.", :gen/elements [nil false 0 "" :k [] {}]}]] :seon.schema/value]}
