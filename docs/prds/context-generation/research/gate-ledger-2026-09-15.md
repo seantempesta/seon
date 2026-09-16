@@ -783,3 +783,13 @@ Boundary: default was reforked mid-lane; the final in-process run sat in
 `seon.await` 40 min on the fresh JVM (unverified end to end) and the last
 publication ended "source changed during adoption" — the orchestrator is
 re-adopting fn.clj now; batch 60 gates `seon.fn-test` cold.
+
+### 2026-09-17 06:40Z — exact-source raw exception: third sighting, fix lane launched
+
+`bin/seon init --dev default --changed src/seon/fn.clj` on pid 17352 threw
+`IndexOutOfBoundsException` (no message) from `seon.fn/exact-source` again —
+a span computed on one source snapshot read against bytes that changed in
+between (a concurrent lane's live edit). Opus lane launched: spans read
+against the captured source they came from, else a typed "source changed
+during analysis" refusal naming file/span/digests; class regression;
+live convergence proof. fn.clj re-adoption follows its landing.
