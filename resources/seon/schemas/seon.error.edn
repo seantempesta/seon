@@ -113,8 +113,7 @@
              :cid :keyword,
              :fact
              [:map
-              {:seon.db/attributes true,
-               :seon.render/ai seon.error/render-ai,
+              {:seon.render/ai seon.error/render-ai,
                :seon.render/html seon.error/render-html}
               [:seon.error/id :seon.error/id]
               [:seon.error/at :seon.error/at]
@@ -189,6 +188,28 @@
               [:seon.config.error/max-evidence-bytes
                :seon.config.error/max-evidence-bytes]
               [:seon.error/fact {:optional true} :seon.error/fact]],
+             :error
+             [:map {:seon.db/attributes true
+                    :seon.render/ai seon.error/render-ai
+                    :seon.render/html seon.error/render-html}
+              [:seon.error/signature :seon.error/signature]
+              [:seon.error/id {:optional true} :seon.error/id]
+              [:seon.error/kind :seon.error/kind]
+              [:seon.error/fn {:optional true} :seon.error/fn]
+              [:seon.error/frame {:optional true} :seon.error/frame]
+              [:seon.error/exception-class {:optional true} :seon.error/exception-class]
+              [:seon.error/occurrences {:optional true} :seon.error/occurrences]
+              [:seon.error/regressions {:optional true} :seon.error/regressions]
+              [:seon.error/issue {:optional true} :seon.error/issue]
+              [:seon.error/resolved-tx {:optional true} :seon.error/resolved-tx]],
+             :ref :seon.db/ref,
+             :recording
+             [:map
+              [:seon.error/fact :seon.error/fact]
+              [:seon.error/ref :seon.error/ref]
+              [:seon.error.occurrence/ref :seon.db/ref]
+              [:seon.error/value :seon.error/value]
+              [:seon.db/tx-data :seon.store/transaction-data]],
              :prepare-request :seon.error/normalize-request,
              :data :map,
              :prepared

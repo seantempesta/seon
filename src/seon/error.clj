@@ -150,6 +150,7 @@
             [seon.id :as id]
             [seon.error.refusal :as error.refusal]
             [seon.print :as print]
+            [seon.program :as program]
             [seon.repl :as repl]
             [seon.render.route :as render.route]
             [seon.render.value :as render.value]
@@ -1247,232 +1248,163 @@
                 :where [?entity ?attribute ?value]]
               db attribute value)))
 
+(defn steward
+  "The steward reached through the error's function ref and namespace."
+  {:malli/schema [:=> [:cat :seon.db/database-value :map] [:maybe :seon.agent/id]]}
+  [database fact]
+  (when-let [function (:seon.error/fn fact)]
+    (db/q '[:find ?id . :in $ ?function
+            :where [?function :seon.fn/ns ?namespace]
+                   [?namespace :seon.ns/steward ?agent]
+                   [?agent :seon.agent/id ?id]]
+          database function)))
+
 (defn- recurrence
-  "How many errors of this signature this process has already committed.
-  DERIVED, never a stored tally — the count is the query. Scoped to the
-  process because a process identity is unique per start, which is
-  exactly the \"since this process started\" window the escalation rule
-  wants, with no clock in it."
-  [db signature process]
-  (count (db/q '[:find ?error
-                :in $ ?signature ?process
-                :where
-                [?error :seon.error/signature ?signature]
-                [?error :seon.error/process ?process]]
-              db signature process)))
+  [database signature process]
+  (reduce + 0
+          (map second
+               (db/q '[:find ?occurrence ?count :in $ ?signature ?process
+                       :where [?error :seon.error/signature ?signature]
+                              [?error :seon.error/occurrences ?occurrence]
+                              [?occurrence :seon.error.occurrence/process ?p]
+                              [?p :seon.db.process/id ?process]
+                              [?occurrence :seon.error.occurrence/count ?count]]
+                     database signature process))))
 
 (defn- message-tx
-  "One explanation message: the notice's ai projection, STORED.
-  The id is DERIVED from error, recipient, and reason, which makes delivery
-  idempotent by construction — re-committing the same error upserts the
-  same message instead of double-sending it, and the double-send
-  question the plan has been carrying since 2026-07-26 does not arise on
-  this path. `about` points at the fact through the shared tempid, and
-  its ABSENCE on an ordinary user message is what makes the storm fence
-  computable without a flag."
   [fact recipient reason notification]
-  {:seon.message/id (id/id (random-uuid) 8) :seon.message/to [:seon.agent/id recipient] :seon.message/content (ai-prose
-    (notice (merge {:seon.error/fact fact
-                    :seon.error/reason reason
-                    :seon.agent/id recipient}
-                   notification))) :seon.message/about (fact-tempid (:seon.error/id fact)) :seon.message/inbox [:seon.agent/id recipient]})
+  {:seon.message/id (id/id [(:seon.error/notification-id notification) recipient reason])
+   :seon.message/to [:seon.agent/id recipient]
+   :seon.message/content (ai-prose (notice (merge {:seon.error/fact fact
+                                                 :seon.error/reason reason
+                                                 :seon.agent/id recipient}
+                                                notification)))
+   :seon.message/about [:seon.error/signature (:seon.error/signature fact)]
+   :seon.message/inbox [:seon.agent/id recipient]})
 
-(defn steward-call
-  "Route one fault to the steward of the failing function's namespace.
-
-  Decided INSIDE the committing transaction against the mid-transaction
-  database value, and merged onto the fact through the same string
-  tempid the fact carries, so the routing and the fact are one commit
-  and no caller pre-read can be stale by the time it lands.
-
-  The chain is `:seon.instrument/fn` -> `:seon.fn/ns` ->
-  `:seon.ns/steward`, all declared facts. No steward, no datom: absence
-  is the state, the fact is still committed, and nothing about the fault
-  record depends on someone being on the hook for it. `:seon.error/agent`
-  is a different question — whom it happened TO — and both relations
-  stand on the same fact.
-
-  ASSERTING IT WAKES THE STEWARD, including when the steward is the
-  agent whose own code failed. There is no self-exclusion: the turn
-  bound is what stops that loop, because a fault is a declared INSIDE
-  wake and never refills the bound it spends."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.error/steward-request]
+(defn commit-call
+  "Upsert one error occurrence and its bounded notifications at the writer."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.error/commit-tx-request]
                   :seon.store/transaction-data]}
-  [db {fact-id :seon.error/id failing-fn :seon.instrument/fn}]
-  (if-let [steward (and failing-fn
-                        (db/q '[:find ?agent .
-                                :in $ ?sym
-                                :where
-                                [?function :seon.fn/sym ?sym]
-                                [?function :seon.fn/ns ?namespace]
-                                [?namespace :seon.ns/steward ?agent]]
-                              db failing-fn))]
-    [{:db/id (fact-tempid fact-id)
-      :seon.error/steward steward}]
-    []))
+  [database request]
+  (let [fact (:seon.error/fact request)
+        signature (:seon.error/signature fact)
+        occurrence-id (:seon.error.occurrence/id request)
+        occurrence-ref [:seon.error.occurrence/id occurrence-id]
+        old (db/pull database '[*] occurrence-ref)
+        at (:seon.error/at fact)
+        process (:seon.error/process fact)
+        agent-id (second (:seon.error/agent fact))
+        turn-id (second (:seon.error/run fact))
+        agent-id (when (and agent-id (entity-exists? database :seon.agent/id agent-id)) agent-id)
+        turn-id (when (and turn-id (entity-exists? database :seon.turn/id turn-id)) turn-id)
+        fact (cond-> fact (nil? agent-id) (dissoc :seon.error/agent)
+                         (nil? turn-id) (dissoc :seon.error/run))
+        count (inc (or (:seon.error.occurrence/count old) 0))
+        process-count (inc (recurrence database signature process))
+        limit (:seon.config.error/recurrence-limit request)
+        recurring? (= process-count limit)
+        silent? (> process-count limit)
+        interrupted? (some? (:seon.error/exception-class fact))
+        escalate-to (:seon.config.error/escalate-to request)
+        steward-id (steward database fact)
+        evidence (select-keys fact [:seon.error/process :seon.error/proc :seon.error/op
+                                   :seon.error/cid :seon.error/throwable-class
+                                   :seon.error/data-edn :seon.error/data-size :seon.error/capped?
+                                   :seon.error/dropped-fault-count :seon.error/dropped-fault-digest
+                                   :seon.instrument/fn :seon.instrument/arm
+                                   :seon.instrument/expected :seon.instrument/args])
+        digest (:seon.error/data-blob fact)
+        occurrence (cond-> (merge evidence
+                                 {:seon.error.occurrence/id occurrence-id
+                                  :seon.error.occurrence/count count
+                                  :seon.error.occurrence/first-at (or (:seon.error.occurrence/first-at old) at)
+                                  :seon.error.occurrence/last-at at
+                                  :seon.error.occurrence/process [:seon.db.process/id process]
+                                  :seon.error.occurrence/message (:seon.error/message fact)})
+                     agent-id (assoc :seon.error.occurrence/agent [:seon.agent/id agent-id])
+                     turn-id (assoc :seon.error.occurrence/turn [:seon.turn/id turn-id])
+                     digest (assoc :seon.error.occurrence/data-blob
+                                   [:seon.error.occurrence/blob-digest digest]))
+        error-row (assoc (select-keys fact [:seon.error/signature :seon.error/id
+                                          :seon.error/kind :seon.error/fn :seon.error/frame
+                                          :seon.error/exception-class])
+                         :seon.error/occurrences #{occurrence})
+        notification (cond-> {:seon.error/notification-id (:seon.error/id request)}
+                       recurring? (assoc :seon.error/occurrence process-count
+                                         :seon.error/notification-limit limit
+                                         :seon.error/notification :final))
+        recipients (cond-> {}
+                     (and interrupted? agent-id (not recurring?) (not silent?))
+                     (assoc agent-id :your-run)
+                     (and interrupted? (nil? agent-id) (not recurring?) (not silent?) escalate-to)
+                     (assoc escalate-to :no-attributable-agent)
+                     (and recurring? escalate-to (not= escalate-to agent-id))
+                     (assoc escalate-to :recurring)
+                     (and steward-id (not silent?)) (assoc steward-id :recurring))]
+    (into (cond-> [{:seon.db.process/id process}]
+            digest (conj {:seon.error.occurrence/blob-digest digest :seon.error/data-blob digest})
+            (and (nil? digest) (:seon.error.occurrence/data-blob old))
+            (conj [:db/retract occurrence-ref :seon.error.occurrence/data-blob
+                   (:db/id (:seon.error.occurrence/data-blob old))])
+            true (conj error-row))
+          (keep (fn [[recipient reason]]
+                  (when (agent-exists? database recipient)
+                    (message-tx fact recipient reason notification))))
+          recipients)))
+
+(defn recording
+  "Prepared identities, flat value and transaction data for one error.
+
+  The leading identity row preserves existing transaction composition; it
+  contains no occurrence state. Counts and notification decisions belong
+  exclusively to commit-call's mid-transaction database."
+  {:malli/schema
+   [:function
+    [:=> [:cat :seon.db/database-value :seon.error/commit-tx-request] :seon.error/recording]
+    [:=> [:cat :map :seon.db/database-value :seon.error/source :inst :map] :seon.error/recording]]}
+  ([_database request]
+   (let [fact (or (:seon.error/fact request) (normalize request))
+         signature (:seon.error/signature fact)
+         agent-id (second (:seon.error/agent fact))
+         turn-id (second (:seon.error/run fact))
+         occurrence-id (id/id (into (sorted-map)
+                                   (cond-> {:seon.error/signature signature}
+                                     agent-id (assoc :seon.agent/id agent-id)
+                                     turn-id (assoc :seon.turn/id turn-id)
+                                     (nil? turn-id) (assoc :seon.db.process/id (:seon.error/process fact)))))
+         function (some-> (:seon.error/fn fact) second symbol)
+         namespace-name (some-> function namespace symbol)
+         identity-row {:db/id (fact-tempid (:seon.error/id request))
+                       :seon.error/id signature :seon.error/signature signature
+                       :seon.error/kind (:seon.error/kind fact)}
+         rows (cond-> [identity-row]
+                namespace-name (conj (program/canonical-row {:seon.ns/name namespace-name}))
+                function (conj (program/canonical-row
+                                (cond-> {:seon.fn/sym (str function)}
+                                  namespace-name (assoc :seon.fn/ns [:seon.ns/name namespace-name])))))
+         tx (conj rows [:db.fn/call #'commit-call
+                        (assoc request :seon.error/fact fact :seon.error.occurrence/id occurrence-id)])]
+     {:seon.error/fact fact
+      :seon.error/ref [:seon.error/signature signature]
+      :seon.error.occurrence/ref [:seon.error.occurrence/id occurrence-id]
+      :seon.error/value (value fact)
+      :seon.db/tx-data tx}))
+  ([cluster database source at attribution]
+   (recording database
+              (merge (select-keys cluster [:seon.sci.admit/caps :seon.config.error/recurrence-limit
+                                          :seon.config.error/max-evidence-bytes :seon.config.error/escalate-to])
+                     {:seon.error/source source :seon.error/id (id/id)
+                      :seon.error/at at :seon.error/process (:seon.db.process/id cluster)
+                      :seon.error/basis-t (db/basis-t database)}
+                     attribution))))
 
 (defn commit-tx
-  "Transaction data committing one error and everything it must say.
-  PURE over a database value: the fact, and zero to two explanation
-  messages, in ONE vector so `db/transact!` commits them together and
-  there is no torn window where an error exists that nobody was told
-  about. Returning data rather than transacting is what keeps this
-  namespace free of the store — the dependency runs `store -> error`,
-  never both ways — and it is why the whole escalation rule is testable
-  against an in-memory database value with no cluster at all.
-
-  DELIVERY IS THE EXISTING WAKE. `:seon.message/to` is the wake
-  attribute, so committing an explanation message wakes that agent's
-  loop by construction: no notification queue, no acknowledgement flag,
-  no second channel.
-
-  WHO IS TOLD, computed from THE FACT ITSELF and never from a flag the
-  caller sets — the same rule as everywhere else in this family, that
-  the shape of the thing decides:
-
-  ATTRIBUTION IS DROPPED, NEVER FATAL. A `run` or `agent` the caller
-  named that this database does not have contributes no ref: a lookup
-  ref to a missing entity fails the whole transaction, and an error
-  destroyed by its own attribution is the recorder failing at the one
-  thing it exists for. Who is told:
-
-  - the ATTRIBUTED agent, when the caller could name one AND the error
-    was a THROWABLE that escaped our code (the fact carries a `class`).
-    That is the case where the agent's run was interrupted by our bug
-    and it cannot know unless told. A returned VALUE — a refused
-    transition, a model failure — is NOT told: the run's own facts
-    already say what happened, the agent reads them in its next prompt,
-    and mailing it a message would open a fresh run to explain a run
-    that already explains itself. Measured, not theorised: wiring the
-    message to every refusal turned a bounded test drive into new runs
-    opening to discuss refusals;
-  - the ESCALATION recipient (`:seon.config.error/escalate-to`), with
-    `:no-attributable-agent` when there was nobody to tell, and with
-    `:recurring` once this signature reaches
-    `:seon.config.error/recurrence-limit` occurrences in this process;
-  - NOBODY, when the dial is absent or names an agent this cluster does
-    not have. Absence is the state: the fact is still committed.
-
-  THE STORM FENCE is that same recurrence count, and it is why the
-  fence needs no flag: AT the limit one `:recurring` escalation goes
-  out, and PAST it nothing is said at all — the facts keep committing,
-  because they are the evidence a query counts, but nobody is mailed
-  again. That bound is load-bearing rather than tidy. Measured on a live
-  cluster: one injected throw in the loop's transform produced six
-  faults in 1.5 s, because committing the explanation message is a
-  commit, a commit wakes the loop through
-  `:seon.message/to`, and the woken loop hit the same broken
-  code. Delivery being the wake attribute is exactly what makes error
-  delivery free — and exactly what makes an unbounded error path a
-  self-feeding fire. A fault now ALSO routes to the steward of the
-  failing function's namespace through `:seon.error/steward`
-  (`steward-call`), which is a listened attribute of its own — so the
-  cycle no longer needs a message to exist, and the two bounds that stop
-  it are this recurrence limit and the agent's turn bound (both the
-  steward ref and the notification message are declared INSIDE wakes,
-  so neither refills what it spends).
-  error -> message -> wake -> turn -> error is a real cycle,
-  and a bounded number of messages per signature per process is what
-  makes it terminate. A recurrence escalation to the attributed agent
-  itself is skipped rather than sent twice. Together with the
-  throwable-only rule above, the number of runs an error can cause is
-  bounded by the number of DISTINCT signatures, not by the number of
-  errors."
-  {:malli/schema [:=> [:cat :seon.db/database-value
-                       :seon.error/commit-tx-request]
+  "Transaction data for one error; occurrence decisions execute only at the writer."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.error/commit-tx-request]
                   :seon.store/transaction-data]}
-  [db {:seon.error/keys [source id at process basis-t]
-       evidence-bytes :seon.config.error/max-evidence-bytes
-       supplied-fact :seon.error/fact
-       :seon.sci.admit/keys [caps]
-       run-id :seon.turn/id
-       agent-id :seon.agent/id
-       escalate-to :seon.config.error/escalate-to
-       limit :seon.config.error/recurrence-limit}]
-  (let [fact (or supplied-fact
-                 (normalize
-                  (cond-> {:seon.error/source source
-                           :seon.error/id id
-                           :seon.error/at at
-                           :seon.error/process process
-                           :seon.sci.admit/caps caps
-                           ;; THE BOUND TRAVELS WITH THE REQUEST. It is a
-                           ;; declared member of this request, so a caller
-                           ;; that has dials hands it and one that does not
-                           ;; is refused by the contract — never a fallback
-                           ;; to a bootstrap number nobody chose here.
-                           :seon.config.error/max-evidence-bytes
-                           evidence-bytes}
-                    basis-t (assoc :seon.error/basis-t basis-t)
-                    (and run-id
-                         (entity-exists? db :seon.turn/id run-id))
-                    (assoc :seon.turn/id run-id)
-                    (and agent-id
-                         (entity-exists? db :seon.agent/id agent-id))
-                    (assoc :seon.agent/id agent-id))))
-        fact (cond-> fact
-               (and (:seon.error/run fact)
-                    (not (entity-exists?
-                          db :seon.turn/id
-                          (second (:seon.error/run fact)))))
-               (dissoc :seon.error/run)
-
-               (and (:seon.error/agent fact)
-                    (not (entity-exists?
-                          db :seon.agent/id
-                          (second (:seon.error/agent fact)))))
-               (dissoc :seon.error/agent))
-        occurrence (inc (recurrence db (:seon.error/signature fact) process))
-        ;; A MISASSEMBLED CALLER MUST NOT BREAK THE RECORDER. The limit
-        ;; is a required request key, but requiredness is a contract and
-        ;; contracts are not enforced until instrumentation is on — and
-        ;; `(> 1 nil)` throws, out of the one function whose whole job
-        ;; is that recording an error cannot fail. The recursion fence
-        ;; covers OUR bugs too. No invented number: with no honest limit
-        ;; the fact is committed and nothing is mailed, which is the
-        ;; conservative half of the storm fence rather than a guess at
-        ;; what the caller meant.
-        bounded? (pos-int? limit)
-        recurring? (and bounded? (= occurrence limit))
-        ;; PAST the limit nothing is said at all. The facts keep
-        ;; committing — they are the evidence, and a query counts them —
-        ;; but the escalation has already been sent once and repeating
-        ;; it is the storm rather than the warning.
-        silent? (or (not bounded?) (> occurrence limit))
-        ;; the fact says whether this was a Throwable; nothing else has
-        ;; to be asked, and no caller gets to have an opinion about it
-        interrupted-a-run? (some? (:seon.error/throwable-class fact))
-        ;; ATTRIBUTION IS READ BACK OFF THE FACT, never off the request.
-        ;; The two differ exactly when the caller named an agent this
-        ;; database does not have: attribution is dropped, and asking
-        ;; the request instead would take the `:your-run` branch (which
-        ;; then addresses nobody) while suppressing the
-        ;; `:no-attributable-agent` escalation — an interrupting error
-        ;; recorded and told to NOBODY. Review-caught; the general rule
-        ;; is that a decision about the fact is made from the fact.
-        attributed (second (:seon.error/agent fact))
-        final-notification {:seon.error/occurrence occurrence
-                            :seon.error/notification-limit limit
-                            :seon.error/notification :final}
-        tell (fn [recipient reason notification]
-               (when (and recipient (agent-exists? db recipient))
-                 (message-tx fact recipient reason notification)))]
-    (into [(assoc fact :db/id (fact-tempid id))
-           ;; The steward is decided inside the commit, not here: the
-           ;; call merges its ref onto this same tempid.
-           [:db.fn/call #'steward-call
-            (cond-> {:seon.error/id id}
-              (:seon.instrument/fn fact)
-              (assoc :seon.instrument/fn (:seon.instrument/fn fact)))]]
-          (remove nil?)
-          [(when (and attributed interrupted-a-run?
-                      (not recurring?) (not silent?))
-             (tell attributed :your-run nil))
-           (when (and interrupted-a-run? (not attributed)
-                      (not recurring?) (not silent?))
-             (tell escalate-to :no-attributable-agent nil))
-           (when (and recurring? (not= escalate-to attributed))
-             (tell escalate-to :recurring final-notification))])))
+  [database request]
+  (:seon.db/tx-data (recording database request)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The family default render

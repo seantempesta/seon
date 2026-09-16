@@ -2533,19 +2533,14 @@
                                  (:seon.error/data-edn (:seon.error/fact prepared))))
                    (blob/stage! connection (:seon.error/data-content prepared)))
           prepared-fact (cond-> (:seon.error/fact prepared)
-                          staged (assoc :seon.error/data-blob
-                                        (:seon.blob/digest staged)))
-          transaction-data
-          (cond->
-           (error/commit-tx
-            db
-            (assoc request :seon.error/fact prepared-fact))
-            (pos-int? dropped-count)
-            (update 0 assoc
-                    :seon.error/dropped-fault-count dropped-count
-                    :seon.error/dropped-fault-digest
-                    (::flow/dropped-fault-digest source-fault)))
-          fact (first transaction-data)
+                          staged (assoc :seon.error/data-blob (:seon.blob/digest staged))
+                          (pos-int? dropped-count)
+                          (assoc :seon.error/dropped-fault-count dropped-count
+                                 :seon.error/dropped-fault-digest
+                                 (::flow/dropped-fault-digest source-fault)))
+          recording (error/recording db (assoc request :seon.error/fact prepared-fact))
+          transaction-data (:seon.db/tx-data recording)
+          fact (:seon.error/fact recording)
           signature (:seon.error/signature fact)
           previously-reported?
           (previously-reported-fault-signature? db signature)]

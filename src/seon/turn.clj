@@ -3511,10 +3511,10 @@
 (defn- refusal-terminal-data
   [cluster database now agent-id run-id process ordinal _receipt source]
   (let [recording
-        (error-tx cluster database source now
+        (error/recording cluster database source now
                   (cond-> {:seon.agent/id agent-id}
                     run-id (assoc :seon.turn/id run-id)))
-        value (error/value (first recording))
+        value (:seon.error/value recording)
         receipt-tx
         (when ordinal
           (receipt-settle-tx
@@ -3531,7 +3531,7 @@
             (when run-id
               (close-tx
                {:seon.turn/id run-id :seon.db.process/id process :seon.turn/closed-tx "datomic.tx"}))
-            recording])}))
+            (:seon.db/tx-data recording)])}))
 
 (defn- settle-batch-refusal!
   "Settle every begun ordinal after the atomic turn settlement is refused."
@@ -3542,10 +3542,10 @@
          run-id :seon.turn/id}
         (first requests)
         process (:seon.db.process/id cluster)
-        recording (error-tx cluster (db/db connection) refusal now
+        recording (error/recording cluster (db/db connection) refusal now
                             {:seon.agent/id agent-id
                              :seon.turn/id run-id})
-        value (error/value (first recording))
+        value (:seon.error/value recording)
         serialized (pr-str value)
         receipts
         (mapv
@@ -3565,7 +3565,7 @@
          (into (receipt-settle-batch-tx receipts)
                cat
                [(close-tx {:seon.turn/id run-id :seon.db.process/id process :seon.turn/closed-tx "datomic.tx"})
-                recording])}
+                (:seon.db/tx-data recording)])}
         outcome (db/transact! connection transaction)]
     (when (:seon.error/kind outcome)
       (throw

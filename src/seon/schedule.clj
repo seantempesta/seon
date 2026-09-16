@@ -450,12 +450,11 @@
           :seon.maintenance.receipt/result result-tempid}])
 
       (= :error arm)
-      (let [error-tx (error/commit-tx database error-request)
-            error-tempid (:db/id (first error-tx))]
-        (conj error-tx
+      (let [recording (error/recording database error-request)]
+        (conj (:seon.db/tx-data recording)
               {:db/id [:seon.maintenance.receipt/id claimed-receipt-id]
                :seon.maintenance.receipt/completed-at completed-at
-               :seon.maintenance.receipt/error error-tempid}))
+               :seon.maintenance.receipt/error (:seon.error/ref recording)}))
 
       :else
       (throw (ex-info "The maintenance terminal arm is invalid."
