@@ -232,6 +232,47 @@ F7. **First agent tasks are the simple ones:** functions without contracts
 F8. **The orchestrator resets `default` whenever needed and does not wait
     on the owner for important things.**
 
+## 1f. Rulings of 2026-09-16 late evening (owner) — deletion, edges, provenance
+
+Grounding: `../research/datahike-deletion-and-the-program-graph-2026-09-16.md`
+(experiments on a throwaway in-memory Datahike at 5,000 functions / 30,000
+edges) and `../research/schema-key-audit-2026-09-16.md`. Owner: "The
+recommendation, which I agree with. Awesome. Do it!"
+
+G1. **Deletion is retraction.** A deleted function, test, namespace, schema
+    key or issue-with-no-note is `[:db/retractEntity …]`. No entity is kept
+    for the sake of another entity's refs. The past is `history` / `as-of` /
+    `since`. There is NO retirement attribute. Ruling 47's two corollaries
+    (identity rows never retract; the population invariant) are RETIRED and
+    AGENTS.md §2 is rewritten in the same commit as the change.
+G2. **Call edges and test reach are values, not refs.** `:seon.fn/calls
+    [:set :qualified-symbol]`, `:seon.test/reach [:set :qualified-symbol]`
+    (symbols-everywhere). Deleting a function touches only its own datoms;
+    "A calls a name with no row" is one Datalog clause and is the honest
+    unresolved-call fact, reported positively by a query, never prevented by
+    the writer. Refs stay where a genuine entity relation exists (`:seon.fn/ns`,
+    `/file`, `/ast`, `/arities`, `/capability-fn`). Reverse reach joins the
+    symbol's AVET index; `gate-sets` maps eid→symbol once per operation.
+G3. **Delete the tombstone machinery**: `seon.db/write-tombstone-validator`,
+    `seon.cluster.source/identity-tombstone-rows` / `mintable-identity` /
+    `identity-ref`, the identity-only "retired row" shapes in
+    `seon.program/exact-replacement-tx` callers. A ref to nothing is refused
+    at the writer as Datahike already refuses a missing lookup ref.
+G4. **Looking is an event and the event is a datom.** If a reader must
+    distinguish "we looked and found nothing" from "we never looked", the
+    looking is a positive fact. Every definition row carries the identity of
+    what produced its definition facts (the file entity/digest for an indexed
+    declaration, the evaluation for an agent-authored one), REQUIRED.
+    `analyzed?` is its presence; "calls nothing" is that fact plus no edges;
+    `#{}` is never a sentinel and submission-time-only validation is a
+    pre-read (rejected).
+G5. **A component is part of its parent's value.** The whole-entity write
+    validator validates the parent pulled with its components expanded as one
+    value against the parent's schema; no identities are invented for
+    component rows.
+G6. All of G1–G5 land in the ONE reset with symbols-everywhere and the
+    required-derivables slice (S2). Database data is disposable; no migration.
+
 ## 2. What exists today, with the seams named
 
 Verified on `steward-platform` at `a36d55c3b`/`849bbce0b` on 2026-09-17.
