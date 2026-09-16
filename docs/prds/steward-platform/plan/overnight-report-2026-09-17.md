@@ -70,6 +70,18 @@ peer session (batches 30–57; ledger
    the store). Both halves proven cold in batch 66 (platform green with the checker running first; the in-process refusal regressions green; store intact across the run). Issue:
    `a-platform-tier-test-wiped-the-checkouts-store`.
 
+0b. **The effect door refuses every declared capability** (since the
+   effect-facts change `0e15593aa`): `seon.effect/accepts-request?`
+   validates a one-argument request against owners that take
+   `[request effective]`, so `my.fs`/`my.web` requests through the door
+   answer false; it surfaced only when a fixture stopped hiding its refused
+   seed. Fix lane running (the door asks the owner's contract about the
+   request position). Issue:
+   `the-effect-door-validates-a-one-argument-request-against-a-two-argument-owner`.
+   A second real defect from the same pass: the opening walk's namespace
+   candidate hands a bare symbol where the contract wants an entity lookup
+   (`91f536c36`), fix lane running.
+
 1. **The store grows without collection.** `data/store` went 107 MB → 12 GB in
    eight hours with no periodic writer. The peer's measurement
    ([write-latency-vs-store-size](../../context-generation/research/write-latency-vs-store-size-2026-09-17.md))
