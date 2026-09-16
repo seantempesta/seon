@@ -11,6 +11,60 @@
           :arities [:vector #:seon.db{:component true} :seon.db/ref],
           :ast [:and #:seon.db{:component true} :seon.db/ref],
           :calls [:set :seon.db/ref],
+          :writes
+          [:set
+           {:description
+            "Declared attributes this declaration asserts at a database write.
+
+  Derived by span containment at indexing: a qualified keyword whose
+  position lies inside the span of a `seon.db/transact!` usage is
+  transaction data that call carries. Each value is a `:seon.schema/key`
+  row, never a keyword literal, so the writers of an attribute are one
+  join. It over-reports nothing the call does not lexically contain, and
+  under-reports transaction data assembled in a helper — which the
+  `:seon.fn/calls` closure already reaches."}
+           :seon.db/ref],
+          :call-arities
+          [:set
+           {:description
+            "The arities each `:seon.fn/calls` edge was invoked with.
+
+  One tuple per distinct (callee, arity) this declaration's source
+  contains: the callee's `:seon.fn/sym` identity value and the argument
+  count clj-kondo reported at that call site. The callee travels as its
+  identity value rather than as a ref because Datahike stores tuple
+  members verbatim — it resolves neither a lookup ref nor a tempid inside
+  a tuple (probed 2026-09-16), so a `[ref long]` tuple would store an
+  unresolvable vector. `:seon.fn/calls` remains the reach index; this set
+  only refines it, and its population is exactly that edge set."}
+           [:tuple [:string {:min 1}] [:int {:min 0}]]],
+          :caller [:string {:min 1}],
+          :callee [:string {:min 1}],
+          :call-arity [:int {:min 0}],
+          :declared-arities
+          [:vector
+           [:map
+            [:seon.fn.arity/min :seon.fn.arity/min]
+            [:seon.fn.arity/max {:optional true} :seon.fn.arity/max]]],
+          :arity-mismatch
+          [:map
+           [:seon.fn/caller :seon.fn/caller]
+           [:seon.fn/callee :seon.fn/callee]
+           [:seon.fn/call-arity :seon.fn/call-arity]
+           [:seon.fn/declared-arities :seon.fn/declared-arities]],
+          :arity-mismatches [:vector :seon.fn/arity-mismatch],
+          :arity-checked [:int {:min 0}],
+          :arity-unchecked [:int {:min 0}],
+          :arity-mismatch-report
+          [:map
+           {:description
+            "Call sites the callee's declared arities refuse, beside their
+  coverage. An empty mismatch list is legible only next to
+  `:seon.fn/arity-checked` and `:seon.fn/arity-unchecked`: silence with a
+  zero checked count reports that nothing was compared, never health."}
+           [:seon.fn/arity-mismatches :seon.fn/arity-mismatches]
+           [:seon.fn/arity-checked :seon.fn/arity-checked]
+           [:seon.fn/arity-unchecked :seon.fn/arity-unchecked]],
           :pending-calls
           [:set {:description "Analyzer-observed call targets whose program identity is not yet admitted. The declaration writer resolves them when that identity arrives."}
            [:string {:min 1}]],
@@ -46,6 +100,8 @@
            [:seon.fn/macro? {:optional true} :seon.fn/macro?]
            [:seon.fn/spec {:optional true} :seon.fn/spec]
            [:seon.fn/calls {:optional true} :seon.fn/calls]
+           [:seon.fn/call-arities {:optional true} :seon.fn/call-arities]
+           [:seon.fn/writes {:optional true} :seon.fn/writes]
            [:seon.fn/pending-calls {:optional true} :seon.fn/pending-calls]
            [:seon.fn/keywords {:optional true} :seon.fn/keywords]
            [:seon.fn/arities {:optional true} :seon.fn/arities]

@@ -1638,3 +1638,243 @@
                                 [:seon.lint/id :seon.lint/type :seon.lint/fn]
                                 [:seon.lint/id (:seon.lint/id finding)]))
                     "only the stable identity survives exact replacement")))))))))
+
+;;; --------------------------------------------------------------------------
+;;; Analysis facets — :seon.fn/writes and :seon.fn/call-arities
+;;; --------------------------------------------------------------------------
+
+(def ^:private writer-fixture-source
+  (str "(ns sample.facets\n"
+       "  (:require [seon.db :as db]))\n"
+       "\n"
+       "(defn helper [value] value)\n"
+       "\n"
+       "(defn record-agent!\n"
+       "  [connection id]\n"
+       "  (db/transact! connection [{:seon.agent/id id\n"
+       "                             :sample.facets/undeclared true\n"
+       "                             :seon.ns/name (helper 'sample.facets)}]))\n"
+       "\n"
+       "(defn reads-only\n"
+       "  [database]\n"
+       "  (db/q '[:find ?e :where [?e :seon.agent/id _]] database))\n"))
+
+(defn- facet-rows
+  ([] (facet-rows writer-fixture-source))
+  ([source]
+   (let [root (fixture-root)]
+     (write-source! root "sample/facets.clj" source)
+     (into {}
+           (keep (fn [row]
+                   (when-let [function-symbol (:seon.fn/sym row)]
+                     [function-symbol row])))
+           (seon.fn/rows {:seon.fn/roots [(.getPath root)]})))))
+
+(deftest writes-facet-names-every-attribute-a-declaration-transacts
+  (let [rows (facet-rows)]
+    (testing "the attributes inside a transact! call's own span, as refs"
+      (is (= #{[:seon.schema/key :seon.agent/id]
+               [:seon.schema/key :seon.ns/name]}
+             (:seon.fn/writes (get rows "sample.facets/record-agent!")))))
+    (testing "an undeclared keyword has no :seon.schema/key row to name"
+      (is (not (contains? (:seon.fn/writes (get rows "sample.facets/record-agent!"))
+                          [:seon.schema/key :sample.facets/undeclared]))))
+    (testing "reading an attribute is not writing it"
+      (is (nil? (:seon.fn/writes (get rows "sample.facets/reads-only")))
+          "the read names :seon.agent/id but transacts nothing")
+      (is (contains? (:seon.fn/keywords (get rows "sample.facets/reads-only"))
+                     :seon.agent/id)
+          "the conflating keyword facet still carries it"))
+    (testing "a declaration that never reaches the write seam carries no set"
+      (is (nil? (:seon.fn/writes (get rows "sample.facets/helper")))))))
+
+(deftest call-arities-refine-exactly-the-stored-call-edges
+  (let [rows (facet-rows)
+        writer (get rows "sample.facets/record-agent!")
+        reader (get rows "sample.facets/reads-only")]
+    (is (= #{["seon.db/transact!" 2] ["sample.facets/helper" 1]}
+           (:seon.fn/call-arities writer)))
+    (is (= #{["seon.db/q" 2]} (:seon.fn/call-arities reader)))
+    (testing "every refined callee is a target the reach index already carries"
+      (doseq [row (vals rows)]
+        (is (= (into #{} (map first) (:seon.fn/call-arities row))
+               (into #{} (map second) (:seon.fn/calls row)))
+            (str (:seon.fn/sym row)
+                 " refines exactly its :seon.fn/calls targets"))))
+    (is (nil? (:seon.fn/call-arities (get rows "sample.facets/helper")))
+        "a declaration with no call edge carries no tuple")))
+
+(deftest static-index-and-runtime-admission-agree-on-analysis-facets
+  (test-support/with-database
+    (fn [connection]
+      (let [namespace-ref [:seon.ns/name 'sample.facets]
+            static (get (facet-rows) "sample.facets/record-agent!")
+            definition
+            (str "(defn record-agent!\n"
+                 "  [connection id]\n"
+                 "  (seon.db/transact! connection"
+                 " [{:seon.agent/id id\n"
+                 "     :sample.facets/undeclared true\n"
+                 "     :seon.ns/name (helper 'sample.facets)}]))")
+            program-row {:seon.fn/sym "sample.facets/record-agent!"
+                         :seon.fn/ns namespace-ref
+                         :seon.fn/source definition
+                         :seon.fn/arglists "([connection id])"
+                         :seon.fn/private? false
+                         :seon.schema.admission/source :agent}]
+        (transact-fixture!
+         connection
+         [{:seon.ns/name 'sample.facets}
+          {:seon.ns/name 'seon.db}])
+        (transact-fixture!
+         connection
+         [{:seon.fn/sym "seon.db/transact!"
+           :seon.fn/ns [:seon.ns/name 'seon.db]
+           :seon.fn/arglists "([request])"
+           :seon.fn/private? false
+           :seon.schema.admission/source :core}
+          {:seon.fn/sym "sample.facets/helper"
+           :seon.fn/ns namespace-ref
+           :seon.fn/source "(defn helper [value] value)"
+           :seon.fn/arglists "([value])"
+           :seon.fn/private? false
+           :seon.schema.admission/source :agent}])
+        (let [[_ admitted]
+              (first (seon.fn/analyze-forms
+                      (db/db connection)
+                      [{:seon.cluster.eval/source definition
+                        :seon.cluster.eval/ns namespace-ref
+                        :seon.program/row program-row}]))]
+          (is (seq (:seon.fn/writes static))
+              "the fixture must actually write, or parity is vacuous")
+          (is (= (:seon.fn/writes static) (:seon.fn/writes admitted))
+              "one derivation, two admission paths")
+          (is (= (:seon.fn/call-arities static)
+                 (:seon.fn/call-arities admitted))))))))
+
+(deftest arity-mismatch-is-a-query-over-stored-call-sites
+  (test-support/with-database
+    (fn [connection]
+      (let [contracted
+            (->> (db/q '[:find ?function-symbol ?minimum ?maximum
+                         :where
+                         [?function :seon.fn/sym ?function-symbol]
+                         [?function :seon.fn/arities ?arity]
+                         [?arity :seon.fn.arity/min ?minimum]
+                         [(get-else $ ?arity :seon.fn.arity/max -1) ?maximum]]
+                       (db/db connection))
+                 (group-by first))
+            [callee declarations]
+            (->> contracted
+                 (filter (fn [[_ rows]] (= 1 (count rows))))
+                 (sort-by key)
+                 first)]
+        (is (some? callee)
+            "the canonical population must install contract arities, or this
+             check reports absence as health")
+        (let [[_ minimum maximum] (first declarations)
+              admitted minimum
+              refused (if (nat-int? maximum) (inc maximum) (dec minimum))
+              caller "sample.mismatch/caller"]
+          (transact-fixture!
+           connection
+           [{:seon.ns/name 'sample.mismatch}
+            {:seon.fn/sym caller
+             :seon.fn/ns [:seon.ns/name 'sample.mismatch]
+             :seon.fn/source "(defn caller [] nil)"
+             :seon.fn/arglists "([])"
+             :seon.fn/private? false
+             :seon.schema.admission/source :agent
+             :seon.fn/call-arities #{[callee admitted] [callee refused]}}])
+          (let [report (seon.fn/arity-mismatches (db/db connection))]
+            (is (= [{:seon.fn/caller caller
+                     :seon.fn/callee callee
+                     :seon.fn/call-arity (long refused)
+                     :seon.fn/declared-arities
+                     [(cond-> {:seon.fn.arity/min minimum}
+                        (nat-int? maximum)
+                        (assoc :seon.fn.arity/max maximum))]}]
+                   (:seon.fn/arity-mismatches report))
+                "the refused arity is named, the admitted one is not")
+            (is (<= 2 (:seon.fn/arity-checked report))
+                "an empty mismatch list is legible only beside its coverage")
+            (is (nat-int? (:seon.fn/arity-unchecked report)))))))))
+
+(deftest re-index-replaces-analysis-facets-exactly
+  (test-support/with-database
+    (fn [connection]
+      (let [narrowed
+            (str/replace writer-fixture-source
+                         "\n                             :seon.ns/name (helper 'sample.facets)}]))"
+                         "}]))")
+            before (get (facet-rows) "sample.facets/record-agent!")
+            after (get (facet-rows narrowed) "sample.facets/record-agent!")]
+        (is (contains? (:seon.fn/writes before) [:seon.schema/key :seon.ns/name]))
+        (is (not (contains? (:seon.fn/writes after)
+                            [:seon.schema/key :seon.ns/name]))
+            "the narrowed source no longer transacts the attribute")
+        ;; Lookup refs resolve against the database BEFORE their transaction
+        ;; (`seon.fn/compile-index-transaction`), so each referenced row is
+        ;; admitted in an earlier one.
+        (let [missing (remove #(db/q '[:find ?entity .
+                                       :in $ ?key
+                                       :where [?entity :seon.schema/key ?key]]
+                                     (db/db connection) %)
+                              [:seon.agent/id :seon.ns/name])]
+          (when (seq missing)
+            (transact-fixture!
+             connection
+             (mapv (fn [schema-key]
+                     {:seon.schema/key schema-key
+                      :seon.schema/form (pr-str :string)
+                      :seon.schema.admission/source :core})
+                   missing))))
+        (transact-fixture!
+         connection
+         [{:seon.ns/name 'sample.facets}
+          {:seon.ns/name 'seon.db}])
+        (transact-fixture!
+         connection
+         [{:seon.fn/sym "sample.facets/helper"
+           :seon.fn/ns [:seon.ns/name 'sample.facets]
+           :seon.fn/source "(defn helper [value] value)"
+           :seon.fn/arglists "([value])"
+           :seon.fn/private? false
+           :seon.schema.admission/source :agent}
+          {:seon.fn/sym "seon.db/transact!"
+           :seon.fn/ns [:seon.ns/name 'seon.db]
+           :seon.fn/arglists "([request])"
+           :seon.fn/private? false
+           :seon.schema.admission/source :core}])
+        (transact-fixture!
+         connection
+         [(assoc (select-keys before
+                              [:seon.fn/sym :seon.fn/writes
+                               :seon.fn/call-arities :seon.fn/arglists
+                               :seon.fn/private?])
+                 :seon.fn/ns [:seon.ns/name 'sample.facets]
+                 :seon.fn/source "(defn record-agent! [connection id] nil)"
+                 :seon.schema.admission/source :agent)])
+        (let [identities [[:seon.fn/sym "sample.facets/record-agent!"]]
+              desired (assoc (select-keys after
+                                          [:seon.fn/sym :seon.fn/writes
+                                           :seon.fn/call-arities
+                                           :seon.fn/arglists :seon.fn/private?])
+                             :seon.fn/ns [:seon.ns/name 'sample.facets]
+                             :seon.fn/source
+                             "(defn record-agent! [connection id] nil)"
+                             :seon.schema.admission/source :agent)]
+          (transact-fixture!
+           connection
+           (seon.fn/reconcile-tx (db/db connection) [desired] identities))
+          (let [stored
+                (db/pull (db/db connection)
+                         [:seon.fn/call-arities
+                          {:seon.fn/writes [:seon.schema/key]}]
+                         [:seon.fn/sym "sample.facets/record-agent!"])]
+            (is (= #{:seon.agent/id}
+                   (into #{} (map :seon.schema/key) (:seon.fn/writes stored)))
+                "re-index retracts the attribute the edit removed")
+            (is (= (:seon.fn/call-arities after)
+                   (set (:seon.fn/call-arities stored)))
+                "the tuple set is replaced exactly, never accreted")))))))

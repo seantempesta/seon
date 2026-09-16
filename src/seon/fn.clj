@@ -273,6 +273,12 @@
     (str (symbol (str (::analyzer/to usage))
                  (str (::analyzer/name usage))))))
 
+(defn- usage-caller
+  [usage]
+  (when (and (::analyzer/from usage) (::analyzer/from-var usage))
+    (str (symbol (str (::analyzer/from usage))
+                 (str (::analyzer/from-var usage))))))
+
 (defn- call-target
   [usage]
   (when (contains? usage ::analyzer/arity)
@@ -288,10 +294,7 @@
   ([analysis first-party-functions resolvable-targets]
   (reduce
    (fn [calls usage]
-     (let [caller
-           (when (and (::analyzer/from usage) (::analyzer/from-var usage))
-             (str (symbol (str (::analyzer/from usage))
-                          (str (::analyzer/from-var usage)))))
+     (let [caller (usage-caller usage)
            target (call-target usage)]
        (if (and (contains? first-party-functions caller)
                 target
@@ -334,6 +337,87 @@
   (when-let [used (seq (get keywords-by-holder (str qualified)))]
     (into (sorted-set) used)))
 
+(def ^:private write-seam-symbols
+  "The functions through which a first-party database write leaves the caller.
+
+  `seon.db` is the one database namespace and `seon.db/transact!` its one
+  write entry, so transaction data a declaration asserts is lexically inside
+  a usage of that seam."
+  #{"seon.db/transact!"})
+
+(defn- span-contains?
+  "True when one analyzer entry's position lies inside another's form span."
+  [span entry]
+  (let [end-row (::analyzer/end-row span)
+        end-col (::analyzer/end-col span)
+        row (long (or (::analyzer/row entry) 0))
+        col (long (or (::analyzer/col entry) 0))
+        start-row (long (or (::analyzer/row span) 0))
+        start-col (long (or (::analyzer/col span) 0))]
+    (and (some? end-row)
+         (some? end-col)
+         (or (> row start-row)
+             (and (= row start-row) (>= col start-col)))
+         (or (< row (long end-row))
+             (and (= row (long end-row)) (<= col (long end-col)))))))
+
+(defn- writes-by-writer
+  "Declared attributes each declaration asserts at a write-seam call site.
+
+  The join is span containment over facts the analyzer already reports:
+  a qualified keyword whose position lies inside the span of a
+  `seon.db/transact!` usage is transaction data that call carries.
+  `declared-key?` admits only attributes the schema population owns, so
+  every emitted value resolves to a `:seon.schema/key` row."
+  [analysis declared-key?]
+  (let [keywords-by-file
+        (group-by ::analyzer/filename (::analyzer/keywords analysis))]
+    (reduce
+     (fn [writes usage]
+       (if-let [caller (and (contains? write-seam-symbols (usage-symbol usage))
+                            (usage-caller usage))]
+         (reduce
+          (fn [writes entry]
+            (let [keyword-namespace (::analyzer/ns entry)
+                  keyword-name (::analyzer/name entry)
+                  attribute (when (and keyword-namespace keyword-name)
+                              (keyword (str keyword-namespace)
+                                       (str keyword-name)))]
+              (if (and attribute
+                       (declared-key? attribute)
+                       (span-contains? usage entry))
+                (update writes caller (fnil conj (sorted-set)) attribute)
+                writes)))
+          writes
+          (get keywords-by-file (::analyzer/filename usage)))
+         writes))
+     {}
+     (::analyzer/var-usages analysis))))
+
+(defn- call-arities-by-caller
+  "The arities each stored call edge was actually invoked with.
+
+  The population is exactly `calls-by-caller`: a tuple appears only for a
+  caller and target the reach index already carries, so a refinement can
+  never name a target with no program row."
+  [analysis calls-by-caller]
+  (reduce
+   (fn [arities usage]
+     (let [caller (usage-caller usage)
+           target (call-target usage)]
+       (if (and caller target
+                (contains? (get calls-by-caller caller) target))
+         (update arities caller (fnil conj (sorted-set))
+                 [target (long (::analyzer/arity usage))])
+         arities)))
+   {}
+   (::analyzer/var-usages analysis)))
+
+(defn- write-refs
+  [writes qualified]
+  (when-let [attributes (seq (get writes (str qualified)))]
+    (into #{} (map (fn [attribute] [:seon.schema/key attribute])) attributes)))
+
 (defn- test-subject
   [metadata]
   (when-let [subject (:seon.test/subject metadata)]
@@ -364,7 +448,8 @@
     value))
 
 (defn- var-row
-  [contexts namespace-contexts calls-by-caller used-keywords entry]
+  [contexts namespace-contexts
+   {:keys [calls-by-caller used-keywords writes call-arities]} entry]
   (let [namespace-name (::analyzer/ns entry)
         qualified (symbol (str namespace-name) (str (::analyzer/name entry)))
         metadata (::analyzer/meta entry)
@@ -402,6 +487,11 @@
                      (get calls-by-caller (str qualified))))
         (keyword-values used-keywords qualified)
         (assoc :seon.fn/keywords (keyword-values used-keywords qualified))
+        (write-refs writes qualified)
+        (assoc :seon.fn/writes (write-refs writes qualified))
+        (seq (get call-arities (str qualified)))
+        (assoc :seon.fn/call-arities
+               (into #{} (get call-arities (str qualified))))
         (test-subject metadata)
         (assoc :seon.test/subject (test-subject metadata)))
 
@@ -431,6 +521,11 @@
                      (get calls-by-caller (str qualified))))
         (keyword-values used-keywords qualified)
         (assoc :seon.fn/keywords (keyword-values used-keywords qualified))
+        (write-refs writes qualified)
+        (assoc :seon.fn/writes (write-refs writes qualified))
+        (seq (get call-arities (str qualified)))
+        (assoc :seon.fn/call-arities
+               (into #{} (get call-arities (str qualified))))
         (test-subject metadata)
         (assoc :seon.test/subject (test-subject metadata))
         (contains? #{:io :compute} (:seon.workload metadata))
@@ -597,7 +692,7 @@
     ::analyzer/findings]))
 
 (defn- analyzed-form
-  [analysis function-rows program-row]
+  [analysis function-rows declared-key? program-row]
   (let [program-symbol (or (:seon.fn/sym program-row)
                            (:seon.test/sym program-row))
         first-party-functions
@@ -606,6 +701,12 @@
         calls-by-caller
         (call-targets-by-caller analysis first-party-functions)
         used-keywords (keywords-by-holder analysis)
+        writes (writes-by-writer analysis declared-key?)
+        call-arities
+        (call-arities-by-caller
+         analysis
+         (update-vals calls-by-caller
+                      #(into #{} (filter first-party-functions) %)))
         program-facts
         (when program-symbol
           (let [qualified (symbol program-symbol)
@@ -632,6 +733,11 @@
               (keyword-values used-keywords qualified)
               (assoc :seon.fn/keywords
                      (keyword-values used-keywords qualified))
+              (write-refs writes qualified)
+              (assoc :seon.fn/writes (write-refs writes qualified))
+              (seq (get call-arities program-symbol))
+              (assoc :seon.fn/call-arities
+                     (into #{} (get call-arities program-symbol)))
               subject (assoc :seon.test/subject subject))))
         merged-row (when program-row (merge program-row program-facts))]
     [(if program-row
@@ -690,11 +796,17 @@
       (let [{analysis :seon.fn/analysis
              spans :seon.fn/source-spans
              function-rows :seon.fn/function-rows}
-            (runtime-analysis-batch database resolved)]
+            (runtime-analysis-batch database resolved)
+            declared-key?
+            (into #{}
+                  (db/q '[:find [?key ...]
+                          :where [_ :seon.schema/key ?key]]
+                        database))]
         (mapv (fn [request [first-row last-row]]
                 (analyzed-form
                  (source-analysis analysis first-row last-row)
                  function-rows
+                 declared-key?
                  (:seon.program/row request)))
               requests spans)))))
 
@@ -788,6 +900,12 @@
   (let [calls-by-caller
         (call-targets-by-caller analysis first-party-functions)
         used-keywords (keywords-by-holder analysis)
+        edges {:calls-by-caller calls-by-caller
+               :used-keywords used-keywords
+               :writes (writes-by-writer
+                        analysis
+                        (set (keys (schema.edn/packaged-forms))))
+               :call-arities (call-arities-by-caller analysis calls-by-caller)}
         namespace-contexts
         (into {}
               (map (fn [entry]
@@ -797,8 +915,7 @@
     (reduce
      (fn [rows entry]
        (if-let [row (if (::analyzer/ns entry)
-                      (var-row contexts namespace-contexts calls-by-caller
-                               used-keywords entry)
+                      (var-row contexts namespace-contexts edges entry)
                       (namespace-row contexts
                                      (get namespace-contexts
                                           (::analyzer/name entry))
@@ -985,6 +1102,72 @@
              database keyword)
        sort
        vec))
+
+(defn- declared-arity-bounds
+  [database]
+  (reduce
+   (fn [bounds [function-symbol minimum maximum]]
+     (update bounds function-symbol (fnil conj #{})
+             (cond-> {:seon.fn.arity/min minimum}
+               (nat-int? maximum) (assoc :seon.fn.arity/max maximum))))
+   {}
+   (db/q '[:find ?function-symbol ?minimum ?maximum
+           :where
+           [?function :seon.fn/sym ?function-symbol]
+           [?function :seon.fn/arities ?arity]
+           [?arity :seon.fn.arity/min ?minimum]
+           [(get-else $ ?arity :seon.fn.arity/max -1) ?maximum]]
+         database)))
+
+(defn- arity-admitted?
+  [declared arity]
+  (boolean
+   (some (fn [{minimum :seon.fn.arity/min maximum :seon.fn.arity/max}]
+           (and (<= (long minimum) (long arity))
+                (or (nil? maximum) (<= (long arity) (long maximum)))))
+         declared)))
+
+(defn arity-mismatches
+  "Call sites whose arity no declared arity of the callee admits.
+
+  An arity error becomes a query over stored call sites instead of a
+  load-time surprise. Only a callee whose contract declares arities can be
+  compared, so the report carries its own coverage: an empty mismatch list
+  beside a zero `:seon.fn/arity-checked` reports that nothing was compared,
+  never that everything agrees."
+  {:malli/schema [:=> [:cat :seon.db/database-value]
+                  [:or :seon.fn/arity-mismatch-report :seon.error/value]]}
+  [database]
+  (let [edges (db/q '[:find ?caller-symbol ?call
+                      :where
+                      [?caller :seon.fn/call-arities ?call]
+                      (or [?caller :seon.fn/sym ?caller-symbol]
+                          [?caller :seon.test/sym ?caller-symbol])]
+                    database)]
+    (if (:seon.error/kind edges)
+      edges
+      (let [bounds (declared-arity-bounds database)
+            checked (filterv (fn [[_ [callee _]]] (contains? bounds callee))
+                             edges)]
+        {:seon.fn/arity-mismatches
+         (->> checked
+              (keep (fn [[caller [callee arity]]]
+                      (let [declared (get bounds callee)]
+                        (when-not (arity-admitted? declared arity)
+                          {:seon.fn/caller caller
+                           :seon.fn/callee callee
+                           :seon.fn/call-arity (long arity)
+                           :seon.fn/declared-arities
+                           (vec (sort-by
+                                 (juxt :seon.fn.arity/min
+                                       #(get % :seon.fn.arity/max
+                                             Integer/MAX_VALUE))
+                                 declared))}))))
+              (sort-by (juxt :seon.fn/caller :seon.fn/callee
+                             :seon.fn/call-arity))
+              vec)
+         :seon.fn/arity-checked (count checked)
+         :seon.fn/arity-unchecked (- (count edges) (count checked))}))))
 
 (def ^:private required-projection-by-sink
   {:ai-visible-text :seon.render/ai

@@ -69,6 +69,8 @@
              [:seon.test/source {:optional true} :seon.test/source]
              [:seon.test/reach-digest {:optional true} :seon.test/reach-digest]
              [:seon.fn/calls {:optional true} :seon.fn/calls]
+             [:seon.fn/call-arities {:optional true} :seon.fn/call-arities]
+             [:seon.fn/writes {:optional true} :seon.fn/writes]
              [:seon.fn/pending-calls {:optional true} :seon.fn/pending-calls]
              [:seon.fn/keywords {:optional true} :seon.fn/keywords]
              [:seon.test/usage {:optional true} :seon.test/usage]
