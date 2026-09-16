@@ -446,3 +446,47 @@ through `seon.test`'s own loader against the canonical harness; no test JVM
 was launched and default was never restarted. The batched path-limited gate
 (`tmp/orchestrator/gate-requests/recorder-absent-identity.txt`, platform tier
 WITH recording) remains the proof.
+
+### One minting rule for every program identity — 2026-09-16
+
+A fresh store on PID 17352 then refused adoption at the source seal with
+`Nothing found for entity id [:seon.test/sym
+"seon.render-simplification-test/nested-ai-values-retain-data-and-html-uses-declared-faces"]`
+— a deftest renamed by `358133a78`. Same class, different identity attribute,
+so the fix is now ONE rule over `seon.program/identity-attributes` rather
+than a branch per attribute.
+
+`mintable-identity` reads the identity attribute's declared row schema, takes
+its required keys, drops the identity itself and
+`:seon.schema.admission/source`, and mints only what is DERIVABLE FROM THE
+IDENTITY. Measured against the packaged declarations:
+
+| Identity attribute | Required besides identity + admission | Minted |
+| --- | --- | --- |
+| `:seon.ns/name` | — | identity alone |
+| `:seon.test/sym` | — | identity + admission source |
+| `:seon.fn/sym` | `:seon.fn/ns` (a `:seon.db/ref`) | identity + its namespace |
+| `:seon.fn.file/path` | `:seon.fn.file/digest` | no — typed unknown |
+| `:seon.schema/key` | `:seon.schema/form` | no — typed unknown |
+| `:seon.lint/id` | file, type, level, message, row, col | no — typed unknown |
+
+`identity-ref` returns nil for an absent identity that cannot be minted, and
+its holders drop the ref rather than dangle it. `preserved-evidence-tx` also
+gives every carried evidence row the minted tempid as its own `:db/id`, so a
+failure's `:seon.test.failure/test` resolves to the row in the SAME
+transaction instead of to a lookup ref against the value before it — which is
+what the renamed deftest actually tripped.
+
+In process, daemon thread, one at a time, PID 17352, armed contracts:
+
+| Regression | Pass/fail/error |
+| --- | --- |
+| `recording-mints-an-absent-identity-instead-of-rejecting-the-completion` | **8 / 0 / 0** |
+| `preserved-evidence-survives-a-rebuild-that-deleted-a-declaration` | **10 / 0 / 0** |
+| `recorded-reach-belongs-to-the-tested-value-and-is-replaced` (existing) | **7 / 0 / 0** |
+
+The preservation regression now carries a RENAMED test identity, a deleted
+function in its reach, and an unresolvable file site in one evidence row, and
+checks that the renamed identity resolves afterwards carrying no fabricated
+source, that the function tombstone asserts nothing but its name, and that
+the site keeps line 7 while reporting its path.
