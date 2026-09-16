@@ -114,3 +114,19 @@ the gate:
 Blocked the transcript / web-debug reds lane from proving any db-backed test
 in process on `default` (2026-09-16). See
 [transcript-web-debug-reds-2026-09-16](../../prds/steward-platform/research/transcript-web-debug-reds-2026-09-16.md).
+
+## Call-graph publication observation — 2026-09-17 assignment
+
+Default PID 53320's publication thread `Clojure Connection seon.cluster/default
+2806` was observed WAITING in `datahike.gc-guard/acquire-reachability-permit!`
+(`gc_guard.cljc:203`) → `datahike.versioning/branch!` (`versioning.cljc:231`)
+→ `seon.cluster.registry/branch!` (`registry.clj:206`). Its operator client
+had announced “branch publication started”. This is the same waiting seam;
+the call-graph lane did not establish the holder's identity or infer a new
+cause from that stack alone.
+
+The lane ended only its own operator client PID 23608 after verifying its
+exact command identity (client exit 143). Default was not signalled, restarted,
+or stopped; no permit was released. The JVM-side publication wait remains an
+owner recovery/verification boundary. See the
+[call-graph landing note](../../prds/steward-platform/research/call-graph-fidelity-fix-2026-09-17.md).

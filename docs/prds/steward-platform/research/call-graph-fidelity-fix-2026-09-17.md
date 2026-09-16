@@ -1,6 +1,6 @@
 # Call-graph fidelity implementation — 2026-09-17
 
-Status: implementation in progress; orchestrator review required before any gate.
+Status: committed for orchestrator review; adopted verification incomplete.
 No test JVM launched; default PID 53320 has not been stopped or restarted.
 
 ## Grounding and dependency ledger
@@ -230,3 +230,38 @@ names the measured writer boundary without guessing its internal cause.
 
 The final small follow-up computes the operation's declared caller set once,
 then supplies it to every file's unresolved-reference derivation.
+
+## Final review boundary
+
+Additional commits: `b13705fc7` (test-rooted coverage plus partial artifact
+uncertainty and its two-file regression), `9a0ae9bc9` (derive declared callers
+once). The last six smoke submissions all returned `:seon.test/unknown`
+before assertions; their exact values are in
+[final-smoke-progress.edn](call-graph-fidelity-evidence-2026-09-17/final-smoke-progress.edn).
+The full selected batch was not run; S1 parity is **unverified**, not green.
+
+The final publication reached branch creation and waited at
+`datahike.gc-guard/acquire-reachability-permit!` (`gc_guard.cljc:203`) →
+`datahike.versioning/branch!` (`versioning.cljc:231`) →
+`seon.cluster.registry/branch!` (`registry.clj:206`). Thread:
+`Clojure Connection seon.cluster/default 2806`, state WAITING. The existing
+[roster-permit issue](../../../seon/issues/an-interrupted-fixture-leaks-datahikes-roster-permit-and-wedges-the-jvm.md)
+now carries this observation. The holder's origin was not established.
+No protected owner or other lane's session was operated.
+
+Last checked published source: `6aaaf664-0ecd-5fae-a037-421814f727d6`;
+adopted source: `6aaaeabe-d99a-5eec-9e3e-9d254e71c9c6`.
+The lane ended only its own client PID 23608 (verified exact command, exit
+143); the JVM-side wait is explicitly outstanding. Default PID 53320 was
+never stopped, restarted or signalled. Every lane shell has ended, all lane
+probe futures have completed or been cancelled with observed thread exit,
+and the snapshot worktree has been removed. Evidence was copied out before
+scratch removal.
+
+**STOP FOR ORCHESTRATOR REVIEW; NOT GATE-GREEN.** No test JVM, `bin/test`,
+or `bin/test-fast` was launched. The orchestrator must review all six source
+commits, restore a usable adopted verification boundary through its owning
+lane, then re-run `seon.fn-test`, `seon.program-test`, `seon.fn.analyzer-test`,
+`seon.test-reaching-test` and the derived reaching tests. The interim table
+must be re-measured after successful adoption. No existing key changed
+meaning; **no schema RESET NEEDED from this implementation**.
