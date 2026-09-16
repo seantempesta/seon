@@ -162,3 +162,99 @@
           (is (str/includes? (:seon.error/message refusal)
                              "bin/seon init stale-fixture --force")
               "naming the refork that resolves it"))))))
+
+(def ^:private indexable-marker ::indexable)
+
+(deftest an-added-index-adopts-in-place-instead-of-forcing-a-refork
+  ;; Adding `:db/index` to an already-installed attribute is accretion, and
+  ;; the vendored fork applies it: the transactor atomically backfills AVET
+  ;; before publishing the resulting database value
+  ;; (`reference-code/datahike/src/datahike/schema.cljc:277`). Comparing the
+  ;; declaration maps with `=` called that difference "incompatible" and
+  ;; forced a destructive refork of every existing cluster (2026-09-16,
+  ;; `docs/seon/issues/adoption-refuses-a-monotonic-index-addition-datahike-supports.md`).
+  (test-support/with-database
+    {::test-support/extra-schema
+     [{:db/ident indexable-marker
+       :db/valueType :db.type/string
+       :db/cardinality :db.cardinality/one}]}
+    (fn [connection]
+      (let [forms (schema.edn/packaged-forms)
+            changes (ns-resolve 'seon.cluster 'declaration-changes)
+            attribute :seon.issue/agent
+            installed (get (:schema @connection) attribute)]
+        (is (true? (:db/index installed))
+            "the canonical population declares the subject attribute indexed")
+        (let [older (update-in @connection [:schema attribute] dissoc :db/index)
+              declarations (schema/call-with-forms
+                            forms
+                            #(changes older forms "older-fixture"))]
+          (is (= [attribute] (mapv :db/ident declarations))
+              "a branch forked before the index addition adopts exactly that
+               declaration in place instead of refusing to reopen")
+          (is (true? (:db/index (first declarations)))
+              "and the declaration it transacts carries the index")))
+      (let [avet-count (fn []
+                         (count
+                          (filter #(= indexable-marker (:a %))
+                                  (seq (:avet @connection)))))
+            written (db/transact!
+                     connection
+                     {:tx-data (mapv (fn [index]
+                                       {indexable-marker (str "marker-" index)})
+                                     (range 3))})]
+        (is (some? (:db-after written))
+            "the fixture writes its rows through the one write path")
+        (is (zero? (avet-count))
+            "an unindexed attribute holds no AVET datoms")
+        (let [adopted (db/transact!
+                       connection
+                       {:tx-data [{:db/ident indexable-marker
+                                   :db/valueType :db.type/string
+                                   :db/cardinality :db.cardinality/one
+                                   :db/index true}]})]
+          (is (some? (:db-after adopted))
+              "transacting the declaration adds the index in place")
+          (is (true? (get-in (:schema @connection)
+                             [indexable-marker :db/index]))
+              "and the installed attribute is now indexed")
+          (is (= 3 (avet-count))
+              "with every pre-existing datom backfilled into AVET")
+          (is (= 1 (count (db/q [:find '?e
+                                 :where ['?e indexable-marker "marker-1"]]
+                                @connection)))
+              "so the AVET index answers a value-bound query afterwards"))))))
+
+(deftest an-incompatible-declaration-refuses-naming-the-changed-property
+  ;; "predates the incompatible schema change" named neither the property nor
+  ;; its values, so a reader could not tell an accretive index addition from a
+  ;; genuine value-type change.
+  (test-support/with-database
+    (fn [connection]
+      (let [database @connection
+            forms (schema.edn/packaged-forms)
+            changes (ns-resolve 'seon.cluster 'declaration-changes)
+            attribute :seon.test/reach-digest
+            declared (:db/valueType (get (:schema database) attribute))
+            stale (assoc-in database [:schema attribute :db/valueType]
+                            :db.type/long)
+            refusal (test-support/refusal-data
+                     #(schema/call-with-forms
+                       forms
+                       (fn [] (changes stale forms "stale-fixture"))))
+            offense (:seon.boot/offense refusal)]
+        (is (= :db.type/string declared)
+            "the bridge derives the subject attribute as a string")
+        (is (= :seon.boot/refused (:seon.error/kind refusal))
+            "a value-type change still refuses to reopen the branch")
+        (is (= :db/valueType (:seon.boot/property offense))
+            "naming the property Datahike will not apply")
+        (is (= [:db.type/long declared]
+               [(:seon.boot/installed-value offense)
+                (:seon.boot/declared-value offense)])
+            "and carrying both of its values as evidence")
+        (is (str/includes? (:seon.error/message refusal)
+                           ":db/valueType from :db.type/long to :db.type/string")
+            "the message states the change rather than `predates`")
+        (is (not (str/includes? (:seon.error/message refusal) "predates"))
+            "so the reader is never told a whole-map inequality")))))

@@ -863,47 +863,122 @@
 (declare require-committed!)
 
 (defn- incompatible-declaration-message
-  [cluster-name attribute]
+  [cluster-name attribute
+   {:seon.boot/keys [property installed-value declared-value]}]
   (let [target-name (or cluster-name "NAME")
         subject (if cluster-name
                   (str "Cluster `" cluster-name "`")
                   "This branch")]
-    (str subject " predates the incompatible schema change for `" attribute
-         "` and cannot be reopened in place. "
+    (str subject " cannot reopen in place: `" attribute "` changed "
+         property " from " (pr-str installed-value)
+         " to " (pr-str declared-value)
+         ", which Datahike does not apply to an installed attribute. "
          "`bin/seon init " target-name " --force` destroys and reforks it from "
          "`current-src`; use export/import instead to preserve its data.")))
 
-(defn- declaration-changes
-  "Missing declarations, refusing non-accretive storage changes.
+(defn- accretive-property-change?
+  "Does Datahike apply this one property change to an INSTALLED attribute?
 
-  The comparison is the UNION of both declarations' storage facets. Selecting
-  only the keys the CURRENT declaration carries read a DROPPED facet as
-  compatible — the branch kept an installed `:db/unique` the bridge no longer
-  derives, and the stale identity surfaced much later as a program-indexing
-  conflict naming the wrong cause (2026-09-16,
+  The rule is the dependency's own acceptance rule,
+  `datahike.schema/find-invalid-schema-updates`
+  (`reference-code/datahike/src/datahike/schema.cljc:257`), narrowed to the
+  changes an upsert of the current declaration can actually EXPRESS:
+
+  - `:db/index` — an index may be added monotonically to an existing
+    attribute; the transactor atomically backfills AVET before publishing the
+    resulting database value, and removal remains unsupported
+    (`reference-code/datahike/src/datahike/schema.cljc:277`, enforced again per
+    datom at `reference-code/datahike/src/datahike/db/transaction.cljc:105`).
+  - `:db/doc`, `:db/noHistory`, `:db/isComponent` — always updatable
+    (`reference-code/datahike/src/datahike/schema.cljc:285`).
+  - `:db/cardinality` — one may widen to many unless the installed attribute
+    carries a `:db/unique` constraint
+    (`reference-code/datahike/src/datahike/schema.cljc:264`).
+
+  A DROP is never accretive here, even where Datahike would accept the update:
+  transacting the current declaration cannot retract a facet the branch still
+  carries, so reading a drop as compatible would leave the stale facet
+  installed (2026-09-16,
+  `docs/seon/issues/adoption-misses-a-dropped-uniqueness-on-an-installed-attribute.md`).
+  Every other property — `:db/valueType`, `:db/unique`, `:db/tupleType`… —
+  answers false and the refusal names it."
+  [property installed-value declared-value installed]
+  (case property
+    :db/index (and (nil? installed-value) (true? declared-value))
+    (:db/doc :db/noHistory :db/isComponent) (some? declared-value)
+    :db/cardinality (and (= :db.cardinality/one installed-value)
+                         (= :db.cardinality/many declared-value)
+                         (nil? (:db/unique installed)))
+    false))
+
+(defn- declaration-property-changes
+  "Every storage facet where the installed attribute and the declaration differ.
+
+  The comparison is the UNION of both declarations' facets. Selecting only the
+  keys the CURRENT declaration carries read a DROPPED facet as compatible — the
+  branch kept an installed `:db/unique` the bridge no longer derives, and the
+  stale identity surfaced much later as a program-indexing conflict naming the
+  wrong cause (2026-09-16,
   `docs/seon/issues/adoption-misses-a-dropped-uniqueness-on-an-installed-attribute.md`).
   Absence of the facet IS the signal, so it is compared rather than skipped.
   Datahike's `:schema` entry holds exactly the declaration datoms transacted
   for that attribute plus its `:db/ident`
   (`reference-code/datahike/src/datahike/db/transaction.cljc:90`), so the two
   maps are comparable once `:db/ident` is dropped."
+  [installed declaration]
+  (let [installed (dissoc installed :db/ident)
+        declaration (dissoc declaration :db/ident)]
+    (into
+     []
+     (keep
+      (fn [property]
+        (let [installed-value (get installed property)
+              declared-value (get declaration property)]
+          (when-not (= installed-value declared-value)
+            {:seon.boot/property property
+             :seon.boot/installed-value installed-value
+             :seon.boot/declared-value declared-value}))))
+     (sort (into #{} (concat (keys installed) (keys declaration)))))))
+
+(defn- declaration-changes
+  "Missing declarations plus the accretive updates, refusing the rest.
+
+  An attribute already installed on the branch is compared facet by facet
+  rather than by whole-map equality: a change every differing facet is
+  accretive under `accretive-property-change?` is ADOPTED IN PLACE by
+  transacting the declaration, which is how adding `:db/index` to a live
+  attribute reaches Datahike's atomic AVET backfill instead of forcing a
+  destructive refork of an existing cluster. A facet Datahike would not apply
+  refuses, naming that property and both of its values."
   [db forms cluster-name]
   (into
    []
    (keep
     (fn [{attribute :db/ident :as declaration}]
       (if-let [installed (get (:schema db) attribute)]
-        (when-not
-          (= (dissoc declaration :db/ident)
-             (dissoc installed :db/ident))
-          (refused!
-           (incompatible-declaration-message cluster-name attribute)
-           (cond->
-            {:seon.boot/attribute attribute
-             :seon.boot/installed installed
-             :seon.boot/current declaration}
-             cluster-name
-             (assoc :seon.boot/cluster-name cluster-name))))
+        (let [changes (declaration-property-changes installed declaration)]
+          (when (seq changes)
+            (if-let [refusal
+                     (first
+                      (remove
+                       (fn [{:seon.boot/keys [property installed-value
+                                              declared-value]}]
+                         (accretive-property-change?
+                          property installed-value declared-value installed))
+                       changes))]
+              (refused!
+               (incompatible-declaration-message
+                cluster-name attribute refusal)
+               (cond->
+                (merge
+                 {:seon.boot/attribute attribute
+                  :seon.boot/installed installed
+                  :seon.boot/current declaration
+                  :seon.boot/changes changes}
+                 refusal)
+                 cluster-name
+                 (assoc :seon.boot/cluster-name cluster-name)))
+              declaration)))
         declaration)))
    (schema.datahike/malli->datahike-schema-in
     {:seon.schema.projection/forms forms}
