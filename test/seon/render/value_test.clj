@@ -777,3 +777,117 @@
         expected (pr-str raw)]
     (binding [*print-readably* false *print-length* 1 *print-level* 1]
       (is (= expected (value/render-ai (probe-unit raw)))))))
+
+;;; A CUT NEVER SHOWS NOTHING. Three regressions for one class: the AI
+;;; projection of an over-budget value used to be an elision whose omitted
+;;; count equalled its total — zero content, no usable coordinate, and a
+;;; CHARACTER count where AGENTS.md §2.4 rules estimated tokens. Issues:
+;;; `a-value-larger-than-the-budget-is-elided-to-nothing` and
+;;; `dir-of-a-namespace-returns-an-elision-with-nothing-shown`.
+
+(defn- elision-in
+  "The one elision value an agent's shown text carries, read back as data."
+  [shown]
+  (let [value (edn/read-string shown)]
+    (first (filter #(and (map? %) (contains? % :seon.print/omitted))
+                   (tree-seq coll? #(if (map? %) (concat (keys %) (vals %)) (seq %))
+                             value)))))
+
+(deftest an-oversized-string-shows-its-prefix-not-only-a-count
+  (support/with-database
+   (fn [connection]
+     (support/seed-cluster! connection "string-floor")
+     (let [configuration (support/effective-config)
+           profile (render/agent-render-profile configuration)
+           ctx (support/fork-cluster-ctx connection "string-floor")
+           result (evaluation/evaluate
+                    {:seon.cluster.eval/source "(apply str (repeat 3000 \"ab\"))"
+                     :seon.sci.eval/ctx ctx :seon.db/db (db/db connection)
+                     :seon.render/profile profile
+                     :seon.repl/handle 'result/e0123456789ab
+                     :seon.sci.admit/caps (config/result-caps configuration)
+                     :seon.sci.eval/time-limit-ms
+                     (:seon.config.eval/time-limit-ms configuration)
+                     :seon.config/on-core-error :panic})
+           shown (:seon.eval/shown result)
+           cut (elision-in shown)]
+       (is (nil? (:seon.cluster.eval/error result)) (pr-str result))
+       (is (some? cut) shown)
+       ;; The floor: content, not a bare count.
+       (is (pos? (count (:seon.print/prefix cut))) shown)
+       (is (str/starts-with? (:seon.print/prefix cut) "abab") shown)
+       ;; The remainder is what is missing, never the whole value.
+       (is (pos? (:seon.print/omitted cut)) shown)
+       (is (< (:seon.print/omitted cut) (:seon.render.data/total cut)) shown)
+       ;; The offset is a real coordinate: it names what was already shown.
+       (is (pos? (:seon.render.data/next-offset cut)) shown)
+       (is (= (:seon.render.data/total cut)
+              (+ (:seon.print/omitted cut) (:seon.render.data/next-offset cut)))
+           shown)
+       ;; And the reader can ask again rather than being told a refusal.
+       (is (= 'seon.print/value-at (first (:seon.print/requery-form cut)))
+           shown)))))
+
+(deftest an-agent-facing-cut-reports-its-size-in-estimated-tokens
+  ;; AGENTS.md §2.4: display sizes for humans are estimated tokens via
+  ;; `seon.ai.tokens/estimate`; character counts are storage projections.
+  (let [characters 4000
+        node (print/elision {:seon.print/omitted characters
+                             :seon.print/elision-unit :characters
+                             :seon.print/prefix "abc"
+                             :seon.render.data/path []
+                             :seon.render.data/next-offset 0
+                             :seon.render.data/total characters
+                             :seon.render.profile/id :seon.render.profile/agent})
+        shown (edn/read-string (print/render-elision-ai node))]
+    (is (= :tokens (:seon.print/elision-unit shown)) (pr-str shown))
+    (is (= (tokens/estimate-of-characters characters)
+           (:seon.print/omitted shown))
+        (pr-str shown))
+    (is (= (tokens/estimate-of-characters characters)
+           (:seon.render.data/total shown))
+        (pr-str shown))
+    ;; The stored node keeps characters: that is the storage projection.
+    (is (= characters (:seon.print/omitted node)))
+    (is (= :characters (:seon.print/elision-unit node)))
+    ;; A member cut counts members, which is already its honest unit.
+    (is (= :children
+           (:seon.print/elision-unit
+            (edn/read-string
+             (print/render-elision-ai
+              (print/elision {:seon.print/omitted 268
+                              :seon.print/elision-unit :children
+                              :seon.render.data/path []
+                              :seon.render.data/next-offset 32
+                              :seon.render.data/total 300
+                              :seon.render.profile/id
+                              :seon.render.profile/agent}))))))))
+
+(deftest dir-of-a-large-namespace-shows-members-and-how-to-continue
+  ;; `dir` is the agent's index into a namespace. On `default` it answered
+  ;; only `{:seon.print/omitted 41040, :seon.render.data/total 41040, ...}`
+  ;; — a count of what the agent was not told.
+  (support/with-database
+   (fn [connection]
+     (support/seed-cluster! connection "dir-floor")
+     (let [configuration (support/effective-config)
+           profile (render/agent-render-profile configuration)
+           ctx (support/fork-cluster-ctx connection "dir-floor")
+           result (evaluation/evaluate
+                    {:seon.cluster.eval/source "(dir seon.turn)"
+                     :seon.sci.eval/ctx ctx :seon.db/db (db/db connection)
+                     :seon.render/profile profile
+                     :seon.repl/handle 'result/e0123456789ab
+                     :seon.sci.admit/caps (config/result-caps configuration)
+                     :seon.sci.eval/time-limit-ms
+                     (:seon.config.eval/time-limit-ms configuration)
+                     :seon.config/on-core-error :panic})
+           shown (:seon.eval/shown result)
+           cut (elision-in shown)]
+       (is (nil? (:seon.cluster.eval/error result)) (pr-str result))
+       (is (str/includes? shown "seon.turn/") shown)
+       (is (some? cut) shown)
+       (is (pos? (:seon.render.data/next-offset cut)) shown)
+       (is (< (:seon.print/omitted cut) (:seon.render.data/total cut)) shown)
+       (is (= 'seon.print/value-at (first (:seon.print/requery-form cut)))
+           shown)))))

@@ -35,6 +35,7 @@
             [org.httpkit.server :as http]
             [seon.blob :as blob]
             [seon.cluster :as cluster]
+            [seon.ai.tokens :as tokens]
             [seon.cluster.agent :as cluster.agent]
             [seon.cluster.wake :as wake]
             [seon.config :as config]
@@ -1805,8 +1806,15 @@ handle))}}
          (is (< (count ai) (count huge))
              "the AI projection is bounded by the render profile")
          (let [elision (edn/read-string ai)]
-           (is (= :characters (:seon.print/elision-unit elision)))
-           (is (= (count huge) (:seon.print/omitted elision)))
+           ;; The AI-facing size is estimated tokens (AGENTS.md §2.4), and a
+           ;; cut never omits its whole subject: the prefix that fit is shown
+           ;; and only the remainder is counted.
+           (is (= :tokens (:seon.print/elision-unit elision)))
+           (is (pos? (count (:seon.print/prefix elision))))
+           (is (= (tokens/estimate-of-characters (count huge))
+                  (:seon.render.data/total elision)))
+           (is (< (:seon.print/omitted elision)
+                  (:seon.render.data/total elision)))
            (is (= 'seon.print/value-at
                   (first (:seon.print/requery-form elision)))))
          (is (<= (count huge) (count html-string))

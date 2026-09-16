@@ -11,6 +11,7 @@
             [malli.core :as m]
             [malli.generator :as mg]
             [sci.core :as sci]
+            [seon.ai.tokens :as tokens]
             [seon.config :as config]
             [seon.print :as print]
             [seon.render :as render]
@@ -344,11 +345,20 @@
     (is (= (count long-text) (:seon.render.data/total fitted))
         "the elision states the whole size it was cut from")
     (is (pos? (:seon.print/omitted fitted)))
+    (is (< (:seon.print/omitted fitted) (:seon.render.data/total fitted))
+        "a cut never omits its whole subject: the floor keeps what fits")
+    (is (pos? (count (:seon.print/prefix fitted)))
+        "and the characters that fit ride the cut as its prefix")
     (is (= [:seon.render.call/id :fixture/long]
            (:seon.print/requery-id fitted))
         "and it carries the identity the reader asks again with")
-    (is (= :characters (:seon.print/elision-unit
-                         (edn/read-string (print/render-elision-ai fitted)))))))
+    (let [shown (edn/read-string (print/render-elision-ai fitted))]
+      ;; AGENTS.md §2.4: the AI-facing size is estimated tokens; the node's
+      ;; own counts stay characters, which is the storage projection.
+      (is (= :tokens (:seon.print/elision-unit shown)))
+      (is (= (tokens/estimate-of-characters (:seon.print/omitted fitted))
+             (:seon.print/omitted shown)))
+      (is (= (:seon.print/prefix fitted) (:seon.print/prefix shown))))))
 
 (deftest fit-preserves-breadth-and-long-strings
   (let [text (apply str (repeat 36 \x))

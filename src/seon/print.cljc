@@ -453,15 +453,44 @@
               (list 'quote path) path)))))
 
 (defn render-elision-ai
-  "Render omitted data as one readable EDN value with its coordinates."
+  "Render omitted data as one readable EDN value with its coordinates.
+
+  THE RETAINED PREFIX IS PART OF THE CUT'S EVIDENCE. A character cut keeps
+  the text it did show in `::prefix`; dropping it here is what turned an
+  over-long value into a count of what the reader was not told.
+
+  SIZES SHOWN TO AN AGENT ARE ESTIMATED TOKENS (AGENTS.md §2.4). A character
+  cut's stored counts stay characters — that is the storage projection — and
+  this AI text reports them through `seon.ai.tokens/estimate-of-characters`,
+  saying `:tokens` so the reader knows which unit it is reading. Child and
+  subtree cuts already count members, which is their own honest unit.
+
+  A cut with no requery identity says so: `::requery-refusal` is the typed
+  unknown §2.4 requires, not silence."
   {:malli/schema [:=> [:cat :seon.render/unit] :string]}
   [unit]
-  (literal
-   (into (sorted-map)
-         (select-keys unit
-                      [::omitted ::elision-unit ::bound-by
-                       :seon.render.data/path :seon.render.data/next-offset
-                       :seon.render.data/total ::requery-form]))))
+  (let [shown (select-keys unit
+                           [::omitted ::elision-unit ::bound-by ::prefix
+                            :seon.render.data/path :seon.render.data/next-offset
+                            :seon.render.data/total ::requery-form
+                            ::requery-refusal])
+        size (fn [characters]
+               (when (int? characters)
+                 (max 1 (tokens/estimate-of-characters characters))))
+        offset (fn [characters]
+                 (when (int? characters)
+                   (tokens/estimate-of-characters characters)))]
+    (literal
+     (into (sorted-map)
+           (cond-> shown
+             (= :characters (::elision-unit unit))
+             (into (into {::elision-unit :tokens}
+                         (remove (comp nil? val))
+                         {::omitted (size (::omitted shown))
+                          :seon.render.data/total
+                          (size (:seon.render.data/total shown))
+                          :seon.render.data/next-offset
+                          (offset (:seon.render.data/next-offset shown))})))))))
 
 (def ^:private scalar-faces
   #{::nil ::boolean ::number ::keyword ::symbol ::char ::string
@@ -1089,9 +1118,14 @@
     (update node ::value enrich-node profile (conj path ::throwable))
 
     ::truncated-string
-    (elision-node (assoc profile ::bound-by (::bound-by node))
-                  path 0 (::length node)
-                  (::length node) :characters nil)
+    ;; Admission already kept the characters that fit; handing them on as the
+    ;; cut's prefix is the difference between "here is the start and what is
+    ;; missing" and a bare count of a value the reader never saw.
+    (let [kept (count (::value node))]
+      (elision-node (assoc profile ::bound-by (::bound-by node))
+                    path kept (max 1 (- (long (::length node)) kept))
+                    (::length node) :characters
+                    (when (pos? kept) (::value node))))
 
     ::elided
     (if (::omitted node)
@@ -1182,12 +1216,20 @@
     (if (string? value) value (literal value))))
 
 (defn- fit-text
-  "Elide one over-long string into an elision naming what it omitted."
+  "Clip one over-long string to the characters its profile admits.
+
+  A CUT NEVER OMITS ITS WHOLE SUBJECT. Emitting an elision whose omitted
+  count equalled the total was the silent case wearing a count: the reader
+  learned the size of what it was not shown and nothing else. The characters
+  that fit ride the cut as `::prefix`, the offset names how many were shown,
+  and the count names only the remainder — so the reader sees content, knows
+  exactly what is missing, and can continue from a real coordinate."
   [node profile path string-limit]
   (let [value (if (= ::projected (::face node))
                 (projected-text node)
                 (::value node))
-        original (long (or (::length node) (count value)))]
+        original (long (or (::length node) (count value)))
+        kept (max 0 (min (count value) (long string-limit)))]
     (if (or (> original string-limit) (< (count value) original))
       (elision-node (assoc profile
                            ::bound-by
@@ -1196,7 +1238,8 @@
                                (when (:seon.render.profile/max-string-length profile)
                                  :seon.render.profile/max-string-length)
                                :seon.render.profile/token-budget))
-                    path 0 original original :characters nil)
+                    path kept (- original kept) original :characters
+                    (when (pos? kept) (subs value 0 kept)))
       node)))
 
 (defn- structural-elision
@@ -1273,7 +1316,14 @@
 
   Token size is measured only through `seon.ai.tokens/estimate`. Structural
   cuts remain ordinary elision nodes carrying their count, path and requery
-  identity, so a cut names its own source and can be asked again."
+  identity, so a cut names its own source and can be asked again.
+
+  THE SEARCH HAS A FLOOR AND THE FLOOR IS STRUCTURAL, NOT NUMERIC: one child,
+  one level, one character. Driving any limit to zero produced a projection
+  that showed NOTHING and reported a count — absence read as a bound, the
+  failure class AGENTS.md §2.4 names. Below the floor the candidate may
+  exceed the budget; that is the honest answer, and the cut it carries says
+  which bound it hit."
   {:malli/schema
    [:=> [:cat :seon.print/node :seon.render.profile/profile]
     :seon.print/node]}
@@ -1292,21 +1342,22 @@
                                        :seon.render.profile/max-depth
                                        depth-limit
                                        ::bound-by (when (or (< child-limit initial-children)
-                                                           (< depth-limit initial-depth))
+                                                           (< depth-limit initial-depth)
+                                                           (< string-limit initial-strings))
                                                     :seon.render.profile/token-budget))
                                 0 [] child-limit string-limit)]
         (cond
           (<= (tokens/estimate (emit-text candidate options)) budget)
           candidate
 
-          (pos? child-limit)
+          (> child-limit 1)
           (recur (dec child-limit) depth-limit string-limit)
 
-          (pos? depth-limit)
+          (> depth-limit 1)
           (recur child-limit (dec depth-limit) string-limit)
 
-          (pos? string-limit)
-          (recur child-limit depth-limit 0)
+          (> string-limit 1)
+          (recur child-limit depth-limit (max 1 (quot string-limit 2)))
 
           :else candidate)))))
 
