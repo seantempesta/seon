@@ -202,3 +202,17 @@ committer transactions are refused on default ("at [0 :seon.error/at]")
 after error-graph's schema change: RESET NEEDED; the steward session
 reforks after issue-family lands and messages first.
 
+## 07:10Z — HOLD on fresh-base gates
+
+Steward session finding (issue
+fixture-base-population-refuses-without-a-carried-projection, `ebc718e7f`):
+at committed HEAD, `seon.test-support/create-base` with no published base
+refuses `:seon.schema/missing-projection` from
+`accrete-schema-population!` (cluster.clj:1347 binds forms but no
+projection) — introduced with write-validation-class `20d30a0bd`. Batch 22
+was green because it reused a cached base. Gates HOLD until the fix commit
+is at HEAD; batch 23 (already running) is allowed to finish and is void if
+it refuses at its first with-database. Also: renderer-fn residual fixed
+`52044b4f4`; attempt-and-eval-facts re-run queued for the first batch after
+the hold.
+
