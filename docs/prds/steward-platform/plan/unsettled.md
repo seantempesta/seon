@@ -533,3 +533,19 @@ Queue, in order:
   per-minute seed cannot be reseeded) and when my two active lanes have
   committed (a reset republishes the working tree); then reseed Juniper,
   lift analyzer-facets' pause, and the peer records the platform tier.
+- 16:20Z analyzer-facets landed (`efaa45a68`): `:seon.fn/writes` (refs to
+  schema-key entities by span containment inside transact! call sites) —
+  470 writers, 2,691 refs, 334 distinct attributes (census had 178);
+  `:seon.fn/call-arities` — 67,941 tuples on 5,548 holders; the analysis
+  config is unchanged (positions/arity were already requested). RULING
+  FALSIFIED: Datahike cannot store a ref inside a tuple (stored verbatim,
+  unresolved), so call-arities landed as `[string long]` like the
+  `:seon.fn/pending-calls` precedent; OWNER DECISION: spend ~½ day on an
+  interned (callee, arity) identity family (4,892 entities, real refs) or
+  accept the string tuple. `seon.fn/arity-mismatches`: ZERO over 7,866 call
+  sites with declared arities (blind check flags 6,449 with arity+1 —
+  falsified). Regressions written, not run (probes paused) — gate covers
+  `seon.fn-test`. Filed: `write-seam-is-a-named-set-not-a-declared-fact`
+  (mark the write seam on `seon.db/transact!` var metadata). Also seen:
+  two concurrent `init --dev default` runs produced "instrumentation did not
+  restore contracts (registered 1090, instrumented 0)" once — reported.
