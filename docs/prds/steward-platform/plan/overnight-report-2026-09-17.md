@@ -15,17 +15,22 @@ peer session (batches 30–57; ledger
 
 ## Broken first
 
-0. **A platform-tier gate wiped the checkout's store (11:17Z local 04:17).**
-   `data/store` (3.6 GB, the live default) became empty while a cold gate's
-   PLATFORM tier ran `seon.cluster.registry-test/reset-returns-a-cluster-to-source-state`
-   one minute earlier; the strong hypothesis is a fixture resolving its
-   root to the checkout instead of its isolated run root. Recovered by a
-   fourth refork (the day's recorded test results on default are lost;
-   data is disposable by ruling). ALL gates with the platform tier or
-   registry-test are HELD until the peer's read-only investigation names
-   the root resolution. Issue: `a-platform-tier-test-wiped-the-checkouts-store`
-   (blocker). Fix shape: root from the handed operator root, never cwd; a
-   sentinel regression; no destructive drill in the platform tier.
+0. **The checkout's store was deleted and re-created from genesis (10:17Z).**
+   `data/store` (3.6 GB, the live default) was wiped while a cold gate's
+   PLATFORM tier ran; the peer's investigation
+   ([store-wipe](../../context-generation/research/store-wipe-2026-09-17.md))
+   proved it was a delete + `create-database`, not a GC: the two code paths
+   with that shape are the operator cleanup and `create-store!`, both
+   `(io/file root "data" "store")` with a nil or relative root reachable
+   through fallbacks in `seon.cluster` and `test_support` — the same class as
+   the earlier `workers/` exhaust. The exact caller is unknown because
+   nothing logs a delete. Recovered by a fourth refork (the day's recorded
+   test results on default are lost; data is disposable by ruling). Fix in
+   flight (peer): a nil/relative/checkout root is unconstructable at both
+   owners, every delete logs root/paths/caller, the fallbacks are removed, a
+   symlinked-sentinel regression proves a drill never touches the checkout.
+   ALL gates are held until it lands. Issue:
+   `a-platform-tier-test-wiped-the-checkouts-store` (blocker).
 
 1. **The store grows without collection.** `data/store` went 107 MB → 12 GB in
    eight hours with no periodic writer. The peer's measurement
