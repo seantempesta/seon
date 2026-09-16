@@ -1686,11 +1686,12 @@
             (remove #(retained (:seon.test.failure/id %)) (:seon.test/failures previous)))
       (mapcat
         (fn [{failure-id :seon.test.failure/id :as failure}]
-          (let [old (get previous-by-id failure-id)
+          (let [old (or (get previous-by-id failure-id)
+                        (db/pull database '[*] [:seon.test.failure/id failure-id]))
                 old-run (get-in old [:seon.test.failure/last-run :db/id])
                 current-run (:db/id (db/pull database [:db/id] run-ref))
                 row (assoc failure
-                           :db/id (str "test-failure:" failure-id)
+                           :db/id (or (:db/id old) (str "test-failure:" failure-id))
                            :seon.test.failure/test test-row-id
                            :seon.test.failure/first-run (or (get-in old [:seon.test.failure/first-run :db/id]) run-ref)
                            :seon.test.failure/last-run run-ref
@@ -1700,7 +1701,11 @@
             (concat
               (for [attribute (keys (dissoc old :db/id :seon.test.failure/id))]
                 [:db.fn/retractAttribute (:db/id old) attribute
-                 (let [value (get old attribute)] (if (set? value) (first value) value))])
+                 (let [value (get old attribute)]
+                   (cond
+                     (or (set? value) (and (sequential? value) (sequential? (first value)))) (first value)
+                     (map? value) (:db/id value)
+                     :else value))])
               [row]))) failures))))
 
 (defn record-tx
@@ -1779,7 +1784,12 @@
                            reach-unknown
                            "The completion did not retain its tested database closure membership."))
                 (seq failures) (assoc :seon.test/failures
-                                      (mapv #(str "test-failure:" (:seon.test.failure/id %)) failures))
+                                      (mapv (fn [failure]
+                                              (let [failure-id (:seon.test.failure/id failure)]
+                                                (or (:db/id (db/pull database [:db/id]
+                                                              [:seon.test.failure/id failure-id]))
+                                                    (str "test-failure:" failure-id))))
+                                            failures))
                 (not exists?)
                 (assoc :seon.test/ns (namespace-tempid namespace-name)))]
           (into (cond-> []
@@ -1834,13 +1844,14 @@
                            [[:db.fn/call #'record-tx (dissoc completion :seon.blob/staged-writes)]]))) ]
     (if (:seon.error/kind transaction-report)
       transaction-report
-      (mapv (fn [{test-symbol :seon.test/sym}]
+      (let [recorded (mapv (fn [{test-symbol :seon.test/sym}]
               (dissoc
                (db/pull (:db-after transaction-report)
                         result-selector
                         [:seon.test/sym test-symbol])
                :db/id))
-            results))))
+            results)]
+        (or (first (filter :seon.error/kind recorded)) recorded)))))
 
 (defn- start-cluster!
   [cluster-name root]

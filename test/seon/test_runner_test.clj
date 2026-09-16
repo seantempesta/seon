@@ -876,9 +876,17 @@
              :seon.test.run/provenance (assoc (runner/provenance @connection) :seon.test.run/at at)
              :seon.test/run-at at}
             test-symbol (:seon.test/sym
-                         (first (:seon.test.runner/results run-result)))]
+                         (first (filter #(pos? (:seon.test/fail-count %))
+                                        (:seon.test.runner/results run-result))))]
         (is (seq (runner/commit-results! connection completion))
             "first recording installs the row")
+        (let [failure-ids (set (db/q '[:find [?id ...]
+                                       :in $ ?s
+                                       :where [?t :seon.test/sym ?s]
+                                              [?t :seon.test/failures ?f]
+                                              [?f :seon.test.failure/id ?id]]
+                                     @connection test-symbol))]
+        (is (seq failure-ids) "the retracted test owns actual failure components")
         (db/transact!
          connection
          [[:db.fn/retractEntity [:seon.test/sym test-symbol]]])
@@ -886,7 +894,14 @@
           (is (not (:seon.error/kind recorded))
               "recording after the retraction still commits")
           (is (some #(= test-symbol (:seon.test/sym %)) recorded)
-              "the retracted row was recreated by the writer's decision"))))))
+              "the retracted row was recreated by the writer's decision")
+          (is (= failure-ids
+                 (set (db/q '[:find [?id ...] :in $ ?s
+                              :where [?t :seon.test/sym ?s]
+                                     [?t :seon.test/failures ?f]
+                                     [?f :seon.test.failure/id ?id]]
+                            @connection test-symbol)))
+              "canonical failure identities survive recreation without conflicting tempids")))))))
 
 (deftest result-facts-live-on-the-test-row-and-reruns-replace-them
   (test-support/with-database
