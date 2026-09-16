@@ -75,3 +75,45 @@
       (finally
         (spit "tmp/turn-test-reds/unregister-trace.edn"
               (pr-str @observations))))))
+
+(comment
+  ;; On snapshot source before the backup-fixture repair (517e045d5), this
+  ;; observer records the actual write result, effective settings and targets.
+  ;; It calls the real constructor and does not substitute any response.
+  (let [original @#'seon.cluster.turn-test/configure-backup!
+        observations (atom [])]
+    (with-redefs-fn
+      {#'seon.cluster.turn-test/configure-backup!
+       (fn [connection]
+         (let [result (original connection)
+               database (seon.db/db connection)
+               settings (seon.config/effective database "turn-test")]
+           (swap! observations conj
+                  {:turn-test-reds/result
+                   (select-keys result [:seon.error/kind :seon.error/message])
+                   :turn-test-reds/settings
+                   (select-keys settings
+                                [:seon.config.ai/model
+                                 :seon.config.ai/api-key-variable
+                                 :seon.config.ai.backup/model
+                                 :seon.config.ai.backup/api-key-variable])
+                   :turn-test-reds/targets (seon.ai/targets database settings)})
+           result))}
+      #(turn-reds-run
+        "residual-observer"
+        ["an-unpaid-failure-with-a-backup-makes-exactly-two-calls"]))
+    @observations)
+
+  ;; Each serial invocation installs only its owned loader for its duration.
+  ;; turn-reds-loader contains the snapshot's complete canonical :test classpath.
+  (let [thread (Thread/currentThread)
+        entering (.getContextClassLoader thread)]
+    (try
+      (.setContextClassLoader thread turn-reds-loader)
+      (with-bindings {clojure.lang.Compiler/LOADER turn-reds-loader}
+        (turn-reds-run
+         "final-census"
+         (->> (ns-publics 'seon.cluster.turn-test)
+              vals (filter #(-> % meta :test))
+              (map #(-> % meta :name str)) sort vec)))
+      (finally (.setContextClassLoader thread entering)))))

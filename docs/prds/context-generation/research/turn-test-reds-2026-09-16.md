@@ -19,7 +19,7 @@ schema-key refinement owner-ruling issue end to end. Read the class-mining
 structural-kill table, active roadmap entry and working edge, and turn PRD
 §§13–15. Read the batch-17 cold report and pre-wave baseline comparison.
 Applied data-oriented-clojure, repl, clojure-testing, datahike,
-seon-flow-architecture and llm-providers skills.
+seon-flow-architecture, llm-providers and seon-context-config skills.
 
 The fresh canonical baseline ran all **59** tests serially through
 `seon.test/run` in default's JVM: **189 passes, 76 failures, 31 errors**;
@@ -88,7 +88,7 @@ and other test files. None is changed by this lane.
 
 ## Verification and landing
 
-Final cold gate pending. Gate request will name `seon.cluster.turn-test` and
+Final cold gate pending. Gate request names `seon.cluster.turn-test` and
 `seon.sci.eval-test`; the orchestrator owns the final namespace/platform gate.
 
 ### Slice 1 — deletion presence (landed source, 01:31 UTC)
@@ -206,3 +206,161 @@ and superseded by these two current regressions. Schema registration reads
 saved shown text and checks declaration provenance separately from the global
 unique identity attribute. No reader, messaging, or schema production behavior
 was changed in this slice.
+
+### Dependency and verification boundaries
+
+The deletion design uses Datahike's absent pull result
+(`reference-code/datahike/src/datahike/pull_api.cljc:509`) and the existing
+first-party `remaining-definition-facts` → `program/changed-attributes` seam.
+SCI execution and isolation use the existing `sci.core/init`/`fork` mechanism
+(`reference-code/sci/src/sci/core.cljc`) through canonical
+`test-support/fork-cluster-ctx`; no result serializer or second context owner
+was added. Fresh populations use the existing `test-support/create-base` and
+`close-base!`, and test execution uses `seon.test/run` with the configured bound.
+
+The successful adoptions accepted the selected source files with no blocking
+syntax/name/arity errors. Non-blocking lint output includes the existing
+duplicate `seon.cluster.message` require and shadowed bindings in this test
+namespace; these remain part of the open consumer-fixture cleanup, not hidden
+proof failures. The final census is a serial in-process namespace run on the
+isolated initial-HEAD snapshot plus this lane's files. It is not the
+orchestrator's cold namespace/platform gate and does not verify subsequent
+concurrent production changes.
+
+The unretained [schema-unregister candidate](turn-test-reds-unregister-candidate-2026-09-16.clj)
+is preserved so the exact four observations can be rerun after repairing the
+protected writer. It is loaded in `seon.cluster.turn-test` only for that probe;
+it does not replace the checked-in failing test.
+
+## Complete namespace census before slice 5
+
+The serial fresh-base in-process census after slice 4 ran **57 tests / 321
+passing assertions / 47 failures / 8 errors**. All **26 repaired tests** pass
+within that run; **two obsolete tests** are superseded by current regressions.
+**17 tests remain non-green.** [Complete values](turn-test-reds-final-census-2026-09-16.edn)
+retain every failure and run identity. This is an isolated snapshot census,
+not a same-JVM causal comparison with the initial default baseline.
+
+| Test | Initial default pass/fail/error | Final snapshot pass/fail/error | Disposition |
+|---|---:|---:|---|
+| `a-batched-turn-commits-only-queryable-definition-facts` | 7/0/0 | 7/0/0 | Unchanged; green |
+| `a-combined-evaluation-projects-every-terminal-receipt-datom` | 2/2/2 | 10/0/0 | Repaired; green |
+| `a-completing-disposition-closes-in-the-terminal-transaction` | 2/0/0 | 2/0/0 | Unchanged; green |
+| `a-held-runs-paid-call-is-never-duplicated` | 5/0/0 | 5/0/0 | Unchanged; green |
+| `a-lost-model-call-leaves-a-durable-readable-reason` | 2/1/0 | 2/1/0 | Open; retained assertion |
+| `a-partial-stream-truncation-is-a-durable-nonfailure-attempt-fact` | 6/0/0 | 6/0/0 | Unchanged; green |
+| `a-prompt-refusal-is-a-recorded-error-value-never-a-throw` | 1/3/0 | 1/3/0 | Open; retained assertion |
+| `a-prose-prefixed-contracted-defn-settles-and-doc-answers` | 3/0/1 | 4/0/0 | Repaired; green |
+| `a-pure-prose-reply-refuses-and-records-no-unsettleable-form` | 3/2/1 | — | Superseded by slice 4 current-protocol regression |
+| `a-real-evaluation-that-runs-away-is-stopped-and-recorded` | 1/1/0 | 2/0/0 | Repaired; green |
+| `a-red-form-routes-to-its-namespace-owner-and-the-fold-continues` | 4/1/0 | 5/0/0 | Repaired; green |
+| `a-refused-contract-commits-a-receipt-and-no-row` | 2/0/0 | 2/0/0 | Unchanged; green |
+| `a-refused-definition-stays-in-its-agents-defs` | 0/0/1 | 0/0/1 | Open; retained assertion |
+| `a-refused-delivery-becomes-a-durable-error-fact` | 0/0/1 | 6/0/0 | Repaired; green |
+| `a-run-prompts-from-its-opening-database-value` | 7/4/0 | 7/4/0 | Open; retained assertion |
+| `a-turn-delivers-what-a-form-asks-to-send-and-still-finishes` | 1/3/1 | 9/0/0 | Repaired; green |
+| `a-turn-hands-its-clusters-projection-to-every-database-call` | 6/0/0 | 5/1/0 | Open; retained assertion |
+| `a-waiting-disposition-frees-the-agent-and-keeps-its-note` | 6/0/0 | 6/0/0 | Unchanged; green |
+| `a-whole-turn-runs-a-REAL-sci-evaluation-end-to-end` | 1/0/1 | 14/0/0 | Repaired; green |
+| `a-whole-turn-runs-from-trigger-to-closed-run` | 1/3/0 | 6/0/0 | Repaired; green |
+| `absent-foreign-ns-unmap-commits-and-mutates-the-run-sci-ctx` | 0/0/1 | 4/0/0 | Repaired; green |
+| `acquisition-orders-agent-authored-refer-targets-and-ignores-alias-cycles` | 0/0/1 | 7/0/0 | Repaired; green |
+| `agent-code-with-defn-and-println-folds-green-without-in-ns` | 1/2/2 | 6/0/0 | Repaired; green |
+| `an-unpaid-failure-with-a-backup-makes-exactly-two-calls` | 13/2/0 | 13/2/0 | Open; retained assertion |
+| `an-unreadable-reply-is-a-settled-form-with-paid-attempt-evidence` | 0/0/1 | 28/0/0 | Repaired; green |
+| `another-agent-calls-the-live-cluster-definition-without-reinstall` | 0/1/0 | 1/0/0 | Repaired; green |
+| `another-agent-sees-a-flat-contract-violation-after-live-install` | 0/1/1 | 2/0/0 | Repaired; green |
+| `concurrent-streams-share-one-conn-test` | 0/0/1 | 0/0/1 | Open; retained assertion |
+| `contracted-redefinition-exactly-replaces-the-row` | 4/0/1 | 5/0/0 | Repaired; green |
+| `delimiter-repair-is-span-local-and-precedes-intent` | 8/3/4 | 8/3/4 | Open; retained assertion |
+| `delivery-rows-and-refusal-facts-share-the-terminal-transaction` | 0/3/1 | — | Superseded by slice 4 current-protocol regression |
+| `evaluation-follows-the-readers-parse-time-namespace` | 2/0/1 | 3/0/0 | Repaired; green |
+| `function-install-reads-the-case-count-from-cluster-facts` | 2/2/0 | 4/0/0 | Repaired; green |
+| `generated-fixed-point-closes-the-run` | 1/3/0 | 1/3/0 | Open; retained assertion |
+| `generated-membership-failure-never-advances-the-run-to-call` | 1/3/0 | 1/3/0 | Open; retained assertion |
+| `generated-model-attempt-traces-preserve-presence-and-episode-laws` | 0/1/0 | 0/1/0 | Open; retained assertion |
+| `generated-phase-failures-converge-through-one-terminal-exit` | 2/3/0 | 2/3/0 | Open; retained assertion |
+| `import-addition-is-ordinary-data-and-reacquires-exactly` | 2/0/0 | 2/0/0 | Unchanged; green |
+| `import-only-ns-unmap-installs-exactly-after-its-context-commit` | 3/0/1 | 4/0/0 | Repaired; green |
+| `incompatible-clusters-alternate-runtime-schema-validation-without-bleed` | 9/0/0 | 9/0/0 | Unchanged; green |
+| `mixed-plan-publishes-only-the-contracted-function` | 2/1/1 | 4/0/0 | Repaired; green |
+| `ns-unmap-retracts-the-owned-function-after-the-terminal-commit` | 0/0/1 | 7/0/0 | Repaired; green |
+| `one-successful-call-leaves-exactly-one-attempt-fact` | 8/0/0 | 8/0/0 | Unchanged; green |
+| `qualified-dynamic-ns-unmap-is-durable-in-a-fresh-context` | 0/0/1 | 2/0/0 | Repaired; green |
+| `reasoning-only-time-limit-persists-its-flat-diagnostic` | 9/0/0 | 9/0/0 | Unchanged; green |
+| `reasoning-starvation-persists-usage-finish-and-the-named-error` | 4/1/0 | 11/0/0 | Repaired; green |
+| `refused-import-only-ns-unmap-leaves-the-run-sci-ctx-unchanged` | 3/0/0 | 3/0/0 | Unchanged; green |
+| `refused-runtime-schema-registration-mutates-neither-row-nor-projection` | 5/0/0 | 5/0/0 | Unchanged; green |
+| `refused-terminal-program-transactions-settle-and-do-not-refire` | 19/13/0 | 19/13/0 | Open; retained assertion |
+| `reply-reading-follows-evaluated-alias-and-dynamic-require-state` | 0/0/1 | 2/0/0 | Repaired; green |
+| `runtime-declarations-install-only-from-a-successful-terminal-db-after` | 4/0/0 | 4/0/0 | Unchanged; green |
+| `runtime-schema-key-changes-pass-the-one-usage-guarded-decision` | 2/4/0 | 2/4/0 | Open; retained assertion |
+| `runtime-schema-registration-commits-the-evaluated-form-and-attribute` | 6/3/0 | 10/0/0 | Repaired; green |
+| `runtime-schema-unregister-removes-one-unused-global-schema` | 0/0/1 | 0/0/1 | Open; retained assertion |
+| `runtime-tests-install-run-redefine-and-delete-exactly` | 0/0/1 | 6/0/0 | Repaired; green |
+| `singleton-enum-uses-are-members-of-their-declared-enums` | 2/0/0 | 2/0/0 | Unchanged; green |
+| `streaming-writes-zero-datoms-test` | 7/2/1 | 7/2/1 | Open; retained assertion |
+| `successful-call-persists-the-providers-open-usage-document` | 0/4/1 | 11/0/0 | Repaired; green |
+| `turn-intent-is-the-complete-crash-falsifier` | 10/4/0 | 10/4/0 | Open; retained assertion |
+
+### Residual attribution after the census
+
+[Complete observer values](turn-test-reds-residual-observations-2026-09-16.edn)
+show that the backup fixture's sparse entity write is refused for the missing
+manifest digest, while the effective configuration still has the shipped
+backup model. `with-cluster` upserts its compiled desired row over a seeded
+configuration; omission of the backup key does not retract the seeded value.
+That constructor must exact-reconcile its intended configuration. The generated
+retry fixture has the same unobserved sparse-write problem. These are recorded
+in the open consumer-fixture issue, not attributed to the production provider.
+
+The projection-carrying test's fresh-base rerun passes **6 / 0 / 0**, run 41646;
+the observer captures no derivation on its bare thread. This does not explain
+the census's one derivation, so that residual remains unproven and its assertion
+is unchanged. MCP twice reported the scratch cluster state as `unknown` while
+evaluation answered; runtime status then showed readiness and all three
+plumbing procs replying, and subsequent envelopes again reported `alive`. No
+MCP outage workaround or process restart was performed.
+
+### Residual classes and exact next boundary
+
+| Class | Remaining tests | Evidence and needed work |
+|---|---|---|
+| Generated context and prompt protocol drift | lost model reason, prompt refusal, opening database prompt, generated fixed-point/membership/phase tests | Recorded assertions depend on old opening membership, replaced prompt refusal premises, or injected values replacing actual system reads; verify current protocol before rewriting |
+| Removed storage and settlement protocol | refused private definition, refused terminal program transactions, crash-intent test | Old private storage queries and per-evaluation settlement injection no longer reach the actual writer; retain current refusal/recovery guarantees at their owners |
+| Configuration construction | generated model attempt traces | Sparse config updates are refused; seeded optional backup is not retracted by a desired-row map upsert; exact-reconcile the fixture before interpreting retry outcomes |
+| Streaming fixture and terminal observations | streaming-writes, concurrent streams | Retired result attribute plus injected completion and request indexing; use real evaluation and exact terminal facts before changing stream owner |
+| Schema change policy and projection | schema-key changes, unregister | Preserve the existing [owner-ruling issue](../../../seon/issues/within-run-schema-key-refinement-needs-an-owner-ruling.md); unregister's writer uses a stale mid-batch projection, with trace in its separate issue |
+| Reader/performance | delimiter repair | Saved-text candidate semantic assertions pass, but 6.7 s exceeds the unchanged 300 ms bound; no unverified performance fix retained |
+| Projection carry | bare-thread projection test | Full census records one derivation; fresh rerun records none. Cause remains unknown, not assigned to a foreign lane |
+
+These residuals remain in the open class issue; the class is not claimed
+closed. The production absence-comparison class is closed by construction,
+and the landed test slices remove the named stale protocols without adding
+a fallback or weakening an asserted invariant.
+
+### Slice 5 — fail loudly at backup fixture construction
+
+`configure-backup!` now supplies explicit attribute additions to the existing
+configuration identity instead of an incomplete entity map. A writer refusal
+throws at setup, so later assertions cannot silently test the shipped target.
+It preserves the primary settings and uses the existing database transaction
+API; it does not introduce a fallback or change provider behavior.
+
+The sole caller's unchanged regression passes **15 / 0 / 0** before the edit
+(run 41652) and after in-place adoption at
+`6aa9f9fd-e0b5-592e-97aa-2d953a2ad808` (run 41665).
+[Complete before/after values](turn-test-reds-backup-before-after-2026-09-16.edn).
+This brings the landed total to **27 repaired tests / 188 passing assertions**
+across the focused after-edit runs, plus two superseded tests. The complete
+census above predates this last helper repair; it is not silently rewritten
+as a later whole-namespace result. Sixteen census members remain unresolved,
+including the projection test that passed its fresh rerun without an attributed
+cause. Cold namespace/platform verification remains the orchestrator's gate.
+
+Final default status is degraded: its advertised PID is now 7595 (the lane
+started against 69622), and `seon.problems/problems` refuses an error occurrence
+count with “expected an integer, got an integer.” The exact boundary is in
+[the status issue](../../../seon/issues/runtime-status-refuses-error-occurrence-count.md).
+No default stop, refork or restart was performed by this lane; no foreign
+status/problem/error owner was edited to repair the observation.

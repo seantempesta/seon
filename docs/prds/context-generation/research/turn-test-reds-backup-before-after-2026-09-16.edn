@@ -1,0 +1,4 @@
+[
+#:seon.test{:fail-count 0, :pass-count 15, :run-at #inst "2026-09-16T02:06:47.396-00:00", :run #:db{:id 41652}, :run-basis-t 536871280, :error-count 0, :sym "seon.cluster.turn-test/an-unpaid-failure-with-a-backup-makes-exactly-two-calls"}
+#:seon.test{:fail-count 0, :pass-count 15, :run-at #inst "2026-09-16T02:09:37.509-00:00", :run #:db{:id 41665}, :run-basis-t 536871290, :error-count 0, :sym "seon.cluster.turn-test/an-unpaid-failure-with-a-backup-makes-exactly-two-calls"}
+]

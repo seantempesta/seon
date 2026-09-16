@@ -1913,14 +1913,19 @@
 
 (defn- configure-backup!
   [connection]
-  (db/transact!
-   connection
-   [{:seon.config/cluster "turn-test"
-     :seon.config.ai.backup/endpoint (:seon.ai/endpoint backup-target)
-     :seon.config.ai.backup/model (:seon.ai/model backup-target)
-     :seon.config.ai.backup/api-key-variable
-     (:seon.ai/api-key-variable backup-target)
-     :seon.config.ai.backup/timeout-ms (:seon.ai/timeout-ms backup-target)}]))
+  (let [report
+        (db/transact!
+         connection
+         (mapv (fn [[attribute value]]
+                 [:db/add [:seon.config/cluster "turn-test"] attribute value])
+               {:seon.config.ai.backup/endpoint (:seon.ai/endpoint backup-target)
+                :seon.config.ai.backup/model (:seon.ai/model backup-target)
+                :seon.config.ai.backup/api-key-variable
+                (:seon.ai/api-key-variable backup-target)
+                :seon.config.ai.backup/timeout-ms (:seon.ai/timeout-ms backup-target)}))]
+    (when (:seon.error/kind report)
+      (throw (ex-info "The fixture backup configuration was refused." report)))
+    report))
 
 (defn- failure
   "One model failure value carrying the evidence the leaf would record."

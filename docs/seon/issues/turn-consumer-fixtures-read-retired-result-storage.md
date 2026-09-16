@@ -272,3 +272,31 @@ parameterized rejected-reply regression; deferred returned-value delivery by
 the immediate-send and typed-refusal regressions. Exact runs and final
 namespace residuals remain in the same landing note. This class stays open
 until those remaining members are repaired and the cold gate passes.
+
+The final isolated in-process census after `517e045d5` is 57 tests / 321
+passing assertions / 47 failures / 8 errors, with all 26 repaired tests green
+and 17 other tests non-green. Two obsolete tests were removed with current
+coverage named above. The complete per-member table is in the lane landing.
+
+A follow-up observer proves `configure-backup!`'s sparse entity write returns
+`:seon.db/invalid-write` for the missing `:seon.config/applied-manifest-digest`.
+It also reveals a broader fixture residual: the cluster is seeded with the
+shipped backup model, then `with-cluster` upserts a compiled row whose absent
+backup key does not retract the seeded value. Exact reconciliation belongs
+at that fixture constructor; a map upsert cannot express absence. The generated
+retry scenario also ignores sparse config write refusals. These remain members
+of this open class; do not infer a provider request-construction defect from
+their later request assertions.
+
+The untouched projection-carrying regression was green in default's baseline,
+failed with one derivation in the isolated full census, then passed all six
+assertions on a fresh-base isolated rerun (recorded run 41646). Its cause is
+not established. The original assertion remains; a single green rerun does
+not erase the recorded failure.
+
+The backup helper sub-slice now updates the existing config identity through
+explicit attribute additions and throws on a writer refusal. Its unchanged
+regression passes 15 assertions both before and after isolated adoption
+(runs 41652 and 41665). The broader seeded-absence and generated-scenario
+constructor residuals remain open. In total, 27 previously red turn tests have
+passing focused proofs; the full census above predates this final helper fix.
