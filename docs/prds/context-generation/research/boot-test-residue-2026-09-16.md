@@ -67,6 +67,16 @@ first", `boot_test.clj:190-196`), then `declaration-changes` for its refusal.
 it was the second of the two; `accrete-schema-population!` still performs the
 comparison it transacts through, unchanged.
 
+Cost, stated honestly and NOT measured here: every boot now runs
+`declaration-changes` twice — once for the refusal, once inside
+`accrete-schema-population!` moments later — one extra
+`schema.datahike/malli->datahike-schema-in` pass over the canonical attributes.
+The probe that would have timed it needs a published root (it refused with
+"No `current-src` branch is published"), and timing it was outside this
+thread's bound. If boot time regresses, the dissolution is to compute the
+changes ONCE at the admission seam and hand them to the population, rather
+than to drop the check.
+
 ### Measured after the fix (probe JVM, same fixtures)
 
 - `incompatible-sovereign-schema-refusal-steers-the-operator`: 14 assertions,
