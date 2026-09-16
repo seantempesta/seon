@@ -344,3 +344,105 @@ launched, default was never restarted, and the batched gate
 (`tmp/orchestrator/gate-requests/test-entity-pair.txt`) remains the proof.
 The new regression was not run against a deliberately broken pair, so its
 falsifying power is argued from its derived expectations, not observed.
+
+### Recording and preservation are total at an absent identity — 2026-09-16
+
+Bounded lane `recorder-absent-identity`. Read AGENTS.md, the wave-2 REPL rules,
+and this note end to end. Batch 49 (`d4a201237`, `seon.fn-test` green) failed to
+record with `:seon.db/rejected Nothing found for entity id [:seon.fn/sym
+"seon.fn/source-files"]`; adoption on `default` then failed with the mirror
+image, `[:seon.fn/sym "seon.fn/rooted-source-files"]`
+([issue](../../../seon/issues/adoption-refuses-when-test-evidence-names-a-deleted-declaration.md)).
+
+#### Attribution — neither a stale reach digest nor an indexing gap
+
+Three hypotheses were offered; the third is the cause, and the first two are
+refuted by evidence:
+
+- **Not an indexing gap.** `seon.fn/source-files` is a private `defn-` at
+  `src/seon/fn.clj:100` at that HEAD, and a live whole-file analysis on
+  `default` (PID 45917) returned it with `::analyzer/private true`, row 100,
+  among 105 var definitions. Private functions are indexed; `default` holds
+  2 939 of them.
+- **Not a stale reach digest.** The rename is real and symmetric.
+  `925ca19fe` renamed `source-files` → `rooted-source-files`; `0eba4b8c3`
+  renamed it back and split `containing-root` out. Both names are therefore
+  correct members of the basis that recorded them.
+- **The recorder resolved reach members against a database it did not write
+  into.** `reach-memberships` derives `[:seon.fn/sym …]` lookup refs from the
+  TESTED value, and `record-tx` emitted them unchanged into the writer's
+  database. Measured on `default`: the `cluster-default` branch holds
+  `{:db/id 6069 :seon.fn/sym "seon.fn/source-files"}` — two datoms, a genuine
+  tombstone whose `:seon.fn/source` was retracted at `t` 536871468 and never
+  re-asserted — while every neighbour (`containing-root`, `under-root?`,
+  `rooted-file`, `sha-256`, `many-or-component-attributes`) carries 11–12
+  attributes. The recording destination, branch `:current-src` at basis
+  536870925, has **no row at all** for `seon.fn/source-files` and a LIVE row
+  for `seon.fn/rooted-source-files`: it was published inside the rename
+  window. Ruling 47 keeps a ref stable only where the identity was once
+  minted; a database built fresh from later source has nothing to tombstone,
+  so evidence crossing a publication in EITHER direction names an identity
+  the destination lacks, and Datahike rejects the whole transaction on the
+  first one.
+
+#### The fix — mint the identity at the writer
+
+`seon.cluster.source` now owns the one decision, made against the writer's own
+database value inside the transaction function: `absent-program-identities`,
+`identity-tombstone-rows` (the identity, its namespace, admission source and
+nothing else), and `identity-ref` (a tempid for a minted row, because a lookup
+ref would be resolved against the value before the mint). Both writers use it:
+`seon.test.runner/record-tx` for `:seon.test/reach`, and the new
+`seon.cluster.source/preserved-evidence-tx`, which the rebuild's
+`[:db.fn/call …]` now invokes in place of `(fn [_] evidence)`.
+
+A file identity is NOT minted: `:seon.fn.file/file` requires the digest of the
+file the indexer walked, and inventing one would be a lie. An unresolvable
+failure site therefore keeps its line and reports its path as the typed
+`:seon.test.failure/reported-file` — an accretive optional key on the durable
+failure entity — instead of a dangling ref. Nothing is dropped silently.
+
+Both writers also ask the destination whether it declares
+`:seon.test.failure/reported-file` before using it; a database whose schema
+lacks the attribute keeps the failure and its line without it.
+
+Regressions in `test/seon/test_failure_facts_test.clj`, on the canonical
+`support/with-database` harness with armed contracts:
+
+| Regression | Pass/fail/error |
+| --- | --- |
+| `recording-mints-an-absent-identity-instead-of-rejecting-the-completion` | **8 / 0 / 0** |
+| `preserved-evidence-survives-a-rebuild-that-deleted-a-declaration` | **5 / 0 / 0** |
+
+The first carries a completion whose reach names one symbol the recording
+database has no row for: the counts commit, BOTH members are queryable
+afterwards, the minted row is exactly `{:seon.fn/sym …}` plus its namespace
+ref and admission source, and no `:seon.fn/source` is fabricated. It carries
+its own reach because `commit-results!` re-derives membership from
+`:seon.db/db` whenever the completion still holds the tested value. The second
+drives `preserved-evidence-tx` on the writer's database and checks both the
+minted reach member and the unresolvable site, which keeps line 7 and reports
+its path.
+
+A recorder-side unresolvable FILE site is not constructible inside one
+fixture: `prepare-failures!` derives the site from the tested test row's own
+`:seon.fn/file`, so an absent file ref only arises across databases. That case
+is asserted in the preservation regression, not in the recorder one.
+
+#### Live proof and verification boundary
+
+`bin/seon init --dev default` **exits 0** on PID 45917, publishing and adopting
+`:current-src` commit `6aaa5523-5055-5df1-bcd7-d944ce8a43fc`, digest
+`beda48b738dae0028f17d3a02b680b5bbd9cfc580a10060272b7e8114febf5db`, past the
+`initialization rows` step that previously died. The first attempt of the same
+command, before the fix was loaded, exited 1 at that exact step with
+`Nothing found for entity id [:seon.fn/sym "seon.fn/rooted-source-files"]`.
+Because adoption itself was the broken seam, the fix had to be hot-reloaded
+into the running JVM (`require :reload` of `seon.cluster.source` and
+`seon.test.runner`) before the publication that adopts it could run.
+
+Boundary: both regressions ran in process on a daemon thread, one at a time,
+through `seon.test`'s own loader against the canonical harness; no test JVM
+was launched and default was never restarted. The batched path-limited gate
+(`tmp/orchestrator/gate-requests/recorder-absent-identity.txt`, platform tier
+WITH recording) remains the proof.

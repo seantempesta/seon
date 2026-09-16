@@ -393,14 +393,15 @@
         absent (absent-program-identities database-value syms)
         file-present?
         (memoize #(some? (db/pull database-value [:db/id] [:seon.fn.file/path %])))
+        reported-path?
+        (some? (get (:schema database-value) :seon.test.failure/reported-file))
         portable-failure
         (fn [failure]
           (let [path (second (:seon.test.failure/file failure))]
             (if (or (nil? path) (file-present? path))
               failure
-              (-> failure
-                  (dissoc :seon.test.failure/file)
-                  (assoc :seon.test.failure/reported-file path)))))]
+              (cond-> (dissoc failure :seon.test.failure/file)
+                reported-path? (assoc :seon.test.failure/reported-file path)))))]
     (into (identity-tombstone-rows absent)
           (map (fn [row]
                  (cond-> row

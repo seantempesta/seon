@@ -1777,15 +1777,16 @@
         (memoize #(some? (db/pull database [:db/id] [:seon.fn.file/path %])))
         ;; A file identity cannot be minted honestly: `:seon.fn.file/file`
         ;; requires the digest of the file the indexer walked. An absent site
-        ;; keeps its line and reports its path as the typed unknown.
+        ;; keeps its line and reports its path as the typed unknown, when the
+        ;; database being written into declares that attribute.
+        reported-path? (some? (get (:schema database) :seon.test.failure/reported-file))
         portable-failure
         (fn [failure]
           (let [path (second (:seon.test.failure/file failure))]
             (if (or (nil? path) (file-present? path))
               failure
-              (-> failure
-                  (dissoc :seon.test.failure/file)
-                  (assoc :seon.test.failure/reported-file path)))))
+              (cond-> (dissoc failure :seon.test.failure/file)
+                reported-path? (assoc :seon.test.failure/reported-file path)))))
         previous (db/pull database (vec (keys run)) run-ref)]
     (when (and previous (not= run (dissoc previous :db/id)))
       (throw (ex-info "A test run's provenance is immutable."

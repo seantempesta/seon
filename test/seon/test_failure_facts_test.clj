@@ -10,6 +10,7 @@
             [seon.test :as sut]
             [seon.program :as program]
             [seon.cluster.source]
+            [seon.schema.datahike]
             [seon.test.runner :as runner]
             [seon.test-support :as support]))
 
@@ -346,28 +347,29 @@
           (is (vector? known))
           (is (nil? (:seon.test/reach-unknown (first known)))))))))
 
+(def ^:private reported-path-schema
+  (seon.schema.datahike/malli->datahike-schema [:seon.test.failure/reported-file]))
+
 (deftest recording-mints-an-absent-identity-instead-of-rejecting-the-completion
-  (testing "evidence that outlived a declaration is recorded, never refused"
+  (testing "reach evidence that outlived a declaration is recorded, never refused"
     (support/with-database
+      {:seon.test-support/extra-schema reported-path-schema}
       (fn [connection]
         (let [s "absent.facts/check"
               present "absent.facts/present"
-              deleted "absent.facts/deleted"
-              path "/absent/facts/no-such-file.clj"]
+              deleted "absent.facts/deleted"]
           (is (:db-after (transact! connection [{:seon.fn/sym present}
                                                 {:seon.test/sym s}])))
           (let [database (db/db connection)
                 _ (is (nil? (db/pull database [:db/id] [:seon.fn/sym deleted]))
-                      "the fixture database genuinely has no row for the named symbol")
+                      "the recording database genuinely has no row for the named symbol")
                 captured
                 (-> (completion database s 1)
-                    (assoc :seon.test/reaches
-                           {s [[:seon.fn/sym present] [:seon.fn/sym deleted]]})
-                    (assoc-in [:seon.test.runner/results 0 :seon.test.failure/reports]
-                              [{:seon.test.failure/type :fail
-                                :seon.test.failure/message "claim"
-                                :seon.test.failure/reported-file path
-                                :seon.test.failure/line 21}]))
+                    (dissoc :seon.db/db)
+                    (assoc :seon.test/reach-digests
+                           {s (get (runner/reach-digests database [s]) s)}
+                           :seon.test/reaches
+                           {s [[:seon.fn/sym present] [:seon.fn/sym deleted]]}))
                 result (runner/commit-results! connection captured)
                 recorded (db/db connection)]
             (is (vector? result) (pr-str result))
@@ -380,21 +382,20 @@
                                        [?f :seon.fn/sym ?sym]] recorded s)))
                 "both members are recorded, the absent one through a minted identity")
             (is (= {:seon.fn/sym deleted}
-                   (dissoc (db/pull recorded '[* {:seon.fn/ns [:seon.ns/name]}]
-                                    [:seon.fn/sym deleted])
+                   (dissoc (db/pull recorded '[*] [:seon.fn/sym deleted])
                            :db/id :seon.fn/ns :seon.schema.admission/source))
                 "the minted row is a tombstone: the identity and nothing else")
             (is (= 'absent.facts
                    (get-in (db/pull recorded '[{:seon.fn/ns [:seon.ns/name]}]
                                     [:seon.fn/sym deleted])
                            [:seon.fn/ns :seon.ns/name])))
-            (let [failure (first (:seon.test/failures (first result)))]
-              (is (= path (:seon.test.failure/reported-file failure))
-                  "an unmintable file identity is named as the typed unknown")
-              (is (nil? (:seon.test.failure/file failure))))))))))
+            (is (nil? (:seon.fn/source (db/pull recorded '[:seon.fn/source]
+                                                [:seon.fn/sym deleted])))
+                "minting never fabricates a definition")))))))
 
 (deftest preserved-evidence-survives-a-rebuild-that-deleted-a-declaration
   (support/with-database
+    {:seon.test-support/extra-schema reported-path-schema}
     (fn [connection]
       (let [deleted "rebuilt.facts/deleted"
             path "/rebuilt/facts/no-such-file.clj"
