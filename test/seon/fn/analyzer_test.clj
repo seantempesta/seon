@@ -198,6 +198,9 @@
           [{:seon.fn/sym "my.turn/complete"
             :seon.fn/private? false
             :seon.fn/arglists "([message])"}
+           {:seon.fn/sym "seon.turn/open?"
+            :seon.fn/private? false
+            :seon.fn/arglists "([turn])"}
            {:seon.fn/sym "other/private-helper"
             :seon.fn/private? true
             :seon.fn/arglists "([value])"}]
@@ -205,7 +208,7 @@
           ["(defn broken [value]\n  (missing value))"
            "(str/join [\"kept\"])"
            "(read \"{:also :kept}\")"
-           "(seon.run/complete \"done\")"
+           "(seon.turn/open? \"done\")"
            "(other/private-helper 1)"
            "(my.turn/complete)"
            "(broken)"]})]
