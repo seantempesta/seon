@@ -316,3 +316,14 @@ gate open 3.36% → 100% over 90 s, zero scheduler key walks, in-process 4 tests
 Gate (seon.schedule-test seon.blob-test seon.cluster.registry-test
 seon.dev.fresh-operator-test + platform) waits on the cold-arming blocker
 (batch 29) and runs on the fresh store after the reset.
+
+### 2026-09-16 08:05Z — fresh-operator config proof: refuted as retention's
+
+retention-sweep verified the batch-30 red in
+`init-owns-current-source-and-dormant-cluster-lifecycle` is pre-existing:
+both assertions pull the config entity from a raw `@connection`, which
+carries no projection state, so `seon.db/pull` returns
+`:seon.schema/missing-projection` (0 actual keys vs 77 expected); through
+`(seon.db/db connection)` all 76 decision keys match (evidence `147010c50`,
+issue `fresh-operator-config-proof-pulls-an-unprojected-database.md`).
+An Opus lane is correcting the test's reads; gated in the next batch.
