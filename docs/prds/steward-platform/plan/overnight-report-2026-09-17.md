@@ -29,6 +29,9 @@ peer session (batches 30–57; ledger
    observable signal: footprint order-of-magnitude / key ceiling →
    `collect!`; a per-commit bound that names the batch and requests
    reclamation; narrower leaves or the vendored LMDB backend for the dev root.
+   Measured after the third reset: 99 MB → 3.6 GB in 2.5 h (~1.4 GB/h) with
+   two to four lanes and one gate batch active; the debug page stayed at
+   0.42 s cold / 25 ms warm throughout.
 2. **Live agents cannot yet close a code issue.** The trials
    ([issue-context-trials](../research/issue-context-trials-2026-09-16.md))
    ran seven cheapest-DeepSeek sessions on the arglists issue; candidate F
