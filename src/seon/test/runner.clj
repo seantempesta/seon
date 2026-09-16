@@ -692,6 +692,111 @@
                      (assoc :seon.test/long-ms (:seon.test/long-ms row)))])))
         (manifest-rows manifest)))
 
+(def ^:private test-source-root
+  "The declared source root whose artifacts hold this program's tests.
+
+  Taken from `seon.fn/source-roots`, the declaration the manifest itself is
+  built over, so namespace discovery keys on a root the program graph admits
+  rather than on a filename suffix."
+  (delay
+    (let [roots @(requiring-resolve 'seon.fn/source-roots)]
+      (or (some #{"test"} roots)
+          (throw
+           (ex-info
+            (str "The program source roots declare no test root: "
+                 (pr-str roots) ".")
+            {:seon.error/kind ::test-source-root-undeclared
+             ::source-roots roots}))))))
+
+(defn- bare-namespaces
+  "Every namespace the bare gate runs, derived from the published manifest.
+
+  THE DERIVATION, not a filename convention: a namespace is a gate member
+  when the program graph holds a `:seon.ns/name` row in an artifact under the
+  declared test source root, and none of that artifact's rows carry
+  `:seon.test/fixture`.
+
+  `find test -name '*_test.clj'` answered this before and was wrong in both
+  directions. It MISSED `seon.repl-parity-test`, whose deftests a macro emits
+  so the file indexes a namespace and no `:seon.test/sym` rows — silent
+  coverage loss, absence read as health. And selecting instead on \"has test
+  rows\" would ADMIT `seon.test-runner-failure-fixture`, whose
+  `failing-example` asserts `(= 5 (+ 2 2))` deliberately, turning the bare
+  gate permanently red. The two questions are different facts, and both are
+  now declared: membership by indexed namespace, exclusion by the marker."
+  [manifest]
+  (let [prefix (str @test-source-root "/")
+        derived
+        (into (sorted-set)
+              (keep (fn [artifact]
+                      (when (str/starts-with?
+                             (str (:seon.fn.file/relative-path artifact)) prefix)
+                        (let [rows (:seon.fn.file/rows artifact)]
+                          (when-not (some :seon.test/fixture rows)
+                            (some :seon.ns/name rows))))))
+              (:seon.fn.manifest/artifacts manifest))]
+    (when (empty? derived)
+      (throw
+       (ex-info
+        (str "The published program manifest declares no namespace under the "
+             "test source root " (pr-str @test-source-root)
+             ", so bare selection would run nothing and report success.")
+        {:seon.error/kind ::no-bare-namespaces
+         ::test-source-root @test-source-root
+         ::artifact-count (count (:seon.fn.manifest/artifacts manifest))})))
+    (vec derived)))
+
+(defn- platform-declarations
+  "The declared platform regressions, as indexed program rows keyed by symbol.
+
+  The same ONE derivation `long-declarations` makes: `:seon.test/platform` is
+  lifted onto the test row at both definition seams by
+  `seon.program/test-marker-attributes`, so the tier partition reads the fact
+  the coordinator already holds from the manifest instead of re-reading Var
+  metadata for a question the program graph answers.
+  `verify-platform-declarations-indexed!` is its drift check."
+  [manifest]
+  (into {}
+        (keep (fn [row]
+                (when-let [reason (:seon.test/platform row)]
+                  [(:seon.test/sym row) {:seon.test/platform reason}])))
+        (manifest-rows manifest)))
+
+(defn- verify-platform-declarations-indexed!
+  "Refuse when a Var declares `:seon.test/platform` and the program row does not.
+
+  The tier partition reads the row. An unindexed declaration would run a
+  platform regression in the bulk tier, losing exactly the fail-fast the tier
+  exists for — absence read as health — so the drift is named here."
+  [declarations test-vars]
+  (let [drifted
+        (into []
+              (keep (fn [test-var]
+                      (let [test-symbol (str (var-symbol test-var))
+                            declared (get declarations test-symbol)
+                            var-reason (marker-reason test-var :seon.test/platform)]
+                        ;; Only the dangerous direction refuses, exactly as the
+                        ;; long check does: a row declaring more than its Var is
+                        ;; conservative on its own.
+                        (when (and var-reason
+                                   (not= var-reason (:seon.test/platform declared)))
+                          {:seon.test/sym test-symbol
+                           ::declared-on-var {:seon.test/platform var-reason}
+                           ::indexed-row (or declared {})}))))
+              test-vars)]
+    (when (seq drifted)
+      (throw
+       (ex-info
+        (str "The indexed program rows disagree with the declared platform "
+             "regressions: " (str/join ", " (map :seon.test/sym drifted))
+             ". The tier partition reads the row, so an unindexed declaration "
+             "runs a platform regression in the bulk tier; publish the tree so "
+             "the declaration is indexed.")
+        {:seon.error/kind ::platform-declaration-drift
+         ::drifted-platform-declarations drifted
+         :seon.test.runner/platform-declaration-drift true}))))
+  nil)
+
 (defn- verify-long-declarations-indexed!
   "Refuse when a Var declares `:seon.test/long` and the program row does not.
 
@@ -756,10 +861,6 @@
                        :seon.test/sym (str (var-symbol (first test/*testing-vars*)))})))
     reason))
 
-(defn- platform-reason
-  [test-var]
-  (marker-reason test-var :seon.test/platform))
-
 (defn- test-selection
   "Partition every test var into the platform tier, the bulk tier, and skips.
 
@@ -767,15 +868,22 @@
   regression set: it runs FIRST on every invocation so a broken platform
   fails in seconds instead of poisoning the bulk. `selected-symbols` bounds
   the bulk tier to the tests one change can reach; `:all` runs every
-  eligible test."
+  eligible test.
+
+  Both markers are read from the INDEXED ROW, never from Var metadata: the
+  published program graph is the authority the drift checks defend, and one
+  partition reading two different sources for two markers is how a Var-only
+  declaration answered for a row that never carried it."
   [namespaces {declarations ::long-declarations
+               platform-declarations* ::platform-declarations
                ::keys [include-long? selected-symbols]}]
   (reduce
    (fn [selection test-var]
      (let [test-symbol (var-symbol test-var)
            long-marker (get-in declarations
                                [(str test-symbol) :seon.test/long])
-           platform (platform-reason test-var)]
+           platform (get-in platform-declarations*
+                            [(str test-symbol) :seon.test/platform])]
        (cond
          (and (not include-long?) long-marker)
          (update selection ::skipped conj
@@ -3611,6 +3719,14 @@
       {::task-results results
        ::task-summary (summarize-task-results results)})))
 
+(defn- program-manifest
+  "The program manifest this invocation selects and discovers namespaces over."
+  []
+  (if-let [base (System/getProperty "seon.test.published-base")]
+    (cache/manifest base)
+    ((requiring-resolve 'seon.fn/build-manifest)
+     {:seon.fn/roots selection/graph-roots})))
+
 (defn- run-coordinator!
   "Run selected tests with progress and a liveness backstop.
 
@@ -3633,7 +3749,16 @@
       {:seon.error/kind ::invalid-selection-mode
        ::selection-mode selection-mode
        ::known selection-modes :seon.test.runner/invalid-selection-mode selection-mode})))
-  (let [namespaces (mapv symbol namespace-names)
+  (let [manifest (program-manifest)
+        ;; Named namespaces are the selection; with none named, the gate's
+        ;; membership is a FACT read from the manifest the base already
+        ;; wrote, so the shell never munges filenames into symbols. The read
+        ;; precedes the worker launch because the workers are handed this
+        ;; set: `manifest.edn` is written by both base-preparation paths
+        ;; before the coordinator is launched at all, so nothing waits on it.
+        namespaces (if (seq namespace-names)
+                     (mapv symbol namespace-names)
+                     (bare-namespaces manifest))
         progress (atom {::description "JVM runner initialized"
                         ::at-nanos (System/nanoTime)
                         ::at (Instant/now)})
@@ -3688,9 +3813,8 @@
           (announce! progress
                      (str "LOADED " (inc index) "/" (count namespaces)
                           " " test-namespace)))
-        (announce! progress "SELECT building the program graph")
-        (let [build-manifest (requiring-resolve 'seon.fn/build-manifest)
-              tested-program (edn/read-string
+        (announce! progress "SELECT partitioning tiers over the program graph")
+        (let [tested-program (edn/read-string
                               (slurp (io/file
                                       (System/getProperty "seon.test.published-base")
                                       "provenance.edn")))
@@ -3698,9 +3822,6 @@
                                     :seon.test.run/id (id/id)
                                     :seon.test.run/at (java.util.Date.)
                                     :seon.test.run/git-sha git-sha)
-              manifest (if-let [base (System/getProperty "seon.test.published-base")]
-                         (cache/manifest base)
-                         (build-manifest {:seon.fn/roots selection/graph-roots}))
               workers (mapv #(.get %) worker-futures)
               pool-workers (filterv #(str/starts-with? (::worker-id %) "pool-")
                                     workers)
@@ -3715,6 +3836,8 @@
               all-vars (test-vars-in namespaces)
               declarations (long-declarations manifest)
               _ (verify-long-declarations-indexed! declarations all-vars)
+              platform-rows (platform-declarations manifest)
+              _ (verify-platform-declarations-indexed! platform-rows all-vars)
             {::keys [platform selected skipped unreached]}
             (if explicit?
               {::platform [] ::selected (if (seq confirming)
@@ -3724,6 +3847,7 @@
               (test-selection namespaces
                               {::include-long? (= "full" selection-mode)
                                ::long-declarations declarations
+                               ::platform-declarations platform-rows
                                ::selected-symbols (::symbols bulk)}))
             _ (when bulk
                 (announce! progress

@@ -1,5 +1,10 @@
-(ns seon.test-runner-failure-fixture
-  "Selected explicitly by runner tests; not discovered by the full gate."
+(ns ^{:seon.test/fixture
+      "Deliberate failure evidence: `failing-example` asserts (= 5 (+ 2 2)) so
+       runner tests have a genuinely red test to assert over. A gate that ran
+       it would be permanently red."}
+  seon.test-runner-failure-fixture
+  "Selected explicitly by runner tests; excluded from the bare gate by its
+  declared `:seon.test/fixture` reason."
   (:require [clojure.test :refer [deftest is]]))
 
 (deftest passing-example

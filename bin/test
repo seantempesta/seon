@@ -578,7 +578,7 @@ record_phase test-slot
 if [ "$fast_iteration" -eq 1 ]; then
   echo "bin/test-fast: selected snapshot $run_root"
   cd "$run_root"
-  launch_runner clojure -M:test -m seon.test.fast "${namespaces[@]}"
+  launch_runner clojure -M:test -m seon.test.fast ${namespaces[@]+"${namespaces[@]}"}
   if await_runner; then status=0; else status=$?; fi
   exit "$status"
 fi
@@ -657,18 +657,15 @@ populate_cache_links() {
 rm "$run_root/target"
 mkdir "$run_root/target"
 populate_cache_links "$run_root"
-if [ "$explicit_selection" -eq 0 ]; then
-  namespaces=()
-  while IFS= read -r file; do
-    ns=${file#test/}; ns=${ns%.clj}; ns=${ns%.cljc}
-    ns=${ns//\//.}; ns=${ns//_/-}
-    namespaces+=("$ns")
-  done < <(find test -type f \( -name '*_test.clj' -o -name '*_test.cljc' \) | sort)
-fi
+# A bare gate names no namespace: the coordinator derives its membership from
+# the published program manifest (`:seon.ns/name` rows under the declared test
+# source root, minus namespaces declaring `:seon.test/fixture`). The filename
+# munge that stood here missed macro-generated test namespaces and would have
+# admitted the deliberate-failure fixtures; both are facts now, not suffixes.
 cd "$source_root"
 
-if [ ${#namespaces[@]} -eq 0 ]; then
-  echo "bin/test: no test namespaces found under test/" >&2
+if [ "$explicit_selection" -eq 1 ] && [ ${#namespaces[@]} -eq 0 ]; then
+  echo "bin/test: no test namespaces selected" >&2
   exit 1
 fi
 
@@ -785,7 +782,7 @@ launch_runner clojure -Scp "$test_classpath" \
   "${coordinator_jvm_arguments[@]}" \
   -M:test -m seon.test.runner \
   "${result_cluster:--}" "$result_root" "$git_sha" "$selection_mode" \
-  "${namespaces[@]}"
+  ${namespaces[@]+"${namespaces[@]}"}
 if await_runner; then
   status=0
 else

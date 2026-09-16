@@ -493,7 +493,159 @@
          (program/test-markers {:seon.test/long "var"} {:seon.test/long-ms 42}))
       "each attribute is decided on its own")
   (is (= {} (program/test-markers {:seon.test/long nil} {}))
-      "a declared nil is no declaration"))
+      "a declared nil is no declaration")
+  (is (= {:seon.test/platform "ns"}
+         (program/test-markers {} {:seon.test/platform "ns"}))
+      "the platform marker is lifted by the same one rule")
+  (is (= {:seon.test/fixture "ns"}
+         (program/test-markers {} {:seon.test/fixture "ns"}))
+      "so is the fixture marker, which a namespace declares once")
+  (is (= {:seon.test/platform "var"}
+         (program/test-markers {:seon.test/platform "var"}
+                               {:seon.test/platform "ns"}))
+      "the deftest wins on conflict for every marker"))
+
+(deftest the-platform-tier-partitions-on-the-indexed-fact-not-var-metadata
+  ;; The tier partition used to read Var metadata while the long marker read
+  ;; the published row. One partition, two authorities: a base that never
+  ;; indexed the declaration still answered PLATFORM from the Var, so nothing
+  ;; could refuse the drift the `long` side already refuses. The fact is the
+  ;; authority now, and the Vars below keep their metadata precisely so a
+  ;; partition that fell back to it would fail this test.
+  (let [root (doto (io/file "tmp" (str "platform-fact-" (id/id))) .mkdirs)
+        file (io/file root "declarations.clj")
+        namespace-name (symbol (str "seon.fixture.platform-" (id/id)))
+        namespace-reason "Every test here exercises the boot sequence."
+        own-reason "This one also re-arms instrumentation."]
+    (try
+      (spit file
+            (str "(ns ^{:seon.test/platform " (pr-str namespace-reason) "} "
+                 namespace-name
+                 " (:require [clojure.test :refer [deftest is]]))\n"
+                 "(deftest inherits (is true))\n"
+                 "(deftest ^{:seon.test/platform " (pr-str own-reason)
+                 "} overrides (is true))\n"))
+      (load-file (str file))
+      (let [manifest {:seon.fn.manifest/artifacts
+                      [(program-fn/build-artifact
+                        {:seon.fn/source-path (str file)
+                         :seon.fn.file/first-party-functions []})]}
+            declarations (#'runner/platform-declarations manifest)
+            inherits (str namespace-name "/inherits")
+            overrides (str namespace-name "/overrides")
+            all-vars (mapv #(ns-resolve namespace-name %) '[inherits overrides])
+            partition-with
+            (fn [rows]
+              (#'runner/test-selection
+               [namespace-name]
+               {::runner/include-long? true
+                ::runner/long-declarations {}
+                ::runner/platform-declarations rows
+                ::runner/selected-symbols :all}))]
+        (is (= {inherits {:seon.test/platform namespace-reason}
+                overrides {:seon.test/platform own-reason}}
+               declarations)
+            "a namespace-declared platform reason reaches every test row, and the deftest's own reason wins")
+        (let [selection (partition-with declarations)]
+          (is (= #{inherits overrides}
+                 (into #{} (map (comp str #'runner/var-symbol))
+                       (::runner/platform selection)))
+              "the partition selects the platform tier from the indexed rows")
+          (is (empty? (::runner/selected selection))))
+        (let [selection (partition-with (dissoc declarations overrides))]
+          (is (= #{inherits}
+                 (into #{} (map (comp str #'runner/var-symbol))
+                       (::runner/platform selection)))
+              "a row the manifest does not carry is NOT platform, however the Var is annotated")
+          (is (= #{overrides}
+                 (into #{} (map (comp str #'runner/var-symbol))
+                       (::runner/selected selection)))))
+        (is (nil? (#'runner/verify-platform-declarations-indexed!
+                   declarations all-vars))
+            "the indexed rows agree with the Vars that declared them")
+        (let [refusal (try (#'runner/verify-platform-declarations-indexed!
+                            (dissoc declarations overrides) all-vars)
+                           nil
+                           (catch clojure.lang.ExceptionInfo failure failure))]
+          (is (some? refusal)
+              "an unindexed declaration refuses instead of running a platform regression in the bulk tier")
+          (is (= [overrides]
+                 (mapv :seon.test/sym
+                       (:seon.test.runner/drifted-platform-declarations
+                        (ex-data refusal)))))))
+      (finally
+        (remove-ns namespace-name)
+        (test-support/delete-recursively! root)))))
+
+(deftest the-bare-namespace-set-is-derived-from-indexed-facts
+  ;; `find test -name '*_test.clj'` answered gate membership before, and was
+  ;; wrong in both directions: it missed `seon.repl-parity-test`, whose
+  ;; deftests a macro emits so the file indexes a namespace and zero
+  ;; `:seon.test/sym` rows, and "has test rows" would have admitted
+  ;; `seon.test-runner-failure-fixture`, whose `failing-example` asserts
+  ;; (= 5 (+ 2 2)) on purpose. Membership and exclusion are different facts.
+  (let [root (doto (io/file "tmp" (str "bare-set-" (id/id))) .mkdirs)
+        gate-file (io/file root "gate.clj")
+        macro-file (io/file root "macro.clj")
+        fixture-file (io/file root "fixture.clj")
+        source-file (io/file root "source.clj")
+        gate-ns (symbol (str "seon.fixture.bare-gate-" (id/id)))
+        macro-ns (symbol (str "seon.fixture.bare-macro-" (id/id)))
+        fixture-ns (symbol (str "seon.fixture.bare-fixture-" (id/id)))
+        source-ns (symbol (str "seon.fixture.bare-source-" (id/id)))
+        fixture-reason "Deliberate failure evidence another test asserts over."
+        ;; The artifacts carry canonically built rows; only the relative path
+        ;; is re-keyed, because the path root IS the input under test and
+        ;; `build-artifact` records the probe's own tmp location.
+        rooted (fn [source-path published-path]
+                 (assoc (program-fn/build-artifact
+                         {:seon.fn/source-path source-path
+                          :seon.fn.file/first-party-functions []})
+                        :seon.fn.file/relative-path published-path))]
+    (try
+      (spit gate-file
+            (str "(ns " gate-ns " (:require [clojure.test :refer [deftest is]]))\n"
+                 "(deftest ordinary (is true))\n"))
+      ;; Indexes a namespace and no test rows: its deftests are macro-emitted.
+      (spit macro-file (str "(ns " macro-ns ")\n(defn emitted [] true)\n"))
+      (spit fixture-file
+            (str "(ns ^{:seon.test/fixture " (pr-str fixture-reason) "} "
+                 fixture-ns
+                 " (:require [clojure.test :refer [deftest is]]))\n"
+                 "(deftest deliberately-red (is (= 5 (+ 2 2))))\n"))
+      (spit source-file (str "(ns " source-ns ")\n(defn ordinary [] true)\n"))
+      (let [fixture-artifact (rooted (str fixture-file) "test/fixture.clj")
+            manifest {:seon.fn.manifest/artifacts
+                      [(rooted (str gate-file) "test/gate.clj")
+                       (rooted (str macro-file) "test/macro.clj")
+                       fixture-artifact
+                       (rooted (str source-file) "src/source.clj")]}
+            derived (#'runner/bare-namespaces manifest)]
+        (is (some :seon.test/fixture (:seon.fn.file/rows fixture-artifact))
+            "the marker reaches the row through the same one lifting rule")
+        (is (= [gate-ns macro-ns] derived)
+            "every namespace indexed under the test root, fixture namespaces excluded, source namespaces never admitted")
+        (let [refusal (try (#'runner/bare-namespaces
+                            {:seon.fn.manifest/artifacts
+                             [(rooted (str source-file) "src/source.clj")]})
+                           nil
+                           (catch clojure.lang.ExceptionInfo failure failure))]
+          (is (some? refusal)
+              "a manifest with no test-rooted namespace refuses instead of running nothing and reporting success")
+          (is (= :seon.test.runner/no-bare-namespaces
+                 (:seon.error/kind (ex-data refusal))))))
+      (finally
+        (test-support/delete-recursively! root)))))
+
+(deftest the-deliberate-failure-fixtures-declare-their-exclusion
+  ;; The bare gate no longer excludes these by filename, so the two
+  ;; namespaces whose tests are material rather than members must say so.
+  ;; Losing either declaration turns the bare gate permanently red.
+  (doseq [namespace-name '[seon.test-runner-failure-fixture my.examples-fixture]]
+    (require namespace-name)
+    (let [reason (:seon.test/fixture (meta (find-ns namespace-name)))]
+      (is (string? reason) (str namespace-name " declares no :seon.test/fixture reason"))
+      (is (not (str/blank? reason))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The schema restore derives from FACTS
