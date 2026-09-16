@@ -317,6 +317,168 @@
                    (db/q '[:find [?e ...] :where [?e :seon.issue/path]] source))]
     (db/transact! connection [[:db.fn/call #'adopt-tx rows]])))
 
+(def done-query
+  "Nonempty tests all have positive green results whose basis follows assignment."
+  '[:find ?subject .
+    :in $ ?subject
+    :where
+    [?subject :seon.issue/agent _ ?started]
+    [?subject :seon.issue/tests _]
+    (not-join [?subject ?started]
+      [?subject :seon.issue/tests ?test]
+      (not-join [?test ?started]
+        [?test :seon.test/pass-count ?passes]
+        [(pos? ?passes)]
+        [?test :seon.test/fail-count 0]
+        [?test :seon.test/error-count 0]
+        [?test :seon.test/run ?run]
+        [?run :seon.test.run/basis-t ?basis]
+        [(>= ?basis ?started)]))])
+
+(defn- refuse! [reason message]
+  (throw (ex-info message {:seon.error/kind reason :seon.error/message message})))
+
+(defn- require-test-refs! [database references]
+  (doseq [reference references]
+    (when-not (:seon.test/sym
+               (db/pull database [:seon.test/sym]
+                        (if (map? reference) (:db/id reference) reference)))
+      (refuse! :seon.issue/not-a-test "Every success ref must identify a test."))))
+
+(defn start-tx
+  "Create the assigned worker, its plan, and its opening in one writer decision."
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       [:map [:seon.issue/id :seon.issue/id]
+                        [:seon.issue/budget :seon.issue/budget]
+                        [:seon.ns/name {:optional true} :seon.ns/name]
+                        [:seon.config.ai/no-provider {:optional true} :seon.config.ai/no-provider]]]
+                  :seon.db/tx-data]}
+  [database request]
+  (let [issue-id (:seon.issue/id request)
+        row (db/pull database '[* {:seon.issue/functions [:seon.fn/sym {:seon.fn/ns [:seon.ns/name]}]}]
+                     [:seon.issue/id issue-id])
+        agent-id (id/id [issue-id])
+        namespace-name (or (:seon.ns/name request)
+                           (get-in (first (sort-by :seon.fn/sym (:seon.issue/functions row)))
+                                   [:seon.fn/ns :seon.ns/name]))
+        cluster-name (db/q '[:find ?name . :where [_ :seon.cluster/name ?name]] database)]
+    (when-not (:seon.issue/title row) (refuse! :seon.issue/not-found "The issue does not exist."))
+    (when (:seon.issue/agent row) (refuse! :seon.issue/already-started "The issue already has a worker."))
+    (when-not (seq (:seon.issue/tests row)) (refuse! :seon.issue/no-tests "Starting an issue requires at least one test."))
+    (require-test-refs! database (:seon.issue/tests row))
+    (when-not namespace-name (refuse! :seon.issue/no-namespace "Supply a namespace or a function with a namespace."))
+    (when-not cluster-name (refuse! :seon.issue/no-cluster "The database has no cluster identity."))
+    (when (db/pull database [:seon.agent/id] [:seon.agent/id agent-id])
+      (refuse! :seon.issue/worker-exists "The derived worker identity already exists."))
+    (let [creation ((requiring-resolve 'seon.cluster.agent/creation-tx)
+                    {:seon.agent/id agent-id :seon.ns/name namespace-name :seon.cluster/name cluster-name})
+          step-id (id/id [:seon.issue/step issue-id])
+          creation (mapv
+                    (fn [entry]
+                      (if (= agent-id (:seon.agent/id entry))
+                        (-> entry
+                            (update :seon.agent/settings merge
+                                    (cond-> {:seon.config.run/max-episode-runs (:seon.issue/budget request)}
+                                      (:seon.config.ai/no-provider request)
+                                      (assoc :seon.config.ai/no-provider true)))
+                            (update :seon.agent/plan merge
+                                    {:my.plan/objective (:seon.issue/problem row)
+                                     :my.plan/current-step (str "issue-step:" issue-id)
+                                     :my.plan/steps [{:db/id (str "issue-step:" issue-id)
+                                                      :my.plan.item/id step-id
+                                                      :my.plan.item/title (:seon.issue/title row)
+                                                      :my.plan.item/position 0
+                                                      :my.plan.item/subject [:seon.issue/id issue-id]
+                                                      :my.plan.item/done-query done-query}]}))
+                        entry))
+                    creation)]
+      (into (conj creation
+                  {:seon.issue/id issue-id :seon.issue/agent [:seon.agent/id agent-id]
+                   :seon.issue/budget (:seon.issue/budget request)}
+                  {:seon.ns/name namespace-name
+                   :seon.ns/requires [[:seon.ns/name 'my.issue] [:seon.ns/name 'my.test]]})
+            ((requiring-resolve 'seon.turn/generated-run-tx)
+             database {:seon.agent/id agent-id :seon.turn/id (id/id [:seon.issue/opening issue-id])
+                       :seon.turn/opened-tx "datomic.tx"
+                       :seon.turn/starting-ns [:seon.ns/name namespace-name]
+                       :seon.turn/trigger [:seon.issue/id issue-id]})))))
+
+(defn start!
+  "Assign an issue and open its worker atomically; returns the changed issue."
+  {:malli/schema [:=> [:cat [:map [:seon.db/connection :seon.db/connection]
+                             [:seon.issue/id :seon.issue/id]
+                             [:seon.issue/budget :seon.issue/budget]
+                             [:seon.ns/name {:optional true} :seon.ns/name]
+                             [:seon.config.ai/no-provider {:optional true} :seon.config.ai/no-provider]]]
+                  :map]}
+  [{connection :seon.db/connection :as request}]
+  (let [report (db/transact! connection [[:db.fn/call #'start-tx (dissoc request :seon.db/connection)]])]
+    (if (:seon.error/kind report) report
+      (status {:seon.db/db (:db-after report) :seon.issue/id (:seon.issue/id request)}))))
+
+(defn add-tx
+  "Author a new issue inside the writer; existing identities refuse."
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       [:map [:seon.issue/title :seon.issue/title]
+                        [:seon.issue/problem :seon.issue/problem]
+                        [:seon.issue/severity :seon.issue/severity]
+                        [:seon.issue/functions {:optional true} :seon.issue/functions]
+                        [:seon.issue/tests {:optional true} :seon.issue/tests]
+                        [:seon.agent/id :seon.agent/id]]]
+                  :seon.db/tx-data]}
+  [database request]
+  (let [subject (sort-by pr-str (:seon.issue/functions request))
+        issue-id (id/id [(:seon.issue/title request) subject])]
+    (when (db/pull database [:seon.issue/id] [:seon.issue/id issue-id])
+      (refuse! :seon.issue/already-exists "An issue with this title and subject already exists."))
+    (when-not (db/pull database [:seon.agent/id] [:seon.agent/id (:seon.agent/id request)])
+      (refuse! :seon.issue/no-author "The author agent does not exist."))
+    (require-test-refs! database (:seon.issue/tests request))
+    [(assoc (select-keys request [:seon.issue/title :seon.issue/problem :seon.issue/severity
+                                 :seon.issue/functions :seon.issue/tests])
+            :seon.issue/id issue-id :seon.issue/status :open :seon.issue/opened (java.util.Date.))]))
+
+(defn add!
+  "Author an issue using title and function refs as its stable identity."
+  {:malli/schema [:=> [:cat [:map [:seon.db/connection :seon.db/connection]
+                             [:seon.agent/id :seon.agent/id]
+                             [:seon.issue/title :seon.issue/title]
+                             [:seon.issue/problem :seon.issue/problem]
+                             [:seon.issue/severity :seon.issue/severity]
+                             [:seon.issue/functions {:optional true} :seon.issue/functions]
+                             [:seon.issue/tests {:optional true} :seon.issue/tests]]]
+                  :map]}
+  [{connection :seon.db/connection :as request}]
+  (let [report (db/transact! connection [[:db.fn/call #'add-tx (dissoc request :seon.db/connection)]])]
+    (if (:seon.error/kind report) report
+      (status {:seon.db/db (:db-after report)
+               :seon.issue/id (id/id [(:seon.issue/title request) (sort-by pr-str (:seon.issue/functions request))])}))))
+
+(defn tests-tx
+  "Add success tests without retracting existing refs, at the serial writer."
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       [:map [:seon.issue/id :seon.issue/id]
+                        [:seon.issue/tests :seon.issue/tests]
+                        [:seon.agent/id :seon.agent/id]]]
+                  :seon.db/tx-data]}
+  [database request]
+  (let [row (db/pull database [:seon.issue/title] [:seon.issue/id (:seon.issue/id request)])]
+    (when-not (:seon.issue/title row) (refuse! :seon.issue/not-found "The issue does not exist."))
+    (require-test-refs! database (:seon.issue/tests request))
+    [{:seon.issue/id (:seon.issue/id request) :seon.issue/tests (:seon.issue/tests request)}]))
+
+(defn tests!
+  "Add tests and return the changed issue. Direct database guards are separate."
+  {:malli/schema [:=> [:cat [:map [:seon.db/connection :seon.db/connection]
+                             [:seon.agent/id :seon.agent/id]
+                             [:seon.issue/id :seon.issue/id]
+                             [:seon.issue/tests :seon.issue/tests]]]
+                  :map]}
+  [{connection :seon.db/connection :as request}]
+  (let [report (db/transact! connection [[:db.fn/call #'tests-tx (dissoc request :seon.db/connection)]])]
+    (if (:seon.error/kind report) report
+      (status {:seon.db/db (:db-after report) :seon.issue/id (:seon.issue/id request)}))))
+
 (defn report
   "Inspect indexed issues and derive the indexer's current refusal report."
   {:malli/schema [:=> [:cat [:map [:seon.db/db :seon.db/database-value]
