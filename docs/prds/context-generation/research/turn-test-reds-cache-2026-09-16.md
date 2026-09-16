@@ -541,3 +541,129 @@ Protected production paths and foreign issue-owner edits were preserved.
 The markdown hook still reports 29 historical gitlink citations in the foreign
 `agents-md-audit-2026-09-15.md`; no evidence links in this slice were changed
 to conceal that unrelated check boundary. Stop after this slice.
+
+## Batch-46 residual slice — 2026-09-16 (delimiter repair, lost model call)
+
+Bounded lane on `steward-platform`. Read end to end: this record, the
+[bookkeeping cost record](turn-bookkeeping-cost-2026-09-16.md), AGENTS.md
+§0/§1/§2.4 and the system-turn and turn-loop vocabulary rows, and
+`tmp/orchestrator/wave2/repl-rule.txt`. Every measurement below was taken in
+the live `default` JVM (pid 45917) through `mcp__seon__eval_clj` in `jvm` mode
+on daemon futures, against the shared canonical fixture base. No test JVM was
+launched and no cluster was stopped, reforked or reset.
+
+### `delimiter-repair-is-span-local-and-precedes-intent`
+
+Three causes, one model change behind all of them.
+
+1. `ordered-receipts` (`test/seon/cluster/turn_test.clj:2694`, now deleted)
+   pulled every entity carrying `:seon.cluster.eval/ordinal` and sorted by
+   ordinal alone. System turn 0 stores the generated opening in that same
+   family, so the count was **14**, not 6, and the second source was `(help)`.
+   The suite already owns the right derivation — `agent-evaluations` filters
+   `:seon.cluster.eval/author :agent` and orders by turn `:t` then ordinal —
+   and it returns exactly the six agent forms.
+2. The four `instrument.clj:414` ERRORs were one contract:
+   `seon.sci.admit/semantic-value` received `nil` because
+   `:seon.cluster.eval/result-edn` is no longer a declared attribute (a pull
+   for it logs `Bad entity attribute … not defined in current schema`). The
+   terminal value fact is `:seon.eval/shown`, the saved shown text.
+3. `[_ :seon.turn/reply ?reply]` matched two turns once the opening became a
+   turn with a reply; the query now names the turn the fixture drove.
+
+The definition in the fixture is now contracted. Measured on the canonical
+base: an uncontracted `(defn repaired [x] (+ x 1))` returns
+`#'my.agents.agent-a/repaired`, and the **next form in the same reply** is
+refused — `expected a resolvable symbol (:symbol), got an unresolved symbol
+repaired`. Only an installed definition is callable from the following form,
+so the uncontracted fixture measured a refusal rather than the repair. With the
+contract the six shown values are `#'my.agents.agent-a/repaired`, `42`, `3`,
+`2`, `4`, `#:my.turn{:disposition :completed, :result "fixed"}`.
+
+In-process run: **15 passes, 1 failure, 0 errors**. The one failure is the
+unchanged **300 ms** bookkeeping bound, measured **6161.843376 ms**.
+
+#### Phase attribution for the bound — the cost is one query
+
+Same fixture, same timed window (`reply/sources` to turn close, minus SCI
+nanoseconds), wrappers installed with `with-redefs-fn`:
+
+| Phase | calls | ms |
+|---|---:|---:|
+| `seon.fn/gate-set` | 1 | **5975.629** |
+| `seon.db/transact!` | 5 | 556.108 |
+| `seon.cluster.prompt/prompt` | 1 | 222.432 |
+| `seon.schema/projection-from-database` | 1 | 217.555 |
+| `seon.turn/settle-batch!` | 1 | 202.273 |
+| `seon.sci.eval/evaluate-candidate` | 1 | 93.589 |
+| `seon.sci.eval/evaluate` | 6 | 48.504 |
+| `seon.fn/analyze-forms` | 2 | 34.859 |
+| `seon.render/request-profile` | 62 | 13.764 |
+| **window total** | | **6416.0** |
+
+`seon.cluster.agent/acquire-context!`, `seon.sci.eval/acquire!` and
+`seon.instrument/apply!` are **not called** inside the window. A 20 ms stack
+sampler over the turn thread agrees: 255 of ~281 samples sit under
+`seon.db/q` called from `seon.fn/gate-set` (`src/seon/fn.clj:1052`).
+
+`gate-set` runs **once per installing definition**, from
+`seon.turn/gate-function-install` (`src/seon/turn.clj:3171`). It is one
+recursive-rule Datalog query (`test-gates-symbol` over `function-reaches`)
+against the whole canonical program graph. That single query is **93% of the
+bookkeeping** the regression bounds.
+
+This explains the whole 5.6–7.2 s history in
+[the performance issue](../../../seon/issues/turn-bookkeeping-exceeds-recorded-regression-bound.md)
+without a cold-JVM warm-up hypothesis: the earlier ~100 ms warm measurement in
+[the cost record](turn-bookkeeping-cost-2026-09-16.md) was taken on a turn
+whose definition did **not** install, so `gate-set` never ran. The bound was
+not loosened and no production change was made here: `src/seon/fn.clj` belongs
+to another lane, and the fix is a decision about that derivation (index the
+reach edges, or scope the rule to the one identity) rather than a tuning knob.
+
+### `a-lost-model-call-leaves-a-durable-readable-reason`
+
+The NPE was a stale authority, not a missing fact. The fault committer records
+the reason on the **occurrence**: a credential refusal commits one
+`:seon.error/occurrences` member carrying
+`:seon.error.occurrence/message "The environment variable DEEPSEEK_API_KEY is
+not set."` with `:seon.error.occurrence/agent`, `/turn`, `/process`, `/count`
+and `:seon.error/data-edn`. The error identity itself carries only
+`:seon.error/id`, `/kind`, `/signature` and `/occurrences`;
+`seon.error/latest-fact` (`src/seon/error.clj:1458`) is what projects the
+message back onto a fact. The test's `[?error :seon.error/message ?e]` bound
+nothing, `:find ?e .` returned nil, and `re-find` threw.
+
+The prompt half was two defects.
+
+- The fixture ran under the stand-in evaluator, which replaces every generated
+  opening read's value with `1`; a prompt assembled under it can never carry a
+  read's actual answer. It now uses real SCI.
+- `seon.error/faults-form` emitted only the steward-namespace selection, so a
+  fault with no `:seon.error/fn` — exactly a lost model call — was never
+  selected for the agent it happened to. **This is the recurring class: the
+  read reported absence of signal as health.** The form now selects, through
+  one `or-join`, either the stewarded-namespace function ref or an occurrence
+  naming this agent; `render-faults-html` uses the same selection so the two
+  surfaces cannot disagree. No second notification path and no new fact family
+  (`42661e5b0`).
+
+The assertion is unchanged in strength and now follows the loop: a terminal
+provider refusal defers reopening until a new outside wake, so the test seeds
+one incoming message, drives, and reads the prompt the provider call actually
+carries. In-process run: **5 passes, 0 failures, 0 errors**.
+
+### Verification boundary
+
+The two in-process results above were taken on explicitly reloaded source
+through `seon.test`'s own loader, before default's adoption converged; they are
+proofs on evaluated forms, not on adopted source. Afterwards the whole
+in-process cluster-turn fixture stopped deriving work in this JVM —
+`seon.turn/next-agent-work` returns nil and `turn` refuses
+`[:seon.turn.work/next]` — and the **untouched**
+`a-whole-turn-runs-from-trigger-to-closed-run` degrades identically (1 pass, 4
+failures, 1 error) where it was green in batch 46. That is a JVM-wide boundary
+belonging to the concurrent adoption wave, not to this slice; it is why no
+later in-process replay is claimed here. The cold gate is the proof.
+
+Commits: `42661e5b0` (fault read), `b166c4246` (both regressions).
