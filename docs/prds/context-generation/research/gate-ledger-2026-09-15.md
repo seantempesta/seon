@@ -1042,3 +1042,28 @@ filing): a required dial declared without its decision must not refuse
 the socket — the seam serves a typed refusal in the value. Batch 71 runs
 cold through the restart; if its recording is refused, that is this
 restart, not the batch.
+
+### 2026-09-16 07:20 — the stop! class closed at its root (`6ea39d45a`)
+
+The batch-71 residue (`seon.cluster.wake/unlisten!` refusing a released
+connection) was not one more member: every request shape that names a
+connection references the ONE key `:seon.db/connection`
+(`seon.db.edn:136`), whose predicate was the liveness check. `6ea39d45a`
+makes that key structural (`seon.db/connection-object?`, "a Datahike
+connection object, live or released"); `seon.cluster.store/connection-object?`
+delegates to it; no liveness predicate remains in any declared shape.
+Liveness stays the authority's runtime question (`transact!` answers "The
+explicit transaction connection is not live."). Totality repair riding
+along: `connection-identity` on a released connection answered a throw from
+an identity projection; it now answers the typed unknown. Verified live on
+pid 74930 (shapes compile); no test JVM. Re-gate as batch 74:
+seon.cluster.boot-test seon.cluster.wake-test seon.db-test.
+
+`development-adoption-targets-one-of-two-cohosted-clusters` was ALREADY
+declared `:seon.test/long` (`d756a09d4`, boot_test.clj:1007). It hits the
+270 s worker exchange bound because a gate naming its namespace runs it
+complete, long tests included (§5). Open question for the check-long
+owner: a named-namespace gate should either exclude declared-long tests
+unless opted in, or the exchange bound must derive from the declaration —
+a bound that ignores the declared long-ness is the tuned-constant defect
+(§2.3).
