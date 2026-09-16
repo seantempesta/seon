@@ -664,19 +664,31 @@
                      (when-let [failure (:seon.test/failure-message test-row)]
                        (str "\n" failure)))))))
 
+(defn- status-view
+  "The issue view a render shows: derived at `status` from the unit's own
+  database, so the detector ref and the check form are resolved by the
+  authority that decides them. A unit carrying no database, or an issue
+  `status` cannot read, renders the row it was handed."
+  [unit]
+  (let [row (or (:seon.render/value unit) unit)]
+    (or (when-let [database (:seon.db/db unit)]
+          (let [view (status {:seon.db/db database :seon.issue/id (:seon.issue/id row)})]
+            (when (:seon.issue/title view) view)))
+        row)))
+
 (defn render-ai
-  "Show the issue's status and exact verification form as one data block."
+  "Show the issue's status and exact verification form as one data block.
+  The done condition the agent reads every turn is derived here, so a
+  detector-resolved issue names its detector and the exact form to run."
   {:malli/schema [:=> [:cat [:or :seon.issue/issue :seon.render/unit]] :string]}
   [unit]
-  (status-text (or (:seon.render/value unit) unit)))
+  (status-text (status-view unit)))
 
 (defn render-html
   "Show the same issue status and verification forms on the agent page."
   {:malli/schema [:=> [:cat [:or :seon.issue/issue :seon.render/unit]] :seon.render/hiccup]}
   [unit]
-  (let [row (or (:seon.render/value unit) unit)
-        view (if-let [database (:seon.db/db unit)]
-               (status {:seon.db/db database :seon.issue/id (:seon.issue/id row)}) row)]
+  (let [view (status-view unit)]
     [:section {:class "seon-family-entry seon-issue"}
      [:h3 (:seon.issue/title view)]
      [:pre {:style "white-space: pre-wrap"} (status-text view)]]))
