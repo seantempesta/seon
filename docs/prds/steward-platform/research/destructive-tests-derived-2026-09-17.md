@@ -163,3 +163,40 @@ the derived union must remain 124 tests.
   uncommitted edits at commit time. Flagged for the orchestrator's review.
 * RESET NOT NEEDED: `:seon.fn/destroys` is a new optional key; no key changed
   meaning.
+
+## 6. Batch 105 reds and what they taught (2026-09-17)
+
+Three reds, all this slice's, fixed in `67c1364b6`.
+
+**A declaration that wraps across source lines is ugly output.** Each
+`:seon.fn/destroys` string was written as wrapped prose, so its value carried
+a newline and the source indentation after it. The AI render prints the test's
+line inside a form, and a newline reaches the agent ESCAPED there — the agent
+would read `…replaced wholesale by a\n  clone…` mid-sentence. Proven live on
+pid 53320:
+
+```clojure
+(seon.repl/source-text (list 'clojure.core/identity "a\n  b"))
+;; => (clojure.core/identity "a\n  b")   ; containment of the raw text: false
+(seon.repl/source-text (list 'clojure.core/identity "a b"))
+;; => (clojure.core/identity "a b")       ; containment: true
+```
+
+The three declarations are now one line each (135 / 130 / 106 characters,
+read back through `seon.fn.analyzer/analyze` on the two files), the attribute's
+schema states the rule, and the regression asserts the RULED LINE — host, call
+path, the owner's own words, cold command — against `host-text`, the AI render
+and the HTML render, plus that the declaration carries no newline.
+
+**The typed unknown found a real gap in a fixture, and stayed.**
+`seon.test-runner-test/the-agent-fork-callable-returns-the-committed-projection`
+evaluated an ad hoc `deftest` whose declaration was never admitted, so the test
+had no program row and `run` correctly answered the unknown. That test exists
+to prove an AGENT'S own `seon.test/run` returns the committed projection, so
+the fixture now admits its test the way a turn does — evaluate with
+`:seon.db/db` and `:seon.db/connection`, `seon.fn/analyze-forms` over the
+evaluation's `:seon.program/row`, `seon.db/transact!` — the idiom
+`seon.test-reaching-test/agent-admitted-tests-reach-their-tested-function`
+already uses. The unknown is unchanged: an agent-authored test that was never
+admitted has no call graph, and that is said rather than guessed.
+
