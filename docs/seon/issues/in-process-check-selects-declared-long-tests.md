@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 created: 2026-09-16
 tags: [issue, test, runtime, in-process, bounds, wave/steward-platform]
@@ -99,3 +99,7 @@ complete check. This note stays open until a cold gate confirms it.
 
 Remaining mirror: `seon.test.runner/long-reason` (`src/seon/test/runner.clj:622`)
 still reads the marker off Var metadata rather than the row it now indexes.
+
+## Resolved 2026-09-17 16:45Z
+
+Batch 72 (cold, recorded) ran `seon.test-reaching-test` GREEN on HEAD with `4e22d2256` + `beb95c1af`: `:seon.test/long` is a program-row fact, `check` excludes long tests by default with a named report and an opt-in, and an expired bound reports the completed verdicts plus the typed expiry.
