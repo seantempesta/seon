@@ -1,12 +1,22 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 created: 2026-09-16
 tags: [schema, test, gate, publication, shared-tree]
 ---
 
 # HEAD declares a contract over an untracked schema resource, so every HEAD-snapshot gate refuses
+
+## Resolution — 2026-09-16
+
+`resources/seon/schemas/seon.test.check.edn` is committed, so HEAD declares
+the family its own `src/seon/test.clj` contract names and a HEAD-snapshot gate
+loads again. Item #24's remaining work — the one-call `bin/test-check` and the
+`seon.test/check-request` regression — lands separately and does not gate this.
+
+The class point stands and is NOT fixed here: nothing reports that a declared
+schema key has no declaring resource in the committed tree.
 
 ## Problem
 
