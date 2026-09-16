@@ -43,3 +43,14 @@ fork; the lane measured from the history index instead — correct.
 
 **Gate requested:** batch 103 = platform, then `seon.cluster.boot-test
 seon.cluster.source-test seon.test-test`.
+
+## Addendum — `19ee62479` (batch 103 attribution, 2026-09-17 22:25Z): approved
+
+The source-test conflict expectation counted recording ATTEMPTS, not
+conflicts (two stale heads need three attempts); C1/C2 removed a write that
+should never have happened; the regression now asserts three with the
+reason. The cohosted `< 500` cluster-datom bound stays and its failure now
+names the writing attribute namespaces (the issue-adoption storm, S7's fix
+`2ed13625e`). The four boot errors could not honestly be classified as load
+from the retained root's evidence; the lane filed the isolation-sensitive
+tests it found rather than claim a pass. Correct on every count.
