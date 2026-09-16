@@ -174,7 +174,7 @@ the shared fixture delay was never forced by this lane.
 | `seon.program-test/schema-row-properties-survive-and-retract-exactly` (existing) | **2 / 0 / 0** |
 | `seon.program-test/declaration-admission-refuses-ambiguous-or-incomplete-rows` (existing) | **6 / 0 / 0** |
 | `seon.fn-test/the-indexer-emits-no-attribute-the-program-row-schema-drops` | **7 / 0 / 0** |
-| `seon.fn-test/file-artifacts-and-manifests-are-byte-digested-and-deterministic` (existing, fixture-backed) | did not complete inside this lane's window; the JVM was saturated by concurrent lanes and the shared base was deliberately not forced |
+| `seon.fn-test/file-artifacts-and-manifests-are-byte-digested-and-deterministic` (existing, fixture-backed) | **19 / 0 / 0** — it took ~25 minutes to return under concurrent lane load, so it is recorded after the rest |
 
 `seon.fn-test/the-indexer-emits-no-attribute-the-program-row-schema-drops` is
 the class killer, and it landed in another lane's commit `0eba4b8c3`: that
