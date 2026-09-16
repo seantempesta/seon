@@ -1062,3 +1062,95 @@ projection cost without changing their implementations.
 Projection observations may include other threads during the settlement
 window; the original row-level attribution above separately isolated the
 defining row. Transaction observations are restricted to the calling thread.
+
+## Settlement projection rebuild landing — 2026-09-16, lane `settlement-projection`
+
+Live `default` **PID 17352**, branch `steward-platform`. Read end to end
+first: this whole page, `AGENTS.md` §0 and §2.1, turn PRD §14 and the
+vocabulary rows for turn and system turn, and
+`tmp/orchestrator/wave2/repl-rule.txt`. No test JVM was launched; `default`
+was never stopped, restarted or reforked. Every probe ran on a daemon
+future; every wrapped Var was restored by `with-redefs-fn`.
+
+### Slice 1 — the rebuild, and one refuted premise
+
+The assignment's premise was that the mid-transaction database value carries
+an up-to-date projection. **Probed and refuted**: inside a `:db.fn/call`, the
+writer's database carries the projection *identical* to the outer value's —
+the entering one. So a bare substitution would have lost declarations made
+earlier in the same transaction, exactly as the slice-2 withdrawal above
+warned.
+
+What is real is the waste. `seon.turn/row-tx` called
+`schema/projection-from-database` on every declaration settlement — three
+`d/q` scans over every schema, contract and source row — and the result was
+the **identical** object it was handed. Measured on the canonical fixture in
+one baseline run of
+`seon.cluster.turn-test/delimiter-repair-is-span-local-and-precedes-intent`:
+one call, **209.412084 ms**, `identical?` true, on the Datahike writer thread
+inside the settlement commit. That is 209 of the **252.989625 ms** the
+regression bounds as settlement and writes, spent to learn nothing — the
+absence-of-signal class this page keeps naming.
+
+The repair keeps the one case the carried value cannot answer.
+`seon.turn/declaration-projection` (new, `src/seon/turn.clj`) returns the
+value's carried projection, and derives at the writer only for a request that
+a declaration PRECEDES in this same transaction. The single owner that orders
+those calls, `receipt-settle-batch-tx`, is what marks them
+(`:seon.turn/declarations-preceding?`); an absent carried projection is still
+refused loudly. No cache, no new mechanism.
+
+| `delimiter-repair-is-span-local-and-precedes-intent`, PID 17352 | before | after |
+|---|---:|---:|
+| six-form settlement and writes | **252.989625 ms** | **53.142 ms** |
+| `projection-from-database` calls in the run | 1 (209.412084 ms, identical result) | **0** |
+| definition installation | 130.538291 ms | 106.235665 ms |
+| pass / fail / error | 20 / 0 / 1 | **20 / 0 / 0** |
+
+The 300 ms assertion is unchanged. The run's same-turn edge assertion — the
+later evaluation keeping `:seon.fn/calls` to the function declared earlier in
+the same turn, the exact proof that withdrew the earlier candidate — passes.
+
+The class regression is
+`seon.cluster.turn-test/a-settling-declaration-uses-the-projection-its-database-carries`
+(**6 / 0 / 0**): the marking is exactly "a declaration precedes this
+request"; the unmarked path performs **zero** derivations and returns the
+carried projection `identical?`; the marked path still derives exactly once.
+It fails the moment the rebuild returns.
+
+`seon.cluster.turn-test/a-batched-turn-commits-only-queryable-definition-facts`:
+**7 / 0 / 1**, the one error being this shared JVM's worker-global
+instrumentation drift on `seon.render-simplification-test/authored-source`,
+a namespace this lane did not touch.
+
+### Slice 2 — the prompt's turns-left expectation was stale
+
+`seon.cluster.prompt-test/prompt-prices-the-exact-retained-history` expected
+`turns left: 99 of 100` and rendered `turns left: 100 of 100`. **The
+derivation is correct and the expectation was stale**, so the expectation
+moved. Probed inside the fixture:
+
+| fixture turn | identity `:t` | reply-size `:t` | attempts |
+|---|---:|---:|---:|
+| `opening-history` | 536870925 | 536870925 | none |
+| `walk-run` | 536870926 | none | none |
+
+`episode-runs` is **0** and `turns-left` is **100**. Both planted turns are
+precisely the shapes 97d1f69e0 ruled out of the budget (turn PRD §14): a
+reply frozen in the same transaction as its turn identity is the opening, and
+an open turn alone is not a provider attempt. The test is **9 / 0 / 0** after
+the change, and the expectation carries that reasoning rather than a number.
+
+### Boundary
+
+Commits: `2da44c50d` (slice 1, `src/seon/turn.clj` +
+`test/seon/cluster/turn_test.clj`), `c27727551` (slice 2,
+`test/seon/cluster/prompt_test.clj`). Focused clj-kondo: **0 errors**
+(49 pre-existing warnings in `turn_test.clj`, 2 in `prompt_test.clj`);
+`git diff --check` passes. `src/seon/cluster/prompt.clj` was not edited —
+the prompt's derivation needed no change. Every number above is a
+hot-loaded, re-armed live-JVM measurement (`seon.instrument/apply!` reported
+1061 registered / 1061 instrumented); the adoption attempt is recorded
+below. The orchestrator's batched gate owns the integration proof;
+the namespaces are `seon.cluster.turn-test`, `seon.turn-test`,
+`seon.cluster.prompt-test`, and `platform`.
