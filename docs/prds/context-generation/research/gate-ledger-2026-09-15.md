@@ -442,3 +442,11 @@ literal expected set as the dated reviewed record whose drift checker is the
 test itself (the derived side is already `:seon.fn.arity/output-refs`, so a
 query on both sides would be tautological) — accepted under §2.2's
 "enforced by a checker" clause. In-process 5/0/0 and 2/0/0. Batch 40.
+
+### 2026-09-16 14:20Z — recording rejected on a healthy JVM: read-only research launched
+
+Every gate since batch 30 ends `persistent results NOT recorded … The cluster
+rejected the prepl operation`, including batch 40 on an idle pid 45917; the
+wrapper drops the rejection value. Opus read-only lane launched to capture
+the exact rejection by sending the recorder's own form to default and to
+verify the stale-head race hypothesis (`gate-recording-rejection-2026-09-16.md`).
