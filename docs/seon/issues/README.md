@@ -58,11 +58,17 @@ tests. `seon.issue/start!` creates the worker, its plan and first turn in one
 transaction. It refuses missing tests and an existing assignment. The
 agent's issue unit links to the referenced entities and their render pairs.
 
-Automatic test execution at settlement, writing `:seon.issue/resolved-tx`,
-and enforcing test preservation against direct database retractions are a
-deferred slice. The additive API does not claim those guarantees.
-The current status read requires a positive green result whose run basis
-follows assignment; a prior green result is not sufficient.
+Before plan settlement, the turn runs the worker's open-issue tests under
+one configured evaluation deadline. Completion requires current verified
+run facts and records the step's completion and `:seon.issue/resolved-tx`
+in the same transaction. The status read verifies the current reach digest.
+
+Database admission preserves a nonempty test set after first assignment,
+including after unassignment and through nested transaction functions.
+Only the issue's original creator may retract test members; source
+reconciliation preserves worker assignment, creator authority and tests.
+The [settlement landing note](../../prds/steward-platform/research/issue-settlement-2026-09-16.md)
+records the live proofs and remaining verification boundaries.
 
 ## Frontmatter template
 
