@@ -1308,6 +1308,17 @@ goal: beyond manual gates to an always-fast suite — stages 1–3 (design lane
 running) + the in-process post-adoption check generalized; my gates are the
 interim.
 
+**Stage 1–3 design landed** (`61f8e7145`, `plan/test-system-stage1-3-design-2026-09-17.md`,
+659 lines): 4–5 lane-days; stage 2 (resolution by identity) and the pure
+claim/completion transaction functions can be built BEFORE the reset; stage
+1's selection integration waits for reset groups 2–3 (symbol edges, digest,
+retractions); stage 3's scheduling switch needs 1+2. Final acceptance: edit
+one definition → the command names exactly N reaching tests and runs only
+them; unchanged rerun executes zero; a fileless SCI test runs through the same
+owner; two launchers get complementary memberships; a killed worker's claim
+is reclaimed. Launch stage 2 (astra) when the implementer count drops below
+four; stage 1 the day the reset converges.
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
