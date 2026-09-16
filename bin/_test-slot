@@ -16,20 +16,9 @@ test_slot_wait_seconds=${SEON_TEST_SLOT_WAIT_SECONDS:-1800}
 test_slot_parent="${source_root:-$PWD}/tmp/test-slots"
 held_test_slot=
 
-# Orchestrator-only mode: while tmp/test-slots/orchestrator-only exists, only
-# an invocation carrying SEON_TEST_ORCHESTRATOR=1 may launch test JVMs. Lanes
-# get a loud refusal naming the rule; the orchestrator batches their gates.
-require_orchestrator_slot() {
-  if [ -e "$test_slot_parent/orchestrator-only" ] && [ "${SEON_TEST_ORCHESTRATOR-}" != "1" ]; then
-    echo "bin/test: test runs are orchestrator-only right now ($(cat "$test_slot_parent/orchestrator-only" 2>/dev/null)); do not launch tests from a lane — commit and list the namespaces to gate in tmp/orchestrator/gate-requests/<lane>.txt" >&2
-    return 75
-  fi
-}
-
 acquire_test_slot() {
   local waited=0 slot holder announced=0
   mkdir -p "$test_slot_parent"
-  require_orchestrator_slot || return 75
   while :; do
     for slot in $(seq 1 "$test_slot_count"); do
       if mkdir "$test_slot_parent/slot-$slot" 2>/dev/null; then
