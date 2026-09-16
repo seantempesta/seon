@@ -529,3 +529,19 @@ live `init --dev default --changed src/seon/cluster.clj` exit 0, commit
 advanced. Noted for later: the write diagnostic says "expected a set, got a
 set" (seon.db admission should name the offending member); a scalar
 adoption recorded an empty identity set (possible under-recording).
+
+### 2026-09-16 20:00Z — adoption-rows reds: a fixture namespace poisons the worker's kondo cache
+
+`d4a201237`: the agent-row-fault test read the error identity row for
+`:seon.error/message`, which lives on the occurrence and is answered by the
+declared projection `seon.error/latest-fact` — read fixed, owner correct;
+8/0/0. The cold `adoption-identities-carry-no-nil-member` red was NOT a stale
+kondo cache (the snapshot ships no cache): `seon.fn-test/keyword-usage-is-
+indexed-per-declaration` analyzes a decoy `(ns seon.error)` fixture with the
+shared kondo cache on, so the worker's `seon.error` cache entry becomes a
+stub and every later analysis calling `error/diagnostic|prepare|recording`
+in that worker is refused — worker-global state mutated by a test, hidden
+until now by same-JVM ordering. Issue
+`a-fixture-namespace-poisons-the-workers-shared-kondo-cache.md`; Opus lane
+launched to isolate fixture analysis at the analyzer seam (no shared cache
+for paths outside declared roots) with one class regression.
