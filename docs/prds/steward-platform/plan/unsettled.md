@@ -199,3 +199,39 @@
   written and queued (tmp/orchestrator/wave3/research/).
 - 08:20Z batch 22 (write-validation-class, HEAD `01539d18a`): 18 tests /
   181 assertions / 0 failures — closed green.
+
+## 2026-09-16 08:25Z — overnight focus (owner, going to bed)
+
+Owner: "Focus on improving code indexing, error and fault storage and
+linking, getting the robust test infrastructure set up so we are updating
+the test entities for each function when it passes and we always know the
+state of things. Efficient updates everywhere without creating a shitload
+of entities: smart aggregation based on identity and updating attributes."
+
+Standing rules tonight: astra only for hard implementation slices; Opus
+for triage, research, mechanical fixes; at most four processes probing
+default (the gate session's lane counted); no test JVMs from lanes; the
+gate session runs gates on request files; refork default once after
+issue-settlement lands (message the peer first), then the recording-only
+platform run, then reseed Juniper; every landing recorded here.
+
+Queue, in order:
+1. issue-settlement lands (guard slice) → refork → recording platform run → reseed.
+2. Research (Opus, as slots free): R2 structured test failures + "what made
+   it red"; R5 analyzer facets (code indexing); R3 effects + write-back
+   provenance. R1 writer census and R4 detectors are running; each result
+   is reviewed here and turned into one lane spec.
+3. Test infrastructure follow-ups: `result-preservation-tx` carries
+   `:seon.test/reach-digest` through full publication (Opus, small, file
+   free now); stale tests (12 transcript + 3 turn) and `kill_child.clj`
+   readiness-after-refused-transact (Opus fixers); a per-function view is a
+   query (tests-reaching + verified on digest) — no new entities.
+4. Error storage residuals: occurrence → turn populated when the committer
+   knows the turn; proc → step-function fact derived from the flow graph
+   definition at arming (astra if it needs the flow owner); the third
+   writer covered by the one-writer rule — verify with a live refusal.
+5. Aggregation principle for every new fact family (R1/R2/R3 outputs must
+   obey): identity from canonical parts, upsert the same entity, counts and
+   last-seen as replaced attributes, history for the timeline; never one
+   entity per event unless the event has its own identity.
+6. Then the issue-context trials (Opus) on the arglists issue.
