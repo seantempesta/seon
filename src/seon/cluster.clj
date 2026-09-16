@@ -3005,8 +3005,8 @@
              :seon.search/index
              {:proc (flow/var-process
                      #'search/index-step :io
-                     (env/carry {:seon.search/index
-                                 (:seon.search/index view)
+                     (env/carry {:seon.search/handle
+                                 (:seon.search/handle environment)
                                  :seon.search/channel
                                  (:seon.search/channel view)
                                  :seon.search/completion
@@ -3070,7 +3070,6 @@
               :seon.render.web/interest render-interest
               :seon.render.web/completion (async/promise-chan)
               :seon.render.web/root-agent-id "root"
-              :seon.search/index (:seon.search/index instance)
               :seon.search/channel search-channel
               :seon.search/completion (async/promise-chan)
               :seon.sci.eval/ctx (:seon.sci.eval/ctx handle)
@@ -3246,9 +3245,9 @@
     (some-> (:seon.search/completion instance) async/<!!))
   ;; A degraded boot can open the index before the graph stands. Then no proc
   ;; owns its close transition yet, so this layer releases it directly.
-  (when (and (:seon.search/index instance)
+  (when (and (:seon.search/handle instance)
              (nil? (:seon.flow/graph instance)))
-    (search/close! (:seon.search/index instance)))
+    (search/close! (:seon.search/handle instance)))
   (when-let [fanout (:seon.flow/error-fanout instance)]
     (flow/stop-error-fanout! fanout))
   (when-let [handle (:seon.turn.loop/cluster instance)]
@@ -3280,7 +3279,7 @@
            search-path (:seon.search/path
                         (cluster-paths (:seon.boot/root config) cluster-name))
            instance (publish!
-                     (assoc instance :seon.search/index
+                     (assoc instance :seon.search/handle
                             (search/open! connection search-path)))
            bare-ctx
            (if base-ctx
@@ -3299,6 +3298,7 @@
             (env/environment
              {:seon.boot/cluster-name cluster-name
               :seon.db/connection connection
+              :seon.search/handle (:seon.search/handle instance)
               :seon.schema/projection
               (:seon.schema/projection @projection-state)
               :seon.db/basis-t (:seon.db/basis-t @projection-state)

@@ -65,15 +65,60 @@
 (schema/register-core-predicate! 'seon.search/ping-map-fn?
                                  ping-map-fn?)
 
+(defrecord IndexHandle [])
+
+(defonce ^:private handle-prototype (map->IndexHandle {}))
+
+(defn- handle?
+  ;; A registered core predicate, like `ping-map-fn?` and `datahike-datom?`
+  ;; above: private and uncontracted, because a schema predicate runs inside
+  ;; every validation of every schema that embeds this one.
+  [value]
+  (instance? (class handle-prototype) value))
+
+(schema/register-core-predicate! 'seon.search/handle? handle?)
+
+#_{:clj-kondo/ignore [:unused-private-var]}
+(def ^:private handle-generator
+  ;; A CLOSED handle holding no Lucene resources. A generator is sampled
+  ;; wherever a schema embedding this one is sampled — the request, the
+  ;; environment, the proc contract — so acquiring a real directory, writer
+  ;; and SearcherManager per sample would make ordinary schema generation
+  ;; open and commit hundreds of indexes. `close!` on one of these is the
+  ;; no-op its own closed flag already declares.
+  (gen/fmap
+   (fn [_]
+     (into handle-prototype
+           {:seon.search/path ""
+            :seon.search/basis (atom nil)
+            :seon.search/lock (ReentrantLock.)
+            :seon.search/closed? (atom true)}))
+   (gen/return nil)))
+
 (schema.edn/load! {})
 
-(defonce ^:private owners
-  (atom {:seon.search/by-id {}
-         :seon.search/by-connection {}}))
+(defn supplied-handle
+  "Return this environment's index handle, or explain its absence.
 
-(defn- owner-by-id
-  [index-id]
-  (get-in @owners [:seon.search/by-id index-id]))
+  This is a declared call-preparation supplier: `search` declares
+  `:seon.search/handle` on its request, so an agent that omits it receives the
+  handle its own cluster's environment carries. A cluster whose index never
+  opened refuses here, naming the member — never a silent empty result set.
+
+  The declared return is the row's value shape plus `:seon.error/value`,
+  exactly as `seon.call-preparation`'s coherence proof requires
+  (`src/seon/call_preparation.clj:166`): a supplier declaring its own error
+  family instead is not proved, and its row is dropped in silence — the call
+  then refuses at the callee's contract for a missing key nobody filled."
+  {:malli/schema [:=> [:cat :seon.env/environment]
+                  [:or :seon.search/handle :seon.error/value]]}
+  [environment]
+  (or (:seon.search/handle environment)
+      {:seon.error/kind ::handle-absent
+       :seon.search/unavailable true
+       :seon.error/message
+       "This cluster's environment carries no search index handle."
+       :seon.error/data {:seon.env/member :seon.search/handle}}))
 
 (defn tokens
   "Split a keyword, symbol, or string on its natural non-alphanumeric
@@ -222,16 +267,16 @@
   [owner basis-t]
   (let [metadata (doto (HashMap.)
                    (.put "seon.database/basis-t" (str basis-t)))]
-    (.setLiveCommitData ^IndexWriter (:writer owner) (.entrySet metadata))
-    (.commit ^IndexWriter (:writer owner))
-    (.maybeRefreshBlocking ^SearcherManager (:searchers owner))
-    (reset! (:basis owner) (long basis-t))))
+    (.setLiveCommitData ^IndexWriter (:seon.search/writer owner) (.entrySet metadata))
+    (.commit ^IndexWriter (:seon.search/writer owner))
+    (.maybeRefreshBlocking ^SearcherManager (:seon.search/searchers owner))
+    (reset! (:seon.search/basis owner) (long basis-t))))
 
 (defn- rebuild!
   [owner database]
-  (let [writer ^IndexWriter (:writer owner)
+  (let [writer ^IndexWriter (:seon.search/writer owner)
         roster (search-roster database)]
-    (.lock ^ReentrantLock (:lock owner))
+    (.lock ^ReentrantLock (:seon.search/lock owner))
     (try
       (.deleteAll writer)
       (doseq [eid (declared-entity-ids database roster)
@@ -239,7 +284,7 @@
         (.addDocument writer ^Iterable doc))
       (set-basis! owner (db/basis-t database))
       (finally
-        (.unlock ^ReentrantLock (:lock owner)))))
+        (.unlock ^ReentrantLock (:seon.search/lock owner)))))
   owner)
 
 (defn- roster-attributes
@@ -253,25 +298,21 @@
   "Advance one derived index by one exact transaction report. A coalesced
   or otherwise non-contiguous report rebuilds from `db-after`."
   {:malli/schema
-   [:=> [:cat :seon.search/index-id :map] :nil]}
-  [index-id report]
-  (let [owner (owner-by-id index-id)]
-    (when-not owner
-      (throw (ex-info "The derived search index id is not open."
-                      {:seon.search/index-id index-id})))
-    (let [before (:db-before report)
+   [:=> [:cat :seon.search/handle :map] :nil]}
+  [owner report]
+  (let [before (:db-before report)
           after (:db-after report)
           datoms (:tx-data report)
           before-roster (search-roster before)
           after-roster (search-roster after)
           relevant-attributes (roster-attributes after-roster)]
-      (if (or (not= @(:basis owner) (db/basis-t before))
+      (if (or (not= @(:seon.search/basis owner) (db/basis-t before))
               (not= before-roster after-roster))
         (rebuild! owner after)
         (do
-          (.lock ^ReentrantLock (:lock owner))
+          (.lock ^ReentrantLock (:seon.search/lock owner))
           (try
-            (let [writer ^IndexWriter (:writer owner)]
+            (let [writer ^IndexWriter (:seon.search/writer owner)]
               (doseq [eid (into #{}
                                 (comp
                                  (filter
@@ -285,7 +326,7 @@
                   (.addDocument writer ^Iterable doc)))
               (set-basis! owner (db/basis-t after)))
             (finally
-              (.unlock ^ReentrantLock (:lock owner))))))))
+              (.unlock ^ReentrantLock (:seon.search/lock owner)))))))
   nil)
 
 (defn- existing-basis
@@ -300,63 +341,53 @@
 (declare close!)
 
 (defn open!
-  "Open the one derived index for `connection`, rebuilding from its current
-  database value unless the on-disk commit records that exact basis."
+  "Open a cluster-owned Lucene handle, rebuilding unless its disk basis matches."
   {:malli/schema
-   [:=> [:cat :seon.db/connection :seon.search/path]
-    :seon.search/index-id]}
+   [:=> [:cat :seon.db/connection :seon.search/path] :seon.search/handle]}
   [connection path]
-  (let [index-id path]
-    (when (get-in @owners [:seon.search/by-connection connection])
-      (throw (ex-info "The cluster already has a search index owner."
-                      {:seon.search/index-id index-id})))
-    (let [index-path (Paths/get path (make-array String 0))
-          _ (Files/createDirectories index-path (make-array java.nio.file.attribute.FileAttribute 0))
-          directory (FSDirectory/open index-path)
-          disk-basis (existing-basis directory)
-          analyzer (StandardAnalyzer.)
-          writer (IndexWriter. directory (IndexWriterConfig. analyzer))
-          searchers (SearcherManager. writer nil)
-          owner {:id index-id
-                 :connection connection
-                 :path path
-                 :directory directory
-                 :analyzer analyzer
-                 :writer writer
-                 :searchers searchers
-                 :basis (atom disk-basis)
-                 :lock (ReentrantLock.)
-                 :closed? (atom false)}
-          database @connection]
-      (swap! owners
-             (fn [current]
-               (-> current
-                   (assoc-in [:seon.search/by-id index-id] owner)
-                   (assoc-in [:seon.search/by-connection connection] index-id))))
-      (try
-        (when (not= disk-basis (db/basis-t database))
-          (rebuild! owner database))
-        index-id
-        (catch Throwable failure
-          (close! index-id)
-          (throw failure))))))
+  (let [index-path (Paths/get path (make-array String 0))
+        _ (Files/createDirectories index-path (make-array java.nio.file.attribute.FileAttribute 0))
+        directory (FSDirectory/open index-path)]
+    (try
+      (let [disk-basis (existing-basis directory)
+            analyzer (StandardAnalyzer.)]
+        (try
+          (let [writer (IndexWriter. directory (IndexWriterConfig. analyzer))]
+            (try
+              (let [searchers (SearcherManager. writer nil)]
+                (try
+                  (let [owner (into handle-prototype
+                                    {:seon.search/path path
+                                     :seon.search/directory directory
+                                     :seon.search/analyzer analyzer
+                                     :seon.search/writer writer
+                                     :seon.search/searchers searchers
+                                     :seon.search/basis (atom disk-basis)
+                                     :seon.search/lock (ReentrantLock.)
+                                     :seon.search/closed? (atom false)})
+                        database @connection]
+                    (when (not= disk-basis (db/basis-t database))
+                      (rebuild! owner database))
+                    owner)
+                  (catch Throwable failure (.close searchers) (throw failure))))
+              (catch Throwable failure (.close writer) (throw failure))))
+          (catch Throwable failure (.close analyzer) (throw failure))))
+      (catch Throwable failure (.close directory) (throw failure)))))
 
 (defn close!
-  "Close and forget one process-local index owner. Idempotent."
-  {:malli/schema [:=> [:cat :seon.search/index-id] :nil]}
-  [index-id]
-  (when-let [owner (owner-by-id index-id)]
-    (when (compare-and-set! (:closed? owner) false true)
-      (swap! owners
-             (fn [current]
-               (-> current
-                   (update :seon.search/by-id dissoc index-id)
-                   (update :seon.search/by-connection dissoc
-                           (:connection owner)))))
-      (.close ^SearcherManager (:searchers owner))
-      (.close ^IndexWriter (:writer owner))
-      (.close ^StandardAnalyzer (:analyzer owner))
-      (.close ^Directory (:directory owner))))
+  "Close one carried index handle. Idempotent; no registry lookup is involved."
+  {:malli/schema [:=> [:cat :seon.search/handle] :nil]}
+  [owner]
+  (when (compare-and-set! (:seon.search/closed? owner) false true)
+    (try
+      (.close ^SearcherManager (:seon.search/searchers owner))
+      (finally
+        (try
+          (.close ^IndexWriter (:seon.search/writer owner))
+          (finally
+            (try
+              (.close ^StandardAnalyzer (:seon.search/analyzer owner))
+              (finally (.close ^Directory (:seon.search/directory owner)))))))))
   nil)
 
 (defn- family-query
@@ -398,7 +429,7 @@
       {:seon.search/unavailable true
        :seon.error/message "Search query must contain a letter or digit."}
       (do
-        (.lock ^ReentrantLock (:lock owner))
+        (.lock ^ReentrantLock (:seon.search/lock owner))
         (try
           (let [builder (BooleanQuery$Builder.)
                 _ (.add builder (text-query normalized match)
@@ -409,12 +440,12 @@
                     (.add builder (namespace-query namespace-prefix)
                           BooleanClause$Occur/FILTER))
                 query-object (.build builder)
-                searcher (.acquire ^SearcherManager (:searchers owner))]
+                searcher (.acquire ^SearcherManager (:seon.search/searchers owner))]
             (try
               (let [^TopDocs hits (.search ^IndexSearcher searcher query-object
                                            (int (min 400 (* 4 limit))))
                     stored-fields (.storedFields ^IndexSearcher searcher)]
-                {:seon.search/basis-t @(:basis owner)
+                {:seon.search/basis-t @(:seon.search/basis owner)
                  :seon.search/results
                  (mapv
                   (fn [^ScoreDoc score-doc]
@@ -437,9 +468,9 @@
                                       #(.-doc ^ScoreDoc %)))
                        (take limit)))})
               (finally
-                (.release ^SearcherManager (:searchers owner) searcher))))
+                (.release ^SearcherManager (:seon.search/searchers owner) searcher))))
           (finally
-            (.unlock ^ReentrantLock (:lock owner))))))))
+            (.unlock ^ReentrantLock (:seon.search/lock owner))))))))
 
 (defn search
   "Search declared database fields through the current cluster's index.
@@ -449,9 +480,7 @@
   are flat values."
   {:malli/schema [:=> [:cat :seon.search/request] :seon.search/response]}
   [request]
-  (if-let [owner (some-> (get-in @owners
-                                 [:seon.search/by-connection db/*conn*])
-                         owner-by-id)]
+  (if-let [owner (:seon.search/handle request)]
     (try
       (search-owner owner request)
       (catch Throwable failure
@@ -479,27 +508,27 @@
      [:catn
       [::request
        [:map
-        [:seon.search/index :seon.search/index-id]
+        [:seon.search/handle :seon.search/handle]
         [:seon.search/channel :seon.flow/channel]
         [:seon.search/completion :seon.flow/channel]]]]
      [:map
-      [::index-id :seon.search/index-id]
+      [::handle :seon.search/handle]
       [::completion :seon.flow/channel]]]
     [:=>
      [:catn
       [::state
        [:map
-        [::index-id :seon.search/index-id]
+        [::handle :seon.search/handle]
         [::completion :seon.flow/channel]]]
       [::transition [:enum ::flow/resume ::flow/pause ::flow/stop]]]
      [:map
-      [::index-id :seon.search/index-id]
+      [::handle :seon.search/handle]
       [::completion :seon.flow/channel]]]
     [:=>
      [:catn
       [::state
        [:map
-        [::index-id :seon.search/index-id]
+        [::handle :seon.search/handle]
         [::completion :seon.flow/channel]]]
       [::input [:= ::transactions]]
       [::report
@@ -514,28 +543,28 @@
            'seon.search/datahike-datom?]]]]]]
      [:tuple
       [:map
-       [::index-id :seon.search/index-id]
+       [::handle :seon.search/handle]
        [::completion :seon.flow/channel]]
       :nil]]]}
   ([] {:ins {::transactions "Datahike transaction reports"}
        :outs {}
        :workload :io
        :ping-map-fn (constantly {})})
-  ([{:keys [:seon.search/index :seon.search/channel
+  ([{:keys [:seon.search/handle :seon.search/channel
             :seon.search/completion] :as state}]
-   (when-not (and index channel completion)
+   (when-not (and handle channel completion)
      (throw (ex-info "The search index proc is missing a required resource."
                      {:seon.error/kind ::missing-resource :seon.search/missing-resource true})))
    (assoc state
           ::flow/in-ports {::transactions channel}
           ::flow/out-ports {}
-          ::index-id index
+          ::handle handle
           ::completion completion))
   ([state transition]
    (when (= ::flow/stop transition)
-     (close! (::index-id state))
+     (close! (::handle state))
      (async/offer! (::completion state) ::stopped))
    state)
   ([state _ report]
-   (apply-report! (::index-id state) report)
+   (apply-report! (::handle state) report)
    [state nil]))

@@ -6,6 +6,7 @@
             [malli.generator :as mg]
             [seon.config :as config]
             [seon.db :as db]
+            [seon.env :as env]
             [seon.schema :as schema]
             [seon.search :as search]
             [seon.sci.eval :as eval]
@@ -15,7 +16,8 @@
   [f]
   (test-support/with-database
    (fn [connection]
-     (let [path (str "tmp/search-test-" (random-uuid))
+     (let [_ (test-support/seed-cluster! connection "search-fixture")
+           path (str "tmp/search-test-" (random-uuid))
            index (search/open! connection path)]
        (try
          (f connection index)
@@ -23,10 +25,9 @@
            (search/close! index)
            (test-support/delete-recursively! path)))))))
 
-(defn- search-with-connection
-  [connection request]
-  (binding [db/*conn* connection]
-    (search/search request)))
+(defn- search-with-handle
+  [handle request]
+  (search/search (assoc request :seon.search/handle handle)))
 
 (deftest index-step-contract-has-durable-generative-host-predicates
   (let [definition
@@ -89,10 +90,10 @@
 
 (deftest search-scopes-by-declared-fact-family-and-namespace-prefix
   (with-index
-    (fn [connection _]
+    (fn [_connection index]
       (let [response
-            (search-with-connection
-             connection
+            (search-with-handle
+             index
              {:seon.search/query "search"
               :seon.search/families #{:seon.fn/sym}
               :seon.search/namespace-prefix 'seon.search
@@ -129,8 +130,8 @@
         (assert (:db-after report) (pr-str report))
         (search/apply-report! index report)
         (let [response
-              (search-with-connection
-               connection
+              (search-with-handle
+               index
                {:seon.search/query "uniquelyincrementalneedle"
                 :seon.search/families #{:seon.fn/sym}
                 :seon.search/namespace-prefix 'fixture.search
@@ -160,14 +161,14 @@
                :seon.search/limit 5}
               instruction-results
               (:seon.search/results
-               (search-with-connection
-                connection
+               (search-with-handle
+                index
                 (assoc request :seon.search/families
                        #{:seon.cluster.instruction/id})))
               message-results
               (:seon.search/results
-               (search-with-connection
-                connection
+               (search-with-handle
+                index
                 (assoc request :seon.search/families
                        #{:seon.message/id})))]
           (is (= [{:seon.search/family :seon.cluster.instruction/id
@@ -187,8 +188,14 @@
 
 (deftest search-is-an-ordinary-sci-evaluation-function
   (with-index
-    (fn [connection _]
-      (let [ctx (test-support/fork-cluster-ctx connection)
+    (fn [connection index]
+      (let [ctx (test-support/fork-cluster-ctx connection "search-fixture")
+            state (get ctx env/state-carrier)
+            environment (assoc (env/of ctx) :seon.search/handle index)
+            _ (env/replace-environment! state environment)
+            _ (is (identical? index (search/supplied-handle (env/of ctx))))
+            _ (is (identical? index (:seon.search/handle
+                                    (env/scope environment {:seon.agent/id "search-agent"}))))
             request {:seon.search/query "search"
                      :seon.search/families #{:seon.fn/sym}
                      :seon.search/namespace-prefix 'seon.search

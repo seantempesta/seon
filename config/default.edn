@@ -510,6 +510,11 @@
    :seon.call-preparation/supplier
    [:seon.fn/sym "seon.env/supplied-agent-id"]}
 
+  {:seon.call-preparation/key :seon.search/handle
+   :seon.call-preparation/schema [:seon.schema/key :seon.search/handle]
+   :seon.call-preparation/supplier
+   [:seon.fn/sym "seon.search/supplied-handle"]}
+
   {:seon.ai.model/provider-id "deepseek"
    :seon.config.ai/endpoint "https://api.deepseek.com/chat/completions"
    :seon.config.ai/api-key-variable "DEEPSEEK_API_KEY"

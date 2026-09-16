@@ -1,6 +1,9 @@
 #:seon.search{:family :qualified-keyword,
               :path :string,
-              :index-id :string,
+              :handle
+              [:fn {:error/message "must be a carried Lucene index handle"
+                    :gen/gen seon.search/handle-generator}
+               seon.search/handle?],
               :index [:enum :text :symbol],
               :channel :seon.flow/channel,
               :completion :seon.flow/channel,
@@ -30,6 +33,7 @@
                [:seon.search/results [:vector :seon.search/result]]],
               :request
               [:map
+               [:seon.search/handle :seon.search/handle]
                [:seon.search/query :seon.search/query]
                [:seon.search/families :seon.search/families]
                [:seon.search/namespace-prefix
