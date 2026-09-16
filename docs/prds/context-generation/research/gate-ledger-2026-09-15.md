@@ -914,3 +914,19 @@ working-directory` 22/0/0, `seon.cluster.store-test/creation-never-deletes-
 a-complete-store-or-an-undeclared-root` 6/0/0, 8 neighbours 40/0/0. Left in
 the issue: the platform tier must declare no destructive drill (a tier
 selection checker).
+
+### 2026-09-16 ~12:40Z — platform tier carries no destructive drill (steward `9fa1f101d` `f03adc248`)
+
+`seon.test.runner/destructive-owners` is a measured roster (the three
+functions that delete a path they did not create: the two
+`populate-published-*` fixtures and `cleanup-root-under-lock!`), resolved
+against the manifest with a refusal if one goes missing; the coordinator
+verifies before the first platform task that no `:seon.test/platform` test
+reaches an owner (reach from `:seon.fn/calls`), refusing with test +
+shortest path; three platform tests that reached one moved to the bulk tier.
+The "reaches the delete-admission seam" predicate was refuted by measurement
+(42 of ~80 platform tests reach `create-store!` through `with-source-store`).
+The orchestrator declined the proposed `:seon.fn/destructive` marker facet as
+a speculative addition with one consumer. Lane rule: destructive tests are
+cold-only. Batch 66 (after 65): platform (the proof) + seon.test.runner-test
+seon.test-runner-test seon.cluster.cohost-boot-test seon.test-support-test.
