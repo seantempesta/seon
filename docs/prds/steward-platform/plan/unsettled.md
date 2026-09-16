@@ -1161,6 +1161,18 @@ and one real bug: `issue-settlement-runs-tests-and-derives-completion` throws
 `nth not supported on this type: PersistentArrayMap` (a destructuring error in
 settlement; also seen in seon.log earlier today).
 
+**RULED 00:20Z (owner: "Do it!") → program-facts PRD §1f G1–G6:** deletion is
+retraction; edges + reach are qualified symbols; tombstones/minting/second
+validator deleted; NO retired attribute; analysis provenance a required fact;
+components validated as their parent's value; all in the one reset. Lane
+`edges-are-symbols-deletion-is-retraction` launched, plan first (the tree is
+busy; it implements file by file as lanes release). The batch-113 issue reds
+(33) dissolve under G1 (an issue whose note is gone is retracted). Also
+launched: Opus `wake-matchers` fix (nth on a map at wake.clj:422) and the
+tier-0 cleanup relaunched with neutral wording (first attempt died on a
+safeguard trip). Next on `transcript.clj` when composable-history releases it:
+the debug-page outline (turns → units → HTML render with AI-text toggle).
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
