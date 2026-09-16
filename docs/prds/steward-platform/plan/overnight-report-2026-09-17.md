@@ -68,8 +68,10 @@ peer session (batches 30–57; ledger
    sites in 96 files, the cold gate showed **142 tests in 47 namespaces had
    been passing over refused writes** (a shared fixture seeding the same
    receipt twice dominates); they are being made honest namespace by
-   namespace, two of them may be real defects (call preparation, boot
-   recovery) and are under separate triage; a
+   namespace; of the two suspected real defects, one WAS real — the
+   instrumentation refusal carried a leaf value instead of the checked
+   value and arity refusals lost their number (fixed at `seon.instrument`) —
+   and the other was expectation drift in boot recovery (fixed at the test); a
    `delay`/`defonce` caching a throwable (3 sightings); an open map keyed only
    by universal attributes shadowing a family (3 sightings; checker issue
    filed); one lane's intermediate edit refusing adoption for every lane (2).
