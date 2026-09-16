@@ -1278,3 +1278,24 @@ pre-existing and attributed in `tmp/orchestrator/gate-requests/render-repl-reds.
 diff). `d15be4dcf` proven on its namespaces. Two earlier attempts failed
 before running (base preparation during the collection; a zsh word-split
 error in the invocation). Root `run.VgHEBZ` swept.
+
+## Batches 101–104 (orchestrator, 2026-09-17 15:00–20:30Z)
+
+- **101** (collector completeness `ba2986d72` + `0f23d6fb6` + `f67d5c028`):
+  first run failed at load (`with-redefs #'` in `operator_test.clj`); second
+  71 tests / 431 assertions, 3 E (the lane's latch test — fixed; two
+  fault-storage tests — attributed to `2066b8c20`, routed); third, on
+  `f67d5c028` over six namespaces, **71 / 436, 0 F 0 E** — the slice proven;
+  the gate itself exited 1 because recording into `default` through the
+  io-prepl went silent for 30 s under lane load (facts not recorded; log
+  `tmp/orchestrator/gate-results/batch-101.log`).
+- **102** (S1 `6312fcef0`: program-test, fn-test, turn-test, sci.eval-test):
+  176 / 531, 3 F 88 E, every error "Fixture setup was refused" — attributed
+  to the HEAD issue schema's misplaced `:seon.issue/turns-remaining`
+  (S7's `3772e2f68`, corrected in `2d997b88f`); reruns after S7's gate.
+- **103** (write-volume fix, boot-test + source-test): first run named a
+  non-existent namespace; second, 51 / 181, 1 F 21 E from the snapshot's
+  broken `operator_test.clj` failing every cluster boot; third run on HEAD in
+  flight.
+- **104** (fault-storage `bdda3cd5d`): **2 tests / 25 assertions, 0 F 0 E**,
+  recorded — the occurrence-model correction proven.
