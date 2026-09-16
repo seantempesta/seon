@@ -428,10 +428,12 @@ Clojure — at design time, not only before the edit. The compact invariants:
   `:symbol`/`:qualified-symbol`, which the schema bridge maps to Datahike's
   `:db.type/symbol` (`src/seon/schema/datahike.clj:66-67`). A string in one
   of those attributes is a defect; a `(str sym)` to write one or a `(symbol
-  s)` to read one is the sighting. A schema tag saying "this string is a
-  symbol" is a mirror of the value's real type and is deleted with the
-  string. Changing an existing attribute's type is done at a reset with no
-  migration — database data is disposable by ruling.
+  s)` to read one is the sighting. (`:seon.search/index :symbol` is NOT a
+  type mirror — it selects the search tokenizer, `src/seon/search.clj:170-174`,
+  and stays.) Changing an existing attribute's type is done at a reset with
+  no migration — database data is disposable by ruling. The inventory of
+  every site is
+  `docs/prds/steward-platform/research/symbols-everywhere-inventory-2026-09-17.md`.
 
 **An entity IS its attributes, values, and refs — never a stamped kind.**
 Do not add `:type`/`:kind` discriminator attributes: query attribute
