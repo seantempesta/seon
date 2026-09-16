@@ -1039,53 +1039,62 @@
 
   Walk indexed incoming call edges once per reachable identity. Explicit
   subjects terminate the walk; pending subjects match this symbol exactly.
-  The finite database graph bounds the work, including cycles."
+  The finite database graph bounds the work, including cycles. A refused
+  database read is returned as the flat value it is: concatenating an
+  error map would splice its entries into the selection."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.fn/sym]
-                  [:vector :seon.test/sym]]}
+                  [:or [:vector :seon.test/sym] :seon.error/value]]}
   [database function-symbol]
-  (let [target (:db/id (db/pull database [:db/id]
-                               [:seon.fn/sym function-symbol]))
-        reached
-        (loop [pending (if target [target] [])
-               seen #{}
-               callers #{}]
-          (if-let [entity (peek pending)]
-            (if (seen entity)
-              (recur (pop pending) seen callers)
-              (let [incoming (mapv :e (db/datoms database :avet
-                                               :seon.fn/calls entity))]
-                (recur (into (pop pending) incoming)
-                       (conj seen entity)
-                       (into callers incoming))))
-            callers))
-        subjects (cond-> reached target (conj target))]
-    (->> (concat
-          (when (seq reached)
-            (db/q '[:find [?symbol ...]
-                    :in $ [?test ...]
-                    :where [?test :seon.test/sym ?symbol]]
-                  database reached))
-          (when (seq subjects)
-            (db/q '[:find [?symbol ...]
-                    :in $ [?subject ...]
-                    :where
-                    [?test :seon.test/subject ?subject]
-                    [?test :seon.test/sym ?symbol]]
-                  database subjects))
-          (db/q '[:find [?symbol ...]
-                  :in $ ?target-symbol
-                  :where
-                  [?test :seon.test/pending-subject ?target-symbol]
-                  [?test :seon.test/sym ?symbol]]
-                database function-symbol))
-         distinct
-         sort
-         vec)))
+  (let [row (db/pull database [:db/id] [:seon.fn/sym function-symbol])]
+    (if (:seon.error/kind row)
+      row
+      (let [target (:db/id row)
+            walked
+            (loop [pending (if target [target] [])
+                   seen #{}
+                   callers #{}]
+              (if-let [entity (peek pending)]
+                (if (seen entity)
+                  (recur (pop pending) seen callers)
+                  (let [edges (db/datoms database :avet :seon.fn/calls entity)]
+                    (if (:seon.error/kind edges)
+                      edges
+                      (let [incoming (mapv :e edges)]
+                        (recur (into (pop pending) incoming)
+                               (conj seen entity)
+                               (into callers incoming))))))
+                callers))]
+        (if (:seon.error/kind walked)
+          walked
+          (let [subjects (cond-> walked target (conj target))
+                by-edge (when (seq walked)
+                          (db/q '[:find [?symbol ...]
+                                  :in $ [?test ...]
+                                  :where [?test :seon.test/sym ?symbol]]
+                                database walked))
+                by-subject (when (seq subjects)
+                             (db/q '[:find [?symbol ...]
+                                     :in $ [?subject ...]
+                                     :where
+                                     [?test :seon.test/subject ?subject]
+                                     [?test :seon.test/sym ?symbol]]
+                                   database subjects))
+                by-pending (db/q '[:find [?symbol ...]
+                                   :in $ ?target-symbol
+                                   :where
+                                   [?test :seon.test/pending-subject ?target-symbol]
+                                   [?test :seon.test/sym ?symbol]]
+                                 database function-symbol)]
+            (or (some #(when (:seon.error/kind %) %) [by-edge by-subject by-pending])
+                (->> (concat by-edge by-subject by-pending)
+                     distinct
+                     sort
+                     vec))))))))
 
 (defn tests-reaching
   "Compatibility spelling for the shared gate-set derivation."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.fn/sym]
-                  [:vector :seon.test/sym]]}
+                  [:or [:vector :seon.test/sym] :seon.error/value]]}
   [database function-symbol]
   (gate-set database function-symbol))
 

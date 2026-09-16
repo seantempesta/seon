@@ -4,11 +4,13 @@
             [clojure.test :refer [deftest is testing]]
             [seon.cluster.store :as store]
             [seon.db :as db]
+            [seon.error :as error]
             [seon.turn :as turn]
             [seon.fn :as seon.fn]
             [seon.fn.analyzer :as analyzer]
             [seon.id :as id]
             [seon.program :as program]
+            [seon.schema :as schema]
             [seon.sci.eval :as sci.eval]
             [seon.test-support :as test-support]))
 
@@ -1426,6 +1428,95 @@
             "edge removal is visible without updating any retained closure")
         (is (= (first results) (seon.fn/gate-set database "sample.gates/a"))
             "the old immutable value keeps its own reach")))))
+
+(deftest gate-set-returns-the-shape-its-contract-declares
+  (test-support/with-database
+    (fn [connection]
+      (transact-fixture!
+       connection
+       (into [{:seon.ns/name 'sample.shape :seon.ns/source "(ns sample.shape)"}]
+             (map (fn [s]
+                    {:seon.fn/sym s
+                     :seon.schema.admission/source :core
+                     :seon.fn/ns [:seon.ns/name 'sample.shape]
+                     :seon.fn/source (str "(defn " (name (symbol s)) " [] nil)")
+                     :seon.fn/arglists "([])"
+                     :seon.fn/private? false}))
+             ["sample.shape/none" "sample.shape/one" "sample.shape/many"]))
+      (transact-fixture!
+       connection
+       [{:seon.test/sym "sample.shape/only-test"
+         :seon.schema.admission/source :core
+         :seon.fn/calls [[:seon.fn/sym "sample.shape/one"]]}
+        {:seon.test/sym "sample.shape/edge-test"
+         :seon.schema.admission/source :core
+         :seon.fn/calls [[:seon.fn/sym "sample.shape/many"]]}
+        {:seon.test/sym "sample.shape/subject-test"
+         :seon.schema.admission/source :core
+         :seon.test/subject [:seon.fn/sym "sample.shape/many"]}
+        {:seon.test/sym "sample.shape/pending-test"
+         :seon.schema.admission/source :core
+         :seon.test/pending-subject "sample.shape/many"}])
+      (let [database (db/db connection)
+            test-sym? (schema/call-with-projection
+                       (db/carried-projection database)
+                       #(schema/candidate-validator :seon.test/sym))
+            gate-sets (into {}
+                            (map (juxt identity #(seon.fn/gate-set database %)))
+                            ["sample.shape/none" "sample.shape/one"
+                             "sample.shape/many"])]
+        (is (= {"sample.shape/none" []
+                "sample.shape/one" ["sample.shape/only-test"]
+                "sample.shape/many" ["sample.shape/edge-test"
+                                     "sample.shape/pending-test"
+                                     "sample.shape/subject-test"]}
+               gate-sets)
+            "none, one and many reaching tests")
+        (doseq [[function-symbol gate] gate-sets]
+          (is (vector? gate)
+              (str function-symbol " gates a vector"))
+          (is (every? test-sym? gate)
+              (str function-symbol " gates only values the declared "
+                   ":seon.test/sym element schema accepts: "
+                   (pr-str (vec (remove test-sym? gate)))))
+          (is (= gate (vec (sort gate)))
+              (str function-symbol " gates a sorted vector")))
+        ;; The class: a flat database refusal concatenated into the selection
+        ;; splices its map entries, and each entry reads as a two-element
+        ;; vector the declared element schema refuses.
+        (let [query db/q
+              thread (Thread/currentThread)
+              ;; A degrading cluster hands a read this flat value; the dev
+              ;; dial throws the same diagnostic, so the selection must never
+              ;; concatenate it either way.
+              refusal (error/diagnostic
+                       {:seon.error/kind :seon.db/invalid-read
+                        :seon.error/message
+                        "seon.db/q cannot read uninstalled attribute :sample.shape/uninstalled."
+                        :seon.error/diagnostic-layer :database-read
+                        :seon.error/diagnostic-operation 'seon.db/q
+                        :seon.error/diagnostic-member :sample.shape/uninstalled
+                        :seon.error/diagnostic-expected :seon.db/installed-attribute
+                        :seon.error/diagnostic-offending :sample.shape/uninstalled
+                        :seon.error/diagnostic-cause :seon.db/uninstalled-attribute
+                        :seon.error/diagnostic-evidence
+                        {:seon.fn/sym "sample.shape/many"}})
+              refused (with-redefs
+                        [db/q (fn [& arguments]
+                                (if (identical? thread (Thread/currentThread))
+                                  refusal
+                                  (apply query arguments)))]
+                        (seon.fn/gate-set database "sample.shape/many"))]
+          (is (= :seon.db/invalid-read (:seon.error/kind refusal))
+              "the injected read is a flat database refusal")
+          (is (= refusal refused)
+              "a refused read is returned whole")
+          (is (not (vector? refused))
+              "a refusal never becomes the gate set's own elements")
+          (is (empty? (filter #(and (vector? %) (= 2 (count %))
+                                    (keyword? (first %)))
+                              (when (vector? refused) refused)))
+              "no spliced map entry reaches the caller"))))))
 
 (deftest output-path-report-finds-the-shortest-bypass
   (test-support/with-database
