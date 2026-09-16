@@ -185,3 +185,15 @@
   assertions / 0 failures — issue-family's publication fix holds. Result
   recording failed (default's prepl silent 30 s under lane load); accepted
   on the log, recording-only re-run requested after the refork.
+- 08:05Z write-validation-class landed (`20d30a0bd`, evidence `e11d2ec03`):
+  a raw write map is matched to an entity schema only by the identity
+  attribute it asserts; reverse refs admitted; canonical fixture setup fails
+  loudly on a flat refusal; 12/0/0 and 6/0/0 in-process; the compound issue
+  archived with residuals: 12 transcript tests and 3 turn tests remain red
+  for stale reasons → Opus fixer queued. Batch 21 named: issue-family
+  18 tests / 1 error = the renderer-fn reader residual (Opus fixer running;
+  seon.dev.issues-test and source-test green). Research launched (Opus):
+  R1 writer census (derived from the program graph, supersedes the hand
+  list), R4 detectors and standards with live subject counts; R2 structured
+  test failures, R3 effects and write-back provenance, R5 analyzer facets
+  written and queued (tmp/orchestrator/wave3/research/).
