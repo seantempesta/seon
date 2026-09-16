@@ -13,14 +13,14 @@
             [seon.cluster.process :as cluster.process]
             [seon.cluster.registry :as registry]
             [seon.cluster.store :as store]
-            [seon.config :as config]
             [seon.db :as db]
             [seon.error :as error]
             [seon.fn :as fn]
             [seon.program :as program]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
-            [seon.schema.edn :as schema.edn])
+            [seon.schema.edn :as schema.edn]
+            [seon.schema.form :as schema.form])
   (:import [java.nio.file Files]))
 
 (schema.edn/load! {})
@@ -357,11 +357,14 @@
    [:=> [:cat :seon.store/store :seon.test.run/completion]
     [:or :seon.test/results :seon.error/value]]}
   [held-store completion]
-  (let [head (database held-store (:seon.source/commit-id (current held-store)))
+  (let [published (or (current held-store)
+                      (refuse! ::source-absent "Test recording requires a published current-src." {}))
+        head (database held-store (:seon.source/commit-id published))
         allowance (or (:seon.test/remaining-ms completion)
-                      (schema/call-with-projection
-                        (schema/projection-from-database head)
-                        #(:seon.test/check-time-limit-ms (config/defaults))))
+                      (:seon.config/default
+                        (schema.form/attr-form-properties
+                          (get-in (schema/projection-from-database head)
+                                  [:seon.schema.projection/forms :seon.test/check-time-limit-ms]))))
         deadline (+ (System/nanoTime) (* 1000000 allowance))]
     (loop [attempt 1]
       (let [outcome (try
