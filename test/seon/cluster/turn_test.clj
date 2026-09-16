@@ -2321,7 +2321,7 @@
     (if backup? :failover-now :backoff)
     (contains? #{:credential :authentication :authorization :model}
                error-class)
-    (if backup? :failover-now :fail)
+    :fail
     :else :fail))
 
 (defn- expected-attempt-trace
@@ -2367,7 +2367,7 @@
 
 (defn- generated-turn-agrees-with-durable-facts?
   [scenario]
-  (with-cluster fake-evaluate
+  (with-cluster
     (fn [cluster]
       (let [{::keys [attempts succeeded?]} (expected-attempt-trace scenario)
             connection (:seon.db/connection cluster)
@@ -2389,9 +2389,9 @@
                         (let [ordinal (count @requests)]
                           (swap! requests conj request)
                           (nth completions ordinal (last completions))))]
-        (db/transact!
+        (let [report (db/transact!
          connection
-         [(cond-> {:seon.config/cluster "turn-test"
+         [(cond-> {:db/id [:seon.config/cluster "turn-test"]
                    :seon.config.ai.retry/base-delay-ms
                    (:seon.ai.retry/base-delay-ms retry-strategy)
                    :seon.config.ai.retry/multiplier
@@ -2412,18 +2412,15 @@
                    :seon.config.ai.backup/api-key-variable
                    (:seon.ai/api-key-variable backup-target)
                    :seon.config.ai.backup/timeout-ms
-                   (:seon.ai/timeout-ms backup-target)))])
+                   (:seon.ai/timeout-ms backup-target)))])]
+          (when (:seon.error/kind report)
+            (throw (ex-info "The generated scenario seed was refused." report))))
         (with-redefs [ai/complete complete!]
-          (with-redefs [injected-evaluation
-                    {:seon.cluster.eval/result-edn
-                     (pr-str (seon.run/complete "generated"))
-                     :seon.sci.admit/value
-                     (seon.run/complete "generated")}]
-            (drive! cluster 12)))
+          (drive! cluster 12))
         (let [rows (attempt-rows @connection)
               actual (mapv actual-attempt-shape rows)
               run-row (db/q '[:find (pull ?run [*]) .
-                             :where [?run :seon.turn/id _]]
+                             :where [?run :seon.turn/attempts _]]
                            @connection)]
           (and
            (= attempts actual)

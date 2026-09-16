@@ -473,3 +473,26 @@ canonical forks complete, preserving the identity, private-object, compaction,
 generated-read, message-diff and real-proc obligations. The earlier closed-event
 timeout and renderer-ref error do not recur in these runs. This does not
 attribute either earlier failure to a specific concurrent change.
+
+
+### Generated provider scenario slice
+
+The scenario constructor now updates the existing config entity via a lookup
+ref and throws with the complete refusal if setup fails. Real SCI replaces
+the fake result envelope, and the observed turn is selected by its attempt
+ref rather than an arbitrary system/agent turn. Direct real scenarios returned
+`[true true]` for credential/no-backup and success/backup.
+
+The first full run exposed the independently stale policy oracle: run
+**53859 0/1/0**, shrinking to credential failure with backup. The complete
+observation shows one terminal attempt, as ruled by `3f26b8af3` and implemented
+by `seon.ai/disposition`: static configuration refusals never fail over. The
+oracle now asserts that behavior while retaining transient retry/failover and
+paid-work protection. Its direct eight-case probe returned
+`[:fail :fail :fail :fail :failover-now :failover-now :failover-now :fail]`.
+
+The unchanged **48 trials**, seed **202607280402**, pass on candidate
+**55836 1/0/0** and after file reload **56329 1/0/0**. Every existing property
+conjunct remains: durable prefix before each call, target, ordinal, absence of
+a stored disposition, closure, episode count, and reply presence. No production
+provider policy or validator changed.
