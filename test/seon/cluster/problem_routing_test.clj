@@ -244,7 +244,7 @@
        (testing "closing the run cannot falsely settle its plan"
          (test-support/transacted! connection
                                  [[:db/add [:seon.turn/id run-id]
-                                   :seon.turn/closed-tx now]])
+                                   :seon.turn/closed-tx "datomic.tx"]])
          (is (false?
               (:seon.turn.work/settled?
                (turn/plan-settlement @connection run-id)))))))))

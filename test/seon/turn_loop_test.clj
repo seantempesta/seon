@@ -622,10 +622,7 @@
                        [?capture :seon.context.capture/run ?run]]
                      @connection run-id)]
            (is (= :error (:seon.turn.loop/outcome report)))
-           (is (inst? (:seon.turn/closed-tx
-                       (db/pull @connection
-                                [:seon.turn/closed-tx]
-                                [:seon.turn/id run-id]))))
+           (is (inst? (test-support/turn-closed-at @connection run-id)))
            (is (= 0 @provider-calls))
            (is (= (:seon.error/kind refusal) (:seon.error/kind capture)))
            (is (= (:seon.error/message refusal)
@@ -1267,7 +1264,10 @@
                   (conj {:seon.ai.attempt/id "closed-attempt"
                          :seon.turn/_attempts [:seon.turn/id "run-1"]
                          :seon.ai.attempt/ordinal 0
-                         :seon.ai.attempt/at now})
+                         :seon.ai.attempt/at now
+                         :seon.ai/endpoint "https://fixture.invalid/v1/chat"
+                         :seon.ai/model "fixture-model"
+                         :seon.ai.attempt/settings-edn "{}"})
 
                   ;; ONE ENTITY PER (run, ordinal), under the ONE identity derivation the
                   ;; writer uses: the freeze asserts the source and the start instant, and
@@ -1357,10 +1357,7 @@
                (:seon.error/kind stored-value)))
         (is (= "install gate broke after evaluation"
                (:seon.cluster.eval/error receipt)))
-        (is (inst? (:seon.turn/closed-tx
-                    (db/pull @connection
-                             [:seon.turn/closed-tx]
-                             [:seon.turn/id "run-1"]))))))))
+        (is (inst? (test-support/turn-closed-at @connection "run-1")))))))
 
 ;;; The F2 sealed suite — kill-positions-per-agent-test, seed 2026072827.
 ;;; ORACLE: the crash-walk rows 1-10, re-grounded — `next-agent-work`
@@ -1430,9 +1427,7 @@
 
 (defn- closed-at
   [connection]
-  (:seon.turn/closed-tx
-   (db/pull @connection [:seon.turn/closed-tx]
-            [:seon.turn/id "run-1"])))
+  (test-support/turn-closed-at @connection "run-1"))
 
 (defn- commit-agent-receipt!
   "The turn's own last form: an AGENT-AUTHORED receipt at ordinal 0.

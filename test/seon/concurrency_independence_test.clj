@@ -344,10 +344,10 @@
   [database specs]
   (doseq [spec specs]
     (let [turn (db/pull database
-                        [:seon.turn/id :seon.turn/closed-tx]
+                        [:seon.turn/id]
                         [:seon.turn/id (::run-id spec)])]
       (is (= (::run-id spec) (:seon.turn/id turn)))
-      (is (inst? (:seon.turn/closed-tx turn))))))
+      (is (inst? (test-support/turn-closed-at database (::run-id spec)))))))
 
 (defn- assert-concurrent-progress!
   [database specs]

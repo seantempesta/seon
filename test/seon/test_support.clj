@@ -792,6 +792,21 @@
       (with-fresh-database database-id extra-schema options body)
       (with-branched-database extra-schema body))))
 
+(defn turn-closed-at
+  "The instant a turn closed, read THROUGH its closing transaction ref.
+
+   `:seon.turn/closed-tx` IS the closing transaction (`seon.turn/open?` means
+   no closed-tx), so pulling the attribute answers `{:db/id …}` and never an
+   instant — the shape forty-five assertions were comparing to `inst?` since
+   the transaction refs landed (`ae0e54841`). The time lives on the
+   transaction, exactly as `seon.plan` reads `:my.plan.item/completed-tx`.
+   Absent while the turn is still open."
+  [database turn-id]
+  (get-in (db/pull database
+                   [{:seon.turn/closed-tx [:db/txInstant]}]
+                   [:seon.turn/id turn-id])
+          [:seon.turn/closed-tx :db/txInstant]))
+
 (defn program-fn-row
   "One first-party program row for a fixture that needs only the identity.
 
@@ -856,6 +871,33 @@
             (reset! registry schemas)
             (doseq [[instrumented-var callable] roots]
               (alter-var-root instrumented-var (constantly callable)))))))))
+
+(defn preserving-schema-registry
+  "Scope a test's deliberate schema-registry changes to that test.
+
+  A SEPARATE owner from `preserving-instrumentation-state`, deliberately:
+  the two preserve different shared state for different call sets (a test
+  that arms a contract rarely declares a schema, and vice versa), and folding
+  the projection snapshot into the instrumentation helper would make every
+  instrumentation test pay for a projection it never touches while naming the
+  concern wrongly. Both restore in a `finally`, including after a throw.
+
+  What it preserves is each RUNNING cluster's schema projection — the only
+  shared schema registry a JVM has. The packaged declaration forms are
+  derived from classpath resources on every call and hold no mutable state,
+  and `seon.schema/register!` refuses outside an isolated candidate delta, so
+  neither can be leaked into.
+
+  `seon.test/run` applies the same restore around EVERY in-process run, so
+  this helper is the scoped version for a test that changes the registry
+  deliberately and wants the change gone before its own later assertions."
+  [body]
+  (let [before ((requiring-resolve 'seon.test.runner/live-cluster-schema-states))]
+    (try
+      (body)
+      (finally
+        ((requiring-resolve 'seon.test.runner/restore-live-cluster-schema!)
+         before)))))
 
 (defn closeable
   "Adapt an acquired fixture value to Clojure's with-open cleanup scope.
