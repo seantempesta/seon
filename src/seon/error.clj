@@ -1664,15 +1664,26 @@
                          [?error :seon.error/occurrences ?occurrence]))])
 
 (defn faults-form
-  "Read errors assigned to this agent: its stewarded namespaces, and its turns."
+  "Read errors assigned to this agent: its stewarded namespaces, and its turns.
+
+  A UNIT WITH NO FAULT VALUE CARRIES NO ENTITY TO PULL. A brand-new agent
+  has no `:seon.error/of-steward` datom at all, so the walk hands this
+  function nil; pulling on nil violated `seon.db/pull`'s declared contract,
+  the throw escaped the renderer, and the fault committer interrupted the
+  turn that was generating the opening. Measured 2026-09-16 on a scratch
+  cluster: every worker `seon.issue/start!` created closed its opening turn
+  with zero evaluations and one `:seon.render/unknown` fault. Absence of a
+  fault is ordinary — it emits no form, exactly as an agent with faults but
+  no readable identity already did."
   {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :seon.render/form]]}
   [unit]
-  (let [row (db/pull (:seon.db/db unit) [:seon.agent/id] (faults-input unit))]
+  (when-let [entity (faults-input unit)]
+   (let [row (db/pull (:seon.db/db unit) [:seon.agent/id] entity)]
     (when-let [agent-id (:seon.agent/id row)]
       {:seon.repl/comment
        "Inspect errors in the namespaces assigned to me and in my own turns."
        :seon.repl/form
-       (list 'seon.db/q (list 'quote agent-faults-query) agent-id)})))
+       (list 'seon.db/q (list 'quote agent-faults-query) agent-id)}))))
 
 (defn render-faults-ai
   "Emit the steward's read, or render already acquired fault entities."
