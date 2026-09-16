@@ -46,3 +46,14 @@ commit).
 
 **Gate requested:** batch 101 = platform, then the namespaces in
 `tmp/orchestrator/gate-requests/collector.txt`.
+
+## Addendum — `0f23d6fb6` (2026-09-17 18:10Z)
+
+Batch 101 failed at load on `with-redefs` binding `#'` forms. The fix uses
+`with-redefs-fn` over a Var map. Loading the namespace then exposed a real
+§2.1 defect in the slice: `documented-request-keys` read the whole authored
+schema population at call time, coupling every collection to every other
+lane's resource placement; it is now a value in `seon.operator`, kept honest
+by a drift test against the declared request schema (derive-or-die: enforced
+by a checker). Five namespaces load through the runner's loader; 16 tests
+green armed in process. Approved; batch 101 reruns.
