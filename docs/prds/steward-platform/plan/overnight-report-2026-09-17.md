@@ -1,0 +1,90 @@
+---
+type: report
+status: current (written 2026-09-17 01:20Z; the working edge in unsettled.md has the minute-by-minute record)
+created: 2026-09-17
+tags: [report, steward, overnight]
+---
+
+# Overnight report — 2026-09-16 → 09-17
+
+Focus given: code indexing, error/fault storage and linking, robust test
+infrastructure with per-test state on the reach digest, efficient updates by
+identity. Everything below landed on `steward-platform`, gated cold by the
+peer session (batches 30–57; ledger
+[gate-ledger-2026-09-15](../../context-generation/research/gate-ledger-2026-09-15.md)).
+
+## Broken first
+
+1. **The store grows without collection.** `data/store` went 107 MB → 12 GB in
+   eight hours with no periodic writer; an empty-delta transaction costs 4–9 s
+   on default vs 46 ms on a fresh store, and every publication, turn, probe
+   and recording pays it. Reset twice today; a third follows the peer's
+   measurements. This is the top decision: the peer's research brings three
+   options keyed on an observable signal (footprint magnitude / key count /
+   per-commit latency bound), never a timer.
+2. **Live agents cannot yet close a code issue.** The trials
+   ([issue-context-trials](../research/issue-context-trials-2026-09-16.md))
+   ran seven cheapest-DeepSeek sessions on the arglists issue; candidate F
+   (namespace picture) wrote the real fix and died one step from green on the
+   30 s shell bound while trying to adopt its own edit. Four platform
+   blockers found by the agents are now fixed (SCI pull of function rows;
+   `dir` elided to nothing; `start!` workers never armed / no wake; plan
+   derivation refusing past ~400 items). The remaining one is a decision
+   (below): agent-facing adoption.
+3. **Recurring classes named and partly killed today:** fixtures ignoring a
+   refused `transact!` (7 sightings; one helper landed, detector pending); a
+   `delay`/`defonce` caching a throwable (3 sightings); an open map keyed only
+   by universal attributes shadowing a family (3 sightings; checker issue
+   filed); one lane's intermediate edit refusing adoption for every lane (2).
+
+## Landed (each with a landing note under `research/`)
+
+- **Indexing:** derived citation resolver + delta-only issue index
+  (edit-hook path free of the 13 s index); `:seon.fn.file/root` fact;
+  `seon.program/shapes` dissolved into declared row schemas; adoption
+  identities derived; gate-set 6.7 s → 11 ms (peer); analyzer facets.
+- **Errors/faults:** provider faults visible to the prompt (peer);
+  `faults-form` no longer pulls on nil for new agents; typed filesystem
+  refusals; `seon.error/recording` as the one writer of facts.
+- **Test infrastructure:** `:seon.test/reach` closure refs + `changed-since-green`;
+  `seon.test.failure` components with file+line links; recording total
+  (typed unknown, tombstone minting, rebased across publications, staged as
+  data — the "Method code too large" class); first recorded gate since
+  batch 30 at batch 46; the evaluation-context loader fix (base poison);
+  base construction retried outside caller bounds; `transacted!` fixture
+  helper; monotonic `:db/index` adoption without a refork.
+- **Issues/tasks:** `seon.issue/generate` with detectors D1 (unpaired entity
+  maps, 32) and D2 (undocumented public functions, 2 src / 28 test) → 63
+  generated issues on default, idempotent by identity; the generated
+  opening names its detector; effect facts (`:seon.effect/eval`, capability
+  fn, file/span/program on `my.edit` effects).
+- **Agent loop:** an agent creation IS the arm wake; the issue assignment
+  datum is the worker's first wake; plan derivation in Clojure; `dir` shows
+  rows + a token-sized elision with a requery offset.
+
+## Owner decisions (2–3 options each, recommendation first)
+
+1. **Agent-facing adoption** (blocker 2): (a) a successful `my.edit` write
+   requests in-process adoption of that path, bounded, reported as the
+   effect result [recommended: the agent already made the change; adoption
+   is its consequence]; (b) `my.test/check` adopts changed `src`
+   namespaces the way it reloads test namespaces; (c) keep the shell path
+   and raise the shell bound to the measured 60–90 s adoption.
+2. **Which opening to keep:** F (namespace picture) + B's two exact
+   completing calls [recommended]; keep A as the floor; drop C, D, E, G.
+3. **Store growth:** await the peer's three options; the decision is the
+   signal the reclamation keys on.
+4. **Generated issues and tests:** the detector decides "done" for a
+   generated issue (no fabricated test row) [recommended, landed]; `start!`
+   therefore needs a detector-driven completion path (issue filed).
+5. **D2 scope:** generate docstring issues for test helpers (28) or src
+   only (2)? [recommended: src by default; test on request].
+6. Earlier parked: R1 identity strings→symbols; call-arities tuple vs
+   interned family; `seon.commit` entity; retention removal; cold page slice 2.
+
+## Still open
+
+`render-coverage` root address (peer lane), turn settlement cost (peer astra),
+gate-set output contract (peer), write-floor research (peer), the seven
+neighbouring reds the plan lane saw in process (cold verdict pending), the
+fixture-refusal detector, the open-map checker.
