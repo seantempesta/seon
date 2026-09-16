@@ -1131,9 +1131,17 @@
                   :seon.eval.drive/run-ids [run-id]}
                  terminal)
               "the episode verdict names the missing disposition")
-          (is (str/includes? rendered
-                             "ended without my.turn/complete or my.turn/wait")
-              "the following history carries the system-authored notice"))))))
+          ;; The undisposed-turn notice is dissolved (decision 8b of
+          ;; docs/prds/steward-platform/plan/owner-decisions-2026-09-17.md,
+          ;; ruled by T2 of program-facts-are-the-runtime-prd-2026-09-17.md).
+          ;; Nothing assembles the history but the walk: the missing
+          ;; disposition is the terminal verdict above and a fact the agent
+          ;; can query, never a third prompt grammar in the transcript.
+          (is (str/includes? rendered "(+ (answer-count) 1)")
+              "the following history carries the turn's own evaluations")
+          (is (not (str/includes? rendered
+                                  "ended without my.turn/complete or my.turn/wait"))
+              "the dissolved notice is not re-introduced"))))))
 
 ;;; THE CLASS-KILLER: what boot installs must cover what the loop writes
 ;;;
