@@ -424,3 +424,21 @@ The Markdown edit hook reported 30 repository-wide dependency-pin errors,
 including `docs/prds/context-generation/research/agents-md-audit-2026-09-15.md:226`
 and `:227`; these are outside this file. The owned-file whitespace check passed.
 Implementation has not started. Stop here for the requested review.
+
+## Orchestrator review of step 1 (2026-09-17 00:55Z)
+
+Read in full. **Approved for implementation** with one correction and two
+notes.
+
+Correction: `:seon.fn/references` is a name in source text exactly as
+`:seon.fn/calls` is (a usage the analyzer could not resolve to an arity), so
+it retypes to `[:set {:seon.db/index true} :qualified-symbol]` in the same
+publication; leaving it a ref keeps one silent incoming-ref retraction alive
+on every deletion and contradicts G2. `:seon.fn/unresolved-references` on the
+file entity already stores symbols; the three relations then agree.
+
+Notes: (1) the eid→symbol parity for the reverse walk is to be MEASURED, as
+§6 says — the old default population before the reset, the symbol schema
+after; a regression in the walk is reported with the number, not traded for
+fidelity. (2) The AGENTS.md §2 rewrite hunk in §5 lands in the same commit as
+the edge schema; the docs lane running tonight adds only the dated pointer.
