@@ -105,6 +105,56 @@ T5. **Waking is out of scope for now** (owner: "I don't think we have a good
     system for waking right now, but we can work on that later"). Slices in
     this document use the existing wake mechanics unchanged.
 
+## 1c. Rulings of 2026-09-17 11:00Z (owner, answering the questions of 10:50Z)
+
+C1. **Clusters are many; a merge names its target cluster explicitly, and the
+    bar for admittance is high.** Every function is fully specified (input
+    and output contract) and has at least one test before it is admitted to
+    a shared cluster. The updating and testing system must be exactly right,
+    because it is how we know an update broke nothing.
+
+C2. **The write-back / merge gate (S5):** the agent's issue tests pass AND
+    every test reaching any changed function passes (the program graph knows
+    both sets). It is an explicit operation, never automatic, for now. Its
+    target is the development cluster `default`, the same cluster the edit
+    hook updates, so both directions (files → facts by the hook, facts →
+    files by the write-back) meet on one cluster and stay in sync; a human
+    edit that changes a file between the agent's read digest and its write is
+    refused by the digest-guarded editor, which is the correct refusal.
+
+C3. **Override scope (S3): all first-party namespaces**, unless a definition
+    cannot be evaluated in SCI (host interop it cannot reach), in which case
+    that identity keeps loading the cluster's JVM-loaded definition and the
+    fact records the override as not loadable in SCI, a typed state.
+
+C4. **Root resumes an agent by updating its budget and running it again.**
+    Resuming is one function: assert the new budget on the issue/agent and
+    open the next turn. If it is more complicated than that, the abstraction
+    is wrong and is fixed, not worked around.
+
+C5. **The per-turn status is the agent's own data on the agent's debug page.**
+    There is no separate context-rendering system for issues. The data is
+    attached to the agent entity (and its issue) with well-thought-out shape
+    and a render pair for AI and HTML; the AI render shows the forms to run
+    alongside the reasoning so agents learn by seeing executions. If the
+    agent page cannot show it today, that is the work.
+
+C6. **No shell for self-modification.** Agents never run `bin/seon` or any
+    shell command to change their own system; the runtime exposes the
+    functions (adoption, tests, collection) as declared requests. Execution
+    limits differ between root and ordinary agents through the existing
+    per-agent config overlays, and root can update an agent's overlay to
+    change its limits.
+
+C7. **The collector's trigger multiple is two** (S8). First dry run approved
+    and taken.
+
+C8. Vocabulary retired on the owner's word: "layer one / layer two" (say
+    JVM-loaded first-party code / agent-authored definitions); `my.edit` is
+    external source editing and is not taught to issue agents; "schema
+    declaration form for a render pair" meant the `:seon.render/ai` /
+    `:seon.render/html` properties on an entity schema — say that.
+
 ## 2. What exists today, with the seams named
 
 Verified on `steward-platform` at `a36d55c3b`/`849bbce0b` on 2026-09-17.
