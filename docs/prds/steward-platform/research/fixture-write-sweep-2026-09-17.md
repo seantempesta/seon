@@ -345,3 +345,106 @@ assertion failure cannot be caused by adding a check to a write that lands):
   `resources/seon/schemas/seon.test.edn` carried peer edits throughout; none was
   touched or committed by this lane. `seon.fn-test` gained a peer's new test
   inside `b981b04d0` (named above).
+
+## Third pass: batch 70 (`ca9a8b0e8`) — the closing instant, and the rest of the keys
+
+Batch 70 ran the 23 second-pass namespaces cold: 306 tests, 297 F / 16 E.
+With the diagnostic now unclipped, every refusal named its own offending row,
+so this pass read causes instead of guessing them.
+
+### (a) `:seon.turn/closed-tx` is a transaction REF — one reader, not 50 edits
+
+`ae0e54841` ("Move agent data to transaction refs…") changed
+`:seon.turn/closed-tx` from an instant to a ref to the CLOSING TRANSACTION.
+Pulling the attribute answers `{:db/id N}`, so every
+`(inst? (:seon.turn/closed-tx …))` assertion has been false since that commit —
+they simply never ran, because their fixtures refused first. 50 assertions,
+but only **four reader sites** (one 45-assertion loop in
+`concurrency_independence_test.clj:350`, a local `closed-at` helper, and two
+inline pulls).
+
+`seon.test-support/turn-closed-at` pulls `{:seon.turn/closed-tx [:db/txInstant]}`
+and answers the instant, exactly as `seon.plan` reads
+`:my.plan.item/completed-tx` (`src/seon/plan.clj:67`). **No assertion was
+relaxed**: each still asserts the turn closed, and now reads the fact where it
+lives. One fixture was also WRITING an instant into the ref
+(`problem_routing_test.clj:247`); `"datomic.tx"` is how a transaction names
+itself.
+
+Design note, deliberately not taken here: the same reader arguably belongs in
+`seon.turn` as a public contracted function, since agents ask when a turn
+closed. It was kept in `seon.test-support` because the drift is in test
+expectations, not in production, and a new public contract in `src/` during a
+red-fixing pass is a separate decision. Commit `4d181533d`.
+
+### (e) The remaining fixture keys — `55a0abae0`
+
+| key | where | root fix |
+|---|---|---|
+| `:seon.schema.admission/source` on `:seon.test/sym` rows | bootstrap (2) | declared, as on `:seon.fn/sym` |
+| `:seon.turn/opened-tx` | background-blob, web.jvm | every seeded turn carries it |
+| `:seon.cluster.eval/at` | context-selection | a freeze has an instant |
+| `:seon.error/at` | turn-work | **not an installed attribute**: it is a REQUEST key `seon.error/recording` reads (`src/seon/error.clj:1417`), and the writer decides which datoms an occurrence gets. The hand-written row dropped it. |
+| `:seon.ai/endpoint` | turn-loop | an attempt names its provider |
+| config ROW written as `(assoc (config/defaults) …)` | web.jvm (2 sites) | `web-manifest` is the overlay, `apply-config!` the path; `config` stays the effective VALUE handed directly to a handler, which is a different thing |
+
+### (f) The four singles
+
+- `seon.bootstrap-test/absent-intent-budget-refuses-loudly` — its premise is
+  that the dial is absent, but `config/default.edn:140` SHIPS
+  `:seon.config.bootstrap/beyond-closure-token-budget`, so `seed-cluster!`
+  always writes it. **Absent is a fact**: the fixture now retracts the dial,
+  which is the only honest way to observe the loud refusal.
+- `seon.render.web-context-test/context-and-page-do-not-demand-the-render-proc`
+  and `seon.render.web-test/unrelated-transaction-reuses-debug-observation-and-render-call`
+  (`d7e5a0268`) — both prove an UNRELATED commit does not re-walk the agent's
+  history, and both seeded that commit as a message addressed to the agent
+  under test. `:seon.message/inbox` is a LISTENED attribute: once the seed
+  stopped refusing, the "unrelated" transaction was a wake (`@walks` = 2, not
+  1). Both now address a bystander agent. The sweep did not break these; it
+  revealed that they had been proving nothing.
+- `seon.test-runner-test/repeated-identical-errors-have-one-whole-face` and
+  `seon.render-source-test/source-contracts-…` were NOT reached: see the
+  blocker below.
+
+### Blocked, not fixed
+
+- **`seon.concurrency-independence-test` (199 F) and
+  `seon.concurrency-streams-test` (9 F) are blocked on the history-cut
+  ruling** — the dir-elision lane's A/B shows the agent's history is rendered
+  as ONE string through the value budget (`transcript.clj:1893`; 2,075 chars
+  against a ~640-token budget), so `(str/includes? rendered payload)` could
+  never have passed. Issue:
+  `docs/seon/issues/the-agents-history-is-cut-as-one-string-by-the-value-budget.md`.
+  Their assertions were NOT relaxed. Their closed-tx reads were fixed anyway,
+  since that is an independent bug.
+- `seon.render.transcript-run-test/render-run-selects-only-the-requested-run`
+  (11 F) looks like the SAME mechanism and is reported rather than forced: the
+  HTML render carries the turn header and "Evaluations 2", while the AI render
+  answers `""`. That is a whole history omitted, not a missing fixture row.
+- `seon.schema-usage-guard-test` (~20) — the registry-preservation lane.
+- `seon.cluster.agent-identity-test`, `seon.context-selection-test` assertion
+  failures — the agent-identity/dials triage. Their REFUSED writes were fixed
+  here; their assertions were left alone.
+
+### Verification boundary, third pass
+
+**The canonical fixture base cannot be constructed on `default` (pid 74930).**
+Two daemon-thread attempts, per the BASE CONSTRUCTION RULE, both answered:
+
+```
+:seon.test-support/database-base-unavailable
+"Canonical fixture base construction failed: Schema declaration resolution
+ requires the projection handed to the operation."
+```
+
+`retrying-base` leaves the delay unrealized rather than caching the throwable,
+so it is NOT poisoned — but no lane can run an in-process test on this JVM
+until it constructs. `src/seon/db.clj`, `src/seon/test.clj` and
+`src/seon/test/runner.clj` carried a peer lane's uncommitted edits at the time
+(their note:
+`bounded-write-retry-and-registry-preservation-2026-09-17.md`), which is the
+likeliest source; this lane did not touch them and did not attempt a repair.
+
+**Everything in `4d181533d`, `55a0abae0` and `d7e5a0268` is therefore
+edit-verified and lint-clean but COLD-GATE-UNPROVEN.**
