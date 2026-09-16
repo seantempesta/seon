@@ -56,6 +56,7 @@
     (support/transacted!
             connection
             [{:seon.schema/key :seon.background-blob-test/request
+              :seon.schema.admission/source :core
               :seon.schema/form
               (pr-str [:map [:seon.background-blob-test/size :int]])}
              {:seon.fn/sym "seon.background-blob-test/binary-capability"
