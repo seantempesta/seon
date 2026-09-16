@@ -1085,3 +1085,25 @@ declared). Excluding long tests from a named gate would silently narrow
 "run this namespace"; the in-process `check` exclusion exists because
 check selects by reach, not by name. Runner slice; queued behind the
 write-storm lane's class-1 release of runner.clj.
+
+### 2026-09-16 08:50 — every commit re-walked every acquired agent history (`dfd2aae54`)
+
+The batch-70/75 red in seon.render.web-context-test (a neutral commit
+re-walks) was the expectation being RIGHT about a production defect, not a
+wake/interest problem (the test pauses the graph and acquires on its own
+thread). Measured on default (pid 88182): acquiring juniper's context
+retained 26 calls, all current; one `{:db/doc …}` commit left the root
+acquisition stale and re-walked and re-rendered the whole history — on
+every commit, for every agent. Cause: `seon.db/stable-value` admits
+`inst?`/`uuid?`/`char?` as stable read data, but `read-result-digest`
+encodes through `seon.schema/canonical-data-string`, which threw on all
+three; the throw was swallowed to nil, and a read with a wildcard pull, no
+index patterns and no digest had only the commit id left as evidence —
+which every commit changes. Two functions disagreed about what ordinary
+data is, and the disagreement read as "stale". Fix `dfd2aae54`:
+`canonical-data-string` encodes the three literals (new tags; no existing
+fingerprint changes). After adoption all 29 retained calls stay current
+across the same neutral commit. Landing note
+`web-context-rewalk-2026-09-16.md` (`40ce33bfc`); secondary issue
+`an-unrelated-fixture-transaction-mints-a-half-agent.md` (`cd2343a0c`).
+Re-gate as batch 83.
