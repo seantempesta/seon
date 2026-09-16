@@ -798,3 +798,4 @@ Queue, in order:
 - 17:25Z `config apply default` exit 0 — effective config carries the issue-opening dial (:bare).
 - 17:35Z wake-test fixed `1b1215ba8`: the listened-set oracle now derives from the schema rows (four derivations compared) instead of a hand list; ruling stated: an issue assignment is an opening wake. Gate with the next batch.
 - 17:40Z sweep: pid 74930 alive, zero writer errors, batch 73 in slot, store 5.3 GB (2.0 → 5.3 GB in ~55 min across batches 74/75/73 — the recording cost; runner lane on the delta). PLAN: reset default at the next quiet boundary after batch 73 reports (store > 5 GB), message the peer first.
+- 17:55Z predicate-functions derivation landed `3764c7965`: one reader (`{}` for absent) + one writer; 14 read / 4 write sites; compilable-form still refuses nil by design; program-graph checker. Class closed (no issue). Gate after the reset.
