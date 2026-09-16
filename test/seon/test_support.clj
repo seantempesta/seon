@@ -18,6 +18,7 @@
             [seon.fs :as fs]
             [seon.fn :as seon.fn]
             [seon.instrument :as instrument]
+            [seon.operator.runtime :as operator.runtime]
             [seon.schema :as schema]
             [seon.sci.eval :as sci.eval]
             [seon.test.cache :as cache])
@@ -166,13 +167,67 @@
   "Returned when a thrown boundary carries no classifiable ex-data."
   ::unknown-refusal)
 
+(defn- published-commit-ids
+  "The `:current-src` heads this JVM's held stores currently name.
+
+   One konserve head record per store (measured 1.05 ms in default PID 88182),
+   so this is an ordinary FACT read, not a cached mirror: nothing has to tell
+   the fixture that the program moved."
+  []
+  (not-empty
+   (into (sorted-set)
+         (keep (fn [held]
+                 (when-let [store (:seon.store/store held)]
+                   (try
+                     (:seon.source/commit-id (source/current store))
+                     (catch Throwable _ nil)))))
+         (vals @operator.runtime/root-store-holder))))
+
+(defn- publication-key
+  "The publication a canonical fixture built RIGHT NOW would carry.
+
+   An isolated worker's published snapshot is immutable for the JVM's life, so
+   its path is the whole key. A development JVM populates from the working
+   tree, and the fact that moves under it is the store's `:current-src` head:
+   `bin/seon init --dev` advances that head only once adoption converges, so a
+   converged adoption is a cache MISS by construction and no run ever branches
+   from a base older than the publication it runs under.
+
+   No reachable store means nothing observable moved: the key then carries no
+   commit member and the existing base stands, exactly as before. A check that
+   answers `fine` when its subject is absent is the project's named failure
+   class, so the absent case is the key's own member, never a silent `nil`."
+  ([] (publication-key (System/getProperty "seon.test.published-base")
+                       (published-commit-ids)))
+  ([published-base commits]
+   (cond
+     published-base {:seon.test-support/published-base published-base}
+     commits {:seon.source/commit-id commits}
+     :else {:seon.test-support/published-base :seon.test-support/no-store})))
+
+(defn- build-source-manifest
+  []
+  (if-let [base (System/getProperty "seon.test.published-base")]
+    (cache/manifest base)
+    (seon.fn/build-manifest {:seon.fn/roots seon.fn/source-roots})))
+
+(defonce ^:private manifest-cache (atom {}))
+
 (def source-manifest
-  ;; The isolated runner publishes this exact manifest once per snapshot.
-  ;; Direct iteration derives it once from its own source checkout.
-  (delay
-    (if-let [base (System/getProperty "seon.test.published-base")]
-      (cache/manifest base)
-      (seon.fn/build-manifest {:seon.fn/roots seon.fn/source-roots}))))
+  "The source manifest of the publication this JVM currently runs under.
+
+   The isolated runner publishes one immutable manifest per snapshot. A
+   development JVM derives it from its own checkout, and re-derives it when
+   `publication-key` moves: the base and this manifest therefore always
+   describe the same publication, and an adopted accreted arity is present in
+   both without any hand rebuild."
+  (reify clojure.lang.IDeref
+    (deref [_]
+      (let [publication (publication-key)]
+        (or (get @manifest-cache publication)
+            (let [manifest (build-source-manifest)]
+              (reset! manifest-cache {publication manifest})
+              manifest))))))
 
 (def ^:private branch-leases
   ;; Datahike deletes a branch from the roster but retains its head until whole
@@ -283,13 +338,25 @@
   nil)
 
 (defn- close-base!
-  [{::keys [configuration connection private-root]}]
-  (try
+  "Release one canonical base exactly once.
+
+   A base is closed either by JVM shutdown or by retirement, and a retired base
+   must not be closed a second time from its own shutdown hook: the second
+   `d/delete-database` throws inside a hook, where nothing reports it."
+  [{::keys [configuration connection private-root closed cleanup-hook]}]
+  (when (or (nil? closed) (compare-and-set! closed false true))
+    (when cleanup-hook
+      (try
+        (.removeShutdownHook (Runtime/getRuntime) ^Thread cleanup-hook)
+        ;; Shutdown is already running: the hook is about to close this base
+        ;; itself, and the guard above makes that a no-op.
+        (catch IllegalStateException _ nil)))
     (try
-      (d/release connection)
-      (finally (d/delete-database configuration)))
-    (finally
-      (when private-root (delete-recursively! private-root))))
+      (try
+        (d/release connection)
+        (finally (d/delete-database configuration)))
+      (finally
+        (when private-root (delete-recursively! private-root)))))
   nil)
 
 (defn- create-base
@@ -339,6 +406,7 @@
             (when-not base (seal-population! connection))
             (cond-> {:seon.test-support/configuration configuration
                      :seon.test-support/connection connection
+                     ::closed (atom false)
                      :seon.sci.eval/ctx
                      (sci.eval/cluster-ctx (db/db connection) connection state)}
               private-root (assoc ::private-root private-root)))
@@ -349,67 +417,201 @@
         (when private-root (delete-recursively! private-root))
         (throw failure)))))
 
-(defn- retrying-base
-  "Share one daemon construction; retain successful values, never failures."
-  [construct]
-  (let [attempt (atom nil)]
-    (reify
-      clojure.lang.IPending
-      (isRealized [_]
-        (boolean (when-let [completion @attempt] (realized? completion))))
-      clojure.lang.IDeref
-      (deref [_]
-        (let [completion
-              (locking attempt
-                (or @attempt
-                    (let [completion (promise)
-                          projection (schema/handed-projection)
-                          loader (ClassLoader/getSystemClassLoader)
-                          work
-                          (fn []
-                            (let [result
-                                  (try
-                                    (with-bindings {clojure.lang.Compiler/LOADER loader}
-                                      (if projection
-                                        (schema/call-with-projection projection construct)
-                                        (construct)))
-                                    (catch Throwable failure
-                                      (error/diagnostic
-                                       {:seon.error/kind ::database-base-unavailable
-                                        :seon.error/message
-                                        (str "Canonical fixture base construction failed: "
-                                             (ex-message failure))
-                                        :seon.error/diagnostic-layer :test-fixture
-                                        :seon.error/diagnostic-operation ::create-base
-                                        :seon.error/diagnostic-member ::database-base
-                                        :seon.error/diagnostic-expected :constructed-base
-                                        :seon.error/diagnostic-offending
-                                        (symbol (.getName (class failure)))
-                                        :seon.error/diagnostic-cause
-                                        (or (ex-message failure) :seon.error/unknown)
-                                        :seon.error/diagnostic-evidence
-                                        (or (ex-data failure) :seon.error/unknown)})))]
-                              (when (:seon.error/kind result)
-                                (compare-and-set! attempt completion nil))
-                              (deliver completion result)))]
-                      (reset! attempt completion)
-                      (doto (Thread. ^Runnable work "seon-test-database-base")
-                        (.setDaemon true)
-                        (.setContextClassLoader loader)
-                        (.start))
-                      completion)))]
-          @completion)))))
+(defprotocol Held
+  "Take and return a hold on a shared canonical base.
 
-(defonce ^:private database-base
-  ;; One successful base per JVM. A caller can stop waiting without interrupting
-  ;; construction; failed attempts report a typed value and the next call retries.
+   Datahike refuses to delete a branch under an active connection, so a base a
+   run still branches from cannot be closed under it. A hold is the one fact
+   that says so."
+  (acquire-base! [this]
+    "Return `{:seon.test-support/value base :seon.test-support/hold token}`.")
+  (release-base! [this held]
+    "Return a hold taken by `acquire-base!`, closing a retired base at zero."))
+
+(defn- adjust-holders
+  [state completion delta]
+  (swap!
+   state
+   (fn [current]
+     (-> current
+         (cond-> (identical? completion (::completion current))
+           (update ::holders (fnil + 0) delta))
+         (update ::retired
+                 (fn [retired]
+                   (mapv (fn [entry]
+                           (cond-> entry
+                             (identical? completion (::completion entry))
+                             (update ::holders (fnil + 0) delta)))
+                         retired)))))))
+
+(defn- retrying-base
+  "Share one daemon construction PER PUBLICATION KEY; retain successful values,
+   never failures.
+
+   `key-fn` names the publication a base built now would carry. When it differs
+   from the key the current base was built under, that base is RETIRED and a
+   new construction starts, so a converged development adoption is a cache miss
+   by construction and no lane ever rebuilds a base by hand. A retired base is
+   closed only after its last holder releases it, on a daemon thread, so a run
+   holding the old base finishes on it while a later run gets the new one and
+   no branch is deleted under an active connection.
+
+   `state` is DATA. Reloading this namespace must neither discard a realized
+   base nor keep an older namespace's construction code, so the process-wide
+   base keeps its state in a `defonce` atom and its behaviour in these Vars.
+
+   The one- and two-argument arities own a private state atom; the
+   one-argument arity keys nothing and behaves exactly as before."
+  ([construct] (retrying-base (atom {::retired []}) (constantly nil) construct))
+  ([key-fn construct] (retrying-base (atom {::retired []}) key-fn construct))
+  ([state key-fn construct]
+   (let [;; At most ONE construction runs at a time. A publication that
+         ;; advances while a construction is in flight supersedes it, and
+         ;; without this bound two lanes adopting minutes apart would put two
+         ;; full canonical populations on the machine at once. A superseded
+         ;; construction still completes, so every caller already waiting on it
+         ;; gets a base, and retirement closes it once it is realized.
+         construction-lock (Object.)
+         start!
+         (fn [completion publication]
+           (let [projection (schema/handed-projection)
+                 loader (ClassLoader/getSystemClassLoader)
+                 work
+                 (fn []
+                   (let [result
+                         (try
+                           (with-bindings {clojure.lang.Compiler/LOADER loader}
+                             (locking construction-lock
+                               (if projection
+                                 (schema/call-with-projection projection construct)
+                                 (construct))))
+                           (catch Throwable failure
+                             (error/diagnostic
+                              {:seon.error/kind ::database-base-unavailable
+                               :seon.error/message
+                               (str "Canonical fixture base construction failed: "
+                                    (ex-message failure))
+                               :seon.error/diagnostic-layer :test-fixture
+                               :seon.error/diagnostic-operation ::create-base
+                               :seon.error/diagnostic-member ::database-base
+                               :seon.error/diagnostic-expected :constructed-base
+                               :seon.error/diagnostic-offending
+                               (symbol (.getName (class failure)))
+                               :seon.error/diagnostic-cause
+                               (or (ex-message failure) :seon.error/unknown)
+                               :seon.error/diagnostic-evidence
+                               (or (ex-data failure) :seon.error/unknown)})))]
+                     (if (:seon.error/kind result)
+                       (do (swap! state
+                                  (fn [current]
+                                    (cond-> current
+                                      (identical? completion (::completion current))
+                                      (dissoc ::completion ::key))))
+                           (deliver completion result))
+                       ;; The base carries the publication it was built from,
+                       ;; so a run can name its own coherence boundary.
+                       (deliver completion
+                                (assoc result :seon.test-support/publication-key
+                                       publication)))))]
+             (doto (Thread. ^Runnable work "seon-test-database-base")
+               (.setDaemon true)
+               (.setContextClassLoader loader)
+               (.start))))
+         sweep!
+         (fn []
+           (let [closable? (fn [entry]
+                             (and (zero? (::holders entry 0))
+                                  (realized? (::completion entry))))
+                 [before _] (swap-vals! state update ::retired
+                                        #(vec (remove closable? %)))
+                 closing (into []
+                               (comp (filter closable?)
+                                     (map (comp deref ::completion))
+                                     (remove :seon.error/kind))
+                               (::retired before))]
+             (when (seq closing)
+               (doto (Thread. ^Runnable #(run! close-base! closing)
+                              "seon-test-database-base-retire")
+                 (.setDaemon true)
+                 (.start)))))
+         entry!
+         (fn []
+           (let [publication (key-fn)
+                 completion
+                 (locking state
+                   (let [{current-key ::key completion ::completion} @state]
+                     (if (and completion (= publication current-key))
+                       completion
+                       (let [fresh (promise)]
+                         (swap! state
+                                (fn [current]
+                                  (cond-> (assoc current ::key publication
+                                                 ::completion fresh
+                                                 ::holders 0)
+                                    completion
+                                    (update ::retired conj
+                                            {::completion completion
+                                             ::holders (::holders current 0)}))))
+                         (start! fresh publication)
+                         fresh))))]
+             (sweep!)
+             completion))]
+     (reify
+       clojure.lang.IPending
+       (isRealized [_]
+         ;; A base built under a SUPERSEDED publication is not a realized base
+         ;; for this run: an observer that guards its deref with `realized?`
+         ;; (`seon.test.runner`'s drift snapshot does) must not be the caller
+         ;; that pays for the next construction.
+         (boolean (let [{publication ::key completion ::completion} @state]
+                    (and completion
+                         (= publication (key-fn))
+                         (realized? completion)))))
+       clojure.lang.IDeref
+       (deref [_] @(entry!))
+       Held
+       (acquire-base! [_]
+         (let [completion (entry!)]
+           ;; Register the hold BEFORE waiting: a key change between the
+           ;; comparison and the wait retires this completion, and the
+           ;; registration then lands on the retired entry, which is exactly
+           ;; what keeps it open under this run.
+           (adjust-holders state completion 1)
+           {:seon.test-support/hold completion
+            :seon.test-support/value @completion}))
+       (release-base! [_ held]
+         (when-let [completion (:seon.test-support/hold held)]
+           (adjust-holders state completion -1)
+           (sweep!))
+         nil)))))
+
+(defonce ^:private base-state
+  ;; The process-wide base's STATE, kept across reloads of this namespace.
+  (atom {::retired []}))
+
+(def ^:private database-base
+  ;; One successful base per PUBLICATION per JVM. A caller can stop waiting
+  ;; without interrupting construction; failed attempts report a typed value
+  ;; and the next call retries. A development adoption that advances
+  ;; `:current-src` is a miss, so an accreted arity is provable in process.
   (retrying-base
+   base-state
+   publication-key
    (fn []
-     (let [base (create-base (System/getProperty "seon.test.published-base"))]
-       (.addShutdownHook
-        (Runtime/getRuntime)
-        (Thread. ^Runnable #(close-base! base) "seon-test-database-base-cleanup"))
-       base))))
+     (let [base (create-base (System/getProperty "seon.test.published-base"))
+           hook (Thread. ^Runnable #(close-base! base)
+                         "seon-test-database-base-cleanup")]
+       (.addShutdownHook (Runtime/getRuntime) hook)
+       (assoc base ::cleanup-hook hook)))))
+
+(def ^:private ^:dynamic *held-base*
+  "The canonical base value the ENCLOSING fixture holds.
+
+   `fork-cluster-ctx` must fork the ctx of the base this fixture's connection
+   actually branched from. Reaching for the current base instead would, at the
+   exact moment a development adoption advances the publication, fork a NEW
+   base's ctx over an OLD base's branch."
+  nil)
 
 (defn- seeded-cluster-name
   "The one cluster this fixture stood up, DERIVED, or nil when it seeded none."
@@ -438,7 +640,8 @@
   ([connection]
    (fork-cluster-ctx connection (seeded-cluster-name (db/db connection))))
   ([connection cluster-name]
-   (let [base-ctx (:seon.sci.eval/ctx (checked-fixture-result @database-base))
+   (let [base-ctx (:seon.sci.eval/ctx
+                   (checked-fixture-result (or *held-base* @database-base)))
          database (db/db connection)
          projection (db/carried-projection database)
          projection-state (:seon.sci.eval/projection-state (meta database))]
@@ -753,9 +956,19 @@
 
 (defn- with-branched-database
   [extra-schema body]
-  (let [{configuration :seon.test-support/configuration
+  ;; HOLD the base across the whole fixture. A development adoption that lands
+  ;; mid-run retires this base rather than closing it, so the branch below is
+  ;; never deleted under its own active connection, and the NEXT fixture gets
+  ;; the base built from the new publication.
+  (let [held (acquire-base! database-base)
+        base (:seon.test-support/value held)
+        {configuration :seon.test-support/configuration
          base-connection :seon.test-support/connection
-         base-ctx :seon.sci.eval/ctx} (checked-fixture-result @database-base)
+         base-ctx :seon.sci.eval/ctx} (try
+                                        (checked-fixture-result base)
+                                        (catch Throwable failure
+                                          (release-base! database-base held)
+                                          (throw failure)))
         base-projection (:seon.schema/projection base-ctx)
         branch (acquire-branch!)]
     (try
@@ -771,7 +984,8 @@
                                            provisional-connection
                                            base-projection)]
             (try
-              (run-database-body connection projection-state extra-schema body)
+              (binding [*held-base* base]
+                (run-database-body connection projection-state extra-schema body))
               (finally
                 (d/release connection))))
           (finally
@@ -782,7 +996,8 @@
         ;; quarantines the lease rather than reusing live mutable state.
         (when (contains? (d/branches base-connection) branch)
           (d/delete-branch! base-connection branch))
-        (release-branch! branch)))))
+        (release-branch! branch)
+        (release-base! database-base held)))))
 
 (defn with-database
   "Run `body` on a fresh branch of one canonical in-memory base.\n\n   The production source population is installed once per new test JVM.\n   Every invocation gets a distinct active branch, connection, datoms, schema\n   evolution, transaction history, and writer. Optional\n   `:seon.test-support/extra-schema` rows are synthetic declarations whose\n   installation is itself part of a test.\n\n   `:seon.test-support/database-id` preserves the legacy physical-store\n   identity contract through an isolated slower path. Store-global blob tests\n   request `:seon.test-support/fresh-store?` because blob keys are outside\n   Datahike branch facts."

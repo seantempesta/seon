@@ -1,6 +1,7 @@
 (ns seon.test-support-test
   (:require [clojure.core.async :as async]
             [clojure.java.io :as io]
+            [datahike.api :as d]
             [clojure.string :as str]
             [clojure.test :as test :refer [deftest is]]
             [clojure.test.check :as tc]
@@ -569,3 +570,123 @@
             "the refusal names what was missing"))
       (is (map? (db/transact! connection {:tx-data []}))
           "an explicit connection still writes its own branch"))))
+
+(defn- publication-base
+  "One cheap stand-in base carrying the publication it was constructed under.
+
+  `retrying-base` knows nothing about the canonical population: it keys, holds
+  and retires whatever `construct` returns, and `close-base!` releases it. A
+  synthetic construction therefore proves the cache-miss and retirement rules
+  without paying the canonical base's construction each time."
+  [published constructed]
+  (fn []
+    (let [publication @published
+          configuration {:store {:backend :memory :id (random-uuid)}
+                         :keep-history? true
+                         :schema-flexibility :read}
+          _ (d/create-database configuration)
+          connection (d/connect configuration)]
+      (d/transact connection [{:db/id -1
+                               :seon.test-support-test/publication
+                               (pr-str publication)}])
+      (swap! constructed conj publication)
+      {:seon.test-support/configuration configuration
+       :seon.test-support/connection connection
+       :seon.test-support/closed (atom false)})))
+
+(defn- base-publication-datom
+  [base]
+  (d/q '[:find ?publication .
+         :where [_ :seon.test-support-test/publication ?publication]]
+       @(:seon.test-support/connection base)))
+
+(deftest ^{:seon.test/platform
+           "Moving part: the shared base every other test forks through must
+            follow the publication its run executes under."}
+  the-shared-base-follows-the-published-commit
+  ;; The defect this kills: a base built once per JVM keeps the program rows
+  ;; and contracts of the publication current when it was first forced, so an
+  ;; adopted accreted arity is refused INSIDE a run while the same call answers
+  ;; from the prepl. The publication key makes a converged adoption a cache
+  ;; miss by construction; nothing rebuilds a base by hand.
+  (let [published (atom {:seon.source/commit-id #{:first}})
+        constructed (atom [])
+        base (#'test-support/retrying-base #(deref published)
+                                           (publication-base published constructed))
+        first-held (test-support/acquire-base! base)
+        first-base (:seon.test-support/value first-held)]
+    (try
+      (is (= {:seon.source/commit-id #{:first}}
+             (:seon.test-support/publication-key first-base))
+          "the base records the publication it was built from")
+      (is (= (pr-str {:seon.source/commit-id #{:first}})
+             (base-publication-datom first-base)))
+      (let [again (test-support/acquire-base! base)]
+        (is (identical? first-base (:seon.test-support/value again))
+            "an unchanged publication is the same base")
+        (test-support/release-base! base again))
+      ;; the published commit advances, exactly as development adoption does
+      (reset! published {:seon.source/commit-id #{:second}})
+      (let [second-held (test-support/acquire-base! base)
+            second-base (:seon.test-support/value second-held)]
+        (try
+          (is (= {:seon.source/commit-id #{:second}}
+                 (:seon.test-support/publication-key second-base))
+              "the next run's base is built from the new publication")
+          (is (= (pr-str {:seon.source/commit-id #{:second}})
+                 (base-publication-datom second-base))
+              "and carries a row only the new publication has")
+          (is (= [{:seon.source/commit-id #{:first}}
+                  {:seon.source/commit-id #{:second}}]
+                 @constructed)
+              "exactly one construction per publication")
+          ;; A run still holding the old base completes on it: Datahike refuses
+          ;; to delete a branch under an active connection, so retirement must
+          ;; wait for the last holder.
+          (is (false? @(:seon.test-support/closed first-base)))
+          (is (= (pr-str {:seon.source/commit-id #{:first}})
+                 (base-publication-datom first-base)))
+          (test-support/release-base! base first-held)
+          (is (true? (test-support/await-event!
+                      (:seon.test-support/closed first-base)
+                      :seon.test-support-test/retired-base-closed
+                      true?))
+              "the retired base is closed once its last holder releases it")
+          (is (false? @(:seon.test-support/closed second-base))
+              "the base this run holds is untouched by that retirement")
+          (is (= (pr-str {:seon.source/commit-id #{:second}})
+                 (base-publication-datom second-base)))
+          (finally
+            (test-support/release-base! base second-held)
+            (#'test-support/close-base! second-base))))
+      (finally
+        (#'test-support/close-base! first-base)))))
+
+(deftest ^{:seon.test/platform
+           "Moving part: the derivation that decides whether a shared base is
+            still coherent with the program its run executes."}
+  the-publication-key-derives-from-the-published-head
+  (let [first-commit (random-uuid)
+        second-commit (random-uuid)]
+    (is (= {:seon.test-support/published-base "/snapshot/checkout"}
+           (#'test-support/publication-key "/snapshot/checkout"
+                                           (sorted-set first-commit)))
+        "an isolated worker's snapshot is immutable for the JVM's life")
+    (is (= {:seon.source/commit-id (sorted-set first-commit)}
+           (#'test-support/publication-key nil (sorted-set first-commit)))
+        "a development JVM keys on the `:current-src` head it runs under")
+    (is (not= (#'test-support/publication-key nil (sorted-set first-commit))
+              (#'test-support/publication-key nil (sorted-set second-commit)))
+        "an advanced head is a different publication, hence a cache miss")
+    (is (= {:seon.test-support/published-base :seon.test-support/no-store}
+           (#'test-support/publication-key nil nil))
+        "nothing observable is its own key member, never a silent nil")
+    (is (= (#'test-support/publication-key)
+           (#'test-support/publication-key
+            (System/getProperty "seon.test.published-base")
+            (#'test-support/published-commit-ids)))
+        "the supplied arity is the whole derivation")
+    (doseq [commit (#'test-support/published-commit-ids)]
+      (is (uuid? commit) "a head this JVM holds is a commit ID"))
+    (is (identical? @test-support/source-manifest @test-support/source-manifest)
+        "the manifest is derived once per publication, not per fixture")))
