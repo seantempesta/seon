@@ -2712,7 +2712,7 @@
           "still-invalid output is rejected")
       (is (= fixed (repair fixed 'my.agents.agent-a 10000))
           "accepted repair is idempotent")))
-  (testing "one missing defn closer is fixed, evaluated, and stored as the transcript form"
+  (testing "one missing defn closer is fixed, evaluated, and stored as the history form"
     (with-cluster
       (fn [cluster]
         (let [connection (:seon.db/connection cluster)
@@ -2728,35 +2728,62 @@
                    "(+ 1 1)\n"
                    "(+ 2 2)\n"
                    "(seon.run/complete \"fixed\")")
-              eval-nanos (atom 0)
+              write-nanos (atom 0)
+              write-count (atom 0)
+              transact! db/transact!
+              install-nanos (atom 0)
+              analyzed-sources (atom [])
+              analyze seon.fn/analyze-forms
+              install-var (ns-resolve 'seon.turn 'gate-function-install)
+              install @install-var
+              test-thread (Thread/currentThread)
               reply-arrived (atom nil)
-              read-sources reply/sources
-              evaluate sci.eval/evaluate]
+              read-sources reply/sources]
           (turn/turn
            {:seon.turn.loop/cluster cluster
             :seon.turn.work/next
             (turn/next-agent-work @connection (request connection))}
            now)
           (let [call-work (turn/next-agent-work @connection
-                                                (request connection))
-                started (System/nanoTime)]
-            (with-redefs [ai/complete (fn [_] {:seon.ai/text original})
+                                                (request connection))]
+            (with-redefs-fn
+              {install-var
+               (fn [& arguments]
+                 (if (= test-thread (Thread/currentThread))
+                   (let [started (System/nanoTime)]
+                     (try (apply install arguments)
+                          (finally
+                            (swap! install-nanos +
+                                   (- (System/nanoTime) started)))))
+                   (apply install arguments)))}
+              (fn []
+               (with-redefs [seon.fn/analyze-forms
+                             (fn [database forms]
+                               (when (= test-thread (Thread/currentThread))
+                                 (swap! analyzed-sources into
+                                        (map :seon.cluster.eval/source forms)))
+                               (analyze database forms))
+                             ai/complete (fn [_] {:seon.ai/text original})
                           reply/sources
                           (fn [& arguments]
                             (reset! reply-arrived (System/nanoTime))
                             (apply read-sources arguments))
-                          sci.eval/evaluate
-                          (fn [request]
-                            (let [started (System/nanoTime)
-                                  result (evaluate request)]
-                              (swap! eval-nanos + (- (System/nanoTime) started))
-                              result))]
+                          db/transact!
+                          (fn [& arguments]
+                            (let [measure? (and (= test-thread (Thread/currentThread))
+                                                @reply-arrived)
+                                  started (System/nanoTime)]
+                              (try (apply transact! arguments)
+                                   (finally
+                                     (when measure?
+                                       (swap! write-count inc)
+                                       (swap! write-nanos + (- (System/nanoTime) started)))))))]
               (turn/turn
                {:seon.turn.loop/cluster cluster
                 :seon.turn.work/next call-work}
-               now))
-            (let [elapsed (- (System/nanoTime) (or @reply-arrived started))
-                  bookkeeping-ms (/ (double (- elapsed @eval-nanos)) 1000000.0)
+               now))))
+            (let [bookkeeping-ms (/ (double @write-nanos) 1000000.0)
+                  install-ms (/ (double @install-nanos) 1000000.0)
                   ;; THE SUBJECT IS THE AGENT'S OWN SIX FORMS. System turn 0
                   ;; stores the generated opening in the same evaluation
                   ;; family, so an absolute count over every evaluation
@@ -2792,8 +2819,14 @@
                            @connection (:seon.turn/id call-work)))
                   "raw intent provenance remains the original reply")
               (is (str/includes? rendered "repaired [x]\n  (+ x 1))"))
+              (is (= 1 (get (frequencies @analyzed-sources) (first sources)))
+                  "the accepted defining form carries its analysis to settlement")
+              (is (pos? @install-nanos) "the definition install was observed")
+              (is (>= @write-count 2) "intent and settlement writes were observed")
+              (is (< install-ms 300.0)
+                  (str "definition installation took " install-ms " ms"))
               (is (< bookkeeping-ms 300.0)
-                  (str "six-form bookkeeping took " bookkeeping-ms " ms"))))))))
+                  (str "six-form settlement and writes took " bookkeeping-ms " ms"))))))))
   (testing "indent mode repairs a mismatched closer type"
     (with-cluster
       (fn [cluster]

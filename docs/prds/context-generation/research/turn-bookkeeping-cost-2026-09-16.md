@@ -888,3 +888,35 @@ In-process runs of
 The namespace was reloaded through `seon.test/with-test-loader`. Temporary
 timing delegates were restored after each run. These are live JVM measurements
 on canonical fixtures, not adopted-change or cold-gate claims.
+
+### Slice 2: carry the defining form's analysis
+
+`gate-function-install` already carries `:seon.turn/form-facts` and the
+analyzed `:seon.program/row` on the evaluation. `resume-turn` now submits
+only evaluations without those facts to its remaining batch analysis. No
+new attribute, cache, or change to `seon.fn` is needed. The defining source
+occurs **once**, versus twice before; ordinary sources still receive their
+evaluation-owned call edges from the batch analyzer.
+
+The unchanged old window remained **420.366332 ms** (run **71311**, 15/1/0).
+Therefore the delimiter regression now measures the requested boundaries
+directly: `db/transact!` after reply arrival (intent and settlement writes),
+and `gate-function-install` separately. Both retain a **300 ms** bound.
+Positive observation assertions require the writes and installation to have
+actually occurred; a further assertion requires exactly one analysis of the
+stored defining source. Counters exclude other threads and delegates restore
+their entering roots. SCI execution, parsing and final context installation
+are not mislabeled as settlement/writes.
+
+The direct measurement is **221.266417 ms** settlement/writes and
+**114.318456 ms** definition installation. An intermediate broader
+total-minus-evaluation-minus-gate measurement passed once (run **71323**,
+18/0/0), then measured **364.192584 ms** under publication load (run **71578**,
+17/1/0); it was replaced with the direct boundaries, not a larger limit.
+
+Explicit development publication reached reload and instrumentation, then
+refused because the source changed during publication and its one retry.
+The tree includes concurrent edits in `src/seon/fn.clj`, `test/seon/fn_test.clj`
+and `test/seon/render_coverage_test.clj`; none was edited by this lane.
+An owned formatting edit also occurred during that publication. No particular
+foreign edit is asserted as the cause. Final adoption proof is recorded below.
