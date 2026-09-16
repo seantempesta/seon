@@ -512,3 +512,8 @@ claim the unexecuted canonical assertions passed. The original research's
 required-cardinality-many and retained-program-identity schema questions remain
 explicit integration checks: the final validator has no exemption that hides
 those model failures if a transaction encounters them.
+
+The fork-maintenance reference's selected gitlink and dependency ledger were
+updated after the Markdown checker identified that new drift. Its remaining
+30 historical gitlink findings predate this slice; the elided checker output
+does not support a repository-wide Markdown-clean claim.

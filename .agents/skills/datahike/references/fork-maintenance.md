@@ -33,7 +33,7 @@ git -C reference-code/datahike rev-parse HEAD
 ```
 
 Both currently select
-`49ea59331dff86caaa587ada215f85f4d322d7dd`. Treat `357ffc87` and
+`73afe78271a289861da236c5ac3457e64349653f`. Treat `357ffc87` and
 `19f5cdd9` only as repair provenance; neither is the selected revision.
 
 | Mechanism | Selected-revision source | Seon acceptance |
@@ -44,6 +44,7 @@ Both currently select
 | Store create/reopen | `reference-code/datahike/src/datahike/connector.cljc:183-237,275-365` | `src/seon/cluster/store.clj:155-183,266-398`; `test/seon/cluster/store_test.clj:94-162,248-266,380-390` |
 | Branch identity and roster | `reference-code/datahike/src/datahike/store.cljc:50-61`; `reference-code/datahike/src/datahike/versioning.cljc:179-203,207-214,237-321` | `src/seon/cluster/store.clj:288-398`; `test/seon/cluster/store_test.clj:107-162,380-390` |
 | Schema removal | `reference-code/datahike/src/datahike/db/transaction.cljc:136-142,276-305` | `src/seon/turn.clj:1275-1305`; `test/seon/schema_usage_guard_test.clj:80-397` |
+| Final report validation | `reference-code/datahike/src/datahike/db/transaction.cljc:1206-1276`; optional `:tx-meta :datahike/validate-report`, nil accepts, a returned value rejects before writer admission | `test/seon/db_test.clj:1479`; verification boundary in `docs/prds/steward-platform/research/write-admission-2026-09-17.md` |
 | Test launchers | `reference-code/datahike/bb.edn:46-51`; `reference-code/datahike/bb/src/tools/test.clj:8-13`; `reference-code/datahike/tests.edn:1-30` | `bin/test`; `test/seon/datahike_fork_test.clj:1-50` |
 
 ## Planner entry point
