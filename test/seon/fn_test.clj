@@ -588,12 +588,6 @@
                        connection
                        (turn/plan-tx
                         {:seon.turn/id "settlement-parity-run" :seon.db.process/id (second boot-process) :seon.turn/starting-ns [:seon.ns/name namespace-name] :seon.turn/sources [{:seon.cluster.eval/source source}]}))
-          (test-support/transacted!
-                       connection
-                       (turn/receipt-start-tx
-                        {:seon.turn/id "settlement-parity-run"
-                         :seon.cluster.eval/ordinal 0
-                         :seon.cluster.eval/at (java.util.Date.)}))
           (let [settlement
                 (db/transact!
                  connection
@@ -2247,3 +2241,34 @@
         (is (not= (:seon.fn.file/captured-digest data)
                   (:seon.fn.file/current-digest data))
             "the refusal names a captured digest the file no longer carries")))))
+
+(deftest a-file-changed-after-capture-analyzes-to-the-captured-spans
+  ;; The class behind that refusal: one analysis read each file TWICE, once to
+  ;; capture the text spans are sliced from and once inside clj-kondo, so a
+  ;; concurrent edit between the two reads produced rows for text the capture
+  ;; no longer matched. `analyze` takes the captured text now and clj-kondo
+  ;; reads it from a private mirror, so there is exactly one read of the live
+  ;; file per analysis and the rows describe the captured bytes by
+  ;; construction — whatever the editor does meanwhile.
+  (let [root (fixture-root)
+        captured-source "(ns changing.analyzed)\n(defn one [] 1)\n(defn two [] 2)\n"
+        file (write-source! root "changing/analyzed.clj" captured-source)
+        path (.getCanonicalPath file)
+        contexts (#'seon.fn/source-contexts [file])
+        ;; the concurrent editor, between the capture and the analysis
+        _ (spit file "(ns changing.analyzed)\n(defn three [] 3)\n")
+        analysis (analyzer/analyze
+                  {::analyzer/sources {path (:text (get contexts path))}})
+        definitions (::analyzer/var-definitions analysis)
+        named (fn [declaration]
+                (first (filter #(= declaration (::analyzer/name %)) definitions)))]
+    (testing "the analysis describes the captured text, not the edited file"
+      (is (= ['one 'two] (mapv ::analyzer/name definitions)))
+      (is (nil? (named 'three))))
+    (testing "every row names the source file, never its mirror"
+      (is (= [path] (distinct (mapv ::analyzer/filename definitions)))))
+    (testing "every declaration slices exactly out of the captured text"
+      (is (= "(defn one [] 1)" (#'seon.fn/exact-source contexts (named 'one))))
+      (is (= "(defn two [] 2)" (#'seon.fn/exact-source contexts (named 'two)))))
+    (testing "the live file really did change under the analysis"
+      (is (= "(ns changing.analyzed)\n(defn three [] 3)\n" (slurp file))))))
