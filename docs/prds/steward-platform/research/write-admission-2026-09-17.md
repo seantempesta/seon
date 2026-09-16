@@ -1,6 +1,6 @@
 ---
 type: research
-status: design decision required before implementation
+status: implemented; orchestrator review pending
 created: 2026-09-17
 tags: [write-admission, schema, datahike, seon.db]
 ---
@@ -18,10 +18,12 @@ resolved entity ids and attempted datoms. Recommend exposing that final
 report to one Seon validator before the writer admits it to commit. This is
 a dependency-seam change, not the small map-only change originally proposed.
 
-No production source was edited. AGENTS.md §2.5's owner design gate applies
-to this cross-owner change. The three options below were presented before
-production edits; implementation remains pending that decision. The issue
-remains open; this is not an implementation landing or a green gate.
+The research through “Initial research verification” was committed at
+`71a237559` before production edits. The orchestrator subsequently selected
+option 2 under F8. The implementation and its verification boundary are
+recorded below: the fork suite passes; the Seon runner currently refuses to
+execute because default lacks the destructive-owner facts it requires.
+This is ready for code review, not a green Seon gate.
 
 ## Grounding and dependency ledger
 
@@ -268,7 +270,7 @@ implementation instruction is not satisfied by pretending option 2 is just
 the proposed per-map transaction function. Ask for the cross-owner change
 before production edits, as AGENTS.md §2.5 requires.
 
-## Verification and landing boundary
+## Initial research verification
 
 `bin/seon status` and MCP both observed default alive at PID 53320. No
 default stop/restart, test JVM, `bin/test`, `bin/test-fast`, scratch cluster,
@@ -293,7 +295,7 @@ boundary, not a claim of a verified reach digest or a reason to alter the
 other lane's schema. The research continued from direct source and live
 admission observations.
 
-Pending: owner decision, implementation, canonical F2 regressions, all
+At the research commit, pending work was: owner decision, implementation, canonical F2 regressions, all
 non-destructive reaching tests and issue sighting tests, adopted-definition
 proof, issue resolution, and orchestrator review before a cold gate. No gate
 request is submitted for an unimplemented fix. All commands completed; the
@@ -303,3 +305,190 @@ filesystem scratch was created. The retained probe passes clj-kondo with
 reported 30 Markdown errors in historical files, including obsolete gitlink
 citations in `docs/prds/context-generation/research/agents-md-audit-2026-09-15.md`;
 the feedback was elided, so this is not a complete Markdown-clean claim.
+
+
+## Approved implementation — final reducer report
+
+The orchestrator explicitly selected option 2 under F8, preserving F2's
+“validate ALL inputs; a failed validation rolls back the transaction.”
+The maintained fork commit is **`73afe78271a289861da236c5ac3457e64349653f`**.
+It is local to the seantempesta fork; the orchestrator must arrange its push
+with the owner. No push or default restart was performed.
+
+The callback travels through the existing transaction map's `:tx-meta`
+under **`:datahike/validate-report`**. This uses `core/with`'s existing
+metadata forwarding (`reference-code/datahike/src/datahike/writing.cljc:879–889`),
+and consumes the process-local control before `flush-tx-meta` makes datoms.
+It therefore needs no second transaction API, writer registry or persistent
+function-valued configuration. The fork's existing `:datahike/expected-basis-t`
+seam (`writing.cljc:873–889`) is the accretive writer-side control precedent;
+the final cross-transaction valid-time check at `db/transaction.cljc:1267`
+is the final-reducer validation precedent.
+
+`db/transaction.cljc:1206–1218` implements the one optional callback.
+`nil` accepts; any other returned value, including false, rejects by throwing
+`{:error :transaction/validation-rejected
+  :datahike/validation-refusal <the-value>}`.
+The callback receives the finished report, plus `:datahike/attempted-tx-data`
+containing assertions that may be idempotent. The public report still exposes
+only effective `:tx-data`; neither that extra observation key nor the callback
+is retained. Its private forwarding key survives native tempid retries and is
+removed before the callback. The call is at `db/transaction.cljc:1276`, after
+tuple expansion, transaction functions, retractions, persistent index
+finalization and the tentative basis increment. It does not execute the
+transaction again. Existing native tempid retry behavior is unchanged.
+
+The writer's unchanged exception branch (`writer.cljc:148–183`) delivers the
+throwable and sets `res` to `:error`. Its admission branch remains:
+
+```clojure
+(not= res :error)
+;; ...
+(if (>! commit-queue [res callback])
+  (recur (:db-after res))
+  ;; ...)
+:else
+(recur old)
+```
+
+(`writer.cljc:201–218`.) Therefore the rejected candidate never enters the
+commit queue and the processing loop keeps the old database. No candidate
+facts, basis increment, branch head or listener notification are committed.
+This is database atomicity; a user-supplied transaction function's unrelated
+external effects are not database writes the writer can reverse.
+
+In Seon, `src/seon/db.clj:159` primes the callback on the connection's immutable
+projection. `:2978` caches a closure over that projection; the callback never
+fetches a connection, registry or schema projection. A later projection has its
+own cache, so adoption cannot reuse a closure for an older projection.
+`transact-call` (`:3092`) selects the connection's carried projection before a
+caller-supplied fallback and attaches the acquired callback to the transaction
+request. The codec fixture now explicitly carries its synthetic projection
+(`test/seon/db_test.clj:311`), matching the production acquisition contract.
+
+`write-map-error` (`db.clj:2852`) retains supplied-attribute and reference
+pre-validation but no longer mistakes a partial map for a complete entity.
+`write-report-error` (`:2944`) validates every attempted added value against its
+attribute schema, including transaction-function output and idempotent adds.
+Then it visits each distinct affected entity in the attempted/effective datoms.
+`write-entity-value` (`:2895`) reads the final EAVT facts, decodes logical values,
+and preserves reference ids without recursively expanding reference graphs.
+`write-entity-error` (`:2913`) uses the same declared entity schemas as the former
+map check, normalizing cardinality-many collections for Malli. Identities in
+both the before and after database select the schema, so retracting a required
+key or an identity while leaving the entity's other facts cannot evade it.
+A completely retracted entity has no final row to validate. No required schema
+key was made optional and no datom-only acceptance branch remains.
+
+A refusal carries `:seon.db/entity` in diagnostic data, the attribute, offending
+value (the existing `:seon.error/unknown` for a missing key), schema and path.
+`transact-call` at `:3131` extracts the callback's refusal through the existing
+cause-chain reader and returns that **same flat `:seon.error` value**.
+The callback costs one scan of attempted/effective datoms plus before/after
+EAVT entity reads per affected entity, and cached schema validation. It avoids
+per-map AVET resolution and does not replay transaction functions. The cost is
+per distinct affected entity, not per submitted partial map; schema/validator
+compilation remains cached on the supplied immutable projection.
+
+## Implementation verification and review boundary
+
+The fork's own task was run from `reference-code/datahike`:
+
+```sh
+bb kaocha clj-pss clj-hht --focus datahike.test.writer-error-test --focus datahike.test.transact-test --focus datahike.test.tuples-test --focus datahike.test.upsert-test --focus datahike.test.attribute-refs.transact-test --reporter kaocha.report/dots
+```
+
+**94 tests, 614 assertions, 0 failures; exit 0.** Its new regression covers
+history on/off, atomic mixed-write rejection, unchanged `:max-tx`, absent rows
+and listener notifications, final tuple values, nested transaction-function
+composition with a one-call counter, idempotent attempted datoms, native tempid
+retry, and final retraction state. Earlier iteration found a test-only missing
+`datahike.core/listen!` qualification, then four assertions incorrectly reading
+the outer asynchronous exception; both were fixed before the green run.
+This was the expressly authorized dependency test JVM, not a Seon test JVM.
+
+The canonical regression is
+`test/seon/db_test.clj:1479`,
+`all-transaction-grammars-validate-the-resulting-entity`. It covers all six
+requested cases plus rejection of a required-key retraction. It uses
+`with-database` and `transacted!`, checks the changed value and retained key,
+compares basis before/after refusals, checks both mixed entities absent,
+asserts entity/key/offending evidence, and checks nested completion runs once.
+No alternate fixture or unarmed test harness was introduced.
+
+All changed runtime forms were evaluated as individual definitions in default;
+no dependency namespace or test-support reload was used. The retained
+[final probe](write-admission-final-probe-2026-09-17.clj) includes the exact
+reducer reload, immutable live-data check, reach query and three-argument
+canonical run. Its live reducer result was:
+
+```clojure
+{:f2/partial-retains-zone true
+ :f2/entity {:seon.schedule/id "f2-incomplete"}
+ :f2/refusal {:seon.error/kind :seon.db/invalid-write
+              :seon.db/attribute :seon.schedule/expression
+              :seon.db/offending :seon.error/unknown}}
+```
+
+This proves the loaded validator's decision over real logical database values;
+it does not claim a canonical fixture run or Seon writer atomicity measurement.
+The latter is covered by the committed regression awaiting admission to run.
+
+The existing refusal regression and the new regression were attempted with
+180000 ms and `seon.test.runner/provenance` on futures. Before/after source edits,
+only `seon.db-test` was reloaded through `#'seon.test/with-test-loader`.
+Every implementation-stage attempt returned the same pre-execution refusal:
+
+```text
+No function in this program declares :seon.fn/destroys, so an in-process run cannot tell whether a test deletes a filesystem path it did not create. Republish the program (bin/seon init --dev default), or declare the attribute in the owner's own metadata at its definition.
+```
+
+The value is `{:seon.error/kind :seon.test/unknown,
+:seon.test/unknown ":seon.fn/destroys", :seon.test/next-tier :none, ...}`.
+A live Datalog query independently returned **zero** destructive-owner rows.
+This is the already-recorded foreign boundary in
+[the fault-evidence issue](../../../seon/issues/fault-evidence-tests-pull-a-fault-entity-that-no-longer-carries-its-evidence.md).
+Its owner is the concurrent `src/seon/fn.clj`/`src/seon/test.clj` publication;
+no protected file or another lane's session was changed to bypass it.
+
+The live `tests-reaching` queries select **1028**, **1028**, and **911** tests
+for `transact-call`, `write-map-error`, and
+`carry-connection-projection-state!`, respectively; their union is **1028**.
+The old default still declares function identities as strings, so those live
+calls used the declared string argument. New helper identities are not yet in
+that published graph. The complete `seon.db-test` namespace, that reaching
+selection, and the issue sightings (`seon.turn-test`,
+`seon.maintenance-schema-test`, `seon.config-test`) remain unexecuted: the runner
+cannot classify any as safe while its required owner facts are absent.
+No unavailable observation is counted as a passing test. The explicit ban on
+Seon test JVMs also rules out the usual isolated-worktree cold fallback here.
+
+Publication has not converged. The first own edit-hook publication
+`cf92291f-30e4-4691-8556-411c00f4bf99` ended with operator exit **124**.
+An explicit own `init --dev default --changed src/seon/db.clj --changed
+test/seon/db_test.clj` waited over 480 seconds for the lifecycle lock held by
+other publications; the redundant waiting process was then ended by exact PID
+23605. No holder or default process was signalled. Last observed source ids:
+**adopted `6aaaeabe-d99a-5eec-9e3e-9d254e71c9c6`**, published
+**`6aaaf664-0ecd-5fae-a037-421814f727d6`**. Thus the live prototype is a
+hot-evaluated-Var proof, explicitly not an adopted-source proof.
+
+`deps.edn:25` uses `:local/root "reference-code/datahike"`, not a dependency jar.
+Default nevertheless started with dependency AOT classes from
+`target/dev-dependency-classes/a4a94060d14cdb97878650471b640fd04750f4327f31ebe266cec4554fe67117/`.
+`clojure -T:dev-cache ensure-cache` completed successfully after the fork edit,
+selecting cache **`64e42ad02ec29380c7f33026f2424c46591413b36043132adecb39723f753949`**,
+source digest **`e0f3bbbc15f546fa7deb82e8e53f1d66a4228006e8d07f65da54466eac18778d`**,
+372 dependency namespaces; the compiled `transaction$validate_report.class`
+exists there. The cache had already been rebuilt by the concurrent operator,
+so this command reported `:current`. Rebuilding the cache does not replace
+classes already loaded in PID **53320**. Only the two ordinary reducer function
+Vars were replaced in that JVM, preserving every existing dependency class.
+Fresh dependency suite JVMs exercised the actual fork source; the orchestrator's
+Seon gate must use the new cache and confirm the combined program.
+
+Review before any gate remains the explicit stop boundary. No Seon gate,
+platform run, default restart, scratch cluster or protected-file edit occurred.
+`git diff --check` is clean for the owned source/test files. The final probe
+passes clj-kondo: **0 errors, 0 warnings**. Source hooks report only existing
+shadowed-var/redundant-let warnings after the new local shadow names were removed.

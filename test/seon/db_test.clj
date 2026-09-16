@@ -308,6 +308,8 @@
   (test-support/with-database
    options
    (fn [connection]
+     (db/carry-connection-projection-state!
+      connection (sci.eval/projection-state @connection fixture-projection))
      (schema/call-with-projection fixture-projection #(body connection)))))
 
 (deftest edn-backed-reads-return-distinguishable-logical-values
@@ -1473,3 +1475,61 @@
             (is (= #{"own" "elided"} (message-ids writing-connection)))
             (is (empty? (message-ids foreign-connection))
                 "nothing reaches the foreign branch"))))))))
+
+(deftest all-transaction-grammars-validate-the-resulting-entity
+  (test-support/with-database
+   (fn [connection]
+     (let [complete {:seon.schedule/id "f2-existing"
+                     :seon.schedule/expression "0 4 * * *"
+                     :seon.schedule/zone-id "UTC"}]
+       (test-support/transacted! connection [complete])
+       (test-support/transacted! connection
+                                 [{:seon.schedule/id "f2-existing"
+                                   :seon.schedule/expression "7 4 * * *"}])
+       (is (= "UTC" (:seon.schedule/zone-id
+                      (db/pull (db/db connection) '[*]
+                               [:seon.schedule/id "f2-existing"]))))
+       (is (= "7 4 * * *" (:seon.schedule/expression
+                           (db/pull (db/db connection) '[*]
+                                    [:seon.schedule/id "f2-existing"]))))
+       (doseq [transaction [[{:seon.schedule/id "f2-invalid"
+                              :seon.schedule/expression "0 4 * * *"}]
+                            [[:db/add -1 :seon.schedule/id "f2-invalid"]
+                             [:db/add -1 :seon.schedule/expression "0 4 * * *"]]
+                            [(assoc complete :seon.schedule/id "f2-valid-mixed")
+                             [:db/add -1 :seon.schedule/id "f2-invalid"]
+                             [:db/add -1 :seon.schedule/expression "0 4 * * *"]]]]
+         (let [basis (:max-tx (db/db connection))
+               refusal (db/transact! connection transaction)]
+           (is (= :seon.db/invalid-write (:seon.error/kind refusal)) (pr-str refusal))
+           (is (= basis (:max-tx (db/db connection))))
+           (is (= {:seon.schedule/id "f2-invalid"}
+                  (get-in refusal [:seon.error/data :seon.db/entity])))
+           (is (= :seon.schedule/zone-id (:seon.db/attribute refusal)))
+           (is (= :seon.error/unknown (:seon.db/offending refusal)))
+           (is (nil? (:db/id (db/pull (db/db connection) '[:db/id]
+                                     [:seon.schedule/id "f2-invalid"]))))
+           (is (nil? (:db/id (db/pull (db/db connection) '[:db/id]
+                                     [:seon.schedule/id "f2-valid-mixed"]))))))
+       (let [basis (:max-tx (db/db connection))
+             refusal (db/transact!
+                      connection
+                      [[:db/retract [:seon.schedule/id "f2-existing"]
+                        :seon.schedule/zone-id "UTC"]])]
+         (is (= :seon.db/invalid-write (:seon.error/kind refusal)))
+         (is (= basis (:max-tx (db/db connection)))))
+       (let [calls (atom 0)]
+         (test-support/transacted!
+          connection
+          [{:seon.schedule/id "f2-composed" :seon.schedule/expression "0 4 * * *"}
+           [:db.fn/call
+            (fn [_]
+              (swap! calls inc)
+              [[:db.fn/call
+                (fn [_]
+                  [[:db/add [:seon.schedule/id "f2-composed"]
+                    :seon.schedule/zone-id "UTC"]])]])]])
+         (is (= 1 @calls))
+         (is (= "UTC" (:seon.schedule/zone-id
+                        (db/pull (db/db connection) '[*]
+                                 [:seon.schedule/id "f2-composed"])))))))))

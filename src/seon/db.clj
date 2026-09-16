@@ -154,6 +154,8 @@
                 state)))
           (vals @instances)))))
 
+(declare write-report-validator)
+
 (defn carry-connection-projection-state!
   "Attach the owning projection state to a live connection at construction.
 
@@ -163,6 +165,7 @@
    [:=> [:cat :seon.db/connection :seon.sci.eval/projection-state]
     :seon.db/connection]}
   [connection state]
+  (write-report-validator (:seon.schema/projection @state))
   (alter-meta! (:wrapped-atom connection)
                assoc :seon.sci.eval/projection-state state)
   connection)
@@ -2858,34 +2861,13 @@
                  (keys row)))
         forms (:seon.schema.projection/forms projection)
         entity-form (some->> schema-keys first (get forms))
-        failure (or
-     (some (fn [[attribute value]]
-             (if (= :db/id attribute)
-               (write-ref-error database projection value (conj path attribute) entity-form)
-               (write-attribute-error database projection attribute value
-                                      (conj path attribute) entity-form false)))
-           row)
-     (when (seq schema-keys)
-       (let [normalized
-             (reduce-kv (fn [result attribute value]
-                          (assoc result attribute
-                                 (write-value database projection attribute value false)))
-                        {} row)]
-         (some
-          (fn [schema-key]
-            (when-not ((write-validator projection schema-key) normalized)
-              (let [explain (schema/projection-cache-value
-                             projection [::write-explainer schema-key]
-                             #(schema/projection-explainer projection schema-key))
-                    failure (first (:errors (explain normalized)))
-                    in (:in failure)
-                    attribute (or (first in) (first (keys row)))
-                    value (get-in row in :seon.error/unknown)]
-                (invalid-write projection attribute
-                               (or (get forms attribute) (get forms schema-key))
-                               value (into path in) (get forms schema-key)
-                               (or (:type failure) ::invalid-entity) nil))))
-          schema-keys))))]
+        failure
+        (some (fn [[attribute value]]
+                (if (= :db/id attribute)
+                  (write-ref-error database projection value (conj path attribute) entity-form)
+                  (write-attribute-error database projection attribute value
+                                         (conj path attribute) entity-form false)))
+              row)]
     (if (and failure (= ::attribute-not-installed
                         (get-in failure [:seon.error/data :seon.error/diagnostic-cause])))
       (let [candidates (write-key-candidates projection row)]
@@ -2909,6 +2891,98 @@
            (write-attribute-error database projection (nth entry 2 nil)
                                   (nth entry 3 nil) [index 3] nil true))))
    (map-indexed vector (if (map? transaction) (:tx-data transaction) transaction))))
+
+(defn- write-entity-value
+  "Read a resulting entity as logical values without expanding reference graphs."
+  [database projection entity-id]
+  (reduce
+   (fn [row datom]
+     (let [attribute (:a datom)
+           value (schema.datahike/decode-attribute-value-in projection attribute (:v datom))]
+       (if (db.utils/multival? database attribute)
+         (update row attribute (fnil conj #{}) value)
+         (assoc row attribute value))))
+   {} (d/datoms database :eavt entity-id)))
+
+(defn- write-error-identity
+  [refusal identities]
+  (-> refusal
+      (update :seon.error/message #(str % " Entity: " (pr-str identities) "."))
+      (assoc-in [:seon.error/data ::entity] identities)))
+
+(defn- write-entity-error
+  "Validate the whole resulting entity, including identities present before a retraction."
+  [database projection entity-id identities row]
+  (when (seq row)
+    (let [forms (:seon.schema.projection/forms projection)
+          schemas (write-entity-schemas projection)
+          schema-keys (distinct (mapcat #(get schemas %) (keys identities)))
+          normalized (reduce-kv (fn [result attribute value]
+                                  (assoc result attribute
+                                         (write-value database projection attribute value false)))
+                                {} row)]
+      (some
+       (fn [schema-key]
+         (when-not ((write-validator projection schema-key) normalized)
+           (let [explain (schema/projection-cache-value
+                          projection [::write-explainer schema-key]
+                          #(schema/projection-explainer projection schema-key))
+                 failure (first (:errors (explain normalized)))
+                 in (:in failure)
+                 attribute (or (first in) (first (keys identities)))
+                 value (get-in row in :seon.error/unknown)
+                 refusal (invalid-write projection attribute
+                                        (or (get forms attribute) (get forms schema-key))
+                                        value (into [entity-id] in) (get forms schema-key)
+                                        (or (:type failure) ::invalid-entity) nil)]
+             (-> refusal
+                 (write-error-identity identities)
+                 (assoc-in [:seon.error/data :seon.error/diagnostic-evidence]
+                           {::entity identities ::entity-value row ::path (into [entity-id] in)})))))
+       schema-keys))))
+
+(defn- write-report-error
+  "One final check for native operations and all expanded transaction-function output."
+  [projection report]
+  (let [database (:db-after report)
+        before (:db-before report)
+        attempted (:datahike/attempted-tx-data report)
+        affected (distinct (map :e (concat attempted (:tx-data report))))
+        identity-attrs (set/union (set (identity-attributes before))
+                                  (set (identity-attributes database)))]
+    (or
+     (some (fn [datom]
+             (when (:added datom)
+               (let [attribute (:a datom)
+                     value (schema.datahike/decode-attribute-value-in
+                            projection attribute (:v datom))]
+                 (when-let [failure (write-attribute-error
+                                     database projection attribute value
+                                     [(:e datom) attribute] nil true)]
+                   (write-error-identity
+                    failure
+                    (select-keys (write-entity-value database projection (:e datom))
+                                 identity-attrs))))))
+           attempted)
+     (some (fn [entity-id]
+             (let [row (write-entity-value database projection entity-id)
+                   prior-identities (into {}
+                                          (keep (fn [datom]
+                                                  (when (identity-attrs (:a datom))
+                                                    [(:a datom) (:v datom)])))
+                                          (d/datoms before :eavt entity-id))
+                   identities (merge prior-identities (select-keys row identity-attrs))]
+               (write-entity-error database projection entity-id identities row)))
+           affected))))
+
+(defn- write-report-validator
+  "Acquire the callback on its immutable projection, primed when the connection acquires it."
+  [projection]
+  (schema/projection-cache-value
+   projection ::write-report-validator
+   #(fn [report]
+      (schema/call-with-projection projection
+        (fn [] (write-report-error projection report))))))
 
 (defn- retention-rules [projection]
   (schema/projection-cache-value
@@ -3023,9 +3097,9 @@
       (let [database (d/db connection)
             carried-state (connection-projection-state connection)
             projection
-            (or (schema/handed-projection)
+            (or (some-> carried-state deref :seon.schema/projection)
                 (carried-projection database)
-                (some-> carried-state deref :seon.schema/projection)
+                (schema/handed-projection)
                 (let [failure (projection-fallback 'seon.db/transact!)]
                   (throw (ex-info (:seon.error/message failure) failure))))]
         (or (write-error database projection transaction)
@@ -3033,7 +3107,11 @@
                     (retain-transaction projection
                      (schema.datahike/encode-transaction-in
                       projection
-                      (jdk-integers->long (stamp-receipt transaction)))))
+                      (jdk-integers->long
+                       (let [request (stamp-receipt transaction)
+                             request (if (map? request) request {:tx-data request})]
+                         (assoc-in request [:tx-meta :datahike/validate-report]
+                                   (write-report-validator projection)))))))
                   state (or (when (identical? projection
                                                (:seon.schema/projection
                                                 (some-> carried-state deref)))
@@ -3050,6 +3128,9 @@
       (catch Throwable throwable
         (let [data (error.refusal/refusal throwable)]
           (cond
+            (error-value? (:datahike/validation-refusal data))
+            (:datahike/validation-refusal data)
+
             ;; A Seon transition refusal returns its own value verbatim.
             (some? (:seon.error/kind data))
             data
