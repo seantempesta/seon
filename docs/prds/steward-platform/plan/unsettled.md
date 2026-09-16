@@ -397,3 +397,18 @@ Queue, in order:
   (`:seon.issue/unresolved`), archived notes never fail the check, the
   check reports counts per path and exits non-zero only for malformed
   frontmatter or duplicate slugs.
+- 12:30Z fixture-base fixer landed (`a3cbcd9a8`, `957e8f7f9`): schema
+  population hands its projection to every transaction it makes
+  (populate-source! and accrete-schema-population!), fixture seal after the
+  connection carries its projection; `declaration-changes` compares the
+  union of installed and new facets → a dropped `:db/unique` is RESET
+  NEEDED, not a silent keep. Fresh in-memory population 26.8 s with no
+  projection bound anywhere. Two regressions added. Batch 26 phase A
+  (platform, bare over the working tree) was red on registry-test and
+  store-test — attributed to the fixer's in-flight tree; cold re-run on HEAD
+  requested. FINDING to verify: the fixer reports `seon.test/run`
+  unusable in the reforked JVM (pid 53378): test/ not on its classpath and
+  `clojure/core/async/flow_monitor` missing when the loader adds it
+  (issue `the-development-cluster-jvm-cannot-run-an-in-process-regression`).
+  Old JVM 7595 died of a dev-panic core fault (root's turn completion
+  backstop 600 s) after the index refusals. Orphan JVM: none now.
