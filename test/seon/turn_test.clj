@@ -101,6 +101,64 @@
                         [:seon.sci.eval/evaluation :seon.cluster.eval/read-evidence]))
            "a virtual reply is authored input, not generated context")))))
 
+(deftest a-refused-generated-form-records-its-refusal
+  (testing "an appended form whose evaluation is refused never stays bare"
+   (support/with-database
+    (fn [connection]
+      (config/apply! {:seon.db/connection connection
+                     :seon.boot/cluster-name "refused-generated-form"})
+      (support/seed-cluster! connection "refused-generated-form")
+      (checked-transact! connection
+                         (agent/creation-tx {:seon.agent/id "reader"
+                                             :seon.ns/name 'my.agents.reader
+                                             :seon.cluster/name "refused-generated-form"}))
+      (let [source "(seon.db/q '[:find ?id :where [_ :seon.turn/id ?id]])"
+            run-id "refused-generated"
+            evaluation-id (id/evaluation run-id 0)
+            _ (checked-transact!
+               connection
+               [{:seon.turn/id run-id
+                 :seon.turn/agent [:seon.agent/id "reader"]
+                 :seon.turn.work/situation :generate
+                 :seon.turn/starting-ns [:seon.ns/name 'my.agents.reader]
+                 :seon.turn/opened-tx "datomic.tx"}
+                {:seon.cluster.eval/id evaluation-id
+                 :seon.cluster.eval/at (java.util.Date.)
+                 :seon.cluster.eval/run [:seon.turn/id run-id]
+                 :seon.cluster.eval/ordinal 0
+                 :seon.cluster.eval/author :system
+                 :seon.cluster.eval/ns [:seon.ns/name 'my.agents.reader]
+                 :seon.cluster.eval/source source}])
+            ctx (support/fork-cluster-ctx connection)
+            handle (support/cluster-handle
+                    {:seon.env/environment (support/environment "refused-generated-form" connection)
+                     :seon.db/connection connection
+                     :seon.cluster/name "refused-generated-form"
+                     :seon.db.process/id cluster/boot-process-identity
+                     :seon.sci.eval/ctx ctx})
+            report (turn/turn {:seon.turn.loop/cluster handle
+                               :seon.turn.work/next {:seon.turn.work/situation :resume
+                                                     :seon.turn/id run-id
+                                                     :seon.agent/id "reader"
+                                                     :seon.cluster.eval/ordinal 0}}
+                              (java.util.Date.))
+            settled (db/pull (db/db connection)
+                             [:seon.eval/shown :seon.cluster.eval/error
+                              :seon.cluster.eval/source]
+                             [:seon.cluster.eval/id evaluation-id])]
+        (is (= :error (:seon.turn.loop/outcome report)) (pr-str report))
+        ;; The class this pins: a form the loop appended and then refused
+        ;; must carry a terminal fact. Neither shown nor error is absence
+        ;; of signal read as health — no query can say what happened to it.
+        (is (string? (:seon.eval/shown settled)) (pr-str settled))
+        (is (string? (:seon.cluster.eval/error settled)) (pr-str settled))
+        (is (str/includes? (str (:seon.eval/shown settled))
+                           "generated-read-depends-on-turns")
+            (pr-str settled))
+        (is (some? (:seon.turn/closed-tx
+                    (db/pull (db/db connection) [:seon.turn/closed-tx]
+                             [:seon.turn/id run-id])))))))))
+
 (deftest compaction-refuses-an-open-turn-at-the-writer
   (support/with-database
    (fn [connection]

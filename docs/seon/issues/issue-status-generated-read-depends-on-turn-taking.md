@@ -1,9 +1,10 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 created: 2026-09-16
-tags: [issue, agent, test, database]
+resolved: 2026-09-16
+tags: [issue, agent, test, database, turn]
 ---
 
 # The live issue status read is refused as depending on turn-taking
@@ -12,33 +13,69 @@ tags: [issue, agent, test, database]
 
 A system turn for the issue-family worker returns
 `:seon.turn/generated-read-depends-on-turns` before reaching settlement.
-The offending generated form is `(my.issue/status {:seon.issue/id
-"agent-form-calls-to-core-namespaces-are-not-indexed"})`.
+The offending generated form is `(my.issue/status {:seon.issue/id …})`.
 
-## Evidence
+## Cause, isolated 2026-09-16 on default PID 53378
 
-On default PID 7595, worker `12254041a057`, the issue-settlement lane called
-`seon.turn/system-turn` with explicit cluster custody and its carried schema
-projection. A repeated probe after P5/P6 returned the same refusal in 1767 ms.
-Its complete artifact is
-`9f3c6a64576580653eb6d52e2ff2b31059543a48221c48969e6adaee55c4ea11`.
-The read evidence names 68 attributes, including `:my.agent/turns-left`,
-`:seon.cluster.eval/id` and provider attempt attributes. The refusal names
-`:seon.wake/context-inert` as its expected dependency shape.
+The read has no turn dependency. `seon.turn/generated-read-fault` FABRICATED
+one. Measured on default with an explicit `seon.db/*read-evidence-sink*`
+around `(seon.issue/status {:seon.db/db db :seon.issue/id
+"evaluation-reader-refuses-pulled-renderer-ref"})`: seven reads, of which four
+report `:datahike.read/attributes :all`. Those four come from
+`seon.test/verified?` → `seon.test/reach-digest` →
+`seon.test.runner/reach-digests` → `reach-refresh`, whose identity scan is
+`'[:find [?e ...] :in $ [?a ...] :where [?e ?a]]` — the attribute is a query
+VARIABLE, so no index pattern names an attribute and the revision reports the
+unknown set.
 
-`src/seon/issue.clj:212` owns the status read, including test verification;
-`src/seon/test.clj:483` owns `verified?` and its reach-digest read;
-`src/seon/turn.clj:2049` owns generated-read dependency admission. The exact
-operation introducing the turn dependencies has not been isolated. Do not
-attribute it to a particular query from the outer form alone.
+`generated-read-fault` answered that UNKNOWN with `inert`, the whole
+`:seon.wake/context-inert` set. The refusal's evidence was therefore
+`(= (set offending) (set (seon.cluster.wake/inert-attributes db)))` — 68
+attributes, verified equal, none of them read by the form. That is the
+"68 attributes" this note previously recorded: not a dependency list, the
+inert roster itself.
 
-## Boundary and acceptance
+The refusal was then DROPPED. `evaluate-sources` throws the fault,
+`resume-turn`'s `phase` turns it into a turn-level fault, and `settle!` was
+called with no `:seon.cluster.eval/ordinal` — so the opening form the same
+pass had just appended kept its source with NEITHER `:seon.eval/shown` NOR
+`:seon.cluster.eval/error`, `next-ordinal` walked past it, and the turn
+closed looking healthy. `seon.issue-test/issue-worker-opening-links-its-issue`
+was red at `issue_test.clj:109` and `:112` for exactly this.
 
-This is outside issue-settlement's four turn settlement sites and issue-writer
-guard. Its canonical system-turn regression passes; the live issue's direct
-settlement owner records green run 70922 and joint completion/resolution
-transaction 536871824. The residual is the live generated-read path.
+## Fix
 
-Probe the nested read evidence at the existing owners, then verify that the
-ordinary generated issue-status read and full system turn succeed without
-suppressing genuine turn dependencies. Preserve verified-test semantics.
+`src/seon/turn.clj`, both at the owner:
+
+- `generated-read-fault` faults only on attributes the evidence NAMES. An
+  `:all` attribute set states no dependency on any particular attribute;
+  whether an unnarrowed read must regenerate is decided by its authority —
+  the shown-value comparison in `system-turn` and `db/read-evidence-current?`.
+  A read that names a turn attribute still refuses, unchanged.
+- `resume-turn`'s evaluation-failure arm passes
+  `:seon.cluster.eval/ordinal`, so `refusal-terminal-data` records the
+  refusal as that evaluation's shown text and error before closing.
+
+## Verification
+
+In-process on default, one test at a time, test namespaces reloaded through
+`seon.test`'s own loader, each run on a daemon thread. No test JVM launched.
+
+- `seon.issue-test/issue-worker-opening-links-its-issue` — was 6/2/0; now
+  8/0/0 when the opening is given wall time. All four opening evaluations
+  carry `:seon.eval/shown`; ordinal 3 is `(my.issue/status …)` and its shown
+  text names the issue's test.
+- `seon.turn-test/generated-read-evidence-rejects-turn-activity` — 6/0/0. A
+  read naming `:seon.turn/id` still refuses with evidence `#{:seon.turn/id}`.
+- `seon.turn-test/a-refused-generated-form-records-its-refusal` (new) — 5/0/0.
+  Pins the class: an appended form whose evaluation is refused carries a
+  terminal fact.
+
+## Residual, filed separately
+
+At the declared 20 s `seon.test-support/event-backstop-seconds` the issue
+test is marginal on a loaded machine: the opening is now four evaluations
+instead of three-plus-a-silent-drop, at roughly 3.5–4 s per turn-loop pass.
+The cold `reach-digests` build is NOT the cost — measured 714 ms cold, 0 ms
+warm, on the canonical fixture. See
+[opening-turn-pass-costs-seconds-per-form](opening-turn-pass-costs-seconds-per-form.md).

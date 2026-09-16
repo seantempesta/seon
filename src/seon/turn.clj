@@ -2064,8 +2064,25 @@
                                                      (map :seon.db/pattern-attribute patterns)
                                                      (get-in read [:datahike.read/revision
                                                                    :datahike.read/attributes]))]
-                                    (if (= :all attributes)
-                                      inert
+                                    ;; `:all` is the UNKNOWN attribute set of a
+                                    ;; whole-database scan — a program-graph
+                                    ;; cache refresh reading `[?e ?a]` over a
+                                    ;; bound attribute collection states no
+                                    ;; dependency on any particular attribute.
+                                    ;; Answering it with the whole inert set
+                                    ;; FABRICATED 68 dependencies the read never
+                                    ;; had: `(my.issue/status …)` reaches
+                                    ;; `seon.test/verified?` → the reach-digest
+                                    ;; cache refresh, and the declared issue
+                                    ;; block of every opening was refused for
+                                    ;; attributes it never touched. A generated
+                                    ;; read only depends on turn-taking when its
+                                    ;; evidence NAMES a turn attribute; whether
+                                    ;; an unnarrowed read must regenerate is
+                                    ;; decided by its own authority — the
+                                    ;; shown-value comparison in `system-turn`
+                                    ;; and `db/read-evidence-current?`.
+                                    (when-not (= :all attributes)
                                       (filter inert attributes)))))
                         evidence)]
     (when (seq offending)
@@ -4602,10 +4619,20 @@
               :else [])]
         (if (:seon.error/kind analyzed)
           (do
+            ;; THE REFUSAL BELONGS ON THE FORM THAT EARNED IT. Without the
+            ;; ordinal this settled a turn-level fault and closed the run,
+            ;; leaving the evaluation this pass had just appended with a
+            ;; source and NEITHER shown NOR error — an appended form whose
+            ;; outcome no query can name, which `next-ordinal` then walks
+            ;; past. That is absence of signal read as health. `settle!`
+            ;; carries the ordinal through `refusal-terminal-data`, which
+            ;; records the refusal as this evaluation's shown text and
+            ;; error before closing.
             (settle! {:seon.turn.loop/cluster cluster
                       :seon.turn.loop/now now
                       :seon.agent/id agent-id
                       :seon.turn/id run-id
+                      :seon.cluster.eval/ordinal first-ordinal
                       :seon.error/value analyzed})
             (report :error (count evaluated)))
           (let [evaluated
