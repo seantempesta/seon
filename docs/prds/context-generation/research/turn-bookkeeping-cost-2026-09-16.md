@@ -843,3 +843,48 @@ Every in-process `seon.test/run` commits its results through
 assertion's window and outside this lane's question, but it is 6–8 s of
 writing per in-process regression and it dominates the wall time of the
 REPL-first loop every lane is told to use.
+
+## Turn settlement cost landing — 2026-09-16
+
+Lane `turn-settlement-cost`, default PID 95853, after ordered-evaluation
+commit `91cd63e5a`. Read the complete research page, assigned issue, AGENTS.md
+sections, PRD §14, and all three wave2 rule files before editing. Loaded the
+REPL, data-oriented Clojure, Datahike, and testing skills. Initial adopted
+source was `6aaa62a7-41e6-5707-b0a8-dfef8347fb56`. The fixture base was acquired
+on a future outside the test loader/bound and returned `:ready`.
+
+### Slice 1: batch-size attribution refuted
+
+The canonical six-form delimiter regression submitted **9 top-level operations**:
+six evaluation settlement calls, disposition, close, and plan settlement.
+There were **zero namespace maps**, **one new function declaration**, and
+**zero unchanged namespace/program rows reasserted**. The transaction report
+contained **249 datoms**. The function's returned transaction data was one
+new declaration (including its contract components) and its call edge to
+`clojure.core/+`. These are new facts, not removable repeated rows.
+
+The commit measured **282.869125 ms**, with **243.270083 ms** in `row-tx`.
+A second attributed run measured `row-tx` **191.371708 ms**, of which
+`schema/projection-from-database` was **186.671708 ms**; adding the function
+contract was **3.159666 ms**. The other two settlement commits in the first
+test measured **22.120541 / 14.887750 ms**, with **81 / 94 datoms**.
+No transaction-size change is justified by these measurements; the requested
+**<50 ms defining-turn commit target is not achieved**.
+
+Dependency ledger: `reference-code/datahike/src/datahike/db/transaction.cljc:1152`
+hands the current writer database to `:db.fn/call`; `receipt-settle-call`
+and `row-tx` retain that authority. `src/seon/schema.clj:2423` queries all
+schema, function-contract, and function-source rows even with a reusable
+projection. Simply substituting the entering carried projection would omit
+earlier declarations in the same transaction, violating ordered evaluation.
+The remaining optimization belongs at that exact projection derivation owner:
+reuse unchanged declarations while including all writer-visible changes.
+`src/seon/schema.clj` is outside this lane's exclusive paths; it was not edited.
+
+In-process runs of
+`seon.cluster.turn-test/delimiter-repair-is-span-local-and-precedes-intent`:
+**71255: 15/1/0**, bookkeeping **550.257708 ms**;
+**71287: 15/1/0**, bookkeeping **402.543209 ms** (pass/fail/error).
+The namespace was reloaded through `seon.test/with-test-loader`. Temporary
+timing delegates were restored after each run. These are live JVM measurements
+on canonical fixtures, not adopted-change or cold-gate claims.
