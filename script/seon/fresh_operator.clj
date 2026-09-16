@@ -2466,8 +2466,21 @@
                    (:seon.dev.clj-kondo/status dependency-cache))
             (fail! "The clj-kondo dependency cache could not be prepared."
                    dependency-cache))
-        truth (reconciled-truth! root)
-        anchor (select-anchor truth)
+        incremental? (or development-cluster (seq changed-paths))
+        truth (if incremental?
+                (cluster-truth root {:seon.fresh-operator/read-offline-roster? false
+                                     :seon.fresh-operator/probe-jvms? false})
+                (reconciled-truth! root))
+        ;; The publication operation observes its own completion. A separate
+        ;; registry probe cannot decide whether that operation can run.
+        anchor (if incremental?
+                 (some #(when (and (:seon.fresh-operator/operator-root? %)
+                                    (:seon.fresh-operator/process-alive? %)
+                                    (:seon.fresh-operator/transport-advertisement %)
+                                    (or (nil? development-cluster)
+                                        (= development-cluster (:seon.fresh-operator/name %)))) %)
+                       truth)
+                 (select-anchor truth))
         live-target
         (when name
           (some #(when (and (:seon.fresh-operator/operator-root? %)
@@ -2494,8 +2507,10 @@
                  (flush))))))
 
           (or development-cluster (seq changed-paths))
-          (fail! "Incremental source publication requires a running operator JVM."
-                 {:seon.fresh-operator/changed-paths changed-paths})
+          (fail! "Incremental source publication requires a live operator advertisement."
+                 {:seon.error/kind :seon.fresh-operator/live-advertisement-unavailable
+                  :seon.fresh-operator/root (str root)
+                  :seon.fresh-operator/changed-paths changed-paths})
 
           :else
           (let [outcome

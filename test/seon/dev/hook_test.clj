@@ -7,20 +7,45 @@
 
 (def ^:private source-worker-probe
   '(do
+     (require '[seon.fresh-operator :as operator]
+              '[seon.dev.clj-kondo :as kondo])
      (binding [*in* (java.io.StringReader. "{}")
                *out* (java.io.StringWriter.)]
        (load-file "bin/seon-hook"))
      (let [published (atom [])
            successor-ids (atom [])
+           transports (atom [])
+           operator-root (io/file (System/getenv "SEON_HOOK_STATE_DIR") "operator")
+           advertised {:seon.boot/cluster-name "default"
+                       :seon.boot/pid (.pid (java.lang.ProcessHandle/current))
+                       :seon.boot/start-instant
+                       (java.util.Date/from (.get (.startInstant (.info (java.lang.ProcessHandle/current)))))
+                       :seon.boot/prepl-host "127.0.0.1"
+                       :seon.boot/prepl-port 1}
+           advertisement-file (io/file operator-root "data" "clusters" "default" "prepl.edn")
            config {:current-source {:quiet-seconds 86400 :timeout-seconds 1}}]
+       (io/make-parents advertisement-file)
+       (spit advertisement-file (pr-str advertised))
        (io/make-parents source-worker-path)
        ;; This process owns the worker. Exercise its real file lock, pending
        ;; batch, admission and completion without launching a second worker.
        (spit source-worker-path
              (pr-str {:seon.hook/pid (.pid (java.lang.ProcessHandle/current))}))
-       (with-redefs [load-config (constantly config)
+       (with-redefs [seon.operator.state/claim-root-under-lock! (fn [& _])
+                     seon.operator.state/mark-root-created-under-lock! (fn [& _])
+                     kondo/ensure-dependency-cache! (fn [& _] {:seon.dev.clj-kondo/status :ready})
+                     operator/prepl-eval!
+                     (fn [advertisement & _]
+                       (swap! transports conj advertisement)
+                       [{:tag :ret :val (pr-str {:seon.source/branch :current-src
+                                                :seon.source/commit-id "probe"
+                                                :seon.source/digest "probe"})}])
+                     load-config (constantly config)
                      publish-source-paths
                      (fn [paths _ id]
+                       (binding [*out* (java.io.StringWriter.)]
+                         (#'operator/init! (str operator-root)
+                                           (into ["--dev" "default" "--changed"] paths)))
                        (swap! published conj {:seon.hook/paths paths
                                               :seon.hook/publication id})
                        (when (= 1 (count @published))
@@ -32,8 +57,16 @@
          (let [first-id (with-pending-lock
                           #(enqueue-source-unlocked! ["a.clj"]))]
            (run-source-worker!)
+           (.delete advertisement-file)
            (prn {:seon.probe/first-id first-id
                  :seon.probe/published @published
+                 :seon.probe/transports @transports
+                 :seon.probe/advertised advertised
+                 :seon.probe/absent
+                 (try
+                   (#'operator/init! (str operator-root) ["--dev" "default" "--changed" "a.clj"])
+                   :unexpected-success
+                   (catch Exception e (:seon.error/kind (ex-data e))))
                  :seon.probe/successor-ids @successor-ids
                  :seon.probe/results
                  (mapv #(edn/read-string (slurp %))
@@ -60,6 +93,10 @@
         (is (= [["a.clj"] ["a.clj" "b.clj" "c.clj"]]
                (mapv :seon.hook/paths published))
             "Idle admission and completion drain immediately, even with a legacy quiet setting.")
+        (is (= (repeat 2 (:seon.probe/advertised observed)) (:seon.probe/transports observed))
+            "Both batches use the live advertisement without a registry census prerequisite.")
+        (is (= :seon.fresh-operator/live-advertisement-unavailable (:seon.probe/absent observed))
+            "An absent advertisement is named, never inferred to mean a dead JVM.")
         (is (= 3 (count successor-ids)))
         (is (= 1 (count (set successor-ids)))
             "Every edit during publication joins the same successor.")

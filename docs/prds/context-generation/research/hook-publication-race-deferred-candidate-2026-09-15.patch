@@ -1,0 +1,141 @@
+--- src/seon/test.clj
++++ candidate/src/seon/test.clj
+@@ -195,7 +195,9 @@
+ (defn- check-in-process
+   [{connection :seon.db/connection changed :seon.test/changed
+     paths :seon.test/paths namespaces :seon.test/namespaces
+-    cluster :seon.boot/cluster-name defer? :seon.test/defer-widened?}
++    cluster :seon.boot/cluster-name defer? :seon.test/defer-widened?
++    defer-observations? :seon.test/defer-observations?
++    time-limit-ms :seon.test/check-time-limit-ms}
+    progress]
+   (let [started (System/nanoTime)
+         database (db/db connection)
+@@ -217,7 +219,16 @@
+                                                 [?n :seon.ns/name ?name]] database)))
+                    (if (:seon.error/kind reaches) reaches
+                        (vec (sort (distinct (mapcat val reaches)))))))
+-        runnable (if (and widened defer?) [] selected)
++        deferred (when (and defer-observations? (not (:seon.error/kind selected)))
++                   (into (sorted-map)
++                         (keep (fn [test-symbol]
++                                 (when-let [reason (:seon.test/fixture-observation
++                                                   (db/pull database [:seon.test/fixture-observation]
++                                                            [:seon.test/sym test-symbol]))]
++                                   [test-symbol reason])))
++                         selected))
++        runnable (when-not (:seon.error/kind selected)
++                   (if (and widened defer?) [] (vec (remove #(get deferred %) selected))))
+         provenance (when (and (not (:seon.error/kind selected)) (seq runnable))
+                      (runner/provenance database))]
+     (cond
+@@ -228,26 +239,33 @@
+       (let [selected (vec (sort selected))
+             namespaces (vec (sort (distinct (or (seq namespaces)
+                                                 (map #(symbol (namespace (symbol %))) selected)))))
+-            deadline (+ started (* 1000000 (:seon.test/check-time-limit-ms effective)))
++            deadline (+ started (* 1000000 (or time-limit-ms (:seon.test/check-time-limit-ms effective))))
+             initial (cond-> {:seon.test/tests [] :seon.test/passed [] :seon.test/failed []
+                              :seon.test/results []
+                              :seon.test.run/basis-t (db/basis-t database)
+                              :seon.test/next-tier (commands paths namespaces)}
+                       provenance (assoc :seon.test.run/program-digest
+                                         (:seon.test.run/program-digest provenance))
++                      (seq deferred)
++                      (assoc :seon.test/deferred
++                             (mapv (fn [[test-symbol reason]]
++                                     {:seon.test/sym test-symbol
++                                      :seon.test/fixture-observation reason}) deferred)
++                             :seon.test/deferred-command
++                             (into ["bin/test-check" (or cluster "default") "--tests"] (keys deferred)))
+                       widened (assoc :seon.test/widened
+                                      (str "the reaching set cannot bound this change: "
+                                           (str/join ", " widened))))
+-            _ (when (and (seq selected) (not (and widened defer?))
+-                         (some (set (functions/tests-reaching database "seon.test-support/with-database")) selected))
++            _ (when (and (seq runnable)
++                         (some (set (functions/tests-reaching database "seon.test-support/with-database")) runnable))
+                 (reset! progress "canonical fixture preparation")
+                 ;; Realize the fixture owner's one base before starting a Var's
+                 ;; event backstop. The total check deadline still applies.
+                 (with-test-loader
+                   #(deref @(requiring-resolve 'seon.test-support/database-base))))
+-            prepared (when (and (seq selected) (not (and widened defer?)))
++            prepared (when (seq runnable)
+                        (reset! progress "test namespace loading and contract arming")
+-                       (prepare-tests! database selected effective))
++                       (prepare-tests! database runnable effective))
+             result
+             (if (:seon.error/kind prepared)
+               (assoc prepared :seon.test/next-tier :none)
+@@ -308,7 +326,9 @@
+   {:malli/schema [:=> [:cat :seon.test/check-request]
+                   [:or :seon.test/check-result :seon.error/value]]}
+   [{connection :seon.db/connection cluster :seon.boot/cluster-name :as request}]
+-  (let [effective (config/effective (db/db connection) (or cluster "default"))]
++  (let [effective (cond-> (config/effective (db/db connection) (or cluster "default"))
++                    (:seon.test/check-time-limit-ms request)
++                    (assoc :seon.test/check-time-limit-ms (:seon.test/check-time-limit-ms request)))]
+     (cond
+       (:seon.error/kind effective) (assoc effective :seon.test/next-tier :none)
+       (not (:seon.test/check-time-limit-ms effective))
+@@ -370,7 +390,8 @@
+               :seon.boot/cluster-name cluster-name
+               :seon.test/changed (mapv program/row-identity (:seon.test/adoption-identities adoption))
+               :seon.test/paths (vec (:seon.test/adoption-inputs adoption))
+-              :seon.test/defer-widened? true}))))
++              :seon.test/defer-widened? true
++              :seon.test/defer-observations? true}))))
+ 
+ (defn feedback
+   "Format complete in-process check feedback, including executable next tiers."
+@@ -390,6 +411,12 @@
+                         (str "\n" (:seon.test/sym failure) " reaches "
+                              (pr-str (:seon.test/changed failure)) ": "
+                              (:seon.test/failure-message failure))))
++           (apply str (for [deferred (:seon.test/deferred result)]
++                        (str "\ndeferred " (:seon.test/sym deferred) ": "
++                             (:seon.test/fixture-observation deferred))))
++           (when-let [command (:seon.test/deferred-command result)]
++             (str "\nrun deferred: " (str/join " " (map quote-arg command))
++                  " (supply --time-limit-ms MILLISECONDS for a longer declared bound)"))
+            (if (seq invocations) (str "\nrun " (str/join " then " invocations))
+                "\nnext-tier: none; fix failures first")))))
+ 
+
+Candidate regression evaluated in seon.test-reaching-test, NOT LANDED:
+(deftest adoption-check-runs-ordinary-tests-and-defers-declared-observations
+  (support/with-database
+    (fn [connection]
+      (with-test connection '(clojure.test/is (= 4 (+ 2 2)))
+        (fn [ordinary _]
+          (with-test connection '(clojure.test/is (= 9 (* 3 3)))
+            (fn [observation _]
+              (let [reason "Observe external fixture lifecycle after ordinary reaching feedback."
+                    admitted (db/transact!
+                               connection
+                               [{:seon.test/sym observation
+                                 :seon.schema.admission/source :core
+                                 :seon.test/fixture-observation reason}
+                                {:db/id "datomic.tx"
+                                 :seon.test/adoption-cluster [:seon.cluster/name "default"]
+                                 :seon.test/adoption-identities [[:seon.test/sym ordinary]
+                                                                 [:seon.test/sym observation]]
+                                 :seon.test/adoption-inputs ["src/seon/id.clj"]}])
+                    _ (is (:db-after admitted) (pr-str admitted))
+                    result (sut/check-adoption connection "default")
+                    feedback (sut/feedback result)]
+                (is (= [ordinary] (:seon.test/passed result)) (pr-str result))
+                (is (= [] (:seon.test/failed result)) (pr-str result))
+                (is (= [{:seon.test/sym observation :seon.test/fixture-observation reason}]
+                       (:seon.test/deferred result)))
+                (is (= ["bin/test-check" "default" "--tests" observation]
+                       (:seon.test/deferred-command result)))
+                (is (.contains feedback (str "deferred " observation ": " reason)))
+                (is (nil? (:seon.test/run (db/pull (db/db connection) [:seon.test/run]
+                                                  [:seon.test/sym observation]))))
+                (let [explicit (sut/check {:seon.db/connection connection
+                                           :seon.test/changed [observation]
+                                           :seon.test/check-time-limit-ms 120000})]
+                  (is (= [observation] (:seon.test/passed explicit)) (pr-str explicit))
+                  (is (empty? (:seon.test/deferred explicit))))))))))))
