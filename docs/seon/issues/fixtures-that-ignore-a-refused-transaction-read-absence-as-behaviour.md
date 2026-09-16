@@ -36,5 +36,29 @@ SIGNAL as health.
 3. One regression: a fixture write refused by admission fails the test at
    the write with the refusal named, never downstream.
 
+## Status 2026-09-16: the choke point landed, the detector is the other half
+
+`seon.test-support/transacted!` is now the one fixture write path
+(`test/seon/test_support.clj:224`). It transacts through `seon.db/transact!`
+with an explicit connection, refuses to return anything but a report carrying
+`:db-after` and no `:seon.error/kind`, and throws an `ex-info` carrying the
+flat error — so a refusal stops the fixture AT the write, naming write
+admission's own diagnostic and the authored row at the refusal's path index.
+(The refusal's `:seon.db/entity-form` is the entity SCHEMA it was read
+against, not the row; naming it as the row was the first probe's finding.)
+The local helpers and the write-and-discard seeds in
+`seon.render.transcript-test`, `seon.render.web-debug-test`,
+`seon.config-test` and `seon.reconcile-test` now call it; the regression is
+`seon.test-support-test/a-refused-fixture-write-is-reported-at-the-write`
+(`test/seon/test_support_test.clj:43`), which proves the seeding fixture never
+resumes after a refused write. `seon.custody-stability-test` was examined and
+left alone: its writes are SCI source strings evaluated in an agent context,
+not fixture calls with a connection in hand, and it already asserts the
+written message ids. The remaining half is item 2, the detector — a test
+function calling `seon.db/transact!` without consuming the result should be a
+generated issue under the issue generator's detector contract
+([issue-generator-2026-09-16.md](../../prds/steward-platform/research/issue-generator-2026-09-16.md)).
+Until that lands, the class can still return in a namespace nobody triages.
+
 Related: `write-admission-validated-partial-maps-against-every-schema`
 (the admission change), the transcript second-pass landing note.

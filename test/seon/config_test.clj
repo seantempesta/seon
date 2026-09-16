@@ -456,7 +456,7 @@
             (:seon.config/desired-row
              (config/compile-manifest
               {:seon.boot/cluster-name "ancestor"}))]
-        (db/transact! connection [ancestor])
+        (test-support/transacted! connection [ancestor])
         (config/apply!
          {:seon.db/connection connection
           :seon.config/manifest
@@ -476,7 +476,7 @@
   (test-support/with-database
     (fn [connection]
       (config/apply! {:seon.db/connection connection})
-      (db/transact!
+      (test-support/transacted!
        connection
        [[:db/retract
          [:seon.config/cluster "default"]

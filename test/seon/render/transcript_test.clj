@@ -128,7 +128,7 @@
 (deftest stored-evaluations-are-terminal-transcript-values
   (support/with-database
     (fn [connection]
-      (db/transact!
+      (support/transacted!
        connection
        [{:seon.agent/id agent-id}
         {:seon.turn/id "terminal-values" :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}
@@ -294,22 +294,6 @@
     (catch Throwable throwable
       (pr-str (main/ex-triage (Throwable->map throwable))))))
 
-(defn- transacted!
-  "Transact and prove it landed, returning the report.
-
-  A fixture that ignores `transact!`'s answer reads ABSENCE OF SIGNAL as
-  health (AGENTS, recurring failure class): `seon.db/transact!` refuses a row
-  the current schema no longer admits by RETURNING a flat `:seon.error` value,
-  with nothing in the log, and the test then renders an empty history and
-  fails three assertions away from its cause. That happened to this whole
-  namespace twice. Every seed here goes through this function."
-  [connection tx-data]
-  (let [report (db/transact! connection tx-data)]
-    (is (:db-after report)
-        (str "the fixture's own transaction was refused: "
-             (:seon.error/message report)))
-    report))
-
 (defn- transaction-instant
   "The instant Datahike stamped on one committed fixture transaction.
 
@@ -340,7 +324,7 @@
   evaluations are then placed between the instants those transactions
   actually produced."
   [connection]
-  (transacted!
+  (support/transacted!
    connection
    [{:seon.ns/name 'my.agents.transcript}
     {:seon.agent/id agent-id
@@ -352,7 +336,7 @@
     {:seon.turn/id "run-error" :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}])
   (let [instants
         (mapv (fn [message]
-                (transaction-instant (transacted! connection [message])))
+                (transaction-instant (support/transacted! connection [message])))
               [{:seon.message/id "outside-0" :seon.message/to [:seon.agent/id agent-id] :seon.message/content "Start with the failed deployment." :my.message/reason "An external observation, not this agent's decline." :seon.message/inbox [:seon.agent/id agent-id]}
                {:seon.message/id "peer-1" :seon.message/from [:seon.agent/id peer-id] :seon.message/to [:seon.agent/id agent-id] :seon.message/about [:seon.problems/id "problem-transcript"] :seon.message/content "Repair the owning namespace." :seon.message/inbox [:seon.agent/id agent-id]}
                {:seon.message/id "send-2" :seon.message/from [:seon.agent/id agent-id] :seon.message/to [:seon.agent/id peer-id] :seon.message/content "Check the repaired namespace." :seon.message/inbox [:seon.agent/id peer-id]}
@@ -364,7 +348,7 @@
     (is (apply < (map #(.getTime ^java.util.Date %) instants))
         (str "fixture transactions shared an instant: " (pr-str instants)))
     (let [[_outside peer sent decline self] instants]
-      (transacted!
+      (support/transacted!
        connection
        [{:seon.cluster.eval/id "eval-result"
          :seon.cluster.eval/run [:seon.turn/id "run-result"]
@@ -464,7 +448,7 @@
 (deftest error-receipt-without-triage-has-an-execution-error-face
   (support/with-database
     (fn [connection]
-      (db/transact!
+      (support/transacted!
        connection
        [{:seon.agent/id agent-id}
         {:seon.turn/id "run-error-without-triage" :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}
@@ -576,7 +560,7 @@
          (map (fn [index]
                 {:seon.message/id (str "newest-" index) :seon.message/to [:seon.agent/id agent-id] :seon.message/content (str "newest history " index) :seon.message/inbox [:seon.agent/id agent-id]})
               (range 6)))]
-    (transacted!
+    (support/transacted!
      connection
      (into [{:seon.agent/id agent-id}
             {:seon.turn/id bootstrap-run-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx" :seon.turn/trigger "bootstrap-message"}
@@ -649,7 +633,7 @@
   (support/with-database
     (fn [connection]
       (let [bootstrap-run-id (bootstrap/run-id agent-id)]
-        (transacted!
+        (support/transacted!
          connection
          [{:seon.agent/id agent-id}
           {:seon.turn/id bootstrap-run-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx" :seon.turn/trigger "bootstrap-message"}
@@ -713,7 +697,7 @@
 (deftest malformed-receipt-bytes-and-any-unique-about-stay-replayable
   (support/with-database
     (fn [connection]
-      (transacted!
+      (support/transacted!
        connection
        [{:seon.agent/id agent-id}
         {:seon.agent/id peer-id}
@@ -746,7 +730,7 @@
 (deftest about-identity-resolution-pulls-one-deterministic-ordered-id-vector
   (support/with-database
     (fn [connection]
-      (db/transact!
+      (support/transacted!
        connection
        [{:seon.agent/id agent-id}
         {:seon.problems/id "about-first"}
@@ -793,7 +777,7 @@
   (support/with-database
     (fn [connection]
       (let [shown "(0 1 #:seon.print{:elided 8388608})"]
-        (db/transact! connection
+        (support/transacted! connection
                       [{:seon.agent/id agent-id}
                        {:seon.turn/id "run-shown" :seon.turn/agent [:seon.agent/id agent-id]
                         :seon.turn/opened-tx "datomic.tx"}
@@ -816,7 +800,7 @@
              :seon.ai/endpoint "https://provider.invalid"
              :seon.ai/model "fixture-thinking"
              :seon.ai.attempt/settings-edn "{}"}]
-        (db/transact!
+        (support/transacted!
          connection
          [{:seon.agent/id agent-id}
           {:seon.turn/id "run-reasoning" :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}
@@ -824,7 +808,7 @@
                  :seon.ai.attempt/id "reasoning-inline"
                  :seon.ai.attempt/ordinal 0)])
         (let [before (full-agent-ai @connection)]
-          (db/transact!
+          (support/transacted!
            connection
            [[:db/add [:seon.ai.attempt/id "reasoning-inline"]
              :seon.ai.attempt/reasoning reasoning]])
@@ -834,7 +818,7 @@
                 "the complete agent projection is byte-identical when reasoning appears")
             (is (not (str/includes? after reasoning)))
             (is (not (str/includes? after digest)))))
-        (db/transact!
+        (support/transacted!
          connection
          [(assoc base-attempt
                  :seon.ai.attempt/id "reasoning-blob"
@@ -874,7 +858,7 @@
   ;; fits afterwards.
   (support/with-database
     (fn [connection]
-      (db/transact!
+      (support/transacted!
        connection
        (into [{:seon.agent/id agent-id}]
              (map (fn [index]
@@ -1024,7 +1008,7 @@
                     ;; not by the one its event declared: they all ride this
                     ;; single transaction.
                     message-at (transaction-instant
-                                (transacted! connection rows))]
+                                (support/transacted! connection rows))]
                 (let [request (unit connection)
                       ai (transcript/render-ai request)
                       html-value (transcript/render-html request)
@@ -1147,7 +1131,7 @@
 (deftest history-unit-derives-both-projections-from-one-bounded-derivation
   (support/with-database
     (fn [connection]
-      (transacted!
+      (support/transacted!
        connection
        (into
         [{:seon.agent/id agent-id}]
@@ -1223,7 +1207,7 @@
      (support/seed-cluster! connection "one-grammar")
      (config/apply! {:seon.db/connection connection
                      :seon.boot/cluster-name "one-grammar"})
-     (db/transact! connection
+     (support/transacted! connection
                    (agent/creation-tx
                     {:seon.agent/id "one-grammar-agent"
                      :seon.ns/name 'my.agents.one-grammar
@@ -1281,7 +1265,7 @@
                          {:seon.turn.loop/cluster cluster :seon.db/db database :seon.turn/id "one-grammar-stored" :seon.turn/agent [:seon.agent/id "one-grammar-agent"] :seon.turn/starting-ns [:seon.ns/name 'my.agents.one-grammar] :seon.turn/reply reply :seon.turn/opened-tx "datomic.tx" :seon.turn/closed-tx "datomic.tx" :seon.turn.loop/evaluated-sources outcomes})
                committed (blob/with-publication!
                            connection (:seon.blob/staged-writes prepared)
-                           #(db/transact! connection
+                           #(support/transacted! connection
                                           (:seon.db/tx-data prepared)))
                stored-db @connection
                ;; b. THE STORED HISTORY, queried back out of the database.

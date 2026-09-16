@@ -26,8 +26,8 @@
   [body]
   (test-support/with-database
     (fn [connection]
-      (db/transact! connection
-                  [{:seon.db.process/id unmanaged-process}])
+      (test-support/transacted! connection
+                                [{:seon.db.process/id unmanaged-process}])
       (body connection))))
 
 (defn- with-non-temporal-database
@@ -42,11 +42,11 @@
         (cluster/populate-source!
          {:seon.db/connection connection
           :seon.fn/manifest @test-support/source-manifest})
-        (db/transact! connection
-                    {:tx-data
-                     [{:seon.source/digest (apply str (repeat 64 "0"))}]})
-        (db/transact! connection
-                    [{:seon.db.process/id unmanaged-process}])
+        (test-support/transacted! connection
+                                  {:tx-data
+                                   [{:seon.source/digest (apply str (repeat 64 "0"))}]})
+        (test-support/transacted! connection
+                                  [{:seon.db.process/id unmanaged-process}])
         (body connection)
         (finally
           (d/release connection)
@@ -58,12 +58,9 @@
 
 (defn- transact-as!
   [connection process tx-data]
-  (let [result (db/transact! connection
-                             {:tx-data tx-data
-                              :tx-meta (transaction-meta process)})]
-    (when (:seon.error/kind result)
-      (throw (ex-info "Reconcile fixture write was refused." result)))
-    result))
+  (test-support/transacted! connection
+                            {:tx-data tx-data
+                             :tx-meta (transaction-meta process)}))
 
 (defn- request
   [desired]

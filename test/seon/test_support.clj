@@ -209,6 +209,50 @@
     (throw (ex-info "Fixture setup was refused." result)))
   result)
 
+(defn- offending-fixture-row
+  "The authored row write admission refused, taken from its reported path.
+
+   The refusal's own `:seon.db/entity-form` is the entity SCHEMA it was read
+   against, not the row: the row is the one the fixture wrote at the path's
+   leading index, so a seeding fixture reads back exactly what it authored."
+  [tx-data report]
+  (let [rows (if (map? tx-data) (:tx-data tx-data) tx-data)
+        index (first (:seon.db/path report))]
+    (when (and (int? index) (sequential? rows) (< -1 index (count rows)))
+      [index (nth rows index)])))
+
+(defn transacted!
+  "Transact fixture data through the writer and prove the report landed.
+
+   A fixture that discards `seon.db/transact!`'s answer reads ABSENCE OF
+   SIGNAL as health, the project's named recurring failure class. Write
+   admission refuses a row the current schema no longer admits by RETURNING a
+   flat `:seon.error` value with nothing in the log: the seed never lands, the
+   test renders an empty world, and it fails several assertions away from its
+   cause. This is the one fixture write path, so a refusal stops the test AT
+   the write, naming the refusal's diagnostic and the offending row.
+
+   Returns the transaction report, whose `:tx-data`, `:tempids` and `:db-after`
+   the seeding fixture reads exactly as production callers do."
+  {:malli/schema
+   [:=> [:cat :seon.db/connection :seon.store/transaction]
+    :seon.db/transaction-report]}
+  [connection tx-data]
+  (let [report (db/transact! connection tx-data)]
+    (when-not (and (map? report)
+                   (nil? (:seon.error/kind report))
+                   (some? (:db-after report)))
+      (throw
+       (ex-info
+        (str "Fixture write was refused at the write: "
+             (or (:seon.error/message report)
+                 (str "no :db-after in " (pr-str report)))
+             (when-let [[index row] (offending-fixture-row tx-data report)]
+               (str " Offending row " index ": " (pr-str row) ".")))
+        (cond-> (if (map? report) report {:seon.db/report report})
+          true (assoc :seon.db/tx-data tx-data)))))
+    report))
+
 (defn- populate-database!
   [connection]
   (checked-fixture-result

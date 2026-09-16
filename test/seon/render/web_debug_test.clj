@@ -38,9 +38,9 @@
      (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "debug-turns"
                     :seon.config/manifest {:seon.config.ai/no-provider true}})
      (cluster/ensure-cluster-entity! connection "debug-turns" cluster/boot-process-identity)
-     (db/transact! connection
-                   [{:seon.agent/id "root" :seon.agent/namespace {:seon.ns/name 'my.agents.root}}
-                    {:seon.agent/id "juniper" :seon.agent/namespace {:seon.ns/name 'my.agents.juniper}}])
+     (support/transacted! connection
+                          [{:seon.agent/id "root" :seon.agent/namespace {:seon.ns/name 'my.agents.root}}
+                           {:seon.agent/id "juniper" :seon.agent/namespace {:seon.ns/name 'my.agents.juniper}}])
      (let [ctx (support/fork-cluster-ctx connection)
            environment (support/environment "debug-turns" connection)
            routing (agent/routing)]
@@ -475,11 +475,11 @@
                      :seon.render/units [::_left ::_right]}
                [:seon.agent/id :seon.agent/id]])}]}
    (fn [connection]
-     (db/transact! connection
-                   [{:seon.agent/id "relationships"}
-                    {::left [:seon.agent/id "relationships"]}
-                    {::right [:seon.agent/id "relationships"]}
-                    {::hidden [:seon.agent/id "relationships"]}])
+     (support/transacted! connection
+                          [{:seon.agent/id "relationships"}
+                           {::left [:seon.agent/id "relationships"]}
+                           {::right [:seon.agent/id "relationships"]}
+                           {::hidden [:seon.agent/id "relationships"]}])
      (let [database @connection
            projection (schema/projection-from-database database)
            result (schema/call-with-projection
@@ -502,7 +502,7 @@
 (deftest reverse-declarations-receive-the-actual-relationship-value
   (support/with-database
    (fn [connection]
-     (db/transact! connection [{:seon.cluster/name "reverse-render-fixture"}])
+     (support/transacted! connection [{:seon.cluster/name "reverse-render-fixture"}])
      (let [effective (config/defaults)
            caps (config/result-caps effective)
            ctx (support/fork-cluster-ctx connection)
@@ -550,8 +550,8 @@
 (deftest agent-identity-groups-scalars-and-keeps-declared-components
   (support/with-database
    (fn [connection]
-     (db/transact! connection [{:seon.cluster/name "identity-blocks"}
-                              {:seon.agent/id "identity-blocks"}])
+     (support/transacted! connection [{:seon.cluster/name "identity-blocks"}
+                                      {:seon.agent/id "identity-blocks"}])
      (let [database @connection
            ctx (support/fork-cluster-ctx connection)
            projection (schema/projection-from-database database)
@@ -667,21 +667,21 @@
   (#'web-test/with-server
    (fn [connection _server context]
      (let [shown "{:functions [café  spaced], :schemas {}}\n"
-           _ (db/transact! connection
-               [{:seon.turn/id "saved-directory-turn"
-                 :seon.turn/agent [:seon.agent/id "root"]
-                 :seon.turn/opened-tx "datomic.tx"
-                 :seon.turn/closed-tx "datomic.tx"
-                 :seon.turn/reply "" :seon.turn/reply-size 0}
-                {:seon.agent/id "root"
-                 :seon.agent/runtime {:seon.runtime/agent [:seon.agent/id "root"]
-                                      :seon.runtime/turns [[:seon.turn/id "saved-directory-turn"]]}}
-                {:seon.cluster.eval/id "saved-directory"
-                 :seon.cluster.eval/run [:seon.turn/id "saved-directory-turn"]
-                 :seon.cluster.eval/ordinal 0 :seon.cluster.eval/at (java.util.Date.)
-                 :seon.cluster.eval/source "(dir my.test)"
-                 :seon.eval/renderer 'seon.repl/render-directory-ai
-                 :seon.eval/shown shown}])
+           _ (support/transacted! connection
+                      [{:seon.turn/id "saved-directory-turn"
+                        :seon.turn/agent [:seon.agent/id "root"]
+                        :seon.turn/opened-tx "datomic.tx"
+                        :seon.turn/closed-tx "datomic.tx"
+                        :seon.turn/reply "" :seon.turn/reply-size 0}
+                       {:seon.agent/id "root"
+                        :seon.agent/runtime {:seon.runtime/agent [:seon.agent/id "root"]
+                                             :seon.runtime/turns [[:seon.turn/id "saved-directory-turn"]]}}
+                       {:seon.cluster.eval/id "saved-directory"
+                        :seon.cluster.eval/run [:seon.turn/id "saved-directory-turn"]
+                        :seon.cluster.eval/ordinal 0 :seon.cluster.eval/at (java.util.Date.)
+                        :seon.cluster.eval/source "(dir my.test)"
+                        :seon.eval/renderer 'seon.repl/render-directory-ai
+                        :seon.eval/shown shown}])
            request {:seon.db/db (db/db connection) :seon.db/connection connection
                     :seon.agent/id "root" :seon.sci.eval/ctx (:ctx context)
                     :seon.sci.admit/caps (config/result-caps (config/defaults))

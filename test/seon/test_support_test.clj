@@ -40,6 +40,46 @@
           (db/q '[:find ?digest . :where [_ :seon.source/digest ?digest]]
                 (db/db connection)))))))
 
+(deftest a-refused-fixture-write-is-reported-at-the-write
+  ;; The recurring failure class: a fixture that discards `transact!`'s answer
+  ;; reads ABSENCE OF SIGNAL as health. One write path means admission's
+  ;; refusal stops the fixture where it happened, naming the diagnostic and
+  ;; the offending row, instead of an empty world several assertions later.
+  (test-support/with-database
+   (fn [connection]
+     (let [reached-downstream? (atom false)
+           failure (try
+                     (test-support/transacted!
+                      connection
+                      [{:seon.agent/id "refused-fixture-write"
+                        :seon.agent/not-an-installed-attribute 1}])
+                     (reset! reached-downstream? true)
+                     nil
+                     (catch clojure.lang.ExceptionInfo error error))]
+       (is (false? @reached-downstream?)
+           "a refused fixture write never returns to its seeding fixture")
+       (is (some? failure))
+       (is (= :seon.db/invalid-write (:seon.error/kind (ex-data failure))))
+       (is (= [0 :seon.agent/not-an-installed-attribute]
+              (:seon.db/path (ex-data failure))))
+       (is (str/includes? (ex-message failure)
+                          ":seon.agent/not-an-installed-attribute")
+           "the failure carries write admission's own diagnostic")
+       (is (str/includes? (ex-message failure)
+                          (str "Offending row 0: "
+                               (pr-str {:seon.agent/id "refused-fixture-write"
+                                        :seon.agent/not-an-installed-attribute 1})))
+           "the failure names the authored row, not the schema it was read against")
+       (is (nil? (db/q '[:find ?id . :where [_ :seon.agent/id ?id]]
+                       (db/db connection)))
+           "the refused row seeded nothing")
+       (let [report (test-support/transacted!
+                     connection [{:seon.agent/id "admitted-fixture-write"}])]
+         (is (some? (:db-after report)))
+         (is (= "admitted-fixture-write"
+                (db/q '[:find ?id . :where [_ :seon.agent/id ?id]]
+                      (db/db connection)))))))))
+
 (defn- file-digests
   [root]
   (into (sorted-map)
