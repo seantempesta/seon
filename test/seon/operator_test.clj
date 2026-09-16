@@ -937,10 +937,13 @@
         (is (identical? replacement (operator/start! request)))
         (is (nil? (operator/stop! original)))
         (is (identical? replacement (operator/restart! original)))
+        ;; `restart!` holds an instance, never the caller's start request:
+        ;; it re-starts from that instance's OWN `:seon.boot/config`, the
+        ;; only value carrying every boot member the stopped cluster had.
         (is (= [[:start request]
                 [:stop original]
                 [:stop original]
-                [:start request]]
+                [:start (:seon.boot/config original)]]
                @calls)))
       (finally
         (doseq [instance [original replacement]]
@@ -1244,39 +1247,31 @@
         (test-support/delete-recursively! repository-root)))))
 
 (deftest public-contracts-refuse-invalid-input-and-output
-  (let [delegate-calls (atom 0)
-        start-filter (mi/-filter-var #{#'operator/start!})
-        ;; THE WORKER'S ENTERING WRAPPER, RESTORED BELOW. `mi/unstrument!`
-        ;; strips whatever is there, so a test arming its own narrow filter
-        ;; also removes the wrapper the WORKER armed — and every later task
-        ;; in that pooled JVM then asserts this test's timing rather than its
-        ;; own subject (AGENTS §5.7: own nothing global). The runner's drift
-        ;; report named this test.
-        entering-root (when (some-> #'operator/start! deref meta ::mi/original)
-                        @#'operator/start!)]
-    (try
-      (mi/clj-collect! {:ns ['seon.operator]})
-      (mi/instrument!
-       {:scope #{:input :output}
-        :filters [start-filter]
-        :report ((ns-resolve 'seon.instrument 'throwing-report) nil)})
-      (with-redefs [cluster/start!
-                    (fn [_]
-                      (swap! delegate-calls inc)
-                      :not-an-instance)]
-        (testing "invalid input is refused before delegation"
-          (let [failure (caught #(operator/start!
-                                 {:seon.boot/cluster-name 42}))]
-            (is (= :seon.instrument/contract-violated
-                   (:seon.error/kind (ex-data failure))))
-            (is (= 0 @delegate-calls))))
-        (testing "invalid delegate output is refused at the public boundary"
-          (let [failure (caught #(operator/start!
-                                 {:seon.boot/cluster-name "valid"}))]
-            (is (= :seon.instrument/contract-violated
-                   (:seon.error/kind (ex-data failure))))
-            (is (= 1 @delegate-calls)))))
-      (finally
-        (mi/unstrument! {:filters [start-filter]})
-        (when entering-root
-          (alter-var-root #'operator/start! (constantly entering-root)))))))
+  ;; THE SUBJECT IS THE WRAPPER THE SYSTEM ARMS. `seon.instrument` arms every
+  ;; public function from the program graph and compiles its contract against
+  ;; the PROJECTION's registry; malli's default registry holds no `:seon.*`
+  ;; key at all, so a test that re-collected these vars with
+  ;; `mi/clj-collect!` refused every declaration it read
+  ;; (`:malli.core/invalid-schema` on `:seon.operator/cleanup-request`) — and
+  ;; `mi/unstrument!` then stripped the worker's own wrapper for every later
+  ;; task in the pooled JVM (AGENTS §5.7: own nothing global). This test arms
+  ;; nothing, restores nothing, and asserts the armed boundary itself.
+  (let [delegate-calls (atom 0)]
+    (is (some? (some-> #'operator/start! deref meta ::mi/original))
+        "the public boundary must enter this test already armed")
+    (with-redefs [cluster/start!
+                  (fn [_]
+                    (swap! delegate-calls inc)
+                    :not-an-instance)]
+      (testing "invalid input is refused before delegation"
+        (let [failure (caught #(operator/start!
+                                {:seon.boot/cluster-name 42}))]
+          (is (= :seon.instrument/contract-violated
+                 (:seon.error/kind (ex-data failure))))
+          (is (= 0 @delegate-calls))))
+      (testing "invalid delegate output is refused at the public boundary"
+        (let [failure (caught #(operator/start!
+                                {:seon.boot/cluster-name "valid"}))]
+          (is (= :seon.instrument/contract-violated
+                 (:seon.error/kind (ex-data failure))))
+          (is (= 1 @delegate-calls)))))))

@@ -13,7 +13,14 @@
                                 :live-instance-stopped? :boolean
                                 :branch-retired? :boolean
                                 :removed [:vector :string]
-                                :collection :seon.error/value
+                                :collection
+                                ;; `seon.operator/collect-store!` either returns
+                                ;; its verified collect result or throws, so the
+                                ;; slot a completed cleanup fills is that result;
+                                ;; an error value stays admitted for a cleanup
+                                ;; whose collection refused.
+                                [:or :seon.operator.collect/result
+                                 :seon.error/value]
                                 :remaining [:vector :string]
                                 :reclaimed-bytes [:int {:min 0}]
                                 :complete?
