@@ -106,3 +106,15 @@ Fix sketch: retain `output` to `logs/current-source-failure.log` (the hook
 already names that file) and let the failure data carry the log path plus a
 bounded tail, so `prn` of the data is small by construction rather than by
 the printer's discretion.
+
+## Program-provenance observation — 2026-09-16
+
+Publication `f78f26b2-5972-4b6b-817f-3454f3f04aae` correctly refused an
+invalid manifest contract, but its diagnostic expanded **35,307** schema
+problems. The retained failure log reported **39,930,609 omitted characters**;
+the publication feedback itself reported approximately **6,298,289 tokens**
+over its budget. The cause remained first, but serializing the complete
+manifest explanation before clipping is still costly and difficult to inspect.
+This was observed during ordinary schema development, not a deliberate failed
+publication. See the
+[program-provenance landing](../../prds/steward-platform/research/program-provenance-2026-09-16.md).

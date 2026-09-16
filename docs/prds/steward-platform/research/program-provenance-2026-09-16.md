@@ -202,3 +202,10 @@ default pull and count.
 All retired subject-prototype Vars were removed from the live namespaces.
 There are no subject-derivation edits in the commit. No background shell,
 scratch cluster, test JVM, or worktree was started by this lane.
+
+Implementation commit: `3402913f3`. After the committed edit, the fixed-tuple
+regression again passed **3 assertions, 0 failures/errors**, run **68282**, in
+6,436 ms. The Datom recording observation is now filed as
+[test-result recording](../../../seon/issues/test-result-recording-walks-datoms-on-failed-live-tests.md),
+and the oversized publication explanation is recorded on the existing
+[operator diagnostic issue](../../../seon/issues/init-failure-dumps-entire-prepl-event-history.md).
