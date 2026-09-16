@@ -19,6 +19,36 @@
   {:seon.error/kind ::unknown :seon.test/unknown (str input)
    :seon.error/message message :seon.test/next-tier :none})
 
+(defn failure-text
+  "Show an assertion's exact claim, ordered contexts, and known source site."
+  {:malli/schema [:=> [:cat [:or :seon.test.failure/value :seon.test.failure/report]] :string]}
+  [failure]
+  (let [field (fn [inline blob]
+                (or (get failure inline)
+                    (when-let [digest (get failure blob)]
+                      (pr-str (list 'seon.blob/get digest)))))
+        path (get-in failure [:seon.test.failure/file :seon.fn.file/path])]
+    (str/join "\n"
+      (remove nil?
+        [(str (name (:seon.test.failure/type failure))
+              (when path (str " " path ":" (:seon.test.failure/line failure))))
+         (when (seq (:seon.test.failure/contexts failure))
+           (str/join " > " (map second (sort-by first (:seon.test.failure/contexts failure)))))
+         (:seon.test.failure/message failure)
+         (when-let [expected (field :seon.test.failure/expected :seon.test.failure/expected-blob)]
+           (str "expected: " expected))
+         (when-let [actual (field :seon.test.failure/actual :seon.test.failure/actual-blob)]
+           (str "actual: " actual))]))))
+
+(defn failure-message
+  "Read structured assertion evidence, retaining legacy text for old results."
+  {:malli/schema [:=> [:cat :seon.test.runner/captured-result] :string]}
+  [result]
+  (if-let [failures (or (seq (:seon.test/failures result))
+                        (seq (:seon.test.failure/reports result)))]
+    (str/join "\n\n" (map failure-text failures))
+    (or (:seon.test/failure-message result) "No assertion claim was retained.")))
+
 (defn changed-since-green
   "Functions in the recorded tested closure with source/spec datoms after its
   last green result. Includes retractions. Missing history or closure evidence
@@ -416,8 +446,9 @@
                                     {:seon.test/sym test-symbol
                                      :seon.test/changed (vec (filter #(get (get reaches %) test-symbol) changed))
                                      :seon.test/failure-message
-                                     (or (:seon.test/failure-message outcome)
-                                         (:seon.error/message outcome) "No passing assertions were observed.")})
+                                     (if (:seon.error/kind outcome) (:seon.error/message outcome)
+                                         (failure-message outcome))
+                                     :seon.test/failures (vec (:seon.test/failures outcome))})
                             (not green?) (assoc :seon.test/next-tier :none))]
                       (recur (next remaining) next-result))))
                 result)))]

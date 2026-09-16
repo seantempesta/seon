@@ -45,6 +45,8 @@
              {:min 1, :seon.db/identity true, :seon.search/index :symbol}],
             :result
             [:map
+             {:seon.render/ai seon.render.test/render-ai
+              :seon.render/html seon.render.test/render-html}
              [:seon.test/failures {:optional true} [:vector :seon.test.failure/value]]
              [:seon.test/sym :seon.test/sym]
              [:seon.test/pass-count :seon.test/pass-count]
@@ -153,6 +155,7 @@
   [:seon.test/passed [:vector :seon.test/sym]]
   [:seon.test/failed
    [:vector [:map [:seon.test/sym :seon.test/sym]
+             [:seon.test/failures {:optional true} [:vector :seon.test.failure/value]]
              [:seon.test/failure-message :string]
              [:seon.test/changed :seon.test/changed]]]]
   [:seon.test/results :seon.test/results]

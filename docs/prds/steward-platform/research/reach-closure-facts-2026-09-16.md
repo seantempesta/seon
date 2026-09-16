@@ -148,3 +148,19 @@ Priority commits: `d2a0ad636` (expiry), `3c6a6bb8f` (failure identities),
 `800fa67af` (committed comparisons), `02ef8370a` (rebuild evidence),
 `e2eb91fcd` (repeated contention), `e8a017620` (allowance from published
 schema facts). The gate request excludes the unfinished working-tree readers.
+
+### Reader slice and publication repair, 2026-09-16
+
+Read the assignment addenda end to end. Item i is withdrawn; a–f are closed
+by the owner's batch 41 at cfac8275c (platform and all five named namespaces
+green). The structured failure readers now cover problems, test/check,
+accretion, and the test render pair. The new problems regression supplies
+its declared two-argument API's empty request map; the one-argument call
+was the whole-tree publication refusal. No API arity change is needed.
+
+The failure-facts regressions previously passed 74 assertions across eleven
+serial in-process tests with armed contracts. The additional reader assertion
+and blob SCI read require the next gate. Publication verification follows
+this commit. Items h (verify deletion tuple failure) and g (retry failed shared
+fixture construction outside caller bounds) remain. Protected gate-session
+files and recording-notice code are excluded.

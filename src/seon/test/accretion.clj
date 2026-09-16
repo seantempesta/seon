@@ -215,14 +215,14 @@
          [:test
           (:seon.test/fail-count result)
           (:seon.test/error-count result)
-          (:seon.test/failure-message result)])]
+          (or (:seon.test.failure/reports result) (:seon.test/failures result)
+              (:seon.test/failure-message result))])]
     (cond->
      {:seon.test.accretion/failure-source :test
       :seon.test.accretion/failure-shape shape
       :seon.test/sym (:seon.test/sym result)
       :seon.test.accretion/expected-actual
-      (or (:seon.test/failure-message result)
-          "The test failed without an assertion message.")}
+      ((requiring-resolve 'seon.test/failure-message) result)}
       (seq (:seon.test/failing-assertions result))
       (assoc :seon.test/failing-assertions
              (:seon.test/failing-assertions result)))))

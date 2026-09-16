@@ -1,4 +1,9 @@
-#:seon.problems{:errored-receipt
+#:seon.problems{:failed-tests
+                [:vector [:map [:seon.test/sym :seon.test/sym]
+                          [:seon.test/fail-count :seon.test/fail-count]
+                          [:seon.test/error-count :seon.test/error-count]
+                          [:seon.test/failures {:optional true} [:vector :seon.test.failure/value]]]]
+                :errored-receipt
                 [:map
                  [:seon.cluster.eval/id :seon.cluster.eval/id]
                  [:seon.turn/id :seon.turn/id]
@@ -76,6 +81,8 @@
                 [:map
                  #:seon.render{:ai seon.problems/ai-prose,
                                :html seon.problems/html-report}
+                 [:seon.problems/failed-tests {:optional true}
+                  :seon.problems/failed-tests]
                  [:seon.problems/error-signatures
                   {:optional true}
                   [:vector :seon.problems/error-signature]]

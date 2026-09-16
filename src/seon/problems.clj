@@ -64,6 +64,8 @@
             [seon.db :as db]
             [seon.turn :as turn]
             [seon.error :as error]
+            [seon.render.test :as test-render]
+            [seon.test :as test]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]))
 
@@ -343,6 +345,19 @@
        (mapv (fn [model]
                {:seon.config.ai/model model}))))
 
+(defn- failed-tests [database]
+  (let [ids (db/q '[:find [?t ...]
+                    :where [?t :seon.test/sym]
+                           (or-join [?t]
+                             (and [?t :seon.test/fail-count ?n] [(pos? ?n)])
+                             (and [?t :seon.test/error-count ?n] [(pos? ?n)]))] database)]
+    (if (:seon.error/kind ids) ids
+        (db/pull-many database
+          '[:seon.test/sym :seon.test/pass-count :seon.test/fail-count :seon.test/error-count
+            :seon.test/failure-message
+            {:seon.test/failures [* {:seon.test.failure/file [:db/id :seon.fn.file/path]}]}]
+          ids))))
+
 ;;; ---------------------------------------------------------------------------
 ;;; The one derivation
 ;;; ---------------------------------------------------------------------------
@@ -370,6 +385,7 @@
   (if-not (or (db/carried-projection db) (schema/handed-projection))
     (db/projection-fallback 'seon.problems/problems)
     (let [signatures (error-signatures db)
+        tests (failed-tests db)
         failed (failed-runs db)
         errored (errored-receipts db)
         deferred (deferred-agents db)
@@ -377,6 +393,7 @@
         stale (stale-vars db)
         missing-model-rows (missing-models db)
         found (cond-> {}
+                (seq tests) (assoc :seon.problems/failed-tests tests)
                 (seq signatures) (assoc :seon.problems/error-signatures signatures)
                 (seq failed) (assoc :seon.problems/failed-runs failed)
                 (seq errored) (assoc :seon.problems/errored-receipts errored)
@@ -386,7 +403,7 @@
                 (seq stale) (assoc :seon.problems/stale-vars stale)
                 (seq missing-model-rows)
                 (assoc :seon.problems/missing-models missing-model-rows))]
-    found)))
+    (if (:seon.error/kind tests) tests found))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The html projection — the problems PAGE
@@ -469,6 +486,9 @@
   {:malli/schema [:=> [:cat :seon.problems/problems] :seon.render/hiccup]}
   [found]
   [:div {:class "seon-problems"}
+   (family-section "failed tests"
+     (for [entry (:seon.problems/failed-tests found)]
+       [:li (test-render/render-html {:seon.render/value entry})]))
    (family-section
     "errors"
     (for [entry (:seon.problems/error-signatures found)]
@@ -527,6 +547,8 @@
   {:malli/schema [:=> [:cat :seon.problems/problems] :string]}
   [found]
   (->> (concat
+        (for [entry (:seon.problems/failed-tests found)]
+          (str "Test " (:seon.test/sym entry) "\n" (test/failure-message entry)))
         (for [entry (:seon.problems/errored-receipts found)]
           (str "Form " (:seon.cluster.eval/ordinal entry)
                " failed during evaluation: "
@@ -558,6 +580,8 @@
   {:malli/schema [:=> [:cat :seon.problems/problems] :string]}
   [found]
   (->> (concat
+        (for [entry (:seon.problems/failed-tests found)]
+          (str "Test " (:seon.test/sym entry) "\n" (test/failure-message entry)))
         (for [entry (:seon.problems/error-signatures found)]
           (error/log-line
            (error/notice {:seon.error/fact (:seon.error/fact entry)

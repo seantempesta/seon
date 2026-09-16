@@ -1,10 +1,179 @@
 (ns seon.test-failure-facts-test
-  (:require [clojure.test :refer [deftest is]]
+  (:require [clojure.test :refer [deftest is testing]]
+            [clojure.string :as str]
+            [sci.core :as sci]
+            [seon.blob :as blob]
+            [seon.id :as id]
+            [seon.problems :as problems]
+            [seon.render.test :as render]
             [seon.db :as db]
             [seon.test :as sut]
             [seon.program :as program]
             [seon.test.runner :as runner]
             [seon.test-support :as support]))
+
+(defn- with-probe [connection check]
+  (let [namespace-name (symbol (str "failure.probe" (id/id)))
+        namespace-object (create-ns namespace-name)
+        test-symbol (str namespace-name "/probe")
+        mode (atom :red)
+        test-var (intern namespace-object 'probe)
+        path (get-in (db/pull (db/db connection)
+                       '[{:seon.fn/file [:seon.fn.file/path]}]
+                       [:seon.test/sym "seon.test-failure-facts-test/recorded-reach-belongs-to-the-tested-value-and-is-replaced"])
+                     [:seon.fn/file :seon.fn.file/path])]
+    (alter-meta! test-var assoc :test
+      (fn []
+        (case @mode
+          :green (is true)
+          :blob (is (= :small (apply str (repeat 5000 "é"))) "large actual")
+          :red (testing "outer" (testing "inner"
+                 (is (= 1 2) "first claim")
+                 (is (= :a :b) "second claim"))))))
+    (try
+      (let [tx (db/transact! connection
+                 [{:seon.ns/name namespace-name}
+                  {:seon.test/sym test-symbol :seon.test/ns [:seon.ns/name namespace-name]
+                   :seon.schema.admission/source :core
+                   :seon.fn/file [:seon.fn.file/path path]
+                   :seon.test/source "(deftest probe (is (= 1 2)) (is (= :a :b)))"}])]
+        (is (:db-after tx) (pr-str tx))
+        (when (:seon.error/kind tx)
+          (throw (ex-info "The failure fixture transaction was refused." tx))))
+      (check test-symbol test-var mode)
+      (finally (remove-ns namespace-name)))))
+
+(defn- run-probe [connection test-var]
+  (let [database (db/db connection)]
+    (sut/run test-var connection {:seon.db/db database
+                                 :seon.test.run/provenance (runner/provenance database)
+                                 :seon.test/remaining-ms 100000})))
+
+(deftest one-failing-is-becomes-one-failure-entity
+  (support/with-database
+    (fn [connection]
+      (with-probe connection
+        (fn [s v _]
+          (let [result (run-probe connection v)
+                failures (:seon.test/failures result)]
+            (is (= 2 (:seon.test/fail-count result)) (pr-str result))
+            (is (= 2 (count failures)))
+            (is (= #{"first claim" "second claim"} (set (map :seon.test.failure/message failures))))
+            (doseq [failure failures]
+              (is (= :fail (:seon.test.failure/type failure)))
+              (is (string? (:seon.test.failure/expected failure)))
+              (is (string? (:seon.test.failure/actual failure)))
+              (is (pos-int? (:seon.test.failure/line failure)))
+              (is (int? (get-in failure [:seon.test.failure/file :db/id])))
+              (is (= [[0 "outer"] [1 "inner"]] (sort-by first (:seon.test.failure/contexts failure)))))
+            (is (= 2 (count (db/q '[:find ?f :in $ ?s
+                                    :where [?t :seon.test/sym ?s]
+                                           [?t :seon.test/failures ?f]
+                                           [?f :seon.test.failure/file ?file]
+                                           [?file :seon.fn.file/path]] (db/db connection) s))))))))))
+
+(deftest a-repeated-failure-upserts-its-entity
+  (support/with-database
+    (fn [connection]
+      (with-probe connection
+        (fn [_ v _]
+          (let [before (:seon.test/failures (run-probe connection v))
+                after (:seon.test/failures (run-probe connection v))]
+            (is (= 2 (count before) (count after)))
+            (is (= (set (map :seon.test.failure/id before)) (set (map :seon.test.failure/id after))))
+            (is (= #{2} (set (map :seon.test.failure/seen-count after)))))
+          (let [again (:seon.test/failures (run-probe connection v))]
+            (is (= #{3} (set (map :seon.test.failure/seen-count again))))
+            (is (every? #(not= (:seon.test.failure/first-run %) (:seon.test.failure/last-run %)) again))))))))
+
+(deftest a-green-run-retracts-its-failures
+  (support/with-database
+    (fn [connection]
+      (with-probe connection
+        (fn [s v mode]
+          (let [red (run-probe connection v) ids (mapv :seon.test.failure/id (:seon.test/failures red))]
+            (is (= 2 (count ids)))
+            (reset! mode :green)
+            (let [green (run-probe connection v)]
+              (is (= 1 (:seon.test/pass-count green)))
+              (is (nil? (:seon.test/failures green)))
+              (is (nil? (:seon.test/failing-assertions green)))
+              (is (nil? (:seon.test/failure-message green)))
+              (is (empty? (db/q '[:find ?e :in $ [?id ...]
+                                  :where [?e :seon.test.failure/id ?id]] (db/db connection) ids)))
+              (is (nil? (:seon.test/failures (db/pull (db/db connection)
+                                             [:seon.test/failures] [:seon.test/sym s])))))))))))
+
+(deftest an-oversized-actual-settles-into-a-blob
+  (support/with-database
+    (fn [connection]
+      (support/seed-cluster! connection "default")
+      (with-probe connection
+        (fn [_ v mode]
+          (reset! mode :blob)
+          (let [failure (first (:seon.test/failures (run-probe connection v)))
+                digest (:seon.test.failure/actual-blob failure)
+                content (when digest (blob/get connection digest))]
+            (is (string? digest))
+            (is (nil? (:seon.test.failure/actual failure)))
+            (is (> (:seon.test.failure/actual-size failure 0) 10000))
+            (is (str/includes? (or content "") (apply str (repeat 5000 "é"))))
+            (when digest
+              (is (= content (sci/eval-string* (support/fork-cluster-ctx connection)
+                                (pr-str (list 'seon.blob/get digest))))
+                  "the rendered blob read uses real SCI connection preparation"))))))))
+
+(deftest an-interpreted-test-failure-records-no-false-site
+  (support/with-database
+    (fn [connection]
+      (with-probe connection
+        (fn [s _ _]
+          (let [ctx (support/fork-cluster-ctx connection)
+                ns-name (symbol (namespace (symbol s)))
+                source (str "(ns " ns-name " (:require [clojure.test :refer [deftest is]])) "
+                            "(deftest probe (is (= 1 2))) #'probe")
+                v (sci/eval-string* ctx source)
+                result (run-probe connection v)
+                failure (first (:seon.test/failures result))]
+            (is (= 1 (:seon.test/fail-count result)) (pr-str result))
+            (is (nil? (:seon.test.failure/file failure)))
+            (is (nil? (:seon.test.failure/line failure)))
+            (is (= (id/id [s [:fail nil (:seon.test.failure/expected failure)
+                              (:seon.test.failure/actual failure) nil] 0])
+                   (:seon.test.failure/id failure)))))))))
+
+(deftest failures-render-their-site-and-claim
+  (support/with-database
+    (fn [connection]
+      (with-probe connection
+        (fn [_ v _]
+          (let [result (run-probe connection v)
+                unit {:seon.db/db (db/db connection) :seon.render/value result}
+                ai (render/render-ai unit)
+                html (render/render-html unit)
+                nodes (tree-seq coll? seq html)
+                links (filter #(and (vector? %) (= :a (first %))) nodes)]
+            (is (str/includes? ai "expected:"))
+            (is (str/includes? ai "actual:"))
+            (is (str/includes? ai "test/seon/test_failure_facts_test.clj:"))
+            (is (every? #(not (str/includes? ai %)) (:seon.test/failing-assertions result)))
+            (is (some #(str/ends-with? (get (second %) :data-file "")
+                                       "test/seon/test_failure_facts_test.clj") links))))))))
+
+(deftest failure-readers-use-the-structured-claims
+  (support/with-database
+    (fn [connection]
+      (with-probe connection
+        (fn [s v _]
+          (let [result (run-probe connection v)
+                entry (first (filter #(= s (:seon.test/sym %))
+                                     (:seon.problems/failed-tests (problems/problems (db/db connection) {}))))
+                found {:seon.problems/failed-tests [entry]}]
+            (is (= (:seon.test/failures result) (:seon.test/failures entry)))
+            (is (str/includes? (problems/ai-prose found) "first claim"))
+            (is (str/includes? (problems/log-report found) "expected:"))
+            (is (str/includes? (sut/failure-message (dissoc result :seon.test/failure-message)) "second claim"))
+            (is (str/includes? (pr-str (problems/html-report found)) "data-file"))))))))
 
 (defn- completion [database test-symbol failures]
   (let [run (runner/provenance database)]
