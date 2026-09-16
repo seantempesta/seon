@@ -622,3 +622,11 @@ Queue, in order:
 - reach-closure-facts (astra) already landed slices 1–2: `bbbfafaf1` (`:seon.test/reach` closure refs per run) and `1086a7b80` (`seon.test/changed-since-green` + test pair links).
 - Reset of default waits for slot-1 (peer batch 32) and the peer's read-only bookkeeping research probes to finish; tree is clean, so publication is no longer refused.
 - Peer batch 31 on `34c5a9535`: seon.turn-test green; seon.cluster.turn-test down to 3 distinct reds (bookkeeping 5.6 s, lost-model-call diagnostic, attempt-traces exchange bound); turn-test class 44→3.
+
+### 2026-09-16 07:40Z — default reset on a fresh store
+
+- `bin/seon reset --force` at HEAD `f8c00a5be` (log `tmp/orchestrator/refork/reset-2026-09-16T07.log`): current-src republished (37,368 entities, 89,241 population rows), default reforked from commit `6aaa32b4`, store 72 GB → 94 MB, `bin/seon start` → pid 27828 (prepl 53933). Juniper reseeded through `juniper-fixture-2026-09-06/install!` (39.6 s; agents 2, issues indexed at publication 1,646, tests with reach digest 10).
+- Peer: batch 32 green (fresh-operator + fn-test cold), batch 33 on `7b3a9ecc8` (platform recording + seon.issue-test + reach-closure namespaces); bookkeeping research `c2972178b`: fixture `with-cluster` ≈5 s because `seon.config/apply!` runs twice per fixture cluster rebuilding the projection (config.clj:459, §2.1); peer astra lane `config-apply-cost` owns config/reconcile/test_support.
+- Gate recording refused on a named-namespace completion (`:seon.test.run/unavailable … lacks its tested database reach membership`, root run.HwsG9I): reach-closure-facts resumed with that as its first fix (explicit selections record; membership unknown is typed).
+- Filed: [issue-indexing-at-publication-costs-13-seconds](../../../seon/issues/issue-indexing-at-publication-costs-13-seconds.md) (mine to fix once a default prober slot frees), [request-profile-is-derived-64-times-per-turn](../../../seon/issues/request-profile-is-derived-64-times-per-turn.md).
+- Probers on default: reach-closure-facts, transcript/web-debug Opus triage, peer config-apply-cost, peer gate recording = 4 (cap).
