@@ -404,6 +404,65 @@
          (is (= history (walk/history (assoc request :seon.db/db @connection)))
              "History reuses the observation without executing or reprinting the component."))))))
 
+(deftest the-agent-page-shows-a-comment-as-thinking-and-a-result-through-its-pair
+  ;; S11 acceptance (c). The comment is a separately stored fact
+  ;; (`:seon.cluster.eval/comment`), so the evaluation schema's declared HTML
+  ;; pair gives it its own block while the AI pair keeps it inside the REPL
+  ;; grammar. This asserts the PAGE path: the pair is SELECTED by
+  ;; `render/render-call`, not called directly.
+  (support/with-database
+   (fn [connection]
+     (let [written
+           (db/transact!
+            connection
+            [{:seon.ns/name 'my.agents.thinking-probe}
+             {:db/id "thinking-agent" :seon.agent/id "thinking-probe"
+              :seon.agent/namespace [:seon.ns/name 'my.agents.thinking-probe]}
+             {:db/id "thinking-turn" :seon.turn/id "thinking-probe-turn"
+              :seon.turn/agent [:seon.agent/id "thinking-probe"]
+              :seon.turn/opened-tx "datomic.tx"}
+             {:seon.cluster.eval/id "thinking-probe-evaluation"
+              :seon.cluster.eval/at (java.util.Date.)
+              :seon.cluster.eval/run [:seon.turn/id "thinking-probe-turn"]
+              :seon.cluster.eval/ordinal 0
+              :seon.cluster.eval/ns [:seon.ns/name 'my.agents.thinking-probe]
+              :seon.cluster.eval/comment ";; I should read the plan first."
+              :seon.cluster.eval/source "(my.plan/plan {})"
+              :seon.eval/shown "The plan's shown text."}])
+           _ (is (:db-after written) (pr-str written))
+           database @connection
+           lookup [:seon.cluster.eval/id "thinking-probe-evaluation"]
+           saved (db/pull database '[*] lookup)
+           request {:seon.db/db database
+                    :seon.db/connection connection
+                    :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
+                    :seon.sci.admit/caps (config/result-caps (config/defaults))
+                    :seon.sci.eval/time-limit-ms 5000
+                    :seon.config/on-core-error :record
+                    :seon.render/value saved
+                    :seon.render.call/id [lookup]}
+           html (render/render-call
+                 (assoc request :seon.render/output :seon.render/html))
+           ai (render/render-call
+               (assoc request :seon.render/output :seon.render/ai))
+           blocks (filter vector? (tree-seq vector? seq html))
+           classed (fn [css-class]
+                     (filter #(= css-class (:class (second %))) blocks))]
+       (is (nil? (:seon.error/kind html)) (pr-str html))
+       (is (= 1 (count (classed "seon-eval-thinking"))) (pr-str html))
+       (is (= ";; I should read the plan first."
+              (last (first (classed "seon-eval-thinking")))))
+       (is (= 1 (count (classed "seon-eval-prompt"))))
+       (is (= "my.agents.thinking-probe=> (my.plan/plan {})"
+              (last (first (classed "seon-eval-prompt"))))
+           "the prompt block no longer carries the comment")
+       (is (str/includes? (element-text html) "The plan's shown text.")
+           "the result renders through the evaluation schema's HTML pair")
+       (is (str/starts-with?
+            ai
+            "my.agents.thinking-probe=> ;; I should read the plan first.\n(my.plan/plan {})")
+           "the AI pair keeps the REPL grammar unchanged")))))
+
 (deftest blocks-use-the-values-schema-documentation
   (support/with-database
     {::support/extra-schema

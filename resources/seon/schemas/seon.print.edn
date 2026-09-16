@@ -291,7 +291,7 @@
              :omitted [:int {:min 1}],
              :elisions [:vector {:description "Complete omitted-member coordinates retained when a print map is decoded as data."} :seon.print/node]
              :elision-unit
-             [:enum :children :characters :subtree :tokens],
+             [:enum :children :characters :subtree :tokens :evaluations],
              :requery-id :seon.schema/value,
              :requery-form
              [:sequential {:description "Executable Clojure form retrieving the omitted value."}

@@ -1,0 +1,24 @@
+#:seon.render.history
+{;; ONE RENDERED EVALUATION. `seon.render.walk/history` produces these, one
+ ;; per stored evaluation, through the evaluation schema's declared AI pair.
+ ;; The map is open: the walk also carries the call id, the subject lookup and
+ ;; the basis transaction, and selection reads only what it needs.
+ :bytes :string,
+ :unit [:map [:seon.render.history/bytes :seon.render.history/bytes]],
+ ;; The same unit after composition priced it. The estimate is DERIVED from
+ ;; the unit's own stored shown text under the calibration the caller holds —
+ ;; never stored, because the calibration drifts as attempts accumulate.
+ :priced-unit
+ [:map
+  [:seon.render.history/bytes :seon.render.history/bytes]
+  [:seon.ai.tokens/estimate :seon.ai.tokens/estimate]],
+ :units [:vector :seon.render.history/priced-unit],
+ ;; WHAT THE PROMPT COMPOSES. The retained units are whole: every one of them
+ ;; was bounded exactly once, by the value renderer at evaluation time. When
+ ;; the budget could not hold the oldest of them, ONE elision value names the
+ ;; dropped count, the offset the retained history resumes at, and the form
+ ;; that retrieves the omitted evaluations.
+ :selection
+ [:map
+  [:seon.render.history/units :seon.render.history/units]
+  [:seon.print/elision {:optional true} :seon.print/elision]]}

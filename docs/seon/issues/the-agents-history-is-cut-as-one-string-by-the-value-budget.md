@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, render, print, agent-context, prompt]
 created: 2026-09-16
@@ -64,3 +64,36 @@ judged against the prompt's own token budget, not the value profile's.
 Regression: an agent whose history exceeds the budget still renders its most
 recent turns COMPLETE, and the assertion that its rendered history contains
 the message it just received holds.
+
+## Resolved — S11, 2026-09-17
+
+Both halves are closed, and the fix DELETED a mechanism rather than adding one.
+
+**The wrong-dimension cut is gone.** `seon.render.transcript/bounded-scalar`
+re-admitted an ALREADY RENDERED AI string as a scalar value node and fitted it
+again with `seon.print/fit-text` — a second clipping spot on its own terms
+(AGENTS.md §2.4). It is deleted: `rendered-family` now returns the declared
+renderer's own bytes, and `message-text` hands the message its content
+unfitted. `floor-text` survives only for genuinely un-rendered values (a
+refusal map, the `extra` map). Verified live on `default` (pid 53320) against
+Juniper: `seon.render.transcript/render-ai` returns 10,990 characters with no
+`:seon.print/prefix` and no `:seon.print/omitted` anywhere.
+
+**The prompt is judged by its own dial.** `seon.cluster.prompt/select` chooses
+the newest WHOLE evaluation units `:seon.config.ai/prompt-token-budget`
+admits, oldest dropped first, and emits ONE elision value naming the dropped
+count, the offset the retained history resumes at, and the requery form;
+`compose` joins them and `budget-report` stays the verdict on the composed
+result. Measured on Juniper's real 16 units: at a 300-token budget, 3 whole
+units survive with one elision (`:seon.print/omitted 13`,
+`:seon.render.data/next-offset 13`, `:seon.render.data/total 16`,
+`:seon.print/elision-unit :evaluations`), no mid-form cut; at the shipped
+1,000,000-token budget the composed prompt is byte-identical to the previous
+join (10,634 characters, same `budget-report`).
+
+Grounding and numbers:
+[composable history research](../../prds/steward-platform/research/composable-history-2026-09-17.md),
+[S11 landing note](../../prds/steward-platform/research/composable-history-s11-2026-09-17.md).
+One consequence was recorded separately:
+[a selected prompt no longer reconstructs from the full join](a-selected-prompt-no-longer-reconstructs-from-the-full-join.md).
+

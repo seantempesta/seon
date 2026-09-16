@@ -70,6 +70,39 @@
                        :seon.eval/shown "2"
                        :seon.eval/duration-ms 3})))))
 
+(deftest the-comment-is-its-own-thinking-block-in-html
+  ;; F4/S11: the comment is a separately stored fact
+  ;; (`:seon.cluster.eval/comment`), so the HTML pair gives it its own block
+  ;; while the AI pair keeps it inside the REPL grammar. One fact, two
+  ;; projections — not two grammars.
+  (let [emission {:seon.cluster.eval/comment ";; I should check the sum."
+                  :seon.cluster.eval/source "(+ 1 1)"
+                  :seon.cluster.eval/ns {:seon.ns/name 'my.agents.juniper}
+                  :seon.eval/shown "2"}
+        hiccup (repl/render-html emission)
+        blocks (filter vector? (tree-seq vector? seq hiccup))
+        thinking (filter #(= "seon-eval-thinking" (:class (second %))) blocks)
+        prompts (filter #(= "seon-eval-prompt" (:class (second %))) blocks)]
+    (is (= 1 (count thinking)) (pr-str hiccup))
+    (is (= ";; I should check the sum." (last (first thinking))))
+    (is (= 1 (count prompts)))
+    (is (= "my.agents.juniper=> (+ 1 1)" (last (first prompts)))
+        "the prompt block no longer carries the comment")
+    (is (str/includes? (text-nodes hiccup) "2")
+        "the result still renders through the pair"))
+  (testing "no comment means no thinking block"
+    (let [hiccup (repl/render-html {:seon.cluster.eval/source "(+ 1 1)"
+                                    :seon.cluster.eval/ns {:seon.ns/name 'my.agents.juniper}
+                                    :seon.eval/shown "2"})]
+      (is (not (str/includes? (pr-str hiccup) "seon-eval-thinking")))))
+  (testing "the AI grammar is unchanged: the comment stays on the prompt line"
+    (is (= (str "my.agents.juniper=> ;; I should check the sum.\n(+ 1 1)\n"
+                "#:seon.repl{:value 2}")
+           (repl/text {:seon.cluster.eval/comment ";; I should check the sum."
+                       :seon.cluster.eval/source "(+ 1 1)"
+                       :seon.ns/name 'my.agents.juniper
+                       :seon.eval/shown "2"})))))
+
 (deftest response-key-order-is-the-emitter-not-the-map
   (testing "keys appear in the declared order whatever order they arrive in"
     (let [emission {:seon.eval/duration-ms 1

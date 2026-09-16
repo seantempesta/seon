@@ -8,6 +8,7 @@
             [seon.config :as config]
             [seon.context :as context]
             [seon.db :as db]
+            [seon.print :as print]
             [seon.cluster.agent :as agent]
             [seon.cluster.prompt :as prompt]
             [seon.render :as render]
@@ -187,47 +188,159 @@
        (is (str/includes? (:seon.cluster.prompt/text rendered)
                           "inspect this walk"))))))
 
-(deftest prompt-budget-is-informational-and-does-not-compact
+(defn- history-unit
+  [ordinal rendered]
+  {:seon.render.history/call-id [[:seon.cluster.eval/id (str "unit-" ordinal)]]
+   :seon.render.history/subject [:seon.cluster.eval/id (str "unit-" ordinal)]
+   :seon.render.history/bytes rendered})
+
+(defn- planted-units
+  "Ten units of about 110 characters each, each one nameable in the output."
+  []
+  (mapv (fn [ordinal]
+          (history-unit ordinal
+                        (str "my.agents.walker=> (unit-" ordinal " "
+                             (apply str (repeat 80 \x)) ")")))
+        (range 10)))
+
+(deftest a-budget-smaller-than-the-history-keeps-whole-newest-units
+  ;; S11 acceptance (a). SELECTION, NOT A CUT: every retained unit is whole —
+  ;; its own result was bounded once already, by the value renderer at
+  ;; evaluation time — and the omission is ONE elision value with a count, a
+  ;; coordinate and a requery form, never a character offset inside a form.
+  (let [calibration (tokens/prior-calibration 3.2)
+        units (planted-units)
+        selection (prompt/select units 200 calibration "walker")
+        retained (:seon.render.history/units selection)
+        elision (:seon.print/elision selection)
+        text (prompt/compose selection)]
+    (is (seq retained))
+    (is (< (count retained) (count units)) "the budget dropped something")
+    (is (= (mapv :seon.render.history/bytes (take-last (count retained) units))
+           (mapv :seon.render.history/bytes retained))
+        "the units kept are the NEWEST, oldest dropped first")
+    (doseq [unit retained]
+      (is (str/includes? text (:seon.render.history/bytes unit))
+          "every retained unit appears whole"))
+    (doseq [unit (drop-last (count retained) units)]
+      (is (not (str/includes? text (:seon.render.history/bytes unit)))
+          "a dropped unit contributes nothing"))
+    (is (some? elision) "the omission is named")
+    (is (= (- (count units) (count retained)) (:seon.print/omitted elision)))
+    (is (= :evaluations (:seon.print/elision-unit elision)))
+    (is (= :seon.config.ai/prompt-token-budget (:seon.print/bound-by elision)))
+    (is (= (- (count units) (count retained))
+           (:seon.render.data/next-offset elision))
+        "next-offset IS the oldest surviving position in the requeried sequence")
+    (is (= (count units) (:seon.render.data/total elision)))
+    (is (seq (:seon.print/requery-form elision)) "the omitted units are askable")
+    (is (str/starts-with? text (print/render-elision-ai elision))
+        "exactly one elision value, named first")
+    (is (not (str/includes? text ":seon.print/prefix"))
+        "no character cut: a mid-form fit would carry fit-text's prefix")
+    (is (= 1 (count (re-seq #":seon.print/elision-unit :evaluations" text)))
+        "exactly one elision value in the composed history")
+    (is (<= (tokens/estimate text (tokens/prior-calibration 3.2)) 200)
+        "and the composition, elision included, fits the budget"))
+  (testing "a cut never omits its whole subject: the newest unit always survives"
+    (let [calibration (tokens/prior-calibration 3.2)
+          units (planted-units)
+          selection (prompt/select units 1 calibration "walker")]
+      (is (= 1 (count (:seon.render.history/units selection))))
+      (is (= (:seon.render.history/bytes (last units))
+             (:seon.render.history/bytes
+              (first (:seon.render.history/units selection))))))))
+
+(deftest a-budget-larger-than-the-history-composes-the-same-bytes
+  ;; S11 acceptance (b). Composition replaces the join, byte for byte.
+  (planted
+   (fn [connection ctx]
+     (let [acquired (render/acquire-context!
+                     (assoc (request connection ctx)
+                            :seon.db/db @connection
+                            :seon.render/distance 2))
+           units (vec (:seon.render.history/entries acquired))
+           calibration (tokens/prior-calibration 3.2)
+           selection (prompt/select units 1000000 calibration "walker")]
+       (is (seq units))
+       (is (nil? (:seon.print/elision selection)) "nothing was dropped")
+       (is (= (count units) (count (:seon.render.history/units selection))))
+       (is (= (:seon.cluster.prompt/text acquired)
+              (prompt/compose selection))
+           "the composed history is byte-identical to the acquired join")
+       (is (= (:seon.cluster.prompt/text acquired)
+              (apply str (:seon.render.history/segments acquired))))))))
+
+(deftest every-unit-is-priced-from-its-own-shown-text
+  ;; S11 change (1): the estimate is DERIVED at composition, never stored.
+  (let [calibration (tokens/prior-calibration 3.2)
+        units (planted-units)
+        selection (prompt/select units 1000000 calibration "walker")]
+    (doseq [unit (:seon.render.history/units selection)]
+      (is (= (tokens/estimate (:seon.render.history/bytes unit) calibration)
+             (:seon.ai.tokens/estimate unit))))
+    (is (every? #(nil? (:seon.ai.tokens/estimate %)) units)
+        "the walk's own units carry no estimate, so nothing stores one")))
+
+(deftest the-prompt-budget-selects-and-still-reports-its-verdict
   (planted
    (fn [connection ctx]
      (support/transacted! connection
                           [{:seon.agent/id "walker"
-                            :seon.agent/settings {:seon.config.ai/prompt-token-budget 3}}])
+                            :seon.agent/settings
+                            {:seon.config.ai/prompt-token-budget 3}}])
      (let [distances (atom [])
+           unit-text (apply str (repeat 40 "x"))
            acquire (fn [render-request]
-                     (let [distance (:seon.render/distance render-request)]
-                       (swap! distances conj distance)
-                       {:seon.cluster.prompt/text
-                        (if (= 1 distance) "fits nine" (apply str (repeat 40 "x")))
-                        :seon.render.history/segments
-                        [(if (= 1 distance)
-                           "fits nine"
-                           (apply str (repeat 40 "x")))]
-                        :seon.db/db (:seon.db/db render-request)}))]
+                     (swap! distances conj (:seon.render/distance render-request))
+                     {:seon.cluster.prompt/text (str unit-text "\n\n" unit-text)
+                      :seon.render.history/entries
+                      [(history-unit 0 unit-text) (history-unit 1 unit-text)]
+                      :seon.render.history/segments
+                      [unit-text (str "\n\n" unit-text)]
+                      :seon.db/db (:seon.db/db render-request)})]
        (with-redefs [render/acquire-context! acquire]
-         (let [compacted (prompt/prompt @connection
-                                        (request connection ctx))]
+         (let [selected (prompt/prompt @connection (request connection ctx))
+               text (:seon.cluster.prompt/text selected)
+               contributions (:seon.context/contributions selected)]
            (is (= [2] @distances))
-           (is (= (str (apply str (repeat 40 "x")) "\n\n" (repl/frame @connection "walker"))
-                  (:seon.cluster.prompt/text compacted)))
-           (is (= :seon.ai.tokens/over
-                  (get-in compacted [:seon.ai.tokens/budget-report
-                                     :seon.ai.tokens/verdict])))))
-       (reset! distances [])
-       (with-redefs [render/acquire-context!
-                     (fn [render-request]
-                       (swap! distances conj (:seon.render/distance render-request))
-                       {:seon.cluster.prompt/text (apply str (repeat 40 "x"))
-                        :seon.render.history/segments
-                        [(apply str (repeat 40 "x"))]
-                        :seon.db/db (:seon.db/db render-request)})]
-         (let [complete (prompt/prompt @connection
-                                       (request connection ctx))]
-           (is (= [2] @distances))
-           (is (= (str (apply str (repeat 40 "x")) "\n\n" (repl/frame @connection "walker"))
-                  (:seon.cluster.prompt/text complete)))
-           (is (= 3 (get-in complete [:seon.ai.tokens/budget-report
-                                      :seon.config.ai/prompt-token-budget])))))))))
+           (is (str/includes? text unit-text) "the newest unit survives whole")
+           (is (str/includes? text ":seon.print/elision-unit :evaluations")
+               "and the older one is named as an elision")
+           (is (str/ends-with? text (repl/frame @connection "walker"))
+               "the turn frame still closes the prompt")
+           (is (= text (apply str (map :seon.context.contribution/text
+                                       contributions)))
+               "the contributions still decompose the exact prompt")
+           (is (= 3 (get-in selected [:seon.ai.tokens/budget-report
+                                      :seon.config.ai/prompt-token-budget])))
+           (is (keyword? (get-in selected [:seon.ai.tokens/budget-report
+                                           :seon.ai.tokens/verdict]))
+               "budget-report stays the verdict on the composed result")))))))
+
+(deftest the-history-path-never-refits-a-rendered-unit
+  ;; S11 acceptance (d). ASSERTED AS BEHAVIOUR, NOT AS REACH, and the reason
+  ;; is itself the finding: `seon.render/render-call` selects its producer at
+  ;; call time, and the program graph records an edge from it to EVERY
+  ;; declared AI producer — including `seon.render.value/render-ai`, which
+  ;; owns the one legitimate clipping spot. So `seon.print/fit-text` is
+  ;; reachable from any render call by construction, and a reach assertion
+  ;; would either be vacuous or forbid the one cut that is supposed to happen.
+  ;; What (d) actually forbids is a SECOND fit of a string a renderer already
+  ;; produced, and that is observable: a character cut leaves `fit-text`'s
+  ;; own fields — `:seon.print/prefix` and `:seon.print/elision-unit
+  ;; :characters` — in the composed bytes.
+  (let [calibration (tokens/prior-calibration 3.2)
+        unit (history-unit 0 (str "my.agents.walker=> (long-one)\n"
+                                  (apply str (repeat 4000 \y))))
+        selection (prompt/select [unit] 1 calibration "walker")
+        text (prompt/compose selection)]
+    (is (str/includes? text (:seon.render.history/bytes unit))
+        "the rendered unit crosses composition whole, under any budget")
+    (is (not (str/includes? text ":seon.print/prefix"))
+        "no retained prefix: nothing re-admitted the rendered string")
+    (is (not (str/includes? text ":seon.print/elision-unit :characters"))
+        "and no character cut fired on the history path")))
 
 (defn- recorded-usage-tx
   "Facts one settled attempt already commits: the exact prompt characters

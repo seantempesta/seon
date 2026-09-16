@@ -217,13 +217,30 @@
                           entries))
            "}")))))
 
+(defn- thinking-text
+  "The agent's own `;;` prose for this evaluation, or nil.
+
+  Stored separately from the source (`:seon.cluster.eval/comment`), so the
+  HTML pair can give it its own block while the AI pair keeps it inside the
+  REPL grammar, where it is part of the session the agent reads back."
+  [{prose :seon.cluster.eval/comment changed? :seon.repl/changed-since?}]
+  (when (and (not changed?) (seq prose))
+    (str/trim-newline prose)))
+
 (defn- input-text
-  [{prose :seon.cluster.eval/comment source :seon.cluster.eval/source
-    prompt-ns :seon.ns/name changed? :seon.repl/changed-since?}]
-  (str (when changed? ";; changed since your last turn\n")
-       (or prompt-ns 'user) "=> "
-       (when (and (not changed?) (seq prose)) (str (str/trim-newline prose) "\n"))
-       source))
+  "The prompt line, the agent's comment and its source.
+
+  The two-argument arity omits the comment for a reader that shows it as its
+  own block; the AI grammar always includes it."
+  ([emission] (input-text emission true))
+  ([{source :seon.cluster.eval/source prompt-ns :seon.ns/name
+     changed? :seon.repl/changed-since? :as emission}
+    comment?]
+   (let [prose (thinking-text emission)]
+     (str (when changed? ";; changed since your last turn\n")
+          (or prompt-ns 'user) "=> "
+          (when (and comment? prose) (str prose "\n"))
+          source))))
 
 (defn text
   "The REPL bytes for one evaluation: prompt, agent input, response.
@@ -463,8 +480,16 @@
                   answer [:pre [:code {:class "seon-eval-response"}
                                 (pretty-response answer)]])]
     (when (seq (:seon.cluster.eval/source emission))
-      (cond-> [:article {:class "seon-family-entry seon-eval-entry"}
-               [:pre [:code {:class "seon-eval-prompt"} (input-text emission)]]]
+      (cond-> (cond-> [:article {:class "seon-family-entry seon-eval-entry"}]
+                ;; THE AGENT'S THINKING IS ITS OWN BLOCK on the page: the
+                ;; comment is a separately stored fact, so the HTML pair shows
+                ;; it as one rather than folding it into the prompt line.
+                (thinking-text emission)
+                (conj [:div {:class "seon-eval-thinking"}
+                       (thinking-text emission)])
+                :always
+                (conj [:pre [:code {:class "seon-eval-prompt"}
+                             (input-text emission false)]]))
         answer (conj [:small {:class "seon-eval-renderer"}
                       (str "AI: " (or (:seon.eval/renderer emission)
                                        'seon.render.value/render-ai)

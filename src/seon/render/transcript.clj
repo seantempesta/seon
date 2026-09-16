@@ -428,12 +428,6 @@
        (assoc :seon.render.call/id [::history-value value])))
     (pr-str value)))
 
-(defn- bounded-scalar
-  [unit value]
-  (when (some? value)
-    (let [bounded (floor-text unit value)]
-      (if (= (pr-str value) bounded) value bounded))))
-
 (defn- rendered-family
   [unit family-unit distance]
   (let [db (:seon.db/db unit)
@@ -447,16 +441,24 @@
                                  :seon.render/distance distance)
                     owner (assoc :seon.render/namespace owner)))
         output (if (:seon.error/kind rendered)
+                 ;; A REFUSAL IS NOT A RENDERED STRING. The refusal value has
+                 ;; no renderer of its own here, so it crosses the value
+                 ;; floor like any other un-rendered value.
                  (floor-text unit rendered)
                  rendered)]
-    (bounded-scalar unit output)))
+    ;; AND THE RENDERED STRING GOES OUT WHOLE. Re-admitting a declared AI
+    ;; renderer's own output as a scalar node and fitting it again was a
+    ;; SECOND clipping spot (AGENTS.md 2.4): the character cut landed inside
+    ;; a REPL session's bytes and replaced a whole entry with a coordinate-less
+    ;; elision. Every value inside `rendered` was already bounded once, by the
+    ;; value renderer, under this same profile.
+    output))
 
 (defn- message-text
   [unit entry _detail]
   (let [entity (cond-> (::entity entry)
                  (::content entry)
-                 (assoc :seon.message/content
-                        (bounded-scalar unit (::content entry))))
+                 (assoc :seon.message/content (::content entry)))
         sentence (rendered-family unit entity 1)
         extra (cond-> {}
                 (::about entry)

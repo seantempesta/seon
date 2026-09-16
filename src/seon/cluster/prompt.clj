@@ -2,13 +2,21 @@
   "The prompt derives retained history on the calling turn's thread.
 
   It returns the exact text, ordered contribution measurements, and database
-  value supplied to the provider boundary. The token budget is informative;
-  prompt acquisition never clips or compacts history."
-  (:require [seon.ai :as ai]
+  value supplied to the provider boundary.
+
+  THE HISTORY IS COMPOSED FROM WHOLE UNITS, NEVER CUT. Each stored evaluation
+  is rendered once, by the evaluation schema's own AI pair, and its shown text
+  was bounded once already — by the value renderer at evaluation time, the one
+  clipping spot. [[select]] then chooses the NEWEST units the token budget can
+  hold and names what it dropped in one elision value; [[compose]] joins them.
+  Nothing here re-fits a string another renderer has already produced."
+  (:require [clojure.string :as str]
+            [seon.ai :as ai]
             [seon.ai.tokens :as tokens]
             [seon.config :as config]
             [seon.context :as context]
             [seon.db :as db]
+            [seon.print :as print]
             [seon.render :as render]
             [seon.repl :as repl]
             [seon.schema :as schema]
@@ -185,6 +193,120 @@
                 (- next-estimated estimated)})))
       contributions)))
 
+;;; ---------------------------------------------------------------------------
+;;; Composable history — whole units under the prompt's own budget
+;;; ---------------------------------------------------------------------------
+
+(def ^:private unit-separator
+  "The one separator between composed history units."
+  "\n\n")
+
+(defn- priced-unit
+  [unit calibration]
+  (assoc unit :seon.ai.tokens/estimate
+         (tokens/estimate (or (:seon.render.history/bytes unit) "") calibration)))
+
+(defn- retained-count
+  "How many of the newest units fit, counting the separators they cost.
+
+  A CUT NEVER OMITS ITS WHOLE SUBJECT (`seon.print/fit-text` states the same
+  law for characters): the newest unit is retained even when it alone exceeds
+  the budget, because a history composed of nothing tells the agent only that
+  it has one."
+  [units budget calibration]
+  (loop [index (dec (count units)) characters 0 kept 0]
+    (if (neg? index)
+      kept
+      (let [next-characters
+            (+ characters
+               (count (or (:seon.render.history/bytes (nth units index)) ""))
+               (if (pos? kept) (count unit-separator) 0))]
+        (if (and (pos? kept)
+                 (> (tokens/estimate-of-characters next-characters calibration)
+                    budget))
+          kept
+          (recur (dec index) next-characters (inc kept)))))))
+
+(defn- dropped-elision
+  "One elision value for the evaluations the budget could not hold.
+
+  `:seon.render.data/next-offset` IS the oldest surviving position: the
+  omitted units are the oldest ones, so the retained history resumes at that
+  index of the requeried evaluation sequence, and the requery form retrieves
+  the whole sequence to read from."
+  [agent-id dropped total]
+  (print/elision
+   {:seon.print/omitted dropped
+    :seon.print/elision-unit :evaluations
+    :seon.print/bound-by :seon.config.ai/prompt-token-budget
+    :seon.render.data/path []
+    :seon.render.data/next-offset dropped
+    :seon.render.data/total total
+    :seon.print/requery-id
+    (list 'seon.eval/of-agent (list 'seon.db/db) agent-id)}))
+
+(defn- selection-segments
+  "The selection's ordered segments, whose concatenation IS the history.
+
+  The separator belongs to the composition, so it is given to exactly one
+  segment and the ordered decomposition the contributions price sums to the
+  composed whole. The elision, when there is one, is named first."
+  [selection]
+  (let [parts (into (if-let [elision (:seon.print/elision selection)]
+                      [(print/render-elision-ai elision)]
+                      [])
+                    (map #(or (:seon.render.history/bytes %) ""))
+                    (:seon.render.history/units selection))]
+    (into []
+          (map-indexed (fn [position part]
+                         (str (when (pos? position) unit-separator) part)))
+          parts)))
+
+(defn compose
+  "Join the selected units, newest last, with the elision named first."
+  {:malli/schema [:=> [:cat :seon.render.history/selection] :string]}
+  [selection]
+  (str/join (selection-segments selection)))
+
+(defn- selection-of
+  [priced total dropped agent-id]
+  (cond-> {:seon.render.history/units (subvec priced dropped)}
+    (pos? dropped)
+    (assoc :seon.print/elision (dropped-elision agent-id dropped total))))
+
+(defn select
+  "Choose the newest whole history units `budget` admits, oldest dropped first.
+
+  PURE: the units, the budget, the calibration and the agent identity are all
+  arguments (2.1); nothing is fetched at call time. Each returned unit carries
+  `:seon.ai.tokens/estimate`, derived here from its own stored shown text —
+  never stored, because the calibration this prices against drifts as attempts
+  accumulate.
+
+  This is SELECTION, not elision: every retained unit is whole, and its result
+  was already bounded once by the value renderer at evaluation time. When
+  anything is dropped the selection carries ONE elision value naming the
+  dropped count, the offset the retained history resumes at, and the form that
+  retrieves the omitted evaluations.
+
+  THE BUDGET BOUNDS WHAT IS COMPOSED, INCLUDING THE ELISION. Naming the
+  omission costs bytes too, so the first estimate is re-judged against the
+  composed result and one more unit is released until the composition fits or
+  only the newest unit is left."
+  {:malli/schema [:=> [:cat [:vector :seon.render.history/unit]
+                       :seon.config.ai/prompt-token-budget
+                       :seon.ai.tokens/calibration :seon.agent/id]
+                  :seon.render.history/selection]}
+  [units budget calibration agent-id]
+  (let [priced (mapv #(priced-unit % calibration) units)
+        total (count priced)]
+    (loop [kept (retained-count priced budget calibration)]
+      (let [selection (selection-of priced total (- total kept) agent-id)]
+        (if (or (<= kept 1)
+                (<= (tokens/estimate (compose selection) calibration) budget))
+          selection
+          (recur (dec kept)))))))
+
 (defn- acquire-context-report
   "`settings` is the ONE resolution `prompt` already made (2.1): the turn
   frame reads the same resolved dial through it rather than deriving the
@@ -195,14 +317,29 @@
                   (assoc request
                          :seon.db/db database
                          :seon.render/distance distance))]
-    (if (:seon.error/kind acquired)
+    (cond
+      (:seon.error/kind acquired)
       acquired
-      (let [history (:seon.cluster.prompt/text acquired)
+
+      ;; ABSENCE IS NOT AN EMPTY HISTORY. Acquisition publishes one unit per
+      ;; stored evaluation; a text with no units behind it would compose to
+      ;; nothing and read as a fresh agent, so it is refused by name.
+      (and (nil? (:seon.render.history/entries acquired))
+           (seq (:seon.cluster.prompt/text acquired)))
+      (refuse! ::missing-history-units
+               (str "Acquired context for agent "
+                    (pr-str (:seon.agent/id request))
+                    " carries prompt text with no history units to compose."))
+
+      :else
+      (let [selection (select (vec (:seon.render.history/entries acquired))
+                              budget calibration (:seon.agent/id request))
+            history (compose selection)
             frame (str (when (seq history) "\n\n")
                        (repl/frame (:seon.db/db acquired) (:seon.agent/id request)
                                    settings))
             text (str history frame)
-            segments (conj (vec (or (:seon.render.history/segments acquired) [history])) frame)
+            segments (conj (selection-segments selection) frame)
             contributions (history-contributions segments calibration)
             report (tokens/budget-report text budget calibration)]
         {:seon.cluster.prompt/text text

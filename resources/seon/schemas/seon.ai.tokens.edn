@@ -17,6 +17,7 @@
  :relative-error [:double {:min 0.0}]
 
  :characters [:int {:min 0}]
+ :estimate [:int {:min 0}]
  :estimated [:int {:min 0}]
  :upper-bound [:int {:min 0}]
 
