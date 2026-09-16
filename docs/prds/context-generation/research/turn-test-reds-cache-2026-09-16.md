@@ -443,3 +443,20 @@ was reloaded to remove the unlanded candidate. No scratch JVM, worktree or
 background shell was created. The four existing namespace names remain in
 `tmp/orchestrator/gate-requests/turn-test-reds.txt`; they were re-verified under
 `test/`. Final cold proof remains the orchestrator's responsibility.
+
+
+## Owner-authorized one-shot fixture refresh — 2026-09-16 05:15 UTC
+
+The owner authorized one canonical-base refresh in default, with an explicit
+stop-without-retry boundary on failure. The [exact MCP form](turn-test-reds-base-refresh-2026-09-16.clj)
+started on a daemon future at 05:15:39 UTC. It builds a fresh source manifest
+and calls the existing canonical `create-base` with default's carried
+projection through `seon.test`'s loader. Installation occurs only after
+construction returns. Default's process lifecycle and the entering shared
+base are not stopped or deleted. Wall time and the exact outcome follow.
+
+The single refresh succeeded: **27548.6125 ms**, returning the canonical
+one- and two-argument `seon.test/stale` contract. The daemon future completed.
+The fresh base was installed; its shutdown hook owns its lifetime. No retry
+was performed. This resolves the immediate stale-base verification boundary,
+not the missing automatic refresh mechanism described in the issue.

@@ -34,3 +34,12 @@ adoption. A new fixture branch must carry contracts coherent with the code it
 executes. Reloading only the test namespace cannot update a realized base.
 Acceptance is an in-process regression that adopts an accreted function arity,
 acquires a fresh canonical fixture, and calls that arity under armed contracts.
+
+## Authorized recovery
+
+The owner authorized one refresh on 2026-09-16. In default PID 53378, the
+existing canonical constructor completed in **27548.6125 ms**; its returned
+program row declares both `seon.test/stale` arities. The new base was installed
+only after construction succeeded. No retry, process restart, or refork was
+performed. The immediate verification boundary is cleared; this issue remains
+open for automatic fixture/source coherence.

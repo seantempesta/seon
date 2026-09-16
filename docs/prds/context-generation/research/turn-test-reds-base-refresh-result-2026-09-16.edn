@@ -1,0 +1,1 @@
+#:turn-test-reds{:refreshed? true, :contract #:seon.fn{:spec "[:function [:=> [:cat :seon.db/database-value] [:or [:vector :seon.test/sym] :seon.error/value]] [:=> [:cat :seon.db/database-value [:sequential :seon.test/sym]] [:or [:vector :seon.test/sym] :seon.error/value]]]"}, :wall-ms 27548.6125}
