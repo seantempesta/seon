@@ -1005,7 +1005,13 @@
     (is (= [] (cluster/reload-order #{} {})))))
 
 (deftest ^{:seon.test/long
-           "Real source publication and two cohosted clusters verify named adoption and independent program facts."}
+           "Real source publication and two cohosted clusters verify named adoption and independent program facts."
+           ;; Two real boots plus a publication do not finish inside the
+           ;; ordinary per-exchange bound: this expired as an exchange failure
+           ;; in batches 68, 71 and 74. Since 8c2f62701 the bound DERIVES from
+           ;; this declaration instead of standing in for it, so the cost is
+           ;; stated here where the test knows it.
+           :seon.test/long-ms 600000}
   development-adoption-targets-one-of-two-cohosted-clusters
   (let [root (bare-root)
         extra-root (doto (io/file root "source") .mkdirs)
