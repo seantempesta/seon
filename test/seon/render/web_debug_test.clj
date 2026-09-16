@@ -261,19 +261,28 @@
                              (attempt "panel-attempt-1" 5000 0 5000) nil)
                  (seed-turn! :call "(inc 123)" [repeated]
                              (attempt "panel-attempt-2" 6000 0 6000) nil)
-                 (is (:db-after
-                      (db/transact! connection
-                        [(error/normalize
-                          {:seon.error/source {:seon.error/kind :seon.debug/panel-fixture
-                                               :seon.error/message "Known fixture fault."}
-                           :seon.error/id "panel-fault" :seon.error/at (java.util.Date.)
-                           :seon.error/process cluster/boot-process-identity
-                           :seon.sci.admit/caps (config/result-caps (support/effective-config))
-                           :seon.config.error/max-evidence-bytes
-                           (:seon.config.error/max-evidence-bytes (support/effective-config))})
-                         {:seon.message/id "panel-fault-message" :seon.message/to [:seon.agent/id "juniper"]
-                          :seon.message/content "A known fixture fault was delivered."
-                          :seon.message/about [:seon.error/id "panel-fault"]}])))
+                 ;; THE FACT'S IDENTITY IS THE SIGNATURE `normalize` DERIVES
+                 ;; from the failure's canonical attributes — the request's
+                 ;; own `:seon.error/id` is the notification id, not the
+                 ;; fact's (`src/seon/error.clj:562`). A fixture that pointed
+                 ;; `:seon.message/about` at the request id was naming an
+                 ;; entity this transaction never creates, and the whole
+                 ;; transaction was rejected for it. Derive the ref from the
+                 ;; fact rather than remembering a name for it.
+                 (let [fault (error/normalize
+                              {:seon.error/source {:seon.error/kind :seon.debug/panel-fixture
+                                                   :seon.error/message "Known fixture fault."}
+                               :seon.error/id "panel-fault" :seon.error/at (java.util.Date.)
+                               :seon.error/process cluster/boot-process-identity
+                               :seon.sci.admit/caps (config/result-caps (support/effective-config))
+                               :seon.config.error/max-evidence-bytes
+                               (:seon.config.error/max-evidence-bytes (support/effective-config))})]
+                   (is (:db-after
+                        (db/transact! connection
+                          [fault
+                           {:seon.message/id "panel-fault-message" :seon.message/to [:seon.agent/id "juniper"]
+                            :seon.message/content "A known fixture fault was delivered."
+                            :seon.message/about [:seon.error/id (:seon.error/id fault)]}]))))
                  (seed-turn! :call "" [] (attempt "panel-attempt-3" 7100 7000 100)
                              [:seon.message/id "panel-fault-message"])
                  (let [after (snapshot)

@@ -634,10 +634,15 @@
   - emits `run` and `agent` as lookup refs (`[:seon.turn/id id]`)
     exactly when the request supplied those ids.
 
-  `id`, `at` and `process` are the caller's: identity and the clock are
-  not this function's to invent, and a pure normalizer is a testable
-  one. The result is transactable as-is — every key is a declared
-  attribute of `:seon.error/fact` and nothing rides along."
+  The fact's `id` IS its `signature`: one failure class is one error
+  identity, derived from the canonical failure attributes rather than
+  minted per occurrence. The request's own `:seon.error/id` names the
+  NOTIFICATION, not the fact, so a caller that wants a ref to the fact
+  reads `(:seon.error/id result)` instead of reusing the name it supplied.
+  `at` and `process` are the caller's: the clock is not this function's to
+  invent, and a pure normalizer is a testable one. The result is
+  transactable as-is — every key is a declared attribute of
+  `:seon.error/fact` and nothing rides along."
   {:malli/schema [:=> [:cat :seon.error/normalize-request] :seon.error/fact]}
   [request]
   (:seon.error/fact (prepare request)))
