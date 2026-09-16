@@ -370,3 +370,14 @@ Queue, in order:
   fixture-base fixer's fresh canonical base builds; the peer's own init --dev
   exceeded its bound. No new launches until the fixer lands; the refork
   clears the JVM.
+- 11:30Z REFORK of default started (second tonight). Cause found by the gate
+  session: default's installed schema still had `:seon.test/reach-digest` as
+  `:db.unique/identity` from an early reach-digest edit while the current
+  bridge derives it non-unique; any test whose digest changed carried two
+  identities and `seon.fn/index-tempids` refused every publication
+  ("multiple entity identities", fn.clj:1842); adoption cannot drop
+  `:db/unique` in place and did not report RESET NEEDED (issue filed by the
+  peer). Refork also batches error identity/occurrences, issue, lint,
+  file/span, settlement guard schemas and clears the 17 GB JVM. After it:
+  reseed Juniper, recording-only platform run, then launch
+  reach-closure-facts, issue-indexer-resolver, issue-generator.
