@@ -1003,6 +1003,7 @@
                              :seon.test/pass-count
                              :seon.test/fail-count
                              :seon.test/error-count
+                             :seon.test/reach-digest
                              :seon.test/run
                              :seon.test/run-basis-t
                              :seon.test/run-at]

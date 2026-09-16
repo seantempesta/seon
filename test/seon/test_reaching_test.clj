@@ -101,6 +101,24 @@
             (is (false? (sut/verified? (db/db connection) s)))
             (is (= [s] (:seon.test/tests (sut/check request))))))))))
 
+(deftest concurrent-completions-use-the-canonical-program
+  (support/with-database
+    (fn [connection]
+      (let [database (db/db connection)
+            s "seon.id-test/an-evaluation-id-is-stable-short-and-a-symbol"
+            completion (assoc (runner/provenance database)
+                              :seon.test.runner/results [{:seon.test/sym s
+                                :seon.test/pass-count 1 :seon.test/fail-count 0 :seon.test/error-count 0}])
+            expected {s (sut/reach-digest database s)}
+            workers (mapv (fn [_] (future (#'runner/completion-reach-digests completion))) (range 2))]
+        (try
+          (doseq [worker workers]
+            (let [result (support/await-event! worker :reach-digest/completion)]
+              (is (= expected (:seon.test/reach-digests result)))
+              (is (= (:seon.test.run/program-digest completion)
+                     (:seon.test.run/program-digest result)))))
+          (finally (doseq [worker workers] (future-cancel worker))))))))
+
 (deftest transported-results-retain-the-tested-database-digest
   (support/with-database
     (fn [connection]

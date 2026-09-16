@@ -1693,33 +1693,23 @@
         (throw failure)))))
 
 (defn- completion-reach-digests
-  "Carry reach evidence from the immutable prepared base across a JVM boundary."
+  "Carry reach evidence from the canonical fixture's tested program across a JVM boundary."
   [run-result]
   (if (:seon.test/reach-digests run-result)
     run-result
-    (let [root (System/getProperty "seon.test.published-base")]
-      (when-not root
-        (throw (ex-info "The result transport requires its prepared test base."
-                        {:seon.error/kind :seon.test.run/unavailable
-                         :seon.test.run/unavailable true})))
-      (let [held-store (store/open-store!
-                         {:seon.store/dir (str (io/file root "data" "store"))})]
-        (try
-          (let [database (source/database held-store
-                           (:seon.source/commit-id (source/current held-store)))
-                database (vary-meta database assoc :seon.schema/projection
-                                    (schema/projection-from-database database))
-                digest (program-digest database)
-                _ (when-not (= digest (:seon.test.run/program-digest run-result))
-                    (throw (ex-info "The prepared base no longer identifies the tested program."
-                                    {:seon.error/kind :seon.test.run/unavailable
-                                     :seon.test.run/unavailable true})))
-                digests (reach-digests database
-                          (mapv :seon.test/sym (:seon.test.runner/results run-result)))]
-            (when (:seon.error/kind digests)
-              (throw (ex-info (:seon.error/message digests) digests)))
-            (assoc run-result :seon.test/reach-digests digests))
-          (finally (store/release-store! held-store)))))))
+    ((requiring-resolve 'seon.test-support/with-database)
+     (fn [connection]
+       (let [database (db/db connection)
+             digest (program-digest database)
+             _ (when-not (= digest (:seon.test.run/program-digest run-result))
+                 (throw (ex-info "The canonical fixture no longer identifies the tested program."
+                                 {:seon.error/kind :seon.test.run/unavailable
+                                  :seon.test.run/unavailable true})))
+             digests (reach-digests database
+                       (mapv :seon.test/sym (:seon.test.runner/results run-result)))]
+         (when (:seon.error/kind digests)
+           (throw (ex-info (:seon.error/message digests) digests)))
+         (assoc run-result :seon.test/reach-digests digests))))))
 
 (defn record!
   "Commit one runner completion into an explicitly named, non-default cluster."
