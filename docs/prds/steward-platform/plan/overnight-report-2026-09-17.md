@@ -85,7 +85,11 @@ peer session (batches 30–57; ledger
    The remaining `seon.web.jvm-test` reds go back to the fixture class (no
    compiled config row on the branch). A second real defect from the same
    pass stands: the opening walk's namespace candidate hands a bare symbol
-   where the contract wants an entity lookup (`91f536c36`), fix lane running.
+   where the contract wants an entity lookup (`91f536c36`) — fixed
+   (`9107232d7`, `58bd7f4f3`; no bare-symbol subject remains under src/ or
+   test/). Question for the owner: the generated-opening producer in
+   `seon.bootstrap` has no caller under src/ (Juniper's prompt comes from
+   `seon.turn/system-turn`) — dead code or the target path?
 
 0c. **The cluster's live projection drops committed storable declarations.**
    When an agent admits a schema through a turn (Juniper's own scenario does
