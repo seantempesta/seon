@@ -5,7 +5,9 @@
             [clojure.string :as str]
             [seon.await :as await]
             [seon.config :as config]
+            [seon.cluster.store :as store]
             [seon.db :as db]
+            [seon.error :as error]
             [seon.fn :as functions]
             [seon.instrument :as instrument]
             [seon.program :as program]
@@ -163,8 +165,146 @@
       ;; daemon virtual thread must finish its resource scopes normally.
       (finally (when-not (.isDone task) (.cancel task false))))))
 
+;;; ---------------------------------------------------------------------------
+;;; An in-process run refuses a destructive drill on a development root
+;;; ---------------------------------------------------------------------------
+
+(defn- development-root
+  "The declared operator root when THIS JVM was launched to operate its own
+  working directory — the developer's checkout, with its live `data/store`.
+
+  `bin/seon [--root PATH] start` declares the root it operates on every child
+  JVM, so an ordinary development JVM declares the checkout it runs in; a
+  `bin/test` worker declares its isolated run root
+  (`src/seon/test/runner.clj:2549`) and `bin/test-fast` declares none. Returns
+  the canonical development root, or nil when this JVM operates an isolated
+  root or declares nothing."
+  [declared]
+  (when-not (str/blank? declared)
+    (let [root (.getCanonicalPath (io/file declared))
+          working (.getCanonicalPath (io/file (System/getProperty "user.dir")))]
+      (when (= root working) root))))
+
+(defn- destructive-reach
+  "Every test symbol whose reach includes a destructive owner, mapped to it.
+
+  The owner set is `seon.test.runner/destructive-owners` — the ONE declaration,
+  shared with the cold gate's platform-tier checker — and membership is the
+  shared `:seon.fn/calls` derivation `seon.fn/tests-reaching`. An owner with no
+  program row is a typed unknown: a rename would otherwise leave this walking
+  to nothing and admitting every test, which is absence of signal read as
+  health."
+  [database]
+  (reduce
+   (fn [reached owner]
+     (let [row (db/pull database [:db/id] [:seon.fn/sym owner])]
+       (cond
+         (:seon.error/kind row) (reduced row)
+         (nil? (:db/id row))
+         (reduced
+          (unknown owner
+                   (str "No program row declares the destructive owner " owner
+                        ", so an in-process run cannot tell whether a test "
+                        "deletes a filesystem path. Republish the program, or "
+                        "correct seon.test.runner/destructive-owners.")))
+         :else
+         (let [tests (functions/tests-reaching database owner)]
+           (if (:seon.error/kind tests)
+             (reduced tests)
+             (reduce #(assoc %1 %2 owner) reached tests))))))
+   {}
+   (sort runner/destructive-owners)))
+
+(defn- destructive-path
+  "The shortest declared call path from one test down to its destructive owner.
+  Evidence for the refusal, walked only when one is being constructed."
+  [database test-symbol owner-symbol]
+  (let [callees (fn [entity]
+                  (let [row (db/pull database
+                                     [{:seon.fn/calls [:db/id :seon.fn/sym]}
+                                      {:seon.test/subject [:db/id :seon.fn/sym]}]
+                                     entity)]
+                    (when-not (:seon.error/kind row)
+                      (let [subject (:seon.test/subject row)]
+                        (concat (:seon.fn/calls row)
+                                (cond (nil? subject) nil
+                                      (sequential? subject) subject
+                                      :else [subject]))))))
+        start (:db/id (db/pull database [:db/id] [:seon.test/sym test-symbol]))]
+    (loop [frontier (if start [[start [test-symbol]]] [])
+           seen (if start #{start} #{})]
+      (if (empty? frontier)
+        [test-symbol owner-symbol]
+        (let [edges (for [[entity path] frontier
+                          row (callees entity)]
+                      [row path])]
+          (if-let [found (some (fn [[row path]]
+                                 (when (= owner-symbol (:seon.fn/sym row))
+                                   (conj path owner-symbol)))
+                               edges)]
+            found
+            (let [next-frontier (reduce (fn [acc [row path]]
+                                          (let [entity (:db/id row)]
+                                            (if (or (contains? seen entity)
+                                                    (some #(= entity (first %)) acc))
+                                              acc
+                                              (conj acc [entity (conj path (:seon.fn/sym row))]))))
+                                        []
+                                        edges)]
+              (recur next-frontier (into seen (map first) next-frontier)))))))))
+
+(defn- destructive-exclusion
+  "One selected test's destructive evidence, or nil when it reaches no owner."
+  [database reach test-symbol]
+  (when-let [owner (get reach test-symbol)]
+    {:seon.test/sym test-symbol
+     :seon.fn/sym owner
+     :seon.test/destructive-path (destructive-path database test-symbol owner)
+     :seon.test/command ["bin/test" "--" (namespace (symbol test-symbol))]}))
+
+(defn- destructive-refusal
+  "Refuse one in-process run that would execute a destructive drill, or nil.
+
+  A test reaching a declared destructive owner deletes a filesystem path it did
+  not create. Run in the JVM that operates the developer's own checkout, that
+  is the 2026-09-17 incident: an in-process run emptied `data/store`
+  (`docs/seon/issues/a-platform-tier-test-wiped-the-checkouts-store.md`). The
+  rule was prose; this is the check. It fires only for a JVM whose DECLARED
+  operator root is that development root — a `bin/test` worker or a lane's
+  `--root` scratch JVM runs the same test untouched. The refusal names the
+  test, the owner it reaches, the call path between them, and the cold
+  invocation that may run it."
+  [database declared-root test-symbol]
+  (when-let [root (development-root declared-root)]
+    (let [reach (destructive-reach database)]
+      (if (:seon.error/kind reach)
+        (assoc reach :seon.test/next-tier :none)
+        (when-let [evidence (destructive-exclusion database reach test-symbol)]
+          (let [owner (:seon.fn/sym evidence)]
+            (error/diagnostic
+             (merge
+              evidence
+              {:seon.error/kind ::destructive-in-process
+               :seon.error/message
+               (str test-symbol " reaches " owner
+                    ", which deletes a filesystem path it did not create, and "
+                    "this JVM was launched to operate the development root "
+                    root ". Run it cold — bin/test -- "
+                    (namespace (symbol test-symbol))
+                    " — or in a JVM under an isolated operator root "
+                    "(bin/seon --root tmp/<lane>-root). Call path: "
+                    (str/join " -> " (:seon.test/destructive-path evidence)) ".")
+               :seon.error/diagnostic-layer :test
+               :seon.error/diagnostic-operation ::run
+               :seon.error/diagnostic-member test-symbol
+               :seon.error/diagnostic-expected :isolated-operator-root
+               :seon.error/diagnostic-offending root
+               :seon.error/diagnostic-cause owner
+               :seon.error/diagnostic-evidence evidence
+               :seon.test/next-tier :none}))))))))
+
 (defn run
-  "Run one declared test Var, commit its result facts, and return them.\n\n  The connection is ordinarily supplied by call preparation from the calling\n  agent's environment. The returned value is pulled from the transaction's\n  `:db-after`, so it cannot disagree with the facts that were committed."
+  "Run one declared test Var, commit its result facts, and return them.\n\n  The connection is ordinarily supplied by call preparation from the calling\n  agent's environment. The returned value is pulled from the transaction's\n  `:db-after`, so it cannot disagree with the facts that were committed.\n\n  A test whose program-graph reach includes a declared destructive owner is\n  REFUSED, without executing, in a JVM whose declared operator root is the\n  development checkout it runs in; the refusal names the test, the owner, the\n  call path, and the cold invocation that may run it. `:seon.test/declared-root`\n  in the options is that declaration when the caller genuinely holds one;\n  absent, this JVM's own is read once here."
   {:malli/schema
    [:function
     [:=> [:cat :seon.test/var :seon.db/connection] [:or :seon.test/result :seon.error/value]]
@@ -187,8 +327,16 @@
       (if (:seon.error/kind database)
         database
         (let [provenance (:seon.test.run/provenance options)
-              result (if (:seon.error/kind provenance)
-                       provenance
+              declared (if-let [entry (find options :seon.test/declared-root)]
+                         (val entry)
+                         (store/declared-operator-root))
+              refusal (destructive-refusal
+                        database declared
+                        (str (:ns (meta test-var)) "/" (:name (meta test-var))))
+              result (cond
+                       refusal refusal
+                       (:seon.error/kind provenance) provenance
+                       :else
                        (schema/call-with-projection
                          (db/carried-projection database)
                          #(bounded-result test-var (:seon.test/remaining-ms options))))]
@@ -334,7 +482,8 @@
 (defn- check-in-process
   [{connection :seon.db/connection changed :seon.test/changed
     paths :seon.test/paths namespaces :seon.test/namespaces
-    cluster :seon.boot/cluster-name defer? :seon.test/defer-widened?}
+    cluster :seon.boot/cluster-name defer? :seon.test/defer-widened?
+    :as request}
    progress]
   (let [started (System/nanoTime)
         database (db/db connection)
@@ -373,14 +522,36 @@
                                     :seon.test/command ["bin/test-check" (or cluster "default")
                                                         "--test" test-symbol]})))
                          selected))
-        runnable (if (or (:seon.error/kind selected) (and widened defer?)) []
-                     (filterv (complement (set (map :seon.test/sym deferred))) selected))
+        ;; A test reaching a declared destructive owner never runs in the
+        ;; development JVM: the same rule seon.test/run enforces per Var, applied
+        ;; to the whole selection so the exclusion is reported, never silent.
+        ;; The declaration this check genuinely holds travels with every run it
+        ;; starts: a seam that re-read the JVM property would decide twice.
+        declared (if-let [entry (find request :seon.test/declared-root)]
+                   (val entry)
+                   (store/declared-operator-root))
+        destructive (when-not (:seon.error/kind selected)
+                      (let [reach (when (development-root declared)
+                                    (destructive-reach database))]
+                        (cond
+                          (nil? reach) []
+                          (:seon.error/kind reach) reach
+                          :else (into [] (keep #(destructive-exclusion database reach %))
+                                      selected))))
+        excluded (if (vector? destructive)
+                   (set (map :seon.test/sym destructive))
+                   #{})
+        runnable (if (or (:seon.error/kind selected) (:seon.error/kind destructive)
+                         (and widened defer?)) []
+                     (filterv (complement (into excluded (map :seon.test/sym) deferred))
+                              selected))
         provenance (when (and (not (:seon.error/kind selected)) (seq runnable))
                      (runner/provenance database))]
     (cond
       (:seon.error/kind effective) effective
       (:seon.error/kind provenance) provenance
       (:seon.error/kind selected) selected
+      (:seon.error/kind destructive) (assoc destructive :seon.test/next-tier :none)
       :else
       (let [selected (vec (sort selected))
             namespaces (vec (sort (distinct (or (seq namespaces)
@@ -393,6 +564,7 @@
                       (nil? changed) (assoc :seon.test/skipped-count (- (count candidates) (count selected))
                                            :seon.test/skip-reason "recorded result has an unchanged reach digest")
                       (seq deferred) (assoc :seon.test/deferred deferred)
+                      (seq destructive) (assoc :seon.test/destructive-excluded destructive)
                       provenance (assoc :seon.test.run/program-digest
                                         (:seon.test.run/program-digest provenance))
                       widened (assoc :seon.test/widened
@@ -425,9 +597,11 @@
                     (let [outcome (try
                                     (if-let [test-var (resolve-test test-symbol)]
                                       (run test-var connection
-                                           {:seon.db/db database
-                                            :seon.test.run/provenance provenance
-                                            :seon.test/remaining-ms remaining-ms})
+                                           (cond-> {:seon.db/db database
+                                                    :seon.test.run/provenance provenance
+                                                    :seon.test/remaining-ms remaining-ms}
+                                             declared
+                                             (assoc :seon.test/declared-root declared)))
                                       (unknown test-symbol "The indexed test Var is unavailable."))
                                     (catch Exception failure
                                       (when (instance? InterruptedException failure)
@@ -462,6 +636,9 @@
   :seon.test/paths for exact escalation commands. Widening inputs select the
   supplied affected namespaces, or all declared test namespaces when unknown.
   Hook callers set :seon.test/defer-widened? to report widening without running.
+  A selected test reaching a declared destructive owner is EXCLUDED, never run,
+  when this JVM operates the development checkout; the exclusions are reported
+  with their owner, call path, and cold command in :seon.test/destructive-excluded.
   Red results return :seon.test/next-tier :none. Every failure names its test
   and the changed identities it reaches. Empty or deferred checks do not mint
   run provenance or compute a program digest; no program was tested.
@@ -554,6 +731,8 @@
            " / elapsed " (:seon.test/elapsed-ms result) " ms"
            (when-let [n (:seon.test/skipped-count result)]
              (str " / skipped " n ": " (:seon.test/skip-reason result)))
+           (when-let [excluded (seq (:seon.test/destructive-excluded result))]
+             (str " / destructive-excluded " (count excluded)))
            (apply str (for [failure (:seon.test/failed result)]
                         (str "\n" (:seon.test/sym failure) " reaches "
                              (pr-str (:seon.test/changed failure)) ": "
@@ -562,6 +741,11 @@
                         (str "\ndeferred " (:seon.test/sym deferred) ": "
                              (:seon.test/fixture-observation deferred)
                              "; run " (str/join " " (map quote-arg (:seon.test/command deferred))))))
+           (apply str (for [excluded (:seon.test/destructive-excluded result)]
+                        (str "\ndestructive " (:seon.test/sym excluded) " reaches "
+                             (:seon.fn/sym excluded)
+                             "; never in process on a development root — run "
+                             (str/join " " (map quote-arg (:seon.test/command excluded))))))
            (if (seq invocations) (str "\nrun " (str/join " then " invocations))
                "\nnext-tier: none; fix failures first")))))
 

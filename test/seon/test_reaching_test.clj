@@ -395,3 +395,155 @@
             (is (= 1 (:seon.test/pass-count result)) (pr-str result))
             (is (zero? (:seon.test/fail-count result)) (pr-str result))
             (is (zero? (:seon.test/error-count result)) (pr-str result))))))))
+
+;;; ---------------------------------------------------------------------------
+;;; An in-process run refuses a destructive drill on a development root
+;;; ---------------------------------------------------------------------------
+
+;; The 2026-09-17 store wipe was an in-process seon.test/run, inside the
+;; development JVM, of a test whose reach includes a function that deletes a
+;; filesystem path it did not create
+;; (docs/seon/issues/a-platform-tier-test-wiped-the-checkouts-store.md). The
+;; cold gate's platform tier refuses the same class from its own side; these
+;; regressions own the in-process half.
+
+(def ^:private destructive-owner "seon.test-support/populate-published-root!")
+
+(defn- with-destructive-test
+  "A probe whose indexed reach is the declared destructive owner.
+
+  Its body creates a marker directory, so an execution that was supposed to be
+  refused leaves evidence on disk instead of passing silently."
+  [connection assertion]
+  (support/seed-cluster! connection "default")
+  (let [namespace-name (symbol (str "destructive.probe" (id/id)))
+        namespace-object (create-ns namespace-name)
+        test-symbol (str namespace-name "/probe")
+        marker (clojure.java.io/file "tmp" (str "destructive-probe-" (id/id)))
+        source (list 'clojure.test/deftest 'probe
+                     (list 'clojure.test/is
+                           (list '.mkdirs (list 'clojure.java.io/file (.getPath marker)))))
+        test-var (binding [*ns* namespace-object]
+                   (clojure.core/refer 'clojure.core)
+                   (eval source))]
+    (try
+      (is (:db/id (db/pull (db/db connection) [:db/id] [:seon.fn/sym destructive-owner]))
+          "the canonical population declares the destructive owner")
+      (support/transacted! connection
+                           [{:seon.ns/name namespace-name}
+                            {:seon.test/sym test-symbol
+                             :seon.schema.admission/source :core
+                             :seon.test/ns [:seon.ns/name namespace-name]
+                             :seon.test/source (pr-str source)
+                             :seon.fn/calls [[:seon.fn/sym destructive-owner]]}])
+      (assertion test-symbol test-var marker)
+      (finally
+        (support/delete-recursively! marker)
+        (remove-ns namespace-name)))))
+
+(deftest a-development-root-is-the-declared-root-this-jvm-operates
+  (let [working (.getCanonicalPath (clojure.java.io/file (System/getProperty "user.dir")))]
+    (is (= working (#'sut/development-root working)))
+    (is (= working (#'sut/development-root "."))
+        "a relative declaration resolves to the working directory it names")
+    (is (nil? (#'sut/development-root nil)) "bin/test-fast declares nothing")
+    (is (nil? (#'sut/development-root "")))
+    (is (nil? (#'sut/development-root (str working "/tmp/isolated-run-root")))
+        "a bin/test worker or a lane --root JVM operates an isolated root")))
+
+(deftest an-in-process-run-under-a-development-root-refuses-a-destructive-test
+  (support/with-database
+    (fn [connection]
+      (with-destructive-test connection
+        (fn [test-symbol test-var marker]
+          (let [database (db/db connection)
+                working (.getCanonicalPath (clojure.java.io/file (System/getProperty "user.dir")))
+                result (sut/run test-var connection
+                                {:seon.db/db database
+                                 :seon.test.run/provenance (runner/provenance database)
+                                 :seon.test/remaining-ms 10000
+                                 :seon.test/declared-root working})]
+            (is (= :seon.test/destructive-in-process (:seon.error/kind result)) (pr-str result))
+            (is (= test-symbol (:seon.test/sym result)))
+            (is (= destructive-owner (:seon.fn/sym result)))
+            (is (= [test-symbol destructive-owner] (:seon.test/destructive-path result)))
+            (is (= ["bin/test" "--" (namespace (symbol test-symbol))]
+                   (:seon.test/command result)))
+            (is (.contains (:seon.error/message result "") working) (pr-str result))
+            (is (not (.exists marker))
+                "the refused test executed nothing, so no fixture root was created")
+            (let [row (db/pull (db/db connection)
+                               [:seon.test/run :seon.test/pass-count :seon.test/error-count]
+                               [:seon.test/sym test-symbol])]
+              (is (nil? (:seon.test/run row)) (pr-str row))
+              (is (nil? (:seon.test/pass-count row)) (pr-str row)))))))))
+
+(deftest an-in-process-run-under-an-isolated-root-runs-the-same-test
+  (support/with-database
+    (fn [connection]
+      (with-destructive-test connection
+        (fn [test-symbol test-var marker]
+          (let [database (db/db connection)
+                isolated (.getCanonicalPath (clojure.java.io/file "tmp" (str "isolated-root-" (id/id))))
+                result (sut/run test-var connection
+                                {:seon.db/db database
+                                 :seon.test.run/provenance (runner/provenance database)
+                                 :seon.test/remaining-ms 10000
+                                 :seon.test/declared-root isolated})]
+            (is (= 1 (:seon.test/pass-count result)) (pr-str result))
+            (is (= 0 (:seon.test/fail-count result)) (pr-str result))
+            (is (.exists marker) "the admitted test executed its body")
+            (is (:seon.test/run (db/pull (db/db connection) [:seon.test/run]
+                                         [:seon.test/sym test-symbol])))))))))
+
+(deftest an-in-process-check-excludes-a-destructive-test-and-reports-it
+  (support/with-database
+    (fn [connection]
+      (with-destructive-test connection
+        (fn [test-symbol _ marker]
+          (with-test connection '(clojure.test/is true)
+            (fn [cheap-symbol _]
+              (let [working (.getCanonicalPath (clojure.java.io/file (System/getProperty "user.dir")))
+                    result (sut/check {:seon.db/connection connection
+                                       :seon.test/declared-root working
+                                       :seon.test/changed [test-symbol cheap-symbol]})
+                    excluded (:seon.test/destructive-excluded result)
+                    feedback (sut/feedback result)]
+                (is (= [cheap-symbol] (:seon.test/tests result)) (pr-str result))
+                (is (= [{:seon.test/sym test-symbol
+                         :seon.fn/sym destructive-owner
+                         :seon.test/destructive-path [test-symbol destructive-owner]
+                         :seon.test/command ["bin/test" "--" (namespace (symbol test-symbol))]}]
+                       excluded)
+                    (pr-str result))
+                (is (.contains feedback "destructive-excluded 1") feedback)
+                (is (.contains feedback destructive-owner) feedback)
+                (is (not (.exists marker)) "the excluded test executed nothing")
+                (is (nil? (:seon.test/run (db/pull (db/db connection) [:seon.test/run]
+                                                   [:seon.test/sym test-symbol]))))
+                (let [isolated (sut/check {:seon.db/connection connection
+                                           :seon.test/declared-root
+                                           (.getCanonicalPath
+                                            (clojure.java.io/file "tmp" (str "isolated-root-" (id/id))))
+                                           :seon.test/changed [test-symbol]})]
+                  (is (= [test-symbol] (:seon.test/passed isolated)) (pr-str isolated))
+                  (is (nil? (:seon.test/destructive-excluded isolated)))
+                  (is (.exists marker)))))))))))
+
+(deftest a-destructive-owner-without-a-program-row-refuses-instead-of-admitting
+  (support/with-database
+    (fn [connection]
+      (let [database (db/db connection)
+            owner (db/pull database [:db/id] [:seon.fn/sym destructive-owner])
+            removed (db/transact! connection
+                                  [[:db/retract (:db/id owner) :seon.fn/sym destructive-owner]])
+            after (db/db connection)
+            reach (#'sut/destructive-reach after)]
+        (is (:db-after removed) (pr-str removed))
+        (is (= :seon.test/unknown (:seon.error/kind reach)) (pr-str reach))
+        (is (.contains (:seon.error/message reach "") destructive-owner) (pr-str reach))
+        (is (:seon.error/kind (#'sut/destructive-refusal
+                               after
+                               (.getCanonicalPath (clojure.java.io/file (System/getProperty "user.dir")))
+                               "seon.id-test/does-not-matter"))
+            "an unanswerable reach refuses the run instead of admitting it")))))

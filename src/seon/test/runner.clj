@@ -724,7 +724,7 @@
 ;;; The platform tier declares no destructive drill
 ;;; ---------------------------------------------------------------------------
 
-(def ^:private destructive-owners
+(def destructive-owners
   "The functions that DELETE a filesystem path they did not create.
 
   `populate-published-root!` / `populate-published-operator-root!` replace a
@@ -744,7 +744,11 @@
 
   Declared here, beside the fixture owners, and RESOLVED against the program
   graph at `destructive-owner-rows`: a rename fails the gate instead of
-  silently emptying the set."
+  silently emptying the set.
+
+  THE ONE OWNER SET. The cold gate reads it here for the platform tier;
+  `seon.test/run` reads the same set for its in-process refusal, over the same
+  `:seon.fn/calls` reach, so the two halves of the rule can never disagree."
   #{"seon.test-support/populate-published-root!"
     "seon.test-support/populate-published-operator-root!"
     "seon.operator/cleanup-root-under-lock!"})

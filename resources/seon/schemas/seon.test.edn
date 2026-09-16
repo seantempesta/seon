@@ -146,11 +146,24 @@
   [:seon.test/paths {:optional true} :seon.test/paths]
   [:seon.test/namespaces {:optional true} :seon.test/namespaces]
   [:seon.boot/cluster-name {:optional true} :seon.boot/cluster-name]
+  [:seon.test/declared-root {:optional true} :seon.test/declared-root]
   [:seon.test/defer-widened? {:optional true} :boolean]]
  :seon.test/run-options
  [:map [:seon.test.run/provenance :seon.test.run/provenance]
   [:seon.db/db {:optional true} :seon.db/database-value]
+  [:seon.test/declared-root {:optional true} :seon.test/declared-root]
   [:seon.test/remaining-ms [:int {:min 1}]]]
+ :seon.test/declared-root
+ [:string {:min 1
+           :description "The operator root the caller genuinely holds; absent means this JVM's own declaration is read."}]
+ :seon.test/destructive-path
+ [:vector {:min 1 :description "The declared call path from a test down to the destructive owner it reaches."}
+  [:string {:min 1}]]
+ :seon.test/destructive-excluded
+ [:vector [:map [:seon.test/sym :seon.test/sym]
+           [:seon.fn/sym :seon.fn/sym]
+           [:seon.test/destructive-path :seon.test/destructive-path]
+           [:seon.test/command :seon.test/command]]]
  :seon.test/unknown :string
  :seon.test/unknown-error
  [:map {:seon.error/class true :seon.render/ai seon.error/render-ai
@@ -183,7 +196,8 @@
   [:seon.test/next-tier :seon.test/next-tier]
   [:seon.test/widened {:optional true} :string]
   [:seon.test/pending {:optional true} [:vector :seon.test/sym]]
-  [:seon.test/deferred {:optional true} :seon.test/deferred]]
+  [:seon.test/deferred {:optional true} :seon.test/deferred]
+  [:seon.test/destructive-excluded {:optional true} :seon.test/destructive-excluded]]
  :seon.test/adoption-identities [:set :seon.db/ref]
  :seon.test/adoption-inputs [:set :string]
  :seon.test/adoption-cluster :seon.db/ref
