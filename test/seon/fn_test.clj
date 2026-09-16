@@ -1817,11 +1817,11 @@
                              [:seon.fn/file :seon.fn.file/relative-path]))))))))))
 
 (def ^:private reconcile-in
-  "`seon.fn/reconcile-tx` with the operation's declaration population in hand.
+  "`seon.fn/reconcile-tx` with the operation's derived row shapes in hand.
 
-  The public arity resolves the authored resources, exactly as `index!` does
-  for a caller that supplied none; this is the same seam `index!` itself calls
-  with the population it resolved once."
+  The public arity resolves the authored resources and derives their shapes,
+  exactly as `index!` does for a caller that supplied no population; this is
+  the same seam `index!` itself calls with the shapes it derived once."
   @#'seon.fn/reconcile-tx-in)
 
 (deftest an-attribute-declared-after-this-jvm-started-is-indexed-without-a-restart
@@ -1875,18 +1875,22 @@
              (testing "a declaration added after this JVM started is kept"
                (let [emitted (assoc file-row ::declared-after "carried")]
                  (is (nil? (::declared-after
-                            (program/canonical-row packaged emitted)))
+                            (program/canonical-row
+                             (program/shapes-in packaged) emitted)))
                      "an undeclared attribute is not a program row attribute")
                  (is (= "carried" (::declared-after
-                                   (program/canonical-row declared emitted)))
+                                   (program/canonical-row
+                                    (program/shapes-in declared) emitted)))
                      "declaring it on :seon.fn.file/file is the whole
                       requirement — no restart, no second list")
                  (testing "and the next index of the same file writes it"
                    (let [report (db/transact!
                                  connection
                                  (reconcile-in
-                                  declared (db/db connection)
-                                  [(program/canonical-row declared emitted)]
+                                  (program/shapes-in declared)
+                                  (db/db connection)
+                                  [(program/canonical-row
+                                    (program/shapes-in declared) emitted)]
                                   []))]
                      (is (:db-after report)
                          (pr-str (select-keys report [:seon.error/kind
@@ -2255,7 +2259,9 @@
         analysis (analyzer/analyze {::analyzer/paths [path]})
         contexts (#'seon.fn/source-contexts [file])
         first-party (#'seon.fn/first-party-function-symbols analysis)
-        emitted (get (#'seon.fn/analysis-rows-by-file analysis first-party contexts)
+        emitted (get (#'seon.fn/analysis-rows-by-file
+                      analysis first-party contexts
+                      (set (keys (schema.edn/packaged-forms))))
                      path)
         artifact (seon.fn/build-artifact
                   {:seon.fn/source-path (.getPath file)
@@ -2389,4 +2395,93 @@
         (is (= (seon.fn/artifact-by-path after "src/./relocated/sample.clj")
                (seon.fn/artifact-by-path after
                  (.getCanonicalPath (io/file b "src/relocated/sample.clj"))))))
+      (finally (test-support/delete-recursively! root)))))
+
+(deftest indexing-resolves-its-declaration-world-once-per-operation
+  ;; THE COUNT IS THE ACCEPTANCE, never wall time. The declaration population
+  ;; cannot change while one indexing operation runs, so an operation resolves
+  ;; it ONCE and derives its shapes ONCE, whatever the row count. Both were
+  ;; call-time fetches before: `packaged-forms` twice per FILE (18 ms a call,
+  ;; ~12 s per 337-file publication) and `shapes-in` once per ROW
+  ;; (the-indexer-resolves-its-declaration-world-per-file-and-per-row).
+  (let [root (fixture-root)
+        files ["src/counted/one.clj" "src/counted/two.clj"
+               "src/counted/three.clj" "src/counted/four.clj"]
+        source (fn [namespace-name]
+                 (str "(ns counted." namespace-name ")\n"
+                      "(defn a [] 1)\n(defn b [] 2)\n(defn c [] 3)\n"))
+        directory (.getCanonicalPath root)
+        ;; `with-redefs` replaces a Var root for the WHOLE JVM, and this one is
+        ;; shared with every other test and with a development cluster's own
+        ;; publication thread. Counting only the calling thread's calls is what
+        ;; makes the count a property of THIS operation rather than of whatever
+        ;; else the worker happened to be doing (AGENTS.md 5, "own nothing
+        ;; global").
+        counted (fn [body]
+                  (let [caller (Thread/currentThread)
+                        population-calls (atom 0)
+                        shape-calls (atom 0)
+                        mine? (fn [] (identical? caller (Thread/currentThread)))
+                        resolve-population schema.edn/packaged-forms
+                        derive-shapes program/shapes-in]
+                    (with-redefs
+                     [schema.edn/packaged-forms
+                      (fn [& arguments]
+                        (when (mine?) (swap! population-calls inc))
+                        (apply resolve-population arguments))
+                      program/shapes-in
+                      (fn [& arguments]
+                        (when (mine?) (swap! shape-calls inc))
+                        (apply derive-shapes arguments))]
+                      (let [value (body)]
+                        {:value value
+                         :seon.schema.edn/packaged-forms-calls @population-calls
+                         :seon.program/shapes-in-calls @shape-calls}))))]
+    (try
+      (doseq [path files]
+        (write-source! root path
+                       (source (str/replace (last (str/split path #"/"))
+                                            ".clj" ""))))
+      (testing "one complete manifest is one operation, whatever the row count"
+        (let [{:keys [value] :as counts}
+              (counted #(seon.fn/build-manifest {:seon.fn/root directory
+                                                 :seon.fn/roots ["src"]}))
+              rows (reduce + (map (comp count :seon.fn.file/rows)
+                                  (:seon.fn.manifest/artifacts value)))]
+          (is (= (count files)
+                 (count (:seon.fn.manifest/artifacts value)))
+              "the probe analysed every fixture file")
+          (is (< (count files) rows)
+              "and there are strictly more rows than files, so a per-row or
+               per-file fetch could not pass by coincidence")
+          (is (= 1 (:seon.schema.edn/packaged-forms-calls counts))
+              "the declaration population is resolved once for the operation")
+          (is (= 1 (:seon.program/shapes-in-calls counts))
+              "and its shapes are derived once, not once per row")))
+      (testing "one file artifact is one operation"
+        (let [counts (counted
+                      #(seon.fn/build-artifact
+                        {:seon.fn/source-path (first files)
+                         :seon.fn/root directory
+                         :seon.fn/roots ["src"]
+                         :seon.fn.file/first-party-functions []}))]
+          (is (= 1 (:seon.schema.edn/packaged-forms-calls counts))
+              "not once for the declared-attribute set and again for the rows")
+          (is (= 1 (:seon.program/shapes-in-calls counts)))))
+      (testing "a caller that already resolved its population re-reads nothing"
+        (let [population (schema.edn/packaged-forms)
+              counts (counted
+                      (fn []
+                        (mapv #(seon.fn/build-artifact
+                                {:seon.fn/source-path %
+                                 :seon.fn/root directory
+                                 :seon.fn/roots ["src"]
+                                 :seon.schema.projection/forms population
+                                 :seon.fn.file/first-party-functions []})
+                              files)))]
+          (is (= 0 (:seon.schema.edn/packaged-forms-calls counts))
+              "the supplied population is the operation's world — this is what
+               makes an incremental publication read the resources once")
+          (is (= (count files) (:seon.program/shapes-in-calls counts))
+              "and each artifact derives its shapes exactly once")))
       (finally (test-support/delete-recursively! root)))))

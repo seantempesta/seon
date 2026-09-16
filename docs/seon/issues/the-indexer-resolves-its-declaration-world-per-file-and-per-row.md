@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 created: 2026-09-17
 tags: [issue, program-graph, schema, publication, performance, class/p1]
@@ -59,8 +59,40 @@ row count.
 (resolved; this is the cost its fix moved), and
 `complete-publication-takes-seventy-seconds`.
 
-## Not landed, and why
+## Resolved 2026-09-16
 
-The fix's owning files (`src/seon/fn.clj`, `src/seon/program.cljc`) were taken
-by a concurrent lane rewriting program-row FILE IDENTITY, which re-signatures
-the same functions. Sequence this after that lane commits.
+Landed as designed after the file-identity rewrite (`28f1a761e`) committed.
+`:seon.program/shapes` is declared; `shape` / `canonical-row` /
+`changed-attributes` / `exact-replacement-tx-in` take that value in their
+explicit arities; `!supplied-shapes`, `supplied-shapes` and `shapes`'s
+one-argument arity are deleted; `seon.fn` resolves the population once per
+operation and carries both halves (the declared-attribute key set and the
+derived shapes) through `artifact`, `build-manifest`, `normalized-index-row`,
+`reconcile-tx-in` and `index!`.
+
+Re-measured on `default` pid 53320 before and after, counts not wall time
+(20 smallest `src/seon/**.clj[c]` files, one `build-artifact` each, 90 rows):
+
+| | `packaged-forms` calls | `shapes-in` calls |
+|---|---|---|
+| before | 40 (2 × files) | 90 (1 × rows) |
+| after | 20 (1 × files) | 20 (1 × files) |
+| after, population supplied | **0** | 20 |
+
+`seon.fn-test/indexing-resolves-its-declaration-world-once-per-operation` is
+the class regression: it asserts the exact count at three seams, and counts
+only the calling thread's calls because `with-redefs` replaces a Var root for
+the whole JVM.
+
+The typed refusal caught a real caller within minutes of landing: a stale
+`seon.fn` in the development JVM handed `canonical-row` a declaration
+population, which without `:seon.program/shapes` would have published rows
+stripped of every attribute their family owns and reported success.
+
+One part of the assignment is NOT done and stays open elsewhere:
+`seon.program/identity-attributes` is still a literal vector rather than a
+derivation over the attributes declaring `:seon.program/row-schema` — see
+`live-resources-outrun-the-loaded-program-identity-list`. It did not fall out
+of this change because the list also carries a deterministic ADMISSION ORDER
+that a population's key set cannot supply, and because `row-identity` /
+`row-identities` read it per row with no population in hand.

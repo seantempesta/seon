@@ -2017,6 +2017,10 @@
                                         (:seon.source/relative-file-digests snapshot-before)
                                         (map (partial fs/relative-path (:seon.fn/root roots)) changed-paths))
             known-functions (seon.fn/manifest-function-symbols manifest)
+            ;; ONE declaration world for the whole publication: without this
+            ;; every changed file re-read and re-merged the authored schema
+            ;; resources twice (18 ms a call, AGENTS.md 2.1).
+            declaration-forms (schema.edn/packaged-forms)
             changes
             (try
              (mapv
@@ -2031,6 +2035,7 @@
                                 {:seon.fn/source-path path
                                  :seon.fn/root (:seon.fn/root roots)
                                  :seon.fn/roots (:seon.fn/roots roots)
+                                 :seon.schema.projection/forms declaration-forms
                                  :seon.fn.file/first-party-functions
                                  known-functions}))]
                  (assoc (seon.fn/plan-file-change

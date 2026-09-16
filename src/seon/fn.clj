@@ -958,15 +958,20 @@
                        :seon.fn/index-refused true})))))
 
 (defn- analysis-rows-by-file
-  [analysis first-party-functions contexts]
+  "Rows by file, owning declared writes by the operation's own population.
+
+  `declared-attributes` is the key set of the declaration population the
+  operation resolved ONCE (see [[declaration-forms]]). Re-resolving it here
+  re-read the authored resources a SECOND time per file, at 18 ms a call,
+  against a population that cannot change while one operation runs
+  (AGENTS.md 2.1)."
+  [analysis first-party-functions contexts declared-attributes]
   (let [calls-by-caller
         (call-targets-by-caller analysis first-party-functions)
         used-keywords (keywords-by-holder analysis)
         edges {:calls-by-caller calls-by-caller
                :used-keywords used-keywords
-               :writes (writes-by-writer
-                        analysis
-                        (set (keys (schema.edn/packaged-forms))))
+               :writes (writes-by-writer analysis declared-attributes)
                :call-arities (call-arities-by-caller analysis calls-by-caller)}
         namespace-contexts
         (into {}
@@ -1036,7 +1041,7 @@
       (schema.edn/packaged-forms)))
 
 (defn- artifact
-  [forms directory file root context rows findings]
+  [row-shapes directory file root context rows findings]
   (let [canonical-path (fs/relative-path directory (.getCanonicalPath ^java.io.File file))
         file-row (cond-> {:seon.fn.file/relative-path canonical-path
                           :seon.fn.file/digest (:seon.fn.file/digest context)}
@@ -1058,7 +1063,7 @@
                              (dissoc ::analyzer/filename)))
                        findings)
         canonical-rows
-        (mapv #(cond-> (assoc (program/canonical-row forms %)
+        (mapv #(cond-> (assoc (program/canonical-row row-shapes %)
                               :seon.schema.admission/source :core)
                  (:seon.fn/calls %)
                  (update :seon.fn/calls set))
@@ -1603,15 +1608,18 @@
                 (first-party-function-symbols analysis))
           findings (publication-findings analysis first-party-functions)]
       (assert-clean-analysis! analysis first-party-functions)
-      (artifact (declaration-forms request)
-                directory file
-                (containing-root directory (or roots source-roots) file)
-                (get contexts canonical-path)
-                (get (analysis-rows-by-file analysis first-party-functions
-                                            contexts)
-                     canonical-path
-                     [])
-                findings))))
+      ;; ONE declaration world per operation: the population resolved once,
+      ;; its shapes derived once, both carried to every row (AGENTS.md 2.1).
+      (let [forms (declaration-forms request)]
+        (artifact (program/shapes-in forms)
+                  directory file
+                  (containing-root directory (or roots source-roots) file)
+                  (get contexts canonical-path)
+                  (get (analysis-rows-by-file analysis first-party-functions
+                                              contexts (set (keys forms)))
+                       canonical-path
+                       [])
+                  findings)))))
 
 (defn artifact-by-path
   "The manifest artifact for a relative or absolute path under its root."
@@ -1696,6 +1704,7 @@
     :seon.fn.manifest/manifest]}
   [request]
   (let [forms (declaration-forms request)
+        row-shapes (program/shapes-in forms)
         directory (fs/absolute-path (fs/source-directory) (or (:seon.fn/root request) "."))
         roots (:seon.fn/roots request)
         files (source-files directory roots)
@@ -1707,10 +1716,11 @@
         (group-by ::analyzer/filename
                   (publication-findings analysis first-party-functions))
         rows-by-file
-        (analysis-rows-by-file analysis first-party-functions contexts)
+        (analysis-rows-by-file analysis first-party-functions contexts
+                               (set (keys forms)))
         artifacts
         (mapv (fn [file]
-                (artifact forms
+                (artifact row-shapes
                           directory file
                           (containing-root directory roots file)
                           (get contexts (.getCanonicalPath ^java.io.File file))
@@ -2264,7 +2274,7 @@
 
 (defn- normalized-index-row
   "Compare stored refs by identity and anonymous components by their values."
-  [forms database row identity-attributes]
+  [row-shapes database row identity-attributes]
   (let [entity (memoize #(db/pull database '[*] %))
         row-identity
         (fn [row]
@@ -2295,11 +2305,11 @@
                 (vector? value) (mapv normalize-value value)
                 (set? value) (into #{} (map normalize-value) value)
                 :else value))]
-      (normalize-map (program/canonical-row forms row)))))
+      (normalize-map (program/canonical-row row-shapes row)))))
 
 (defn- reconcile-tx-in
-  "Replace source definitions, owning rows by the population `forms` declares."
-  [forms database rows previous-identities]
+  "Replace source definitions, owning rows by the shapes `row-shapes` carries."
+  [row-shapes database rows previous-identities]
   (let [identity-attributes (db/identity-attributes database)
         desired-identities (into #{} (map program/row-identity) rows)
         removed (remove desired-identities previous-identities)
@@ -2313,10 +2323,10 @@
                (fn [row]
                  (let [current (db/pull database '[*] (program/row-identity row))
                        normalized-current
-                       (normalized-index-row forms database current
+                       (normalized-index-row row-shapes database current
                                              identity-attributes)
                        normalized-desired
-                       (normalized-index-row forms database row
+                       (normalized-index-row row-shapes database row
                                              identity-attributes)]
                    (when (not= normalized-current normalized-desired)
                      {:seon.program/row row
@@ -2324,7 +2334,7 @@
                       (if-let [entity-id (:db/id current)]
                         (vec (butlast
                               (program/exact-replacement-tx-in
-                               forms
+                               row-shapes
                                (assoc normalized-current :db/id entity-id)
                                normalized-desired)))
                         [])}))))
@@ -2350,7 +2360,8 @@
           :seon.fn.file/identities]
     [:vector :seon.schema/value]]}
   [database rows previous-identities]
-  (reconcile-tx-in (declaration-forms nil) database rows previous-identities))
+  (reconcile-tx-in (program/shapes-in (declaration-forms nil))
+                   database rows previous-identities))
 
 (defn- published-index-rows
   "Read compiled rows with portable program refs and complete owned components."
@@ -2398,7 +2409,7 @@
      previous-database :seon.source/previous-database
      source-database :seon.source/database :as request}
     progress!]
-   (let [forms (declaration-forms request)
+   (let [row-shapes (program/shapes-in (declaration-forms request))
          rows (if source-database
                 (published-index-rows source-database)
                 (desired-rows request progress!))
@@ -2438,8 +2449,8 @@
                           (fn [database]
                             (schema/call-with-projection
                              projection
-                             #(reconcile-tx-in forms database rows
-                                              previous-identities)))]]}
+                             #(reconcile-tx-in row-shapes database rows
+                                               previous-identities)))]]}
                  process (assoc :tx-meta {:seon.db/process process})))
               :seon.fn/population)
              changed-entities (into #{} (map :e) (:tx-data report))
@@ -2451,13 +2462,13 @@
                            (let [identity (program/row-identity row)]
                              (when (not=
                                     (normalized-index-row
-                                     forms
+                                     row-shapes
                                      previous-database
                                      (when (get (:schema previous-database) (first identity))
                                        (db/pull previous-database '[*] identity))
                                      previous-identity-attributes)
                                     (normalized-index-row
-                                     forms (:db-after report) row
+                                     row-shapes (:db-after report) row
                                      current-identity-attributes))
                                identity))))
                    rows)

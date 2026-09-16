@@ -912,12 +912,15 @@
              :sample/facet "carried"}
         declared (update forms :seon.fn/fn conj
                          [:sample/facet {:optional true} :string])]
-    (is (nil? (:sample/facet (program/canonical-row forms row)))
+    (is (nil? (:sample/facet
+               (program/canonical-row (program/shapes-in forms) row)))
         "an undeclared attribute is not a program row attribute")
-    (is (= "carried" (:sample/facet (program/canonical-row declared row)))
+    (is (= "carried" (:sample/facet
+                      (program/canonical-row (program/shapes-in declared) row)))
         "declaring it on :seon.fn/fn is sufficient — no code names it")
     (is (contains? (set (program/changed-attributes
-                         declared row (dissoc row :sample/facet)))
+                         (program/shapes-in declared)
+                         row (dissoc row :sample/facet)))
                    :sample/facet)
         "and an exact replacement retracts it when the source stops carrying it"))
   (testing "an entry naming another writer stays out of the indexer's hands"
@@ -933,9 +936,11 @@
                :seon.fn/arglists "([])"
                :seon.fn/private? false
                :sample/outcome "written elsewhere"}]
-      (is (nil? (:sample/outcome (program/canonical-row foreign row))))
+      (is (nil? (:sample/outcome
+                 (program/canonical-row (program/shapes-in foreign) row))))
       (is (not (contains? (set (program/changed-attributes
-                                foreign row (dissoc row :sample/outcome)))
+                                (program/shapes-in foreign)
+                                row (dissoc row :sample/outcome)))
                           :sample/outcome))
           "so an exact re-index can never retract another writer's fact"))))
 
@@ -1004,7 +1009,8 @@
            (set (rest (get forms :seon.program/identity-attribute))))
         "the identity-attribute enum does not drift from the declarations")
     (is (= (into #{}
-                 (map #(:seon.program/source-attribute (program/shape forms %)))
+                 (map #(:seon.program/source-attribute
+                        (program/shape (program/shapes-in forms) %)))
                  program/identity-attributes)
            (set (rest (get forms :seon.program/source-attribute))))
         "the source-attribute enum does not drift from the declarations")))
@@ -1042,7 +1048,7 @@
                   (program/shapes))]
       (is (contains? (owned after) ::declared-after)
           "a changed resource stamp re-derives, without restarting the JVM")
-      (is (= row (program/canonical-row declared row))
+      (is (= row (program/canonical-row (program/shapes-in declared) row))
           "and the row built from that population carries the attribute"))
     (is (= before (program/shapes))
         "an unchanged stamp answers the same derivation, so the per-row

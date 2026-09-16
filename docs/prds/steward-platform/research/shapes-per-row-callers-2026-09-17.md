@@ -128,3 +128,111 @@ Sequence this fix AFTER that lane commits; the measurement above is against
 
 Issue:
 [the-indexer-resolves-its-declaration-world-per-file-and-per-row](../../../seon/issues/the-indexer-resolves-its-declaration-world-per-file-and-per-row.md).
+
+## 2026-09-16: re-measured and landed at HEAD
+
+Same probe, same JVM discipline, on `default` pid 53320 (reset that morning),
+against `f479a2441` — the first-party file-identity rewrite this note named as
+its boundary had landed (`28f1a761e`), so the seams were found by name rather
+than by the line numbers above.
+
+### Before, re-measured at HEAD
+
+| call | ms/call | note |
+|---|---|---|
+| `seon.schema.edn/packaged-forms` | **21.31** | 30 calls after a warm-up (was 18.13) |
+| `seon.program/shapes-in forms` | 0.0224 | 200 calls (unchanged) |
+
+Twenty smallest `src/seon/**.clj[c]` files, one `build-artifact` each, counting
+wrappers on both seams:
+
+```
+{:files 20, :rows 90, :packaged-forms-calls 40, :shapes-in-calls 90,
+ :total-ms 9780.3}
+```
+
+Two per-file resolutions and one per-ROW derivation, exactly as measured on
+2026-09-17. The ratio is the whole finding: 40 = 2 × files, 90 = 1 × rows.
+
+### What landed
+
+The designed fix, unchanged in shape:
+
+1. `:seon.program/shapes`
+   (`[:map-of :seon.program/identity-attribute :seon.program/shape]`) is
+   declared in `resources/seon/schemas/seon.program.edn`. The cost of the typed
+   refusal was measured before adopting it: validating the whole six-family
+   shapes map costs **0.00083 ms**, 27× cheaper than the 0.0224 ms derivation
+   it guards, so the contract is free at indexing scale.
+2. `src/seon/program.cljc`: `shape`, `canonical-row`, `changed-attributes` and
+   `exact-replacement-tx-in` take that value in their explicit arities;
+   `!supplied-shapes`, `supplied-shapes` and `shapes`'s one-argument arity are
+   deleted. `shapes` is now a plain no-argument function over the authored
+   resources.
+3. `src/seon/fn.clj`: `build-artifact` and `build-manifest` resolve the
+   population once, derive its shapes once, and carry BOTH halves —
+   `analysis-rows-by-file` takes the declared-attribute key set as an argument,
+   `artifact` / `normalized-index-row` / `reconcile-tx-in` / `index!` take the
+   shapes.
+4. `src/seon/cluster.clj`: `incremental-source-refresh!` resolves
+   `schema.edn/packaged-forms` once above the per-file loop and supplies it as
+   `:seon.schema.projection/forms` in the `build-artifact` request.
+5. `seon.fn-test/indexing-resolves-its-declaration-world-once-per-operation`
+   asserts the COUNT at three seams: one complete manifest over four fixture
+   files is 1 population resolution and 1 shape derivation whatever the row
+   count; one file artifact is 1 and 1 (not 2 and per-row); and a caller that
+   supplies its own population resolves the resources 0 times.
+
+### The typed refusal earned its place immediately
+
+The first development adoption of the new contract refused:
+
+```
+seon.program/canonical-row refused row-shapes at [:seon.sci.eval/evaluation]:
+expected either :seon.ns/name or :seon.fn/sym or :seon.schema/key or
+:seon.test/sym or :seon.fn.file/relative-path or :seon.lint/id, got a keyword.
+```
+
+That is a declaration POPULATION handed where shapes belong — the exact
+silently-stripped-row failure the schema key exists to make impossible. The
+cause was a stale `seon.fn` still loaded in the development JVM against a
+freshly adopted `seon.program`; without the contract it would have published
+rows stripped of every owned attribute and reported success.
+
+### After, measured at HEAD on the same JVM
+
+Same 20 files, same counting wrappers:
+
+| | `packaged-forms` calls | `shapes-in` calls | wall ms |
+|---|---|---|---|
+| before | 40 | 90 | 9780.3 |
+| after | 20 | 20 | 6840.8 |
+| after, population supplied once | **0** | 20 | 6248.1 |
+
+The counts are the result; the wall times are recorded only because they were
+measured, and they are contended (a full publication and three other lanes
+shared this JVM). Per incremental publication of 337 changed files the removed
+work is 674 resolutions of a 21.31 ms merge, replaced by ONE hoisted
+resolution in `seon.cluster/incremental-source-refresh!`.
+
+### In-process verification
+
+On `default` pid 53320, through `seon.test/run` with the three-argument arity
+(`:seon.test/remaining-ms` 600000), each namespace reloaded through
+`#'seon.test/with-test-loader` first. No test JVM was launched; `default` was
+never stopped, reforked or restarted.
+
+- `seon.fn-test/indexing-resolves-its-declaration-world-once-per-operation`:
+  8 assertions, 0 failures. Its first run failed on the `0` assertion with an
+  actual of `1`; the cause was `with-redefs` counting a CONCURRENT publication
+  thread's call, proven by a stack-trace probe that recorded 0 in-thread calls
+  for the same operation. The counter now ignores other threads.
+- `seon.program-test`: 26 tests, 0 failed, 0 errored.
+
+The publication path itself is the live proof: `bin/seon init --dev default`
+completed source build, analysis, program population (93 392 rows), branch
+publication, development schema declarations, development program
+reconciliation, loaded definitions, SCI acquisition and JVM instrumentation
+through the changed `index!` / `reconcile-tx-in` / `artifact` seams. Its final
+adoption commit was refused with `:seon.cluster/source-changed-during-adoption`
+because concurrent lanes kept editing the tree, not by anything in this change.

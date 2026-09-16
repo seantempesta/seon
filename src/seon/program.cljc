@@ -134,9 +134,7 @@
   therefore sufficient for the indexer to keep, write and exactly replace it:
   there is no second list, which is what twice silently stripped an owned
   attribute on 2026-09-16 (`7cfe02790`, `925ca19fe`)."
-  {:malli/schema
-   [:=> [:cat :map]
-    [:map-of :seon.program/identity-attribute :seon.program/shape]]}
+  {:malli/schema [:=> [:cat :map] :seon.program/shapes]}
   [forms]
   (into {}
         (map (fn [identity-attribute]
@@ -176,40 +174,19 @@
            derived)))
      :cljs (shapes-in (schema/registered-schemas))))
 
-(defonce ^:private !supplied-shapes (atom nil))
-
-(defn- supplied-shapes
-  "The shapes one supplied population defines, derived once per population.
-
-  [[shapes-in]] is pure, so the LAST population's derivation is reusable
-  exactly while the caller hands back the same immutable map — the case an
-  operation that resolved its population once and asks per row (the indexer
-  over 90 000 rows) is in. A different population is a different object and
-  derives again; nothing here can answer for a population it was not handed."
-  [forms]
-  (let [cached @!supplied-shapes]
-    (if (identical? forms (:seon.program/forms cached))
-      (:seon.program/shapes cached)
-      (let [derived (shapes-in forms)]
-        (reset! !supplied-shapes {:seon.program/forms forms
-                                  :seon.program/shapes derived})
-        derived))))
-
 (defn shapes
   "Program-row shapes keyed by their database identity attribute.
 
-  The no-argument arity answers from the AUTHORED declaration resources as
-  they are NOW (see [[authored-shapes]]). A caller holding the operation's own
-  population hands it over; resolve that population ONCE per operation and
-  pass the same map to every row, which costs one identity check."
-  {:malli/schema
-   [:function
-    [:=> [:cat]
-     [:map-of :seon.program/identity-attribute :seon.program/shape]]
-    [:=> [:cat :map]
-     [:map-of :seon.program/identity-attribute :seon.program/shape]]]}
-  ([] (authored-shapes))
-  ([forms] (supplied-shapes forms)))
+  Answers from the AUTHORED declaration resources as they are NOW (see
+  [[authored-shapes]]) — the answer for a caller holding no operation of its
+  own. A caller that DOES hold one resolves its declaration population once,
+  derives its shapes once with [[shapes-in]], and hands that VALUE to every
+  per-row question (AGENTS.md 2.1). Nothing memoizes a supplied population
+  here: the memo this replaced was a process-wide mirror of a value its caller
+  already held, and every per-row caller went around it."
+  {:malli/schema [:=> [:cat] :seon.program/shapes]}
+  []
+  (authored-shapes))
 
 (defn declaration-at
   "The declaration whose `:seon.fn/form-span` contains `position`.
@@ -239,15 +216,20 @@
           :seon.program/declarations-examined (count spanned)}})))
 
 (defn shape
-  "The program shape owned by `identity-attribute`."
+  "The program shape owned by `identity-attribute`.
+
+  The two-argument arity reads the operation's own derived shapes (see
+  [[shapes-in]]); it takes that value, never the declaration population it was
+  derived from, so a population handed here is a typed refusal rather than a
+  shape silently missing."
   {:malli/schema
    [:function
     [:=> [:cat :seon.program/identity-attribute]
      [:maybe :seon.program/shape]]
-    [:=> [:cat :map :seon.program/identity-attribute]
+    [:=> [:cat :seon.program/shapes :seon.program/identity-attribute]
      [:maybe :seon.program/shape]]]}
   ([identity-attribute] (get (shapes) identity-attribute))
-  ([forms identity-attribute] (get (shapes-in forms) identity-attribute)))
+  ([row-shapes identity-attribute] (get row-shapes identity-attribute)))
 
 (defn row-identity
   "The `[identity-attribute value]` pair carried by `row`."
@@ -883,14 +865,14 @@
 
   Ownership comes from the family's declared entity map (see [[shapes-in]]),
   so an attribute declared there is kept without any code change here. The
-  explicit-population arity is the honest one for a caller that already holds
-  the operation's declaration population."
+  explicit-shapes arity is the honest one for a caller that already derived
+  its operation's shapes: it asks nothing per row."
   {:malli/schema
    [:function
     [:=> [:cat [:maybe :map]] [:maybe :map]]
-    [:=> [:cat :map [:maybe :map]] [:maybe :map]]]}
+    [:=> [:cat :seon.program/shapes [:maybe :map]] [:maybe :map]]]}
   ([row] (canonical-row-in (shapes) row))
-  ([forms row] (canonical-row-in (shapes-in forms) row)))
+  ([row-shapes row] (canonical-row-in row-shapes row)))
 
 (defn- canonical-namespace-components
   "Namespace components in the one shape `:seon.ns/ns` declares.
@@ -1013,9 +995,10 @@
   {:malli/schema
    [:function
     [:=> [:cat :map :map] [:vector :keyword]]
-    [:=> [:cat :map :map :map] [:vector :keyword]]]}
+    [:=> [:cat :seon.program/shapes :map :map] [:vector :keyword]]]}
   ([current desired] (changed-attributes-in (shapes) current desired))
-  ([forms current desired] (changed-attributes-in (shapes-in forms) current desired)))
+  ([row-shapes current desired]
+   (changed-attributes-in row-shapes current desired)))
 
 (defn- replacement-tx
   [row-shapes current desired]
@@ -1038,18 +1021,19 @@
       [(assoc desired :db/id entity-id)]))))
 
 (defn exact-replacement-tx-in
-  "Replace one declaration row, owning it by the population `forms` declares.
+  "Replace one declaration row, owning it by the shapes `row-shapes` carries.
 
-  The population-carrying companion to [[exact-replacement-tx]], read like
-  [[shapes-in]]: a caller that resolved its population once hands it here and
-  never asks a process-wide answer what its own operation already decided
-  (AGENTS.md 2.1). It is a separate name rather than an arity because a
-  newly added arity of an existing callable root is refused until every
-  armed wrapper of it has been re-armed from a population that knows it."
+  The shape-carrying companion to [[exact-replacement-tx]]: a caller that
+  derived its operation's shapes once hands them here and never asks a
+  process-wide answer what its own operation already decided (AGENTS.md 2.1).
+  It is a separate name rather than an arity because a newly added arity of an
+  existing callable root is refused until every armed wrapper of it has been
+  re-armed from a population that knows it."
   {:malli/schema
-   [:=> [:cat :map [:map [:db/id :int]] :map] [:vector :seon.schema/value]]}
-  [forms current desired]
-  (replacement-tx (shapes forms) current desired))
+   [:=> [:cat :seon.program/shapes [:map [:db/id :int]] :map]
+    [:vector :seon.schema/value]]}
+  [row-shapes current desired]
+  (replacement-tx row-shapes current desired))
 
 (defn exact-replacement-tx
   "Replace one declaration row using current values and component retraction."
