@@ -167,3 +167,29 @@
                            (pr-str (seon.issue/render-html unit))
                            detector)
                           "the block names the detector too"))))))
+
+(clojure.test/deftest the-docstring-standard-scopes-on-the-source-root-fact
+  ;; The unscoped detector stays the honest over-report. Given a root it joins
+  ;; positively on the fact the indexer wrote, so a test helper and a
+  ;; production function are told apart by the query, never by their names.
+  (seon.test-support/with-database
+    (fn [connection]
+      (let [database (seon.db/db connection)
+            syms (fn [request] (into #{} (map :seon.fn/sym)
+                                     (seon.issue.detect/public-without-doc database request)))
+            unscoped (into #{} (map :seon.fn/sym)
+                           (seon.issue.detect/public-without-doc database))
+            production (syms {:seon.fn.file/root "src"})
+            helpers (syms {:seon.fn.file/root "test"})
+            root-of (fn [sym]
+                      (seon.db/q '[:find [?root ...] :in $ ?sym :where
+                                   [?f :seon.fn/sym ?sym] [?f :seon.fn/file ?file]
+                                   [?file :seon.fn.file/root ?root]]
+                                 database sym))]
+        (clojure.test/is (seq production) "the fixture holds an undocumented production function")
+        (clojure.test/is (seq helpers) "the fixture holds an undocumented test helper")
+        (clojure.test/is (empty? (filter helpers production)))
+        (clojure.test/is (every? unscoped (concat production helpers))
+                         "a scoped subject is always an unscoped subject")
+        (clojure.test/is (every? #(= ["src"] (root-of %)) production))
+        (clojure.test/is (every? #(= ["test"] (root-of %)) helpers))))))

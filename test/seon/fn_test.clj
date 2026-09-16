@@ -1878,3 +1878,62 @@
             (is (= (:seon.fn/call-arities after)
                    (set (:seon.fn/call-arities stored)))
                 "the tuple set is replaced exactly, never accreted")))))))
+
+(deftest every-indexed-file-carries-the-root-the-indexer-walked
+  ;; The canonical fixture population is walked from seon.fn/source-roots, so
+  ;; the root is a fact on every file entity in it and the set of roots IS the
+  ;; declared roots. Scoped to that population deliberately: the changed-path
+  ;; seam indexes any file it is handed, and a file under no declared root
+  ;; carries no root rather than a fabricated one.
+  (test-support/with-database
+    (fn [connection]
+      (let [database (db/db connection)
+            files (into #{} (map first)
+                        (db/q '[:find ?p :where [?f :seon.fn.file/path ?p]] database))
+            rooted (into #{} (map first)
+                         (db/q '[:find ?p :where [?f :seon.fn.file/path ?p]
+                                 [?f :seon.fn.file/root _]] database))
+            roots (into #{} (db/q '[:find [?root ...] :where
+                                    [?f :seon.fn.file/root ?root]] database))]
+        (is (seq files) "the canonical population holds indexed files")
+        (is (empty? (remove rooted files)) (pr-str (remove rooted files)))
+        (is (= (set seon.fn/source-roots) roots))))))
+
+(deftest a-declaration-answers-its-source-root-through-its-file
+  ;; "Is this declaration test-only?" is this join and nothing else: no name
+  ;; rule, no path parsing, and never the ABSENCE of a root.
+  (test-support/with-database
+    (fn [connection]
+      (let [database (db/db connection)
+            root-of (fn [sym]
+                      (db/q '[:find [?root ...] :in $ ?sym :where
+                              [?f :seon.fn/sym ?sym] [?f :seon.fn/file ?file]
+                              [?file :seon.fn.file/root ?root]]
+                            database sym))]
+        (is (= ["src"] (root-of "seon.fn/build-manifest")))
+        (is (= ["test"] (root-of "seon.test-support/with-database")))))))
+
+(deftest the-walked-root-travels-with-its-file-and-is-stored-verbatim
+  (let [root (fixture-root)]
+    (try
+      (let [file (write-source! root "sample/rooted.clj"
+                                "(ns sample.rooted)\n(defn chosen [x] x)\n")
+            supplied (.getPath root)
+            file-row (fn [artifact]
+                       (first (filter :seon.fn.file/path
+                                      (:seon.fn.file/rows artifact))))
+            artifact (fn [request]
+                       (seon.fn/build-artifact
+                        (merge {:seon.fn.file/path (.getCanonicalPath file)
+                                :seon.fn.file/first-party-functions []}
+                               request)))]
+        (is (= supplied
+               (:seon.fn.file/root
+                (first (filter :seon.fn.file/path
+                               (seon.fn/rows {:seon.fn/roots [supplied]})))))
+            "the walk stores the root exactly as supplied, never canonicalized")
+        (is (= supplied (:seon.fn.file/root (file-row (artifact {:seon.fn/roots [supplied]}))))
+            "the changed-path seam answers the same root by directory ancestry")
+        (is (nil? (:seon.fn.file/root (file-row (artifact {}))))
+            "a file under no declared source root carries no root"))
+      (finally (test-support/delete-recursively! root)))))

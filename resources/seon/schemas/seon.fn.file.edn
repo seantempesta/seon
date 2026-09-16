@@ -1,9 +1,18 @@
 {:seon.fn.file/path [:string {:min 1 :seon.db/identity true}]
  :seon.fn.file/digest [:string {:min 64 :max 64}]
+ :seon.fn.file/root
+ [:string {:min 1
+           :description
+           "The source root the indexer walked to reach this file, exactly as
+            supplied to the index request (\"src\" or \"test\" for the declared
+            seon.fn/source-roots). Absent means the file lies under no declared
+            root: the changed-path seam indexes any Clojure file it is handed.
+            Scope on the value, never on its absence."}]
  :seon.fn.file/file
  [:map {:seon.db/attributes true}
   [:seon.fn.file/path :seon.fn.file/path]
-  [:seon.fn.file/digest :seon.fn.file/digest]]
+  [:seon.fn.file/digest :seon.fn.file/digest]
+  [:seon.fn.file/root {:optional true} :seon.fn.file/root]]
  :seon.fn.file/rows :seon.program/rows
  :seon.fn.file/identities [:vector :seon.program/identity]
  :seon.fn.file/findings [:vector :map]

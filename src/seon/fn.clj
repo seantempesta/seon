@@ -77,18 +77,37 @@
        (or (str/ends-with? (.getName ^java.io.File file) ".clj")
            (str/ends-with? (.getName ^java.io.File file) ".cljc"))))
 
-(defn- source-files
+(defn- under-root?
+  "True when this canonical file is a descendant of this canonical directory."
+  [^java.io.File root-file ^java.io.File file]
+  (loop [parent (.getParentFile file)]
+    (cond
+      (nil? parent) false
+      (= parent root-file) true
+      :else (recur (.getParentFile parent)))))
+
+(defn- containing-root
+  "The supplied root whose directory holds this file, or nil for none.
+  Real directory ancestry of canonical files, never a rule about the path
+  text: the changed-path seam is handed one path and must answer the same
+  question the walk answers by construction."
+  [roots ^java.io.File file]
+  (let [file (.getCanonicalFile file)]
+    (some (fn [root] (when (under-root? (rooted-file root) file) root)) roots)))
+
+(defn- rooted-source-files
+  "Each admitted Clojure file paired with the root that was walked to reach it.
+  The root travels with the file so its fact is written where the file entity
+  is minted, exactly as supplied, rather than recovered from the path later."
   [roots]
-  (let [files
-        (into []
-              (mapcat (fn [root]
-                        (->> (file-seq (rooted-file root))
-                             (filter source-file?)
-                             (sort-by (fn [file]
-                                        (.getCanonicalPath
-                                         ^java.io.File file))))))
-              roots)]
-    files))
+  (into []
+        (mapcat (fn [root]
+                  (->> (file-seq (rooted-file root))
+                       (filter source-file?)
+                       (sort-by (fn [file]
+                                  (.getCanonicalPath ^java.io.File file)))
+                       (map (fn [file] [root file])))))
+        roots))
 
 (defn- many-or-component-attributes
   [attributes]
@@ -964,10 +983,12 @@
      findings)))
 
 (defn- artifact
-  [file context rows findings]
+  [file root context rows findings]
   (let [canonical-path (.getCanonicalPath ^java.io.File file)
-        rows (into (into [{:seon.fn.file/path canonical-path
-                          :seon.fn.file/digest (:seon.fn.file/digest context)}] rows)
+        file-row (cond-> {:seon.fn.file/path canonical-path
+                          :seon.fn.file/digest (:seon.fn.file/digest context)}
+                   root (assoc :seon.fn.file/root root))
+        rows (into (into [file-row] rows)
                    (lint-rows file context rows findings))
         canonical-rows
         (mapv #(cond-> (assoc (program/canonical-row %)
@@ -1458,10 +1479,12 @@
     [:cat [:map
            [:seon.fn.file/path [:string {:min 1}]]
            [:seon.fn.file/first-party-functions
-            [:vector [:string {:min 1}]]]]]
+            [:vector [:string {:min 1}]]]
+           [:seon.fn/roots {:optional true} :seon.fn/roots]]]
     :seon.fn.file/artifact]}
   [{path :seon.fn.file/path
-    known-functions :seon.fn.file/first-party-functions}]
+    known-functions :seon.fn.file/first-party-functions
+    roots :seon.fn/roots}]
   (let [file (rooted-file path)]
     (when-not (source-file? file)
       (throw (ex-info "A file artifact requires one existing Clojure file."
@@ -1476,6 +1499,7 @@
           findings (publication-findings analysis first-party-functions)]
       (assert-clean-analysis! analysis first-party-functions)
       (artifact file
+                (containing-root (or roots source-roots) file)
                 (get contexts canonical-path)
                 (get (analysis-rows-by-file analysis first-party-functions
                                             contexts)
@@ -1561,7 +1585,8 @@
     :seon.fn.manifest/manifest]}
   [request]
   (let [roots (:seon.fn/roots request)
-        files (source-files roots)
+        rooted-files (rooted-source-files roots)
+        files (mapv second rooted-files)
         paths (mapv #(.getCanonicalPath ^java.io.File %) files)
         contexts (source-contexts files)
         analysis (analyzer/analyze {::analyzer/paths paths})
@@ -1572,8 +1597,9 @@
         rows-by-file
         (analysis-rows-by-file analysis first-party-functions contexts)
         artifacts
-        (mapv (fn [file]
+        (mapv (fn [[root file]]
                 (artifact file
+                          root
                           (get contexts (.getCanonicalPath ^java.io.File file))
                           (get rows-by-file
                                (.getCanonicalPath ^java.io.File file)
@@ -1581,7 +1607,7 @@
                           (get findings-by-file
                                (.getCanonicalPath ^java.io.File file)
                                [])))
-              files)
+              rooted-files)
         manifest
         (manifest-data
          (mapv #(.getCanonicalPath ^java.io.File (rooted-file %)) roots)

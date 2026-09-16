@@ -42,7 +42,8 @@
    {:seon.program/identity-attribute :seon.fn.file/path
     :seon.program/source-attribute :seon.fn.file/digest
     :seon.program/owned-attributes
-    [:seon.fn.file/path :seon.fn.file/digest :seon.schema.admission/source]}
+    [:seon.fn.file/path :seon.fn.file/digest :seon.fn.file/root
+     :seon.schema.admission/source]}
    :seon.lint/id
    {:seon.program/identity-attribute :seon.lint/id
     :seon.program/source-attribute :seon.lint/message

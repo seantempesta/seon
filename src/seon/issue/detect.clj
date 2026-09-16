@@ -102,21 +102,43 @@
 
   Excluded: a function that does not OWN its defining form — several functions
   sharing one `:seon.fn/form-span` in one file were interned by a single form
-  (a `defrecord`'s constructors), and no docstring can be written on them."
-  {:malli/schema [:=> [:cat :seon.db/database-value]
-                  [:or [:vector [:map [:seon.fn/sym :seon.fn/sym]]] :seon.error/value]]}
-  [database]
-  (let [spans (db/q '[:find ?sym ?file ?span :where
-                      [?f :seon.fn/sym ?sym] [?f :seon.fn/file ?file] [?f :seon.fn/form-span ?span]]
-                    database)
-        shared (into #{}
-                     (comp (filter (fn [[_ group]] (> (count group) 1)))
-                           (mapcat (fn [[_ group]] (map first group))))
-                     (group-by (fn [row] [(nth row 1) (nth row 2)]) spans))]
-    (into []
-          (comp (remove (comp shared first)) (map doc-subject))
-          (sort (db/q '[:find ?sym ?name :where
-                        [?f :seon.fn/sym ?sym] [?f :seon.fn/private? false] [?f :seon.fn/source _]
-                        [?f :seon.fn/ns ?ns] [?ns :seon.ns/name ?name]
-                        (not [?f :seon.fn/doc _])]
-                      database)))))
+  (a `defrecord`'s constructors), and no docstring can be written on them.
+
+  The one-argument arity is the whole function population, test helpers
+  included: an honest over-report, not a name-based exclusion. Given
+  `{:seon.fn.file/root \"src\"}` it instead yields the declarations the indexer
+  walked under that source root, joining positively on the root the file entity
+  carries — a declaration under no declared root is scoped out, never assumed
+  to be production."
+  {:malli/schema
+   [:function
+    [:=> [:cat :seon.db/database-value]
+     [:or [:vector [:map [:seon.fn/sym :seon.fn/sym]]] :seon.error/value]]
+    [:=> [:cat :seon.db/database-value
+          [:map [:seon.fn.file/root {:optional true} :seon.fn.file/root]]]
+     [:or [:vector [:map [:seon.fn/sym :seon.fn/sym]]] :seon.error/value]]]}
+  ([database] (public-without-doc database {}))
+  ([database request]
+   (let [root (:seon.fn.file/root request)
+         spans (db/q '[:find ?sym ?file ?span :where
+                       [?f :seon.fn/sym ?sym] [?f :seon.fn/file ?file] [?f :seon.fn/form-span ?span]]
+                     database)
+         shared (into #{}
+                      (comp (filter (fn [[_ group]] (> (count group) 1)))
+                            (mapcat (fn [[_ group]] (map first group))))
+                      (group-by (fn [row] [(nth row 1) (nth row 2)]) spans))
+         subjects (if root
+                    (db/q '[:find ?sym ?name :in $ ?root :where
+                            [?f :seon.fn/sym ?sym] [?f :seon.fn/private? false] [?f :seon.fn/source _]
+                            [?f :seon.fn/file ?file] [?file :seon.fn.file/root ?root]
+                            [?f :seon.fn/ns ?ns] [?ns :seon.ns/name ?name]
+                            (not [?f :seon.fn/doc _])]
+                          database root)
+                    (db/q '[:find ?sym ?name :where
+                            [?f :seon.fn/sym ?sym] [?f :seon.fn/private? false] [?f :seon.fn/source _]
+                            [?f :seon.fn/ns ?ns] [?ns :seon.ns/name ?name]
+                            (not [?f :seon.fn/doc _])]
+                          database))]
+     (into []
+           (comp (remove (comp shared first)) (map doc-subject))
+           (sort subjects)))))
