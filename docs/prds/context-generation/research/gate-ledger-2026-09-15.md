@@ -826,3 +826,12 @@ everyone until the absent-identity extension lands) — batch 62 gates
 one read (sibling issue `source-analysis-can-slice-changing-files-with-
 stale-offsets.md` open); adoption's retry predicate (`cluster.clj:2244`)
 should also key on the analysis-time refusal (steward's file).
+
+### 2026-09-17 08:00Z — live checks on the fresh default (pid 17352)
+
+Debug page `/ns/my.agents.juniper/debug`: 0.42 s first request, 23–27 ms
+warm (the night's opening complaint of 1.8 s stands fixed across every
+landing). Store: 99 MB at the reset → 3.6 GB two and a half hours later
+(~1.4 GB/hour of copy-on-write leaves with only the weekly GC) — the owner's
+GC-signal decision is the standing priority. `bin/issues-index --check`
+exits 1 (detail in the next note).
