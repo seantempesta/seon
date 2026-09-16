@@ -2,6 +2,7 @@
   "Fact-derived maintenance result projection and reporting."
   (:require [clojure.string :as str]
             [seon.db :as db]
+            [seon.error :as error]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.schema.form :as schema.form]))
@@ -173,28 +174,6 @@
    :seon.operator.reap/complete?
    (:seon.operator.reap/complete? result)})
 
-(defn project-cluster-cleanup-result
-  "Project one public cluster cleanup value into queryable facts."
-  {:malli/schema
-   [:=> [:cat :seon.operator.cluster-cleanup/result]
-    :seon.maintenance.result/value]}
-  [result]
-  (-> (select-keys
-       result
-       [:seon.operator.cluster-cleanup/managed-root
-        :seon.boot/cluster-name
-        :seon.store/branch
-        :seon.operator.cluster-cleanup/live-instance-stopped?
-        :seon.operator.cluster-cleanup/branch-retired?
-        :seon.operator.cluster-cleanup/removed
-        :seon.operator.cluster-cleanup/remaining
-        :seon.operator.cluster-cleanup/reclaimed-bytes
-        :seon.operator.cluster-cleanup/complete?])
-      (assoc :seon.maintenance.result/cluster-cleanup-collection
-             (select-keys
-              (:seon.operator.cluster-cleanup/collection result)
-              [:seon.error/kind :seon.error/message]))))
-
 (defn project-collect-result
   "Project one public collection value into queryable component facts."
   {:malli/schema
@@ -217,6 +196,40 @@
              (mapv #(select-keys % [:seon.store/branch
                                     :seon.source/commit-id])
                    (:seon.operator.collect/branches result)))))
+
+(defn- collection-component
+  "Project one cleanup's collection slot, whichever arm it carries.
+
+  `seon.operator/collect-store!` returns its verified collect result or
+  throws, so a completed cleanup fills the slot with the SAME value a
+  `collect!` receipt stores and it projects through the same producer. An
+  error value stays admitted for a cleanup whose collection refused. Absence
+  of the error keys is not health: the success arm carries its own facts."
+  [collection]
+  (if (:seon.error/kind collection)
+    (select-keys collection [:seon.error/kind :seon.error/message])
+    (project-collect-result collection)))
+
+(defn project-cluster-cleanup-result
+  "Project one public cluster cleanup value into queryable facts."
+  {:malli/schema
+   [:=> [:cat :seon.operator.cluster-cleanup/result]
+    :seon.maintenance.result/value]}
+  [result]
+  (-> (select-keys
+       result
+       [:seon.operator.cluster-cleanup/managed-root
+        :seon.boot/cluster-name
+        :seon.store/branch
+        :seon.operator.cluster-cleanup/live-instance-stopped?
+        :seon.operator.cluster-cleanup/branch-retired?
+        :seon.operator.cluster-cleanup/removed
+        :seon.operator.cluster-cleanup/remaining
+        :seon.operator.cluster-cleanup/reclaimed-bytes
+        :seon.operator.cluster-cleanup/complete?])
+      (assoc :seon.maintenance.result/cluster-cleanup-collection
+             (collection-component
+              (:seon.operator.cluster-cleanup/collection result)))))
 
 (def ^:private receipt-pull
   '[*
@@ -285,6 +298,78 @@
        (report-in database))))
   ([database]
    (report-in database)))
+
+(def ^:private collection-facts
+  [:seon.operator.collect/store-id
+   :seon.operator.collect/objects-before
+   :seon.operator.collect/objects-after
+   :seon.operator.collect/swept-objects
+   :seon.operator.collect/bytes-before
+   :seon.operator.collect/bytes-after
+   :seon.operator.collect/reclaimed-bytes
+   :seon.operator.collect/verification-pass-swept
+   :seon.operator.collect/complete?])
+
+(defn- last-collection-in
+  [database managed-root]
+  (let [rows
+        (db/q '[:find ?completed-at ?receipt-id ?collection
+                :in $ ?root
+                :where
+                [?collection :seon.operator.collect/managed-root ?root]
+                ;; The collection a `collect!` receipt stores IS its result;
+                ;; the collection a cleanup receipt stores hangs under the
+                ;; cleanup result. Same attributes, two owners, one answer.
+                (or-join [?collection ?receipt]
+                         [?receipt :seon.maintenance.receipt/result ?collection]
+                         (and [?result
+                               :seon.maintenance.result/cluster-cleanup-collection
+                               ?collection]
+                              [?receipt :seon.maintenance.receipt/result ?result]))
+                [?receipt :seon.maintenance.receipt/completed-at ?completed-at]
+                [?receipt :seon.maintenance.receipt/id ?receipt-id]]
+              database managed-root)]
+    (if-let [[completed-at receipt-id collection]
+             (last (sort-by (fn [[completed-at receipt-id]]
+                              [completed-at receipt-id])
+                            rows))]
+      (merge {:seon.operator/managed-root managed-root
+              :seon.maintenance.receipt/id receipt-id
+              :seon.maintenance.receipt/completed-at completed-at}
+             (db/pull database collection-facts collection))
+      (error/diagnostic
+       {:seon.error/kind ::root-never-collected
+        :seon.error/message
+        "No completed maintenance receipt records a collection of this root."
+        :seon.error/diagnostic-layer :seon.maintenance
+        :seon.error/diagnostic-operation 'seon.maintenance/last-collection
+        :seon.error/diagnostic-member :seon.operator/managed-root
+        :seon.error/diagnostic-expected :seon.operator.collect/managed-root
+        :seon.error/diagnostic-offending managed-root
+        :seon.error/diagnostic-cause :seon.db/not-found
+        :seon.error/diagnostic-evidence
+        [:seon.operator.collect/managed-root managed-root]}))))
+
+(defn last-collection
+  "When `managed-root` was last collected, and what that collection reclaimed.
+
+  One answer over the facts every collection already stores, whether the
+  receipt was a `collect!` firing or a cluster cleanup that collected on its
+  way out. A root with no completed collection receipt gets the typed
+  refusal, never an empty map read as a clean store."
+  {:malli/schema
+   [:function
+    [:=> [:cat :seon.operator/managed-root]
+     [:or :seon.maintenance/collection-record :seon.error/value]]
+    [:=> [:cat :seon.db/database-value :seon.operator/managed-root]
+     [:or :seon.maintenance/collection-record :seon.error/value]]]}
+  ([managed-root]
+   (let [database (db/db)]
+     (if (:seon.error/kind database)
+       database
+       (last-collection-in database managed-root))))
+  ([database managed-root]
+   (last-collection-in database managed-root)))
 
 (defn- attention-rules
   []

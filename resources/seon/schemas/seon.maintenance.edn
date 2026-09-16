@@ -23,6 +23,40 @@
                     {:seon.render/ai seon.maintenance/render-report-ai
                      :seon.render/html seon.maintenance/render-report-html}
                     [:seon.maintenance/entries :seon.maintenance/entries]]
+                   :collection-record
+                   [:map
+                    [:seon.operator/managed-root
+                     :seon.operator/managed-root]
+                    [:seon.maintenance.receipt/id
+                     :seon.maintenance.receipt/id]
+                    [:seon.maintenance.receipt/completed-at
+                     :seon.maintenance.receipt/completed-at]
+                    [:seon.operator.collect/reclaimed-bytes
+                     :seon.operator.collect/reclaimed-bytes]
+                    [:seon.operator.collect/store-id
+                     {:optional true}
+                     :seon.operator.collect/store-id]
+                    [:seon.operator.collect/objects-before
+                     {:optional true}
+                     :seon.operator.collect/objects-before]
+                    [:seon.operator.collect/objects-after
+                     {:optional true}
+                     :seon.operator.collect/objects-after]
+                    [:seon.operator.collect/swept-objects
+                     {:optional true}
+                     :seon.operator.collect/swept-objects]
+                    [:seon.operator.collect/bytes-before
+                     {:optional true}
+                     :seon.operator.collect/bytes-before]
+                    [:seon.operator.collect/bytes-after
+                     {:optional true}
+                     :seon.operator.collect/bytes-after]
+                    [:seon.operator.collect/verification-pass-swept
+                     {:optional true}
+                     :seon.operator.collect/verification-pass-swept]
+                    [:seon.operator.collect/complete?
+                     {:optional true}
+                     :seon.operator.collect/complete?]]
                    :result-entity-request :seon.maintenance.result/value
                    :result-entity-response
                    [:or :seon.maintenance.result/value :seon.error/value]}

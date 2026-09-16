@@ -355,3 +355,211 @@
                    (mapv #(get-in % [:seon.maintenance/receipt-facts
                                      :seon.maintenance.receipt/id])
                          (:seon.maintenance/entries report-value))))))))))
+
+(def ^:private collected-root "/repo/operator")
+
+(defn- collect-result
+  [reclaimed]
+  {:seon.operator.collect/store-id
+   (UUID/fromString "00000000-0000-0000-0000-000000000101")
+   :seon.operator.collect/managed-root collected-root
+   :seon.operator.collect/branches
+   [{:seon.store/branch :cluster-retired
+     :seon.source/commit-id
+     (UUID/fromString "00000000-0000-0000-0000-000000000102")}]
+   :seon.operator.collect/objects-before 12
+   :seon.operator.collect/objects-after 10
+   :seon.operator.collect/swept-objects 2
+   :seon.operator.collect/bytes-before 8192
+   :seon.operator.collect/bytes-after (- 8192 reclaimed)
+   :seon.operator.collect/reclaimed-bytes reclaimed
+   :seon.operator.collect/verification-pass-swept 0
+   :seon.operator.collect/complete? true})
+
+(defn- cleanup-result
+  [collection]
+  {:seon.operator.cluster-cleanup/managed-root collected-root
+   :seon.boot/cluster-name "retired"
+   :seon.store/branch :cluster-retired
+   :seon.operator.cluster-cleanup/live-instance-stopped? true
+   :seon.operator.cluster-cleanup/branch-retired? true
+   :seon.operator.cluster-cleanup/removed
+   ["/repo/operator/data/clusters/retired"]
+   :seon.operator.cluster-cleanup/collection collection
+   :seon.operator.cluster-cleanup/remaining []
+   :seon.operator.cluster-cleanup/reclaimed-bytes 8192
+   :seon.operator.cluster-cleanup/complete? true})
+
+(deftest a-successful-cleanup-persists-its-verified-collection-result
+  (let [public-result (cleanup-result (collect-result 4096))
+        projected (maintenance/result-entity public-result)]
+    (is (true? (schema/valid-candidate-value?
+                :seon.operator.cluster-cleanup/result public-result))
+        "collect-store! returns its verified result, so the slot carries one")
+    (is (= 4096
+           (get-in projected
+                   [:seon.maintenance.result/cluster-cleanup-collection
+                    :seon.operator.collect/reclaimed-bytes]))
+        "the projected collection is the collect result, not an empty map")
+    (test-support/with-database
+      (fn [connection]
+        (test-support/transacted!
+         connection
+         [(assoc projected
+                 :seon.maintenance.result/id "cleanup-result/collected")])
+        (testing "a SUCCESSFUL collection is a queryable maintenance fact"
+          (is (= #{[4096 2 true]}
+                 (db/q
+                  '[:find ?reclaimed ?swept ?complete
+                    :where
+                    [?result :seon.maintenance.result/id
+                     "cleanup-result/collected"]
+                    [?result
+                     :seon.maintenance.result/cluster-cleanup-collection
+                     ?collection]
+                    [?collection :seon.operator.collect/reclaimed-bytes
+                     ?reclaimed]
+                    [?collection :seon.operator.collect/swept-objects ?swept]
+                    [?collection :seon.operator.collect/complete? ?complete]]
+                  @connection))))
+        (testing "the collection's retained roster rides the same component"
+          (is (= #{[:cluster-retired
+                    (UUID/fromString
+                     "00000000-0000-0000-0000-000000000102")]}
+                 (db/q
+                  '[:find ?branch ?commit
+                    :where
+                    [?result :seon.maintenance.result/id
+                     "cleanup-result/collected"]
+                    [?result
+                     :seon.maintenance.result/cluster-cleanup-collection
+                     ?collection]
+                    [?collection :seon.maintenance.result/collect-branches
+                     ?head]
+                    [?head :seon.store/branch ?branch]
+                    [?head :seon.source/commit-id ?commit]]
+                  @connection))))))))
+
+(deftest a-refused-collection-keeps-its-typed-error-on-the-same-slot
+  (let [refusal {:seon.error/kind :seon.operator/collection-incomplete
+                 :seon.error/message "Collection did not verify every root."
+                 :seon.error/data {:seon.cluster.registry/swept :opaque}}
+        projected (maintenance/result-entity (cleanup-result refusal))]
+    (test-support/with-database
+      (fn [connection]
+        (test-support/transacted!
+         connection
+         [(assoc projected
+                 :seon.maintenance.result/id "cleanup-result/refused")])
+        (is (= #{[:seon.operator/collection-incomplete
+                  "Collection did not verify every root."]}
+               (db/q
+                '[:find ?kind ?message
+                  :where
+                  [?result :seon.maintenance.result/id
+                   "cleanup-result/refused"]
+                  [?result
+                   :seon.maintenance.result/cluster-cleanup-collection
+                   ?collection]
+                  [?collection :seon.error/kind ?kind]
+                  [?collection :seon.error/message ?message]]
+                @connection))
+            "one projection writes both arms; the error arm is unchanged")
+        (is (empty?
+             (db/q '[:find ?reclaimed
+                     :where
+                     [?result :seon.maintenance.result/id
+                      "cleanup-result/refused"]
+                     [?result
+                      :seon.maintenance.result/cluster-cleanup-collection
+                      ?collection]
+                     [?collection :seon.operator.collect/reclaimed-bytes
+                      ?reclaimed]]
+                   @connection))
+            "a refused collection reclaims nothing and claims nothing")))))
+
+(deftest re-recording-one-maintenance-run-replaces-its-attributes
+  (test-support/with-database
+    (fn [connection]
+      (let [result-id "cleanup-result/rerun"
+            record!
+            (fn [reclaimed]
+              (test-support/transacted!
+               connection
+               [(assoc (maintenance/result-entity
+                        (cleanup-result (collect-result reclaimed)))
+                       :seon.maintenance.result/id result-id)]))]
+        (record! 4096)
+        (record! 8192)
+        (is (= 1 (count (db/q '[:find ?result
+                                :where
+                                [?result :seon.maintenance.result/id
+                                 "cleanup-result/rerun"]]
+                              @connection)))
+            "one maintenance entity per run identity, never one per event")
+        (is (= #{[8192]}
+               (db/q '[:find ?reclaimed
+                       :where
+                       [?result :seon.maintenance.result/id
+                        "cleanup-result/rerun"]
+                       [?result
+                        :seon.maintenance.result/cluster-cleanup-collection
+                        ?collection]
+                       [?collection :seon.operator.collect/reclaimed-bytes
+                        ?reclaimed]]
+                     @connection))
+            "the re-run replaces the attributes it re-observes")))))
+
+(deftest last-collection-answers-when-a-root-was-collected-and-what-it-reclaimed
+  (test-support/with-database
+    (fn [connection]
+      (let [collect-task "root/maintenance/compact"
+            collect-handler "seon.operator/collect!"
+            cleanup-task "root/maintenance/cleanup"
+            cleanup-handler "seon.operator/cleanup-cluster!"]
+        (test-support/transacted!
+         connection
+         (into [{:seon.agent/id "root"}]
+               cat
+               [(task-transaction collect-task collect-handler)
+                (task-transaction cleanup-task cleanup-handler)]))
+        (testing "an uncollected root is the typed unknown, never absence"
+          (let [answer (maintenance/last-collection @connection collected-root)]
+            (is (= :seon.maintenance/root-never-collected
+                   (:seon.error/kind answer)))
+            (is (= collected-root
+                   (:seon.error/diagnostic-offending answer)))))
+        (test-support/transacted!
+         connection
+         (receipt collect-task collect-handler "collect/1" at-1
+                  {:seon.maintenance.receipt/completed-at at-1
+                   :seon.maintenance.receipt/result
+                   (assoc (maintenance/result-entity (collect-result 4096))
+                          :seon.maintenance.result/id "collect-result/1")}))
+        (testing "a collect! receipt answers from its own result entity"
+          (let [answer (maintenance/last-collection @connection collected-root)]
+            (is (= {:seon.operator/managed-root collected-root
+                    :seon.maintenance.receipt/id "collect/1"
+                    :seon.maintenance.receipt/completed-at at-1
+                    :seon.operator.collect/reclaimed-bytes 4096}
+                   (select-keys answer
+                                [:seon.operator/managed-root
+                                 :seon.maintenance.receipt/id
+                                 :seon.maintenance.receipt/completed-at
+                                 :seon.operator.collect/reclaimed-bytes])))
+            (is (true? (schema/valid-candidate-value?
+                        :seon.maintenance/collection-record answer)))))
+        (test-support/transacted!
+         connection
+         (receipt cleanup-task cleanup-handler "cleanup/1" at-2
+                  {:seon.maintenance.receipt/completed-at at-2
+                   :seon.maintenance.receipt/result
+                   (assoc (maintenance/result-entity
+                           (cleanup-result (collect-result 8192)))
+                          :seon.maintenance.result/id "cleanup-result/2")}))
+        (testing "a later cleanup's collection is the root's latest answer"
+          (let [answer (maintenance/last-collection @connection collected-root)]
+            (is (= "cleanup/1" (:seon.maintenance.receipt/id answer)))
+            (is (= at-2 (:seon.maintenance.receipt/completed-at answer)))
+            (is (= 8192
+                   (:seon.operator.collect/reclaimed-bytes answer)))))))))

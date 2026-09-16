@@ -119,6 +119,8 @@
                        :seon.schedule.task/schedule [:seon.schedule/id schedule-id]}
                       {:seon.schedule.fire/id fire-id
                        :seon.schedule.fire/task [:seon.schedule.task/id task-id]
+                       :seon.schedule.fire/agent
+                       [:seon.agent/id "maintenance-schema-test/root"]
                        :seon.schedule.fire/nominal-at nominal-at
                        :seon.schedule.fire/observed-at observed-at}
                       {:seon.maintenance.receipt/id receipt-id
@@ -268,3 +270,43 @@
         (is (empty? (filter #(#{:seon.schedule.task/id :seon.schedule/id}
                                (:a %))
                             (:tx-data second-result))))))))
+
+(deftest the-cleanup-collection-slot-declares-both-arms-it-can-carry
+  (let [collect-component
+        (maintenance/project-collect-result
+         {:seon.operator.collect/store-id
+          (UUID/fromString "00000000-0000-0000-0000-000000000101")
+          :seon.operator.collect/managed-root "/repo/operator"
+          :seon.operator.collect/branches
+          [{:seon.store/branch :cluster-default
+            :seon.source/commit-id
+            (UUID/fromString "00000000-0000-0000-0000-000000000102")}]
+          :seon.operator.collect/objects-before 12
+          :seon.operator.collect/objects-after 10
+          :seon.operator.collect/swept-objects 2
+          :seon.operator.collect/bytes-before 8192
+          :seon.operator.collect/bytes-after 4096
+          :seon.operator.collect/reclaimed-bytes 4096
+          :seon.operator.collect/verification-pass-swept 0
+          :seon.operator.collect/complete? true})
+        error-component
+        {:seon.error/kind :seon.operator/collection-incomplete
+         :seon.error/message "Collection did not verify every root."}]
+    (testing "the maintenance mirror admits what the public slot admits"
+      (doseq [[public-key component-key value]
+              [[:seon.operator.collect/result
+                :seon.maintenance.result/cluster-cleanup-collection-component
+                collect-component]
+               [:seon.error/value
+                :seon.maintenance.result/cluster-cleanup-collection-component
+                error-component]]]
+        (is (true? (schema/valid-candidate-value? component-key value))
+            (str component-key " must admit the " public-key " arm"))))
+    (testing "the success arm is the one collect component, not a copy"
+      (is (true? (schema/valid-candidate-value?
+                  :seon.maintenance.result/collect-component
+                  collect-component))))
+    (is (false? (schema/valid-candidate-value?
+                 :seon.maintenance.result/cluster-cleanup-collection-component
+                 {:seon.maintenance-schema-test/only-unrelated true}))
+        "neither arm admits a value carrying no collection evidence")))

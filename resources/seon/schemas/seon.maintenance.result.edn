@@ -141,11 +141,23 @@
                            [:seon.operator.reap/reason
                             :seon.operator.reap/reason]
                            [:seon.error/message :seon.error/message]],
-                          :cluster-cleanup-collection-component
+                          :collection-error
                           [:map
                            {:seon.db/attributes true}
                            [:seon.error/kind :seon.error/kind]
                            [:seon.error/message :seon.error/message]],
+                          ;; The maintenance mirror of
+                          ;; `:seon.operator.cluster-cleanup/collection`, which
+                          ;; `ec260cd2e` widened to [:or result error] because
+                          ;; `collect-store!` returns its verified collect
+                          ;; result or throws. A completed cleanup therefore
+                          ;; persists the SAME collect component every
+                          ;; `collect!` receipt stores; a refused collection
+                          ;; persists the error component. One declaration per
+                          ;; arm, referenced twice, never a second shape.
+                          :cluster-cleanup-collection-component
+                          [:or :seon.maintenance.result/collect-component
+                           :seon.maintenance.result/collection-error],
                           :reap-component
                           [:map
                            {:seon.db/attributes true}
