@@ -1261,6 +1261,14 @@ list merging edges plan + audit + design review + symbols inventory + S2, the
 reset procedure and live proofs, and two owner questions (kind-2 living refs
 refusing target retraction inside db.fn/call; ast delete vs merge).
 
+**02:30Z hook-progress LANDED** (`bc0a0c5f1`, `61f0332e6`): `bin/seon init
+--result-file PATH` writes the operator's typed terminal value (progress
+maps + failure envelope); the hook reads keys, never prose; the four English
+phrases and `publication-exception` deleted; defaults live once in
+`.claude/seon-hook.edn`. NOT gated: its test-fast starved 25 min behind two
+slots (slots now 3, `afa82d092`). Gate `seon.dev.hook-test
+seon.dev.edit-feedback-test` in the next batch.
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
