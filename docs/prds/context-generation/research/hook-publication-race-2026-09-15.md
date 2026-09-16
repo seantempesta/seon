@@ -7,6 +7,8 @@ tags: [operator, test, runtime]
 
 # Hook publication and check feedback
 
+Implementation commit: **`c0006a125`** on `steward-platform`.
+
 **Incomplete class:** the false JVM-absence prerequisite is removed and its
 regression passes. Expensive-check deferral remains open at the protected
 program-row owner; no production check change was landed. The exact residual
@@ -43,6 +45,9 @@ repl, clojure-testing, seon-flow-architecture, datahike and data-modeling skills
   at `resources/seon/schemas/seon.test.edn:6`, but row construction omits them.
 
 ## Member 1: false JVM refusal
+
+Verdict: **resolved by `c0006a125`**, with the live operation and in-process
+regression below. The orchestrator's final gate remains outstanding.
 
 The log claim needed correction: batch `6fedfed5` contained **three** paths,
 including `test/seon/mcp_test.clj`; successor `3d800021` contained two.
@@ -195,3 +200,10 @@ Static lint of the operator, regression and durable probe: **0 errors,
 54 warnings**, 89 ms. `git diff --check` is clean. The warning set and
 foreign Markdown citation failures were not converted into a passing gate
 claim. The residual issue index entry remains the orchestrator's ownership.
+
+Cleanup complete: the probe future and candidate-only test Var were removed
+from the development JVM; `tmp/hook-publication-race` was deleted after
+retaining the evidence. The operator shell exited normally. No lane shell,
+scratch root, or worktree remains. Final `bin/seon status` still reports
+default PID **69622**, alive, with no orphan Seon JVMs. The gate-request file
+and shared publication records remain for the orchestrator.
