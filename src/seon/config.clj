@@ -457,7 +457,11 @@
    [:=> [:cat :seon.db/connection :seon.config/compiled]
     :seon.reconcile/result]}
   [connection compiled]
-  (let [projection (schema/projection-from-database @connection)
+  (let [database @connection
+        projection (or (db/carried-projection database)
+                       (schema/handed-projection)
+                       (do (db/projection-fallback 'seon.config/apply-compiled!)
+                           (schema/projection-from-database database)))
         forms (:seon.schema.projection/forms projection)
         desired
         (into [(:seon.config/desired-row compiled)]
@@ -469,7 +473,7 @@
               (db/q '[:find [?cluster-name ...]
                       :where
                       [_ :seon.config/cluster ?cluster-name]]
-                    @connection))
+                    database))
         identities (into inherited-config-identities
                          (keep #(row-identity forms %))
                          desired)
@@ -477,7 +481,9 @@
         {::reconcile/desired desired
          ::reconcile/process managing-process-identity
          ::reconcile/adopt-identities identities}
-        operations (count (reconcile/plan @connection request))
+        ;; The digest covers config dials, not initialization rows or later
+        ;; hand edits. Exact reconciliation must still observe those facts.
+        operations (count (reconcile/plan database request))
         result
         (if (zero? operations)
           {::reconcile/converged? true
@@ -487,7 +493,7 @@
                  connection
                  {:tx-data
                   (conj
-                   (population-transaction-data forms @connection desired)
+                   (population-transaction-data forms database desired)
                    [:db.fn/call #'reconcile/reconcile-call request])
                   :tx-meta
                   {:seon.db/process

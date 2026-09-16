@@ -1,3 +1,9 @@
+---
+type: research
+status: active
+tags: [research, config, test-fixture, performance]
+---
+
 # Turn bookkeeping cost: the 300 ms bound and the 270 s worker bound
 
 Dated 2026-09-16. Research lane, read-only, branch `steward-platform` at
@@ -163,3 +169,137 @@ half of the waste returns, and it kills the class rather than the instance.
   runs has no owner in this page. It deserves its own probe.
 - `seon.render/request-profile` at 64 calls per six-form turn is a derive-per-call
   on the turn's hot path.
+
+## Config apply landing — 2026-09-16
+
+Lane `config-apply-cost`, default PID 27828. Read this research page, the
+assigned AGENTS.md sections, `apply!`/`apply-compiled!`, `reconcile/plan`, the
+canonical fixture construction, and all three wave-2 lane-rule files end to
+end before editing. No test JVM, default restart, refork, or replacement of
+the shared fixture base was performed.
+
+### Rotation and implemented slice
+
+The proposed attribution was incomplete: `reconcile/plan` itself rebuilt
+the projection. Both `apply-compiled!` and `plan` now prefer the database
+value's carried projection, then the explicitly handed projection. Only
+absence of both reaches the existing warning seam and rebuild. Config apply
+captures one database value for its reads; writer-side reconciliation still
+recomputes against the writer's current database.
+
+The proposed digest shortcut is **refuted as a convergence proof**.
+`compile-manifest` hashes effective dials only, excluding initialization
+rows. Hand edits do not update that digest. On default, compilation of the
+current effective config produced an exact plan containing three retractions
+on `[:seon.ai.model/id "deepseek-flash"]`:
+`:seon.ai.model/last-latency-ms`, `:seon.ai.model/last-tokens-per-second`, and
+`:seon.ai.model/last-used-at`. These are initialization-row differences even
+with the same config digest. A changed initialization document can also
+arrive at an unchanged database basis. Neither digest equality nor adding
+the basis comparison proves the complete desired population is converged.
+No cache, new marker, or weaker convergence semantics was introduced.
+
+The two fixture calls were **not identical** and were **not a boot call**:
+`seon.cluster.turn-test/with-cluster` called `test-support/seed-cluster!`
+(which applied defaults), then applied its test manifest. There is no
+`with-cluster` in `test_support.clj`. The fixture now applies its final
+manifest once, then calls the same `cluster/ensure-cluster-entity!` owner
+that `seed-cluster!` called, with the same boot-process identity, before
+seeding its agent and message. Production boot still applies its compiled
+config once in `stand-cluster-runtime!` and was not edited.
+
+Additional edited paths beyond the assignment's ownership list:
+
+- `test/seon/cluster/turn_test.clj`: the actual owner of the duplicate apply;
+  no pre-existing edit was present in this path.
+- [config_apply_cost_probe_2026_09_16.clj](config_apply_cost_probe_2026_09_16.clj):
+  reproducible, non-writing comparison on one immutable database snapshot.
+
+`test/seon/config_test.clj` adds one class regression,
+`converged-apply-uses-carried-projection-and-remains-exact`: a present carried
+projection, zero rebuilds, zero fallback events, a real plan with zero
+operations, and an unchanged transaction basis. It also checks that the
+unchanged digest cannot hide a hand edit or changed initialization rows.
+The observation delegates count only their calling test thread.
+
+### Dependency ledger and measured evidence
+
+- Datahike writer authority: `reference-code/datahike/src/datahike/db/transaction.cljc`
+  `:db.fn/call` supplies the current transaction database;
+  `seon.reconcile/reconcile-call` retains that integration.
+- Projection authority: `seon.db/carried-projection` reads the immutable
+  schema origin's metadata. Existing `seon.config/effective` demonstrates
+  carried-first, explicitly-handed-second acquisition.
+- Fixture branch authority: `test-support/with-branched-database` calls
+  Datahike `branch!`; its roster permit is acquired in
+  `reference-code/datahike/src/datahike/versioning.cljc:231`, through
+  `reference-code/datahike/src/datahike/gc_guard.cljc:190`.
+
+| Measurement | Before (ms) | After (ms) | Boundary |
+|---|---:|---:|---|
+| Exact plan on default | 1,343.693 | 70.145 / 66.584 / 63.824 | Hot-loaded and re-armed candidate; three operations in both |
+| Fixed-snapshot comparison, basis 536871203 | 1,335.950 / 661.827 / 612.218 | 85.890 / 81.674 / 79.592 | Six exactly equal plans; committed probe script |
+| Manifest compilation | 53.307 / 50.849 / 50.173 | unchanged | Still separate work |
+| Empty fixture | Historical 5,017 / 4,851 / 5,050 above | unavailable | Current fixture branch acquisition blocked |
+| Generated 48-trial test | Historical 270,000 worker bound | 24,497.810 total; 20,000 execution bound | Zero assertions; fixture acquisition blocked, not a performance pass |
+
+The fixed-snapshot script reconstructs the previous projection-build-plus-plan
+path and compares it with the actual carried plan, without changing Vars or
+writing facts. This establishes the removed work and equal plans, **not**
+whole-apply latency below 100 ms or a fixture below 500 ms. Those acceptance
+measurements remain unverified. Optional fixture-base seeding was not added
+without its prerequisite measurement.
+
+### In-process runs and exact verification boundary
+
+All tests were resolved with `#'seon.test/resolve-test` and run using
+`seon.test/run` on futures, with `(seon.operator/connection "default")`.
+Namespaces were reloaded using `#'seon.test/with-test-loader`; the shared
+fixture namespace/base was not reloaded or replaced.
+
+```clojure
+(seon.test/run
+ (#'seon.test/resolve-test
+  'seon.config-test/apply-compiles-once-and-round-trips-through-database-facts)
+ (seon.operator/connection "default"))
+;; Before: run 46716; candidate: run 47638. Both 0 pass / 0 fail / 1 error,
+;; named 20000 ms execution timeout.
+
+(seon.test/run
+ (#'seon.test/resolve-test
+  'seon.config-test/converged-apply-uses-carried-projection-and-remains-exact)
+ (seon.operator/connection "default"))
+;; Run 48471: 0/0/1, the same 20000 ms fixture boundary.
+
+(seon.test/run
+ (#'seon.test/resolve-test
+  'seon.cluster.turn-test/generated-model-attempt-traces-preserve-presence-and-episode-laws)
+ (seon.operator/connection "default"))
+;; Run 48906, after reloading the edited test namespace: 0/0/1,
+;; 24497.810 ms including result recording; execution bound 20000 ms.
+```
+
+The fixture delay realizes successfully and has a connection; it is **not**
+a cached construction exception. The empty-fixture probe instead waited at
+`acquire-reachability-permit!` → `branch!`. Its memory-store id was
+`348b77ab-4a40-4b20-9457-9b966b4b4df9`; roster token 174 remained held, no
+sweep or blobs were active, and 12 requests were queued. The originating
+holder was not identified. The lane cancelled its own waiting probe and
+did not operate another session or release an unowned permit. This is the
+existing issue
+[canonical-fixture-roster-permit-remains-held](../../../seon/issues/canonical-fixture-roster-permit-remains-held.md).
+
+Adoption is separately unproven. Publication
+`50a6badf-3c19-4556-9580-a646c85e2044` refused on the foreign
+`test/seon/test_failure_facts_test.clj:120` reference `support/test-context`.
+That file was not edited. The live function evidence above is explicitly
+hot-loaded, with `seon.instrument/apply!` reporting 1040/1040 registered and
+instrumented functions, not a completed development-adoption claim.
+
+Focused clj-kondo: zero errors; existing shadowing, unused-require, and
+duplicate-require warnings remain in the touched namespaces. `git diff
+--check` passed. Gate request written to
+`tmp/orchestrator/gate-requests/config-apply-cost.txt`: `seon.config-test`,
+`seon.reconcile-test`, `seon.schema-test`, `seon.db-test`,
+`seon.cluster.turn-test`, `seon.test-support-test`, and `platform`.
+No test-suite green claim is made; the orchestrator's batched gate owns it.

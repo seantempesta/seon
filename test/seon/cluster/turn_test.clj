@@ -192,17 +192,7 @@
                    :seon.config.flow.io/queue-depth 2
                    :seon.config.flow.io/concurrency 2)})]
      (try
-      (test-support/seed-cluster! connection "turn-test")
-      (let [result
-            (db/transact! connection
-                  [{:seon.ns/name 'clojure.set}
-                   {:seon.ns/name 'clojure.test}
-                   {:seon.ns/name 'seon.schema}
-                   (agent-row "agent-a")
-                   {:seon.message/id "m-1" :seon.message/to [:seon.agent/id "agent-a"] :seon.message/content "count the widgets" :seon.message/inbox [:seon.agent/id "agent-a"]}])]
-        (when (:seon.error/kind result)
-          (throw (ex-info "Turn fixture seed was refused." result))))
-      ;; Reconcile absence as well as values against the seeded defaults.
+      ;; Apply the final manifest once; cluster and agent facts need that config.
       (let [result
             (config/apply!
              {:seon.db/connection connection
@@ -224,6 +214,19 @@
                :seon.config.ai.retry/maximum-total-delay-ms 0}})]
         (when (:seon.error/kind result)
           (throw (ex-info "Turn fixture configuration was refused." result))))
+      (let [result (cluster/ensure-cluster-entity!
+                    connection "turn-test" cluster/boot-process-identity)]
+        (when (:seon.error/kind result)
+          (throw (ex-info "Turn fixture cluster was refused." result))))
+      (let [result
+            (db/transact! connection
+                  [{:seon.ns/name 'clojure.set}
+                   {:seon.ns/name 'clojure.test}
+                   {:seon.ns/name 'seon.schema}
+                   (agent-row "agent-a")
+                   {:seon.message/id "m-1" :seon.message/to [:seon.agent/id "agent-a"] :seon.message/content "count the widgets" :seon.message/inbox [:seon.agent/id "agent-a"]}])]
+        (when (:seon.error/kind result)
+          (throw (ex-info "Turn fixture seed was refused." result))))
       (with-render-context-proc
          connection
          ;; THE HANDLE IS THE PRODUCTION HANDLE: `test-support/cluster-handle`

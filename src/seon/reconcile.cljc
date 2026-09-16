@@ -314,14 +314,13 @@
   {:malli/schema [:=> [:cat :seon.db/database-value ::request]
                   :seon.store/transaction-data]}
   [db request]
-  ;; ONE declaration population for the whole plan. Every `seon.db` read below
-  ;; resolves its own when nothing is supplied, and `plan` pulls once PER
-  ;; MANAGED ENTITY — thousands of complete classpath re-reads, which wedged
-  ;; `seon.reconcile-test` and `seon.config-application-test` at the 300 s
-  ;; liveness backstop (2026-08-07). `db/pull` deliberately takes no population
-  ;; argument, so the operation supplies the one it already resolved for its
-  ;; own extent; this is the same value, made visible, not a cache.
-  (let [projection (schema/projection-from-database db)
+  ;; The immutable database already carries its declaration population.
+  ;; Bootstrap callers may supply it before carriage is installed; rebuilding
+  ;; is the loud fallback, never the cost of an ordinary convergence read.
+  (let [projection (or (seon.db/carried-projection db)
+                       (schema/handed-projection)
+                       (do (seon.db/projection-fallback 'seon.reconcile/plan)
+                           (schema/projection-from-database db)))
         forms (:seon.schema.projection/forms projection)]
     (schema/call-with-projection
      projection #(plan-transaction-data forms db request))))

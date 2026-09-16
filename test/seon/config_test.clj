@@ -161,6 +161,69 @@
              (is (= committed-basis (:max-tx @connection))
                  "an identical config and population write no transaction")))))))
 
+(deftest converged-apply-uses-carried-projection-and-remains-exact
+  (test-support/with-database
+   (fn [connection]
+     (let [request {:seon.db/connection connection}
+           first-result (config/apply! request)
+           basis (:max-tx @connection)
+           rebuild schema/projection-from-database
+           fallback db/projection-fallback
+           plan reconcile/plan
+           caller (Thread/currentThread)
+           rebuilds (atom 0)
+           fallbacks (atom 0)
+           planned-operations (atom [])]
+       (is (false? (:seon.reconcile/converged? first-result)))
+       (is (some? (db/carried-projection @connection)))
+       (with-redefs [schema/projection-from-database
+                     (fn [& arguments]
+                       (when (identical? caller (Thread/currentThread))
+                         (swap! rebuilds inc))
+                       (apply rebuild arguments))
+                     db/projection-fallback
+                     (fn [operation]
+                       (when (identical? caller (Thread/currentThread))
+                         (swap! fallbacks inc))
+                       (fallback operation))
+                     reconcile/plan
+                     (fn [database request]
+                       (let [operations (plan database request)]
+                         (when (identical? caller (Thread/currentThread))
+                           (swap! planned-operations conj (count operations)))
+                         operations))]
+         (is (= {:seon.reconcile/converged? true
+                 :seon.reconcile/operations 0}
+                (config/apply! request))))
+       (is (zero? @rebuilds))
+       (is (zero? @fallbacks))
+       (is (= [0] @planned-operations)
+           "a real exact read observes convergence without rebuilding")
+       (is (= basis (:max-tx @connection)))
+       (let [compiled (config/compile-manifest {})
+             digest (:seon.config/applied-manifest-digest compiled)
+             queue-depth (get-in compiled [:seon.config/effective
+                                          :seon.config.flow.compute/queue-depth])]
+         (db/transact! connection
+                       [{:seon.config/cluster "default"
+                         :seon.config.flow.compute/queue-depth (inc queue-depth)}])
+         (is (= digest (:seon.config/applied-manifest-digest
+                        (db/pull @connection [:seon.config/applied-manifest-digest]
+                                 [:seon.config/cluster "default"]))))
+         (is (false? (:seon.reconcile/converged? (config/apply! request)))
+             "the same manifest repairs a hand edit")
+         (is (= queue-depth (:seon.config.flow.compute/queue-depth
+                             (config/effective @connection))))
+         (let [process-identity [:seon.db.process/id "config-apply-cost-initialization"]
+               changed (update compiled :seon.config/initialization conj
+                               {(first process-identity) (second process-identity)})]
+           (is (false? (:seon.reconcile/converged?
+                        (config/apply-compiled! connection changed)))
+               "initialization can change while the dial digest stays equal")
+           (is (= (second process-identity)
+                  (:seon.db.process/id
+                   (db/pull @connection [:seon.db.process/id] process-identity))))))))))
+
 (deftest packaged-defaults-use-the-same-shipped-document-authority
   (let [resource io/resource
         directory (io/file "tmp/config-test-packaged")
