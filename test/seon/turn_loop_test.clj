@@ -936,16 +936,18 @@
          {:seon.error/kind :seon.turn.phase/prompt
           :seon.error/message "injected prompt failure"
           :seon.error/data {:seon.turn.loop/phase :prompt}})
-        recipients (into []
-                         (keep #(second (:seon.message/to %)))
-                         (filter :seon.message/id
-                                 (:seon.db/tx-data prepared)))]
+        before (set (db/q '[:find [?id ...] :where [?m :seon.message/id ?id]] @connection))]
     (db/transact! connection (:seon.db/tx-data prepared))
-    recipients))
+    (into [] (keep (fn [[id recipient]] (when-not (before id) recipient)))
+          (db/q '[:find ?id ?recipient
+                  :where [?m :seon.message/id ?id]
+                         [?m :seon.message/to ?agent]
+                         [?agent :seon.agent/id ?recipient]] @connection))))
 
 (defn- committed-error-count
   [connection]
-  (or (db/q '[:find (count ?error) . :where [?error :seon.error/id _]]
+  (or (db/q '[:find (sum ?count) . :with ?occurrence
+              :where [?occurrence :seon.error.occurrence/count ?count]]
             @connection)
       0))
 
