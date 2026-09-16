@@ -1,8 +1,9 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 created: 2026-09-16
+resolved: 2026-09-16
 tags: [issue, test, config, schema]
 ---
 
@@ -51,3 +52,34 @@ operator gate, and inspect any residual comparison difference.
 Exact forms and map differences are in the
 [retention landing note](../../prds/context-generation/research/retention-sweep-2026-09-16.md),
 section “Batch 30 follow-up”.
+
+## Resolution (2026-09-16)
+
+Both prepl forms in
+`seon.dev.fresh-operator-test/init-owns-current-source-and-dormant-cluster-lifecycle`
+now read through `(seon.db/db connection#)`, so the database value carries its
+projection to `seon.db/pull` (AGENTS.md §2.1). Two call sites changed; no
+second fallback was added. The equality assertions are preserved, and each
+form now returns a diagnostic map instead of a bare `false` when the
+comparison fails, so a read refusal or a key difference is visible in the
+failure output rather than hidden behind `"true"` versus `"false"`.
+
+The file's two remaining raw `@connection#` derefs (the `datahike.api/q`
+marker and agent counts) are direct dependency calls outside `seon.db`'s
+projection contract and are correct as written.
+
+Live evidence on `default` (JVM mode, `(seon.operator/connection "default")`):
+
+- raw `@connection` pull of `[:seon.config/cluster "default"]` returns
+  `{:seon.error/kind :seon.schema/missing-projection ...}` with the
+  `seon.db/projection-fallback` warning, and the cluster pull's
+  `:seon.source/commit-id` reads as `nil`;
+- the same reads through `(seon.db/db connection)` return the real entity —
+  79 keys, 76 of the 77 desired config keys equal, the sole difference being
+  `:seon.config/applied-manifest-digest` because this live cluster was not
+  config-applied by the probe (the test applies `config/default.edn`
+  immediately before its comparison) — and a real
+  `:seon.source/commit-id`.
+
+The declared-long test itself was not run here (110 s, forks operator roots);
+the orchestrator's batched gate is its proof.

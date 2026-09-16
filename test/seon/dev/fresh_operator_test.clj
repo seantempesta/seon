@@ -1151,9 +1151,17 @@
                                      (seon.config/compile-manifest
                                       {:seon.boot/cluster-name ~name}))
                           actual# (seon.db/pull
-                                   @connection# [:*]
+                                   (seon.db/db connection#) [:*]
                                    [:seon.config/cluster ~name])]
-                      (= expected# (select-keys actual# (keys expected#)))))))
+                      (if (= expected# (select-keys actual# (keys expected#)))
+                        true
+                        {:seon.dev.fresh-operator-test/read actual#
+                         :seon.dev.fresh-operator-test/differing
+                         (into (sorted-set)
+                               (keep (fn [[key# value#]]
+                                       (when (not= value# (get actual# key#))
+                                         key#))
+                                     expected#))})))))
               "every shipped decision, including symbols, survives the prepl boundary")
           (let [adopted (run-operator root "init" "--dev" name)]
             (is (= 0 (::exit adopted)) (::output adopted))
@@ -1162,13 +1170,18 @@
                     advertisement
                     (pr-str
                      `(let [instance# (get @seon.operator.runtime/running-instances ~name)
-                            connection# (seon.operator/connection ~name)]
-                        (= (:seon.source/commit-id
-                            (seon.db/pull @connection# [:*]
-                                          [:seon.cluster/name ~name]))
-                           (:seon.source/commit-id
-                            (seon.cluster.source/current
-                             (:seon.store/store instance#))))))))
+                            connection# (seon.operator/connection ~name)
+                            cluster# (seon.db/pull (seon.db/db connection#) [:*]
+                                                   [:seon.cluster/name ~name])
+                            adopted# (:seon.source/commit-id cluster#)
+                            published# (:seon.source/commit-id
+                                        (seon.cluster.source/current
+                                         (:seon.store/store instance#)))]
+                        (if (= adopted# published#)
+                          true
+                          {:seon.dev.fresh-operator-test/read cluster#
+                           :seon.dev.fresh-operator-test/adopted adopted#
+                           :seon.dev.fresh-operator-test/published published#})))))
                 "development adoption converges after config apply"))))
       (finally
         (try
