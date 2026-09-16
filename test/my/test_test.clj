@@ -15,6 +15,7 @@
             [seon.cluster :as cluster]
             [seon.config :as config]
             [seon.db :as db]
+            [seon.env :as env]
             [seon.test-support :as support]))
 
 (deftest an-agents-own-test-reaches-its-cluster-through-the-elided-arity
@@ -29,6 +30,38 @@
      (cluster/ensure-cluster-entity! connection "own-tests"
                                      cluster/boot-process-identity)
      (let [ctx (support/fork-cluster-ctx connection)
+           ;; THE AGENT'S OWN ENVIRONMENT IS HANDED OVER, NEVER AMBIENT.
+           ;; Production scopes `:seon.agent/id` onto the cluster environment
+           ;; the ctx carries for every evaluation it runs
+           ;; (`seon.sci.eval/evaluate`, src/seon/sci/eval.clj:2273), and that
+           ;; is the one place call preparation reads it from when it supplies
+           ;; `seon.test/owned-symbols`. A fixture that forks the cluster ctx
+           ;; and stops there is an environment with no agent in it: the run
+           ;; then refuses with `:seon.env/agent-id-absent` and every
+           ;; assertion below is about the refusal instead of the custody
+           ;; (AGENTS §5.2 — hand the environment explicitly, exactly like
+           ;; production callers).
+           scoped (env/scope (env/of ctx) {:seon.agent/id "owner"})
+           _ (env/replace-environment! (get ctx env/state-carrier) scoped)
+           ;; THE ROSTER IS A DATABASE FACT. An agent's `deftest` becomes a
+           ;; `:seon.test` row when the TURN WRITER commits the evaluation's
+           ;; `:seon.program/row` (src/seon/turn.clj:1775); `agent-value`
+           ;; crosses `seon.sci.eval/evaluate` without a turn, so the row that
+           ;; writer would commit is committed here, through the one fixture
+           ;; write path. Without it `seon.test/owned-symbols` answers `[]`
+           ;; and the run below has nothing to reach a cluster with. The row
+           ;; carries no `:seon.test/source`: the declaration's source names
+           ;; the basis that this very write advances, and the agent's own
+           ;; SCI context holds the Var the run resolves.
+           _ (support/transacted!
+              connection
+              [{:seon.test/sym "my.agents.owner/my-cluster-is-reachable"
+                :seon.test/ns [:seon.ns/name 'my.agents.owner]
+                :seon.schema.admission/source :agent}])
+           ;; Read AFTER the last fixture write, so the agent's own assertion
+           ;; names the exact database value its cluster holds: an elided read
+           ;; that reached any other cluster, or an older value of this one,
+           ;; fails it.
            basis (db/basis-t (db/db connection))
            declared
            (support/agent-value
