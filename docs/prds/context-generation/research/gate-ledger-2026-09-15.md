@@ -793,3 +793,19 @@ between (a concurrent lane's live edit). Opus lane launched: spans read
 against the captured source they came from, else a typed "source changed
 during analysis" refusal naming file/span/digests; class regression;
 live convergence proof. fn.clj re-adoption follows its landing.
+
+### 2026-09-17 07:00Z — settlement projection rebuild dissolved (`2da44c50d`); prompt expectation (`c27727551`)
+
+`seon.turn/row-tx` (`turn.clj:1281`) called `schema/projection-from-database`
+on every declaration settlement and got back the identical object it was
+handed — 209 ms of a 253 ms settlement window, three scans to learn nothing.
+The premise "substitute the carried projection" was refined: inside a
+`:db.fn/call` the writer's db carries the ENTERING projection, so a same-
+transaction declaration that precedes a request needs the writer-side
+derivation — now done only for that case, marked by the one owner that
+orders those calls. Settlement and writes 253 → 53 ms warm, derivations
+1 → 0, install 130 → 106 ms; regression
+`a-settling-declaration-uses-the-projection-its-database-carries` 6/0/0.
+Prompt: derivation correct, expectation stale — an open turn with no attempt
+and no reply spends nothing (PRD §14) → "turns left: 100 of 100". No adopted
+proof (adoption refused on a foreign renamed test identity); batch 62.
