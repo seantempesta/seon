@@ -1205,3 +1205,11 @@ construction in `incremental-source-refresh!`. Issue
 landing note `incremental-refresh-exchange-bound-2026-09-16.md`
 (`86cda05b6`). Re-gate when fixed: boot-test, fn-test, program-test +
 platform.
+
+Incident (open): at 16:03:46Z the batch-91 B `bin/test` (pid 43315) died by
+TERM 11 s in, and in the same minute the steward's own 25-minute heartbeat
+shell died by signal (exit 144). No lane issued kill/pkill/`seon down`; the
+only stops were harness TaskStops by exact task id on two sleep loops in
+another session. Something above the lanes signalled unrelated shells in one
+minute; source unknown. Next occurrence: record the exact second and compare
+against harness task events.
