@@ -1401,6 +1401,24 @@ wake-matchers, tier-0 remaining, no-default-cluster, incremental
 publication (told about the source-test seal red at source_test.clj:81/:98).
 Queued: bin/test preparation bounds.
 
+**Deletion research 1/3 landed** (`94778dc8b`, agents/turns family):
+Seon ALREADY has all four behaviours and the refuse-vs-sweep dial is
+`{:optional true}` on the referrer's entry — retract-entity's swept
+datoms land in the report and the final-report validator re-validates
+every touched entity whole (db.clj:3009-3041), so a required ref missing
+refuses and an optional one sweeps silently. Overturns the review's N9
+premise. Two holes: identity-less entities (29 component maps) are never
+validated. Live: an agent cannot be deleted today (three refusals; nothing
+tries — rule it a positive closure fact); the ONE entity-constrained listen
+pattern on default widens to all 1,743 issues if its note is deleted
+(wake.clj:433) — highest severity, no ruling needed; compaction loses
+contribution/effect refs silently; deleting a cited test refuses under the
+issue retraction authority; a fifth behaviour (pending edge migrating to a
+settled sibling) exists twice unnamed. Blanket living-ref rule recommended
+AGAINST for this family: five provenance refs are meant to sweep. Five
+owner decisions priced in the note. Awaiting the program-graph and
+reset-edits passes before the decisions page.
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
