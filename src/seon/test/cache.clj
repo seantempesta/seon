@@ -3,7 +3,8 @@
   (:require [babashka.process :as process]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
-            [seon.fs :as fs])
+            [seon.fs :as fs]
+            [seon.test.selection :as selection])
   (:import [java.io RandomAccessFile]
            [java.lang Process ProcessHandle]
            [java.nio.file Files LinkOption]
@@ -96,6 +97,50 @@
                       (< (.lastModified (io/file directory "ready.edn")) cutoff))]
       (fs/delete-recursively! (str parent) (str directory)))))
 
+(defn- compatible-changes
+  "Program paths differing between complete, corresponding cache inputs.
+  Missing legacy evidence or any non-program change requires a full build."
+  [before after]
+  (when (and (vector? before) (= 3 (count before))
+             (vector? after) (= 3 (count after))
+             (map? (first before)) (map? (first after))
+             (every? string? (subvec before 1))
+             (every? string? (subvec after 1))
+             (= (subvec before 1) (subvec after 1)))
+    (let [changes (selection/changed-inputs (first before) (first after))
+          paths (vec (sort (concat (::selection/changed changes)
+                                   (::selection/removed changes))))]
+      ;; The selector already declares which changed paths are outside the
+      ;; program graph; re-deriving that boundary here would be a second
+      ;; authority for the same question.
+      (when-not (some selection/widening-path? paths)
+        paths))))
+
+(defn- retained-base
+  [parent inputs]
+  (->> (.listFiles (io/file parent))
+       (keep (fn [directory]
+               (let [ready (read-edn (io/file directory "ready.edn"))
+                     changes (compatible-changes (::inputs ready) inputs)
+                     base (io/file directory "base")]
+                 (when (and changes
+                            (= (.getName directory) (::digest ready))
+                            (.isDirectory (io/file base "data" "store"))
+                            (.isFile (io/file base "build" "current-src.edn")))
+                   {::base base ::digest (::digest ready) ::changes changes}))))
+       (sort-by (juxt #(count (::changes %)) ::digest))
+       first))
+
+(defn- clone-base!
+  [seed base]
+  (doseq [path ["data/store" "build/current-src.edn"]]
+    (let [destination (io/file base path)]
+      (.mkdirs (.getParentFile destination))
+      (child! base
+              (if (= "Mac OS X" (System/getProperty "os.name"))
+                ["/bin/cp" "-cRP" (str (io/file seed path)) (str destination)]
+                ["cp" "-a" "--reflink=auto" (str (io/file seed path)) (str destination)])))))
+
 (defn- ensure-base! [source snapshot digest classpath pid]
   (let [parent (.getCanonicalFile (io/file source "target" "test-published-bases"))
         directory (io/file parent digest)
@@ -114,26 +159,34 @@
       (let [acquired (System/nanoTime)
             _ (println "bin/test: CACHE LOCK acquired wait-ms="
                        (quot (- acquired started) 1000000))
+            inputs (read-edn (io/file source "target/test-classpaths"
+                                      (str digest ".inputs.edn")))
             hit? (and (= digest (::digest (read-edn ready)))
                       (.isDirectory (io/file base "data" "store"))
                       (.isFile (io/file base "manifest.edn")))]
         (when-not hit?
           (when (.exists directory)
             (fs/delete-recursively! (str parent) (str directory)))
-          (copy-checkout! snapshot checkout)
-          (println "bin/test: PUBLISH cached base" digest)
-          (flush)
-          (child! checkout
-                  ["clojure" "-Scp" classpath
-                   (str "-J-Dseon.operator.root=" base)
-                   (str "-J-Dseon.test.root=" snapshot)
-                   (str "-J-Dseon.test.source-root=" source)
-                   "-M:test" "-m" "seon.test.runner" "--prepare-base" (str base)])
-          (when-not (and (.isDirectory (io/file base "data" "store"))
-                         (.isFile (io/file base "manifest.edn")))
-            (throw (ex-info "Publication exited without its store and manifest."
-                            {::base (str base)})))
-          (spit ready (pr-str {::digest digest ::prepared-at (str (Instant/now))})))
+          (let [seed (retained-base parent inputs)]
+            (copy-checkout! snapshot checkout)
+            (when seed (clone-base! (::base seed) base))
+            (println "bin/test: PUBLISH cached base" digest
+                     (if seed "from retained base" "full: no compatible retained base")
+                     (when seed (select-keys seed [::digest ::changes])))
+            (flush)
+            (child! checkout
+                    (cond-> ["clojure" "-Scp" classpath
+                             (str "-J-Dseon.operator.root=" base)
+                             (str "-J-Dseon.test.root=" snapshot)
+                             (str "-J-Dseon.test.source-root=" source)
+                             "-M:test" "-m" "seon.test.runner" "--prepare-base" (str base)]
+                      seed (conj (pr-str (::changes seed)))))
+            (when-not (and (.isDirectory (io/file base "data" "store"))
+                           (.isFile (io/file base "manifest.edn")))
+              (throw (ex-info "Publication exited without its store and manifest."
+                              {::base (str base)})))
+            (spit ready (pr-str (cond-> {::digest digest ::prepared-at (str (Instant/now))}
+                                 inputs (assoc ::inputs inputs))))))
         (.mkdirs (.getParentFile reference))
         (spit reference (pr-str {::pid (Long/parseLong pid)
                                 ::started (str (.orElse (.startInstant (.info handle)) nil))}))

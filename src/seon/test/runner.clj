@@ -53,6 +53,12 @@
   (delay (requiring-resolve 'seon.cluster/stop!)))
 (defonce ^:private cluster-refresh-source!
   (delay (requiring-resolve 'seon.cluster/refresh-source!)))
+(defonce ^:private cluster-source-artifact-file
+  (delay (requiring-resolve 'seon.cluster/source-artifact-file)))
+(defonce ^:private cluster-source-progress
+  (delay (requiring-resolve 'seon.cluster/*source-progress!*)))
+(defonce ^:private export-reidentify!
+  (delay (requiring-resolve 'seon.cluster.export/reidentify!)))
 
 (def var-generator
   "Finite representatives for the closed host/SCI Var representation sum."
@@ -3962,7 +3968,7 @@
                         namespace-names))))
 
 (defn -main
-  "Run the coordinator, prepare its immutable base, or run one worker."
+  "Run the coordinator, publish its full or incremental base, or run a worker."
   {:malli/schema [:=> [:cat [:* {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Clojure's command-line entry point receives any number of string arguments; the command parser owns option combinations and their diagnostics.", :gen/elements [[]]} :string]] :nil]}
   [& arguments]
   (case (first arguments)
@@ -3977,7 +3983,17 @@
         (when-not (= expected actual)
           (throw (ex-info "Publication classpath does not name its snapshot."
                           {::expected (str expected) ::actual (str actual)}))))
-      (@cluster-refresh-source! root)
+      ;; A cloned compatible base arrives with the seed's store identity; the
+      ;; existing export owner reidentifies the COPY before it is opened.
+      ;; `refresh-source!` alone decides whether a named change is safe to
+      ;; upsert or requires its complete build.
+      (let [changed-paths (some-> (nth arguments 2 nil) edn/read-string)]
+        (when changed-paths
+          (@export-reidentify! (str (io/file root "data" "store"))))
+        (with-bindings {@cluster-source-progress #(println "bin/test: SOURCE" %)}
+          (if changed-paths
+            (@cluster-refresh-source! root changed-paths)
+            (@cluster-refresh-source! root))))
       (let [held-store (store/open-store!
                         {:seon.store/dir (str (io/file root "data" "store"))})]
         (try
@@ -3994,10 +4010,10 @@
                                        :seon.test.run/basis-t
                                        :seon.test.run/branch]))))
           (finally (store/release-store! held-store))))
-      ;; Publication already holds the exact analysis; do not analyze the
-      ;; same checkout again in the coordinator and every fixture JVM.
-      (let [analysis @(var-get (ns-resolve 'seon.cluster 'source-analysis-cache))
-            manifest (:seon.fn/manifest analysis)]
+      ;; The completed artifact is authoritative for full AND incremental
+      ;; publication; the in-memory analysis cache only covers full builds.
+      (let [artifact (edn/read-string (slurp (@cluster-source-artifact-file root)))
+            manifest (:seon.fn/manifest artifact)]
         (when-not (seq (:seon.fn.manifest/artifacts manifest))
           (throw (ex-info "Publication produced no program manifest." {::root root})))
         (spit (io/file root "manifest.edn") (pr-str manifest)))
