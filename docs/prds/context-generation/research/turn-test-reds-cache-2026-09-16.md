@@ -98,3 +98,29 @@ larger tally is not attributed wholesale to any one class.
 
 The gate request remains unchanged until the current replays incorporate
 these reds. No `bin/test`, `bin/test-fast`, or test JVM was launched.
+
+## Schema consumer slice
+
+The production cache repair is main commit `c1d7d4695`. The remaining schema
+consumers used the retired serialized-result codec. They now query ordered,
+agent-authored evaluations through the existing `agent-evaluations` helper and
+assert exact saved shown text. No error-data codec or schema policy changed.
+
+| Cause | Tests | Disposition | Regression |
+|---|---|---|---|
+| Speculative transaction retained committed cache identity | `runtime-schema-unregister-removes-one-unused-global-schema` | Resolved by fork/writer repair and current observation | Canonical composed declaration/deletion plus real turn |
+| Retired result observation | `runtime-schema-key-changes-pass-the-one-usage-guarded-decision` | Current exact shown text, same schema/error obligations | Existing real refinement turn |
+
+Candidate unregister run 44563: **4/0/0**; refinement run 44582: **6/0/0**.
+After file reload, fresh canonical base and fresh contexts: runs **44592 4/0/0**
+and **44593 6/0/0**. Refinement's first candidate incorrectly retained the old
+delivery annotation expectation (44564, 5/1/0); the actual `seon.run/complete`
+return is the completion value alone, and that exact value is asserted.
+
+These later probes use this lane's isolated development JVM at snapshot
+`c1d7d4695`, with only this lane's test overlay. The main default probe overlapped
+foreign instrumentation changes (`seon.cluster/populate-source!` and
+`seon.test-support/effective-config`); the isolated JVM removes that interference.
+Its source publication was `6aaa1645-156e-5b57-aefc-a6c14d4b814e`. These are
+explicit file-reloaded Var proofs, not a claim that default's queued adoption
+completed. Main-tree publication reported a bounded timeout.

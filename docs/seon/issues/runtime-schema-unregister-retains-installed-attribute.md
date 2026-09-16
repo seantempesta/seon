@@ -1,11 +1,21 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, runtime, schema, database, class/p3]
 ---
 
 # Schema unregister leaves the installed Datahike attribute
+
+Resolved by main commit `c1d7d4695` and maintained Datahike commit `49ea5933`.
+Transaction entry clears committed cache identity before transaction functions;
+deletion derives its projection from the writer's current facts. The unchanged
+native-attribute removal obligation now passes in the real register/unregister
+turn. The observation uses saved shown text instead of the retired result codec.
+Fresh canonical base/context, armed in-process runs: candidate 44563 and
+file-reloaded 44592, each **4 passes / 0 failures / 0 errors**. The dependency
+and composed writer regressions separately pass 17 and 8 assertions.
+See [the continuation landing](../../prds/context-generation/research/turn-test-reds-cache-2026-09-16.md).
 
 At `a55bdfc80` plus the deletion-presence repair, the real turn test
 `seon.cluster.turn-test/runtime-schema-unregister-removes-one-unused-global-schema`

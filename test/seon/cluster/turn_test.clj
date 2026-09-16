@@ -1099,39 +1099,18 @@
           (drive! cluster 10)
           (let [database @connection
                 row (db/pull database '[*] [:seon.schema/key schema-key])
-                receipts
-                (into {}
-                      (map (fn [receipt]
-                             (let [printed
-                                   (edn/read-string
-                                    (:seon.cluster.eval/result-edn receipt))]
-                               [(:seon.cluster.eval/ordinal receipt)
-                                {:result
-                                 (if (:seon.print/face printed)
-                                   (#'admit/semantic-value printed)
-                                   printed)
-                                 :error-kind (:seon.error/kind receipt)}])))
-                      (db/q '[:find [(pull ?receipt
-                                          [:seon.cluster.eval/ordinal
-                                           :seon.cluster.eval/result-edn
-                                           :seon.error/kind]) ...]
-                              :where
-                              [?receipt :seon.cluster.eval/result-edn _]]
-                            database))]
+                evaluations (agent-evaluations database)]
             (is (= ":int" (:seon.schema/form row))
                 "the run's own unconsumed key refines to its latest form")
-            (is (= schema-key (get-in receipts [1 :result])))
-            (is (= schema-key (get-in receipts [2 :result]))
+            (is (= (pr-str schema-key) (get-in evaluations [1 :seon.eval/shown])))
+            (is (= (pr-str schema-key) (get-in evaluations [2 :seon.eval/shown]))
                 "identical registration is an ordinary idempotent success")
-            (is (= schema-key (get-in receipts [3 :result]))
+            (is (= (pr-str schema-key) (get-in evaluations [3 :seon.eval/shown]))
                 "and so is a change nothing currently depends on")
-            (is (empty? (into #{}
-                              (keep #(:error-kind (val %)))
-                              receipts))
+            (is (every? #(nil? (:seon.cluster.eval/error %)) evaluations)
                 "no form was refused")
-            (is (= (assoc (seon.run/complete "refined")
-                          :my.turn/delivered-to :outside)
-                   (get-in receipts [4 :result]))
+            (is (= (pr-str (seon.run/complete "refined"))
+                   (get-in evaluations [4 :seon.eval/shown]))
                 "the run stayed open through the change and completed")))))))
 
 (deftest runtime-schema-unregister-removes-one-unused-global-schema
@@ -1151,16 +1130,8 @@
                "(seon.run/complete \"schema removed\")")})]
           (drive! cluster 10)
           (let [db @connection
-                results
-                (into {}
-                      (map (fn [[ordinal result-edn]]
-                             [ordinal (semantic-result result-edn)]))
-                      (db/q '[:find ?ordinal ?result
-                             :where
-                             [?receipt :seon.cluster.eval/ordinal ?ordinal]
-                             [?receipt :seon.cluster.eval/result-edn ?result]]
-                           db))]
-            (is (= schema-key (get results 2))
+                evaluations (agent-evaluations db)]
+            (is (= (pr-str schema-key) (:seon.eval/shown (nth evaluations 2)))
                 "unregister has ordinary REPL return semantics")
             ;; Ruling 47 keeps the ctx-resolvable schema identity row while
             ;; unregister retracts its definition and installed DB schema.
