@@ -447,3 +447,15 @@ Queue, in order:
   Opus fixer launched (issue.clj free). Also: `database-base` delay caches
   a failed construction forever (issue filed; daemon-thread rule added to
   repl-rule.txt).
+- 13:40Z platform reds fixed at the real owners (`6d4705498`): the
+  `:seon.db/append-only-after` retention rule called `history` on every
+  write, so ONE declared rule broke every write to every non-temporal store
+  (fixtures were correct; "registered candidates = base attrs" means the
+  store genuinely had no first-party attributes because its schema write
+  had failed inside the writer) — now derived from the database when it
+  has no temporal index; `on-caller-loader` conveys the caller's frame with
+  `bound-fn*`. Four platform/fixture tests green in-process; two new
+  regressions (falsified against the old code). Gate recording fixed by the
+  peer (`7c7395c8a`: the send is the authority, not a census pre-read).
+  Batch 27 running on `7c7395c8a` (platform with recording + nine
+  namespaces); my two Opus agents told to pause probes ~15 min.
