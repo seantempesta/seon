@@ -209,3 +209,74 @@ whose keyword namespace has a `:seon.ns/name` entity.
 - The remaining detectors (D3 reaching test, D5 generator, D7 test subject, D8
   steward) are untouched; D3 and D8 in particular would add 303 + 431 subjects
   and need the source-root fact above first.
+
+## 6. Batch 43 attribution (2026-09-16, HEAD `e3bfa76d1`)
+
+`seon.issue-test` green; `seon.issue-generate-test/generate-is-idempotent-per-detector-and-subject`
+and `…/generate-resolves-and-reopens-without-losing-identity` red.
+`…/generate-refuses-a-bare-entity-id-subject` green.
+
+**The mechanism was right and the fixture was wrong.** Every red assertion read
+`nil` where the generated issue should have been, and the log carried
+`:datahike/write-rejected {:kind :entity-id/syntax, :cause "Expected number or
+lookup ref for entity id, got nil"}` — a retract of an entity that was never
+created. The seed was refused and the fixture ignored its transaction report:
+
+```clojure
+(#'seon.db/write-error database projection
+ [{:seon.ns/name 'example.probe}
+  {:seon.fn/sym "seon.issue.detect/public-without-doc"} …])
+;; => #:seon.error{:kind :seon.db/invalid-write
+;;                 :message "seon.db/transact! refused transaction data at
+;;                  [1 :seon.schema.admission/source]: expected the required key
+;;                  :seon.schema.admission/source with either :core or :agent,
+;;                  got a map missing :seon.schema.admission/source."}
+```
+
+`seon.db/write-map-error` (`src/seon/db.clj:2777`) validates EVERY map keyed by
+an identity attribute against that attribute's entity schema, and
+`resources/seon/schemas/seon.fn.edn:92` makes `:seon.schema.admission/source`
+required on a declaration. So the whole seed was refused, the probe functions
+never existed, and `generate`'s correct behaviour read as a missing issue. The
+third regression passed because the fixture's own program population already
+holds `seon.issue-generate-test/bare-entity-subject` — it never needed the seed.
+
+**Why §3's live proof missed it**: it wrote with `datahike.api/with`, which
+bypasses `seon.db/transact!`'s validator entirely. The proof was real about the
+generator and blind about the fixture, because it used a write path the fixture
+does not use. That is the lesson to carry: prove a fixture's writes through the
+writer the fixture uses.
+
+Fixed in `e47d05dec` by deleting the seed: the regressions take their subject
+from the canonical population (the first docstring-less public function the
+detector itself names), change it with `:db/add`/`:db/retract` forms — which
+carry no entity map and so meet no entity-schema validation, verified by the
+same `write-error` call returning `nil` — and assert every transaction report
+through one `written!` helper.
+
+## 7. The floor defect: a generated issue promised tests it does not have
+
+`docs/seon/issues/generated-issue-opening-promises-tests-it-does-not-have.md`.
+`seon.issue/check-form` (new, private) now names the form that decides done:
+the tests when the issue has any, otherwise `(<detector> (seon.db/db))`, and
+NOTHING when neither — `(my.test/check {:seon.test/changed []})` was a check
+that passes by being empty, the absence-as-health shape. `render-ai` and the
+HTML block follow the same choice. Observed on `default`, issue `7cf1077d99bb`:
+
+```
+;; My issue. Its detector decides done: it resolves on the run after
+;; (seon.issue.detect/public-without-doc (seon.db/db)) stops naming this subject.
+(my.issue/status {:seon.issue/id "7cf1077d99bb"})
+```
+
+with `[:p "Done when: (seon.issue.detect/public-without-doc (seon.db/db))"]` in
+the block, and an authored issue's block unchanged apart from a `nil` where its
+absent form would be. Regression:
+`seon.issue-generate-test/a-generated-issue-names-its-detector-and-promises-no-tests`.
+
+Verification boundary for §6 and §7: read-only MCP `jvm` evaluations on
+`default` (`seon.db/write-error` as a pure read, `status`/`render-ai`/
+`render-html` on the real generated issues) plus batch 43's named output. No
+db-backed in-process run was possible — the fixture base still predates
+`:seon.issue/detector` and was not rebuilt — and no test JVM was launched. The
+next cold gate is the proof.
