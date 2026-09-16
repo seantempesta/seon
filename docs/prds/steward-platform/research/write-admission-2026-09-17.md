@@ -306,7 +306,6 @@ reported 30 Markdown errors in historical files, including obsolete gitlink
 citations in `docs/prds/context-generation/research/agents-md-audit-2026-09-15.md`;
 the feedback was elided, so this is not a complete Markdown-clean claim.
 
-
 ## Approved implementation — final reducer report
 
 The orchestrator explicitly selected option 2 under F8, preserving F2's
@@ -492,3 +491,24 @@ platform run, default restart, scratch cluster or protected-file edit occurred.
 `git diff --check` is clean for the owned source/test files. The final probe
 passes clj-kondo: **0 errors, 0 warnings**. Source hooks report only existing
 shadowed-var/redundant-let warnings after the new local shadow names were removed.
+
+## Landed slice and cleanup
+
+Research commit: **`71a2375595c4c9dd2dcc075949cf6e8c4512649f`**.
+Implementation commit: **`35c5d2fa8`**, including the fork gitlink, `src/seon/db.clj`,
+`test/seon/db_test.clj`, this note, the retained final probe, and the resolved
+issue moved to `docs/seon/issues/archive/`. Both Seon commits and the one fork
+commit carry the requested co-author trailer. The final documentation-only
+checkpoint records this handoff.
+
+All lane-started shell commands have ended. Completed test futures were removed
+from `user`; no source definitions were reverted. The lane's
+`tmp/write-admission` scratch directory is removed after recording the results.
+No other lane's scratch, source edits, sessions or processes were cleaned.
+The orchestrator gate request is appended to
+`tmp/orchestrator/gate-requests/write-admission.txt` with the requested four
+namespaces and `--platform`. That request is a review handoff, not permission to
+claim the unexecuted canonical assertions passed. The original research's
+required-cardinality-many and retained-program-identity schema questions remain
+explicit integration checks: the final validator has no exemption that hides
+those model failures if a transaction encounters them.
