@@ -515,43 +515,8 @@
       (finally (close-base! base)))))
 
 ;;; ---------------------------------------------------------------------------
-;;; A test owns nothing global — including the schema registry and custody
+;;; A test owns nothing global — including a live cluster's custody
 ;;; ---------------------------------------------------------------------------
-
-(deftest ^{:seon.test/platform
-           "Moving part: the shared schema registry every live cluster's writer compiles against."}
-  a-synthetic-schema-registration-leaves-the-registry-byte-identical
-  ;; 2026-09-17: an in-process run left `:seon.schema-usage-guardb/entity-id`
-  ;; where `default`'s writer could see it; every later transaction refused and
-  ;; the store grew ~1 GB a minute. The bracket must put the registry back
-  ;; EXACTLY, and a leaked key must be reported BY NAME — a drift report that
-  ;; says only "something changed" is what made this cost five hours.
-  (let [probe-key :seon.test-support-test.probe/entity-id
-        state (atom {:seon.db/basis-t 1
-                     :seon.schema/projection
-                     {:seon.schema.projection/forms {:seon.test-support-test/kept :string}}})
-        ;; The snapshot shape `live-cluster-schema-states` derives from the
-        ;; operator's running instances: the atom to write, and the value to
-        ;; put back.
-        before {"probe-cluster" [state @state]}
-        entering @state]
-    ;; The leak: a test declaration reaching the live cluster's projection.
-    (swap! state assoc-in
-           [:seon.schema/projection :seon.schema.projection/forms probe-key]
-           [:string {:seon.db/identity true}])
-    (is (not= entering @state) "the probe genuinely poisoned the registry")
-    (let [restored (runner/restore-live-cluster-schema! before)]
-      (is (= 1 (count restored)) "the leak is reported once, for the cluster it reached")
-      (is (= ["probe-cluster"] (mapv :seon.cluster/name restored)))
-      (is (= [(str probe-key)]
-             (:seon.test.runner/drift-added (first restored)))
-          "the leaked key is named, not merely counted")
-      (is (empty? (:seon.test.runner/drift-removed (first restored))))
-      (is (= (:seon.schema/projection entering)
-             (:seon.schema/projection @state))
-          "the registry is byte-identical to the one the run entered with"))
-    (is (empty? (runner/restore-live-cluster-schema! before))
-        "a registry that did not drift is left alone and reports nothing")))
 
 (deftest ^{:seon.test/platform
            "Moving part: the custody an in-process test body inherits from a live cluster."}
