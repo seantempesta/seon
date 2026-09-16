@@ -531,6 +531,21 @@ context for prepl evaluation* and `98af726e` *`*repl*` not true inside prepl* �
 `bin/seon`'s prepl is a first-class seam, so note these, but tracking an alpha
 for two prepl fixes is not worth whole-program risk.
 
+### Amendment 2026-09-17 17:40Z (orchestrator, from the pin-move lane's refutation)
+
+The persistent-sorted-set row above is amended by
+[pss-pin-move-2026-09-17.md](pss-pin-move-2026-09-17.md): `8fea23b` is a
+clean fast-forward and green on its own suites (418/56,149 JVM; 252/3,209
+node), but (1) every site `5c5999e` touches is guarded by
+`measureOps != null && _measure != null`, and Datahike configures no measure
+(`reference-code/datahike/src/datahike/index/persistent_set.cljc:547`), so the
+fix is a no-op for us; and (2) the submodule is not on our classpath —
+Datahike resolves `persistent-sorted-set {:mvn/version "0.4.137"}` from Maven
+(`reference-code/datahike/deps.edn:20`), and the current gitlink is exactly
+that released tag. **Do not move the gitlink alone.** Moving the Maven
+coordinate (0.4.137 → 0.5.144) belongs to the Datahike upstream-merge lane,
+gitlink and coordinate together. HOLD.
+
 ### Recommendation per pin, and the proof a move needs
 
 | dependency | verdict | reason | proof |
