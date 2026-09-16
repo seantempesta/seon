@@ -713,19 +713,6 @@
 (def ^:dynamic ^:private *packaged-forms* nil)
 (def ^:dynamic ^:private *registration-admission-source* :core)
 
-(def ^:dynamic *verified-release-identity*
-  "Exact release digest admitted by the process launcher, or nil.
-
-   Module loading happens before process main. The operator supplies this only
-   when the release manifest contains the preprocessed projection artifact;
-   every process still verifies the same digest against cluster facts before
-   admitting executable work."
-  (let [application (System/getenv "SEON_APPLICATION_DIGEST")
-        preprocessed (System/getenv "SEON_PREPROCESSED_RELEASE_IDENTITY")]
-    (when (and (re-matches #"[0-9a-f]{64}" (or application ""))
-               (= application preprocessed))
-      application)))
-
 (defn admission-from-asserting-transaction
   "Read admission source recorded on a row asserted by `asserting-tx-eid`.
 
@@ -1389,12 +1376,11 @@
   ;; namespace has finished loading; there is no hand-maintained exception set.
   (when-let [admit (some-> (find-ns 'seon.schema.edn)
                            (ns-resolve 'admit))]
-    (when-not *verified-release-identity*
-      (admit
-       {:seon.schema/forms (assoc (candidate-forms) k v)
-        :seon.schema/identity k
-        :seon.schema/admission
-        {:seon.schema.admission/source *registration-admission-source*}})))
+    (admit
+     {:seon.schema/forms (assoc (candidate-forms) k v)
+      :seon.schema/identity k
+      :seon.schema/admission
+      {:seon.schema.admission/source *registration-admission-source*}}))
   (update-candidate-forms! assoc k v)
   k)
 
