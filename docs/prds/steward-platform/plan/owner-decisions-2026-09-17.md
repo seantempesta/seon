@@ -34,7 +34,7 @@ Part 3 says what it means.
 
 ## Part 1 — Background: the four mechanisms
 
-### 1.1 How code becomes program facts, and the two layers of code
+### 1.1 How code becomes program facts, and the two kinds of code in one process
 
 Seon indexes source into the database as **program facts**: one `:seon.fn`
 entity per function (its qualified name in `:seon.fn/sym`, its Malli contract
@@ -46,16 +46,16 @@ every form, and writes those entities to the non-executing `:current-src`
 branch. A cluster forks that branch's exact commit and so starts with the
 whole program as facts. This is "publication".
 
-There are **two layers of code**, and the difference is the whole of decision 1:
+There are **two kinds of code in one process**, and the difference is the whole of decision 1 (earlier drafts called them "layers"; that word is retired — it named nothing in Clojure, SCI or Datahike):
 
-**Layer one: first-party code in `src/`.** This is JVM Clojure. The running
+**JVM-loaded first-party code (`src/`).** This is JVM Clojure. The running
 JVM loaded it at boot with `require`. When the base SCI context is built for a
 cluster, each first-party function enters SCI by **reference** to its JVM Var —
 `sci/copy-var*` (`src/seon/sci/eval.clj:197`, `:1168`) — so when an agent calls
 `seon.db/transact!` from SCI, the JVM's function runs. If an agent evaluates a
 new `defn seon.db/transact!` in its own SCI fork, the fork's Var is shadowed
 **for that agent only**; the JVM, the other agents, and the base are unchanged.
-To change layer-one behaviour for everyone, the **file on disk** has to change
+To change JVM-loaded behaviour for everyone, the **file on disk** has to change
 and the JVM has to reload the namespace, and the program facts have to be
 re-published so the database describes the new code. The operator's command
 for that is `bin/seon init --dev default --changed PATH`, which is what the
@@ -63,7 +63,7 @@ edit hook runs after every file edit in this repository, and what a lane runs
 after a shell write. That reload-and-republish is what the notes call
 "adoption".
 
-**Layer two: agent-authored code.** When an agent evaluates a `defn` **with a
+**Agent-authored definitions (evaluated in SCI, persisted as program facts).** When an agent evaluates a `defn` **with a
 `:malli/schema` contract** in its turn, the evaluation is settled by the turn
 writer and the definition becomes a program fact in the same transaction:
 `install-evaluated-rows!` (`src/seon/sci/eval.clj:938`) installs the function,
@@ -74,11 +74,11 @@ context and the agent is told so — the exact text is at
 `src/seon/repl.clj:127-129`: `"<name> was not installed: every function needs
 a :malli/schema contract to become part of the program."` So your model —
 "if an agent wants to update a function they run defn and we index and record
-it if it evals" — **is the implemented behaviour for layer two**, persisted to
+it if it evals" — **is the implemented behaviour for agent-authored definitions**, persisted to
 the database, no disk involved.
 
-What layer two cannot do is fix layer one. Last night's issue trials assigned
-agents an issue whose defect was in `seon.sci.eval/read-arglists`, a layer-one
+What an agent-authored definition cannot do is change JVM-loaded code. Last night's issue trials assigned
+agents an issue whose defect was in `seon.sci.eval/read-arglists`, a JVM-loaded
 function. The agent could redefine it in its own fork, but that would not fix
 the platform. So the trial's opening taught the agent to edit the **file**
 (`my.edit/exact!`, `src/my/edit.clj`, a digest-guarded write to a source path)
@@ -182,8 +182,8 @@ Datahike collector, `datahike.online-gc`, not to `gc-storage!`.
 ### Decision 1 — Should agents change first-party source on disk, and under what gate?
 
 **What this is about.** Section 1.1: an agent can already extend the program
-by evaluating a `defn` with a contract; that is layer two and it persists to
-the database. It cannot fix layer-one code that way. Last night's issue trials
+by evaluating a `defn` with a contract; that is agent-authored definitions and it persists to
+the database. It cannot fix JVM-loaded code that way. Last night's issue trials
 taught issue-assigned agents to edit `src/` files and adopt. You asked what
 edits we are talking about: **these ones, and only these** — file edits to
 first-party source, made because the assigned defect lived in the JVM.
@@ -229,8 +229,8 @@ and what do issue-assigned agents do until it exists".
 
 **Options.**
 
-1. **Agent-layer only until a gated disk path is designed (recommended).**
-   Issue-assigned agents fix what they can fix by evaluation: layer-two
+1. **Agent-authored definitions only, until the gated write-back is designed (recommended).**
+   Issue-assigned agents fix what they can fix by evaluation: agent-authored
    functions, schemas, tests, and data. Issues whose defect is in `src/` are
    not assigned to agents yet; the generator can still open them and the
    detector can still close them when a human lands the fix. The design work
@@ -267,7 +267,7 @@ selection, `refresh-source!`, the detached effect arm); what does not exist
 is the ONE request that composes them with a refusal on red. That is worth
 designing properly rather than assembling overnight.
 
-**Question 1.** Do you confirm: agents stay on layer two now; `src/` defects
+**Question 1.** Do you confirm: agents stay on agent-authored definitions now; `src/` defects
 are not assigned to agents; and the next design chunk is the gated candidate
 path of option 2? If yes, what is the gate you want — reach-selected tests
 green in a candidate context, the platform tier too, or something else?
@@ -857,7 +857,7 @@ facts). Both are queries over facts we store; neither needs a roster.
 **What the task is.** For each subject, an issue-assigned agent reads the
 entity's actual data on `default`, decides what a reader needs, and authors
 a contracted `render-ai` and `render-html` pair as forms in its turn (R1:
-layer two, persisted as program facts, live for every agent). The pair is
+agent-authored definitions, persisted as program facts, live for every agent). The pair is
 the curated response; the value renderer stays the floor for what nobody has
 curated yet. The detector closes the issue when the pair is declared on the
 schema. Quality is judged by reading the rendered output on the agent page
@@ -906,7 +906,7 @@ absence-as-health shape in prose.
 
 ## Part 4 — The questions, in one place
 
-1. Agents stay on layer two now; `src/` defects are not assigned to agents;
+1. Agents stay on agent-authored definitions now; `src/` defects are not assigned to agents;
    the next design chunk is the gated candidate path. Confirm, and name the
    gate you want.
 2. Ship the namespace-picture opening with the two completing calls, `:bare`

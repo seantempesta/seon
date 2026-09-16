@@ -1258,3 +1258,11 @@ seon.schema-test seon.cluster.boot-test seon.cluster.source-test` on HEAD ≥
 `a36d55c3b` (shapes threaded once, `849bbce0b`; reported paths preserved and
 publication assertions isolated, `a36d55c3b`). Log:
 `tmp/orchestrator/gate-results/batch-98.log`.
+
+## Batch 99 (orchestrator, 2026-09-17 10:15Z) — GREEN
+
+`seon.cluster.boot-test` 35 tests / 187 assertions, 0 F 0 E, on HEAD ≥
+`ce8dbbacf`. With batch 98 (program-test, fn-test, schema-test, source-test
+green) this proves the whole cloned-base slice cold: `f1e93fd02`,
+`28f1a761e`, `a36d55c3b`, `ce8dbbacf`. Roots `run.1bLJ5O` (97) and
+`run.NXK1pO` (98) swept.
