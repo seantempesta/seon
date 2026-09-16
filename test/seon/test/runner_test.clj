@@ -71,6 +71,74 @@
            (remove-ns namespace-name)
            (test-support/delete-recursively! root)))))
 
+(deftest the-platform-tier-declares-no-destructive-drill
+  ;; The platform tier runs FIRST on every bin/test invocation. A test there
+  ;; that deletes a filesystem path deletes before the run has produced any
+  ;; evidence — on 2026-09-17 that emptied the development store
+  ;; (docs/seon/issues/a-platform-tier-test-wiped-the-checkouts-store.md).
+  ;; The owners are RESOLVED against the program graph and the reach is
+  ;; derived from :seon.fn/calls, so neither a rename nor metadata drift can
+  ;; leave the checker walking to nothing and reporting the tier healthy.
+  (let [root (doto (io/file "tmp" (str "destructive-tier-" (id/id))) .mkdirs)
+        file (io/file root "declarations.clj")
+        namespace-name (symbol (str "seon.fixture.destructive-" (id/id)))
+        support (program-fn/build-artifact
+                 {:seon.fn.file/path "test/seon/test_support.clj"
+                  :seon.fn.file/first-party-functions []})
+        operator (program-fn/build-artifact
+                  {:seon.fn.file/path "src/seon/operator.clj"
+                   :seon.fn.file/first-party-functions []})
+        known (vec (keep :seon.fn/sym (concat (:seon.fn.file/rows support)
+                                              (:seon.fn.file/rows operator))))]
+    (try
+      (spit file
+            (str "(ns " namespace-name
+                 " (:require [clojure.test :refer [deftest]] [seon.test-support :as support]))\n"
+                 "(defn- indirect [] (support/populate-published-root! \"unused\"))\n"
+                 "(deftest ^{:seon.test/platform \"probe\"} drill (indirect))\n"
+                 "(deftest ^{:seon.test/platform \"probe\"} ordinary"
+                 " (support/with-database (fn [_] nil)))\n"))
+      (load-file (str file))
+      (let [manifest {:seon.fn.manifest/artifacts
+                      [support operator
+                       (program-fn/build-artifact
+                        {:seon.fn.file/path (str file)
+                         :seon.fn.file/first-party-functions known})]}
+            selected #(vector (ns-resolve namespace-name %))
+            rows (#'runner/manifest-rows manifest)]
+        (is (= (sort @#'runner/destructive-owners)
+               (sort (map :seon.fn/sym (#'runner/destructive-owner-rows rows))))
+            "every declared destructive owner resolves to a program row")
+        (let [drifted (filterv #(not= "seon.test-support/populate-published-root!"
+                                      (:seon.fn/sym %))
+                               rows)
+              refusal (try (#'runner/destructive-owner-rows drifted)
+                           nil
+                           (catch clojure.lang.ExceptionInfo failure failure))]
+          (is (some? refusal) "a renamed owner refuses instead of emptying the set")
+          (is (= ["seon.test-support/populate-published-root!"]
+                 (:seon.test.runner/missing-destructive-owners (ex-data refusal)))))
+        (let [refusal (try (#'runner/verify-platform-tier-carries-no-destructive-drill!
+                            manifest (selected 'drill))
+                           nil
+                           (catch clojure.lang.ExceptionInfo failure failure))
+              offender (first (:seon.test.runner/destructive-platform-tests
+                               (ex-data refusal)))]
+          (is (some? refusal) "a platform test reaching a destructive owner refuses")
+          (is (= (str namespace-name "/drill") (:seon.test/sym offender)))
+          (is (= [(str namespace-name "/drill")
+                  (str namespace-name "/indirect")
+                  "seon.test-support/populate-published-root!"]
+                 (:seon.test.runner/destructive-path offender))
+              "the refusal carries the call path to the owner")
+          (is (str/includes? (ex-message refusal) (str namespace-name "/drill"))))
+        (is (nil? (#'runner/verify-platform-tier-carries-no-destructive-drill!
+                   manifest (selected 'ordinary)))
+            "an ordinary platform test is admitted"))
+      (finally
+        (remove-ns namespace-name)
+        (test-support/delete-recursively! root)))))
+
 (deftest assertion-report-uses-bounded-value-renderer
   (let [ctx (sci/init {:namespaces
                        {'large.fixture

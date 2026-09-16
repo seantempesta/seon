@@ -720,6 +720,114 @@
           :seon.fn.file/rows (filterv (complement seeds) rows)}]
         ["fixture-selection"])))
 
+;;; ---------------------------------------------------------------------------
+;;; The platform tier declares no destructive drill
+;;; ---------------------------------------------------------------------------
+
+(def ^:private destructive-owners
+  "The functions that DELETE a filesystem path they did not create.
+
+  `populate-published-root!` / `populate-published-operator-root!` replace a
+  store directory (`delete-recursively!` + clone) inside a root they were
+  handed; `cleanup-root-under-lock!` removes an operator root's whole `data/`.
+  These are the paths a root-resolution defect turns into the developer's own
+  store — one of them did, on 2026-09-17
+  (`docs/seon/issues/a-platform-tier-test-wiped-the-checkouts-store.md`).
+
+  `seon.cluster.store/create-store!` is deliberately NOT one: every
+  `open-store!` reaches it, it deletes only its own incomplete genesis, and it
+  now refuses a complete store outright — declaring it destructive would empty
+  the platform tier of every file-store fixture (42 of its tests reach it)
+  while naming nothing the incident is about. Datahike branch retirement and
+  collection are not here either: they act on a store handle the fixture
+  already holds, never on a path it can misspell.
+
+  Declared here, beside the fixture owners, and RESOLVED against the program
+  graph at `destructive-owner-rows`: a rename fails the gate instead of
+  silently emptying the set."
+  #{"seon.test-support/populate-published-root!"
+    "seon.test-support/populate-published-operator-root!"
+    "seon.operator/cleanup-root-under-lock!"})
+
+(defn- manifest-rows
+  [manifest]
+  (vec (mapcat :seon.fn.file/rows (:seon.fn.manifest/artifacts manifest))))
+
+(defn- destructive-owner-rows
+  "The program rows of every declared destructive owner, or a refusal.
+  An owner with no row means the declaration drifted from the program: the
+  checker would then walk to nothing and report the tier healthy, which is
+  the absence-of-signal class this whole issue is about."
+  [rows]
+  (let [owner-rows (filterv #(destructive-owners (:seon.fn/sym %)) rows)
+        missing (set/difference destructive-owners
+                                (set (map :seon.fn/sym owner-rows)))]
+    (when (seq missing)
+      (throw (ex-info "Tier selection cannot resolve its destructive owners."
+                      {:seon.error/kind ::missing-destructive-owners
+                       ::missing-destructive-owners (vec (sort missing))})))
+    owner-rows))
+
+(defn- destructive-call-path
+  "The shortest `:seon.fn/calls` path from one test down to a destructive
+  owner, as the evidence a refusal hands its reader."
+  [rows owner-symbols test-symbol]
+  (let [callees (into {}
+                      (map (fn [row]
+                             [(or (:seon.fn/sym row) (:seon.test/sym row))
+                              (into #{} (map second) (:seon.fn/calls row))]))
+                      rows)]
+    (loop [frontier [[test-symbol]]
+           seen #{test-symbol}]
+      (when (seq frontier)
+        (if-let [found (first (filter (comp owner-symbols peek) frontier))]
+          found
+          (let [next-frontier
+                (for [path frontier
+                      callee (get callees (peek path))
+                      :when (not (seen callee))]
+                  (conj path callee))]
+            (recur (vec next-frontier)
+                   (into seen (map peek) next-frontier))))))))
+
+(defn- verify-platform-tier-carries-no-destructive-drill!
+  "Refuse a platform tier containing a test that reaches a destructive owner.
+
+  The platform tier runs FIRST on every `bin/test` invocation, before any
+  other evidence exists, so a destructive fixture there deletes with nothing
+  yet observed — on 2026-09-17 that cost the development store and the day's
+  recorded results. The rule is enforced here, at the selection that admits
+  the tier, so metadata drift cannot bypass it: a test reaching a destructive
+  owner belongs to the bulk tier or `:seon.test/long`, under its own isolated
+  root. The refusal names each test and its call path to the owner."
+  [manifest platform-vars]
+  (when (seq platform-vars)
+    (let [rows (manifest-rows manifest)
+          owner-symbols (set (map :seon.fn/sym (destructive-owner-rows rows)))
+          destructive (tests-reaching-rows
+                       rows #(destructive-owners (:seon.fn/sym %)))
+          offenders (vec (for [test-var platform-vars
+                               :let [test-symbol (str (var-symbol test-var))]
+                               :when (destructive test-symbol)]
+                           {:seon.test/sym test-symbol
+                            ::destructive-path
+                            (or (destructive-call-path rows owner-symbols
+                                                       test-symbol)
+                                [test-symbol ::reached-through-declared-subject])}))]
+      (when (seq offenders)
+        (throw
+         (ex-info
+          (str "The platform tier declares a destructive drill: "
+               (str/join ", " (map :seon.test/sym offenders))
+               ". The platform tier runs FIRST on every invocation, so a "
+               "fixture that deletes a filesystem path runs there before any "
+               "evidence exists; declare the test :seon.test/long or leave it "
+               "to the bulk tier, under an isolated root.")
+          {:seon.error/kind ::destructive-platform-test
+           ::destructive-platform-tests offenders
+           :seon.test.runner/destructive-platform-test true})))))
+  nil)
+
 (defn- expensive-fixture-tests
   "Derive fixture demand from program calls and declared request keywords.
   with-database's optional fresh-store branch is not an unconditional demand."
@@ -3238,6 +3346,8 @@
                                 ", not reached " (count unreached))))
               platform-tasks (test-tasks all-vars platform)
               selected-tasks (test-tasks all-vars selected)
+              _ (verify-platform-tier-carries-no-destructive-drill!
+                 manifest platform)
               _ (verify-fixture-observations! manifest (concat platform selected))
               _ (announce! progress
                            (str "TIER platform " (count platform) " tests"))
