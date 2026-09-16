@@ -121,6 +121,12 @@
               [:seon.error/kind :seon.error/kind]
               [:seon.error/message :seon.error/message]
               [:seon.error/signature :seon.error/signature]
+              [:seon.error/fn {:optional true} :seon.error/fn]
+              [:seon.error/frame {:optional true} :seon.error/frame]
+              [:seon.error/exception-class {:optional true} :seon.error/exception-class]
+              [:seon.error/regressions {:optional true} :seon.error/regressions]
+              [:seon.error/issue {:optional true} :seon.error/issue]
+              [:seon.error/resolved-tx {:optional true} :seon.error/resolved-tx]
               [:seon.error/data-edn :seon.error/data-edn]
               [:seon.error/data-size
                {:optional true}
@@ -248,5 +254,11 @@
              :notification [:enum :final],
              :unclassified [:= true],
              :dropped-fault-count [:int {:min 1}],
-             :signature [:re #:seon.db{:index true} "^[0-9a-f]{64}$"],
+             :signature [:string {:min 64 :max 64 :seon.db/identity true}],
+             :fn :seon.db/ref,
+             :frame [:tuple :symbol :symbol :string :int],
+             :exception-class [:symbol {:description "Throwable class as data; throwable-class retains the historical string evidence."}],
+             :regressions [:set :seon.db/ref],
+             :issue :seon.db/ref,
+             :resolved-tx :seon.db/ref,
              :process [:string {:min 1}]}

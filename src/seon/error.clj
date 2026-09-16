@@ -98,7 +98,7 @@
   want one ruling, not three local judgements.)
 
   THE SIGNATURE IS CONTENT, NOT A TALLY. `sha-256` over
-  `[process, class, kind, top frame]` — deliberately WITHOUT the
+  the canonically ordered identity attributes (kind, Throwable class, function, frame) — deliberately WITHOUT the
   message, because a message carrying an id, a path or a timestamp
   makes every occurrence unique and recurrence undetectable, which is
   exactly the derived count the escalation rule needs
@@ -269,20 +269,22 @@
              "error was expected."))))
 
 (defn- top-frame
-  "The Throwable's own top stack frame, or nil.
-  Part of the signature because it is what separates two different bugs
-  that happen to share a class and a kind."
+  "The Throwable's first complete stack frame as Clojure data."
   [failure]
-  (when failure
-    (some-> ^Throwable failure .getStackTrace first str)))
+  (when-let [^StackTraceElement frame (when failure (first (.getStackTrace ^Throwable failure)))]
+    (when-let [file (.getFileName frame)]
+      [(symbol (.getClassName frame)) (symbol (.getMethodName frame))
+       file (.getLineNumber frame)])))
 
 (defn- signature
-  "SHA-256 over the error's own content: process, class, kind, top frame.
-  The MESSAGE IS DELIBERATELY ABSENT — a message carrying a run id, a
-  path or a timestamp would make every occurrence unique and the derived
-  recurrence count (which is the escalation rule) always one."
-  [process class-name error-kind frame]
-  (id/digest 64 [process class-name error-kind frame]))
+  "Identity of what failed, independent of process, agent, turn and message."
+  [error-kind class-name function frame]
+  (id/id (into (sorted-map)
+               (cond-> {:seon.error/kind error-kind}
+                 class-name (assoc :seon.error/throwable-class (symbol class-name))
+                 function (assoc :seon.error/fn (symbol function))
+                 frame (assoc :seon.error/frame frame)))
+         64))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Flat diagnostics — one evidence-complete construction
@@ -514,7 +516,7 @@
   "Prepare one bounded fact and its full meaningful admitted evidence."
   {:malli/schema [:=> [:cat :seon.error/prepare-request]
                   :seon.error/prepared]}
-  [{:seon.error/keys [source id at process basis-t]
+  [{:seon.error/keys [source at process basis-t]
     evidence-bytes :seon.config.error/max-evidence-bytes
     :seon.sci.admit/keys [caps]
     run-id :seon.turn/id
@@ -537,6 +539,10 @@
         projected-source (:seon.sci.admit/value admitted)
         instrument-data (projected-instrument-data projected-source)
         flow? (map? source)
+        function (or (:seon.instrument/fn instrument-data)
+                     (stack-failing-function failure))
+        frame (top-frame failure)
+        signature (signature error-kind class-name function frame)
         ;; THE SIZE IS THE SOURCE'S, NOT THE SUBSTITUTE'S. When the whole
         ;; evidence went over the storage bound the marker is a few dozen
         ;; bytes, and reporting those as `data-size` said the evidence was
@@ -549,15 +555,17 @@
                     (:seon.sci.admit/bytes marker)
                     (utf8-size full-edn))
         base-fact
-        (cond-> {:seon.error/id id
+        (cond-> {:seon.error/id signature
                  :seon.error/at at
                  :seon.error/process process
                  :seon.error/kind error-kind
-                 :seon.error/signature (signature process class-name error-kind
-                                                  (top-frame failure))
+                 :seon.error/signature signature
                  :seon.error/capped? true}
           (int? data-size) (assoc :seon.error/data-size (long data-size))
-          class-name (assoc :seon.error/throwable-class class-name)
+          class-name (assoc :seon.error/throwable-class class-name
+                            :seon.error/exception-class (symbol class-name))
+          frame (assoc :seon.error/frame frame)
+          function (assoc :seon.error/fn [:seon.fn/sym (str function)])
           (and flow? (::flow/pid source))
           (assoc :seon.error/proc (::flow/pid source))
           (and flow? (::flow/op source)) (assoc :seon.error/op (::flow/op source))
@@ -618,7 +626,7 @@
   - lifts `::flow/pid`, `::flow/op` and `::flow/cid` into `proc`, `op`
     and `cid`, each present exactly when the arriving shape carried it;
   - computes `signature` as `sha-256` over
-    `[process, class, kind, top frame]`;
+    the canonically ordered identity attributes (kind, Throwable class, function, frame);
   - emits `run` and `agent` as lookup refs (`[:seon.turn/id id]`)
     exactly when the request supplied those ids.
 
