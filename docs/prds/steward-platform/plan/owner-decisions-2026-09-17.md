@@ -837,6 +837,42 @@ gate is pending. **Question 10b:** which of the three?
 
 ---
 
+## Part 2b — Ruling added 2026-09-17 10:00Z: curated render pairs are the first agent task
+
+The owner: "One of the tasks I want agents to do is for us to find all outputs
+that do not have render functions specified for both AI and HTML and to
+ensure that the data is only high quality and is curated. So we strip away all
+the garbage and synthesize a better clearer response. We do not rely on the
+value renderer for most things. We think about what data we have in the
+system and how to display it properly."
+
+**What exists for it.** `seon.issue.detect/entity-map-without-pair`
+(`src/seon/issue/detect.clj`) already yields every declared entity map with
+no `:seon.render/ai` / `:seon.render/html` pair; the first generator run
+opened 32 such issues. A second population is function **outputs**: every
+`:seon.fn/spec` whose output names a schema key with no pair, derivable from
+the same facts (`seon.fn/output-path-report` and the projection-boundary
+facts). Both are queries over facts we store; neither needs a roster.
+
+**What the task is.** For each subject, an issue-assigned agent reads the
+entity's actual data on `default`, decides what a reader needs, and authors
+a contracted `render-ai` and `render-html` pair as forms in its turn (R1:
+layer two, persisted as program facts, live for every agent). The pair is
+the curated response; the value renderer stays the floor for what nobody has
+curated yet. The detector closes the issue when the pair is declared on the
+schema. Quality is judged by reading the rendered output on the agent page
+and the namespace page, per the standing order that ugly output is a defect.
+
+**What it depends on, and therefore why these two rulings come first:**
+decision 4 (start admits a detector as the done-query, otherwise no generated
+issue can be assigned) and decision 9 (no render fallback, so every uncurated
+attribute shows as the generic printer and is findable, instead of borrowing
+a neighbour's form). Decision 2's opening then teaches the agent
+`(dir seon.render)` and the schema declaration form rather than `my.edit`.
+
+**Question 11.** Confirm decisions 4 and 9 as recommended so this task can
+start, and confirm the scope: entity maps first, function outputs second?
+
 ## Part 3 — Vocabulary corrections
 
 The law (AGENTS.md §3): Clojure's name, else the dependency's, else coin once
