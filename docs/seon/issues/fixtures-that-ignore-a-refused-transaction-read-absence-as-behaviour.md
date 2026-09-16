@@ -71,3 +71,27 @@ complete in-process tally are in
 
 Related: `write-admission-validated-partial-maps-against-every-schema`
 (the admission change), the transcript second-pass landing note.
+
+## Status 2026-09-17: the sweep is finished, the detector is the only half left
+
+The class hit an eighth time after the choke point landed
+(`seon.render-coverage-test` seeded a program row without
+`:seon.schema.admission/source`, `ac95db78a`), because the first pass converted
+only the namespaces its three triages had visited. The whole tree has now been
+enumerated structurally — a rewrite-clj parse that propagates a
+value-is-discarded flag, not a regex — and **588 discarding fixture writes in 96
+files** now call `seon.test-support/transacted!`. `seon.effect-test`'s and
+`seon.edit-test`'s own checked wrappers were folded into it, and
+`seon.flow.kill-child` (the Flow process-death child JVM, the one instance of
+the class outside a fixture) now names a refusal instead of leaving the parent
+to read a missing datom.
+
+**Baseline for the detector: outside the four files another lane holds, ZERO
+raw discarding `seon.db/transact!` sites remain in `test/`.** The 16 that
+remain are all in `test/seon/render_simplification_test.clj` (15) and
+`test/seon/render_coverage_test.clj` (1). Seven raw `datahike.api/transact`
+fixture writes are deliberate admission bypasses and throw on failure, so they
+are not this class. Measurements, the classification rules the detector needs
+(a textual rule reports 310 false positives), and the in-process tally are in
+[fixture-write-sweep-2026-09-17.md](../../prds/steward-platform/research/fixture-write-sweep-2026-09-17.md).
+
