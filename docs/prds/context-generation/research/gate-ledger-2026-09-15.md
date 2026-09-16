@@ -1175,3 +1175,31 @@ Open: why a freshly forked cluster records no `:seon.source/commit-id`
 (that is what makes the first adoption reload all 107 namespaces). Landing
 note `cohosted-adoption-scalar-rows-2026-09-16.md` (`0130957f5`).
 Re-gate as batch 88.
+
+### 2026-09-16 10:05 — incremental-source-refresh's 270 s bound: a cloned artifact names a checkout that is gone
+
+Not `19874b71b` (refuted: it touches no path identity; the same two
+assertion failures are recorded in batches 68, 71, 74, 79). The worker was
+healthy and inside a COMPLETE publication: 657 new segments in one minute.
+`seon.test-support/populate-published-root!` clones the base into the test
+root, but the artifact's `:seon.source/file-digests` and
+`:seon.fn.manifest/roots` are keyed by the BASE checkout's absolute paths
+(2048/2048 under `target/test-published-bases/…/checkout/`, 0 under the
+worker), so `changed-source-paths` reads every base path as `:deleted` and
+every worker path as `:added`; all 337 files are analysed, discarded as
+structural, then analysed again by `full-source-refresh!`. A path spelled
+differently read as a deleted file — absence-as-health. The test's
+`:seon.test/long` reason ("complete incremental publication dominates") is
+a record of this defect; the expectation (`built? false`) is correct.
+Growth since batch 79 came from `9cc181289` moving derivations off the
+defonce: `packaged-forms` 14.9 ms/call, re-resolved on every
+`build-artifact` (≈5 s across 337 analyses); the new `supplied-shapes` memo
+is bypassed by its own per-row callers (`program/shape`, `canonical-row`,
+`changed-attributes`, `seon.fn/artifact`). Root fix: artifact path identity
+relative to its root (then the clone is a no-op); interim: an artifact
+whose manifest roots differ from the publication's roots is stale by
+construction in `incremental-source-refresh!`. Issue
+`a-cloned-published-base-names-a-checkout-that-is-gone.md` (blocker);
+landing note `incremental-refresh-exchange-bound-2026-09-16.md`
+(`86cda05b6`). Re-gate when fixed: boot-test, fn-test, program-test +
+platform.
