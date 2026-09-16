@@ -809,3 +809,18 @@ orders those calls. Settlement and writes 253 → 53 ms warm, derivations
 Prompt: derivation correct, expectation stale — an open turn with no attempt
 and no reply spends nothing (PRD §14) → "turns left: 100 of 100". No adopted
 proof (adoption refused on a foreign renamed test identity); batch 62.
+
+### 2026-09-17 07:30Z — exact-source typed refusal landed (`50a7110b7`)
+
+Cause: `source-contexts` (`fn.clj:138`) captures each file's bytes while
+`analyzer/analyze` re-reads the same paths (`fn.clj:1622`, `:1526`), so rows
+and columns describe a different read than the text they slice — two reads
+of one path (the pre-read class). The span read is now total: a span past
+the captured text refuses with `:seon.fn/source-changed-during-analysis`
+naming path, span, captured length and both digests; a fitting span reads
+the captured source unchanged. Not yet adopted (adoption refuses for
+everyone until the absent-identity extension lands) — batch 62 gates
+`seon.fn-test` cold. Follow-ups: analyze FROM the captured text so there is
+one read (sibling issue `source-analysis-can-slice-changing-files-with-
+stale-offsets.md` open); adoption's retry predicate (`cluster.clj:2244`)
+should also key on the analysis-time refusal (steward's file).
