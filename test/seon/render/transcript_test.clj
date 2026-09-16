@@ -975,11 +975,29 @@
                 :seon.cluster.eval/output content))])))
 
 (defn- expected-order
-  [events]
+  "The order `entry-order` puts these events in, stated independently.
+
+  A MESSAGE HAS NO INSTANT OF ITS OWN. The generator picks one for every
+  event, but the transcript orders a message by the instant of the
+  TRANSACTION that wrote it (`message-order-facts`,
+  `src/seon/render/transcript.clj:259`; `entry-order`, `:341`), and this
+  property writes every generated row in ONE transaction — so all its
+  messages share one instant and the generated offset never reaches them.
+  Declaring an order from that offset promised something the rule does not
+  make. `message-at` is the instant the fixture actually observed.
+
+  The rule is total, and this mirrors it: instant, then kind rank — a
+  message precedes an evaluation at the same instant — then the last
+  discriminator each kind carries. Among messages of one transaction that is
+  entity id, which follows the order the rows were written in, so
+  `source-index` stands for it. Among evaluations the turns are written in
+  the same one transaction and every ordinal here is 0, so it is the
+  evaluation id, compared as the string `entry-order` compares."
+  [events message-at]
   (sort-by
    (fn [{:keys [kind id source-index] event-at :at}]
-     [(.getTime ^java.util.Date event-at)
-      (case kind :message 0 :eval 1)
+     [(.getTime ^java.util.Date (if (= :message kind) message-at event-at))
+      (case kind :message 0 :eval 3)
       (if (= :message kind) source-index id)])
    events))
 
@@ -1001,15 +1019,19 @@
                                 {:seon.test/sym "generated-target"
                                  :seon.schema.admission/source :core}]
                                (mapcat generated-rows)
-                               events)]
-                (transacted! connection rows)
+                               events)
+                    ;; EVERY GENERATED MESSAGE IS ORDERED BY THIS INSTANT,
+                    ;; not by the one its event declared: they all ride this
+                    ;; single transaction.
+                    message-at (transaction-instant
+                                (transacted! connection rows))]
                 (let [request (unit connection)
                       ai (transcript/render-ai request)
                       html-value (transcript/render-html request)
                       html (hiccup/->string html-value)
                       html-rows (html-entries html-value)
                       visible-ids (mapv :id html-rows)
-                      ordered-ids (mapv :id (expected-order events))
+                      ordered-ids (mapv :id (expected-order events message-at))
                       elided (html-elided html-value)
                       visible-id-set (set visible-ids)
                       events-by-id (into {} (map (juxt :id identity)) events)

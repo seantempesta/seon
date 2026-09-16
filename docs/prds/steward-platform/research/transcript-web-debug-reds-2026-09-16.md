@@ -333,3 +333,72 @@ evaluation still pullable — is what the test asserts now.
   (`logs/current-source-failure.log`, "Publication did not finish within its
   declared bound"), so `agent-history`'s wrapper on `default` is still armed
   from the old declaration.
+
+---
+
+# Third pass — batch 39 (HEAD 3c446a558): the generative survivor
+
+Batch 39 proved the second pass cold: `seon.render.web-debug-test` GREEN,
+`seon.render.transcript-test` 13 reds → 1. The survivor is
+`every-generated-history-is-ordered-and-total`, shrunk by test.check to two
+same-instant inbound messages, `[[:message-in 1 "x"] [:message-in 0 "x"]]`,
+seed `2026073104`.
+
+## The order rule is total; the generator's declared order was not
+
+The ruling — the agent's history is chronological, and a message orders by its
+transaction — is implemented by `entry-order`
+(`src/seon/render/transcript.clj:341`), whose key ends in a discriminator no
+two entries share:
+
+```
+:message [1 at 0 <transaction> <ordinal> <entity id>]
+:eval    [1 at 3 <run opened at> <ordinal> <evaluation id>]
+```
+
+So there is no missing tie-break to add at the owner. What was wrong is the
+test's independent statement of that order. `expected-order` gave a MESSAGE
+the instant the generator picked for its event — but a message has no instant
+of its own: `message-order-facts` (`src/seon/render/transcript.clj:259`) reads
+its TRANSACTION's `:db/txInstant`, and this property writes every generated
+row in ONE transaction. Every generated message therefore shares one instant
+and the generated offset never reaches it.
+
+The shrunk case is exactly that, minimally: event 0 declares offset 1, event 1
+declares offset 0, so the generator promised event-1 first; the mechanism sees
+one instant for both and breaks the tie by entity id, which follows the order
+the rows were written — event-0 first. The generator asserted an order the
+rule never made. This is the same defect the populated-history fixture had in
+the second pass (G), reached from the other direction.
+
+`expected-order` now takes the instant the fixture OBSERVED and mirrors
+`entry-order` exactly: instant, then kind rank (a message precedes an
+evaluation at the same instant — 0 and 3, the rule's own ranks, where the test
+previously used 0 and 1), then each kind's last discriminator — `source-index`
+standing for entity id among messages of one transaction, and the evaluation
+id compared as the string `entry-order` compares.
+
+## In-process verdict
+
+Authorized single run on `default` (pid 45917, base realized), reloaded
+through `seon.test`'s own loader, on a daemon thread, `:seon.test/remaining-ms
+100000`:
+
+```
+seon.render.transcript-test/every-generated-history-is-ordered-and-total
+  pass 41   fail 0   error 0
+```
+
+Same seed (`2026073104`) that shrank in batch 39. This is the first db-backed
+in-process verdict this lane has been able to record.
+
+## Observed while verifying, filed not fixed
+
+Every render of a transcript containing a message with `:seon.message/about`
+writes one Datahike `:error` line per identity attribute the value does NOT
+belong to — hundreds of lines across this one test, and in every gate log that
+touches the namespace. `about-identities` probes existence with a pull per
+attribute (`src/seon/render/transcript.clj:211`); the misses are the point of
+the probe, and Datahike logs each one. A log that prints `:error` during
+healthy rendering is the standing order's logging twin. Issue:
+[about-identity-resolution-logs-an-error-per-non-matching-attribute](../../../seon/issues/about-identity-resolution-logs-an-error-per-non-matching-attribute.md).
