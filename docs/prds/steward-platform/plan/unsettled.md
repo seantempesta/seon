@@ -1014,6 +1014,31 @@ seon.turn-loop-test`) and 111 (detectors + S11: `seon.issue.detect-test
 seon.issue-generate-test seon.cluster.prompt-test
 seon.render.transcript-run-test seon.concurrency-independence-test
 seon.render.web-debug-test seon.repl-test`) launched, staggered 100 s.
+**Batch 110 RED (22:20Z):** 67 tests, 38F/4E. 33 reds are ONE class: archived
+issues retain identity and `seon.issue/adopt-tx` leaves `#:seon.issue{:id …}`
+alone, refused for `:seon.issue/title` — the retired-identity class on a
+second entity kind. Owner ruled retirement-is-a-fact (Option B) → lane
+`retirement-is-a-fact` launched, design first, covering every kind
+(fn/test/ns/schema/issue), one reset batched. Two reds are the
+`:seon.eval/origin` pulled-ref class (lane in flight). Remainder (stale
+"ended without my.turn/complete" assertion; two citation-resolver tests;
+`started-issue-tests-retain-historical-authority`; `success-test`) → Opus
+triage agent, note `batch-110-triage-2026-09-16.md`.
+
+**Batch 111 RED (22:30Z):** 54 tests, 171F/3E. S11's own regressions fail
+cold: `seon.cluster.prompt/select` emits an elision missing
+`:seon.render.profile/id` (three errors); the thinking block renders 0;
+`render-run-selects-only-the-requested-run` AI render is ""; 154 assertions
+of `n-agents-fold-independently-on-one-live-cluster` (begun-before-first-close
+is `#{}`: the agents never ran); one detector opening no longer names its
+detector. S11 lane to be resumed with these lines.
+
+**Also launched 22:15Z (owner: "launch fixes for all known defects while we
+plan"):** `schema-key-audit` (astra, table feeding the one reset),
+`test-preparation-costs` (astra: worker base priming, cold base publication
+reuse, coordinator graph rebuild), Opus `platform-tier-is-a-fact` (D1 + the
+filename `find` D2).
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
