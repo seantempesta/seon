@@ -41,3 +41,28 @@ Acceptance: establish the fixture's intended turn lifecycle through bounded
 events before submitting; repeatedly run it in the normal pooled gate with
 the same complete program and armed contracts. Do not accept nil as a turn
 ID, add sleeps, or weaken the one-open-turn fence.
+
+## 2026-09-17 — it is not a pooled-worker race; it reproduces in process
+
+Batch 80 ran this namespace cold for the first time since then:
+`virtual-loop-end-to-end` returned 10 F (root `tmp/test-runs/run.MNJEDt`,
+extract `tmp/orchestrator/gate-results/batch-80/named.md`). Measured in
+process on `default` (pid 88182), one test at a time:
+
+| fixture loaded | result |
+|---|---|
+| HEAD (`5553725d3`) | 223 pass, 6 fail, 2 error |
+| the pre-change fixture (`5553725d3~1`, loaded over the ns) | 223 pass, 6 fail, 2 error — the SAME six assertions |
+
+So the red is deterministic, not pooled-parallel, and it predates the
+juniper-installer change (the baseline run proves it by loading the previous
+fixture bytes into the same JVM and getting a byte-identical failure set).
+
+The six are two root causes:
+
+- `expected: (= basis (db/basis-t @connection))` → `(not (= …971 …972))`,
+  `(nil? (:seon.turn/id refresh))` → a real id, `(every? :unchanged …)`, and
+  two extra evaluation ids appended — the family this note already describes,
+  with `agent-already-running` refusals logged alongside.
+- `my.agents.juniper/order-total` = `[0 1 0]` — a DIFFERENT cause, filed as
+  `an-agents-own-test-loses-its-clusters-custody`.

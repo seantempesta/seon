@@ -136,6 +136,48 @@ changed and was restored`, and none reported `::snapshot-schema-keys` drift.
   `b1` Bea 100, `c1` Cy 40) are queryable facts on the cluster.
 - `default` was never stopped, reset or reforked; no test JVM was launched.
 
+## Batch 80's `virtual-loop-end-to-end` red is NOT this change
+
+The coordinator routed batch 80's 10 F back to this lane. Attributed from the
+blocks, then reproduced in process on `default` (pid 88182), one test at a
+time:
+
+| fixture loaded in the JVM | result |
+|---|---|
+| HEAD (`5553725d3`) | 223 pass, 6 fail, 2 error |
+| the pre-change fixture (`5553725d3~1`, `load-file`d over the namespace) | 223 pass, 6 fail, 2 error — the SAME six `expected:` lines |
+
+The baseline run is the falsification: the previous fixture bytes in the same
+JVM produce a byte-identical failure set. Reading confirms why —
+`virtual-loop-end-to-end` calls `fixture/install!`, and `declared!` is called
+only from `install-running!`; the only other change on that path is
+`schema-source`, proven byte-identical to the previous string.
+
+The red is two causes, neither this lane's and neither the dropped-declaration
+blocker (no schema refusal appears anywhere in the blocks):
+
+1. `my.agents.juniper/order-total` = `[0 1 0]`, its assertion failing with
+   `{:seon.db/missing-connection-binding true, … :binding seon.db/*conn*}`.
+   The agent's own `deftest`, run through `(my.test/run)` inside an agent
+   evaluation, reaches `seon.test.runner/run-var!`, which now executes every
+   test Var inside `seon.db/call-without-custody`
+   (`src/seon/test/runner.clj:600`). Correct for a host test in process;
+   wrong for a test an agent runs in its own cluster, where the elided arity
+   is the documented affordance. Filed as
+   [an-agents-own-test-loses-its-clusters-custody](../../../seon/issues/an-agents-own-test-loses-its-clusters-custody.md)
+   (blocker; owner `src/seon/test/runner.clj`, protected for this lane).
+2. The other five — basis advanced by one, a turn id where `nil` was
+   expected, two extra evaluations, `:unchanged` violated — are the already
+   open
+   [virtual-loop-fixture-submission-can-race-an-armed-turn](../../../seon/issues/virtual-loop-fixture-submission-can-race-an-armed-turn.md),
+   filed 2026-09-15. That note is updated with today's measurement: it is not
+   pooled-parallel, it reproduces deterministically in process, and it
+   predates this change.
+
+Cold showed 10 F against 6 in process; the extra four are repeats of the same
+two families (the stored-text comparison and a second pass through the
+`:unchanged` / turn-id pair).
+
 ## Verification boundary
 
 - Proven: the claim that the scenario's declarations are facts, on the
@@ -143,7 +185,8 @@ changed and was restored`, and none reported `::snapshot-schema-keys` drift.
   both; the drift check quiet after a live reseed.
 - NOT proven here: the isolated gate. Request at
   `tmp/orchestrator/gate-requests/juniper-installer.txt`.
-- NOT this lane's: the projection drop. It is a blocker at a protected owner
+- NOT this lane's: batch 80's `virtual-loop-end-to-end` red, refuted above
+  with a baseline run, and the projection drop. It is a blocker at a protected owner
   (`src/seon/sci/eval.clj`) and the regression that would fail on it is
   deliberately NOT in this commit — a test asserting a known-open defect's
   presence is worse than the issue that names it.
