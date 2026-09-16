@@ -74,3 +74,18 @@ Measured by the lane, one read-only evaluation on default: bulk selection
 8.877 s → 8.449 s with the union; default then held zero
 `:seon.fn/references` facts, so the populated cost is measured by batch 106
 on the converged base. The lane is stopped; gate 106 is next.
+
+## Addendum — `d639d5509` reviewed (orchestrator, 2026-09-16 21:40Z)
+
+Read: the diff to `src/seon/fn.clj` (the declared-reference rules split out,
+the owner-preserving clause) and the regression added to
+`declared-function-values-contribute-edges-without-arities`. Batch 106's one
+call-graph red was the schema-declared dispatch join: a declaration that says
+"this attribute references a function" was joined through `[?function
+:seon.fn/keywords ?attribute]`, which made every function that merely reads
+the attribute a caller of every handler stored under it. The fix keeps the
+known owner when the holder is itself a function and falls back to the
+keyword-reader join only for holders that are not functions (config rows). The
+fixture selection went from 1,581 tests to the one that reaches the handler,
+with each extra test's path recorded in the retained trace. Calls and
+references stay unioned. **Approved.** Gate 106 reruns on the next HEAD.
