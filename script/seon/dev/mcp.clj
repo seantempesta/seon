@@ -116,7 +116,10 @@
 (defn- cluster-layer-form
   []
   (pr-str
-   '(into
+   '(do
+      (seon.cluster/project-next-prepl-value!
+       {:seon.dev.mcp/read-only? true :seon.dev.mcp/project? false})
+      (into
      {}
      (map
       (fn [[cluster-name instance]]
@@ -125,7 +128,7 @@
           (and (map? instance)
                (:seon.sci.eval/ctx instance)
                (:seon.turn.loop/cluster instance)))])
-      @@(ns-resolve 'seon.cluster (symbol "running-instances"))))))
+      @@(ns-resolve 'seon.cluster (symbol "running-instances")))))))
 
 (defn- cluster-layer-states
   [observations]
@@ -586,21 +589,23 @@
     mode))
 
 (defn- jvm-evaluation-form
-  [form namespace-symbol]
+  [form namespace-symbol read-only?]
   (pr-str
    (list 'do
          (list (list 'requiring-resolve
                      (list 'quote
-                           'seon.cluster/project-next-prepl-value!)))
+                           'seon.cluster/project-next-prepl-value!))
+               {:seon.dev.mcp/read-only? read-only?})
          (list 'in-ns (list 'quote namespace-symbol))
          (list 'clojure.core/refer (list 'quote 'clojure.core))
          (list 'clojure.core/eval (list 'quote form)))))
 
 (defn- sci-evaluation-form
-  [source cluster namespace-symbol]
+  [source cluster namespace-symbol read-only?]
   (pr-str
    `(do
-      ((requiring-resolve 'seon.cluster/project-next-prepl-value!) true)
+      ((requiring-resolve 'seon.cluster/project-next-prepl-value!)
+       {:seon.dev.mcp/evaluation? true :seon.dev.mcp/read-only? ~read-only?})
       (let [instances# @@(ns-resolve 'seon.cluster
                                    (symbol "running-instances"))
           instance# (get instances# ~cluster)
@@ -629,10 +634,10 @@
           (:seon.config/on-core-error cluster#)}))))))
 
 (defn- remote-evaluation-form
-  [{:seon.dev.mcp/keys [form source]} mode cluster namespace-symbol]
+  [{:seon.dev.mcp/keys [form source read-only?]} mode cluster namespace-symbol]
   (case mode
-    "jvm" (jvm-evaluation-form form namespace-symbol)
-    "sci" (sci-evaluation-form source cluster namespace-symbol)))
+    "jvm" (jvm-evaluation-form form namespace-symbol (true? read-only?))
+    "sci" (sci-evaluation-form source cluster namespace-symbol (true? read-only?))))
 
 (defn- execute-clj-eval
   [{:keys [code root cluster mode session_id timeout_ms] :as request}]
@@ -665,7 +670,8 @@
         (try
           (let [remote-form
               (remote-evaluation-form
-               (:seon.dev.mcp/evaluation validation)
+               (assoc (:seon.dev.mcp/evaluation validation)
+                      :seon.dev.mcp/read-only? (true? (:read_only request)))
                mode cluster namespace-symbol)
               {:keys [writer endpoint] :as session}
               (current-clj-session! root cluster session-id)]
@@ -742,7 +748,8 @@
             (pr-str
              `(do
                 ((requiring-resolve
-                  'seon.cluster/project-next-prepl-value!))
+                  'seon.cluster/project-next-prepl-value!)
+                 {:seon.dev.mcp/read-only? true})
                 ((requiring-resolve
                   'seon.cluster/mcp-runtime-observation)
                  ~cluster)))
@@ -820,7 +827,8 @@
          root cluster
          (pr-str
           `(do
-             ((requiring-resolve 'seon.cluster/project-next-prepl-value!))
+             ((requiring-resolve 'seon.cluster/project-next-prepl-value!)
+              {:seon.dev.mcp/read-only? true})
              ((requiring-resolve 'seon.cluster/mcp-get-value)
               ~cluster ~content-digest ~path ~offset)))
          timeout-ms)
@@ -844,6 +852,7 @@
                                :root {:type "string" :description "Operator root path. Defaults to the repository root used by bin/seon."}
                                :cluster {:type "string" :description "Cluster name within root. Defaults to this MCP server's own cluster; ambiguous live matches fail with their candidate list."}
                                :namespace {:type "string" :description "Clojure namespace for either mode. Defaults to user; a missing JVM namespace is created and refers clojure.core."}
+                               :read_only {:type "boolean" :description "Declare that this evaluation changes no runtime code or mutable state; preserves retained pages. Omitted or false conservatively invalidates them."}
                                :mode {:type "string" :enum ["jvm" "sci"] :description "jvm evaluates in the host io-prepl; sci evaluates through the cluster's shared SCI ctx. Defaults to jvm."}
                                :session_id {:type "string" :description "Stateful io-prepl session id. Defaults to 'default'."}
                                :timeout_ms {:type "integer" :minimum 1 :maximum 120000}}

@@ -8,6 +8,15 @@ created: 2026-09-15
 
 # The first debug page after an adoption takes eighteen seconds
 
+## 2026-09-16 cold-page follow-up
+
+The [cold-page-kills landing](../../prds/context-generation/research/cold-page-kills-2026-09-16.md)
+records explicit read-only intent across MCP evaluation and its three discovery
+observations. Live retained calls now remain **11 → 11**. The armed canonical
+page regression passed **12 / 0 / 0**, result run **68082**. Keep this issue open:
+the two-minute root measurement still included an adoption and cost **0.667470 s
+cold / 0.139521 s warm**; history dependency precision is the next slice.
+
 ## Problem
 
 Default, 2026-09-15 22:05Z, right after the hook adopted `c395610db`:

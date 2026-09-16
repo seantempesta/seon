@@ -1,12 +1,15 @@
 (ns seon.render.web-context-test
   "Callers derive with shared evidence while the tab delta proc is paused."
-  (:require [clojure.core.async.flow :as flow]
+  (:require [clojure.edn]
+            [clojure.core.async.flow :as flow]
             [clojure.string :as str]
             [clojure.test :refer [deftest is]]
+            [seon.cluster]
             [seon.config :as config]
             [seon.db :as db]
             [seon.render :as render]
             [seon.render.walk :as walk]
+            [seon.render.web]
             [seon.render.web-test :as web-test]
             [seon.sci.kernel :as kernel]
             [seon.test-support :as support])
@@ -194,3 +197,49 @@
                               [:seon.message/id "identity-cache-message"]))))
              (is (= initial @calls)
                  "reverse concern changes are not inputs to the scalar identity pair"))))))))
+
+(clojure.test/deftest read-only-mcp-return-preserves-root-page
+  (#'seon.render.web-test/with-server
+   (fn [connection server context]
+     (let [cache (seon.render/shared-cache (:ctx context))
+           calls (atom 0)
+           roots (atom 0)
+           acquire @#'seon.render.web/acquire-root
+           invoke seon.sci.kernel/invoke
+           channels [(:runtime-eval-channel context)]
+           retained-count #(reduce + (map count (vals (:seon.render.web/calls @cache))))]
+       (with-redefs [seon.render.web/acquire-root
+                     (fn [request call-id] (swap! roots inc) (acquire request call-id))
+                     seon.sci.kernel/invoke
+                     (fn [request] (swap! calls inc) (invoke request))]
+         (let [before (#'seon.render.web-test/fetch server "/agent/root")
+               count-before (retained-count)
+               invokes-before @calls
+               roots-before @roots
+               basis (seon.db/basis-t (seon.db/db connection))
+               _ (seon.cluster/project-next-prepl-value! {:seon.dev.mcp/read-only? true})
+               terminal (seon.cluster/mcp-valf
+                         "cold-page-mcp-test" (seon.config/defaults)
+                         (seon.db/q '[:find ?id . :where [_ :seon.agent/id ?id]]
+                                    (seon.db/db connection))
+                         false channels)]
+           (clojure.test/is (= 200 (.statusCode before)))
+           (clojure.test/is (pos? count-before))
+           (clojure.test/is (pos? invokes-before) "the page used real SCI")
+           (clojure.test/is (= "root" (:seon.dev.mcp/value (clojure.edn/read-string terminal)))
+                           "the synchronous return crossed its notification boundary")
+           (clojure.test/is (= count-before (retained-count)))
+           (clojure.test/is (= basis (seon.db/basis-t (seon.db/db connection))))
+           (let [after (#'seon.render.web-test/fetch server "/agent/root")]
+             (clojure.test/is (= (.body before) (.body after)))
+             (clojure.test/is (= invokes-before @calls))
+             (clojure.test/is (= roots-before @roots) "zero root reacquisitions"))
+           (seon.cluster/project-next-prepl-value!)
+           (seon.cluster/mcp-valf "cold-page-mcp-test" (seon.config/defaults) 3 false channels)
+           (seon.test-support/await-event!
+            cache [:unspecified-mcp-return-invalidates]
+            #(empty? (:seon.render.web/calls %)))
+           (clojure.test/is (zero? (retained-count)))
+           (#'seon.render.web-test/fetch server "/agent/root")
+           (clojure.test/is (> @roots roots-before)
+                           "unspecified evaluation still reacquires the page")))))))

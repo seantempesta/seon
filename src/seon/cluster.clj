@@ -235,13 +235,21 @@
   (ThreadLocal.))
 
 (defn project-next-prepl-value!
-  "Mark this io-prepl connection's next returned value for MCP projection."
+  "Mark the next PREPL return with explicit projection and read-only intent.
+  Unspecified intent conservatively announces possible runtime changes."
   {:malli/schema [:function
                   [:=> [:cat] :nil]
-                  [:=> [:cat :boolean] :nil]]}
+                  [:=> [:cat [:or :boolean
+                              [:map
+                               [:seon.dev.mcp/evaluation? {:optional true} :boolean]
+                               [:seon.dev.mcp/project? {:optional true} :boolean]
+                               [:seon.dev.mcp/read-only? {:optional true} :boolean]]]] :nil]]}
   ([] (project-next-prepl-value! false))
-  ([evaluation?]
-   (.set mcp-projection (if evaluation? :evaluation :value))
+  ([request]
+   (.set mcp-projection
+         (if (map? request)
+           request
+           {:seon.dev.mcp/evaluation? request}))
    nil))
 
 (defn- consume-mcp-projection!
@@ -440,22 +448,27 @@
   {:malli/schema
    [:function
     [:=> [:cat :seon.boot/cluster-name :seon.config/effective [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Clojure's prepl hands the projection arbitrary evaluation results, including live JVM objects and nil.", :gen/elements [nil false 0 "" :k [] {}]}]] :string]
-    [:=> [:cat :seon.boot/cluster-name :seon.config/effective [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Clojure's prepl hands the projection arbitrary evaluation results, including live JVM objects and nil.", :gen/elements [nil false 0 "" :k [] {}]}] :boolean] :string]]}
+    [:=> [:cat :seon.boot/cluster-name :seon.config/effective [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Clojure's prepl hands the projection arbitrary evaluation results, including live JVM objects and nil.", :gen/elements [nil false 0 "" :k [] {}]}] :boolean] :string]
+    [:=> [:cat :seon.boot/cluster-name :seon.config/effective [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Clojure's prepl hands the projection arbitrary evaluation results, including live JVM objects and nil.", :gen/elements [nil false 0 "" :k [] {}]}] :boolean [:sequential :seon.flow/channel]] :string]]}
   ([cluster-name bootstrap-effective value]
    (mcp-valf cluster-name bootstrap-effective value false))
   ([cluster-name bootstrap-effective value exception?]
+   (mcp-valf cluster-name bootstrap-effective value exception?
+             (keep #(get-in % [:seon.render.web/view
+                               :seon.render.web/runtime-eval-channel])
+                   (vals @running-instances))))
+  ([cluster-name bootstrap-effective value exception? runtime-eval-channels]
    (let [projection (consume-mcp-projection!)]
      (try
        ;; A host evaluation may replace Vars used by any cohosted cluster.
-       (doseq [instance (vals @running-instances)
-               :let [view (:seon.render.web/view instance)]
-               :when (:seon.render.web/runtime-eval-channel view)]
-         (async/offer! (:seon.render.web/runtime-eval-channel view)
-                       :seon.render.web/runtime-eval))
+       (when-not (:seon.dev.mcp/read-only? projection)
+         (doseq [channel runtime-eval-channels]
+           (async/offer! channel
+                         :seon.render.web/runtime-eval)))
        (admit/canonical-edn
-        (if projection
+        (if (and projection (get projection :seon.dev.mcp/project? true))
           (mcp-project cluster-name bootstrap-effective value
-                       (= :evaluation projection) exception?)
+                       (true? (:seon.dev.mcp/evaluation? projection)) exception?)
           value))
        (catch Throwable _
          ;; Fixed semantic data never re-enters admission or a failed producer.

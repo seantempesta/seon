@@ -585,6 +585,8 @@
                'seon.cluster
                'seon.cluster.process
                'seon.cluster.registry)
+      (when-let [mark# (ns-resolve 'seon.cluster 'project-next-prepl-value!)]
+        (mark# {:seon.dev.mcp/read-only? true :seon.dev.mcp/project? false}))
       (let [instances#
             @@(ns-resolve 'seon.cluster (symbol "running-instances"))
             configured-cluster-root#

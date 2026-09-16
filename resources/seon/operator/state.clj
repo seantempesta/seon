@@ -1032,7 +1032,16 @@
                           (java.io.InputStreamReader.
                            (.getInputStream socket)
                            java.nio.charset.StandardCharsets/UTF_8))]
-        (.write writer ":seon.operator/process-census\n")
+        (.write writer
+                (str
+                 (pr-str
+                  '(do
+                     (when-let [cluster (find-ns 'seon.cluster)]
+                       (when-let [mark (ns-resolve cluster 'project-next-prepl-value!)]
+                         (mark {:seon.dev.mcp/read-only? true
+                                :seon.dev.mcp/project? false})))
+                     :seon.operator/process-census))
+                 "\n"))
         (.flush writer)
         (loop []
           (let [event (edn/read {:eof ::eof} reader)]

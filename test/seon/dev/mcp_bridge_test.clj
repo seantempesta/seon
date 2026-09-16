@@ -3,6 +3,9 @@
             [clojure.core.server :as core.server]
             [clojure.java.io :as io]
             [clojure.string :as str]
+            [seon.cluster]
+            [seon.config]
+            [seon.test-support]
             [clojure.test :refer [deftest is testing]])
   (:import [java.io PushbackReader]
            [java.util.concurrent TimeUnit TimeoutException]))
@@ -727,3 +730,48 @@
         (delete-known-files! known-paths)))
     (is (not (.exists fixture-root))
         "the parent-watchdog fixture root was deleted after exact child exit")))
+
+(clojure.test/deftest read-only-intent-crosses-evaluation-and-discovery-forms
+  (require 'seon.fresh-operator)
+  (let [remote (bridge-var 'remote-evaluation-form)
+        consume (ns-resolve 'seon.cluster 'consume-mcp-projection!)
+        mark seon.cluster/project-next-prepl-value!]
+    (doseq [mode ["jvm" "sci"] intent [true false]
+            :let [source (remote {:seon.dev.mcp/form '(+ 1 2)
+                                  :seon.dev.mcp/source "(+ 1 2)"
+                                  :seon.dev.mcp/read-only? intent}
+                                 mode "default" 'user)
+                  form (read-string source)]]
+      (eval (second form))
+      (clojure.test/is (= {:seon.dev.mcp/read-only? intent}
+                         (select-keys (consume) [:seon.dev.mcp/read-only?]))))
+    (let [form (read-string ((ns-resolve 'seon.dev.mcp 'cluster-layer-form)))]
+      (eval (second form))
+      (clojure.test/is (= {:seon.dev.mcp/read-only? true :seon.dev.mcp/project? false}
+                         (consume))))
+    (eval (read-string ((ns-resolve 'seon.fresh-operator 'jvm-snapshot-form))))
+    (clojure.test/is (= {:seon.dev.mcp/read-only? true :seon.dev.mcp/project? false}
+                       (consume)))
+    (mark)))
+
+(clojure.test/deftest census-return-declares-read-only-intent
+  (require 'seon.operator.state)
+  (let [name (str "mcp-census-" (random-uuid))
+        seen (atom ::absent)
+        project seon.cluster/mcp-valf
+        marker @(ns-resolve 'seon.cluster 'mcp-projection)
+        server (clojure.core.server/start-server
+                {:name name :accept 'seon.cluster/mcp-io-prepl
+                 :args [name (seon.config/defaults)]
+                 :address "127.0.0.1" :port 0})]
+    (try
+      (with-redefs [seon.cluster/mcp-valf
+                    (fn [& args]
+                      (when (= name (first args)) (reset! seen (.get ^ThreadLocal marker)))
+                      (apply project args))]
+        (clojure.test/is
+         ((ns-resolve 'seon.operator.state 'responsive-advertisement?)
+          {:seon.boot/prepl-host "127.0.0.1" :seon.boot/prepl-port (.getLocalPort server)}
+          (* 1000 seon.test-support/event-backstop-seconds))))
+      (clojure.test/is (= {:seon.dev.mcp/read-only? true :seon.dev.mcp/project? false} @seen))
+      (finally (clojure.core.server/stop-server name)))))
