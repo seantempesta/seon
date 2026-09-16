@@ -8,6 +8,7 @@
             [seon.fn :as seon.fn]
             [seon.program :as program]
             [seon.db :as db]
+            [seon.error :as error]
             [seon.schema :as schema]
             [seon.sci.eval :as eval]
             [seon.test-support :as test-support]))
@@ -57,12 +58,20 @@
                connection "adoption-rows" ctx
                (schema/projection-from-database @connection))
               refusal
-              (first
-               (db/q '[:find [(pull ?error [*]) ...]
-                       :where
-                       [?error :seon.error/kind
-                        :seon.sci.eval/acquisition-refused]]
-                     @connection))]
+              ;; The durable error identity row carries id, signature, kind
+              ;; and its occurrences; the MESSAGE is an occurrence fact
+              ;; (`src/seon/error.clj:1392` mints the identity row without
+              ;; one). `seon.error/latest-fact` is the declared projection
+              ;; that answers `:seon.error/message` from the latest
+              ;; occurrence, so this reads the refusal the way every other
+              ;; error consumer does.
+              (some-> (first
+                       (db/q '[:find [(pull ?error [*]) ...]
+                               :where
+                               [?error :seon.error/kind
+                                :seon.sci.eval/acquisition-refused]]
+                             @connection))
+                      error/latest-fact)]
           (is (nil? (db/pull source-database [:seon.ns/name]
                             [:seon.ns/name namespace-name])))
           (is (= 1 (count (db/q '[:find [?e ...] :where
