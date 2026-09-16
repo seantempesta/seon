@@ -16,21 +16,22 @@ peer session (batches 30–57; ledger
 ## Broken first
 
 0. **The checkout's store was deleted and re-created from genesis (10:17Z).**
-   `data/store` (3.6 GB, the live default) was wiped while a cold gate's
-   PLATFORM tier ran; the peer's investigation
-   ([store-wipe](../../context-generation/research/store-wipe-2026-09-17.md))
-   proved it was a delete + `create-database`, not a GC: the two code paths
-   with that shape are the operator cleanup and `create-store!`, both
-   `(io/file root "data" "store")` with a nil or relative root reachable
-   through fallbacks in `seon.cluster` and `test_support` — the same class as
-   the earlier `workers/` exhaust. The exact caller is unknown because
-   nothing logs a delete. Recovered by a fourth refork (the day's recorded
-   test results on default are lost; data is disposable by ruling). Fix in
-   flight (peer): a nil/relative/checkout root is unconstructable at both
-   owners, every delete logs root/paths/caller, the fallbacks are removed, a
-   symlinked-sentinel regression proves a drill never touches the checkout.
-   ALL gates are held until it lands. Issue:
-   `a-platform-tier-test-wiped-the-checkouts-store` (blocker).
+   Actual cause (peer, `ccccea806`): `seon.cluster/operator-root` answered
+   the JVM property `-Dseon.operator.root` — default's own root, the
+   checkout — before the root the caller held, so an IN-PROCESS fixture run
+   inside default's JVM (a lane following the repl rule, not a gate) built a
+   "published root" under `tmp/` that resolved to `data/store` and deleted +
+   cloned over it. A §2.1 fetch-at-call-time defect with a destructive
+   consequence; every lane on default could have done it. Fixed: recursive
+   deletion is admitted only under a root the JVM was declared to operate,
+   the caller's root wins, `create-store!` refuses to delete a rostered
+   store, every delete logs root/targets/caller/pid; regressions green.
+   Recovered by a fourth refork (the day's recorded test results on default
+   are lost; data is disposable by ruling). Gates resumed at batch 65 with
+   the store size checked around each run. Still open (lane running): the
+   platform tier must carry no destructive drill, derived from reach to the
+   delete seam and enforced by a checker. Issue:
+   `a-platform-tier-test-wiped-the-checkouts-store`.
 
 1. **The store grows without collection.** `data/store` went 107 MB → 12 GB in
    eight hours with no periodic writer. The peer's measurement
