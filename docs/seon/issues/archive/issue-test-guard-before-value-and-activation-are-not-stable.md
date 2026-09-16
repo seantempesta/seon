@@ -1,12 +1,25 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 created: 2026-09-16
 tags: [issue, database, test]
 ---
 
 # The proposed issue test guard loses its before value and activation
+
+## Verdict — 2026-09-16
+
+Resolved by `a6fee5b31`. The writer realizes immutable membership, assignment,
+creator and identity maps before expanding work. Activation comes from assignment
+history and creator authority from its first historical assertion. The canonical
+`seon.issue-settlement-test/started-issue-tests-retain-historical-authority`
+regression passed 33/0/0 after adoption of the declaration on default (run 73966,
+03:42:38Z, 5970 ms). It verifies the two-transaction creator-unassign then
+worker-retract case as well as direct and nested retractions. An ordinary live
+worker retraction of the issue-family test returned `:seon.db/retention-refused`
+and left the basis unchanged. Exact bounds and publication limitations are in
+the [landing note](../../../prds/steward-platform/research/issue-settlement-2026-09-16.md).
 
 ## Problem
 
@@ -39,7 +52,7 @@ value to functions at line 1153. Capturing the enclosing value does not freeze
 the indices.
 
 Exact forms and complete small results are in the
-[settlement landing note](../../prds/steward-platform/research/issue-settlement-2026-09-16.md)
+[settlement landing note](../../../prds/steward-platform/research/issue-settlement-2026-09-16.md)
 and its adjacent probe script. Live schema inspection at basis 536871615 found
 neither the proposed append-only property nor `:seon.issue/created-by`.
 

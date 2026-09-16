@@ -128,7 +128,7 @@ consequence is design reasoning, not a completed creator-substitution probe;
 the creator attribute is not installed.
 
 P6 remains open. The additional evidence is recorded in
-[the guard-design issue](../../../seon/issues/issue-test-guard-before-value-and-activation-are-not-stable.md).
+[the guard-design issue](../../../seon/issues/archive/issue-test-guard-before-value-and-activation-are-not-stable.md).
 The original writer-integration issue was an in-flight untracked file owned
 by issue-family and was not edited or closed.
 
@@ -373,3 +373,40 @@ and `test/seon/issue_settlement_test.clj`; affected namespaces
 `seon.issue-settlement-test`, `seon.issue-test`, `seon.db-test`,
 `seon.cluster.source-test`. Run the path-limited gate and then `--platform`
 serially at the orchestrator, including the P5 paths in integration.
+
+## Landing verdict and final boundary
+
+P5 landed in `d132df212`; P6 landed in `a6fee5b31`. The writer-integration
+issue and the unstable-snapshot/activation member are resolved and archived.
+The ownership decision had already been superseded by the owner's authorization.
+The original worker-creation timeout remains a separately recorded observation;
+it was not reclassified as a passing baseline.
+
+Default now has the physical creator attribute and the retention property in
+its carried projection. An ordinary `seon.db/transact!` worker retraction,
+without any candidate projection, returned the named refusal and left the
+basis unchanged (87 ms MCP time). After this adoption observation, P5 passed
+19/0/0 at 03:41:28Z, run 73955, 9916 ms; P6 passed 33/0/0 at 03:42:38Z,
+run 73966, 5970 ms. The immediately preceding P6 run 73965 passed its 33
+assertions but recorded one instrumentation-drift error while 75 wrappers
+changed during concurrent adoption. The serial repeat was green. Its reach
+digest is `4252a6ed5918f0b6b08b957b27d8d68fcab086607f00d3b9da86d42fbe1502e2`.
+
+Full publication-seal convergence is not claimed: the observed adopted seal
+was `6aaa0c28-fb31-5521-9bd8-c9c64e5f123f`, while published head was
+`6aaa1002-d1ce-5ae5-b2be-9cccc5c5deae`. Publication reported both concurrent
+source changes and its declared completion bound. The declaration and behavior
+are live, but those observations do not imply the whole program adopted.
+
+The live issue's generated status read remains refused before system-turn
+settlement. The exact offending form and read evidence are filed in
+[the generated-read issue](../../../seon/issues/issue-status-generated-read-depends-on-turn-taking.md).
+P5's live green proof therefore covers its settlement owner directly; the
+canonical regression covers a full system turn. This limitation is not hidden
+by the two passing class regressions.
+
+No test JVM or lane gate was launched. No default lifecycle operation was
+performed. The one explicit publication shell exited; no scratch root/worktree
+or other lane-owned background process was created. Foreign edits were preserved,
+including the write-validation changes that landed before the database edit.
+`git diff --check` passed. Final isolated and platform gates are requested above.

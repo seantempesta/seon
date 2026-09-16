@@ -1,12 +1,29 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 created: 2026-09-16
 tags: [issue, database, agent, test]
 ---
 
 # Enforce issue success tests and verified settlement at their owners
+
+## Verdict — 2026-09-16
+
+Resolved by `d132df212` (P5) and `a6fee5b31` (P6). The canonical in-process
+regressions `seon.issue-settlement-test/issue-settlement-runs-tests-and-derives-completion`
+and `seon.issue-settlement-test/started-issue-tests-retain-historical-authority`
+verify 19 and 33 assertions respectively. The writer uses materialized snapshots
+and assignment/creator history, correcting the dated proposal below.
+
+Live default issue 43695 acquired green run 70922 and completed its verification
+step with resolved-tx in transaction 536871824. After schema adoption, an ordinary
+worker retraction was refused with the issue and test named; its basis did not
+change. The full live system-turn proof has a separate
+[generated-read boundary](../issue-status-generated-read-depends-on-turn-taking.md).
+Publication seal convergence and the orchestrator's serial gate remain explicit
+verification boundaries in the
+[landing note](../../../prds/steward-platform/research/issue-settlement-2026-09-16.md).
 
 ## Problem
 

@@ -35,6 +35,12 @@ actual pending operation under the canonical fixture before attributing the
 failure to fixture preparation, contention, or worker creation. Do not just
 increase the bound. Concurrent issue-family edits were preserved.
 
+The owner-directed retry at 02:54:02Z also recorded 0/0/1: run 67488,
+basis 536871665, declared 20000 ms bound and 22058 ms wall time. Settlement
+continued with its canonical fixture in-process as directed; its P5 and P6
+regressions passed. This note remains an observation boundary for the original
+worker-creation test, not evidence against those passing regressions.
+
 ## Acceptance
 
 The canonical regression completes through `seon.test/run` under armed
