@@ -1,0 +1,22 @@
+{:seon.measurement/surface :default-jvm-read-only
+ :seon.measurement/probe "docs/prds/steward-platform/research/edges-symbol-walk-probe-2026-09-16.clj"
+ :seon.measurement/basis 536871871
+ :seon.measurement/source-commit "6aab0333-dc9b-5928-9501-a3817f3980a6"
+ :seon.measurement/probe-sha256 "f10dfecb525014221c95734642bdc3eea3bacb095af138682091d375f9a48cae"
+ :seon.measurement/entities 6975
+ :seon.measurement/edges 65119
+ :seon.measurement/edge-value-bytes 260697
+ :seon.measurement/targets [seon.issue/index-tx seon.issue/adopt-tx seon.fn/gate-sets]
+ :seon.measurement/reachable-counts {seon.fn/gate-sets 3056
+                                     seon.issue/adopt-tx 87
+                                     seon.issue/index-tx 116}
+ :seon.measurement/reachable-digest "8675378f69bc84beade0469e1faae61e6994951723cab154343a8dce521015d2"
+ :seon.measurement/schemas
+ {:seon.fn/calls {:db/cardinality :db.cardinality/many :db/valueType :db.type/ref}
+  :seon.fn/references {:db/cardinality :db.cardinality/many :db/valueType :db.type/ref}}
+ :seon.measurement/samples-ms {:ref [562.141042 452.444458 425.844333]}
+ :seon.measurement/statistics {:ref {:seon.measurement/median-ms 452.444458
+                                    :seon.measurement/p95-ms 562.141042}}
+ :seon.measurement/bound-ms 30000
+ :seon.measurement/qualification
+ "Calls plus references only, three targets, three warmed samples, identity-map construction included per batch. Concurrent test workloads. Eight high-fan-in targets exceeded 30 s; no parity claim. A second attempt reached the digest but supplied a map where digest requires sequential parts; fixed before these samples."}

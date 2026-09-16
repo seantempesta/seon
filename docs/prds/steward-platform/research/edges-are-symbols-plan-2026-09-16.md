@@ -100,6 +100,7 @@ updates and evaluation compaction without a ref becoming invalid.
 | Declaration | Exact reset edit |
 |---|---|
 | `resources/seon/schemas/seon.fn.edn:23` calls | `[:set {:seon.db/index true} :qualified-symbol]`. The value shape is G2's `[:set :qualified-symbol]`; explicit indexing preserves AVET lookup when ref's implicit indexing disappears. |
+| `resources/seon/schemas/seon.fn.edn:44` references | Same indexed qualified-symbol set, in the same publication as calls/reach, per orchestrator review. An arity-unresolved source reference is still a name, not entity custody. |
 | `resources/seon/schemas/seon.test.edn:2` reach | Same indexed symbol set, replacing ref vector/cardinality-many spelling. Update `reaches` and output contracts through this one alias. |
 | `resources/seon/schemas/seon.fn.edn:114` fn map | Require analyzed-source-digest, source, arglists and private?; retain required identity/ns/admission. Calls are a logical required set derived as empty at the final validation/read projection only after provenance is present. No empty-set datom or sentinel. |
 | `resources/seon/schemas/seon.test.edn:77` test map | Require the same provenance key, namespace and source with admission provenance, coordinate with S2. Calls follow the same logical-set rule. Run/result counts remain lifecycle-dependent; an unrun test has no invented run evidence. |
@@ -242,10 +243,13 @@ held `src/seon/cluster/source.clj`) must still select tests for deleted symbols
 using reverse symbol AVET joins, and invalidate affected cached reach digests.
 It need not rewrite A or create duplicate unresolved datoms. Analyzer-level
 unknown-namespace/file uncertainty is a different observation and retains its
-existing conservative handling. `:seon.fn/references` remains a genuine ref
-under the current declaration; this slice does not promise its incoming datoms
-survive deletion. If a later rule wants name-mention retention for that separate
-relation, it must retype that relation explicitly rather than silently extending G2.
+existing conservative handling. The orchestrator review explicitly extends
+the retype to `:seon.fn/references`: its source names survive deletion exactly
+as calls do. Apply every calls writer, pull, AVET and recursion conversion above
+to references too (`src/seon/fn.clj:630`, `:668`, `:900`, `:1285`, `:1344`;
+`src/seon/test/selection.clj:129`; `src/seon/test/runner.clj:1916`, `:1967`).
+Schema-declared genuine entity relations remain refs; they are distinct from
+the source-level `references` attribute.
 
 ## 4. Component validation (f)
 
@@ -442,3 +446,128 @@ Notes: (1) the eid→symbol parity for the reverse walk is to be MEASURED, as
 after; a regression in the walk is reported with the number, not traded for
 fidelity. (2) The AGENTS.md §2 rewrite hunk in §5 lands in the same commit as
 the edge schema; the docs lane running tonight adds only the dated pointer.
+
+## Step 2 — first seam preparation (2026-09-16)
+
+The review above was read in full before edits. `references` is included in
+the planned atomic edge-schema publication; AGENTS §2 still lands with that
+schema, not with this independent issue-deletion seam.
+
+Prepared the [bounded walk probe](edges-symbol-walk-probe-2026-09-16.clj)
+and [exact baseline result](edges-symbol-walk-baseline-2026-09-16.edn) first.
+The script returns a function and creates no Vars, threads or transactions.
+It uses the actual installed AVET indexes and includes identity-map acquisition
+once per measured batch. After reset it compares naive and mapped symbol walks
+for identical answers. It covers calls/references, not declared dispatch or
+file-uncertainty edges, so it is not a benchmark of the complete gate-set query.
+
+Default at basis `536871871`, source commit
+`6aab0333-dc9b-5928-9501-a3817f3980a6`: 6,975 function/test identities,
+65,119 call/reference edges, 260,697 printed edge-value bytes. Three targets
+(`seon.issue/index-tx`, `seon.issue/adopt-tx`, `seon.fn/gate-sets`) reached
+116, 87 and 3,056 identities respectively. Ref walk samples, milliseconds per
+three-target operation including map construction: **562.141042, 452.444458,
+425.844333**; median **452.444458**, p95 **562.141042**. Concurrent tests were
+running. These are a small before-reset baseline, not evidence of parity.
+
+The first eight-high-fan-in-target probe hit its declared 30-second bound;
+no timing result was claimed. A subsequent authored probe error supplied a
+map to `seon.id/digest`, whose contract requires sequential parts; the script
+now passes the ordered entry vector. The reported baseline is the succeeding
+run (2,073 ms total MCP evaluation). A separate 21 ms read-only as-of query
+recovered the source commit at the measured basis. No default writes/reset.
+
+Prepared regression `test/seon/issue_deletion_test.clj` before the implementation:
+both note-indexing and adoption retract the removed issue and component
+citations, retain the noncomponent cited file and historical entity, and repeat
+as a no-op. A second regression verifies both writers refuse removal of a
+started issue's last test even for its creator, rolling back sibling deletion
+and preserving components and basis. Updated the existing issue and settlement
+expectations to honest deletion/refusal.
+
+The production hunk is only the two removed-issue branches in
+`src/seon/issue.clj` (`index-tx`, `adopt-tx`): emit
+`[:db/retractEntity [:seon.issue/id id]]` instead of identity-only replacement.
+Datahike's component cascade removes citations; existing retention admission
+remains authoritative. This seam does not require any edge type change.
+
+`src/seon/issue.clj` was clean immediately before the edit. During verification,
+another editor added require/direct-call changes elsewhere in it. Those hunks
+are preserved and excluded from this seam's verification worktree at
+`tmp/edges-are-symbols-wt` (HEAD `6df6967b8` plus only this seam's files).
+The worktree links reference-code and the main checkout's test-slot directory,
+so it obeys the same two-slot admission limit. No foreign session was operated.
+Test results and final landing status follow when the awaited runs complete.
+
+## Step 2 continuation — landing and the held boundary (2026-09-16 16:5xZ)
+
+The lane that wrote the section above stopped mid-verification. This
+continuation read AGENTS §0–§3 and §5–§7, the datahike and clojure-testing
+skills, this plan end to end including the orchestrator review, and PRD §1f
+G1–G6, then re-derived the tree state rather than trusting the note.
+
+**The issue-deletion production hunk already landed.** `git log -S` on the
+exact form finds it at `c703fa8da` ("issue: require ai, cluster.message and
+seon.test; resolve turn once"), which a concurrent editor of
+`src/seon/issue.clj` committed together with its own `requiring-resolve`
+dissolution. Both removal branches are live at HEAD: `src/seon/issue.clj:407`
+(`index-tx`) and `:776` (`adopt-tx`). Nothing of this seam's production change
+remains to write; only its regressions were still uncommitted. The verification
+worktree `tmp/edges-are-symbols-wt` is therefore redundant and is removed.
+
+**The schema publication seam (§7.3) is BLOCKED by concurrent holders.**
+Every central file of that one atomic publication holds another lane's
+uncommitted edits, verified at HEAD `bc0a0c5f1`:
+
+| Held file | Foreign hunk observed |
+|---|---|
+| `resources/seon/schemas/seon.fn.edn` | `:seon.program/declaration-required true` added to the fn map's ns/source/arglists/private? entries — the same §1 table row this seam must edit |
+| `resources/seon/schemas/seon.test.edn` | the same property on the test map's ns/source entries |
+| `resources/seon/schemas/seon.program.edn` | new `:seon.program/declaration-required` and `:seon.program/required-attributes` declarations, and the shape map gaining the latter |
+| `src/seon/program.cljc` | `shape-in` derives required attributes from those entries; `declaration-required-attributes` hand-map deleted; `canonical-row` gains a shapes argument |
+| `src/seon/render.clj`, `src/seon/test/runner.clj`, `src/seon/test/selection.clj`, `src/seon/cluster/source.clj`, `src/seon/sci/eval.clj` | further uncommitted hunks of the same and other lanes |
+
+`bin/codex-agent status` shows `reset-batch-integration` (pid 13811) and
+`design-review-eval-path-and-deletion-contract` (pid 17630) live; the schema
+files' mtimes fall inside that window. The required-derivables work in flight
+is the *same table row* as this plan's §1 fn/test map requirement, so editing
+those four files beside it would reproduce exactly the failure AGENTS §7
+records as `one-lanes-intermediate-edit-refuses-adoption-for-every-lane`:
+a resource is live on disk for every reader the moment it is written while the
+JVM still holds the previous `def`.
+
+Per §7.3–§7.4 the seam stops here with its hunk recorded; the hunk is the §1
+table (calls, references, reach, fn map, test map, file map) plus the §2
+writer table and §3 consumer table, unchanged by this observation. No partial
+edge retype was written: publishing a type before its consumers, or a required
+key before its constructors, is what §7.3 forbids. **The AGENTS §2 rewrite in
+§5 has not landed either**, because §5 binds it to the schema commit.
+
+Consumers that are currently FREE (`src/seon/fn.clj`, `src/seon/turn.clj`,
+`src/seon/db.clj`, `src/seon/test.clj`, `src/seon/render/ns.clj`,
+`src/seon/render/test.clj`, `src/seon/effect.clj`, `src/seon/issue/detect.clj`,
+`src/seon/bootstrap.clj`, `src/seon/run.clj`, `src/seon/test/accretion.clj`)
+were deliberately NOT edited: every one of them reads a type this seam cannot
+publish, so a free-file edit there is a half-published schema by another name.
+
+**RESET NEEDED** remains true and unperformed; `default` was neither stopped,
+reforked nor written. The only default contact was the single read-only
+measurement evaluation recorded above.
+
+### Foreign gate boundary observed while verifying this seam
+
+`bin/test-fast --paths <this seam's test files> -- …` refused to initialize at
+HEAD `7b779d81a` with `The loaded function contract cannot compile`,
+`:diagnostic-member seon.test/check-request`,
+`:diagnostic-offending :seon.test.check/request`. The cause is not this seam:
+`src/seon/test.clj:982` is COMMITTED (`a00e73e49`) declaring that contract,
+while the resource declaring the key,
+`resources/seon/schemas/seon.test.check.edn`, is still UNTRACKED at
+`2955a0755`. HEAD alone therefore cannot arm — the exact class AGENTS §7 names
+(`live-resources-outrun-the-loaded-program-identity-list`), here with the
+polarity reversed: the consumer landed and its resource did not. This
+continuation does not own `src/seon/test.clj`, `bin/test-check`,
+`resources/seon/schemas/my.test.edn` or `seon.test.edn` (all held or committed
+by the no-default-cluster lane) and did not commit them. The rerun overlays the
+untracked resource read-only via `--paths` so the snapshot loads; the fix
+belongs to that lane's own path-limited publication.
