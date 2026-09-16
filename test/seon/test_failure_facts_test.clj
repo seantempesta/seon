@@ -80,3 +80,21 @@
         (runner/commit-results! connection (completion (db/db connection) s 1))
         (is (= [a] (mapv :seon.fn/sym (sut/changed-since-green (db/db connection) s)))
             "spec retraction counts; a changed function outside the tested closure does not")))))
+
+(deftest recorded-run-names-its-addressable-destination
+  (support/with-database
+    (fn [connection]
+      (let [database (db/db connection)
+            captured (assoc-in (completion database "branch.facts/check" 0)
+                              [:seon.test.run/provenance :seon.test.run/branch]
+                              :building-source-retired)
+            _ (is (vector? (runner/commit-results! connection captured)))
+            row (db/pull (db/db connection)
+                        '[{:seon.test/run [*]}] [:seon.test/sym "branch.facts/check"])
+            run (:seon.test/run row)]
+        (is (= (get-in database [:config :branch]) (:seon.test.run/branch run)))
+        (is (= :building-source-retired (:seon.test.run/tested-branch run)))
+        (is (:db/id (db/pull (db/db connection) [:db/id]
+                            [:seon.test.run/id (:seon.test.run/id run)])))
+        (is (vector? (runner/commit-results! connection captured))
+            "retrying the same completion preserves immutable normalized provenance")))))

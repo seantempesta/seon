@@ -57,3 +57,12 @@ an entire cardinality-many tuple set to Datahike's tuple validator before
 still retracts the complete attribute. Regression covers a three-tuple set
 replaced by one tuple on the canonical database. This extends owned files to
 `src/seon/program.cljc`; no protected file was edited.
+
+## Slice 3
+
+The result writer records its destination branch; `:seon.test.run/tested-branch`
+retains a different execution branch. `basis-t` still identifies the tested
+value. The source publisher explicitly hands the durable `:current-src`
+destination while it commits on a disposable branch. Direct cluster writes
+derive their destination from the writer's database. The schema states this
+rule, and retries compare normalized immutable provenance.

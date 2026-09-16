@@ -318,7 +318,7 @@
                 result (schema/call-with-projection
                         projection
                         #((requiring-resolve 'seon.test.runner/commit-results!)
-                          connection completion))]
+                          connection (assoc completion :seon.test.run/branch current-branch)))]
             (if (:seon.error/kind result)
               result
               (do (d/force-branch! @connection current-branch #{expected}

@@ -1614,11 +1614,16 @@
    {results :seon.test.runner/results
     run :seon.test.run/provenance
     tested-database :seon.db/db
+    destination :seon.test.run/branch
     carried-digests :seon.test/reach-digests
     carried-reaches :seon.test/reaches}]
-  (let [tested (or tested-database
-                   (when (= (:seon.test.run/branch run) (get-in database [:config :branch]))
+  (let [tested-branch (or (:seon.test.run/tested-branch run) (:seon.test.run/branch run))
+        tested (or tested-database
+                   (when (= tested-branch (get-in database [:config :branch]))
                      (db/as-of database (:seon.test.run/basis-t run))))
+        destination (or destination (get-in database [:config :branch]))
+        run (cond-> (assoc run :seon.test.run/branch destination)
+              (not= tested-branch destination) (assoc :seon.test.run/tested-branch tested-branch))
         digests (or carried-digests
                     (when tested (reach-digests tested (mapv :seon.test/sym results))))
         reaches (or carried-reaches

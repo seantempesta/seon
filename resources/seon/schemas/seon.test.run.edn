@@ -3,7 +3,8 @@
                 :id [:string {:min 1, :seon.db/identity true}],
                 :program-digest [:and {:seon.db/identity false} :seon.source/digest],
                 :basis-t :seon.db/basis-t,
-                :branch :seon.source/branch,
+                :branch [:and {:description "Durable destination branch of the result commit, addressable in its store. A publication scratch branch is never the destination; tested-branch records execution provenance separately."} :seon.source/branch],
+                :tested-branch [:and {:description "Branch of the immutable database tested, when different from the result destination. basis-t belongs to this branch; it must not be interpreted as destination history."} :seon.source/branch],
                 :immutable [:and {:seon.db/identity false} :seon.test.run/id],
                 :immutable-error
                 [:map {:seon.error/class true
@@ -28,6 +29,7 @@
                  [:seon.test.run/program-digest :seon.test.run/program-digest]
                  [:seon.test.run/basis-t :seon.test.run/basis-t]
                  [:seon.test.run/branch :seon.test.run/branch]],
+                :destination [:map [:seon.test.run/branch :seon.test.run/branch]],
                 :completion
                 [:and :seon.test.runner/completion
                  [:map [:seon.test.run/provenance :seon.test.run/provenance]]],
@@ -39,4 +41,5 @@
                  [:seon.test.run/git-sha {:optional true} :seon.test.run/git-sha]
                  [:seon.test.run/program-digest {:optional true} :seon.test.run/program-digest]
                  [:seon.test.run/basis-t {:optional true} :seon.test.run/basis-t]
+                 [:seon.test.run/tested-branch {:optional true} :seon.test.run/tested-branch]
                  [:seon.test.run/branch {:optional true} :seon.test.run/branch]]}
