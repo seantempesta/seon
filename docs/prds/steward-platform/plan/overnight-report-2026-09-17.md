@@ -86,7 +86,15 @@ peer session (batches 30–57; ledger
    reclamation; narrower leaves or the vendored LMDB backend for the dev root.
    Measured after the third reset: 99 MB → 3.6 GB in 2.5 h (~1.4 GB/h) with
    two to four lanes and one gate batch active; the debug page stayed at
-   0.42 s cold / 25 ms warm throughout.
+   0.42 s cold / 25 ms warm throughout. The single largest writer was then
+   measured and fixed: each cold gate's result recording retracted and
+   re-asserted every test's `:seon.test/reach` set (157,981 datoms for an
+   unchanged 93-result completion, 94.6% of it reach; index-node rewrite
+   amplification made that 5–18 MB of store per recorded test). Recording
+   now emits only the delta — 0 datoms for an unchanged re-record
+   (`f272b9e6e`; cold proof in batch 79 with recording on). Six resets
+   today in total; the reclamation-signal decision still stands for the
+   ordinary churn.
 2. **Live agents cannot yet close a code issue.** The trials
    ([issue-context-trials](../research/issue-context-trials-2026-09-16.md))
    ran seven cheapest-DeepSeek sessions on the arglists issue; candidate F
