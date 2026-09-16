@@ -101,7 +101,9 @@
       (let [task-id "maintenance-schema-test/task"
             schedule-id "maintenance-schema-test/schedule"
             fire-id "maintenance-schema-test/fire"
-            handler "maintenance-schema-test/handler"
+            ;; The fn row refs its namespace row, and only namespaces the
+            ;; canonical population already holds can be referenced.
+            handler "seon.operator/observe-footprint!"
             receipt-id "maintenance-schema-test/receipt"
             nominal-at (instant "2026-08-05T02:00:00Z")
             observed-at (instant "2026-08-05T02:00:01Z")]
@@ -255,7 +257,8 @@
       (test-support/transacted!
                    connection
                    [{:seon.schedule/id "root/maintenance/footprint-schedule"
-                     :seon.schedule/expression "7 4 * * *"}])
+                     :seon.schedule/expression "7 4 * * *"
+                     :seon.schedule/zone-id "UTC"}])
       (let [second-result
             (db/transact!
              connection [[:db.fn/call #'schedule/root-maintenance-seed-call]])]
