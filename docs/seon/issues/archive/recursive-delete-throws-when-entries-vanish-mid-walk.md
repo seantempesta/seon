@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, operator, runtime]
 ---
@@ -31,3 +31,10 @@ reports honestly.
 
 The concurrent-vanish regression passes; the sweep path no longer fails
 a gate on a racing worker cleanup.
+
+## 2026-09-16 03:40Z — verified resolved at HEAD
+
+`src/seon/fs.clj` `delete-recursively-impl!` catches `NoSuchFileException`
+per entry (line ~116) and the docstring states "A path removed by a
+concurrent deletion is already complete for this walk." Found stale while
+selecting a live-trial subject; archived by the orchestrator.

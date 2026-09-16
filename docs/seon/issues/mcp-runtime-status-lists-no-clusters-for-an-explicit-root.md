@@ -48,6 +48,17 @@ empty vector.
 
 ## Acceptance
 
+Entity-pairs observation, 2026-09-15: initial explicit-root health reported
+default PID 69622 with answering plumbing procs. Two subsequent read-only
+JVM probes of `seon.id/id` through `(seon.operator/connection "default")`
+returned `repl-unavailable`, advertisement state `missing`. Operator status
+then reported `0/0 clusters alive`, first with orphan PID 7519 and later
+with recorded live PID 7595 but no cluster advertisement. This is evidence
+of an unavailable development REPL during process churn, not evidence of
+the earlier live-root discovery disagreement or its cause. The lane did
+not start, stop, refork, or restart default. Required pre-edit JVM evaluation
+and in-process regression execution remain unavailable at this observation.
+
 `runtime_status` with the hook's `:current-source` root lists that cluster
 with its advertisement; a root with no advertisements returns a typed
 "no advertisements under ROOT" value; one regression covers both.

@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: friction
 tags: [issue, runtime, class/n8, wave/work-ordering-follow-up]
 ---
@@ -33,3 +33,10 @@ The work derivation that selects refusal-continuation context.
 - A same-transaction fixture with more than nine runs proves no lexical id
   order can affect the selected run.
 - No run id parsing or new stored projection is introduced.
+
+## 2026-09-16 03:40Z — superseded at HEAD
+
+`src/seon/cluster/work.clj` no longer exists and no `latest-closed-run`
+definition remains in `src/` (the work derivation moved into `seon.turn`
+during the turn-loop rename). Found stale while selecting a live-trial
+subject; archived by the orchestrator.
