@@ -54,7 +54,9 @@
             :results [:vector :seon.test/result],
             :test
             [:map
-             #:seon.db{:attributes true}
+             {:seon.db/attributes true
+              :seon.render/ai seon.render.test/render-ai
+              :seon.render/html seon.render.test/render-html}
              [:seon.test/sym :seon.test/sym]
              [:seon.schema.admission/source
               :seon.schema.admission/source]
