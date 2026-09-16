@@ -462,3 +462,11 @@ Queue, in order:
 - 13:55Z PLATFORM GREEN on `7c7395c8a` (batch 27 run A): 86 tests / 579
   assertions / 0 failures / 0 errors, registry-test and store-test included.
   Recording notice pending; run B (nine namespaces) next; probe pause held.
+- 14:05Z Gate recording still fails with probes paused (the record send
+  itself is slow; peer's Opus lane owns runner.clj, fresh_operator.clj,
+  bin/test to fix it) → reach-closure-facts (needs record-tx) DEFERRED
+  until that lands. Launched: `arming-includes-referenced-schemas` (astra:
+  wrapper identity = contract resolved against the armed projection; a
+  projection change re-arms exactly the affected wrappers). Waiting on the
+  opening-evaluation fixer before the two issue.clj lanes (indexer
+  resolver, generator) launch. Probes resumed lightly.
