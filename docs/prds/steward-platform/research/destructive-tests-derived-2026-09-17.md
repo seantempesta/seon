@@ -117,12 +117,36 @@ returns `:seon.fn.analyzer/meta {:seon.fn/destroys "an operator root's whole
 data/ directory …"}` for `cleanup-root-under-lock!`, which is what
 `var-row` admits.
 
-AFTER (derived from `:seon.fn/destroys`): TO BE FILLED
+AFTER (derived from `:seon.fn/destroys`): NOT YET OBSERVED ON `default`.
+Adoption could not be won: `bin/seon init --dev default --changed …` was
+launched four times, waited 5–8 minutes each for the operator lifecycle lock
+(17 concurrent `init --dev` publications from other lanes at 20:00Z) and was
+refused twice with "Source changed while incremental publication was being
+analyzed" — the open issue
+[an-analysis-time-snapshot-change-never-reaches-the-one-publication-retry](../../../seon/issues/an-analysis-time-snapshot-change-never-reaches-the-one-publication-retry.md),
+whose own declaration says the next read converges. Six attempts over ~2 hours all lost the same race;
+the attribute itself IS installed on `default` (`:seon.fn/destroys`,
+entity 80920), only the three owners' row values are missing, which needs
+the analysis step to land. What WAS proven live on pid 53320: the analyzer reports the
+declaration at the definition (above), and the before-numbers are the
+derivation's expected answer — the owner set is unchanged by this slice, so
+the derived union must remain 124 tests.
 
 ## 5. Boundary
 
-* In-process proofs only; the cold gate is the proof of record. The lane
-  launched no test JVM.
+* NO IN-PROCESS REGRESSION RUN HAPPENED, and the reason is infrastructure,
+  not the slice: `seon.test/run` reaches its test namespace and the canonical
+  fixture base through the PUBLISHED program, so the three regressions below
+  cannot be exercised in process until adoption lands. They are written and
+  committed; the cold gate is their proof of record:
+  `seon.test-reaching-test/an-in-process-run-under-a-development-root-refuses-a-destructive-test`
+  (extended: the refusal and `host` name the owner AND what it destroys),
+  `…/a-program-declaring-no-destroyer-refuses-instead-of-admitting`,
+  `…/a-test-with-no-program-row-is-unknown-and-is-never-run-in-process`,
+  `…/a-tests-render-pair-shows-where-it-runs-and-why`, and
+  `seon.test.runner-test/…destructive…` (the tier checker now derives its
+  owners from the analyzed declarations of the real `src`/`test` files).
+  The lane launched no test JVM.
 * Publication contention is real and is the known open issue
   [an-analysis-time-snapshot-change-never-reaches-the-one-publication-retry](../../../seon/issues/an-analysis-time-snapshot-change-never-reaches-the-one-publication-retry.md):
   with a dozen lanes editing the shared checkout, `bin/seon init --dev default
