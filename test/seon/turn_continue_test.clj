@@ -34,8 +34,8 @@
            (config/apply! {:seon.db/connection connection
                           :seon.boot/cluster-name "loop-continue"
                           :seon.config/manifest {:seon.config.ai/no-provider true}})
-           (db/transact! connection [{:seon.agent/id "root"
-                                     :seon.agent/namespace {:seon.ns/name 'my.agents.root}}])
+           (support/transacted! connection [{:seon.agent/id "root"
+                                            :seon.agent/namespace {:seon.ns/name 'my.agents.root}}])
            (cluster/ensure-cluster-entity! connection "loop-continue" cluster/boot-process-identity)
            (let [ctx (support/fork-cluster-ctx connection)
                  environment (support/environment "loop-continue" connection)

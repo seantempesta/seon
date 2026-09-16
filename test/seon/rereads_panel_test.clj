@@ -8,6 +8,7 @@
             [seon.render.transcript :as transcript]
             [seon.repl :as repl]
             [seon.rereads-test :as rereads]
+            [seon.test-support :as support]
             [seon.turn :as turn]))
 
 (defn- stale-check [connection handle]
@@ -39,7 +40,7 @@
           (is (nat-int? initial-count))
           (dotimes [ordinal 2]
             (let [before (observed-bases connection)]
-              (db/transact! connection [[:db/add [:example/order "a1"] :example/amount (+ 61 ordinal)]])
+              (support/transacted! connection [[:db/add [:example/order "a1"] :example/amount (+ 61 ordinal)]])
               (is (nil? (:seon.turn/id (turn/system-turn request))))
               (let [after (observed-bases connection)
                     refreshed (set (refreshed-ids before after))
@@ -59,7 +60,7 @@
           ;; The earlier min read is silent while the later max read changes.
           ;; Only emitted evaluations consume ordinals or result identities.
           (let [before (observed-bases connection)
-                _ (db/transact! connection [[:db/add [:example/order "b1"] :example/amount 101]])
+                _ (support/transacted! connection [[:db/add [:example/order "b1"] :example/amount 101]])
                 result (turn/system-turn request)
                 turn-eid (:db/id (db/pull @connection [:db/id] [:seon.turn/id (:seon.turn/id result)]))
                 added (filter #(= turn-eid (get-in % [:seon.cluster.eval/run :db/id]))

@@ -213,7 +213,7 @@
             plan with no change to any dispatch code"
     (test-support/with-database
      (fn [connection]
-       (db/transact! connection (synthetic-population :sample/marker))
+       (test-support/transacted! connection (synthetic-population :sample/marker))
        (let [database @connection
              current (cp/snapshot database (projection))
              call-state (cp/state)]
@@ -240,7 +240,7 @@
 (deftest an-undeclared-function-gets-an-empty-plan
   (test-support/with-database
    (fn [connection]
-     (db/transact! connection (synthetic-population :sample/marker))
+     (test-support/transacted! connection (synthetic-population :sample/marker))
      (let [database @connection
            current (cp/snapshot database (projection))
            plan (cp/plan (cp/state) database current "sample/supply-marker")]
@@ -256,7 +256,7 @@
             arm never becomes an installed supplied default"
     (test-support/with-database
      (fn [connection]
-       (db/transact! connection (synthetic-population :string))
+       (test-support/transacted! connection (synthetic-population :string))
        (let [database @connection
              current (cp/snapshot database (projection))
              refusal (first (filter #(= :sample/marker
@@ -276,17 +276,17 @@
 (deftest a-row-naming-an-absent-supplier-is-refused
   (test-support/with-database
    (fn [connection]
-     (db/transact! connection
-                   [{:seon.ns/name 'sample :seon.ns/source "(ns sample)"}
-                    {:seon.fn/sym "sample/nowhere"
-                     :seon.fn/ns [:seon.ns/name 'sample]
-                     :seon.fn/source "(defn nowhere [] nil)"
-                     :seon.fn/private? false}
-                    {:seon.call-preparation/key :sample/absent
-                     :seon.call-preparation/schema
-                     [:seon.schema/key :seon.db/database-value]
-                     :seon.call-preparation/supplier
-                     [:seon.fn/sym "sample/nowhere"]}])
+     (test-support/transacted! connection
+                               [{:seon.ns/name 'sample :seon.ns/source "(ns sample)"}
+                                {:seon.fn/sym "sample/nowhere"
+                                 :seon.fn/ns [:seon.ns/name 'sample]
+                                 :seon.fn/source "(defn nowhere [] nil)"
+                                 :seon.fn/private? false}
+                                {:seon.call-preparation/key :sample/absent
+                                 :seon.call-preparation/schema
+                                 [:seon.schema/key :seon.db/database-value]
+                                 :seon.call-preparation/supplier
+                                 [:seon.fn/sym "sample/nowhere"]}])
      (let [current (cp/snapshot @connection (projection))
            refusal (first (filter #(= :sample/absent
                                       (:seon.call-preparation/key
@@ -314,7 +314,7 @@
              before (cp/current-snapshot call-state cold (projection))
              warm (cp/plan call-state cold before "sample/target")]
          (is (nil? warm) "sample/target is not in the program graph yet")
-         (db/transact! connection (synthetic-population :sample/marker))
+         (test-support/transacted! connection (synthetic-population :sample/marker))
          ;; No sleep and no listener: read the connection, compare the basis.
          (let [after-database @connection
                after (cp/current-snapshot call-state after-database
@@ -333,15 +333,15 @@
 (deftest an-unrelated-transaction-refreshes-without-changing-the-row-basis
   (test-support/with-database
    (fn [connection]
-     (db/transact! connection (synthetic-population :sample/marker))
+     (test-support/transacted! connection (synthetic-population :sample/marker))
      (let [call-state (cp/state)
            first-database @connection
            first-snapshot (cp/current-snapshot call-state first-database
                                                (projection))
            first-plan (cp/plan call-state first-database first-snapshot
                                "sample/target")]
-       (db/transact! connection [{:seon.ns/name 'unrelated
-                                  :seon.ns/source "(ns unrelated)"}])
+       (test-support/transacted! connection [{:seon.ns/name 'unrelated
+                                              :seon.ns/source "(ns unrelated)"}])
        (let [next-database @connection
              next-snapshot (cp/current-snapshot call-state next-database
                                                 (projection))]
@@ -366,7 +366,7 @@
             reuse it; B is a sovereign branch with its own state"
     (test-support/with-database
      (fn [connection-a]
-       (db/transact! connection-a (synthetic-population :sample/marker))
+       (test-support/transacted! connection-a (synthetic-population :sample/marker))
        (let [state-a (cp/state)
              database-a @connection-a
              snapshot-a (cp/current-snapshot state-a database-a (projection))
@@ -376,10 +376,10 @@
           (fn [connection-b]
             ;; B declares the same function identity, with no supplied
             ;; default for its slot.
-            (db/transact! connection-b
-                          (filterv #(not (contains?
-                                          % :seon.call-preparation/key))
-                                   (synthetic-population :sample/marker)))
+            (test-support/transacted! connection-b
+                                      (filterv #(not (contains?
+                                                      % :seon.call-preparation/key))
+                                               (synthetic-population :sample/marker)))
             (let [state-b (cp/state)
                   database-b @connection-b
                   snapshot-b (cp/current-snapshot state-b database-b
@@ -457,7 +457,7 @@
             nested — every one of them through a RAW compiled host Var"
     (test-support/with-database
      (fn [connection]
-       (db/transact! connection database-rows)
+       (test-support/transacted! connection database-rows)
        (let [ctx (probe-ctx connection)]
          (testing "positional: the elided slot arrives at its recorded index"
            (is (true? (probe ctx "probe-received-database? \"a\""))))
@@ -520,7 +520,7 @@
   (testing "the cached all-default shape and schema-decided partial calls"
     (test-support/with-database
      (fn [connection]
-       (db/transact! connection database-rows)
+       (test-support/transacted! connection database-rows)
        (let [ctx (probe-ctx connection)
              current (cp/snapshot @connection (projection))
              plan (cp/plan (cp/state) @connection current
@@ -554,7 +554,7 @@
             own declared value schema rather than by arity order"
     (test-support/with-database
      (fn [connection]
-       (db/transact! connection database-rows)
+       (test-support/transacted! connection database-rows)
        (let [ctx (probe-ctx connection)]
          (is (= :supplied-database (probe ctx "probe-shortcut \"a\" \"b\""))
              "two non-database arguments mean the three-arity with its
@@ -580,7 +580,7 @@
             the exact address, with the callee never entered"
     (test-support/with-database
      (fn [connection]
-       (db/transact! connection database-rows)
+       (test-support/transacted! connection database-rows)
        (let [current (cp/snapshot @connection (projection))
              environment (environment-for connection)
              slot {:seon.fn.argument/index 1
@@ -619,10 +619,10 @@
             other's plan cache"
     (test-support/with-database
      (fn [connection-a]
-       (db/transact! connection-a database-rows)
+       (test-support/transacted! connection-a database-rows)
        (test-support/with-database
         (fn [connection-b]
-          (db/transact! connection-b database-rows)
+          (test-support/transacted! connection-b database-rows)
           (let [ctx-a (probe-ctx connection-a)
                 ctx-b (probe-ctx connection-b)
                 name-a (probe ctx-a "probe-connection-name")
@@ -646,7 +646,7 @@
   (testing "the production installation path, not a ctx this test built"
     (test-support/with-database
      (fn [connection]
-       (db/transact! connection database-rows)
+       (test-support/transacted! connection database-rows)
        (let [ctx (sci.eval/cluster-ctx @connection connection)
              acquired-projection (:seon.schema/projection ctx)
              environment
@@ -678,7 +678,7 @@
   (testing "a real first-party call uses its contracted shorter shape"
     (test-support/with-database
      (fn [connection]
-       (db/transact! connection database-rows)
+       (test-support/transacted! connection database-rows)
        ;; This ordinary call is also the program-graph edge that makes the
        ;; source-string callee part of a reduced focused-test projection.
        (is (= :my.plan/agent-not-found
@@ -730,7 +730,7 @@
 (deftest call-preparation-cache-coherence-does-not-widen-evaluation-evidence
   (test-support/with-database
    (fn [connection]
-     (db/transact! connection database-rows)
+     (test-support/transacted! connection database-rows)
      (let [captured (atom [])
            call-state (cp/state)
            sym "seon.call-preparation-test/probe-current-database"
@@ -764,7 +764,7 @@
        (is (every? attributes (cp/row-attributes))
            "precise supplied-default declaration dependencies remain")
        (is (db/read-evidence-current? @connection evidence))
-       (db/transact! connection [{:seon.ns/name 'unrelated-evidence-one}])
+       (test-support/transacted! connection [{:seon.ns/name 'unrelated-evidence-one}])
        (is (db/read-evidence-current? @connection evidence)
            "cold plan derivation is independent of unrelated settlement facts")
        (let [warm-captured (atom [])
@@ -775,15 +775,15 @@
                  (cp/plan call-state @connection current sym)))
              warm-evidence (db/read-evidence @warm-captured)]
          (is (= invocation-plan warm-plan))
-         (db/transact! connection [{:seon.ns/name 'unrelated-evidence-two}])
+         (test-support/transacted! connection [{:seon.ns/name 'unrelated-evidence-two}])
          (is (db/read-evidence-current? @connection warm-evidence)
              "warm contract revalidation does not become a semantic read"))
-       (db/transact!
-        connection
-        [{:seon.call-preparation/key :test/alternate-database
-          :seon.call-preparation/schema
-          (get-in row [:seon.call-preparation/schema :db/id])
-          :seon.call-preparation/supplier
-          (get-in row [:seon.call-preparation/supplier :db/id])}])
+       (test-support/transacted!
+                    connection
+                    [{:seon.call-preparation/key :test/alternate-database
+                      :seon.call-preparation/schema
+                      (get-in row [:seon.call-preparation/schema :db/id])
+                      :seon.call-preparation/supplier
+                      (get-in row [:seon.call-preparation/supplier :db/id])}])
        (is (false? (db/read-evidence-current? @connection evidence))
            "a real supplied-default declaration change still invalidates")))))

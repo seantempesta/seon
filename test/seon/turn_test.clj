@@ -555,16 +555,16 @@
             now (java.util.Date. 1785000000000)
             settle-row!
             (fn [run-id agent-id row]
-              (db/transact!
-               connection
-               [{:seon.agent/id agent-id}
-                {:seon.turn/id run-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}])
-              (db/transact!
-               connection
-               (turn/receipt-start-tx
-                {::turn/id run-id
-                 :seon.cluster.eval/ordinal 0
-                 :seon.cluster.eval/at now}))
+              (support/transacted!
+                      connection
+                      [{:seon.agent/id agent-id}
+                       {:seon.turn/id run-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}])
+              (support/transacted!
+                      connection
+                      (turn/receipt-start-tx
+                       {::turn/id run-id
+                        :seon.cluster.eval/ordinal 0
+                        :seon.cluster.eval/at now}))
               (db/transact!
                connection
                (turn/receipt-settle-tx
@@ -572,7 +572,7 @@
                  :seon.cluster.eval/ordinal 0
                  :seon.eval/shown "nil"
                  :seon.program/row row})))]
-        (db/transact! connection [{:seon.ns/name namespace-name}])
+        (support/transacted! connection [{:seon.ns/name namespace-name}])
         (settle-row!
          "pending-test-run" "pending-test-agent"
          {:seon.test/sym test-symbol
@@ -622,10 +622,10 @@
                   :seon.fn/arglists "([])"
                   :seon.fn/private? false
                   :seon.fn/spec "[:=> [:cat] :int]"}]]
-       (db/transact! connection
-                     [{:seon.ns/name 'fixture.batch}
-                      {:seon.agent/id "batch"}
-                      {:seon.turn/id "batch" :seon.turn/agent [:seon.agent/id "batch"] :seon.turn/opened-tx "datomic.tx"}])
+       (support/transacted! connection
+                            [{:seon.ns/name 'fixture.batch}
+                             {:seon.agent/id "batch"}
+                             {:seon.turn/id "batch" :seon.turn/agent [:seon.agent/id "batch"] :seon.turn/opened-tx "datomic.tx"}])
        (doseq [ordinal (range 2)]
          (db/transact! connection
                        (turn/receipt-start-tx
@@ -717,10 +717,10 @@
   ;; the evaluations already carry.
   (with-model-database
     (fn [connection]
-      (db/transact! connection [{:seon.agent/id "merged-agent"}])
-      (db/transact!
-       connection
-       (turn/open-tx {::turn/id "merged" ::turn/agent [:seon.agent/id "merged-agent"] :seon.turn/opened-tx "datomic.tx"}))
+      (support/transacted! connection [{:seon.agent/id "merged-agent"}])
+      (support/transacted!
+              connection
+              (turn/open-tx {::turn/id "merged" ::turn/agent [:seon.agent/id "merged-agent"] :seon.turn/opened-tx "datomic.tx"}))
 
       (is (= ::committed
              (transact-or-refusal
@@ -765,7 +765,7 @@
 (deftest one-run-lifecycle-teaches-the-call-shapes
   (with-model-database
     (fn [connection]
-      (db/transact! connection [{:seon.agent/id "teacher"}])
+      (support/transacted! connection [{:seon.agent/id "teacher"}])
       (testing "open: run entity + agent pointer from ONE agent ref"
         (is (= ::committed
                (transact-or-refusal
@@ -813,12 +813,12 @@
 (deftest generated-system-runs-grow-only-after-their-settled-prefix
   (with-model-database
     (fn [connection]
-      (db/transact!
-       connection
-       [{:seon.ns/name 'my.agents.generated}
-        {:seon.agent/id "generated-agent"
-         :seon.agent/namespace
-         [:seon.ns/name 'my.agents.generated]}])
+      (support/transacted!
+              connection
+              [{:seon.ns/name 'my.agents.generated}
+               {:seon.agent/id "generated-agent"
+                :seon.agent/namespace
+                [:seon.ns/name 'my.agents.generated]}])
       (is (= ::committed
              (transact-or-refusal
               connection
@@ -869,12 +869,12 @@
                  :seon.cluster.eval/ordinal 1
                  :seon.cluster.eval/source "(dir 'my.turn)"
                  :seon.ns/name 'my.agents.generated})))))
-      (db/transact!
-       connection
-       (turn/receipt-settle-tx
-        {::turn/id "generated-run"
-         :seon.cluster.eval/ordinal 0
-         :seon.eval/shown "{:introduced 'my.turn}"}))
+      (support/transacted!
+              connection
+              (turn/receipt-settle-tx
+               {::turn/id "generated-run"
+                :seon.cluster.eval/ordinal 0
+                :seon.eval/shown "{:introduced 'my.turn}"}))
       (is (= ::committed
              (transact-or-refusal
               connection
@@ -903,23 +903,23 @@
 (deftest run-derives-its-opening-database-and-starting-namespace
   (with-model-database
     (fn [connection]
-      (db/transact!
-       connection
-       [{:seon.ns/name 'replay.start}
-        {:seon.agent/id "replay-agent"
-         :seon.agent/namespace
-         [:seon.ns/name 'replay.start]}])
-      (db/transact!
-         connection
-         (turn/system-run-tx
-          @connection
-          {:seon.agent/id "replay-agent" ::turn/id "replay-run" :seon.db.process/id "replay-process" :seon.turn/opened-tx "datomic.tx" ::turn/starting-ns [:seon.ns/name 'replay.start] ::turn/sources [{:seon.cluster.eval/source "(def replayed 1)"}]}))
+      (support/transacted!
+              connection
+              [{:seon.ns/name 'replay.start}
+               {:seon.agent/id "replay-agent"
+                :seon.agent/namespace
+                [:seon.ns/name 'replay.start]}])
+      (support/transacted!
+                connection
+                (turn/system-run-tx
+                 @connection
+                 {:seon.agent/id "replay-agent" ::turn/id "replay-run" :seon.db.process/id "replay-process" :seon.turn/opened-tx "datomic.tx" ::turn/starting-ns [:seon.ns/name 'replay.start] ::turn/sources [{:seon.cluster.eval/source "(def replayed 1)"}]}))
         (let [run (db/pull
                    @connection
                    '[* {:seon.turn/starting-ns [:seon.ns/name]}]
                    [::turn/id "replay-run"])]
-          (db/transact! connection [{:seon.ns/name 'replay.later}
-                                    {::turn/id "replay-run" :seon.turn/opened-tx "datomic.tx"}])
+          (support/transacted! connection [{:seon.ns/name 'replay.later}
+                                           {::turn/id "replay-run" :seon.turn/opened-tx "datomic.tx"}])
           (let [opening (turn/opening-db @connection "replay-run")]
             (is (= "replay-run"
                    (::turn/id (db/pull opening [::turn/id]
@@ -971,13 +971,13 @@
 (deftest system-run-refuses-a-concurrent-namespace-reassignment
   (with-model-database
     (fn [connection]
-      (db/transact!
-       connection
-       [{:seon.ns/name 'my.agents.before}
-        {:seon.ns/name 'my.agents.after}
-        {:seon.agent/id "moving-agent"
-         :seon.agent/namespace
-         [:seon.ns/name 'my.agents.before]}])
+      (support/transacted!
+              connection
+              [{:seon.ns/name 'my.agents.before}
+               {:seon.ns/name 'my.agents.after}
+               {:seon.agent/id "moving-agent"
+                :seon.agent/namespace
+                [:seon.ns/name 'my.agents.before]}])
       (let [before @connection
             outcome
             (db/transact!
@@ -1006,19 +1006,19 @@
   ;; Unresolvable mentions settle as errors without inventing graph edges.
   (support/with-database
     (fn [connection]
-      (db/transact!
-       connection
-       [{:seon.ns/name 'my.macro-caller}
-        {:seon.agent/id "macro-caller"
-         :seon.agent/namespace [:seon.ns/name 'my.macro-caller]}])
-      (db/transact!
-       connection
-       (turn/system-run-tx
-        @connection
-        {:seon.agent/id "macro-caller" ::turn/id "macro-call-run" :seon.db.process/id "macro-call-process" :seon.turn/opened-tx "datomic.tx" ::turn/starting-ns [:seon.ns/name 'my.macro-caller] ::turn/sources [{:seon.cluster.eval/source "(seon.bootstrap/help)"}
-          {:seon.cluster.eval/source "(missing.target/nope)"}
-          {:seon.cluster.eval/source
-           "(require 'unindexed.required)"}]}))
+      (support/transacted!
+              connection
+              [{:seon.ns/name 'my.macro-caller}
+               {:seon.agent/id "macro-caller"
+                :seon.agent/namespace [:seon.ns/name 'my.macro-caller]}])
+      (support/transacted!
+              connection
+              (turn/system-run-tx
+               @connection
+               {:seon.agent/id "macro-caller" ::turn/id "macro-call-run" :seon.db.process/id "macro-call-process" :seon.turn/opened-tx "datomic.tx" ::turn/starting-ns [:seon.ns/name 'my.macro-caller] ::turn/sources [{:seon.cluster.eval/source "(seon.bootstrap/help)"}
+                 {:seon.cluster.eval/source "(missing.target/nope)"}
+                 {:seon.cluster.eval/source
+                  "(require 'unindexed.required)"}]}))
       (let [macro-row
             (db/pull @connection
                      [:db/id :seon.fn/source :seon.fn/macro?]
@@ -1116,22 +1116,22 @@
               (db/transact!
                connection
                (turn/close-tx {::turn/id run-id :seon.turn/closed-tx "datomic.tx"})))]
-        (db/transact!
-         connection
-         [{:seon.ns/name namespace-name}
-          {:seon.ns/name agent-namespace-name}
-          {:seon.agent/id "system-refresh"
-           :seon.agent/namespace
-           [:seon.ns/name namespace-name]}
-          {:seon.agent/id "agent-refresh"
-           :seon.agent/namespace
-           [:seon.ns/name agent-namespace-name]}])
-        (db/transact!
-         connection
-         (turn/system-run-tx
-          @connection
-          {:seon.agent/id "system-refresh" ::turn/id "system-source" :seon.db.process/id process :seon.turn/opened-tx "datomic.tx" ::turn/starting-ns [:seon.ns/name namespace-name] ::turn/sources [{:seon.cluster.eval/source
-             "{:my.refresh/value 42}"}]}))
+        (support/transacted!
+                connection
+                [{:seon.ns/name namespace-name}
+                 {:seon.ns/name agent-namespace-name}
+                 {:seon.agent/id "system-refresh"
+                  :seon.agent/namespace
+                  [:seon.ns/name namespace-name]}
+                 {:seon.agent/id "agent-refresh"
+                  :seon.agent/namespace
+                  [:seon.ns/name agent-namespace-name]}])
+        (support/transacted!
+                connection
+                (turn/system-run-tx
+                 @connection
+                 {:seon.agent/id "system-refresh" ::turn/id "system-source" :seon.db.process/id process :seon.turn/opened-tx "datomic.tx" ::turn/starting-ns [:seon.ns/name namespace-name] ::turn/sources [{:seon.cluster.eval/source
+                    "{:my.refresh/value 42}"}]}))
         (settle! "system-source" false)
         (close! "system-source")
         (let [prior-id (turn/receipt-identity "system-source" 0)]
@@ -1174,13 +1174,13 @@
                  (::turn/rule
                   (transact-or-refusal connection
                                        (turn/refresh-tx prior-id))))))
-        (db/transact!
-         connection
-         (turn/open-tx {::turn/id "agent-source" ::turn/agent [:seon.agent/id "agent-refresh"] :seon.turn/opened-tx "datomic.tx"}))
+        (support/transacted!
+                connection
+                (turn/open-tx {::turn/id "agent-source" ::turn/agent [:seon.agent/id "agent-refresh"] :seon.turn/opened-tx "datomic.tx"}))
 
-        (db/transact!
-         connection
-         (turn/plan-tx {::turn/id "agent-source" ::turn/starting-ns [:seon.ns/name agent-namespace-name] ::turn/sources [{:seon.cluster.eval/source "(+ 1 1)"}]}))
+        (support/transacted!
+                connection
+                (turn/plan-tx {::turn/id "agent-source" ::turn/starting-ns [:seon.ns/name agent-namespace-name] ::turn/sources [{:seon.cluster.eval/source "(+ 1 1)"}]}))
         (settle! "agent-source" true)
         (close! "agent-source")
         (is (= ::turn/refresh-agent-authored
@@ -1198,9 +1198,9 @@
     (when (and start-tx settle-tx)
       (with-model-database
         (fn [connection]
-          (db/transact! connection [{:seon.agent/id "receipt-agent"}])
-          (db/transact! connection
-                      (turn/open-tx {::turn/id "receipts" ::turn/agent [:seon.agent/id "receipt-agent"] :seon.turn/opened-tx "datomic.tx"}))
+          (support/transacted! connection [{:seon.agent/id "receipt-agent"}])
+          (support/transacted! connection
+                             (turn/open-tx {::turn/id "receipts" ::turn/agent [:seon.agent/id "receipt-agent"] :seon.turn/opened-tx "datomic.tx"}))
 
           (let [start {::turn/id "receipts"
                        :seon.cluster.eval/ordinal 0
@@ -1327,12 +1327,12 @@
                         :seon.cluster.eval/ordinal ordinal
                         :seon.eval/shown "nil"}
                        request))))]
-        (db/transact!
-         connection
-         [{:seon.ns/name namespace-name
-           :seon.schema.admission/source :agent}
-          {:seon.agent/id agent-a}
-          {:seon.agent/id agent-b}])
+        (support/transacted!
+                connection
+                [{:seon.ns/name namespace-name
+                  :seon.schema.admission/source :agent}
+                 {:seon.agent/id agent-a}
+                 {:seon.agent/id agent-b}])
         (doseq [[run-id agent-id] [[run-a agent-a] [run-b agent-b]]]
           (db/transact!
            connection
@@ -1611,9 +1611,9 @@
          (prop/for-all [commands commands-gen]
            (with-model-database
              (fn [connection]
-               (db/transact! connection
-                           (mapv (fn [id] {:seon.agent/id id})
-                                 agent-ids))
+               (support/transacted! connection
+                                  (mapv (fn [id] {:seon.agent/id id})
+                                        agent-ids))
                (loop [commands commands
                       model {:runs {} :pointers {} :receipts {}}
                       index 0]
@@ -1688,29 +1688,29 @@
 )
                      agent-id (str "keeper-" run-id)
 ]
-                 (db/transact! connection
-                             [{:seon.agent/id agent-id}])
-                 (db/transact! connection
-                             (turn/open-tx
-                              {::turn/id run-id ::turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}))
+                 (support/transacted! connection
+                                    [{:seon.agent/id agent-id}])
+                 (support/transacted! connection
+                                    (turn/open-tx
+                                     {::turn/id run-id ::turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}))
 
-                 (db/transact!
-                  connection
-                  (vec (map-indexed
-                        (fn [ordinal state]
-                          (cond-> {:seon.cluster.eval/id
-                                   (turn/receipt-identity run-id ordinal)
-                                   :seon.cluster.eval/run
-                                   [:seon.turn/id run-id]
-                                   :seon.cluster.eval/ordinal ordinal
-                                   :seon.cluster.eval/at t1}
-                            (= :done state)
-                            (assoc :seon.eval/shown
-                                   (str ordinal))
-                            (= :error state)
-                            (assoc :seon.cluster.eval/error
-                                   (str "boom-" ordinal))))
-                        states)))
+                 (support/transacted!
+                         connection
+                         (vec (map-indexed
+                               (fn [ordinal state]
+                                 (cond-> {:seon.cluster.eval/id
+                                          (turn/receipt-identity run-id ordinal)
+                                          :seon.cluster.eval/run
+                                          [:seon.turn/id run-id]
+                                          :seon.cluster.eval/ordinal ordinal
+                                          :seon.cluster.eval/at t1}
+                                   (= :done state)
+                                   (assoc :seon.eval/shown
+                                          (str ordinal))
+                                   (= :error state)
+                                   (assoc :seon.cluster.eval/error
+                                          (str "boom-" ordinal))))
+                               states)))
                  (when generated?
                    (db/transact! connection
                                  [{::turn/id run-id
@@ -1721,10 +1721,10 @@
                         {::turn/id run-id
 
                          ::turn/now t2})
-                       _ (db/transact! connection recovery)
+                       _ (support/transacted! connection recovery)
                        ;; recovery is IDEMPOTENT: running it again from
                        ;; current facts commits nothing new
-                       _ (db/transact! connection recovery)
+                       _ (support/transacted! connection recovery)
                        entity (run-entity connection run-id)]
                    (and
                     (= (count states) (count (pull-receipts connection run-id)))
@@ -1747,24 +1747,24 @@
   ;; a settled receipt could be stamped `interrupted-at`.
   (with-model-database
     (fn [connection]
-      (db/transact! connection [{:seon.agent/id "orderer"}])
-      (db/transact! connection
-                  (turn/open-tx {::turn/id "order-b" ::turn/agent [:seon.agent/id "orderer"] :seon.turn/opened-tx "datomic.tx"}))
+      (support/transacted! connection [{:seon.agent/id "orderer"}])
+      (support/transacted! connection
+                         (turn/open-tx {::turn/id "order-b" ::turn/agent [:seon.agent/id "orderer"] :seon.turn/opened-tx "datomic.tx"}))
 
-      (db/transact! connection
-                  (turn/receipt-start-tx {::turn/id "order-b"
-                                         :seon.cluster.eval/ordinal 0
-                                         :seon.cluster.eval/at t0}))
+      (support/transacted! connection
+                         (turn/receipt-start-tx {::turn/id "order-b"
+                                                :seon.cluster.eval/ordinal 0
+                                                :seon.cluster.eval/at t0}))
       ;; the settle lands FIRST; recovery then runs against whatever
       ;; the transaction sees — which includes that settle
-      (db/transact! connection
-                  (turn/receipt-settle-tx {::turn/id "order-b"
-                                          :seon.cluster.eval/ordinal 0
-                                          :seon.eval/shown "2"}))
-      (db/transact! connection
-                  (turn/recover-tx {::turn/id "order-b"
+      (support/transacted! connection
+                         (turn/receipt-settle-tx {::turn/id "order-b"
+                                                 :seon.cluster.eval/ordinal 0
+                                                 :seon.eval/shown "2"}))
+      (support/transacted! connection
+                         (turn/recover-tx {::turn/id "order-b"
 
-                                   ::turn/now t2}))
+                                          ::turn/now t2}))
       (let [receipt (db/pull @connection '[*]
                             [:seon.cluster.eval/id (turn/receipt-identity "order-b" 0)])]
         (is (= "2" (:seon.eval/shown receipt)))
@@ -1780,9 +1780,9 @@
 (deftest recovery-closes-a-turn-with-no-evaluations
   (with-model-database
     (fn [connection]
-      (db/transact! connection [{:seon.agent/id "cut"}])
-      (db/transact! connection
-                    (turn/open-tx {::turn/id "cut-run" ::turn/agent [:seon.agent/id "cut"] :seon.turn/opened-tx "datomic.tx"}))
+      (support/transacted! connection [{:seon.agent/id "cut"}])
+      (support/transacted! connection
+                           (turn/open-tx {::turn/id "cut-run" ::turn/agent [:seon.agent/id "cut"] :seon.turn/opened-tx "datomic.tx"}))
       (is (= ::committed
              (transact-or-refusal connection
                                   (turn/recover-tx {::turn/id "cut-run"
@@ -1816,9 +1816,9 @@
 (deftest open-turn-is-derived-without-an-agent-pointer
   (with-model-database
     (fn [connection]
-      (db/transact! connection [{:seon.agent/id "derived"}])
-      (db/transact! connection
-                    (turn/open-tx {::turn/id "derived-turn" ::turn/agent [:seon.agent/id "derived"] :seon.turn/opened-tx "datomic.tx"}))
+      (support/transacted! connection [{:seon.agent/id "derived"}])
+      (support/transacted! connection
+                           (turn/open-tx {::turn/id "derived-turn" ::turn/agent [:seon.agent/id "derived"] :seon.turn/opened-tx "datomic.tx"}))
       (is (= "derived-turn" (open-run-id connection "derived")))
       (doseq [attribute [:seon.agent/run :seon.agent/cluster
                          :seon.agent/instructions]]
@@ -1826,9 +1826,9 @@
       (is (= #{:db/id :seon.agent/id :seon.agent/runtime}
              (set (keys (db/pull @connection '[*]
                                  [:seon.agent/id "derived"])))))
-      (db/transact! connection
-                    [[:db/add [:seon.turn/id "derived-turn"]
-                      :seon.turn/closed-tx "datomic.tx"]])
+      (support/transacted! connection
+                           [[:db/add [:seon.turn/id "derived-turn"]
+                             :seon.turn/closed-tx "datomic.tx"]])
       (is (nil? (open-run-id connection "derived"))))))
 
 ;; THE FAULTS UNIT lives on `:seon.error/agent`, whose renderer needs a run to

@@ -129,15 +129,15 @@
            query '[:find [?m ...] :in $ ?recipient
                    :where [?m :seon.message/to ?recipient]
                    (not [?m :seon.message/read-tx])]]
-       (db/transact! connection [[:db/add [:seon.message/id "mine"]
-                                 :seon.message/read-tx "datomic.tx"]])
+       (test-support/transacted! connection [[:db/add [:seon.message/id "mine"]
+                                             :seon.message/read-tx "datomic.tx"]])
        (is (empty? (binding [db/*read-evidence-sink* captured]
                      (db/q query @connection [:seon.agent/id "juniper"]))))
        (let [evidence (mapv #(dissoc % :seon.db/read-request
                                    :seon.db/read-result :seon.db/read-result-digest)
                            (db/read-evidence @captured))]
          (is (seq evidence))
-         (db/transact! connection [[:db/retract [:seon.message/id "mine"]
-                                   :seon.message/read-tx]])
+         (test-support/transacted! connection [[:db/retract [:seon.message/id "mine"]
+                                               :seon.message/read-tx]])
          (is (false? (db/read-evidence-current? @connection evidence)))
          (is (= 1 (count (db/q query @connection [:seon.agent/id "juniper"])))))))))

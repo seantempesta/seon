@@ -27,17 +27,17 @@
            ordinal 0
            receipt-id (pr-str [run-id ordinal])
            now (java.util.Date. 1785000000000)]
-       (db/transact! connection [{:seon.agent/id agent-id}])
-       (db/transact!
-        connection
-        (turn/open-tx
-         {:seon.turn/id run-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}))
-       (db/transact!
-        connection
-        (turn/receipt-start-tx
-         {:seon.turn/id run-id
-          :seon.cluster.eval/ordinal ordinal
-          :seon.cluster.eval/at now}))
+       (support/transacted! connection [{:seon.agent/id agent-id}])
+       (support/transacted!
+               connection
+               (turn/open-tx
+                {:seon.turn/id run-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}))
+       (support/transacted!
+               connection
+               (turn/receipt-start-tx
+                {:seon.turn/id run-id
+                 :seon.cluster.eval/ordinal ordinal
+                 :seon.cluster.eval/at now}))
        (let [evaluation
              (sci.eval/evaluate
               {:seon.cluster.eval/source
@@ -75,8 +75,8 @@
                      [?tx :seon.db/user ?agent]
                      [?agent :seon.agent/id ?agent-id]]
                    @connection "receipt-carrier")))))
-       (db/transact! connection
-                     [{:seon.agent/id system-agent-id}])
+       (support/transacted! connection
+                            [{:seon.agent/id system-agent-id}])
        (testing "a system write outside receipt custody asserts no receipt"
          (is (nil?
               (db/q

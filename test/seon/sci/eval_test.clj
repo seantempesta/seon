@@ -1156,11 +1156,11 @@
     (fn [connection]
       (let [agent-id "empty-namespace-agent"
             namespace-name 'fixture.empty-agent
-            _ (db/transact!
-               connection
-               [{:seon.agent/id agent-id
-                 :seon.agent/namespace
-                 {:seon.ns/name namespace-name}}])
+            _ (test-support/transacted!
+                           connection
+                           [{:seon.agent/id agent-id
+                             :seon.agent/namespace
+                             {:seon.ns/name namespace-name}}])
             base (test-support/fork-cluster-ctx connection)
             _ (eval/acquire! {:seon.sci.eval/ctx base
                               :seon.db/db (db/db connection)})
@@ -1267,19 +1267,19 @@
       "(defn ^{:malli/schema [:=> [:cat] :int]} spin [] "
       "(loop [i 0] (recur (inc i))))")
      _
-     (db/transact!
-      connection
-      [#:seon.agent{:id "interrupt-author",
-                    :namespace
-                    #:seon.ns{:name 'authored.interrupt,
-                              :source "(ns authored.interrupt)"}}
-       {:seon.fn/sym "authored.interrupt/spin",
-        :seon.schema.admission/source :agent,
-        :seon.fn/ns [:seon.ns/name 'authored.interrupt],
-        :seon.fn/source source,
-        :seon.fn/arglists "([])",
-        :seon.fn/private? false,
-        :seon.fn/spec "[:=> [:cat] :int]"}])
+     (test-support/transacted!
+                  connection
+                  [#:seon.agent{:id "interrupt-author",
+                                :namespace
+                                #:seon.ns{:name 'authored.interrupt,
+                                          :source "(ns authored.interrupt)"}}
+                   {:seon.fn/sym "authored.interrupt/spin",
+                    :seon.schema.admission/source :agent,
+                    :seon.fn/ns [:seon.ns/name 'authored.interrupt],
+                    :seon.fn/source source,
+                    :seon.fn/arglists "([])",
+                    :seon.fn/private? false,
+                    :seon.fn/spec "[:=> [:cat] :int]"}])
      ctx
      (eval/build-base-ctx)
      acquired
@@ -1310,27 +1310,27 @@
      (str
       "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
       "good [x] (inc x))")]
-    (db/transact!
-     connection
-     [#:seon.agent{:id agent-id,
-                   :namespace
-                   #:seon.ns{:name namespace-name,
-                             :source "(ns acquire.poison)"}}
-      {:seon.fn/sym "acquire.poison/bad",
-       :seon.schema.admission/source :agent,
-       :seon.fn/ns [:seon.ns/name namespace-name],
-       :seon.fn/source
-       "(defn ^{:malli/schema [:=> [:cat :int] :int]} bad [x] (missing-dependency x))",
-       :seon.fn/arglists "([x])",
-       :seon.fn/private? false,
-       :seon.fn/spec "[:=> [:cat :int] :int]"}
-      {:seon.fn/sym "acquire.poison/good",
-       :seon.schema.admission/source :agent,
-       :seon.fn/ns [:seon.ns/name namespace-name],
-       :seon.fn/source good-source,
-       :seon.fn/arglists "([x])",
-       :seon.fn/private? false,
-       :seon.fn/spec "[:=> [:cat :int] :int]"}])
+    (test-support/transacted!
+                 connection
+                 [#:seon.agent{:id agent-id,
+                               :namespace
+                               #:seon.ns{:name namespace-name,
+                                         :source "(ns acquire.poison)"}}
+                  {:seon.fn/sym "acquire.poison/bad",
+                   :seon.schema.admission/source :agent,
+                   :seon.fn/ns [:seon.ns/name namespace-name],
+                   :seon.fn/source
+                   "(defn ^{:malli/schema [:=> [:cat :int] :int]} bad [x] (missing-dependency x))",
+                   :seon.fn/arglists "([x])",
+                   :seon.fn/private? false,
+                   :seon.fn/spec "[:=> [:cat :int] :int]"}
+                  {:seon.fn/sym "acquire.poison/good",
+                   :seon.schema.admission/source :agent,
+                   :seon.fn/ns [:seon.ns/name namespace-name],
+                   :seon.fn/source good-source,
+                   :seon.fn/arglists "([x])",
+                   :seon.fn/private? false,
+                   :seon.fn/spec "[:=> [:cat :int] :int]"}])
     (let
      [ctx
       (assoc
@@ -1379,24 +1379,24 @@
      (str
       "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
       "accept [x] x)")]
-    (db/transact!
-     connection
-     [(:seon.config/desired-row
-       (config/compile-manifest
-        {:seon.boot/cluster-name "contract-acquire",
-         :seon.config/manifest
-         (assoc caps :seon.config/on-core-error :panic)}))
-      #:seon.agent{:id "contract-author",
-                   :namespace
-                   #:seon.ns{:name 'authored.contract,
-                             :source "(ns authored.contract)"}}
-      {:seon.fn/sym "authored.contract/accept",
-       :seon.schema.admission/source :agent,
-       :seon.fn/ns [:seon.ns/name 'authored.contract],
-       :seon.fn/source source,
-       :seon.fn/arglists "([x])",
-       :seon.fn/private? false,
-       :seon.fn/spec "[:=> [:cat :int] :int]"}])
+    (test-support/transacted!
+                 connection
+                 [(:seon.config/desired-row
+                   (config/compile-manifest
+                    {:seon.boot/cluster-name "contract-acquire",
+                     :seon.config/manifest
+                     (assoc caps :seon.config/on-core-error :panic)}))
+                  #:seon.agent{:id "contract-author",
+                               :namespace
+                               #:seon.ns{:name 'authored.contract,
+                                         :source "(ns authored.contract)"}}
+                  {:seon.fn/sym "authored.contract/accept",
+                   :seon.schema.admission/source :agent,
+                   :seon.fn/ns [:seon.ns/name 'authored.contract],
+                   :seon.fn/source source,
+                   :seon.fn/arglists "([x])",
+                   :seon.fn/private? false,
+                   :seon.fn/spec "[:=> [:cat :int] :int]"}])
     (let
      [assert-violation
       (fn
@@ -1459,12 +1459,12 @@
             agent-id "probe"
             assigned-namespace 'my.tools.demo
             _ (test-support/seed-cluster! connection cluster-name)
-            _ (db/transact!
-               connection
-               (agent/creation-tx
-                {:seon.agent/id agent-id
-                 :seon.ns/name assigned-namespace
-                 :seon.cluster/name cluster-name}))
+            _ (test-support/transacted!
+                           connection
+                           (agent/creation-tx
+                            {:seon.agent/id agent-id
+                             :seon.ns/name assigned-namespace
+                             :seon.cluster/name cluster-name}))
             ctx (eval/cluster-ctx (db/db connection) connection)
             evaluation
             (run-in ctx
@@ -1613,12 +1613,12 @@
   (test-support/with-database
     (fn [connection]
       (test-support/seed-cluster! connection "host-walk")
-      (db/transact!
-        connection
-        (agent/creation-tx
-          {:seon.agent/id "host-walker",
-           :seon.cluster/name "host-walk",
-           :seon.ns/name 'my.agents.host-walker}))
+      (test-support/transacted!
+                    connection
+                    (agent/creation-tx
+                      {:seon.agent/id "host-walker",
+                       :seon.cluster/name "host-walk",
+                       :seon.ns/name 'my.agents.host-walker}))
       (let [ctx (eval/cluster-ctx (db/db connection) connection)
             request {:seon.render.walk/lookup [:seon.agent/id "host-walker"],
                      :seon.sci.eval/time-limit-ms 5000,

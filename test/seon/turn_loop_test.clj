@@ -195,7 +195,7 @@
   (test-support/with-database
     (fn [connection]
       (config/apply! {:seon.db/connection connection})
-      (db/transact! connection [{:seon.turn/id "gauge-run"}])
+      (test-support/transacted! connection [{:seon.turn/id "gauge-run"}])
       ((private-loop-fn 'record-attempt!)
        {:seon.db/connection connection}
        {:seon.ai/target
@@ -300,35 +300,35 @@
             first-run "first-answer"
             request {:seon.agent/id agent-id
                      :seon.db.process/id process}]
-        (db/transact!
-         connection
-         [{:seon.agent/id agent-id}
-          {:seon.config/cluster "loop-test"
-           :seon.config.run/max-episode-runs 100}
-          {:seon.message/id trigger-id :seon.message/to [:seon.agent/id agent-id] :seon.message/content "answer once" :seon.message/inbox [:seon.agent/id agent-id]}])
+        (test-support/transacted!
+                     connection
+                     [{:seon.agent/id agent-id}
+                      {:seon.config/cluster "loop-test"
+                       :seon.config.run/max-episode-runs 100}
+                      {:seon.message/id trigger-id :seon.message/to [:seon.agent/id agent-id] :seon.message/content "answer once" :seon.message/inbox [:seon.agent/id agent-id]}])
         (is (= :open (:seon.turn.work/situation
                       (turn/next-agent-work (db/db connection) request)))
             "the wake opens exactly one turn")
-        (db/transact!
-         connection
-         {:tx-data
-          (into
-           [[:db.fn/call
-             #'turn/open-call
-             {:seon.turn/id first-run :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}]]
-           [])})
-        (db/transact!
-         connection
-         [{:seon.turn/id first-run
-           :seon.turn/reply "(+ 1 1)"}
-          {:seon.ai.attempt/id "one-answer-attempt"
-           :seon.turn/_attempts [:seon.turn/id first-run]
-           :seon.ai.attempt/ordinal 0
-           :seon.ai.attempt/at now}])
-        (db/transact!
-         connection
-         (turn/close-tx
-          {:seon.turn/id first-run :seon.db.process/id process :seon.turn/closed-tx "datomic.tx"}))
+        (test-support/transacted!
+                     connection
+                     {:tx-data
+                      (into
+                       [[:db.fn/call
+                         #'turn/open-call
+                         {:seon.turn/id first-run :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}]]
+                       [])})
+        (test-support/transacted!
+                     connection
+                     [{:seon.turn/id first-run
+                       :seon.turn/reply "(+ 1 1)"}
+                      {:seon.ai.attempt/id "one-answer-attempt"
+                       :seon.turn/_attempts [:seon.turn/id first-run]
+                       :seon.ai.attempt/ordinal 0
+                       :seon.ai.attempt/at now}])
+        (test-support/transacted!
+                     connection
+                     (turn/close-tx
+                      {:seon.turn/id first-run :seon.db.process/id process :seon.turn/closed-tx "datomic.tx"}))
         (let [database (db/db connection)]
           (is (empty? (turn/unanswered-wakes database agent-id {}))
               "the closed turn answered it, with nothing stored")
@@ -395,26 +395,26 @@
         (config/apply! {:seon.db/connection connection
                         :seon.boot/cluster-name cluster-name})
         (test-support/seed-cluster! connection cluster-name)
-        (db/transact!
-         connection
-         (cluster.agent/creation-tx
-          {:seon.agent/id agent-id
-           :seon.ns/name starting-ns
-           :seon.cluster/name cluster-name}))
-        (db/transact!
-         connection
-         (turn/open-tx {:seon.turn/id run-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}))
+        (test-support/transacted!
+                     connection
+                     (cluster.agent/creation-tx
+                      {:seon.agent/id agent-id
+                       :seon.ns/name starting-ns
+                       :seon.cluster/name cluster-name}))
+        (test-support/transacted!
+                     connection
+                     (turn/open-tx {:seon.turn/id run-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}))
 
-        (db/transact!
-         connection
-         (turn/plan-tx
-          {:seon.turn/id run-id :seon.db.process/id process :seon.turn/starting-ns [:seon.ns/name starting-ns] :seon.turn/sources [{:seon.cluster.eval/source
-             "(when true (in-ns 'my.generated.after-resume))"
-             :seon.ns/name starting-ns}
-            {:seon.cluster.eval/source
-             (str "(defn ^{:malli/schema [:=> [:cat] :int]} "
-                  "attributed-after-resume [] 1)")
-             :seon.ns/name starting-ns}]}))
+        (test-support/transacted!
+                     connection
+                     (turn/plan-tx
+                      {:seon.turn/id run-id :seon.db.process/id process :seon.turn/starting-ns [:seon.ns/name starting-ns] :seon.turn/sources [{:seon.cluster.eval/source
+                         "(when true (in-ns 'my.generated.after-resume))"
+                         :seon.ns/name starting-ns}
+                        {:seon.cluster.eval/source
+                         (str "(defn ^{:malli/schema [:=> [:cat] :int]} "
+                              "attributed-after-resume [] 1)")
+                         :seon.ns/name starting-ns}]}))
         ;; The freeze minted both evaluations; nothing separate starts one.
         (let [ctx (test-support/fork-cluster-ctx connection)
               first-evaluation
@@ -432,19 +432,19 @@
                 :seon.turn/id run-id
                 :seon.cluster.eval/ordinal 0})]
           (is (= ending-ns (:seon.sci.eval/ending-ns first-evaluation)))
-          (db/transact!
-           connection
-           ;; ABSENT MEANS NO KEY: the settle request marks every terminal
-           ;; fact optional, and an optional key present as nil fails its
-           ;; contract, so the request carries only the facts the
-           ;; evaluation actually produced.
-           (turn/receipt-settle-tx
-            (merge {:seon.turn/id run-id
-                    :seon.cluster.eval/ordinal 0}
-                   (select-keys first-evaluation
-                                [:seon.eval/shown
-                                 :seon.cluster.eval/ns
-                                 :seon.sci.eval/ending-ns]))))
+          (test-support/transacted!
+                       connection
+                       ;; ABSENT MEANS NO KEY: the settle request marks every terminal
+                       ;; fact optional, and an optional key present as nil fails its
+                       ;; contract, so the request carries only the facts the
+                       ;; evaluation actually produced.
+                       (turn/receipt-settle-tx
+                        (merge {:seon.turn/id run-id
+                                :seon.cluster.eval/ordinal 0}
+                               (select-keys first-evaluation
+                                            [:seon.eval/shown
+                                             :seon.cluster.eval/ns
+                                             :seon.sci.eval/ending-ns]))))
           (is (= ending-ns
                  (:seon.sci.eval/ending-ns
                   (db/pull @connection
@@ -499,19 +499,19 @@
         (config/apply! {:seon.db/connection connection
                         :seon.boot/cluster-name cluster-name})
         (test-support/seed-cluster! connection cluster-name)
-        (db/transact!
-         connection
-         (into (cluster.agent/creation-tx
-                {:seon.agent/id "planner"
-                 :seon.ns/name 'my.agents.planner
-                 :seon.cluster/name cluster-name})
-               (cluster.agent/creation-tx
-                {:seon.agent/id "worker"
-                 :seon.ns/name 'my.agents.worker
-                 :seon.cluster/name cluster-name})))
-        (db/transact! connection
-                    [{:seon.agent/id "planner"
-                      :seon.agent/settings {:seon.config.ai/thinking :high}}])
+        (test-support/transacted!
+                     connection
+                     (into (cluster.agent/creation-tx
+                            {:seon.agent/id "planner"
+                             :seon.ns/name 'my.agents.planner
+                             :seon.cluster/name cluster-name})
+                           (cluster.agent/creation-tx
+                            {:seon.agent/id "worker"
+                             :seon.ns/name 'my.agents.worker
+                             :seon.cluster/name cluster-name})))
+        (test-support/transacted! connection
+                                [{:seon.agent/id "planner"
+                                  :seon.agent/settings {:seon.config.ai/thinking :high}}])
         (let [db @connection
               cluster-settings (config/effective db cluster-name)
               planner-settings
@@ -530,8 +530,8 @@
 
 (defn- prepare-call!
   [{connection :seon.db/connection :as cluster} agent-id run-id message-id]
-  (db/transact! connection
-              [{:seon.message/id message-id :seon.message/to [:seon.agent/id agent-id] :seon.message/content "prove live settings" :seon.message/inbox [:seon.agent/id agent-id]}])
+  (test-support/transacted! connection
+                          [{:seon.message/id message-id :seon.message/to [:seon.agent/id agent-id] :seon.message/content "prove live settings" :seon.message/inbox [:seon.agent/id agent-id]}])
   (db/transact!
    connection
    [{:seon.turn/id run-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/trigger [:seon.message/id message-id] :seon.turn/opened-tx "datomic.tx"}
@@ -584,18 +584,18 @@
        (config/apply! {:seon.db/connection connection
                        :seon.boot/cluster-name cluster-name})
        (test-support/seed-cluster! connection cluster-name)
-       (db/transact!
-        connection
-        (cluster.agent/creation-tx
-         {:seon.agent/id agent-id
-          :seon.ns/name 'my.agents.generated-agent
-          :seon.cluster/name cluster-name}))
-       (db/transact!
-        connection
-        [{:seon.message/id message-id :seon.message/to [:seon.agent/id agent-id] :seon.message/content "start" :seon.message/inbox [:seon.agent/id agent-id]}])
-       (db/transact!
-        connection
-        (turn/open-tx {:seon.turn/id run-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/trigger [:seon.message/id message-id] :seon.turn/opened-tx "datomic.tx"}))
+       (test-support/transacted!
+                    connection
+                    (cluster.agent/creation-tx
+                     {:seon.agent/id agent-id
+                      :seon.ns/name 'my.agents.generated-agent
+                      :seon.cluster/name cluster-name}))
+       (test-support/transacted!
+                    connection
+                    [{:seon.message/id message-id :seon.message/to [:seon.agent/id agent-id] :seon.message/content "start" :seon.message/inbox [:seon.agent/id agent-id]}])
+       (test-support/transacted!
+                    connection
+                    (turn/open-tx {:seon.turn/id run-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/trigger [:seon.message/id message-id] :seon.turn/opened-tx "datomic.tx"}))
 
        (with-redefs [prompt/prompt (fn [_database _request] refusal)
                      ai/complete (fn [_request]
@@ -674,20 +674,20 @@
             run-id "assigned-run"
             assigned-namespace 'my.tools.demo]
         (test-support/seed-cluster! connection cluster-name)
-        (db/transact!
-         connection
-         (cluster.agent/creation-tx
-          {:seon.agent/id agent-id
-           :seon.ns/name assigned-namespace
-           :seon.cluster/name cluster-name}))
-        (db/transact!
-         connection
-         (turn/open-tx {:seon.turn/id run-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}))
+        (test-support/transacted!
+                     connection
+                     (cluster.agent/creation-tx
+                      {:seon.agent/id agent-id
+                       :seon.ns/name assigned-namespace
+                       :seon.cluster/name cluster-name}))
+        (test-support/transacted!
+                     connection
+                     (turn/open-tx {:seon.turn/id run-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}))
 
-        (db/transact!
-         connection
-         (turn/plan-tx
-          {:seon.turn/id run-id :seon.db.process/id process :seon.turn/sources [{:seon.cluster.eval/source "(ns-name *ns*)"}]}))
+        (test-support/transacted!
+                     connection
+                     (turn/plan-tx
+                      {:seon.turn/id run-id :seon.db.process/id process :seon.turn/sources [{:seon.cluster.eval/source "(ns-name *ns*)"}]}))
         (let [planned-form
               (db/pull
                @connection
@@ -712,12 +712,12 @@
           (is (= assigned-namespace
                  (get-in planned-form
                          [:seon.cluster.eval/ns :seon.ns/name])))
-          (db/transact!
-           connection
-           (turn/receipt-start-tx
-            {:seon.turn/id run-id
-             :seon.cluster.eval/ordinal 0
-             :seon.cluster.eval/at now}))
+          (test-support/transacted!
+                       connection
+                       (turn/receipt-start-tx
+                        {:seon.turn/id run-id
+                         :seon.cluster.eval/ordinal 0
+                         :seon.cluster.eval/at now}))
           (let [evaluation
                 (sci.eval/evaluate
                  {:seon.cluster.eval/source
@@ -736,15 +736,15 @@
                   :seon.agent/id agent-id
                   :seon.turn/id run-id
                   :seon.cluster.eval/ordinal 0})]
-            (db/transact!
-             connection
-             (turn/receipt-settle-tx
-              (merge {:seon.turn/id run-id
-                      :seon.cluster.eval/ordinal 0}
-                     (select-keys evaluation
-                                  [:seon.eval/shown
-                                   :seon.cluster.eval/ns
-                                   :seon.sci.eval/ending-ns]))))
+            (test-support/transacted!
+                         connection
+                         (turn/receipt-settle-tx
+                          (merge {:seon.turn/id run-id
+                                  :seon.cluster.eval/ordinal 0}
+                                 (select-keys evaluation
+                                              [:seon.eval/shown
+                                               :seon.cluster.eval/ns
+                                               :seon.sci.eval/ending-ns]))))
             (is (= assigned-namespace
                    (:seon.sci.admit/value evaluation)))
             (is (= assigned-namespace
@@ -803,16 +803,16 @@
          {:seon.config.ai/model "before-apply"
           :seon.config.ai.backup/model "backup-before-apply"}})
        (test-support/seed-cluster! connection cluster-name)
-       (db/transact!
-        connection
-        (cluster.agent/creation-tx
-         {:seon.agent/id agent-id
-          :seon.ns/name 'my.agents.live-settings
-          :seon.cluster/name cluster-name}))
-       (db/transact!
-        connection
-        [{:seon.agent/id agent-id
-          :seon.agent/settings {:seon.config.ai/thinking :high}}])
+       (test-support/transacted!
+                    connection
+                    (cluster.agent/creation-tx
+                     {:seon.agent/id agent-id
+                      :seon.ns/name 'my.agents.live-settings
+                      :seon.cluster/name cluster-name}))
+       (test-support/transacted!
+                    connection
+                    [{:seon.agent/id agent-id
+                      :seon.agent/settings {:seon.config.ai/thinking :high}}])
        (let [opening (turn/system-turn {:seon.turn.loop/cluster cluster
                                         :seon.agent/id agent-id
                                         :seon.turn/write? true})]
@@ -869,10 +869,10 @@
                         :seon.ai/settings))
                   "settings are beside usage, never inside it"))
 
-            (db/transact!
-             connection
-             (turn/close-tx
-              {:seon.turn/id "settings-run-1" :seon.db.process/id process :seon.turn/closed-tx "datomic.tx"}))
+            (test-support/transacted!
+                         connection
+                         (turn/close-tx
+                          {:seon.turn/id "settings-run-1" :seon.db.process/id process :seon.turn/closed-tx "datomic.tx"}))
             (config/apply!
              {:seon.db/connection connection
               :seon.boot/cluster-name cluster-name
@@ -937,7 +937,7 @@
           :seon.error/message "injected prompt failure"
           :seon.error/data {:seon.turn.loop/phase :prompt}})
         before (set (db/q '[:find [?id ...] :where [?m :seon.message/id ?id]] @connection))]
-    (db/transact! connection (:seon.db/tx-data prepared))
+    (test-support/transacted! connection (:seon.db/tx-data prepared))
     (into [] (keep (fn [[id recipient]] (when-not (before id) recipient)))
           (db/q '[:find ?id ?recipient
                   :where [?m :seon.message/id ?id]
@@ -955,9 +955,9 @@
   (testing "a supervisor hears about a worker's refused phases — once"
     (test-support/with-database
      (fn [connection]
-       (db/transact! connection
-                     [{:seon.agent/id "worker"}
-                      {:seon.agent/id "supervisor"}])
+       (test-support/transacted! connection
+                                 [{:seon.agent/id "worker"}
+                                  {:seon.agent/id "supervisor"}])
        (is (= [[] [] ["supervisor"] [] [] []]
               (mapv (fn [_] (refuse-phase! connection "supervisor" "worker"))
                     (range 6)))
@@ -968,7 +968,7 @@
   (testing "the failing agent is never mailed about its own refusal"
     (test-support/with-database
      (fn [connection]
-       (db/transact! connection [{:seon.agent/id "worker"}])
+       (test-support/transacted! connection [{:seon.agent/id "worker"}])
        (is (= [[] [] [] [] [] []]
               (mapv (fn [_] (refuse-phase! connection "worker" "worker"))
                     (range 6)))
@@ -1030,25 +1030,25 @@
             run-id "undisposed-run"
             message-id "undisposed-trigger"
             terminal-data (private-loop-fn 'evaluation-terminal-data)]
-        (db/transact!
-         connection
-         [{:seon.ns/name 'my.agents.undisposed-agent}
-          {:seon.agent/id agent-id
-           :seon.agent/namespace
-           [:seon.ns/name 'my.agents.undisposed-agent]}
-          {:seon.message/id message-id :seon.message/to [:seon.agent/id agent-id] :seon.message/content "prove the contract" :seon.message/inbox [:seon.agent/id agent-id]}])
-        (db/transact!
-         connection
-         (into [] cat
-               [(turn/open-tx
-                 {:seon.turn/id run-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/trigger [:seon.message/id message-id] :seon.turn/opened-tx "datomic.tx"})
-                []
-                (turn/plan-tx
-                 {:seon.turn/id run-id :seon.db.process/id process :seon.turn/reply "(defn answer-count [] 2)\n(answer-count)\n(+ (answer-count) 1)" :seon.turn/sources [{:seon.cluster.eval/source
-                    "(defn answer-count [] 2)"}
-                   {:seon.cluster.eval/source "(answer-count)"}
-                   {:seon.cluster.eval/source
-                    "(+ (answer-count) 1)"}]})]))
+        (test-support/transacted!
+                     connection
+                     [{:seon.ns/name 'my.agents.undisposed-agent}
+                      {:seon.agent/id agent-id
+                       :seon.agent/namespace
+                       [:seon.ns/name 'my.agents.undisposed-agent]}
+                      {:seon.message/id message-id :seon.message/to [:seon.agent/id agent-id] :seon.message/content "prove the contract" :seon.message/inbox [:seon.agent/id agent-id]}])
+        (test-support/transacted!
+                     connection
+                     (into [] cat
+                           [(turn/open-tx
+                             {:seon.turn/id run-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/trigger [:seon.message/id message-id] :seon.turn/opened-tx "datomic.tx"})
+                            []
+                            (turn/plan-tx
+                             {:seon.turn/id run-id :seon.db.process/id process :seon.turn/reply "(defn answer-count [] 2)\n(answer-count)\n(+ (answer-count) 1)" :seon.turn/sources [{:seon.cluster.eval/source
+                                "(defn answer-count [] 2)"}
+                               {:seon.cluster.eval/source "(answer-count)"}
+                               {:seon.cluster.eval/source
+                                "(+ (answer-count) 1)"}]})]))
         (doseq [[ordinal value] [[0 "#'my.agents.undisposed-agent/answer-count"]
                                  [1 "2"]]]
           (db/transact!
@@ -1061,12 +1061,12 @@
                   {:seon.turn/id run-id
                    :seon.cluster.eval/ordinal ordinal
                    :seon.eval/shown value}))))
-        (db/transact!
-         connection
-         (turn/receipt-start-tx
-          {:seon.turn/id run-id
-           :seon.cluster.eval/ordinal 2
-           :seon.cluster.eval/at now}))
+        (test-support/transacted!
+                     connection
+                     (turn/receipt-start-tx
+                      {:seon.turn/id run-id
+                       :seon.cluster.eval/ordinal 2
+                       :seon.cluster.eval/at now}))
         (let [prepared
               (terminal-data
                {:seon.turn.loop/cluster
@@ -1159,9 +1159,9 @@
         _ (d/create-database configuration)
         connection (d/connect configuration)]
     (try
-      (db/transact! connection
-                  (schema.datahike/malli->datahike-schema
-                   (schema/canonical-database-attributes)))
+      (test-support/transacted! connection
+                              (schema.datahike/malli->datahike-schema
+                               (schema/canonical-database-attributes)))
       (testing "the trigger — the exact transact the live drive failed on"
         (is (map? (db/transact! connection
                               [{:seon.agent/id "alice"}
@@ -1253,10 +1253,10 @@
    (fn [connection]
       (config/apply! {:seon.db/connection connection
                       :seon.boot/cluster-name "loop-test"})
-      (db/transact! connection
-                  [{:seon.ns/name 'user}
-                   {:seon.agent/id "agent-a"}
-                   {:seon.message/id "m-1" :seon.message/to [:seon.agent/id "agent-a"] :seon.message/content "go" :seon.message/inbox [:seon.agent/id "agent-a"]}])
+      (test-support/transacted! connection
+                              [{:seon.ns/name 'user}
+                               {:seon.agent/id "agent-a"}
+                               {:seon.message/id "m-1" :seon.message/to [:seon.agent/id "agent-a"] :seon.message/content "go" :seon.message/inbox [:seon.agent/id "agent-a"]}])
       (body connection))))
 
 (defn- commit-run! [connection {:keys [planned? receipts closed?]}]
@@ -1624,8 +1624,8 @@
             "and the turn closed in the refusal path itself")
         (is (nil? (turn/open-for-agent database [:seon.agent/id "agent-a"]))
             "the agent holds no wreckage")
-        (db/transact! connection
-                      [{:seon.message/id "m-after-refusal" :seon.message/to [:seon.agent/id "agent-a"] :seon.message/content "again" :seon.message/inbox [:seon.agent/id "agent-a"]}])
+        (test-support/transacted! connection
+                                  [{:seon.message/id "m-after-refusal" :seon.message/to [:seon.agent/id "agent-a"] :seon.message/content "again" :seon.message/inbox [:seon.agent/id "agent-a"]}])
         (is (= :open
                (:seon.turn.work/situation
                 (turn/next-agent-work

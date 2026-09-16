@@ -67,8 +67,8 @@
                     :seon.boot/cluster-name "running-fixture"
                     :seon.config/manifest
                     {:seon.config.run/max-episode-runs :seon.config/absent}})
-     (db/transact! connection [{:seon.agent/id "root"
-                               :seon.agent/namespace {:seon.ns/name 'my.agents.root}}])
+     (support/transacted! connection [{:seon.agent/id "root"
+                                      :seon.agent/namespace {:seon.ns/name 'my.agents.root}}])
      (cluster/ensure-cluster-entity! connection "running-fixture" cluster/boot-process-identity)
      (let [ctx (support/fork-cluster-ctx connection)
            environment (support/environment "running-fixture" connection)
@@ -146,10 +146,10 @@
                               [?runtime :seon.runtime/turns ?turn]
                               [?turn :seon.turn/reply ""] [?turn :seon.turn/closed-tx]] @connection)))
              (let [basis (db/basis-t @connection)]
-               (db/transact! connection [{:seon.message/id "running-fixture/wake"
-                                         :seon.message/to [:seon.agent/id "juniper"]
-                                         :seon.message/inbox [:seon.agent/id "juniper"]
-                                         :seon.message/content "Probe the running runtime component."}])
+               (support/transacted! connection [{:seon.message/id "running-fixture/wake"
+                                                :seon.message/to [:seon.agent/id "juniper"]
+                                                :seon.message/inbox [:seon.agent/id "juniper"]
+                                                :seon.message/content "Probe the running runtime component."}])
                (await-settled!)
                (is (= 29 (turn/turns-left @connection "juniper")))
                (is (some #(> (:t %) basis) (evaluation/of-agent @connection "juniper"))))
@@ -161,7 +161,7 @@
                                        (db/pull @connection '[{:seon.agent/settings [:db/id]}]
                                                 [:seon.agent/id "juniper"])))]
                  (support/await-event! completion ::idle-permit)
-                 (db/transact! connection [[:db/add settings :seon.config.agent/turn-completion-backstop-ms 100]])
+                 (support/transacted! connection [[:db/add settings :seon.config.agent/turn-completion-backstop-ms 100]])
                  (is (nil? (:seon.error/kind
                             (db/transact! connection
                                           (turn/open-tx
@@ -179,7 +179,7 @@
                        (is (= 100 (:seon.config.agent/turn-completion-backstop-ms data)))
                        (is (< (/ (- (System/nanoTime) start) 1e6) 2000))))
                    (finally
-                     (db/transact! connection [[:db/add settings :seon.config.agent/turn-completion-backstop-ms 600000]])
+                     (support/transacted! connection [[:db/add settings :seon.config.agent/turn-completion-backstop-ms 600000]])
                      (async/offer! completion :seon.agent/ready)))))
              (finally
                (wake/unlisten! {:seon.cluster.wake/connection connection :seon.cluster.wake/key ::running-route})
@@ -213,9 +213,9 @@
            start (java.util.concurrent.CountDownLatch. 1)
            request {:seon.turn.loop/cluster handle
                     :seon.agent/routing routing :seon.agent/id "concurrent"}
-           _ (db/transact! connection
-                           [{:seon.agent/id "concurrent"
-                             :seon.agent/namespace {:seon.ns/name 'my.agents.concurrent}}])
+           _ (support/transacted! connection
+                                  [{:seon.agent/id "concurrent"
+                                    :seon.agent/namespace {:seon.ns/name 'my.agents.concurrent}}])
            arms (mapv (fn [_]
                         (future
                           (.countDown ready)
@@ -765,11 +765,11 @@
                (let [id (turn/next-id @connection "loop-proof" "other")
                      source "(seon.db/transact! [{:seon.agent/id \"must-not-execute\"}])"
                      sources (turn/planned-sources source 'my.agents.other 10000)]
-                 (db/transact!
-                  connection
-                  (turn/system-run-tx
-                   @connection
-                   {:seon.agent/id "other" :seon.turn/id id :seon.turn/opened-tx "datomic.tx" :seon.turn/starting-ns [:seon.ns/name 'my.agents.other] :seon.turn/reply source :seon.turn/sources sources}))
+                 (support/transacted!
+                         connection
+                         (turn/system-run-tx
+                          @connection
+                          {:seon.agent/id "other" :seon.turn/id id :seon.turn/opened-tx "datomic.tx" :seon.turn/starting-ns [:seon.ns/name 'my.agents.other] :seon.turn/reply source :seon.turn/sources sources}))
                  (is (= 1 (:seon.boot/recovered-runs (#'cluster/recover-runs! connection))))
                  (let [saved (evaluation/of-agent @connection "other")
                        basis (db/basis-t @connection)]
@@ -783,9 +783,9 @@
                    (is (= 0 (:seon.boot/recovered-runs (#'cluster/recover-runs! connection))))
                    (is (= basis (db/basis-t @connection))))))
              (testing "a system-only turn without the wake's results answers nothing"
-               (db/transact!
-                connection
-                [{:seon.message/id "unobserved-wake" :seon.message/to [:seon.agent/id "unobserved"] :seon.message/content "This agent has no inbox read." :seon.message/inbox [:seon.agent/id "unobserved"]}])
+               (support/transacted!
+                       connection
+                       [{:seon.message/id "unobserved-wake" :seon.message/to [:seon.agent/id "unobserved"] :seon.message/content "This agent has no inbox read." :seon.message/inbox [:seon.agent/id "unobserved"]}])
                (let [pending (turn/unanswered-wakes @connection "unobserved" {})
                      system (turn/system-turn
                              (assoc request :seon.agent/id "unobserved"))]

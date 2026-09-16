@@ -18,8 +18,8 @@
    (fn [connection]
      (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "rereads"
                     :seon.config/manifest {:seon.config.ai/no-provider true}})
-     (db/transact! connection [{:seon.agent/id "root"
-                               :seon.agent/namespace {:seon.ns/name 'my.agents.root}}])
+     (support/transacted! connection [{:seon.agent/id "root"
+                                      :seon.agent/namespace {:seon.ns/name 'my.agents.root}}])
      (cluster/ensure-cluster-entity! connection "rereads" cluster/boot-process-identity)
      (let [ctx (support/fork-cluster-ctx connection)
            environment (support/environment "rereads" connection)
@@ -74,7 +74,7 @@
           (is (= 1 (count before)))
           (is (= 40 (repl/shown-value (:seon.eval/shown previous))))
           (is (seq (:seon.cluster.eval/read-evidence previous)))
-          (db/transact! connection [[:db/add [:example/order "a1"] :example/amount 61]])
+          (support/transacted! connection [[:db/add [:example/order "a1"] :example/amount 61]])
           (is (false? (db/read-evidence-current? @connection (:seon.cluster.eval/read-evidence previous))))
           (testing "preview emits nothing and changes no facts"
             (let [basis (db/basis-t @connection)
@@ -97,7 +97,7 @@
               (is (nil? (:seon.turn/id (turn/system-turn request))))
               (is (= basis (db/basis-t @connection)) "fresh evidence avoids another evaluation or write")))
           (testing "a changed value emits exactly once with its actual result handle"
-            (db/transact! connection [[:db/add [:example/order "c1"] :example/amount 39]])
+            (support/transacted! connection [[:db/add [:example/order "c1"] :example/amount 39]])
             (let [result (turn/system-turn request)
                   added (last (entries connection source))
                   emission (repl/entity-emission added)
@@ -134,7 +134,7 @@
           (is (#'turn/read-only-evaluation? @connection doc-entry))
           (is (not (#'turn/read-only-evaluation?
                      @connection (dissoc doc-entry :seon.cluster.eval/read-evidence))))
-          (db/transact! connection [[:db/add [:example/order "c1"] :example/amount 39]])
+          (support/transacted! connection [[:db/add [:example/order "c1"] :example/amount 39]])
           (let [plan (#'turn/system-plan @connection []
                                         (#'turn/latest-evaluations @connection "juniper"))
                 by-source (into {} (map (juxt :seon.cluster.eval/source identity)) plan)]
@@ -142,8 +142,8 @@
             (is (= :unchanged (:seon.turn/status (get by-source documentation))))
             (is (nil? (:seon.turn/id (turn/system-turn request))))
             (is (= 1 (count (entries connection documentation)))))
-          (db/transact! connection [[:db/add [:seon.fn/sym "my.plan/current!"]
-                                    :seon.fn/doc "Select the current plan item. Reread proof."]])
+          (support/transacted! connection [[:db/add [:seon.fn/sym "my.plan/current!"]
+                                           :seon.fn/doc "Select the current plan item. Reread proof."]])
           (let [plan (#'turn/system-plan @connection []
                                         (#'turn/latest-evaluations @connection "juniper"))]
             (is (= :changed (:seon.turn/status

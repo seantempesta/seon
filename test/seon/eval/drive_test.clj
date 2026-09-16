@@ -27,23 +27,23 @@
 (deftest transcript-projects-the-evaluation-time-limit
   (support/with-database
     (fn [connection]
-      (db/transact!
-       connection
-       {:tx-data
-        [{:seon.ns/name 'my.agents.projection-proof}
-         {:seon.agent/id "projection-proof"
-          :seon.agent/namespace
-          [:seon.ns/name 'my.agents.projection-proof]}
-         {:seon.turn/id "projection-proof-run" :seon.turn/agent [:seon.agent/id "projection-proof"] :seon.turn/opened-tx "datomic.tx"}
-         ;; `result-size` is intentionally absent. Evaluation rendering derives
-         ;; from the declared content and must not require that numeric fact.
-         {:seon.cluster.eval/id "projection-proof-receipt"
-          :seon.cluster.eval/run
-          [:seon.turn/id "projection-proof-run"]
-          :seon.cluster.eval/ordinal 0
-          :seon.cluster.eval/source "42"
-          :seon.cluster.eval/at (java.util.Date.)
-          :seon.eval/shown "42"}]})
+      (support/transacted!
+              connection
+              {:tx-data
+               [{:seon.ns/name 'my.agents.projection-proof}
+                {:seon.agent/id "projection-proof"
+                 :seon.agent/namespace
+                 [:seon.ns/name 'my.agents.projection-proof]}
+                {:seon.turn/id "projection-proof-run" :seon.turn/agent [:seon.agent/id "projection-proof"] :seon.turn/opened-tx "datomic.tx"}
+                ;; `result-size` is intentionally absent. Evaluation rendering derives
+                ;; from the declared content and must not require that numeric fact.
+                {:seon.cluster.eval/id "projection-proof-receipt"
+                 :seon.cluster.eval/run
+                 [:seon.turn/id "projection-proof-run"]
+                 :seon.cluster.eval/ordinal 0
+                 :seon.cluster.eval/source "42"
+                 :seon.cluster.eval/at (java.util.Date.)
+                 :seon.eval/shown "42"}]})
       (let [database @connection
             full-transcript (ns-resolve 'seon.eval.drive 'full-transcript)
             instance {:seon.boot/cluster-connection connection
