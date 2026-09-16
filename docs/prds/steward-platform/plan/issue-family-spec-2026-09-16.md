@@ -117,3 +117,26 @@ index becomes a query), tests. Does NOT edit `src/seon/cluster.clj`,
 `seon.fn*.edn` (lane program-provenance). Needed changes there go in the
 landing note. Landing note
 `docs/prds/steward-platform/research/issue-family-2026-09-16.md`.
+
+## 6. Prerequisites for a worker to complete an issue, in order (owner, 03:05Z: "do those things first")
+
+Vocabulary: entities, attributes, values, refs. The issue block LINKS; it
+never copies function source, contract text, test source or error data —
+the linked entities render themselves through their own pairs.
+
+| # | Prerequisite | Status | Owner |
+|---|---|---|---|
+| P1 | The entities and links: issue entity with refs to functions, tests, errors; tests linked to namespaces through their direct calls; function and test entities carry file and span; lint findings as entities; the error entity keyed by its signature with occurrence components; renderer and usage as refs and facts | in flight | lanes issue-family, program-provenance, error-graph, attempt-and-eval-facts |
+| P2 | Render pairs for the linked entities: `:seon.fn` has only a legacy `:seon.render/form` (`seon.fn.edn:25`), `:seon.test` has no entity pair (`seon.test.edn`). Without them the issue block cannot link a function or a test and have it render. Function pair: symbol, contract, docstring, callers and reaching tests as counts with the exact query; test pair: symbol, latest result, failing assertions, the functions it calls. Link-only, no source copies (the agent reads source with `doc`/`(seon.db/pull …)`) | queued behind program-provenance (it holds `seon.fn.edn`) | lane `entity-pairs` |
+| P3 | `start!`: worker agent + budget overlay + plan (objective = problem, one step with subject = the issue and the done-query) + first turn, one transaction | in flight | issue-family slice 3 |
+| P4 | The opening contains the issue block after the plan block, through `:seon.issue/_agent` on the agent's units; proven with a virtual turn on the fixture and on default | in flight | issue-family slice 4 |
+| P5 | Tests run after every step: before each `plan/settle-call` (`src/seon/turn.clj:2208`, `:3427`, `:3466`, `:4646`) the turn runs the open issue's tests in-process with `seon.test/run` under the evaluation bound, results recorded with provenance; the done-query reads `verified?` on the reach digest; `resolved-tx` written when the step completes. Never inside a Datahike transaction function | queued behind attempt-and-eval-facts and error-graph (both hold `turn.clj` hunks) and reach-digest (the `verified?` arity) | lane `issue-settlement` |
+| P6 | Writer invariant: a worker adds tests to its issue, never retracts them; refused at the writer (`:db.fn/call` guard on the issue writer plus a declared schema property the transact admission checks), not by a caller pre-read | design filed as an issue by issue-family | lane `issue-settlement` |
+| P7 | Budget: `:seon.issue/budget` copied to the worker's `max-episode-runs` overlay at start; `turns-left` unchanged | in flight (start!) | issue-family |
+| P8 | The first steward: an agent for `seon.render.web`, assigned through `steward-call`; `:seon.ns/steward` set | in flight (live proof) | issue-family |
+| P9 | Regeneration: the issue block's read is re-evaluated by the since-diff when its linked entities change (new occurrence, test result); compaction regenerates it | exists (`seon.turn/system-turn`) | — |
+| P10 | The live proof: one real issue with a real red test on default, a DeepSeek session on the cheapest model, opening bytes, ledger line, explain probe | in flight after P3–P4 | issue-family |
+| P11 | Durability of the worker's results: admitted definitions land on default's branch immediately; per-issue forks and merge come later (roadmap E) | accepted for now | — |
+
+Order of landing: P1 → P2 → P3/P4 (can proceed on the interim done-query) →
+P5/P6 → P8/P10. P2 and P5 launch the moment their files are free.
