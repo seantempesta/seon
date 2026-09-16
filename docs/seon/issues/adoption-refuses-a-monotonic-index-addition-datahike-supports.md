@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, schema, adoption, datahike, cluster]
 ---
@@ -38,3 +38,21 @@ asymmetry Datahike already encodes for `:db/doc`, `:db/noHistory`,
 
 Evidence and the forced reset:
 [start-arms-and-wakes-2026-09-16](../../prds/steward-platform/research/start-arms-and-wakes-2026-09-16.md).
+
+## Resolution (2026-09-16, monotonic-index lane)
+
+`seon.cluster/declaration-changes` now compares facet by facet and derives
+"compatible" from the dependency's own acceptance rule
+(`accretive-property-change?`, grounded per clause in
+`reference-code/datahike/src/datahike/schema.cljc:257`). An accretive change —
+`:db/index` added, `:db/doc`/`:db/noHistory`/`:db/isComponent` updated,
+`:db/cardinality` widened one→many on a non-unique attribute — is ADOPTED IN
+PLACE by transacting the declaration through the existing `seon.db` write path,
+where the transactor backfills AVET atomically. A genuinely incompatible change
+still refuses, now naming the property and both values
+(`… changed :db/valueType from :db.type/long to :db.type/string`) instead of
+`predates`. A DROP remains a refusal: transacting the declaration cannot retract
+a facet the branch still carries.
+
+Evidence, regressions, and the live AVET probe:
+[monotonic-index-adoption-2026-09-16](../../prds/steward-platform/research/monotonic-index-adoption-2026-09-16.md).
