@@ -143,8 +143,55 @@
                 (source-context file)]))
         files))
 
+(defn- current-file-digest
+  [path]
+  (let [file (java.io.File. ^String path)]
+    (when (.isFile file)
+      (sha-256 (Files/readAllBytes (.toPath file))))))
+
+(defn- span-refused!
+  "Refuse a declaration span that does not fit the source text it is read from.
+
+  The analyzer reads every file itself, so its rows and columns describe a
+  different read of the file than `source-contexts` captured. A concurrent edit
+  between those two reads leaves a span addressing characters the captured text
+  does not have. This names the file, the offending span, the captured digest
+  and length, and the file's current digest, so publication reports a source
+  change instead of a bare index exception."
+  [contexts entry detail]
+  (let [path (::analyzer/filename entry)
+        context (get contexts path)]
+    (throw
+     (ex-info
+      "Source changed during analysis; a declaration span does not fit the analyzed text."
+      (merge {:seon.error/kind ::index-refused
+              :seon.error/diagnostic-cause ::source-changed-during-analysis
+              :seon.fn/index-refused true
+              :seon.fn.file/path path
+              :seon.fn.file/captured-digest (:seon.fn.file/digest context)
+              :seon.fn.file/captured-length (count (:text context))
+              ::analysis-span [(::analyzer/row entry) (::analyzer/col entry)
+                               (::analyzer/end-row entry) (::analyzer/end-col entry)]}
+             (when-let [digest (current-file-digest path)]
+               {:seon.fn.file/current-digest digest})
+             detail)))))
+
+(defn- character-offset
+  "The character offset of one analyzer row/column in the captured text.
+
+  Total: a position the captured text cannot hold is the typed refusal, never
+  an index exception."
+  [contexts entry row col]
+  (let [{:keys [text line-starts]} (get contexts (::analyzer/filename entry))]
+    (when-not (and (pos? row) (<= row (count line-starts)))
+      (span-refused! contexts entry {:seon.error/diagnostic-offending [row col]}))
+    (let [offset (+ (nth line-starts (dec row)) (dec col))]
+      (when-not (<= 0 offset (count text))
+        (span-refused! contexts entry {:seon.error/diagnostic-offending [row col]}))
+      offset)))
+
 (defn- exact-source [contexts entry]
-  (let [{:keys [text line-starts]}
+  (let [{:keys [text]}
         (get contexts (::analyzer/filename entry))
         row (::analyzer/row entry)
         col (::analyzer/col entry)
@@ -158,16 +205,24 @@
       (throw (ex-info "Static declaration has no exact source span."
                       {:seon.error/kind ::index-refused
                        ::analysis-entry entry :seon.fn/index-refused true})))
-    (subs text
-          (+ (nth line-starts (dec row)) (dec col))
-          (+ (nth line-starts (dec end-row)) (dec end-col)))))
+    (let [start (character-offset contexts entry row col)
+          end (character-offset contexts entry end-row end-col)]
+      (when-not (<= start end)
+        (span-refused! contexts entry
+                       {:seon.error/diagnostic-offending [end-row end-col]}))
+      (subs text start end))))
 
 (defn- exact-form-span
   [contexts entry]
   (let [{:keys [text line-starts] ::keys [byte-line-starts]} (get contexts (::analyzer/filename entry))
         offset (fn [row col]
                  ;; An analyzer column past the line's last character addresses
-                 ;; that line's end; no source byte exists beyond it.
+                 ;; that line's end; no source byte exists beyond it. A row the
+                 ;; captured text does not have is the typed refusal: the file
+                 ;; changed between the analyzer's read and this one.
+                 (when-not (and (pos? row) (<= row (count line-starts)))
+                   (span-refused! contexts entry
+                                  {:seon.error/diagnostic-offending [row col]}))
                  (let [start (nth line-starts (dec row))
                        stop (min (+ start (dec col))
                                  (nth line-starts row (count text)))]

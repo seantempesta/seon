@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 created: 2026-09-16
 tags: [publication, analysis, seon.fn, bounded-boundaries]
@@ -52,3 +52,37 @@ minutes later, dirty under the dir-elision lane's edits), not `fn.clj`. So
 the class stands as filed: a file changing between the analysis snapshot
 and the span read yields a raw index exception instead of the typed
 source-changed refusal the operator retries on.
+
+## Resolved 2026-09-16 (steward-platform)
+
+Cause, confirmed live on pid 17352: `source-contexts` (`src/seon/fn.clj:138`)
+captures each file's bytes once, and `analyzer/analyze` re-reads the same
+paths itself (`src/seon/fn.clj:1622`, `src/seon/fn.clj:1526`). The analyzer's
+rows and columns therefore describe a DIFFERENT read of the file than the text
+they are sliced against, and an edit between the two reads left
+`exact-source` calling `(nth line-starts (dec row))` past the captured text.
+Reproduced against the loaded pre-fix definition with a file grown after its
+capture: `java.lang.IndexOutOfBoundsException` carrying no message, exactly
+the adoption failure logged in `tmp/orchestrator/fn-adopt2.log`.
+
+Fix: the span read is total. `character-offset` and `exact-form-span` refuse a
+row or offset the captured text cannot hold, through `span-refused!`
+(`src/seon/fn.clj:146`), which names `:seon.fn.file/path`, the analysis span,
+`:seon.error/diagnostic-offending`, `:seon.fn.file/captured-length`, and the
+captured digest against the file's current digest, under
+`:seon.error/kind :seon.fn/index-refused` with
+`:seon.error/diagnostic-cause :seon.fn/source-changed-during-analysis`.
+A span that still fits reads the captured source unchanged.
+
+Regression: `seon.fn-test/a-span-past-the-captured-source-is-the-typed-refusal`.
+
+Retry boundary (verified, not edited): the one adoption retry at
+`src/seon/cluster.clj:2244` keys on `::source-changed-during-adoption` under
+`[:seon.boot/offense :seon.error/diagnostic-cause]`, raised only by the
+post-publication digest compare (`src/seon/cluster.clj:2169`). An
+analysis-time refusal does not reach it. It does reach the incremental
+catch at `src/seon/cluster.clj:1904`, which reads `:seon.fn/index-refused`
+and falls back to a complete rebuild. So a changing file is now a named
+refusal plus one full rebuild; making it retry adoption needs
+`::source-changed-during-analysis` added to that retry predicate in
+`seon.cluster`, which this lane did not own.
