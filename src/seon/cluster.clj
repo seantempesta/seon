@@ -1626,6 +1626,11 @@
         (or (schema/handed-projection)
             (schema/declaration-projection forms))
         (fn []
+          ;; EACH KIND OF CHANGED INPUT HAS ONE OWNER. A complete publication
+          ;; supplies no classes and runs every owner; an incremental one
+          ;; names exactly the owners its changed inputs belong to, so a
+          ;; schema resource never re-indexes the program and a config
+          ;; document never re-accretes the schema.
           (when (or (nil? classes) (classes :schema-resource))
           (report-source-progress! "schema population started")
           (accrete-schema-population! connection nil)
@@ -1643,16 +1648,17 @@
                               {:seon.db/process
                                [:seon.db.process/id boot-process-identity]}})
                {:seon.boot/population :seon.cluster.instruction/rows}))))
-          (report-source-progress! "program rows started")
-          (seon.fn/index!
-           (cond-> {:seon.db/connection connection
-                    :seon.db/process
-                    [:seon.db.process/id boot-process-identity]}
-             manifest (assoc :seon.fn/manifest manifest)
-             classes (assoc :seon.source/previous-database (db/db connection))
-             (nil? manifest) (assoc :seon.fn/roots (or roots seon.fn/source-roots)))
-           report-source-progress!)
-          (report-source-progress! "program rows complete")
+          (when (or (nil? classes) (classes :program))
+            (report-source-progress! "program rows started")
+            (seon.fn/index!
+             (cond-> {:seon.db/connection connection
+                      :seon.db/process
+                      [:seon.db.process/id boot-process-identity]}
+               manifest (assoc :seon.fn/manifest manifest)
+               classes (assoc :seon.source/previous-database (db/db connection))
+               (nil? manifest) (assoc :seon.fn/roots (or roots seon.fn/source-roots)))
+             report-source-progress!)
+            (report-source-progress! "program rows complete"))
           ;; Initialization rows come LAST because they may name a program row
           ;; by lookup ref — the call-preparation suppliers do — and program
           ;; rows are asserted by `index!` immediately above. Nothing earlier in
@@ -1679,7 +1685,7 @@
 (def source-roots
   "The complete file roots whose content identifies `current-src`."
   (into seon.fn/source-roots
-        ["config/default.edn" "docs/seon/issues"]))
+        ["config/default.edn"]))
 
 (defn- publication-roots
   "The root sets one publication analyzes, digests, and compares against.
@@ -1708,6 +1714,21 @@
   ;; roots should not re-run clj-kondo for identical bytes.
   (atom nil))
 
+(def ^:private issue-note-path
+  "The one repository path whose Markdown the publication indexes but does
+  NOT digest. An issue note owns no program facts, so it never re-identifies
+  `current-src`; `seon.issue/notes` reads this same folder at every
+  publication (`src/seon/issue.clj:121`)."
+  "docs/seon/issues")
+
+(def ^:private schema-declaration-path
+  "The one repository path whose content IS the merged schema declaration set.
+
+  The snapshot writes the declaration digest under this entry instead of the
+  individual resource files, and the incremental publication reads the same
+  name to route a changed resource to the schema owner. One name, one spot."
+  "resources/seon/schemas")
+
 (defn source-snapshot
   "Snapshot `roots` plus the merged schema declaration set.
 
@@ -1723,7 +1744,7 @@
   (let [tree-snapshot
         (source/snapshot {:seon.source/roots roots :seon.fn/root directory})
         schema-digest (schema.edn/declaration-digest)
-        schema-path "resources/seon/schemas"
+        schema-path schema-declaration-path
         file-digests
         (assoc (:seon.source/relative-file-digests tree-snapshot)
                schema-path schema-digest)
@@ -1744,6 +1765,7 @@
   [store source-digest manifest roots]
   (source/publish!
    {:seon.store/store store
+    :seon.fn/root (:seon.fn/root roots)
     :seon.source/digest source-digest
     :seon.source/populate `populate-source!
     :seon.source/activation `derive-activation
@@ -2023,6 +2045,10 @@
                                                (:seon.source/relative-file-digests published))
                                         (:seon.source/relative-file-digests snapshot-before)
                                         (map (partial fs/relative-path (:seon.fn/root roots)) changed-paths))
+            ;; An explicitly reported note must reach the issue owner even
+            ;; though it moved no digest; without this the unchanged
+            ;; short-circuit below would publish nothing at all.
+            issue-notes? (some #(str/starts-with? % (str issue-note-path "/")) paths)
             known-functions (seon.fn/manifest-function-symbols manifest)
             ;; ONE declaration world for the whole publication: without this
             ;; every changed file re-read and re-merged the authored schema
@@ -2045,6 +2071,12 @@
                                  :seon.schema.projection/forms declaration-forms
                                  :seon.fn.file/first-party-functions
                                  known-functions}))]
+                 ;; EVERY changed input names the owner that installs its
+                 ;; facts. A Clojure file owns program rows and enters the
+                 ;; artifact planner; every other input owns the population
+                 ;; its own owner writes, and a file that owns no facts at
+                 ;; all is a publication no-op (R2/R3,
+                 ;; docs/prds/steward-platform/research/recompute-from-scratch-inventory-2026-09-16.md).
                  (if (or clojure-source? current)
                  (assoc (seon.fn/plan-file-change
                   (cond->
@@ -2058,11 +2090,12 @@
                     (assoc :seon.fn.change/current-artifact current)
                     desired
                     (assoc :seon.fn.change/desired-artifact desired)))
-                        :seon.fn.change/artifact desired)
+                        :seon.fn.change/artifact desired
+                        :seon.source/change-class :program)
                  {:seon.source/change-class
                   (cond
-                    (or (= path "resources/seon/schemas")
-                        (str/starts-with? path "resources/seon/schemas/"))
+                    (or (= path schema-declaration-path)
+                        (str/starts-with? path (str schema-declaration-path "/")))
                     :schema-resource
                     (= path config/default-manifest-path) :config
                     :else :no-program-facts)})))
@@ -2112,15 +2145,17 @@
                 rows (if scalar? (into [] (mapcat :seon.fn.change/rows) changes) [])
                 _ (report-source-progress!
                    (str (if scalar? "incremental scalar publication" "incremental manifest reconciliation")
-                        ": " (count paths) " paths; reasons=" (pr-str (sort reasons))))
+                        ": " (count paths) " paths; owners=" (pr-str (sort classes))
+                        "; reasons=" (pr-str (sort reasons))))
                 unchanged
-                (when (and (not population?) (empty? rows)
+                (when (and (not population?) (not issue-notes?) (empty? rows)
                            (= digest-after (:seon.source/digest cached)))
                   (current-publication store digest-after))
                 result
                 (or unchanged
                     (source/upsert!
                      (cond-> {:seon.store/store store
+                      :seon.fn/root (:seon.fn/root roots)
                       :seon.source/expected-commit-id expected-commit
                       :seon.source/digest digest-after
                       :seon.source/upsert-rows rows

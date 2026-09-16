@@ -95,8 +95,7 @@
   [filename]
   (or (str/ends-with? filename ".clj")
       (str/ends-with? filename ".cljc")
-      (str/ends-with? filename ".edn")
-      (str/ends-with? filename ".md")))
+      (str/ends-with? filename ".edn")))
 
 (defn snapshot
   "The source-tree digest and exact per-file digests of the declared roots."
@@ -562,12 +561,12 @@
           (::recorded outcome)))))))
 
 (defn- index-issues!
-  [connection source-digest]
+  [connection source-digest directory]
   (when (get (:schema (db/db connection)) :seon.issue/id)
     (require-committed!
      ((requiring-resolve 'seon.issue/index!)
       {:seon.db/connection connection
-       :seon.issue/notes ((requiring-resolve 'seon.issue/notes) ".")})
+       :seon.issue/notes ((requiring-resolve 'seon.issue/notes) directory)})
      :seon.issue/index-refused "Issue indexing was refused."
      {:seon.source/digest source-digest})))
 
@@ -576,6 +575,7 @@
   {:malli/schema [:=> [:cat :seon.source/publish-request]
                   :seon.source/published]}
   [{:keys [:seon.store/store]
+    directory :seon.fn/root
     source-digest :seon.source/digest
     populate :seon.source/populate
     activation :seon.source/activation
@@ -606,7 +606,7 @@
              (merge populate-request
                     {:seon.db/connection connection
                      :seon.source/digest source-digest}))
-            (index-issues! connection source-digest)
+            (index-issues! connection source-digest (or directory (fs/source-directory)))
             (when expected-commit
               (let [evidence (result-preservation-tx
                               (database store expected-commit))]
@@ -694,6 +694,7 @@
                                    :seon.fn.manifest/manifest]]]]
                   :seon.source/published]}
   [{:keys [:seon.store/store :seon.db/process]
+    directory :seon.fn/root
     manifest :seon.fn/manifest
     populate :seon.source/populate
     populate-request :seon.source/populate-request
@@ -739,7 +740,7 @@
                "the incremental source transaction was refused"
                {:seon.source/digest source-digest
                 :seon.source/expected-commit-id expected-commit}))
-              (index-issues! connection source-digest)
+              (index-issues! connection source-digest (or directory (fs/source-directory)))
               (let [seal (activation-seal-tx
                           connection source-digest #{activation} activation-fn)]
                 (when (seq seal)
