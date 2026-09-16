@@ -951,8 +951,9 @@ diagnostic must never be clipped. All with the steward's sweep lane.
 
 The triage of the 65 B reds found `seon.test/check` has no `:seon.test/long`
 filter: a changed function reaching a real-boot long test pulls it into the
-development JVM and burns the 120 s bound. Opus lane launched on
-src/seon/test.clj: `check` under a development root excludes declared-long
-tests through the runner's own predicate, reports the count beside the
-destructive exclusion (one report shape), names the cold command; regression
-in test_reaching_test.
+development JVM and burns the 120 s bound. The steward's Opus lane (`check-excludes-long-tests`) owns it: a default
+exclusion with a named report mirroring the destructive one, an opt-in key,
+and an expired bound that reports completed verdicts plus the typed expiry.
+The orchestrator launched a duplicate lane two minutes before learning that
+and stopped it (no commit; own hunks backed out by hand) — lesson: announce
+a lane before launching when the other session is active in the same area.
