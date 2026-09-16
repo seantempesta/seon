@@ -603,3 +603,16 @@ query over the whole call graph per call). Lane spec
 `tmp/orchestrator/wave2/gate-set-cost.spec`: prefer the reach-closure facts
 as a lookup; else one derivation per turn; results must equal the current
 derivation; the 300 ms bookkeeping assertion stays and must pass.
+
+### 2026-09-16 23:40Z — gate-set-cost landed (`1d141d26a`)
+
+Gate sets are now derived from indexed incoming call edges instead of one
+recursive rule per identity: `gate-set` 6,753 → 11.4 ms with identical
+results across all 4,879 identities; the changed-function check (`seon.test/
+check`) 5,923 → 5.4 ms; the six-form turn's bookkeeping 6,530 → 366 ms.
+The 300 ms assertion still fails at 366 ms — the residual is the prompt
+(~217 ms, `request-profile` derived 64× per turn; issue
+`request-profile-is-derived-64-times-per-turn.md`), next dissolution.
+Reach regressions 25 assertions green; adoption was blocked by the
+`:seon.issue/agent` index change (refork in progress). Batch 54 gates it
+with start-arms on the reforked default.
