@@ -359,10 +359,16 @@
            expected (if (and (vector? expected) (= :cat (first expected))
                              (= 2 (count expected)))
                       (second expected) expected)
-           offending (if arity? (:arity data)
-                         (if (= :input arm)
-                           [(:value (first (:errors explanation)))]
-                           (:value (first (:errors explanation)))))
+           ;; The offending value is the value the contract CHECKED: the
+           ;; caller's arguments for an input arm, the returned value for an
+           ;; output, the pair for a guard, the count for an arity. Naming one
+           ;; problem's leaf here instead dropped both the caller's own call
+           ;; and the position it failed at — `probe/g "a" 1` reported a bare
+           ;; `[1]` at path `[]`, with nothing but the message's prose saying
+           ;; which argument — while a second problem went unnamed. Every leaf
+           ;; value and its path are already carried per problem in
+           ;; `:seon.error/problems`, so this loses no evidence.
+           offending (if arity? (:arity data) value)
            paths (into [] (comp (map :seon.error/path) (remove empty?)) problems)
            caller (caller-frame)]
        (error/diagnostic
