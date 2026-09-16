@@ -267,7 +267,9 @@
                   (let [rows (functions/rows {:seon.fn/roots [(.getPath root)]})
                         row (first (filter #(= observed-symbol (:seon.test/sym %)) rows))]
                     (is (= reason (:seon.test/fixture-observation row)) (pr-str row))
-                    (is (:db-after (db/transact! connection [row]))))
+                    ;; The indexed test row refers to its file and namespace rows, so the
+                    ;; whole emitted artifact is admitted exactly as publication admits it.
+                    (is (:db-after (db/transact! connection rows))))
                   (let [result (sut/check {:seon.db/connection connection
                                            :seon.test/changed [observed-symbol cheap-symbol]})
                         deferred [{:seon.test/sym observed-symbol
