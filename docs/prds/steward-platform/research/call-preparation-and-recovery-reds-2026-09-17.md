@@ -293,9 +293,17 @@ binds a projection before the arm:
 - `schema.clj:1535` — the render-input arity match;
 - `schema.clj:3045` — the function-output arity compile.
 
-All three now use the same `get`-with-`{}`, so no caller of `compilable-form`
-can hand it nil. Verified live on default against a projection with the key
-`dissoc`'d:
+All three now use the same `get`-with-`{}`. PRECISE CLAIM: every site that
+reads the key INLINE into a `compilable-form` call is now total — verified by
+walking each `compilable-form` call in `src/`. Sites that bind a
+`predicate-functions` local earlier and pass it on are NOT covered by this
+commit and still read the key bare: `fn.clj:1907`, `fn.clj:1966`,
+`schema.clj:2171`, `schema.clj:2611`, `sci/eval.clj:444`, `sci/eval.clj:1937`.
+Each builds or receives a projection on a path that has so far always carried
+the key; none is the observed red. The durable cure is one named derivation for
+"the predicate bindings this projection carries", which would replace all nine
+spellings — worth doing once, in a slice that can be adopted and gated.
+Verified live on default against a projection with the key `dissoc`'d:
 
 ```clojure
 {:key-present-in-cold? false
