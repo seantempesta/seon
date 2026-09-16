@@ -2732,8 +2732,6 @@
               write-count (atom 0)
               transact! db/transact!
               install-nanos (atom 0)
-              analyzed-sources (atom [])
-              analyze seon.fn/analyze-forms
               install-var (ns-resolve 'seon.turn 'gate-function-install)
               install @install-var
               test-thread (Thread/currentThread)
@@ -2757,13 +2755,7 @@
                                    (- (System/nanoTime) started)))))
                    (apply install arguments)))}
               (fn []
-               (with-redefs [seon.fn/analyze-forms
-                             (fn [database forms]
-                               (when (= test-thread (Thread/currentThread))
-                                 (swap! analyzed-sources into
-                                        (map :seon.cluster.eval/source forms)))
-                               (analyze database forms))
-                             ai/complete (fn [_] {:seon.ai/text original})
+               (with-redefs [ai/complete (fn [_] {:seon.ai/text original})
                           reply/sources
                           (fn [& arguments]
                             (reset! reply-arrived (System/nanoTime))
@@ -2819,8 +2811,12 @@
                            @connection (:seon.turn/id call-work)))
                   "raw intent provenance remains the original reply")
               (is (str/includes? rendered "repaired [x]\n  (+ x 1))"))
-              (is (= 1 (get (frequencies @analyzed-sources) (first sources)))
-                  "the accepted defining form carries its analysis to settlement")
+              (is (= #{"my.agents.agent-a/repaired"}
+                     (set (db/q '[:find [?symbol ...] :in $ ?evaluation
+                                  :where [?evaluation :seon.fn/calls ?function]
+                                  [?function :seon.fn/sym ?symbol]]
+                                (db/db connection) (:db/id (nth evaluations 2)))))
+                  "a later evaluation retains its edge to the definition in this turn")
               (is (pos? @install-nanos) "the definition install was observed")
               (is (>= @write-count 2) "intent and settlement writes were observed")
               (is (< install-ms 300.0)

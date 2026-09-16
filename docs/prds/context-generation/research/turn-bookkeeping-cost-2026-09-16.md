@@ -889,14 +889,15 @@ The namespace was reloaded through `seon.test/with-test-loader`. Temporary
 timing delegates were restored after each run. These are live JVM measurements
 on canonical fixtures, not adopted-change or cold-gate claims.
 
-### Slice 2: carry the defining form's analysis
+### Slice 2: carried-analysis candidate, withdrawn after stronger proof
 
 `gate-function-install` already carries `:seon.turn/form-facts` and the
-analyzed `:seon.program/row` on the evaluation. `resume-turn` now submits
+analyzed `:seon.program/row` on the evaluation. The candidate made `resume-turn` submit
 only evaluations without those facts to its remaining batch analysis. No
-new attribute, cache, or change to `seon.fn` is needed. The defining source
+new attribute or cache. The defining source
 occurs **once**, versus twice before; ordinary sources still receive their
-evaluation-owned call edges from the batch analyzer.
+evaluation-owned call edges from the batch analyzer for existing functions.
+The stronger same-turn edge proof below refutes completeness for new functions.
 
 The unchanged old window remained **420.366332 ms** (run **71311**, 15/1/0).
 Therefore the delimiter regression now measures the requested boundaries
@@ -920,3 +921,26 @@ The tree includes concurrent edits in `src/seon/fn.clj`, `test/seon/fn_test.clj`
 and `test/seon/render_coverage_test.clj`; none was edited by this lane.
 An owned formatting edit also occurred during that publication. No particular
 foreign edit is asserted as the cause. Final adoption proof is recorded below.
+
+**Final slice-2 verdict: stopped at the protected `src/seon/fn.clj` boundary.**
+Candidate commit `3594331c8` is corrected by the following path-limited
+commit; its `resume-turn` shortcut and one-analysis assertion are removed.
+Run **72330**, **20/1/0**, proved that `(repaired 2)` lost its call edge to
+the function declared earlier in the same six-form turn. Evaluation still
+returned `3`, so the original result-only proof was insufficient.
+
+The current analyzer derives available symbols from database rows plus the
+submitted declaration rows (`resolvable-runtime-function-rows` and
+`runtime-analysis-batch` in `src/seon/fn.clj`). Excluding the defining source
+also excludes its new identity from that context; `analyzed-form` drops the
+ordinary evaluation's unresolved call. The retained regression explicitly
+requires that evaluation's `:seon.fn/calls` edge to `my.agents.agent-a/repaired`.
+
+Exact required protected change: accrete an `analyze-forms` input carrying
+already analyzed declaration rows; use those rows in `program-prelude` and
+the resolvable symbol set, without analyzing their bodies again. Then
+`resume-turn` can pass the carried rows alongside only the remaining source
+forms. Preserve the current arity and contracts. No protected file was edited;
+the original batch analysis remains until that owner change is authorized.
+The direct settlement/write and definition-install bounds remain useful and
+are retained independently of the withdrawn optimization.

@@ -4640,21 +4640,16 @@
                                      reader-event
                                      (assoc :seon.sci.eval/event reader-event)))))
                       evaluations)}))
-            ;; The install gate already analyzed declarations and carried their
-            ;; facts on the evaluation. Analyze only the remaining forms.
             submitted
             (into []
-                  (comp
-                   (map-indexed
-                    (fn [index {form :seon.turn.loop/admitted-form evaluation :seon.sci.eval/evaluation}]
-                      (when-not (:seon.turn/form-facts evaluation)
-                        [index
-                         (cond->
-                          {:seon.cluster.eval/source (:seon.cluster.eval/source form)
-                           :seon.cluster.eval/ns (:seon.cluster.eval/ns form)}
-                           (:seon.program/row evaluation)
-                           (assoc :seon.program/row (:seon.program/row evaluation)))])))
-                   (keep identity))
+                  (map-indexed
+                   (fn [index {form :seon.turn.loop/admitted-form evaluation :seon.sci.eval/evaluation}]
+                     [index
+                      (cond->
+                       {:seon.cluster.eval/source (:seon.cluster.eval/source form)
+                        :seon.cluster.eval/ns (:seon.cluster.eval/ns form)}
+                        (:seon.program/row evaluation)
+                        (assoc :seon.program/row (:seon.program/row evaluation)))]))
                   evaluated)
             analyzed
             (cond
