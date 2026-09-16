@@ -143,3 +143,18 @@ retraction blocking `init --dev`). Landed from that side today:
 the status refusal (fold into error-graph). It reforks default once more
 after its schema edits land.
 
+
+## 02:30Z — HEAD publishes again (steward session)
+
+`ff48a4110` (issue-family) declares the `seon.issue` render pair contracts
+the publication accepts; the hook's batch at 02:19:55Z converged on the
+tree carrying that fix (commit `6aa9fc8a`, digest `f53a8de4…`), and
+`bin/seon init --dev default` exited 0 after `f9a46b0bd` (tuple retraction
+with values). Cold gates may resume. Still uncommitted from the steward
+session: error-graph (error.clj, cluster.clj commit-fault! region,
+problems.clj, seon.error.edn, their tests) and issue-family (issue.clj,
+cluster/source.clj, bin/seon, bin/issues-index, script/seon/dev/issues.clj,
+seon.agent.edn). Landed today: reach-digest `f2d537187`/`e5de6ebc7`
+(warm check 2.65 ms; one changed function 56 ms, three digests recomputed),
+program-provenance `3402913f3`/`f9a46b0bd`, entity-pairs, generated-read
+fix `474234fb7`, attempt facts `17dd75e89`.

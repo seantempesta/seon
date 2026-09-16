@@ -104,3 +104,12 @@
   (`problems-refuses-its-own-zero-occurrence-signature`); to refusal-grammar:
   the `{:min 1}` constraint dropped from the refusal text. Refork of default
   only after the four schema lanes land, announced to the peer first.
+- 04:35Z reach-digest landed (`f2d537187`, `e5de6ebc7`): incremental
+  digests, `stale`, result recording, drift detection; warm check 2.65 ms,
+  one change 56 ms / 3 digests. Residuals routed: agent-admitted test call
+  edges still missing (Juniper digest unchanged when its function changes —
+  a correctness hole for agent tests; lane `agent-call-edges` launched);
+  `result-preservation-tx` in cluster/source.clj must carry
+  `:seon.test/reach-digest` through full publication (queued until
+  issue-family frees the file). HEAD publishes again (`ff48a4110`);
+  ledger line written; gate session pinged.
