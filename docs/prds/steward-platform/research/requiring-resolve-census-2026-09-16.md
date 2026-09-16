@@ -1,6 +1,6 @@
 ---
 type: research
-status: active; census complete, class (a)+(b)+(d) applied in every free file
+status: active; every actionable site outside a held file closed; gate boundary stated
 created: 2026-09-16
 tags: [research, workarounds, dissolution, requiring-resolve, load-cycles, program-graph]
 ---
@@ -386,3 +386,97 @@ entry points are now public, which is what three cross-namespace callers mean.
 
 **No per-call cross-namespace `requiring-resolve` survives in any file this
 lane could touch.**
+
+---
+
+## The gate, and exactly what it did and did not settle
+
+### What ran
+
+`bin/test-fast seon.turn-test seon.issue-test seon.error-test seon.db-test`
+against the **working tree**, 2026-09-16 22:39–22:46.
+
+```
+bin/test: CONTRACTS ARMED … worker= test-fast mode= :panic namespaces= 4
+          program-namespaces= 107 registered= 1102 instrumented= 1102
+Ran 122 tests containing 1076 assertions.
+27 failures, 6 errors.
+```
+
+**The load proof is that first line.** All 107 program namespaces loaded in
+one JVM and 1,102 contracts instrumented — the one thing a wrong `:require`
+edge would have prevented, and the thing an acyclic graph is only *necessary*
+for. `seon.turn-test` — the owner of 23 rewritten sites, the largest single
+population — ran **green end to end**.
+
+### The 33 red assertions, and why they are not this lane's
+
+Four distinct tests failed. The run used the **working tree**, which at that
+moment carried other lanes' uncommitted edits to `src/seon/instrument.clj`,
+`src/seon/cluster.clj`, `src/seon/cluster/source.clj`,
+`src/seon/render/transcript.clj`, `src/seon/schema/datahike.clj`,
+`src/seon/search.clj`, `src/seon/test/selection.clj`,
+`src/seon/bootstrap_drive.clj` and some eighteen test files.
+
+- **`error-identity-and-occurrences-are-owned-by-the-writer` (25 FAIL, 5
+  ERROR at `instrument.clj:433`)** — `:433` is the `:panic` reporter raising
+  the violation, and the uncommitted foreign diff to that file rewrites the
+  `violation` function immediately above it: `@@ -400,5 +405,6 @@` adds
+  `:seon.instrument.lookup/cause` to the evidence and `@@ -411,6 +417,8 @@`
+  replaces `(catch Throwable _ (minimal-violation kind data))` with one that
+  carries `(ex-message failure)`. That is ranked row `instrument.clj:183-184,
+  190, 413` of the [workaround inventory](workaround-inventory-2026-09-16.md)
+  §2 being implemented in flight. The failing test asserts error identity and
+  occurrences; the in-flight edit changes exactly that.
+- **`indexed-issues-replace-facts-and-retract-removed-notes` (1 FAIL)** —
+  asserts `seon.issue/render-ai` contains `"(my.issue/status"`; commit
+  `65986edf7` *"Derive the issue status view in the AI render, not only in
+  HTML"* landed on that surface hours earlier. This lane changed no render
+  text.
+- **`issue-worker-opening-links-its-issue` (1 ERROR)** — `await-event!`:
+  *"The test channel did not publish its required event."* A bounded event
+  wait, during a run with load average 19.58/46.75 and 21 `bin/test`
+  processes live.
+- **`diff-refuses-missing-identity-and-external-sinks` (1 FAIL)** — in
+  `seon.db`'s diff surface; unexamined.
+
+### The rerun that should have settled it, and why it could not run
+
+The correct gate for a shared tree is the HEAD snapshot
+(`bin/test-fast --paths … -- …`). It **refused before running a test**:
+
+```
+bin/test-fast: initialization or execution failed:
+  The loaded function contract cannot compile.
+  :diagnostic-member seon.test/check-request
+  :diagnostic-offending :seon.test.check/request
+  :diagnostic-cause :malli.core/invalid-schema
+```
+
+HEAD's `src/seon/test.clj` declares a contract over `:seon.test.check/request`
+while `resources/seon/schemas/seon.test.check.edn` — the only declaration of
+that family — is **untracked**. HEAD does not load. Filed as
+[head-declares-a-contract-over-an-untracked-schema-resource](../../../seon/issues/head-declares-a-contract-over-an-untracked-schema-resource.md).
+
+A throwaway worktree at HEAD with this lane's 22 files reverted was built as a
+control and **is not one**: its own fixture setup is refused
+(`test_support.clj:285`, *"Fixture setup was refused."*) across nine
+`seon.error-test` tests, so it fails differently and more broadly than either
+tree. It was removed rather than reported as evidence.
+
+### The boundary, stated plainly
+
+**Established.** The edited program loads and instruments (1,102 contracts,
+107 namespaces). The require graph is acyclic. `clj-kondo --lint src` gains
+no finding. `seon.turn-test` is green.
+
+**Not established.** That the three other namespaces are green *with this
+lane's change and without anyone else's*. The working-tree run cannot separate
+them and the HEAD-snapshot run cannot start. The attribution above is evidence
+— the foreign diff hunks, the foreign commit, the load average — not a
+control run, and it is offered as such.
+
+**The one honest way to close it** is to re-run
+`bin/test-fast --paths … -- seon.issue-test seon.error-test seon.db-test`
+once `resources/seon/schemas/seon.test.check.edn` is committed and the
+`instrument.clj` lane has landed.
