@@ -100,3 +100,20 @@ without target arities. Fixture:
 `seon.fn-test/unresolved-call-shapes-preserve-reference-edges-and-reach`.
 Post-adoption result pending. Schema changes are new keys and optional entries;
 no existing stored key changes meaning. **No RESET NEEDED for this slice.**
+
+## Verification follow-up
+
+The first reference regression returned 5 pass / 10 fail / 0 error against
+pre-adoption definitions. Its recorded reach was explicitly unknown because
+`:seon.fn/references` was not installed in that database. A follow-up probe
+confirmed the loaded analyzer config still lacked `:symbols`, while disk had
+it: the queued publication had captured the earlier slice. This result is
+retained as a failed iteration, not attributed to another lane or called green.
+Consumers of the uninstalled keys were returned to their pre-adoption live
+forms until adoption completes; checked-in changes remain intact.
+
+Review found that literal declaration targets must be scoped to the file
+whose consumers see them. Full-manifest and single-file indexing now share
+that rule; schema declarations remain supplied operation-wide. This prevents
+full builds acquiring unrelated source-file literals that incremental builds
+cannot see. The same existing row owner implements both paths.

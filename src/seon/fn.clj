@@ -1066,15 +1066,22 @@
    (analysis-rows-by-file analysis first-party-functions contexts declared-attributes {}))
   ([analysis first-party-functions contexts declared-attributes forms]
   (let [used-keywords (keywords-by-holder analysis)
-        literal-values (mapcat #(map kondo.utils/sexpr
-                                     (:children (kondo.utils/parse-string-all (:text %))))
-                               (vals contexts))
-        targets (declared-function-targets forms (concat (vals forms) literal-values)
-                                           first-party-functions)
+        schema-targets (declared-function-targets forms (vals forms) first-party-functions)
+        keywords-by-file (group-by ::analyzer/filename (::analyzer/keywords analysis))
+        declared-calls
+        (reduce-kv
+         (fn [calls filename context]
+           (let [values (map kondo.utils/sexpr
+                             (:children (kondo.utils/parse-string-all (:text context))))
+                 targets (merge-with set/union schema-targets
+                                     (declared-function-targets forms values first-party-functions))
+                 holders (keywords-by-holder
+                          {::analyzer/keywords (get keywords-by-file filename)})]
+             (merge-with set/union calls (declared-calls-by-caller holders targets))))
+         {} contexts)
         calls-by-caller
-        (merge-with set/union
-                    (call-targets-by-caller analysis first-party-functions)
-                    (declared-calls-by-caller used-keywords targets))
+        (merge-with set/union (call-targets-by-caller analysis first-party-functions)
+                    declared-calls)
         references (references-by-caller analysis first-party-functions)
         unresolved-by-file
         (into {} (map (fn [[filename usages]]
@@ -1353,7 +1360,8 @@
             (or (some #(when (:seon.error/kind %) %)
                       [unresolved by-edge by-subject by-pending])
                 (when (or (nil? target) (seq unresolved))
-                  (db/q '[:find [?test ...] :where [_ :seon.test/sym ?test]] database))
+                  (let [tests (db/q '[:find [?test ...] :where [_ :seon.test/sym ?test]] database)]
+                    (if (:seon.error/kind tests) tests (vec (sort tests)))))
                 (->> (concat by-edge by-subject by-pending)
                      distinct
                      sort
