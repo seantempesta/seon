@@ -1961,6 +1961,8 @@
         manifest (:seon.fn/manifest cached)
         expected-commit (:seon.source/commit-id published)]
     (if-not (and (valid-source-manifest? manifest)
+                 (= (:seon.fn.manifest/roots manifest)
+                    (mapv canonical-path (:seon.fn/roots roots)))
                  expected-commit
                  (= expected-commit (:seon.source/commit-id cached))
                  (map? (:seon.source/file-digests cached)))

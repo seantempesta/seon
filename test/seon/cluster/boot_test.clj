@@ -30,6 +30,7 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.fn :as seon.fn]
+            [seon.fn.analyzer :as analyzer]
             [seon.flow :as seon.flow]
             [seon.render.route :as route]
             [seon.fs :as fs]
@@ -979,6 +980,36 @@
       (finally
         (cluster/stop! old-world)
         (delete-recursively! root)))))
+
+(deftest ^{:seon.test/fixture-observation "Counts real analyzer calls while refreshing a cloned canonical publication with stale checkout paths."
+           :seon.test/long "One complete canonical source analysis."}
+  relocated-manifest-requires-one-complete-analysis
+  (let [root (published-root)
+        artifact-path (cluster/source-artifact-file root)
+        artifact (edn/read-string (slurp artifact-path))
+        stale (-> artifact
+                  (assoc-in [:seon.fn/manifest :seon.fn.manifest/roots]
+                            ["/former-checkout/src" "/former-checkout/test"])
+                  (update :seon.source/file-digests
+                          #(into {} (map (fn [[path digest]]
+                                          [(str "/former-checkout" path) digest])) %)))
+        calls (atom [])
+        analyze analyzer/analyze]
+    (try
+      (spit artifact-path (pr-str stale))
+      (with-redefs-fn
+        {#'cluster/source-analysis-cache (atom nil)
+         #'analyzer/analyze
+         (fn [request]
+           (swap! calls conj (count (:seon.fn.analyzer/sources request)))
+           (analyze request))}
+        #(cluster/refresh-source! root ["src/seon/ai/tokens.cljc"]))
+      (is (= 1 (count @calls)) (pr-str @calls))
+      (is (= (count (get-in artifact [:seon.fn/manifest :seon.fn.manifest/artifacts]))
+             (first @calls))
+          "the sole analysis covers the complete manifest, with no discarded per-file pass")
+      (finally
+        (spit artifact-path (pr-str artifact))))))
 
 (deftest development-reload-follows-declared-requires
   (let [namespace-name (symbol (str "reload-resource-probe-" (random-uuid)))]

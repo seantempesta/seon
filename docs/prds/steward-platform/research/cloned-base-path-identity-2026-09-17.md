@@ -68,3 +68,42 @@ The cold boot-test proof remains the orchestrator's responsibility.
 
 Files touched by this boundary report: this landing note and
 `docs/seon/issues/a-cloned-published-base-names-a-checkout-that-is-gone.md`.
+
+## Interim implementation after consumer release
+
+The owner released both consumers. The interim guard compares the manifest's
+canonical roots with the publication's canonical roots before snapshot/diff
+or file analysis. The canonical boot regression
+`seon.cluster.boot-test/relocated-manifest-requires-one-complete-analysis`
+observes the real analyzer, uses a fresh analysis cache scoped to the test,
+and requires exactly one call covering every manifest artifact. It does not
+replace the analyzer or publication with a stand-in. This destructive
+regression awaits the orchestrator's cold gate; its analysis count is an
+assertion, not a claimed measurement.
+
+The revised function was evaluated in default before the source edit.
+`bin/seon init --dev default --changed src/seon/cluster.clj --changed
+test/seon/cluster/boot_test.clj` converged at source commit
+`6aaabdcf-c6ee-5559-bb4a-9ff9a367755e`.
+
+After reloading only `seon.fn-test` through `seon.test/with-test-loader`,
+this in-process form ran in a future and was polled to completion:
+
+```clojure
+(let [connection (seon.operator/connection "default")
+      database (seon.db/db connection)]
+  (seon.test/run
+    (#'seon.test/resolve-test
+      'seon.fn-test/file-artifacts-and-manifests-are-byte-digested-and-deterministic)
+    connection
+    {:seon.db/db database
+     :seon.test.run/provenance (seon.test.runner/provenance database)
+     :seon.test/remaining-ms 180000}))
+```
+
+Result: 19 passes, zero failures, zero errors, run entity 51388, basis
+536871086. `seon.fn/tests-reaching` selected this test through
+`seon.fn/build-artifact`; no `seon.program-test` test reached that function.
+This validates the unchanged artifact mechanism, not the cold regression.
+Interim files: `src/seon/cluster.clj`, `test/seon/cluster/boot_test.clj`,
+and this note. No schema change in this slice.
