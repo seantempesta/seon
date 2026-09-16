@@ -1286,6 +1286,17 @@ retraction already at `c703fa8da`. Owner asked "are you gating?" — yes, but
 five landed slices await batch 114; no landing is called proven before its
 cold gate.
 
+**03:15Z test-preparation LANDED:** `f33e9c05a` (platform blocker: `6df6967b8`
+gave `seon.test.selection` a babashka.process require the `-T:dev-cache` tool
+JVM did not declare → EVERY `bin/test` refused at its dependency-cache phase;
+this is why gates sat at `phase=snapshot` for an hour), `0afbab25d` (R6:
+cache hit decided without the rebuild lock, 87 s → 1.9 s), `5df50a193`
+(step 2 option 1: publish the test base from a compatible retained base
+incrementally — the incremental branch has NOT yet executed, first run
+measures it; its gate pid 34576 still queued), `350df6d34` note. Also
+`53eef8551` (shutdown-agents exit fix). Batch 114 has a slot and is past the
+dependency phase. Misrouted #20 correction re-sent to the environment agent.
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
