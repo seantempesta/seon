@@ -46,3 +46,10 @@ The shared constructor explains reference/composite schemas through their
 declared forms, or reports an explicit typed unavailable expectation.
 Neither “unknown error” nor “invalid type” is presented as what to supply.
 A regression exercises this exact missing :seon.turn/agent case.
+
+## Recurrence 2026-09-16 (batch 95, cold, root `tmp/test-runs/run.xvaxWP`)
+
+`seon.db/transact! refused transaction data at [1 :seon.fn/ns]: expected the
+required key :seon.fn/ns with a value satisfying unknown error, got a map
+missing :seon.fn/ns.` — the same face on a registry-referenced key, seen by
+seon.background-blob-test/background-binary-results-remain-exact-across-the-inline-threshold.
