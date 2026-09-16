@@ -1,6 +1,6 @@
 ---
 type: research
-status: active
+status: complete
 tags: [render, performance, database]
 ---
 
@@ -116,12 +116,68 @@ adoption success.
 
 ## Remaining work and gate boundary
 
-Slice 2 still owns overly broad history read evidence and the two-minute debug
-page regression. The cold-page issue remains open. No dependency file has yet
-been changed, and no dependency test result is claimed in this slice.
+Slice 1 landed in **0dd6bc0aa**. This bounded assignment stops at the requested
+slice-2 design gate; complete here means this landing record is settled, not
+that the cold-page target is achieved. The cold-page issue remains open.
 
 Gate request: `tmp/orchestrator/gate-requests/cold-page-kills.txt`.
 The orchestrator must run the listed namespaces with the owned paths and then
 the platform gate. This lane deliberately ran no `bin/test`, `bin/test-fast`,
 or other Seon test JVM. `git diff --check` passed; hook lint reports no new
 syntax, namespace, or arity errors. Existing unrelated style warnings remain.
+
+## Slice 2: deletion falsifies attribute-only precision
+
+The [reproducible JVM probe](cold_page_dependency_probe_2026_09_16.clj)
+evaluates both candidate functions in the default JVM, uses the canonical
+database fixture, and restores both entering Vars in `finally`. It changes no
+dependency source file. Exact invocation:
+
+```clojure
+(load-file "docs/prds/context-generation/research/cold_page_dependency_probe_2026_09_16.clj")
+```
+
+The candidate passes the actual source database to the existing compiled pull
+plan. The nested selector's dependencies become exactly
+`#{:seon.agent/id :seon.agent/runtime :db/id :seon.runtime/turns :seon.turn/id}`,
+where the entering implementation returns `:all`. That establishes the
+proposed extraction mechanism, but not its correctness for cached execution.
+
+The same probe creates entity **39410** with only `:seon.message/id`, then
+queries `(pull ?e [:db/id :seon.message/content])` with the eid as input.
+The candidate dependencies are `#{:db/id :seon.message/content}`. After
+`retractEntity`, cached execution reports **hit** and returns
+`{:db/id 39410}`; execution with the existing query-result cache disabled
+returns **nil**. Equality is **false**. The saved probe reproduced the whole
+result in **24 ms**. A subsequent read-only plan call returned `:all`,
+independently confirming the original functions were restored.
+
+Dependency ledger: `reference-code/datahike/src/datahike/pull_api.cljc`
+(`compile-pull-plan`, `pull-spec-attribute-dependencies`, and `pull-attr` near
+line 372) makes `:db/id` depend on entity datom existence;
+`reference-code/datahike/src/datahike/query.cljc`
+(`advance-query-cache-context` near line 2568 and
+`source-context-unchanged?` near line 2960) compares revisions of modified
+stored attributes. Deleting the last unselected attribute changes entity
+existence without changing either selected attribute's revision. Seon's
+outer read evidence cannot repair a stale result already returned by the
+dependency query cache. This is a candidate regression, not a claim that the
+unchanged conservative implementation has this failure for this selector.
+
+No slice-2 production edit, dependency commit, or dependency test task was run.
+The two-minute debug-page regression is not implemented. The fork remains
+clean. Achieving precise reuse while preserving deletion needs work at both
+dependency extraction and the existing cache revision authority, beyond the
+approved extraction-only change. Per the assignment's explicit stop rule,
+the following estimates are options for the owner, not authorization to proceed.
+
+| Option | Guarantee | Estimated engineering cost | What we give up |
+|---|---|---|---|
+| **1. Constrain narrowing (recommended interim)** | Keep `:all` whenever compiled pull semantics require entity-existence evidence; narrow only dependencies fully represented by the existing revision mechanism. | 4–8 hours, including fork tests and live deletion probes. | Existence-sensitive history selectors remain broad; no promise of the 2× target. |
+| **2. Extend existing dependency evidence** | Represent entity-existence changes at the query cache's current revision authority before admitting finite plans, preserving creation and last-datom deletion. | 1–2 days across pull compilation, query dependency plans, transaction revision handling, fork tests and Seon integration. | Larger cross-owner scope; the 2× target still requires measurement after correctness passes. |
+| **3. Retain current history behavior** | Preserve the currently conservative invalidation behavior and land only slice 1. | 1–2 hours for gate review and documentation. | Defer history precision and the cold-page latency target entirely. |
+
+The cost estimates need confirmation against the dependency's implementation;
+option 2 must also verify all identity-resolution inputs before making a
+general precision guarantee. No second retained-value store or digest cache
+is proposed in any option.

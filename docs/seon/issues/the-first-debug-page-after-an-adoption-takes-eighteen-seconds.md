@@ -15,7 +15,14 @@ records explicit read-only intent across MCP evaluation and its three discovery
 observations. Live retained calls now remain **11 → 11**. The armed canonical
 page regression passed **12 / 0 / 0**, result run **68082**. Keep this issue open:
 the two-minute root measurement still included an adoption and cost **0.667470 s
-cold / 0.139521 s warm**; history dependency precision is the next slice.
+cold / 0.139521 s warm**. Slice 1 is commit **0dd6bc0aa**; its orchestrator
+gate remains pending. Slice 2 stopped at the requested design gate: the
+database-aware dependency prototype returned a stale `{:db/id 39410}` after
+entity deletion, while uncached execution returned nil. The original Vars
+were restored and the dependency fork is unchanged. The landing records the
+reproducible probe and three priced options. Residual: precise history
+dependencies must preserve entity-existence revisions before narrowing, and
+the two-minute cold-page target remains unproven.
 
 ## Problem
 
