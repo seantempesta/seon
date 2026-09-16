@@ -204,7 +204,7 @@
        (sort-by :seon.issue/id) vec))
 
 (defn status
-  "Read the issue and test outcomes; verification follows assignment."
+  "Read the issue and test outcomes; verification uses the current test reach digest."
   {:malli/schema [:=> [:cat [:map [:seon.db/db :seon.db/database-value]
                              [:seon.issue/id :seon.issue/id]]]
                   [:or :map :seon.error/value]]}
@@ -220,23 +220,25 @@
                      [:seon.issue/id issue-id])]
     (if-not (:seon.issue/title row)
       {:seon.error/kind :seon.issue/not-found :seon.error/message (str "No current issue " issue-id)}
-      (let [started (db/q '[:find ?tx . :in $ ?issue :where [?issue :seon.issue/agent _ ?tx]]
-                          database (:db/id row))
-            test-rows (mapv
+      (let [test-rows (mapv
                        (fn [test-value]
-                         (let [basis (get-in test-value [:seon.test/run :seon.test.run/basis-t])
-                               state (cond
+                         (let [state (cond
                                        (not (:seon.test/run test-value)) :unrun
                                        (or (pos? (get test-value :seon.test/fail-count 0))
                                            (pos? (get test-value :seon.test/error-count 0))) :red
-                                       (and started basis (>= basis started)
-                                            (pos? (get test-value :seon.test/pass-count 0))
-                                            (= 0 (:seon.test/fail-count test-value))
-                                            (= 0 (:seon.test/error-count test-value))) :verified
+                                       (true? ((requiring-resolve 'seon.test/verified?)
+                                               database (:seon.test/sym test-value))) :verified
                                        :else :unverified)]
                            (assoc test-value :seon.issue.test/state state)))
                        (sort-by :seon.test/sym (:seon.issue/tests row)))]
         (assoc row :seon.issue/tests test-rows
+                   :seon.issue/functions (mapv #(vector :seon.fn/sym (:seon.fn/sym %)) (:seon.issue/functions row))
+                   :seon.issue/errors (mapv (fn [error]
+                                              (cond-> (dissoc error :seon.error/occurrences)
+                                                (seq (:seon.error/occurrences error))
+                                                (assoc :seon.error/occurrence-count
+                                                       (reduce + (map :seon.error.occurrence/count (:seon.error/occurrences error))))))
+                                            (:seon.issue/errors row))
                    :seon.issue/check-form
                    (list 'my.test/check {:seon.test/changed (mapv :seon.test/sym test-rows)}))))))
 
@@ -318,22 +320,22 @@
     (db/transact! connection [[:db.fn/call #'adopt-tx rows]])))
 
 (def done-query
-  "Nonempty tests all have positive green results whose basis follows assignment."
+  "Nonempty tests all have positive green results on their current reach digest."
   '[:find ?subject .
-    :in $ ?subject
+    :in $ ?input
     :where
-    [?subject :seon.issue/agent _ ?started]
+    [(identity ?input) ?subject]
     [?subject :seon.issue/tests _]
-    (not-join [?subject ?started]
+    (not-join [?subject]
       [?subject :seon.issue/tests ?test]
-      (not-join [?test ?started]
+      (not-join [?test]
         [?test :seon.test/pass-count ?passes]
         [(pos? ?passes)]
         [?test :seon.test/fail-count 0]
         [?test :seon.test/error-count 0]
-        [?test :seon.test/run ?run]
-        [?run :seon.test.run/basis-t ?basis]
-        [(>= ?basis ?started)]))])
+        [?test :seon.test/sym ?symbol]
+        [(seon.test/verified? $ ?symbol) ?verified]
+        [(true? ?verified)]))])
 
 (defn- refuse! [reason message]
   (throw (ex-info message {:seon.error/kind reason :seon.error/message message})))
