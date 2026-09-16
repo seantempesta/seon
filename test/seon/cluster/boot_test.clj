@@ -274,8 +274,14 @@
                    (get-in mismatch-offense
                            [:seon.boot/current :db/valueType]))))
           (testing "the wrapped message names both operator resolutions"
-            (is (str/includes? message
-                               "predates the incompatible schema change"))
+            ;; The steer no longer says "predates": `0b910eb69` replaced that
+            ;; wording with the property and BOTH of its values, because the
+            ;; refusal now derives from Datahike's own acceptance rule per
+            ;; facet instead of whole-map inequality. The expectation here was
+            ;; left behind by that commit; the current words are the ruled
+            ;; ones.
+            (is (str/includes? message "cannot reopen in place"))
+            (is (str/includes? message ":db/valueType"))
             (is (str/includes? message ":seon.ns/requires"))
             (is (str/includes? message
                                "bin/seon init legacy --force"))
@@ -1146,11 +1152,16 @@
       (let [instance (cluster/start! {:seon.boot/cluster-name cluster-name
                                       :seon.boot/root root})
             connection (:seon.boot/cluster-connection instance)]
+        ;; ONE attribute on the cluster's EXISTING config entity is a datom,
+        ;; not an identity-keyed map: a map carrying `:seon.config/cluster` is
+        ;; read against the whole `:seon.config/entity` schema, which requires
+        ;; the applied manifest digest the config owner mints — the fixture
+        ;; would be writing a config row no mechanism can produce.
         (test-support/transacted!
                      connection
                      {:tx-data
-                      [{:seon.config/cluster cluster-name
-                        :seon.config.flow.compute/queue-depth 1}]})
+                      [[:db/add [:seon.config/cluster cluster-name]
+                        :seon.config.flow.compute/queue-depth 1]]})
         (cluster/stop! instance))
       (with-redefs-fn
         {#'seon.flow/start-work-launcher!
