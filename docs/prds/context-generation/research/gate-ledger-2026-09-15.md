@@ -1250,3 +1250,11 @@ seon.background-blob-test` on HEAD ≥ `e4195742c` (boot-test residue landing)
 with `5b8a5b4c0` (background-blob effect ref derived). Platform tier first.
 Log: `tmp/orchestrator/gate-results/batch-97.log`. From this batch on the
 orchestrator runs every gate itself.
+
+## Batch 98 (orchestrator, 2026-09-17 08:35Z)
+
+`bin/test --paths src/seon/schedule.clj -- seon.program-test seon.fn-test
+seon.schema-test seon.cluster.boot-test seon.cluster.source-test` on HEAD ≥
+`a36d55c3b` (shapes threaded once, `849bbce0b`; reported paths preserved and
+publication assertions isolated, `a36d55c3b`). Log:
+`tmp/orchestrator/gate-results/batch-98.log`.
