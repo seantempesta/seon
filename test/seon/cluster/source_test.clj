@@ -535,10 +535,19 @@
                             :seon.test.failure/actual "(not (= 1 2))"
                             :seon.test.failure/reported-file "id_test.clj"
                             :seon.test.failure/line 42}]}]}
+            empty-recording (source/record-results!
+                             opened (assoc completion :seon.test.runner/results []))
+            empty-head (source/current opened)
+            empty-database (source/database opened (:seon.source/commit-id empty-head))
             recorded (source/record-results! opened completion)
             recorded-commit (:seon.source/commit-id (source/current opened))
             rebuilt (publish opened digest-a population {:seon.fn/manifest manifest})
             rebuilt-db (source/database opened (:seon.source/commit-id rebuilt))]
+        (is (= [] empty-recording))
+        (is (= (:seon.source/commit-id first-publication)
+               (:seon.source/commit-id empty-head)))
+        (is (= (:max-tx first-db) (:max-tx empty-database))
+            "empty recording writes no transaction and moves no head")
         (is (= 1 (:seon.test/pass-count (first recorded))) (pr-str recorded))
         (is (= (get (:seon.test/reach-digests completion) test-symbol)
                (:seon.test/reach-digest

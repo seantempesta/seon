@@ -498,7 +498,9 @@
    [:=> [:cat :seon.store/store :seon.test.run/completion]
     [:or :seon.test/results :seon.error/value]]}
   [held-store completion]
-  (let [published (or (current held-store)
+  (if (empty? (:seon.test.runner/results completion))
+    []
+    (let [published (or (current held-store)
                       (refuse! ::source-absent "Test recording requires a published current-src." {}))
         head (database held-store (:seon.source/commit-id published))
         allowance (or (:seon.test/remaining-ms completion)
@@ -530,7 +532,7 @@
                {:seon.await/config-attribute (if (:seon.test/remaining-ms completion)
                                                :seon.test/remaining-ms :seon.test/check-time-limit-ms)
                 :seon.await/config-value allowance :seon.test.runner/attempts attempt}}))
-          (::recorded outcome))))))
+          (::recorded outcome)))))))
 
 (defn- index-issues!
   [connection source-digest]
