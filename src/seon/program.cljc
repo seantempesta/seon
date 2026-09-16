@@ -6,7 +6,10 @@
             [seon.schema :as schema]
             [seon.schema.form :as schema.form]
             #?(:clj [clojure.edn :as edn]
-               :cljs [cljs.reader :as reader])))
+               :cljs [cljs.reader :as reader])
+            ;; CLJ-only: `seon.schema.edn` has no CLJS side, and the two uses
+            ;; below already sit inside a `#?(:clj …)` branch.
+            #?(:clj [seon.schema.edn :as schema.edn])))
 
 (def identity-attributes
   "Program-row identity attributes in deterministic admission order."
@@ -169,12 +172,11 @@
   population as broken forever."
   []
   #?(:clj
-     (let [stamp ((requiring-resolve 'seon.schema.edn/declaration-stamp))
+     (let [stamp (schema.edn/declaration-stamp)
            cached @!authored-shapes]
        (if (= stamp (:seon.program/declaration-stamp cached))
          (:seon.program/shapes cached)
-         (let [derived (shapes-in ((requiring-resolve
-                                    'seon.schema.edn/packaged-forms)))]
+         (let [derived (shapes-in (schema.edn/packaged-forms))]
            (reset! !authored-shapes
                    {:seon.program/declaration-stamp stamp
                     :seon.program/shapes derived})
