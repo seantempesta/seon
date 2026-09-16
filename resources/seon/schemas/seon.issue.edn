@@ -5,10 +5,10 @@
              :opened    :inst
              :path      [:string {:min 1 :description "Repository path of the note whose sections are the prose; absent for database-authored issues."}]
              :problem   [:string {:min 1 :description "The Problem section, or the instructions to an agent."}]
-             :functions [:set {:description "Program rows the issue is about: cited qualified symbols resolved to :seon.fn rows at index time."} :seon.db/ref]
-             :tests     [:set {:description "The deftests whose verification resolves the issue (the Acceptance section as code). Workers add, never remove; the writer refuses an empty set on a started issue."} :seon.db/ref]
+             :functions [:set {:description "Program entities the issue is about: cited qualified symbols resolved to :seon.fn entities at index time."} :seon.db/ref]
+             :tests     [:set {:description "The deftests defining success. The issue API adds tests and start! refuses an empty set; enforcement against direct database retraction is deferred to issue settlement."} :seon.db/ref]
              :errors    [:set {:description "seon.error entities cited by signature."} :seon.db/ref]
-             :commits   [:set :seon.source/commit-id]
+             :commits   [:set [:string {:min 9 :max 9 :description "Nine-character Git commit citations; not Datahike source commit UUIDs."}]]
              :members   [:set {:description "A class note's member issues."} :seon.db/ref]
              :agent     [:and {:description "The agent working it; asserted by start! in the transaction that creates the agent and opens its first turn."} :seon.db/ref]
              :budget    [:int {:min 1 :description "Provider turns for the worker; copied to its settings overlay at start."}]
