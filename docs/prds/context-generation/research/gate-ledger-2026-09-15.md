@@ -739,3 +739,17 @@ remaining ERROR is `render.clj:995`: `invocation-unknown` passes a nil
 `:seon.error/value` for a time-limited producer (issue
 `a-time-limited-render-producer-passes-nil-where-the-typed-unknown-requires-a-map.md`,
 render.clj — steward's).
+
+### 2026-09-17 05:10Z — turn-settlement-cost landed (`3594331c8` `60e0ba923` `97d1f69e0`)
+
+Budget semantics fixed: provider attempts and accepted replies count against
+`:seon.issue/budget`; the opening (system turn 0) spends nothing — exactly
+one provider turn follows the opening at budget 1 (37 assertions green).
+Settlement writes 249 datoms with no unchanged namespace/program rows; the
+< 50 ms commit target is unmet because projection rebuilding dominates the
+settlement (§2.1, owner change owed — recorded in the research page). The
+duplicate analyze-forms stopped at protected `fn.clj` (the lane proved the
+shortcut lost same-turn call edges and removed it; owed at the analyzer
+seam). The timing regression now bounds writes and installation separately
+at 300 ms each. Batch 59 (cold): cluster.turn, turn, evaluate-sources,
+cluster.prompt, render-coverage; platform recording after the reset.
