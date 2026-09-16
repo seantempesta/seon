@@ -48,3 +48,25 @@ rejection blocker); the cold gate is the first execution of the new
 regressions. **Gate requested:** platform, then `seon.cluster.prompt-test
 seon.render.transcript-run-test seon.concurrency-independence-test
 seon.render.web-debug-test seon.repl-test`, once a base can be built.
+
+## Cold batch 111 follow-up — protected-path stop, 2026-09-16
+
+Red (3) requires the explicitly held `src/seon/render/transcript.clj`.
+`render-run-ai` at line 785 returns empty text for a valid selected turn;
+`render-run-html` at line 888 delegates only to `turn-header` (line 866).
+Batch 111's retained log at
+`tmp/orchestrator/gate-results/batch-111.log:294-325` independently records
+the empty AI result and the header-only HTML result, including the missing
+evaluation source and interrupted-turn explanation. This is a production
+rendering boundary, not grounds to weaken the regression's assertions.
+
+Required hunks: the selected-turn AI and HTML functions and their shared
+turn presentation in that file, preserving selection of only the requested
+turn. `git status --short` confirms the file remains dirty; the assignment
+names its holder as `pulled-ref-is-a-ref` and explicitly requires stopping
+when a hunk there is needed. No held file was edited and no other lane was
+contacted. No production fixes or tests were run before this stop; reds
+(1), (2), and (4) remain unverified and unresolved by this follow-up.
+`bin/seon status` reported default alive (PID 41413); no prepl evaluation
+was used. This note records the boundary only, not acceptance or a green
+verification claim.
