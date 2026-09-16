@@ -124,7 +124,12 @@ peer session (batches 30–57; ledger
   data — the "Method code too large" class); first recorded gate since
   batch 30 at batch 46; the evaluation-context loader fix (base poison);
   base construction retried outside caller bounds; `transacted!` fixture
-  helper; monotonic `:db/index` adoption without a refork.
+  helper; monotonic `:db/index` adoption without a refork; the cold-arming
+  class closed (one derivation for a projection's bound predicates at
+  fourteen read sites, with a program-graph checker); `:seon.test/long` a
+  program fact with `check` excluding long tests by name; recording made
+  total on every absent identity; the platform tier and in-process runs both
+  refusing destructive drills.
 - **Issues/tasks:** `seon.issue/generate` with detectors D1 (unpaired entity
   maps, 32) and D2 (undocumented public functions, 2 src / 28 test) → 63
   generated issues on default, idempotent by identity; the generated
