@@ -15,6 +15,13 @@
 (set! *warn-on-reflection* true)
 
 (deftest ^{:seon.test/fixture-observation "The test observes prompt acquisition under instrumentation installed by a real development-cluster boot."} an-instrumented-dev-cluster-builds-an-attempt-ready-prompt
+  ;; OWN NOTHING GLOBAL (AGENTS §5). Booting a real development cluster arms
+  ;; the JVM, and a pooled worker runs many tests: the runner's drift detector
+  ;; reported 33 vars this test left instrumented for whoever ran next. The
+  ;; bracket restores the entering callable roots and Malli registry, including
+  ;; after a throw.
+  (test-support/preserving-instrumentation-state
+   (fn []
   (let [cluster-name (str "instrumented-acquire-" (random-uuid))
         root (str "tmp/instrumented-acquire-test/" cluster-name)
         message-id "instrumented-acquire-turn"
@@ -65,4 +72,4 @@
           (finally
             (cluster/stop! instance))))
       (finally
-        (test-support/delete-recursively! root)))))
+        (test-support/delete-recursively! root)))))))
