@@ -562,3 +562,73 @@ Introduced with `0e15593aa`. Not repaired here — the effect owner's slice.
 - `src/seon/fn.clj`, `test/seon/fn_test.clj` and `test/seon/program_test.clj`
   carried a peer lane's uncommitted edits at the end of this pass; none was
   touched or committed here.
+
+## Fifth pass: batch 80 residue, the web seeds, and a refuted attribution
+
+### The effect-door attribution was WRONG, and the issue says so
+
+The orchestrator's A/B refuted it. The probe asked the program graph about
+`seon.web.jvm/fetch` — a PRIVATE handler whose declared contract is the
+two-argument form — while `accepts-request?` resolves the capability through
+`my.web/fetch`'s `:seon.effect/capability`, whose declared input is the
+one-argument request. The false/true measurement was real; the symbol was
+wrong. The issue note is kept, marked superseded, with the refutation and its
+lesson written into it (`a0024d297`): a program-graph question about a
+capability must ask the capability's DECLARED owner, not the handler var
+behind it.
+
+The two `seon.web.jvm-test` errors return to the fixture class.
+
+### What was fixed, and what each fixture was actually doing
+
+| test | cause | in process |
+|---|---|---|
+| `turn-loop/attempt-settlement-updates-the-registered-model-gauges` | **neither hypothesis.** The fixture named the model `"deepseek-v4-flash"`, which no shipped descriptor carries. Measured on a canonical branch after `config/apply!`: `[deepseek-v4-pro deepseek/deepseek-v4-flash-20260731 kimi-k3 deepseek-flash muse-spark-1.1]`. `ai/model-observation-tx` had no registered model to observe, so every gauge read back nil. | 1/3/0 → **4/0/0** |
+| `turn-loop/prompt-and-call-resolve-once…` | `config/apply!` EXACT-reconciles, so applying the model overlay and then `seed-cluster!`'s EMPTY manifest left the shipped models behind — the call read `deepseek-flash`, not `before-apply`. And `turn/turn` closes the run it drove; closing it again is the fixture writing what the mechanism wrote (`run transition refused: run-closed`). | 9/1/1 → **14/2/0** |
+| `turn-loop/committed-ending-namespace-seeds-a-resumed-fold` | the settle carries `:seon.sci.eval/ending-ns` as a lookup that resolved to nothing. `(in-ns …)` creates the namespace in the SCI context only; THE POPULATION INVARIANT mints the program row where the context learns it, and this test settles through `receipt-settle-tx` directly instead of through the loop that mints. It supplies that row. | not re-run (see boundary) |
+| `seon.web.jvm-test` (7) | the branch carried a compiled config ROW but no cluster ENTITY, and the dials are read through the cluster's own facts — a nil dial dereferenced is the bare NPE. `with-file-database` seeds the cluster. Two successive `apply-config!` calls also left only the second manifest's dials, and `public-fetch` applied none at all: each door-crossing test now applies ONE manifest carrying every dial it needs. | not re-run (refuses in process) |
+| `render.web-context-test`, `render.web-test` "unrelated transaction" | `d7e5a0268`'s bystander agent minted a half-agent beside the real creation path (peer issue `an-unrelated-fixture-transaction-mints-a-half-agent`). Both sites now commit a `{:db/doc …}` probe entity: no identity, no listened attribute, no join. | not re-run |
+
+Commits: `a0024d297` (refutation), `484e05bdb` (probe entity), `87359e9fb`
+(web.jvm seeds), `13f382e28` (one apply, no second close), `546d0750c`
+(registered model id), `1fb006a9c` (minted ending namespace).
+
+### Attributed, not changed
+
+- **`ai/agent-overlay` is read FIVE times where the ruling says three.** With
+  the overlay finally applied, `prompt-and-call-resolve-once` counts 5 in both
+  phases — symmetrically two extra reads. The ruling it asserts is "profile,
+  prompt and call each read the overlay; **failover reuses it**", so five means
+  the failover is re-reading rather than reusing: a fetch-at-call-time
+  question (§2.1) for the `seon.ai` resolution seam. The expectation was NOT
+  relaxed, because relaxing it would ratify the thing it exists to catch.
+- `turn-work/situation-totality-property` and
+  `turn-loop/a-clean-last-form-without-a-disposition-…` remain in the
+  continuation/disposition family: the generator and that fixture close runs
+  without recording what the last form decided, and the "ended without
+  my.turn/complete or my.turn/wait" notice is the system-authored half of the
+  same rule. They need the turn-loop owner's call on where that notice is
+  written, not another fixture key.
+
+### BLOCKER at the end of this pass
+
+**`test/seon/test_support.clj` is syntactically broken in the working tree** —
+a peer lane holds 262 uncommitted insertions in it (their note:
+`agent-tests-keep-custody-2026-09-17.md`, new `test/my/test_test.clj`), and
+clj-kondo reports `Found an opening ( with no matching )` at
+`test_support.clj:446` plus mismatched brackets through `:565`. Every lane's
+in-process run and the cold gate load that namespace. Not touched, not
+repaired — reported. This lane's own files lint clean against the committed
+`test_support.clj`.
+
+### Verification boundary, fifth pass
+
+- In process on `default` pid 88182, one test at a time. The three turn-loop
+  greens above were measured; the web.jvm tests refuse in process (file-backed
+  published root) and are cold-only; `committed-ending-namespace-…` and the
+  two "unrelated transaction" tests were not re-run because the shared
+  `test_support.clj` broke first.
+- `src/seon/db.clj`, `src/seon/test.clj`, `src/seon/test/runner.clj`,
+  `src/my/test.clj`, `resources/seon/schemas/seon.db.edn` and
+  `resources/seon/schemas/seon.test.edn` carried peer edits throughout; none
+  was touched or committed here.
