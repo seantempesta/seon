@@ -119,11 +119,11 @@
   (support/with-database
     (fn [connection]
       (let [_ (support/seed-cluster! connection "web-test")
-            _ (db/transact! connection
-                            (cluster.agent/creation-tx
-                             {:seon.agent/id agent-id
-                              :seon.cluster/name "web-test"
-                              :seon.ns/name 'my.agents.root}))
+            _ (support/transacted! connection
+                                   (cluster.agent/creation-tx
+                                    {:seon.agent/id agent-id
+                                     :seon.cluster/name "web-test"
+                                     :seon.ns/name 'my.agents.root}))
             ctx (support/fork-cluster-ctx connection)
             server (atom nil)
             render-channel (async/chan (async/sliding-buffer 1))
@@ -419,11 +419,11 @@ handle))}}
   ;; the design has regressed.
   (with-server
     (fn [connection server _context]
-      (db/transact! connection
-                  (cluster.agent/creation-tx
-                   {:seon.agent/id "agent-b"
-                    :seon.cluster/name "web-test"
-                    :seon.ns/name 'my.agents.agent-b}))
+      (support/transacted! connection
+                         (cluster.agent/creation-tx
+                          {:seon.agent/id "agent-b"
+                           :seon.cluster/name "web-test"
+                           :seon.ns/name 'my.agents.agent-b}))
       (let [root (.body (fetch server "/"))
             other (.body (fetch server "/agent/agent-b"))]
         (is (str/includes? root "<title>seon · root</title>"))
@@ -595,11 +595,11 @@ handle))}}
 (deftest declared-units-are-components-in-schema-order
   (support/with-database
    (fn [connection]
-     (db/transact! connection
-                   [{:seon.agent/id "unit-owner"
-                     :seon.agent/plan {:my.plan/objective "Inspect the page"}
-                     :seon.agent/settings
-                     {:seon.config.eval/time-limit-ms 1234}}])
+     (support/transacted! connection
+                          [{:seon.agent/id "unit-owner"
+                            :seon.agent/plan {:my.plan/objective "Inspect the page"}
+                            :seon.agent/settings
+                            {:seon.config.eval/time-limit-ms 1234}}])
      (let [database @connection
            projection (schema/projection-from-database database)
            declared (web-private 'declared-entity-units)
@@ -943,9 +943,9 @@ handle))}}
                          "&output=%3Aseon.render%2Fhtml"))]
         (try
           (read-patches! stream 1)
-          (db/transact! connection
-                        [{:seon.ns/name namespace-name
-                          :seon.ns/doc "debug-live-subject-marker"}])
+          (support/transacted! connection
+                               [{:seon.ns/name namespace-name
+                                 :seon.ns/doc "debug-live-subject-marker"}])
           (is (str/includes?
                (read-until! stream "debug-live-subject-marker")
                "debug-live-subject-marker")
@@ -1050,19 +1050,19 @@ handle))}}
                     "the initial page selects a render function for its units")
                 (is (pos? (:invocation before))
                     "the initial comparison executes its applicable render functions")
-                (db/transact!
-                 connection
-                 [{:seon.message/id "debug-cache-unrelated"
-                   :seon.message/content
-                   "does not affect the inspected namespace"}])
+                (support/transacted!
+                        connection
+                        [{:seon.message/id "debug-cache-unrelated"
+                          :seon.message/content
+                          "does not affect the inspected namespace"}])
                 (is (< pass-before (settle-render! context)))
                 (is (= before @counts)
                     "the database wake reuses observation, discovery, and invocation")
                 (let [pass-after-unrelated (derivations context)]
-                  (db/transact!
-                   connection
-                   [{:seon.ns/name 'seon.flow
-                     :seon.ns/doc "debug-cache-relevant"}])
+                  (support/transacted!
+                          connection
+                          [{:seon.ns/name 'seon.flow
+                            :seon.ns/doc "debug-cache-relevant"}])
                   (is (< pass-after-unrelated (settle-render! context)))
                   (is (= 2 (:observation @counts)))
                   (is (> (:discovery @counts) (:discovery before))
@@ -1243,9 +1243,9 @@ handle))}}
       (let [first-stream (open-feed server (str "/feed/" agent-id))]
         (read-complete-paint! first-stream connection)
         (.close first-stream))
-      (db/transact! connection
-                  [{:seon.ns/name 'my.agents.root
-                    :seon.ns/source "(ns my.agents.root)\n(def current true)"}])
+      (support/transacted! connection
+                         [{:seon.ns/name 'my.agents.root
+                           :seon.ns/source "(ns my.agents.root)\n(def current true)"}])
       (let [second-stream (open-feed server (str "/feed/" agent-id))]
         (try
           (let [repaint (read-complete-paint! second-stream connection)]
@@ -1294,9 +1294,9 @@ handle))}}
                        (range 4))]
         (try
           (doseq [tab tabs] (read-complete-paint! tab connection))
-          (db/transact! connection
-                        [{:seon.ns/name 'my.agents.root
-                          :seon.ns/source "(ns my.agents.root)\n(def shared true)"}])
+          (support/transacted! connection
+                               [{:seon.ns/name 'my.agents.root
+                                 :seon.ns/source "(ns my.agents.root)\n(def shared true)"}])
           (let [morphs (mapv #(read-until! % "def shared true") tabs)]
               (is (every? seq morphs))
               (is (= 1 (count (distinct morphs)))
@@ -1328,10 +1328,10 @@ handle))}}
                 k 5]
             ;; nobody reads `slow` for the whole burst
             (doseq [n (range k)]
-              (db/transact! connection
-                          [{:seon.ns/name 'my.agents.root
-                            :seon.ns/source
-                            (str "(ns my.agents.root)\n(def slow " n ")")}])
+              (support/transacted! connection
+                                 [{:seon.ns/name 'my.agents.root
+                                   :seon.ns/source
+                                   (str "(ns my.agents.root)\n(def slow " n ")")}])
               ;; the fast sibling proves the proc kept passing while the
               ;; slow tap stayed full — never parked, never blocked
               (read-until! fast (str "def slow " n)))
@@ -1420,16 +1420,16 @@ handle))}}
                               (.countDown entered)
                               (support/await-event! holding ::held-pass-released))
                             (walk request))]
-              (db/transact! connection
-                            [{:seon.ns/name 'my.agents.root
-                              :seon.ns/source
-                              "(ns my.agents.root)\n(def superseded true)"}])
+              (support/transacted! connection
+                                   [{:seon.ns/name 'my.agents.root
+                                     :seon.ns/source
+                                     "(ns my.agents.root)\n(def superseded true)"}])
               (support/await-event! entered [:pass-held-mid-derivation])
               ;; the held pass can no longer describe the facts
-              (db/transact! connection
-                            [{:seon.ns/name 'my.agents.root
-                              :seon.ns/source
-                              "(ns my.agents.root)\n(def connected true)"}])
+              (support/transacted! connection
+                                   [{:seon.ns/name 'my.agents.root
+                                     :seon.ns/source
+                                     "(ns my.agents.root)\n(def connected true)"}])
               (let [fresh (open-feed server (str "/feed/" agent-id))]
                 (try
                   (.countDown holding)
@@ -1465,10 +1465,10 @@ handle))}}
                      :seon.ai/partial {:seon.ai/text "half a re"
                                        :seon.ai/tokens 3}})
       (async/poll! (:stream-channel context))
-      (db/transact! connection
-                  [{:seon.ns/name 'my.agents.root
-                    :seon.ns/source
-                    "(ns my.agents.root)\n(def after-drop true)"}])
+      (support/transacted! connection
+                         [{:seon.ns/name 'my.agents.root
+                           :seon.ns/source
+                           "(ns my.agents.root)\n(def after-drop true)"}])
       (let [fresh (open-feed server (str "/feed/" agent-id))]
         (try
           (let [repaint (read-complete-paint! fresh connection)]
@@ -1513,9 +1513,9 @@ handle))}}
       (let [run-a "stream-run-a"
             run-b "stream-run-b"]
         (open-run! connection run-a)
-        (db/transact! connection
-                    [{:seon.agent/id "agent-b"}
-                     {:seon.turn/id run-b :seon.turn/agent [:seon.agent/id "agent-b"] :seon.turn/opened-tx "datomic.tx"}])
+        (support/transacted! connection
+                           [{:seon.agent/id "agent-b"}
+                            {:seon.turn/id run-b :seon.turn/agent [:seon.agent/id "agent-b"] :seon.turn/opened-tx "datomic.tx"}])
         (let [tab (open-feed server (str "/feed/" agent-id))]
         (try
           (is (not (str/includes? (read-complete-paint! tab connection)
@@ -1621,8 +1621,8 @@ handle))}}
   (with-server
     (fn [connection server context]
       ;; the dial as a fact, the way production ships it
-      (db/transact! connection [{:seon.config/cluster "web-test"
-                               :seon.config.render/coalesce-ms 250}])
+      (support/transacted! connection [{:seon.config/cluster "web-test"
+                                      :seon.config.render/coalesce-ms 250}])
       (let [tab (open-feed server (str "/feed/" agent-id))]
         (try
           (read-complete-paint! tab connection)
@@ -1663,10 +1663,10 @@ handle))}}
                               (.countDown entered)
                               (support/await-event! release ::release-derivation))
                             (walk request))]
-              (db/transact! connection
-                            [{:seon.ns/name 'my.agents.root
-                              :seon.ns/source
-                              "(ns my.agents.root)\n(def observed true)"}])
+              (support/transacted! connection
+                                   [{:seon.ns/name 'my.agents.root
+                                     :seon.ns/source
+                                     "(ns my.agents.root)\n(def observed true)"}])
               (support/await-event! entered ::derivation-entered)
               (let [observation (future (derivations context))]
                 (.countDown release)
@@ -1708,8 +1708,8 @@ handle))}}
 (deftest data-resolves-an-entity-root-and-preserves-it-in-floor-links
   (with-server
     (fn [connection server _context]
-      (db/transact! connection
-                  [{:seon.agent/id "alice"}])
+      (support/transacted! connection
+                         [{:seon.agent/id "alice"}])
       (let [response
             (fetch server
                    "/data?entity=%5B%3Aseon.cluster.agent%2Fid+%22alice%22%5D&path=%5B%5D&offset=0")
@@ -1758,8 +1758,8 @@ handle))}}
             entity (URLEncoder/encode
                     (pr-str [:seon.ns/name namespace-name]) "UTF-8")
             path (URLEncoder/encode (pr-str [:seon.ns/source]) "UTF-8")]
-        (db/transact! connection
-                    [{:seon.ns/name namespace-name :seon.ns/source huge}])
+        (support/transacted! connection
+                           [{:seon.ns/name namespace-name :seon.ns/source huge}])
         (let [response (fetch server (str "/data?entity=" entity
                                           "&path=" path "&offset=0"))
               body (.body response)]
@@ -1782,8 +1782,8 @@ handle))}}
      (support/seed-cluster! connection "ai-bound")
      (let [namespace-name 'my.agents.ai-bound-source
            huge (apply str (repeat (* 5 1024 1024) "x"))]
-       (db/transact! connection
-                     [{:seon.ns/name namespace-name :seon.ns/source huge}])
+       (support/transacted! connection
+                            [{:seon.ns/name namespace-name :seon.ns/source huge}])
        (let [database @connection
              ctx (support/fork-cluster-ctx connection)
              profile (render/agent-render-profile (config/defaults))
@@ -1852,11 +1852,11 @@ handle))}}
 (deftest each-agent-has-an-isolated-debug-route
   (with-server
     (fn [connection server _context]
-      (db/transact! connection
-                  (cluster.agent/creation-tx
-                   {:seon.agent/id "alice"
-                    :seon.cluster/name "web-test"
-                    :seon.ns/name 'my.agents.alice}))
+      (support/transacted! connection
+                         (cluster.agent/creation-tx
+                          {:seon.agent/id "alice"
+                           :seon.cluster/name "web-test"
+                           :seon.ns/name 'my.agents.alice}))
       (let [agent-page (.body (fetch server "/agent/root"))
             root (.body (fetch server "/agent/root/debug?prompt=true"))
             alice (.body (fetch server "/agent/alice/debug"))]
@@ -1874,10 +1874,10 @@ handle))}}
   ;; it does not become an extra context block.
   (with-server
     (fn [connection server _context]
-      (db/transact! connection
-                  {:tx-data [{:seon.agent/id "debug-trigger"}]
-                   :tx-meta {:seon.db/user
-                             [:seon.agent/id agent-id]}})
+      (support/transacted! connection
+                         {:tx-data [{:seon.agent/id "debug-trigger"}]
+                          :tx-meta {:seon.db/user
+                                    [:seon.agent/id agent-id]}})
       (let [stream (open-feed server (debug-feed-path
                                       agent-id [] "&maxRefAttributes=200"))]
         (try
@@ -1912,7 +1912,7 @@ handle))}}
   ;; seed 2026072905 — the former prefix-dispatch shadow class.
   (with-server
     (fn [connection server _context]
-      (db/transact! connection [{:seon.agent/id "bob"}])
+      (support/transacted! connection [{:seon.agent/id "bob"}])
       (is (= 404 (.statusCode (fetch server "/agent/bob/message"))))
       (is (= 404 (.statusCode (post-form server "/agent/bob" "content=x"))))
       (is (= 404 (.statusCode
@@ -1967,11 +1967,11 @@ handle))}}
   (support/with-database
     (fn [connection]
       (support/seed-cluster! connection "web-write-refusal")
-      (db/transact! connection
-                  (cluster.agent/creation-tx
-                   {:seon.agent/id agent-id
-                    :seon.cluster/name "web-write-refusal"
-                    :seon.ns/name 'my.agents.root}))
+      (support/transacted! connection
+                         (cluster.agent/creation-tx
+                          {:seon.agent/id agent-id
+                           :seon.cluster/name "web-write-refusal"
+                           :seon.ns/name 'my.agents.root}))
       (let [service (service-request connection {})
             inbound {:seon.agent/id agent-id
                      :seon.message/inbound-content "accepted"}]
@@ -2106,11 +2106,11 @@ handle))}}
   "One render-pass state whose pages all throw, with a real fault channel."
   [connection fault-channel]
   (support/seed-cluster! connection "web-fault-test")
-  (db/transact! connection
-                (cluster.agent/creation-tx
-                 {:seon.agent/id "agent-a"
-                  :seon.cluster/name "web-fault-test"
-                  :seon.ns/name 'my.agents.fault-test}))
+  (support/transacted! connection
+                       (cluster.agent/creation-tx
+                        {:seon.agent/id "agent-a"
+                         :seon.cluster/name "web-fault-test"
+                         :seon.ns/name 'my.agents.fault-test}))
   {:seon.turn.loop/cluster
    (support/cluster-handle
    {:seon.cluster/name "web-fault-test"

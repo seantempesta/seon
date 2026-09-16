@@ -18,10 +18,10 @@
      (let [effective (config/defaults)
            caps (config/result-caps effective)
            ctx (support/fork-cluster-ctx connection)
-           _ (db/transact! connection [{:seon.agent/id "fault-render-agent"}
-                                       {:seon.turn/id "fault-render-turn"
-                                        :seon.turn/agent [:seon.agent/id "fault-render-agent"]
-                                        :seon.turn/opened-tx "datomic.tx"}])
+           _ (support/transacted! connection [{:seon.agent/id "fault-render-agent"}
+                                              {:seon.turn/id "fault-render-turn"
+                                               :seon.turn/agent [:seon.agent/id "fault-render-agent"]
+                                               :seon.turn/opened-tx "datomic.tx"}])
            recording (error/recording
                       (db/db connection)
                       {:seon.error/source {:seon.error/kind :seon.instrument/contract-violated

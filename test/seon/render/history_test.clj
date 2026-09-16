@@ -28,26 +28,26 @@
 (deftest form-is-the-third-output-of-the-existing-selection-chain
   (support/with-database
    (fn [connection]
-     (db/transact!
-      connection
-      (into []
-            (filter (comp #{:seon.render/form
-                            :seon.render/output
-                            :seon.render/rendered
-                            :seon.render/call-request
-                            :seon.ns/ns
-                            :seon.fn/fn
-                            :seon.schema/schema
-                            :seon.message/message
-                            :seon.message/to}
-                          :seon.schema/key))
-            (schema/canonical-schema-rows)))
-     (db/transact!
-      connection
-      [{:seon.ns/name 'fixture.history}
-       {:seon.agent/id "history-agent"
-        :seon.agent/namespace [:seon.ns/name 'fixture.history]}
-       {:seon.message/id "history-message" :seon.message/to [:seon.agent/id "history-agent"] :seon.message/content "Read me." :seon.message/inbox [:seon.agent/id "history-agent"]}])
+     (support/transacted!
+             connection
+             (into []
+                   (filter (comp #{:seon.render/form
+                                   :seon.render/output
+                                   :seon.render/rendered
+                                   :seon.render/call-request
+                                   :seon.ns/ns
+                                   :seon.fn/fn
+                                   :seon.schema/schema
+                                   :seon.message/message
+                                   :seon.message/to}
+                                 :seon.schema/key))
+                   (schema/canonical-schema-rows)))
+     (support/transacted!
+             connection
+             [{:seon.ns/name 'fixture.history}
+              {:seon.agent/id "history-agent"
+               :seon.agent/namespace [:seon.ns/name 'fixture.history]}
+              {:seon.message/id "history-message" :seon.message/to [:seon.agent/id "history-agent"] :seon.message/content "Read me." :seon.message/inbox [:seon.agent/id "history-agent"]}])
      (let [database @connection
            ctx (support/fork-cluster-ctx connection)
            selected

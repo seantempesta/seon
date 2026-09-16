@@ -23,12 +23,12 @@
 (deftest identity-reads-stewardship-without-an-agent-cluster-attribute
   (support/with-database
    (fn [connection]
-     (db/transact! connection
-                   [{:db/id "steward" :seon.agent/id "record-steward"}
-                    {:db/id "namespace" :seon.ns/name 'my.agents.record
-                     :seon.ns/steward "steward"}
-                    {:seon.agent/id "record-agent"
-                     :seon.agent/namespace "namespace"}])
+     (support/transacted! connection
+                          [{:db/id "steward" :seon.agent/id "record-steward"}
+                           {:db/id "namespace" :seon.ns/name 'my.agents.record
+                            :seon.ns/steward "steward"}
+                           {:seon.agent/id "record-agent"
+                            :seon.agent/namespace "namespace"}])
      (let [unit {:seon.db/db @connection
                  :seon.agent/id "record-agent"}
            source (agent/render-identity-ai unit)
@@ -228,17 +228,17 @@
            namespace-name 'useful "(defn useful [value] value)"
            {:seon.fn/spec "[:=> [:cat :string] :string]"
             :seon.fn/doc "Return the useful value."})])
-        (db/transact!
-         connection
-         (conj
-          (mapv (fn [required-name] {:seon.ns/name required-name})
-                required-names)
-          {:seon.ns/name namespace-name
-           :seon.ns/doc
-           "Useful namespace summary.\n\nLonger stewardship text."
-           :seon.ns/requires
-           (mapv (fn [required-name] [:seon.ns/name required-name])
-                 required-names)}))
+        (support/transacted!
+                connection
+                (conj
+                 (mapv (fn [required-name] {:seon.ns/name required-name})
+                       required-names)
+                 {:seon.ns/name namespace-name
+                  :seon.ns/doc
+                  "Useful namespace summary.\n\nLonger stewardship text."
+                  :seon.ns/requires
+                  (mapv (fn [required-name] [:seon.ns/name required-name])
+                        required-names)}))
         (let [raw (sut/render-html
                    (namespace-unit @connection namespace-name 1 100000))
               raw-html (hiccup/->string raw)
@@ -277,13 +277,13 @@
   ;; An empty namespace still teaches the same executable inspection form.
   (support/with-database
     (fn [connection]
-      (db/transact! connection
-                  [{:db/id "fresh-namespace"
-                    :seon.ns/name 'my.agents.fresh
-                    :seon.ns/steward "fresh-agent"}
-                   {:db/id "fresh-agent"
-                    :seon.agent/id "fresh"
-                    :seon.agent/namespace "fresh-namespace"}])
+      (support/transacted! connection
+                         [{:db/id "fresh-namespace"
+                           :seon.ns/name 'my.agents.fresh
+                           :seon.ns/steward "fresh-agent"}
+                          {:db/id "fresh-agent"
+                           :seon.agent/id "fresh"
+                           :seon.agent/namespace "fresh-namespace"}])
       (let [db @connection
             unit (namespace-unit db 'my.agents.fresh 1 256)
             ai (sut/render-ai unit)

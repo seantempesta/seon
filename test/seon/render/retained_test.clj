@@ -90,8 +90,8 @@
          (is (pos? @checks) "a changed database still validates dependencies")
          (let [invoke kernel/invoke
                invocations (atom 0)]
-           (db/transact! connection [[:db/add [:seon.ns/name namespace-name]
-                                      :seon.ns/doc "Updated fixture documentation"]])
+           (support/transacted! connection [[:db/add [:seon.ns/name namespace-name]
+                                             :seon.ns/doc "Updated fixture documentation"]])
            (with-redefs [kernel/invoke (fn [input] (swap! invocations inc) (invoke input))]
              (is (= "two" (render/render-call (request))))
              (is (zero? @invocations) "an unrelated fact is not a renderer input")))

@@ -20,9 +20,9 @@
   (#'web-test/with-server
    (fn [connection server context]
      (flow/pause (:graph context))
-     (db/transact! connection
-                   [{:seon.message/id "context-probe-message" :seon.message/to [:seon.agent/id "root"] :seon.message/content "A caller-owned context." :seon.message/inbox [:seon.agent/id "root"]}
-                    {:seon.turn/id "context-probe" :seon.turn/agent [:seon.agent/id "root"] :seon.turn/opened-tx "datomic.tx"}])
+     (support/transacted! connection
+                          [{:seon.message/id "context-probe-message" :seon.message/to [:seon.agent/id "root"] :seon.message/content "A caller-owned context." :seon.message/inbox [:seon.agent/id "root"]}
+                           {:seon.turn/id "context-probe" :seon.turn/agent [:seon.agent/id "root"] :seon.turn/opened-tx "datomic.tx"}])
      (let [ctx (:ctx context)
            request {:seon.db/db @connection
                     :seon.db/connection connection
@@ -60,15 +60,15 @@
              (is (empty? costs) "saved history writes no new render costs"))
            (is (identical? (render/shared-cache ctx) (render/shared-cache ctx)))
            (is (seq (:seon.render.web/calls @(render/shared-cache ctx))))
-           (db/transact! connection
-             [{:seon.agent/id "root"
-               :seon.agent/runtime {:seon.runtime/agent [:seon.agent/id "root"]
-                                    :seon.runtime/turns [[:seon.turn/id "context-probe"]]}}
-              {:seon.cluster.eval/id "retained-history"
-               :seon.cluster.eval/run [:seon.turn/id "context-probe"]
-               :seon.cluster.eval/ordinal 0
-               :seon.cluster.eval/at (java.util.Date.)
-               :seon.cluster.eval/source "(+ 1 1)" :seon.eval/shown "2"}])
+           (support/transacted! connection
+                    [{:seon.agent/id "root"
+                      :seon.agent/runtime {:seon.runtime/agent [:seon.agent/id "root"]
+                                           :seon.runtime/turns [[:seon.turn/id "context-probe"]]}}
+                     {:seon.cluster.eval/id "retained-history"
+                      :seon.cluster.eval/run [:seon.turn/id "context-probe"]
+                      :seon.cluster.eval/ordinal 0
+                      :seon.cluster.eval/at (java.util.Date.)
+                      :seon.cluster.eval/source "(+ 1 1)" :seon.eval/shown "2"}])
            (let [request (dissoc request :seon.turn/id)
                  invoke kernel/invoke
                  calls (atom 0)
@@ -92,9 +92,9 @@
                  (is (= 1 @walks) "current retained history is not queried and folded again")
                  (is (identical? (:seon.render.history/entries first-result)
                                  (:seon.render.history/entries second-result)))
-                 (db/transact! connection
-                   [{:seon.message/id "context-probe-message"
-                     :seon.message/content "Does not change saved evaluations."}])
+                 (support/transacted! connection
+                          [{:seon.message/id "context-probe-message"
+                            :seon.message/content "Does not change saved evaluations."}])
                  (let [unrelated (render/acquire-context! (assoc request :seon.db/db @connection))]
                    (is (= 1 @walks) "an unrelated transaction preserves the acquired history")
                    (is (identical? @connection (:seon.db/db unrelated)))
@@ -187,8 +187,8 @@
                initial @calls]
            (is (= 200 (.statusCode before)))
            (is (pos? initial))
-           (db/transact! connection
-                         [{:seon.message/id "identity-cache-message" :seon.message/to [:seon.agent/id "root"] :seon.message/content "A newly connected message." :seon.message/inbox [:seon.agent/id "root"]}])
+           (support/transacted! connection
+                                [{:seon.message/id "identity-cache-message" :seon.message/to [:seon.agent/id "root"] :seon.message/content "A newly connected message." :seon.message/inbox [:seon.agent/id "root"]}])
            (let [after (#'web-test/fetch server "/agent/root")]
              (is (= 200 (.statusCode after)))
              (is (= "A newly connected message."

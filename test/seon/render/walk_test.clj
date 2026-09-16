@@ -45,10 +45,10 @@
   (support/with-database
    (fn [connection]
      (seed-agent-and-inbox! connection)
-     (db/transact!
-      connection
-      [{:seon.message/content "identityless message"
-        :seon.message/inbox [:seon.agent/id agent-id]}])
+     (support/transacted!
+             connection
+             [{:seon.message/content "identityless message"
+               :seon.message/inbox [:seon.agent/id agent-id]}])
      (let [database @connection
            identity-attributes (db/populated-identity-attributes database)
            units (vals (:seon.render.walk/members
@@ -139,14 +139,14 @@
   (support/with-database
    (fn [connection]
      (seed-agent-and-inbox! connection)
-     (db/transact!
-      connection
-      (mapv (fn [ordinal]
-              {:seon.message/id (str "render-walk-message-" ordinal)
-               :seon.message/to [:seon.agent/id agent-id]
-               :seon.message/inbox [:seon.agent/id agent-id]
-               :seon.message/content "42"})
-            [1 2]))
+     (support/transacted!
+             connection
+             (mapv (fn [ordinal]
+                     {:seon.message/id (str "render-walk-message-" ordinal)
+                      :seon.message/to [:seon.agent/id agent-id]
+                      :seon.message/inbox [:seon.agent/id agent-id]
+                      :seon.message/content "42"})
+                   [1 2]))
      (let [database @connection
            ctx (support/fork-cluster-ctx connection)
            narrow (assoc caps :seon.config.eval.result/max-collection 2)]

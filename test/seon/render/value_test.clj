@@ -57,7 +57,7 @@
            database (db/db connection)
            directory (evaluation/directory-value database 'seon.repl true)
            step (plan/item {:seon.db/db database :my.plan.item/id "prepare"})
-           _ (db/transact! connection [{:seon.agent/id "plan-reader"}])
+           _ (support/transacted! connection [{:seon.agent/id "plan-reader"}])
            installed (plan/plan!
                       {:my.plan/objective "Verify the render"
                        :my.plan/current-step {:my.plan.item/id "focus"}

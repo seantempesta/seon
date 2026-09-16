@@ -71,15 +71,15 @@
 (deftest temporal-root-selector-uses-the-origin-schema
   (support/with-database
    (fn [connection]
-     (db/transact!
-      connection
-      [{:seon.agent/id "temporal-root-agent"}
-       {:seon.message/id "temporal-root-message" :seon.message/to [:seon.agent/id "temporal-root-agent"] :seon.message/content "The opening message." :seon.message/inbox [:seon.agent/id "temporal-root-agent"]}])
-     (db/transact!
-      connection
-      [{:seon.turn/id "temporal-root-run" :seon.turn/agent [:seon.agent/id "temporal-root-agent"] :seon.turn/trigger [:seon.message/id "temporal-root-message"] :seon.turn/opened-tx "datomic.tx"}
-       {:seon.agent/id "temporal-root-agent"
-        }])
+     (support/transacted!
+             connection
+             [{:seon.agent/id "temporal-root-agent"}
+              {:seon.message/id "temporal-root-message" :seon.message/to [:seon.agent/id "temporal-root-agent"] :seon.message/content "The opening message." :seon.message/inbox [:seon.agent/id "temporal-root-agent"]}])
+     (support/transacted!
+             connection
+             [{:seon.turn/id "temporal-root-run" :seon.turn/agent [:seon.agent/id "temporal-root-agent"] :seon.turn/trigger [:seon.message/id "temporal-root-message"] :seon.turn/opened-tx "datomic.tx"}
+              {:seon.agent/id "temporal-root-agent"
+               }])
      (let [current @connection
            temporal (db/as-of current (db/basis-t current))
            current-selector (walk/root-selector current 1 caps)
@@ -120,10 +120,10 @@
 (deftest history-database-neighborhood-terminates-with-origin-schema
   (support/with-database
    (fn [connection]
-     (db/transact!
-      connection
-      [{:seon.agent/id "historical-walk-agent"}
-       {:seon.message/id "historical-walk-message" :seon.message/to [:seon.agent/id "historical-walk-agent"] :seon.message/content "A historical walk must terminate." :seon.message/inbox [:seon.agent/id "historical-walk-agent"]}])
+     (support/transacted!
+             connection
+             [{:seon.agent/id "historical-walk-agent"}
+              {:seon.message/id "historical-walk-message" :seon.message/to [:seon.agent/id "historical-walk-agent"] :seon.message/content "A historical walk must terminate." :seon.message/inbox [:seon.agent/id "historical-walk-agent"]}])
      (let [current @connection
            render-request {:seon.db/db current
                     :seon.agent/id "historical-walk-agent"
@@ -151,7 +151,7 @@
   (support/with-database
    {:seon.test-support/extra-schema root-pull-schema}
    (fn [connection]
-     (db/transact! connection [{::root-id "root" ::value "one"}])
+     (support/transacted! connection [{::root-id "root" ::value "one"}])
      (let [acquisition-request (request connection)
            acquisition (walk/root-acquisition acquisition-request)
            units (walk/neighborhood
@@ -173,7 +173,7 @@
   (support/with-database
    {:seon.test-support/extra-schema root-pull-schema}
    (fn [connection]
-     (db/transact! connection [{::root-id "root" ::value "one"}])
+     (support/transacted! connection [{::root-id "root" ::value "one"}])
      (let [initial (walk/root-pull-plan (request connection))
            compile-count (atom 0)]
        (with-redefs [pull-api/compile-pull-plan
@@ -248,12 +248,12 @@
   (support/with-database
    {:seon.test-support/extra-schema root-pull-schema}
    (fn [connection]
-     (db/transact! connection
-                   [{::root-id "root"
-                     ::component "component"}
-                    {:db/id "component"
-                     ::node-id "component"
-                     ::value "before"}])
+     (support/transacted! connection
+                          [{::root-id "root"
+                            ::component "component"}
+                           {:db/id "component"
+                            ::node-id "component"
+                            ::value "before"}])
      (let [reads (atom [])
            pull db/pull
            count-read (fn [operation f]
@@ -301,18 +301,18 @@
   (support/with-database
    {:seon.test-support/extra-schema root-pull-schema}
    (fn [connection]
-     (db/transact! connection
-                   [{::root-id "root"
-                     ::component "component"}
-                    {:db/id "component"
-                     ::node-id "component"
-                     ::value "before"}])
+     (support/transacted! connection
+                          [{::root-id "root"
+                            ::component "component"}
+                           {:db/id "component"
+                            ::node-id "component"
+                            ::value "before"}])
      (let [initial (acquire connection)]
        (testing "an undeclared forward ref remains an identity in the root value"
-         (db/transact! connection
-                       [{::node-id "forward"}
-                        {::root-id "root"
-                         ::forward [::node-id "forward"]}])
+         (support/transacted! connection
+                              [{::node-id "forward"}
+                               {::root-id "root"
+                                ::forward [::node-id "forward"]}])
          (let [with-forward (acquire connection)
                added (walk/membership-diff initial with-forward)]
            (is (not (contains? (member-lookups with-forward)
@@ -321,9 +321,9 @@
                                     [:seon.render.walk/root ::forward ::node-id])))
            (is (= #{}
                   (changed-lookups added :seon.render.walk/added)))
-           (db/transact! connection
-                         [[:db/retract [::root-id "root"] ::forward
-                           [::node-id "forward"]]])
+           (support/transacted! connection
+                                [[:db/retract [::root-id "root"] ::forward
+                                  [::node-id "forward"]]])
            (let [without-forward (acquire connection)
                  removed (walk/membership-diff with-forward without-forward)]
              (is (= #{}
@@ -331,16 +331,16 @@
 
        (testing "an undeclared reverse ref neither adds nor removes a member"
          (let [before-reverse (acquire connection)]
-           (db/transact! connection
-                         [{::node-id "reverse"
-                           ::edge [::root-id "root"]}])
+           (support/transacted! connection
+                                [{::node-id "reverse"
+                                  ::edge [::root-id "root"]}])
            (let [with-reverse (acquire connection)
                  added (walk/membership-diff before-reverse with-reverse)]
              (is (= #{}
                     (changed-lookups added :seon.render.walk/added)))
-             (db/transact! connection
-                           [[:db/retract [::node-id "reverse"] ::edge
-                             [::root-id "root"]]])
+             (support/transacted! connection
+                                  [[:db/retract [::node-id "reverse"] ::edge
+                                    [::root-id "root"]]])
              (let [without-reverse (acquire connection)
                    removed
                    (walk/membership-diff with-reverse without-reverse)]
@@ -350,8 +350,8 @@
 
        (testing "a component-only touch changes the component, not its root"
          (let [before-component (acquire connection)]
-           (db/transact! connection
-                         [[:db/add [::node-id "component"] ::value "after"]])
+           (support/transacted! connection
+                                [[:db/add [::node-id "component"] ::value "after"]])
            (let [after-component (acquire connection)
                  changed
                  (walk/membership-diff before-component after-component)]
@@ -364,7 +364,7 @@
   (support/with-database
    {:seon.test-support/extra-schema root-pull-schema}
    (fn [connection]
-     (db/transact! connection [{::root-id "root" ::value "one"}])
+     (support/transacted! connection [{::root-id "root" ::value "one"}])
      (let [render-request (request connection)
            acquisition (walk/root-acquisition render-request)
            reads (atom 0)
@@ -386,9 +386,9 @@
   (support/with-database
    {:seon.test-support/extra-schema root-pull-schema}
    (fn [connection]
-     (db/transact! connection
-                   [{::root-id "root" ::component "both"}
-                    {:db/id "both" ::root-id "lexical" ::node-id "declared"}])
+     (support/transacted! connection
+                          [{::root-id "root" ::component "both"}
+                           {:db/id "both" ::root-id "lexical" ::node-id "declared"}])
      (let [acquisition (acquire connection)]
        (is (contains? (:seon.render.walk/members acquisition)
                       [::node-id "declared"])
@@ -398,7 +398,7 @@
   (support/with-database
    {:seon.test-support/extra-schema root-pull-schema}
    (fn [connection]
-     (db/transact! connection [{::root-id "root" ::value "one"}])
+     (support/transacted! connection [{::root-id "root" ::value "one"}])
      (let [captured (atom [])
            database @connection
            fixed (db/as-of database (db/basis-t database))
@@ -415,11 +415,11 @@
   (support/with-database
    {:seon.test-support/extra-schema root-pull-schema}
    (fn [connection]
-     (db/transact! connection [{::root-id "root" ::value "retained"}])
+     (support/transacted! connection [{::root-id "root" ::value "retained"}])
      (let [render-request (request connection)
            call-id ::root
            [_ initial-entry] (#'web/acquire-root render-request call-id)]
-       (db/transact! connection [{::node-id "outside" ::value "changed"}])
+       (support/transacted! connection [{::node-id "outside" ::value "changed"}])
        (let [database @connection
              retained {call-id initial-entry}
              candidates (#'web/candidate-call-ids retained database)
@@ -494,7 +494,7 @@
   (support/with-database
    {:seon.test-support/extra-schema root-pull-schema}
    (fn [connection]
-     (db/transact! connection [{::root-id "root" ::value "sample"}])
+     (support/transacted! connection [{::root-id "root" ::value "sample"}])
      (let [acquisition-request (request connection)
            pull-plan (walk/root-pull-plan acquisition-request)
            started (System/nanoTime)

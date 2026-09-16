@@ -18,33 +18,33 @@
 (deftest render-run-selects-only-the-requested-run
   (support/with-database
    (fn [connection]
-     (db/transact!
-      connection
-      [{:seon.agent/id "run-render-agent"}
-       {:seon.turn/id "run-a" :seon.turn/agent [:seon.agent/id "run-render-agent"] :seon.turn/opened-tx "datomic.tx" :seon.turn/closed-tx "datomic.tx"}
-       {:seon.turn/id "run-b" :seon.turn/agent [:seon.agent/id "run-render-agent"] :seon.turn/opened-tx "datomic.tx"}
-       ;; ONE ENTITY PER (run, ordinal): the frozen source and the settled
-       ;; result are attributes of the same evaluation. Ordinal 1 of run-a
-       ;; is frozen and never started, which is exactly "pending".
-       {:seon.cluster.eval/id "eval-a"
-        :seon.cluster.eval/run [:seon.turn/id "run-a"]
-        :seon.cluster.eval/ordinal 0
-        :seon.cluster.eval/author :agent
-        :seon.cluster.eval/source "(+ 1 1)"
-        :seon.cluster.eval/at #inst "2026-09-06T00:00:01.000-00:00"
-        :seon.cluster.eval/result-edn "2"}
-       {:seon.cluster.eval/id "form-a-pending"
-        :seon.cluster.eval/run [:seon.turn/id "run-a"]
-        :seon.cluster.eval/ordinal 1
-        :seon.cluster.eval/author :agent
-        :seon.cluster.eval/source "pending-form"}
-       {:seon.cluster.eval/id "eval-b"
-        :seon.cluster.eval/run [:seon.turn/id "run-b"]
-        :seon.cluster.eval/ordinal 0
-        :seon.cluster.eval/author :agent
-        :seon.cluster.eval/source "(* 9 9)"
-        :seon.cluster.eval/at #inst "2026-09-06T00:01:01.000-00:00"
-        :seon.cluster.eval/result-edn "81"}])
+     (support/transacted!
+             connection
+             [{:seon.agent/id "run-render-agent"}
+              {:seon.turn/id "run-a" :seon.turn/agent [:seon.agent/id "run-render-agent"] :seon.turn/opened-tx "datomic.tx" :seon.turn/closed-tx "datomic.tx"}
+              {:seon.turn/id "run-b" :seon.turn/agent [:seon.agent/id "run-render-agent"] :seon.turn/opened-tx "datomic.tx"}
+              ;; ONE ENTITY PER (run, ordinal): the frozen source and the settled
+              ;; result are attributes of the same evaluation. Ordinal 1 of run-a
+              ;; is frozen and never started, which is exactly "pending".
+              {:seon.cluster.eval/id "eval-a"
+               :seon.cluster.eval/run [:seon.turn/id "run-a"]
+               :seon.cluster.eval/ordinal 0
+               :seon.cluster.eval/author :agent
+               :seon.cluster.eval/source "(+ 1 1)"
+               :seon.cluster.eval/at #inst "2026-09-06T00:00:01.000-00:00"
+               :seon.cluster.eval/result-edn "2"}
+              {:seon.cluster.eval/id "form-a-pending"
+               :seon.cluster.eval/run [:seon.turn/id "run-a"]
+               :seon.cluster.eval/ordinal 1
+               :seon.cluster.eval/author :agent
+               :seon.cluster.eval/source "pending-form"}
+              {:seon.cluster.eval/id "eval-b"
+               :seon.cluster.eval/run [:seon.turn/id "run-b"]
+               :seon.cluster.eval/ordinal 0
+               :seon.cluster.eval/author :agent
+               :seon.cluster.eval/source "(* 9 9)"
+               :seon.cluster.eval/at #inst "2026-09-06T00:01:01.000-00:00"
+               :seon.cluster.eval/result-edn "81"}])
      (let [database (db/db connection)
            run (db/pull database '[*] [:seon.turn/id "run-a"])
            ctx (support/fork-cluster-ctx connection)
