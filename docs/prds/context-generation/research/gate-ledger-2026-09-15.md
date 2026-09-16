@@ -1025,3 +1025,19 @@ incremental-source-refresh, two timeouts. Live defect found in passing:
 Date) for agent root on default (blocker issue). Landing note:
 `batch-68-boot-test-reds-2026-09-16.md` (`868d7b992`). Batch 71 adds
 seon.cluster.store-test and seon.cluster-test.
+
+### 2026-09-16 07:25 — the io-prepl drop: a required dial without its decision killed the connection seam
+
+The steward found the prepl drop the batch-68 triage thread met: every
+io-prepl connection thread on default died at connect with
+`seon.cluster/mcp-io-prepl refused bootstrap-effective at
+[:seon.config.agent/write-refusal-bound]` (one log line per connection) —
+the write-storm lane's new required dial was hook-adopted before its
+default value was applied, so MCP, `config apply`, and gate recording all
+saw "Connection reset". The pair is committed (`f86ec57ed`) but the
+effective config in default's database still lacked the value and only a
+restart reconciles it; the steward restarts default. Class (steward
+filing): a required dial declared without its decision must not refuse
+the socket — the seam serves a typed refusal in the value. Batch 71 runs
+cold through the restart; if its recording is refused, that is this
+restart, not the batch.
