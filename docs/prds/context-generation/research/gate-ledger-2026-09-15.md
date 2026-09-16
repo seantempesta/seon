@@ -328,3 +328,23 @@ carries no projection state, so `seon.db/pull` returns
 `(seon.db/db connection)` all 76 decision keys match (evidence `147010c50`,
 issue `fresh-operator-config-proof-pulls-an-unprojected-database.md`).
 Fixed `8208754cb` (two read sites through `seon.db/db`); gated in batch 32 with seon.fn-test on the steward's `7cfe02790` (program/shapes hand list killed).
+
+### 2026-09-16 09:00Z — turn bookkeeping cost: config/apply! rebuilds, not the store
+
+Research `c2972178b` (`turn-bookkeeping-cost-2026-09-16.md`): the six-form
+bookkeeping path is ~100 ms warm (whole call-turn window 452 ms: prompt 217,
+6× evaluate 134, 4× transact 38, settle 22, analyze once 16, request-profile
+15 over 64 calls, issue tests 0) — the archived per-form disease has not
+recurred. The 270 s worker bound is the FIXTURE: an empty `with-cluster` costs
+~5.0 s (with-database 1 ms), ×48 trials ≈ 240 s. One cause, two halves, in
+`seon.config/apply!` (called twice per fixture cluster, 2–3 s each,
+already converged): `apply-compiled!` rebuilds `projection-from-database`
+(`config.clj:459`, 682–720 ms) where the carried projection is 0 ms — the
+§2.1 defect relocated to config — and `reconcile/plan` (`:479`) spends
+773–984 ms to return 0 operations. Store size refuted (MemoryStore fixture;
+1-datom transact 3 ms); the reset changes none of this. Plan: hand
+`apply-compiled!` the carried projection; a converged apply becomes a read on
+`:seon.config/applied-manifest-digest` + basis `:t`; seed the fixture
+cluster into the canonical base. Flagged: a 13 s / 89k-datom publication
+transaction on default; `request-profile` derived 64× per turn. The 5.6 s
+first-turn cost in a fresh worker is not yet attributed (needs a cold JVM).
