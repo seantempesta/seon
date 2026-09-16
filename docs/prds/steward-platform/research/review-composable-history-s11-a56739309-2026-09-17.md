@@ -110,3 +110,31 @@ seon.repl-test` passed 17 tests / 93 assertions, zero failures or errors
 both direct and schema-selected AI/HTML calls, presence of the selected
 evaluations and interruption explanation, exclusion of the other turn, and
 the missing-identity diagnostic. No browser-paint proof is claimed.
+
+## Red (2) — select the evaluation pair for namespace refs, 2026-09-16
+
+The batch-111 HTML was the generic map printer, not an evaluation article.
+The wildcard pull supplied `:seon.cluster.eval/ns {:db/id ...}`, but
+`:seon.eval/entity` required `{:seon.ns/name ...}`. Consequently the declared
+evaluation pair never qualified. This was independent of the thinking-block
+implementation and did not depend on hot reload.
+
+After `5ae2337d1` released `resources/seon/schemas/seon.eval.edn`, status was
+checked again before editing. The namespace member now admits its shared
+reference contract while retaining the existing expanded-name shape.
+`seon.repl/entity-emission` resolves an unexpanded namespace against the
+database carried by the render request, just as its renderer ref already did.
+No placeholder namespace or second pair-selection mechanism was added.
+The page-pair regression uses `transacted!` and checks the original pulled
+reference plus numeric and lookup references, keeping the thinking, prompt,
+saved-result and AI-grammar assertions.
+
+Verification at isolated HEAD `c74dc5c01`: the 13 web-debug tests, 16 REPL
+tests and selected-turn test completed without failures or errors in
+`tmp/s11-render-final-fast.log`. The broader run's 48-test aggregate had one
+error in `supersession-chains-vanish-from-the-history`; that error concerned
+the red-(4) bootstrap-message query and is handled in its separate slice.
+The original thinking regression and its additional ref cases passed through
+`render/render-call` with armed contracts. Default adoption and browser paint
+remain unverified; the publication-bound observation is recorded in
+`docs/seon/issues/concurrent-publications-serialize-past-the-hook-bound.md`.

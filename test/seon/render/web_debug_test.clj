@@ -413,7 +413,7 @@
   (support/with-database
    (fn [connection]
      (let [written
-           (db/transact!
+           (support/transacted!
             connection
             [{:seon.ns/name 'my.agents.thinking-probe}
              {:db/id "thinking-agent" :seon.agent/id "thinking-probe"
@@ -461,7 +461,20 @@
        (is (str/starts-with?
             ai
             "my.agents.thinking-probe=> ;; I should read the plan first.\n(my.plan/plan {})")
-           "the AI pair keeps the REPL grammar unchanged")))))
+           "the AI pair keeps the REPL grammar unchanged")
+       (doseq [namespace-ref [(get-in saved [:seon.cluster.eval/ns :db/id])
+                             [:seon.ns/name 'my.agents.thinking-probe]]]
+         (let [rendered (render/render-call
+                         (assoc request :seon.render/output :seon.render/html
+                                :seon.render/value
+                                (assoc saved :seon.cluster.eval/ns namespace-ref)))
+               blocks (filter vector? (tree-seq vector? seq rendered))]
+           (is (= 1 (count (filter #(= "seon-eval-thinking" (:class (second %)))
+                                   blocks)))
+               (pr-str rendered))
+           (is (str/includes? (element-text rendered)
+                              "my.agents.thinking-probe=> (my.plan/plan {})")
+               "namespace references resolve through the carried database")))))))
 
 (deftest blocks-use-the-values-schema-documentation
   (support/with-database

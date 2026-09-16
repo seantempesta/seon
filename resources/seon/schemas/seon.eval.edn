@@ -17,7 +17,8 @@
              [:seon.cluster.eval/at {:optional true} :inst]
              [:seon.cluster.eval/ns
               {:optional true}
-              [:map [:seon.ns/name :seon.ns/name]]]
+              [:or :seon.cluster.eval/ns
+               [:map [:seon.ns/name :seon.ns/name]]]]
              [:seon.cluster.eval/read-evidence
               {:optional true}
               [:vector :seon.db/read-evidence]]

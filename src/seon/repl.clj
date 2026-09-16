@@ -355,15 +355,22 @@
 (defn entity-emission
   "One pulled evaluation entity as an emission this namespace can render.
 
-  The prompt namespace is the evaluation's own `:seon.cluster.eval/ns` when
-  the pull reached its name; an unreached namespace prints as `user`, which
-  is what a REPL with no namespace in effect is called."
+  Resolve the evaluation's namespace ref against the carried database when
+  the pull did not expand its name."
   {:malli/schema [:=> [:cat :seon.repl/entity-request] :seon.repl/emission]}
   [unit]
   (let [database (:seon.db/db unit)
         unit (if (map? (:seon.render/value unit))
                (:seon.render/value unit)
                unit)
+        namespace-ref (:seon.cluster.eval/ns unit)
+        namespace-name
+        (or (when (map? namespace-ref) (:seon.ns/name namespace-ref))
+            (when (and database namespace-ref)
+              (:seon.ns/name
+               ((requiring-resolve 'seon.db/pull)
+                database [:seon.ns/name]
+                (if (map? namespace-ref) (:db/id namespace-ref) namespace-ref)))))
         renderer-ref (:seon.eval/renderer-fn unit)
         renderer-symbol
         (or (get-in unit [:seon.eval/renderer-fn :seon.fn/sym])
@@ -414,8 +421,8 @@
     ;; ONE ENTITY PER (run, ordinal), ONE SPELLING. The frozen form family
     ;; is gone; the source, the ordinal and the namespace are this
     ;; evaluation's own attributes, so there is nothing to reconcile here.
-    (get-in unit [:seon.cluster.eval/ns :seon.ns/name])
-    (assoc :seon.ns/name (get-in unit [:seon.cluster.eval/ns :seon.ns/name]))
+    namespace-name
+    (assoc :seon.ns/name namespace-name)
 
     ;; THE HANDLE COMES FROM THE EVALUATION'S OWN IDENTITY, so two runs of one
     ;; agent never name two values alike. An evaluation with no entity id never
