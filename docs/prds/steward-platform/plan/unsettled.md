@@ -1173,6 +1173,19 @@ tier-0 cleanup relaunched with neutral wording (first attempt died on a
 safeguard trip). Next on `transcript.clj` when composable-history releases it:
 the debug-page outline (turns → units → HTML render with AI-text toggle).
 
+**Workaround inventory fully slated (00:35Z).** Assigned: tier 0 → Opus cleanup
+agent (items 1–5, 7, 8; #6 hook defaults → `hook-progress-is-a-value`); tier 1
+#9/#10/#12 → `no-default-cluster-fallback`; #11/#13/#15 → tier-0 agent; #14
+(`valid-source-manifest?` catch) + #22 (`retrying-source-change`) + #26 (four
+full-refresh escapes) → `incremental-publication-is-the-rule` on its next
+resume; tier 2 #16 → no-default lane; #17 → platform-tier agent; #18 →
+`hook-progress-is-a-value`; #19 → `one-classpath-derivation`; #20/#21/#24/#30
+→ `environment-carries-it`; #23 → tier-0 agent; #25 → Opus requiring-resolve
+census+fix; tier 3 #27 (stage 1), #28 (one evaluation path — design note
+committed, lane after the tree frees), #29 → platform-tier agent. Twelve lanes
+and agents running; the tree is saturated, so several will stop at held files
+with hunks and resume as files free — expected, not failure.
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
