@@ -66,3 +66,19 @@
   Lanes launched: error-graph, issue-family; running: reach-digest (beat 2),
   attempt-and-eval-facts, program-provenance (corrected: file/span + lint
   entities, no derived subject).
+- 03:20Z **RESET NEEDED on default**: the error-graph lane's schema change
+  (`:seon.error/signature` becomes an identity; occurrence components,
+  `2320dc1a9`) makes development adoption refuse ("predates the incompatible
+  schema change"); program-provenance landed (`3402913f3`: file/span on
+  function and test entities, `seon.lint` entities with exact replacement)
+  but could not prove on default. The orchestrator reforks default ONCE
+  after issue-family (seon.issue.edn), reach-digest (seon.test.edn) and
+  attempt-and-eval-facts (seon.ai.*.edn) land, batching every schema
+  change; then reseeds and re-runs each lane's live proof. Lane
+  entity-pairs launched (P2); issue-settlement spec written, launches when
+  turn.clj is free.
+- Owner rulings 03:05Z: one steward first (`seon.render.web`); new issues
+  are authored as entities in the database, the folder is an export; the
+  issue block links and never copies; vocabulary is entities/attributes/
+  values; DeepSeek sessions may run freely; prerequisites P1–P11 in the
+  issue-family spec §6 come first.
