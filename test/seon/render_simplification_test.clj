@@ -229,9 +229,18 @@
               [:=> [:cat :string :string] :seon.render/ai]]
              matching [:=> [:cat argument-schema] :seon.render/ai]})
            request
-           ;; the declared call request takes a REAL ctx even where the
-           ;; projection this test wants is redefined below it.
-           (assoc (render-request (db/db connection)
+           ;; THE PROJECTION IS HANDED ON THE DATABASE VALUE. Selection
+           ;; derives its projection from the value's own world
+           ;; (`seon.render/request-projection`), so this test supplies the
+           ;; projection it wants the way any caller does. It used to
+           ;; redefine `kernel/context-projection` instead, because before
+           ;; 2026-09-16 mutating the ctx was the ONLY way to ask selection a
+           ;; question about another projection — the ergonomic defect the
+           ;; render-selection issue names. The ctx stays real and
+           ;; unmodified; only the candidate SYMBOLS still come from it.
+           (assoc (render-request (vary-meta (db/db connection)
+                                             assoc :seon.schema/projection
+                                             projection)
                                   (support/fork-cluster-ctx connection)
                                   'probe.render 7)
                   :seon.render/output :seon.render/ai
@@ -242,8 +251,7 @@
                    :seon.render.profile/max-children 10
                    :seon.render.profile/composition
                    :multiline})]
-       (with-redefs [kernel/context-projection (constantly projection)
-                     kernel/public-functions-in
+       (with-redefs [kernel/public-functions-in
                      (fn [_ctx _namespace-name] [cross-arity matching])]
          (let [decision (selection request)
                namespace-stage

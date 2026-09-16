@@ -148,6 +148,42 @@ now also asserts the BEHAVIOUR those bytes stand for — that the rendered
 text is not the `#:seon.error{…}` dump, and that occurrence evidence
 reaches it — so neither side can go stale silently again.
 
+## Fallout — batch 60, `candidate-input-and-output-must-fit-the-same-arity`
+
+One test went red on the change, and it is the same finding one level down.
+`seon.render-simplification-test/candidate-input-and-output-must-fit-the-same-arity`
+handed selection the projection it wanted by REDEFINING the accessor:
+
+```clojure
+(with-redefs [kernel/context-projection (constantly projection) …]
+```
+
+That was the only way to ask selection about another projection before this
+change — the exact ergonomic defect the issue names ("a seam that cannot be
+probed with a supplied value"). With selection deriving from the value's own
+world, the stub no longer reaches it, so the synthetic `probe.render`
+functions were invisible, the namespace stage found nothing, and selection
+fell to the floor (6 F + 1 E, including "unexpected validator compilation" —
+the projection's caches were never warmed because nothing used it).
+
+Fixed at the test's SUPPLY mechanism, not at a seam: the projection now rides
+the database value the request carries
+(`(vary-meta (db/db connection) assoc :seon.schema/projection projection)`),
+which is the supported path and the same one the new regression uses. The ctx
+stays real and unmodified; only the candidate SYMBOLS still come from it
+through the surviving `kernel/public-functions-in` redef. No production code
+changed for this.
+
+In process on default pid 17352 (fresh store, adoption converged):
+`candidate-input-and-output-must-fit-the-same-arity` 8/0/0,
+`selection-asks-the-handed-database-value-s-projection` 5/0/0,
+`nested-values-render-their-declared-faces` 11/0/0.
+
+Batch 60's other red in that namespace,
+`nested-ai-values-retain-data-and-html-uses-declared-faces`, is another
+lane's: at HEAD that test is `nested-values-render-their-declared-faces`
+(`358133a78`), which runs green here.
+
 ## Verification boundary
 
 - Live: default pid 95853, jvm mode, read-only probes plus the adopted
