@@ -352,6 +352,7 @@
  ; than a tick — a burst of commits inside one window costs one repaint
  ; and a quiet cluster costs none.
  :seon.config.render/coalesce-ms 16
+ :seon.config.render/issue-opening :bare
 
  ; Unit: milliseconds for in-process test selection, fixture preparation,
  ; and execution. Matches the declared seon.test/check-time-limit-ms default.
