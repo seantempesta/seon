@@ -689,3 +689,17 @@ tier) — Opus fix lane launched on fn.clj; a fixture's JVM-global
 released → astra lane `turn-settlement-cost` launched (settlement delta,
 one analyze-forms per form, budget semantics, the 300 ms assertion
 re-expressed).
+
+### 2026-09-17 03:00Z — the write floor: default's store is 12 GB again; every commit 4–9 s
+
+`in-process-record-tx-cost-2026-09-17.md` (`8a9832ba8`) falsified the recorder:
+record-tx builds its data in 263 ms; an EMPTY-DELTA transaction costs
+3.9–8.9 s on default vs 46–48 ms on a fresh file store; idle sampling rules
+out contention. `data/store` is 12,043 MB / 101,506 keys eight hours after
+the 107 MB reset — copy-on-write index churn with nothing collecting it.
+Every write on the dev cluster pays the floor (hook adoption, turns, probes,
+recording). Read-only lane launched on write latency vs store size (per-
+commit files/bytes/fsyncs, growth curve on scratch stores, GC dry-run) to
+bring three owner options. Second-order recorder waste (reaches re-derived,
+814 lookup-ref pulls, identical `:seon.test/reach` churn per run) queued for
+a runner.clj lane.
