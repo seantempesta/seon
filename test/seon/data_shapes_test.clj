@@ -10,20 +10,30 @@
             [seon.render]
             [seon.sci.eval]
             [seon.db :as db]
+            [seon.id :as id]
+            [seon.schema :as schema]
+            [seon.schema.datahike :as schema.datahike]
             [seon.context-blocks-fixture :as fixture]
             [seon.test-support :as support]))
 
 (defn plan-probe
   "Apply the chart's raw forms to the canonical Juniper plan, without committing."
   [database]
-  (let [seed (:db-after
+  ;; The raw Datahike forms below bypass `seon.db/transact!`, so they also
+  ;; bypass its ONE encoding seam. `:my.plan.item/done-query` is an EDN-encoded
+  ;; attribute stored as a string; encode the seed through the same bridge the
+  ;; writer uses instead of handing Datahike an unencoded query vector.
+  (let [projection (schema/projection-from-database database)
+        seed (:db-after
               (d/with database
-                      (into (agent/creation-tx
-                             {:seon.agent/id "juniper"
-                              :seon.ns/name 'my.agents.juniper
-                              :seon.cluster/name "data-lane"})
-                            [{:seon.agent/id "juniper"
-                              :seon.agent/plan (update fixture/authored-plan :my.plan/steps set)}])))
+                      (schema.datahike/encode-transaction-in
+                       projection
+                       (into (agent/creation-tx
+                              {:seon.agent/id "juniper"
+                               :seon.ns/name 'my.agents.juniper
+                               :seon.cluster/name "data-lane"})
+                             [{:seon.agent/id "juniper"
+                               :seon.agent/plan (update fixture/authored-plan :my.plan/steps set)}]))))
         plan-ref [:my.plan/agent [:seon.agent/id "juniper"]]
         before (d/pull seed '[:db/id {:my.plan/steps [:my.plan.item/id]}] plan-ref)
         complete (d/with seed [[:db/add [:my.plan.item/id "juniper/read"]
@@ -144,7 +154,9 @@
      (let [probe (message-runtime-probe @connection)
            runtime (get-in probe [:seon.test/runtime :seon.agent/runtime])
            recorded-turn (first (:seon.runtime/turns runtime))]
-       (is (= 8 (count (:seon.test/message-id probe))))
+       ;; Minted message identities come from the one identity derivation, so
+       ;; the expected length is derived from it rather than mirrored here.
+       (is (= (count (id/id)) (count (:seon.test/message-id probe))))
        (is (= 1 (count (get-in probe [:seon.test/before :seon.message/_inbox]))))
        (is (empty? (get-in probe [:seon.test/after :seon.message/_inbox])))
        (is (= "recipient" (get-in probe [:seon.test/message :seon.message/to :seon.agent/id])))
