@@ -160,6 +160,51 @@
             (is (some #(str/ends-with? (get (second %) :data-file "")
                                        "test/seon/test_failure_facts_test.clj") links))))))))
 
+(deftest a-recorded-test-renders-its-sites-and-changed-dependencies
+  (support/with-database
+    (fn [connection]
+      (with-probe connection
+        (fn [s v mode]
+          (reset! mode :green)
+          (is (= 1 (:seon.test/pass-count (run-probe connection v))))
+          (reset! mode :red)
+          (let [red (run-probe connection v)
+                namespace-name (symbol (namespace (symbol s)))
+                reached (str namespace-name "/reached")
+                tx (db/transact! connection
+                     [{:seon.fn/sym reached :seon.schema.admission/source :core
+                       :seon.fn/ns [:seon.ns/name namespace-name]
+                       :seon.fn/source "(defn reached [] :changed)"}
+                      {:seon.test/sym s :seon.schema.admission/source :core
+                       :seon.test/reach [[:seon.fn/sym reached]]}])
+                database (db/db connection)
+                changed (sut/changed-since-green database s)
+                unit {:seon.db/db database
+                      :seon.render/value (db/pull database '[*] [:seon.test/sym s])}
+                [summary _evidence changed-form]
+                (rest (read-string (str "(do\n" (render/render-ai unit) "\n)")))
+                sites (set (map (juxt #(get-in % [:seon.test.failure/file :seon.fn.file/path])
+                                      :seon.test.failure/line)
+                                (:seon.test/failures red)))
+                links (filter #(and (vector? %) (= :a (first %)) (map? (second %)))
+                              (tree-seq coll? seq (render/render-html unit)))]
+            (is (:db-after tx) (pr-str tx))
+            (is (= 2 (:seon.test/fail-count red)) (pr-str red))
+            (is (= 2 (count sites)) (pr-str sites))
+            (is (= [reached] (mapv :seon.fn/sym changed)) (pr-str changed))
+            (is (= (str "Test " s ": fail") (first (str/split-lines (second summary))))
+                (pr-str summary))
+            (is (every? (fn [[path line]] (str/includes? (second summary) (str path ":" line))) sites)
+                (pr-str summary))
+            (is (= (list 'seon.test/changed-since-green (list 'seon.db/db) s) changed-form)
+                (pr-str changed-form))
+            (is (= sites (set (keep (fn [[_ attributes]]
+                                      (when-let [path (:data-file attributes)]
+                                        [path (:data-line attributes)]))
+                                    links)))
+                (pr-str links))
+            (is (contains? (set (mapcat #(drop 2 %) links)) reached) (pr-str links))))))))
+
 (deftest failure-readers-use-the-structured-claims
   (support/with-database
     (fn [connection]

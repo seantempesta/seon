@@ -283,3 +283,64 @@ The two retained proof scripts pass clj-kondo with **0 errors, 0 warnings**.
 All lane probe threads have completed, and both explicit publication shells
 have exited. Disposable lane logs, classpath file, thread dump, and HTML
 preview were removed after their evidence was retained here.
+
+### Batch 45 red: the entity-pair expectation was stale — 2026-09-16
+
+Bounded lane `test-entity-pair`, triaging
+`seon.render.entity-pairs-test/test-entity-pair-is-total-through-the-issue-walk`
+(8 failing assertions at `test/seon/render/entity_pairs_test.clj:80-81` on
+`8d5a7bcea`). Verdict: **(a) the expectation was stale**; the pair did not
+regress.
+
+Evidence, PID 45917, base already realized:
+
+- The fixture test entity carries only `:seon.test/sym` and `:seon.fn/calls`
+  — it genuinely has no recorded result, so `unrun or incomplete` is the
+  truthful line for the `{}` case, and the `pass`/`fail`/`error` cases each
+  produced their own state from the merged counts. A live
+  `(seon.render.test/render-ai {:seon.render/value {…:pass-count 1…}})`
+  returned `"Test entity-pairs.fixture/test: pass"` plus the evidence pull and
+  the `changed-since-green` call.
+- Both failing assertions were written against the pre-`5a9de3185` shape:
+  `ac34ce5a3`'s `render-ai` emitted `;;`-prefixed prose ending in a period and
+  exactly one form (the pull), so `": pass."` and `(= 2 (count (do …)))` held.
+  `5a9de3185` moved the summary out of comment prose into
+  `(clojure.core/identity text)` — the ruled grammar, rendered output carries
+  no comment-prefixed prose — and added the `changed-since-green` form. A form
+  count is not a behaviour; the period was an artefact of the deleted prose.
+
+The expectation now asserts what each form does: no comment-prefixed line in
+the rendered source; form 1 is `clojure.core/identity` whose first line is
+`Test <sym>: <state>`; form 2 is a `seon.db/pull` keyed by
+`[:seon.test/sym <sym>]`; form 3 equals
+`(seon.test/changed-since-green (seon.db/db) <sym>)`; the HTML projection is
+hiccup.
+
+The regression reach-closure was asked for did not exist — the closest,
+`failures-render-their-site-and-claim`, asserts substrings and covers neither
+reach nor `changed-since-green`. Added
+`seon.test-failure-facts-test/a-recorded-test-renders-its-sites-and-changed-dependencies`:
+a green probe run, then a red one, then a recorded `:seon.test/reach` member
+whose `:seon.fn/source` datom lands after the green basis. It asserts, as data,
+that `changed-since-green` names exactly that function, that the AI summary's
+first line is the state line and carries each recorded failure's `path:line`,
+that the third AI form is exactly the `changed-since-green` call, that the set
+of HTML `:data-file`/`:data-line` link attributes equals the set derived from
+the recorded failure entities, and that the changed function is linked by name.
+
+In-process proof (daemon thread, `seon.test`'s own loader, 100000 ms,
+armed contracts, PID 45917):
+
+- `seon.render.entity-pairs-test/test-entity-pair-is-total-through-the-issue-walk`
+  — **40 pass / 0 fail / 0 error**
+- `seon.render.entity-pairs-test/function-entity-pair-is-selected-through-the-issue-walk`
+  — **17 / 0 / 0**
+- `seon.test-failure-facts-test/a-recorded-test-renders-its-sites-and-changed-dependencies`
+  — **11 / 0 / 0**
+
+Verification boundary: test-only edits, proven in process against the adopted
+source of `src/seon/render/test.clj`; no src file was changed, no test JVM was
+launched, default was never restarted, and the batched gate
+(`tmp/orchestrator/gate-requests/test-entity-pair.txt`) remains the proof.
+The new regression was not run against a deliberately broken pair, so its
+falsifying power is argued from its derived expectations, not observed.
