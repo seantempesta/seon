@@ -93,3 +93,12 @@ hot-adopted definitions, so an in-process regression can be blocked by a
 stale contract the cold worker never sees. Same family as the projection
 carriage work (P1); assign after P1's current slice.
 
+## 01:15Z — a second orchestrator session is live
+
+A separate Claude Code session (the owner's steward-platform dialogue, pid
+75117) launched lanes `cold-page-plan` and `hook-publication-race` from the
+wave-2 spec templates. This session does not resume, stop, or gate them.
+Gate coordination across sessions rests on `tmp/test-slots` (two slots
+machine-wide, orchestrator-only mode); each session runs at most one gate
+at a time, so the machine sees at most two.
+
