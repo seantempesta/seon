@@ -105,9 +105,11 @@ peer session (batches 30–57; ledger
    declarations read as "not committed" and were skipped; one value-equal
    comparison now. Issue resolved:
    `a-committed-storable-declaration-is-dropped-from-the-clusters-live-projection`.
-   A follow-up class from the same day: the runner's drift restore put
-   deliberately retracted declarations back (a restore must derive from the
-   committed facts) — `the-drift-restore-undoes-a-committed-schema-retraction`.
+   A follow-up class from the same day, also closed (`c79a157fd`): the
+   runner's drift restore had put deliberately retracted declarations back;
+   it now derives the projection from the committed facts and classifies
+   every difference as drift or committed change
+   (`the-drift-restore-undoes-a-committed-schema-retraction`, resolved).
 
 1. **The store grows without collection.** `data/store` went 107 MB → 12 GB in
    eight hours with no periodic writer. The peer's measurement
