@@ -1424,11 +1424,6 @@
           (nil? manifest) (assoc :seon.fn/roots seon.fn/source-roots))
         report-source-progress!)
        (report-source-progress! "program rows complete")
-       (require-committed!
-        ((requiring-resolve 'seon.issue/index!)
-         {:seon.db/connection connection
-          :seon.issue/notes ((requiring-resolve 'seon.issue/notes) ".")})
-        {:seon.boot/population :seon.issue/rows})
        ;; Initialization rows come LAST because they may name a program row
        ;; by lookup ref — the call-preparation suppliers do — and program
        ;; rows are asserted by `index!` immediately above. Nothing earlier in

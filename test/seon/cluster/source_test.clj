@@ -319,7 +319,8 @@
             rows (:seon.fn.change/rows plan)]
         (is (not= original revised))
         (is (= :incremental-upsert (:seon.fn.change/action plan)))
-        (is (= #{[:seon.ns/name 'seon.id] [:seon.fn/sym "seon.id/id"]}
+        (is (= #{[:seon.ns/name 'seon.id] [:seon.fn/sym "seon.id/id"]
+                 [:seon.fn.file/path (.getCanonicalPath file)]}
                (set (map program/row-identity rows))))
         (is (every? #(= :core (:seon.schema.admission/source %)) rows))
         (test-support/with-database
@@ -519,7 +520,8 @@
             test-symbol "seon.id-test/data-shape-and-explicit-length-determine-identity"
             run (assoc (runner/provenance first-db)
                        :seon.test.run/git-sha (apply str (repeat 40 "a")))
-            completion {:seon.test.run/provenance run
+            completion {:seon.test/reach-digests (runner/reach-digests first-db [test-symbol])
+                        :seon.test.run/provenance run
                         :seon.test/run-basis-t (:seon.test.run/basis-t run)
                         :seon.test/run-at (:seon.test.run/at run)
                         :seon.test.runner/results
@@ -530,6 +532,10 @@
             rebuilt (publish opened digest-a population {:seon.fn/manifest manifest})
             rebuilt-db (source/database opened (:seon.source/commit-id rebuilt))]
         (is (= 1 (:seon.test/pass-count (first recorded))) (pr-str recorded))
+        (is (= (get (:seon.test/reach-digests completion) test-symbol)
+               (:seon.test/reach-digest
+                (db/pull rebuilt-db [:seon.test/reach-digest]
+                         [:seon.test/sym test-symbol]))))
         (is (not= recorded-commit (:seon.source/commit-id first-publication)))
         (is (= digest-a
                (db/q '[:find ?digest . :in $ ?symbol
@@ -567,7 +573,9 @@
                 (with-redefs [runner/commit-results!
                               (fn [connection completed]
                                 (let [result (commit-results! connection completed)]
-                                  (when (= 1 (swap! attempts inc))
+                                  (when (and (= (:seon.test.run/id run)
+                                                (get-in completed [:seon.test.run/provenance :seon.test.run/id]))
+                                             (= 1 (swap! attempts inc)))
                                     (reset! advanced
                                             (upsert opened (:seon.source/commit-id changed)
                                                     digest-c [])))
@@ -596,10 +604,13 @@
                     (with-redefs [runner/commit-results!
                                   (fn [connection completed]
                                     (let [result (commit-results! connection completed)
-                                          ordinal (swap! conflicts inc)]
-                                      (upsert opened
-                                              (:seon.source/commit-id (source/current opened))
-                                              (if (= 1 ordinal) digest-a digest-b) [])
+                                          ordinal (when (= (:seon.test.run/id next-run)
+                                                           (get-in completed [:seon.test.run/provenance :seon.test.run/id]))
+                                                    (swap! conflicts inc))]
+                                      (when ordinal
+                                        (upsert opened
+                                                (:seon.source/commit-id (source/current opened))
+                                                (if (= 1 ordinal) digest-a digest-b) []))
                                       result))]
                       (refusal #(source/record-results! opened next-completion)))
                     final-db (source/database opened

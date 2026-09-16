@@ -282,11 +282,13 @@
                           :where [?test :seon.test/run]] previous)
           runs (db/q '[:find [?run ...]
                        :where [?run :seon.test.run/id]] previous)
-          selector [:seon.test/sym :seon.test/pass-count
+          selector (cond-> [:seon.test/sym :seon.test/pass-count
                     :seon.test/fail-count :seon.test/error-count
                     :seon.test/run-basis-t :seon.test/run-at
                     :seon.test/failing-assertions :seon.test/failure-message
-                    {:seon.test/run [:seon.test.run/id]}]]
+                    {:seon.test/run [:seon.test.run/id]}]
+                     (get (:schema previous) :seon.test/reach-digest)
+                     (conj :seon.test/reach-digest))]
       (into (mapv #(dissoc (db/pull previous '[*] %) :db/id) runs)
             (map (fn [test]
                    (let [row (dissoc (db/pull previous selector test) :db/id)]
@@ -336,6 +338,16 @@
         (record-results-at-head! held-store completion)
         (throw failure)))))
 
+(defn- index-issues!
+  [connection source-digest]
+  (when (get (:schema (db/db connection)) :seon.issue/id)
+    (require-committed!
+     ((requiring-resolve 'seon.issue/index!)
+      {:seon.db/connection connection
+       :seon.issue/notes ((requiring-resolve 'seon.issue/notes) ".")})
+     :seon.issue/index-refused "Issue indexing was refused."
+     {:seon.source/digest source-digest})))
+
 (defn publish!
   "Build and atomically publish one complete source database value."
   {:malli/schema [:=> [:cat :seon.source/publish-request]
@@ -371,6 +383,7 @@
              (merge populate-request
                     {:seon.db/connection connection
                      :seon.source/digest source-digest}))
+            (index-issues! connection source-digest)
             (when expected-commit
               (let [evidence (result-preservation-tx
                               (database store expected-commit))]
@@ -493,24 +506,15 @@
                "the incremental source transaction was refused"
                {:seon.source/digest source-digest
                 :seon.source/expected-commit-id expected-commit})
+              (index-issues! connection source-digest)
               (require-committed!
                (db/transact!
                 connection
                 (cond->
                  {:tx-data
                   (into [[:db/retractEntity digest-entity]]
-                        (do
-                          (when (db/q '[:find ?attribute .
-                                        :where [?attribute :db/ident :seon.issue/id]]
-                                      (db/db connection))
-                            (require-committed!
-                             ((requiring-resolve 'seon.issue/index!)
-                              {:seon.db/connection connection
-                               :seon.issue/notes ((requiring-resolve 'seon.issue/notes) ".")})
-                             :seon.issue/index-refused "Issue indexing was refused."
-                             {:seon.source/digest source-digest}))
-                          (activation-seal-tx
-                           connection source-digest #{activation} activation-fn)))}
+                        (activation-seal-tx
+                         connection source-digest #{activation} activation-fn))}
                   process (assoc :tx-meta {:seon.db/process process})))
                ::incremental-activation-refused
                "the incremental source activation transaction was refused"
