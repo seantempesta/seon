@@ -359,7 +359,7 @@
                 [?run :seon.turn/id ?run-id]
                 [?run :seon.turn/closed-tx _ ?close-tx]
                 [?receipt :seon.cluster.eval/run ?run]
-                [?receipt :seon.cluster.eval/result-edn _ ?receipt-tx]]
+                [?receipt :seon.eval/shown _ ?receipt-tx]]
               database run-ids)
         first-close (apply min (map #(nth % 2) rows))
         begun-before-first-close
@@ -565,11 +565,14 @@
             interrupted-at (Date.)]
         (test-support/transacted!
                      connection
-                     [{:seon.turn/id run-id}
+                     [{:seon.agent/id "receipt-diagnostic-agent"}
+                      {:seon.turn/id run-id
+                       :seon.turn/agent [:seon.agent/id "receipt-diagnostic-agent"]
+                       :seon.turn/opened-tx "datomic.tx"}
                       {:seon.cluster.eval/id (pr-str [run-id 0])
                        :seon.cluster.eval/run [:seon.turn/id run-id]
                        :seon.cluster.eval/ordinal 0
-                       :seon.cluster.eval/result-edn "42"}
+                       :seon.eval/shown "42"}
                       {:seon.cluster.eval/id (pr-str [run-id 1])
                        :seon.cluster.eval/run [:seon.turn/id run-id]
                        :seon.cluster.eval/ordinal 1

@@ -17,7 +17,7 @@
    {:seon.error/kind :seon.sci.eval/evaluation-failed
     :seon.error/message "Unable to resolve symbol: prefix-def"
     :seon.error/data {}}
-   :seon.cluster.eval/result-edn
+   :seon.eval/shown
    (pr-str {:seon.error/kind :seon.sci.eval/evaluation-failed
             :seon.error/message "Unable to resolve symbol: prefix-def"
             :seon.error/data {}})
@@ -68,8 +68,8 @@
          "one X2 clause prevents process-history breakage becoming owner blame")
      (test-support/transacted! connection
                              [[:db/add [:seon.cluster.eval/id "resume-receipt-1"]
-                               :seon.cluster.eval/result-edn
-                               (:seon.cluster.eval/result-edn failed)]
+                               :seon.eval/shown
+                               (:seon.eval/shown failed)]
                               [:db/add [:seon.cluster.eval/id "resume-receipt-1"]
                                :seon.cluster.eval/error
                                (:seon.cluster.eval/error failed)]

@@ -133,8 +133,8 @@
            _ (test-support/transacted!
                           connection
                           [{:seon.agent/id "compact-agent"}
-                           {:seon.turn/id "compact-before" :seon.turn/agent [:seon.agent/id "compact-agent"] :seon.turn/closed-tx "datomic.tx"}
-                           {:seon.turn/id "compact-after" :seon.turn/agent [:seon.agent/id "compact-agent"] :seon.turn/closed-tx "datomic.tx"}
+                           {:seon.turn/id "compact-before" :seon.turn/agent [:seon.agent/id "compact-agent"] :seon.turn/opened-tx "datomic.tx" :seon.turn/closed-tx "datomic.tx"}
+                           {:seon.turn/id "compact-after" :seon.turn/agent [:seon.agent/id "compact-agent"] :seon.turn/opened-tx "datomic.tx" :seon.turn/closed-tx "datomic.tx"}
                            {:seon.ns/name 'compact.context}
                            {:seon.cluster.eval/id "compact-before-0"
                             :seon.cluster.eval/run

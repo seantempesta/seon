@@ -17,13 +17,13 @@
   [body]
   (test-support/with-database
     (fn [connection]
+      (test-support/seed-cluster! connection cluster-name)
       (test-support/transacted!
                    connection
-                   (into [{:seon.cluster/name cluster-name}]
-                         (agent/creation-tx
-                          {:seon.agent/id agent-id
-                           :seon.ns/name namespace-name
-                           :seon.cluster/name cluster-name})))
+                   (vec (agent/creation-tx
+                         {:seon.agent/id agent-id
+                          :seon.ns/name namespace-name
+                          :seon.cluster/name cluster-name})))
       (body connection))))
 
 (deftest identity-renders-from-current-database-facts

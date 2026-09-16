@@ -667,9 +667,13 @@
            "durable pull evidence retains only a fixed-size result digest")
        (is (every? #(find % :seon.db/read-result) process-local)
            "the explicit process-local cache retains stable replay values")
-       (test-support/transacted! connection
-                                 [{:seon.message/id "semantic-replay-unrelated"
-                                   :seon.message/content "unrelated"}])
+       (test-support/transacted!
+                    connection
+                    [{:seon.agent/id "db-test-recipient"}
+                     {:seon.message/id "semantic-replay-unrelated"
+                      :seon.message/to [:seon.agent/id "db-test-recipient"]
+                      :seon.message/inbox [:seon.agent/id "db-test-recipient"]
+                      :seon.message/content "unrelated"}])
        (is (true? (db/read-evidence-current? @connection durable))
            "an equal wildcard replay survives an unrelated transaction")
        (is (true? (db/read-evidence-current? @connection process-local))
@@ -690,10 +694,14 @@
      (doseq [subject [[:seon.ns/name 'seon.db-test/missing]
                       [:seon.message/id "large-digest"]]]
        (when (= :seon.message/id (first subject))
-         (test-support/transacted! connection
-                                   [{:seon.message/id (second subject)
-                                     :seon.message/content
-                                     (apply str (repeat 100000 "x"))}]))
+         (test-support/transacted!
+                      connection
+                      [{:seon.agent/id "db-test-recipient"}
+                       {:seon.message/id (second subject)
+                        :seon.message/to [:seon.agent/id "db-test-recipient"]
+                        :seon.message/inbox [:seon.agent/id "db-test-recipient"]
+                        :seon.message/content
+                        (apply str (repeat 100000 "x"))}]))
        (let [captured (atom [])]
          (binding [db/*read-evidence-sink* captured]
            (db/pull @connection '[*] subject))
@@ -820,7 +828,7 @@
 (deftest every-database-value-reader-answers-for-all-four-view-shapes
   (test-support/with-database
    (fn [connection]
-     (test-support/transacted! connection [{:seon.cluster/name "four-view"}])
+     (test-support/seed-cluster! connection "four-view")
      (let [views (four-view-table @connection)]
        (is (= #{:current :as-of :since :history} (set (keys views))))
        (doseq [[view database] views]
@@ -852,7 +860,7 @@
 (deftest an-as-of-view-is-keyed-on-its-own-fixed-point
   (test-support/with-database
    (fn [connection]
-     (test-support/transacted! connection [{:seon.cluster/name "fixed-point-a"}])
+     (test-support/seed-cluster! connection "fixed-point-a")
      (let [database @connection
            earlier (db/as-of database (dec (long (db/basis-t database))))
            revision (fn [value]
@@ -1074,8 +1082,13 @@
            ;; that both `as-of` calls accepted while comparing two views of
            ;; nothing, until the armed contract asked what a time point is.
            before-t (db/basis-t before)]
-       (test-support/transacted! connection
-                                 [{:seon.message/id "db-test-temporal"}])
+       (test-support/transacted!
+                    connection
+                    [{:seon.agent/id "db-test-recipient"}
+                     {:seon.message/id "db-test-temporal"
+                      :seon.message/to [:seon.agent/id "db-test-recipient"]
+                      :seon.message/inbox [:seon.agent/id "db-test-recipient"]
+                      :seon.message/content "temporal"}])
        (let [after @connection]
          (binding [db/*conn* connection]
            (is (= (db/q exam-query (db/history after))

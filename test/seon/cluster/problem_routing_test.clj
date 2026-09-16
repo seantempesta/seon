@@ -41,6 +41,8 @@
   {:seon.cluster.eval/id (str "form-" ordinal)
    :seon.cluster.eval/run [:seon.turn/id run-id]
    :seon.cluster.eval/ordinal ordinal
+   ;; Every evaluation carries the instant it was frozen at.
+   :seon.cluster.eval/at #inst "2026-09-06T20:00:00Z"
    :seon.cluster.eval/source (str "(form-" ordinal ")")
    :seon.cluster.eval/ns [:seon.ns/name 'my.gen.alpha]})
 
@@ -177,6 +179,7 @@
                    {:seon.cluster.eval/id "historical-form"
                     :seon.cluster.eval/run [:seon.turn/id "historical-run"]
                     :seon.cluster.eval/ordinal 0
+                    :seon.cluster.eval/at #inst "2026-09-06T20:00:00Z"
                     :seon.cluster.eval/source "(my.store/get :obsolete)"
                     :seon.cluster.eval/ns [:seon.ns/name 'my.gen.alpha]}])
      (is (nil?

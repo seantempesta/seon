@@ -222,7 +222,9 @@
                             :seon.activation/executable-symbols #{"legacy.core/f"}
                             :seon.activation/lookup-refs []}}
             {:seon.ns/name 'legacy.core}
-                          {:seon.fn/sym "legacy.core/f"}]))
+                          {:seon.fn/sym "legacy.core/f"
+                           :seon.schema.admission/source :core
+                           :seon.fn/ns [:seon.ns/name 'legacy.core]}]))
           (finally
             (d/release connection))))
       (finally
@@ -1467,7 +1469,11 @@
                  (pr-str claim)))
         (try
           (test-support/transacted! (:seon.boot/cluster-connection instance)
-                                    [{:seon.message/id "history-refork-destroys"}])
+                                    [{:seon.agent/id "history-refork-recipient"}
+                                     {:seon.message/id "history-refork-destroys"
+                                      :seon.message/to [:seon.agent/id "history-refork-recipient"]
+                                      :seon.message/inbox [:seon.agent/id "history-refork-recipient"]
+                                      :seon.message/content "history-refork-destroys"}])
           (let [result (operator/refork!
                         {:seon.operator/repository-root repository-root
                          :seon.operator/managed-root managed-root
@@ -1705,7 +1711,12 @@
   ;; returns nothing, forever. Recovery is BY FACT: the drill measured
   ;; the dead holder's 60-second lease still in the future when the fix
   ;; fires, so nothing here waits a lease out.
-  (let [root (published-root)]
+  (let [root (published-root)
+        ;; the reply whose forms were executing when the process died: the
+        ;; "plan intact" this test claims is a fact of THIS turn, so it is
+        ;; seeded here instead of being read off whatever other turn in the
+        ;; store happened to carry one
+        crashed-reply "(+ 1 1)"]
     (try
       ;; a first boot writes the wreckage a kill -9 mid-model-call leaves:
       ;; an open run claimed by a process that will not exist afterwards,
@@ -1727,7 +1738,9 @@
         (test-support/transacted! connection
                                 [{:seon.turn/id "run-clean" :seon.turn/agent [:seon.agent/id "bob"] :seon.turn/opened-tx "datomic.tx" :seon.turn/closed-tx "datomic.tx"}])
         (test-support/transacted! connection
-                                [{:seon.turn/id "run-crashed" :seon.turn/agent [:seon.agent/id "alice"] :seon.turn/opened-tx "datomic.tx"}
+                                [{:seon.turn/id "run-crashed" :seon.turn/agent [:seon.agent/id "alice"] :seon.turn/opened-tx "datomic.tx"
+                                  :seon.turn/reply crashed-reply
+                                  :seon.turn/reply-size (count crashed-reply)}
                                  {:seon.agent/id "alice"
                                   }
                                  ;; dangling = started with no terminal fact —
@@ -1753,16 +1766,26 @@
                            @connection)))))
           (testing "and the run is CLOSED with its plan intact —
                     recovery ends custody and no plan form can execute"
-            (is (some? (db/q (quote [:find ?c . :where
-                                    [_ :seon.turn/closed-tx ?c]])
-                            @connection)))
-            (is (some? (db/q (quote [:find ?d . :where
-                                    [_ :seon.turn/reply-size ?d]])
-                            @connection))))
+            ;; both facts are read off THIS turn. An unbound `[_ ...]` query
+            ;; answered from any turn in the store, so it reported health
+            ;; from a bootstrap opening rather than from recovery's subject.
+            (let [crashed (db/pull @connection
+                                   '[:seon.turn/reply :seon.turn/reply-size
+                                     {:seon.turn/closed-tx [:db/id :db/txInstant]}]
+                                   [:seon.turn/id "run-crashed"])]
+              (is (some? (:seon.turn/closed-tx crashed)))
+              (is (= crashed-reply (:seon.turn/reply crashed)))
+              (is (= (count crashed-reply) (:seon.turn/reply-size crashed))
+                  "recovery ended custody without touching the reply it held")))
           (testing "boot closes the interrupted turn and preserves the clean turn"
-            (is (inst? (:seon.turn/closed-tx
-                        (db/pull @connection '[*]
-                                 [:seon.turn/id "run-crashed"]))))
+            ;; `:seon.turn/closed-tx` is a REF to the closing transaction
+            ;; (`seon.turn.edn` :closed-tx), so the instant is one hop away;
+            ;; pulling the attribute itself can only ever answer `{:db/id n}`.
+            (is (inst? (:db/txInstant
+                        (:seon.turn/closed-tx
+                         (db/pull @connection
+                                  '[{:seon.turn/closed-tx [:db/txInstant]}]
+                                  [:seon.turn/id "run-crashed"])))))
             (is (str/includes?
                  (turn/render-ai
                   (assoc (db/pull @connection '[*]
@@ -1770,7 +1793,22 @@
                          :seon.db/db @connection))
                  "interrupted")))
           (testing "and the instance reports what recovery did"
-            (is (= 1 (:seon.boot/recovered-runs instance)))
+            ;; DERIVED, never a fixed number: recovery closes every open turn
+            ;; in ONE transaction, so the turns carrying that transaction as
+            ;; their `closed-tx` ARE what it recovered. A literal 1 mirrored
+            ;; how many other turns a boot happened to leave open — a
+            ;; bootstrap opening still open at `stop!` made it 2, which says
+            ;; nothing about whether the dead holder's run was unclaimed.
+            (let [closing-tx (:db/id (:seon.turn/closed-tx
+                                      (db/pull @connection
+                                               '[{:seon.turn/closed-tx [:db/id]}]
+                                               [:seon.turn/id "run-crashed"])))]
+              (is (some? closing-tx))
+              (is (= (count (db/q '[:find [?turn ...] :in $ ?tx :where
+                                    [?turn :seon.turn/closed-tx ?tx]]
+                                  @connection closing-tx))
+                     (:seon.boot/recovered-runs instance))
+                  "the report names exactly the turns this recovery closed"))
             (is (pos? (:seon.boot/recovery-operations instance))))
           (finally
             (cluster/stop! instance))))

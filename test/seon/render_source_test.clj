@@ -240,7 +240,7 @@
                  :seon.cluster.eval/at #inst "2026-09-06T20:00:00Z"
                  :seon.cluster.eval/source source
                  :seon.cluster.eval/ns [:seon.ns/name 'my.agents.source-contract]
-                 :seon.cluster.eval/result-edn result}]))
+                 :seon.eval/shown result}]))
      (let [database @connection
            ctx (support/fork-cluster-ctx connection)
            source-call (ns-resolve 'seon.render.web 'render-source-call)

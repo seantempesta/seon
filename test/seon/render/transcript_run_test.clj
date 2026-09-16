@@ -32,7 +32,7 @@
                :seon.cluster.eval/author :agent
                :seon.cluster.eval/source "(+ 1 1)"
                :seon.cluster.eval/at #inst "2026-09-06T00:00:01.000-00:00"
-               :seon.cluster.eval/result-edn "2"}
+               :seon.eval/shown "2"}
               {:seon.cluster.eval/id "form-a-pending"
                :seon.cluster.eval/run [:seon.turn/id "run-a"]
                :seon.cluster.eval/ordinal 1
@@ -44,7 +44,7 @@
                :seon.cluster.eval/author :agent
                :seon.cluster.eval/source "(* 9 9)"
                :seon.cluster.eval/at #inst "2026-09-06T00:01:01.000-00:00"
-               :seon.cluster.eval/result-edn "81"}])
+               :seon.eval/shown "81"}])
      (let [database (db/db connection)
            run (db/pull database '[*] [:seon.turn/id "run-a"])
            ctx (support/fork-cluster-ctx connection)

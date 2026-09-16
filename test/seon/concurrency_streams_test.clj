@@ -103,6 +103,13 @@
                        :seon.boot/cluster-name cluster-name})
        (create-agent! connection cluster-name sender 'streams.test.sender)
        (create-agent! connection cluster-name recipient 'streams.test.recipient)
+       ;; The delivery rows reference the sender's open turn; a message row
+       ;; naming a turn that was never opened is refused for its agent.
+       (test-support/transacted!
+                    connection
+                    (turn/open-tx {:seon.turn/id "streams-test-message-run"
+                                   :seon.turn/agent [:seon.agent/id sender]
+                                   :seon.turn/opened-tx "datomic.tx"}))
        (let [value
              (mapv (fn [index]
                      (seon.cluster.message/send recipient (format "message-%02d" index)))
