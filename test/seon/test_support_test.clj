@@ -512,3 +512,60 @@
             "and the population sealed, which is the write that needed the
              projection the connection carries"))
       (finally (close-base! base)))))
+
+;;; ---------------------------------------------------------------------------
+;;; A test owns nothing global — including the schema registry and custody
+;;; ---------------------------------------------------------------------------
+
+(deftest ^{:seon.test/platform
+           "Moving part: the shared schema registry every live cluster's writer compiles against."}
+  a-synthetic-schema-registration-leaves-the-registry-byte-identical
+  ;; 2026-09-17: an in-process run left `:seon.schema-usage-guardb/entity-id`
+  ;; where `default`'s writer could see it; every later transaction refused and
+  ;; the store grew ~1 GB a minute. The bracket must put the registry back
+  ;; EXACTLY, and a leaked key must be reported BY NAME — a drift report that
+  ;; says only "something changed" is what made this cost five hours.
+  (let [probe-key :seon.test-support-test.probe/entity-id
+        state (atom {:seon.db/basis-t 1
+                     :seon.schema/projection
+                     {:seon.schema.projection/forms {:seon.test-support-test/kept :string}}})
+        ;; The snapshot shape `live-cluster-schema-states` derives from the
+        ;; operator's running instances: the atom to write, and the value to
+        ;; put back.
+        before {"probe-cluster" [state @state]}
+        entering @state]
+    ;; The leak: a test declaration reaching the live cluster's projection.
+    (swap! state assoc-in
+           [:seon.schema/projection :seon.schema.projection/forms probe-key]
+           [:string {:seon.db/identity true}])
+    (is (not= entering @state) "the probe genuinely poisoned the registry")
+    (let [restored (runner/restore-live-cluster-schema! before)]
+      (is (= 1 (count restored)) "the leak is reported once, for the cluster it reached")
+      (is (= ["probe-cluster"] (mapv :seon.cluster/name restored)))
+      (is (= [(str probe-key)]
+             (:seon.test.runner/drift-added (first restored)))
+          "the leaked key is named, not merely counted")
+      (is (empty? (:seon.test.runner/drift-removed (first restored))))
+      (is (= (:seon.schema/projection entering)
+             (:seon.schema/projection @state))
+          "the registry is byte-identical to the one the run entered with"))
+    (is (empty? (runner/restore-live-cluster-schema! before))
+        "a registry that did not drift is left alone and reports nothing")))
+
+(deftest ^{:seon.test/platform
+           "Moving part: the custody an in-process test body inherits from a live cluster."}
+  a-test-body-inherits-no-ambient-cluster-custody
+  ;; THE ROOT CAUSE of the 2026-09-17 registry leak: an in-process test ran on
+  ;; a thread that still carried the agent evaluation's `seon.db` custody, so a
+  ;; fixture helper using an elided arity wrote the LIVE cluster's datoms and
+  ;; nothing said so. Without the bindings the elided arity refuses and names
+  ;; what it needed.
+  (test-support/with-database
+    (fn [connection]
+      (let [refusal (db/call-without-custody #(db/transact! {:tx-data []}))]
+        (is (:seon.error/kind refusal)
+            "an elided write with no custody is a typed refusal, never a silent write")
+        (is (str/includes? (:seon.error/message refusal) "connection")
+            "the refusal names what was missing"))
+      (is (map? (db/transact! connection {:tx-data []}))
+          "an explicit connection still writes its own branch"))))

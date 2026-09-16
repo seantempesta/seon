@@ -333,13 +333,29 @@
               refusal (destructive-refusal
                         database declared
                         (str (:ns (meta test-var)) "/" (:name (meta test-var))))
+              ;; AN IN-PROCESS RUN HAPPENS INSIDE A LIVE CLUSTER'S JVM.
+              ;; Whatever a test leaves in that cluster's schema projection
+              ;; refuses every later write it attempts, so the registry is
+              ;; snapshotted and put back the way the drift detector re-arms
+              ;; instrumentation — and the restored keys are NAMED, never
+              ;; silently swallowed.
+              registry-before (runner/live-cluster-schema-states)
               result (cond
                        refusal refusal
                        (:seon.error/kind provenance) provenance
                        :else
                        (schema/call-with-projection
                          (db/carried-projection database)
-                         #(bounded-result test-var (:seon.test/remaining-ms options))))]
+                         #(bounded-result test-var (:seon.test/remaining-ms options))))
+              restored (runner/restore-live-cluster-schema! registry-before)
+              result (if (or (:seon.error/kind result) (empty? restored))
+                       result
+                       (-> result
+                           (update :seon.test/error-count (fnil inc 0))
+                           (update :seon.test/failure-message
+                                   #(str (when % (str % "\n"))
+                                         "Live cluster schema registry changed and was restored: "
+                                         (pr-str restored)))))]
           (if (:seon.error/kind result)
             result
             (let [committed (runner/commit-results!

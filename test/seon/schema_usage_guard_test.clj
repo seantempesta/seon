@@ -5,6 +5,7 @@
             [seon.db :as db]
             [datahike.db.interface :as dbi]
             [seon.turn :as turn]
+            [seon.env :as env]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
             [seon.test-support :as test-support]))
@@ -21,6 +22,21 @@
   {base-key [:int {:seon.db/index true}]
    direct-key [:and {:seon.db/index true} base-key]
    transitive-key [:and {:seon.db/index true} direct-key]})
+
+(defn- with-database
+  "This suite's fixture bracket: the canonical database AND a scoped schema
+  registry.
+
+  Every test here installs synthetic declarations and drives `row-tx`, the
+  writer's own declaration path. Run in a live cluster's JVM those
+  declarations are exactly what must not survive the test: on 2026-09-17 a
+  leaked `:seon.schema-usage-guardb/entity-id` made every write on `default`
+  refuse and filled the store. `seon.test/run` restores the registry around
+  any in-process run; this bracket scopes it to each test as well, so the
+  leak cannot outlive even one deftest."
+  [body]
+  (test-support/preserving-schema-registry
+   #(test-support/with-database body)))
 
 (defn- deepest-ex-data
   [error]
@@ -51,6 +67,18 @@
    :seon.schema.admission/source :core})
 
 (defn- install-forms!
+  "Install synthetic declarations through ONE seam the registry and the writer
+  both see.
+
+  Writing the schema rows and the Datahike attributes is only half of a
+  declaration. Production's declaration path also ADVANCES the cluster's
+  projection state at the basis the write produced
+  (`seon.sci.eval/advance-context-projection!`), which is what makes the next
+  `:db.fn/call` compile the new definition against a population that holds its
+  references. A fixture that wrote the rows and left the projection behind
+  made every later `row-tx` here fail `:malli.core/invalid-schema` on
+  `:seon.schema-usage-guardb/entity-id` — the suite's own declaration
+  referring to a key its writer's projection did not carry."
   [connection selected-forms]
   (let [projection
         (reduce-kv
@@ -59,15 +87,22 @@
             current schema-key definition
             {:seon.schema.admission/source :core}))
          (schema/projection-from-database @connection)
-         selected-forms)]
-    (test-support/transacted!
-                 connection
-                 (into
-                  (schema.datahike/malli->datahike-schema-in
-                   projection
-                   (schema.datahike/database-attributes-for-in
-                    projection selected-forms))
-                  (schema/canonical-schema-rows selected-forms)))))
+         selected-forms)
+        report
+        (test-support/transacted!
+         connection
+         (into
+          (schema.datahike/malli->datahike-schema-in
+           projection
+           (schema.datahike/database-attributes-for-in
+            projection selected-forms))
+          (schema/canonical-schema-rows selected-forms)))
+        database (db/db connection)]
+    (when-let [state (:seon.sci.eval/projection-state (meta database))]
+      (env/advance-projection!
+       state (db/basis-t database)
+       (schema/projection-from-database database)))
+    report))
 
 (defn- schema-reference-edges
   [database]
@@ -137,7 +172,7 @@
             :expected-key :seon.schema.blockers/function-symbols
             :expected-value #{'seon.schema-usage-guard/accept}}]]
     (testing label
-      (test-support/with-database
+      (with-database
         (fn [connection]
           (install-forms! connection selected-forms)
           (when extra-row (test-support/transacted! connection [extra-row]))
@@ -158,7 +193,7 @@
 (deftest nonidentical-change-refuses-direct-and-transitive-current-data
   (doseq [used-key [direct-key transitive-key]]
     (testing (str "current data at " used-key)
-      (test-support/with-database
+      (with-database
         (fn [connection]
           (install-forms! connection forms)
           (test-support/transacted! connection [{used-key 7}])
@@ -187,7 +222,7 @@
                         @connection used-key)))))))))
 
 (deftest identical-registration-is-idempotent-with-current-data
-  (test-support/with-database
+  (with-database
     (fn [connection]
       (install-forms! connection {base-key (get forms base-key)})
       (test-support/transacted! connection [{base-key 7}])
@@ -207,7 +242,7 @@
                     @connection base-key)))))))
 
 (deftest retracted-current-data-allows-change-and-retains-history
-  (test-support/with-database
+  (with-database
     (fn [connection]
       (install-forms! connection {base-key (get forms base-key)})
       (test-support/transacted!
@@ -248,7 +283,7 @@
   ;; allows was refused anyway. There is now ONE decision path, and this
   ;; regression walks all three of its answers against one run so the coarse
   ;; rule cannot be reintroduced without failing here.
-  (test-support/with-database
+  (with-database
     (fn [connection]
       (let [run-id "schema-usage-guard-run"
             agent-id "schema-usage-guard-agent"
@@ -314,7 +349,7 @@
                              [:seon.schema/key unrelated-key]))))))))))
 
 (deftest entity-child-data-blocks-entity-schema-change
-  (test-support/with-database
+  (with-database
     (fn [connection]
       (let [entity-form
             [:map {:seon.db/attributes true}
@@ -369,7 +404,7 @@
                 "entity replacement leaves unrelated attributes absent")))))))
 
 (deftest entity-lifecycle-preserves-surviving-global-leaf-attributes
-  (test-support/with-database
+  (with-database
     (fn [connection]
       (let [entity-form
             [:map {:seon.db/attributes true}
@@ -425,7 +460,7 @@
                     @connection entity-id-key entity-child-key)))))))
 
 (deftest generic-schema-deletion-removes-unused-row-and-attribute
-  (test-support/with-database
+  (with-database
     (fn [connection]
       (install-forms! connection {base-key (get forms base-key)})
       (let [result
@@ -443,7 +478,7 @@
         (is (not (contains? (:schema @connection) base-key)))))))
 
 (deftest retracted-data-allows-removal-and-historical-rows-restore-validation
-  (test-support/with-database
+  (with-database
     (fn [connection]
       (install-forms! connection {base-key (get forms base-key)})
       (test-support/transacted! connection [{base-key 7}])
@@ -486,7 +521,7 @@
               "Datahike as-of delegates to the current schema map"))))))
 
 (deftest no-history-data-is-not-promised-to-simulations
-  (test-support/with-database
+  (with-database
     (fn [connection]
       (let [schema-key :seon.schema-usage-guard/no-history
             definition
