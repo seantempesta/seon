@@ -60,6 +60,7 @@
               :seon.schema/form
               (pr-str [:map [:seon.background-blob-test/size :int]])}
              {:seon.fn/sym "seon.background-blob-test/binary-capability"
+              :seon.schema.admission/source :core
               :seon.fn/spec
               (pr-str [:=> [:cat :seon.background-blob-test/request]
                        :seon.blob/octet-array])
