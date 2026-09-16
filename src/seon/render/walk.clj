@@ -661,6 +661,22 @@
                      (map :seon.render.walk/lookup connected)))))
        (assoc acquisition :seon.render.walk/order [root-lookup]) concerns))))
 
+(defn- scoped-attribute
+  "The attribute this member's render request is ABOUT, if any.
+
+  The walk stamps `:seon.render.walk/attribute` on members with two different
+  meanings. `declared-acquisition` synthesizes a member FOR an attribute — a
+  declared concern block — and that member stands for the attribute itself, so
+  it carries no entity of its own. `visit` stamps the attribute it REACHED an
+  entity THROUGH, and that member carries the entity's own
+  `:seon.render.walk/eid`; its value is the neighbour, never the attribute's
+  value, so its render request is about the neighbour and carries no
+  attribute. Render selection reads only the request, so the walk decides
+  here rather than letting the seam guess from the value's keys."
+  [member]
+  (when-not (:seon.render.walk/eid member)
+    (:seon.render.walk/attribute member)))
+
 (defn neighborhood
   "Render the root acquisition's stable members without further discovery."
   {:malli/schema [:=> [:cat :seon.render.walk/request] :seon.render.walk/units]}
@@ -716,9 +732,9 @@
                                           :seon.render/distance render-distance
                                           :seon.render.call/id
                                           [output member-lookup render-distance])
-                             (:seon.render.walk/attribute member)
+                             (scoped-attribute member)
                              (assoc :seon.render.walk/attribute
-                                    (:seon.render.walk/attribute member))
+                                    (scoped-attribute member))
                              owner (assoc :seon.render/namespace owner))
                            rendered (render/render-call render-request)
                            failure (when (:seon.error/kind rendered) rendered)

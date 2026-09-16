@@ -364,27 +364,20 @@
             schema.form/attr-form-properties
             (get output))))
 
-(defn- attribute-declared-producers
-  "The producers an attribute declares for `output`, as a candidate vector.
+(defn- attribute-scoped?
+  "Is this render request ABOUT one attribute?
 
-  An attribute may declare a producer for any authored projection. A stored
-  attribute reached by the walk selects that producer ahead of map-shape
-  discovery, which is how a cardinality-many or component attribute renders
-  as one unit. The form projection keeps its floor when nothing is declared."
-  [projection request value output]
-  (let [attribute (:seon.render.walk/attribute request)
-        ;; The walk also stamps the attribute on a neighbour it REACHED
-        ;; through that attribute. An entity map lacking the attribute is
-        ;; that neighbour, never the attribute's value, and renders by its
-        ;; own shape.
-        attribute-value? (and attribute
-                              (or (not (map? value))
-                                  (contains? value attribute)))]
-    (when attribute-value?
-      (if-let [declared (attribute-producer projection request output)]
-        [declared]
-        (when (= :seon.render/form output)
-          ['seon.render/render-form])))))
+  `:seon.render.walk/attribute` means exactly one thing on a render request:
+  the attribute the request asks about. The walk hands that decision —
+  `seon.render.walk/neighborhood` stamps it only for a member it synthesized
+  FOR an attribute, never for a neighbour entity it merely REACHED through
+  one, and a neighbour therefore reaches map-shape discovery and renders by
+  its own shape. An attribute-scoped request resolves to that attribute's
+  declared pair or to the generic printer at the floor; it never borrows the
+  owning entity's declared form, so an attribute nobody curated is visibly
+  generic (owner ruling, 2026-09-17, decision 9 option 1)."
+  [request]
+  (some? (:seon.render.walk/attribute request)))
 
 (defn- render-invocation-argument
   "Supply an attribute declaration with that attribute's value."
@@ -420,8 +413,8 @@
 
 (defn- declared-producer
   [projection request value output]
-  (if-let [producers (attribute-declared-producers projection request value output)]
-    (first producers)
+  (if (attribute-scoped? request)
+    (attribute-producer projection request output)
     (schema-producer projection request value output)))
 
 (def ^:private selection-stage-order
@@ -519,8 +512,10 @@
 (defn- schema-stage
   [request projection value output]
   (let [producers
-        (or (attribute-declared-producers projection request value output)
-            (schema-producers projection request value output)
+        (or (if (attribute-scoped? request)
+              (when-let [declared (attribute-producer projection request output)]
+                [declared])
+              (schema-producers projection request value output))
             [])
         selection-error (when (> (count producers) 1)
                           (ambiguity nil output producers))
@@ -1086,6 +1081,14 @@
   ;; `seon.render.value` already says the same way, and which the selection
   ;; below already treats as "nothing declared".
   (let [projection (request-projection request)
+        ;; AN ATTRIBUTE SCOPES THE REQUEST'S SUBJECT, NOT THE NODES
+        ;; BENEATH IT. The value renderer hands every child node the
+        ;; parent's request, so an attribute-scoped render would
+        ;; otherwise ask each nested value to answer for an attribute
+        ;; nobody asked it about, and its own declared shape would never
+        ;; be consulted. The subject is the node at the empty path.
+        request (cond-> request
+                  (seq path) (dissoc :seon.render.walk/attribute))
         ;; A PRODUCER IS NEVER RE-ENTERED INSIDE ITS OWN WALK. A
         ;; producer that renders its value THROUGH the floor —
         ;; `seon.ai/attempt-html` calls `render.value/render-html` for

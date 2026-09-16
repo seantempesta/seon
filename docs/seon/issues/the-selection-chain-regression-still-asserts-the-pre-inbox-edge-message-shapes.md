@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, render, testing, wave/render-producers]
 ---
@@ -60,14 +60,30 @@ Three more have a declaration to point at but no dated ruling:
    Whether an attribute-scoped request may fall back to the entity's pair is
    the open question here.
 
-## What the owner has to decide
+## Resolution (2026-09-16)
 
-Whether (4) and (5) are the declared behaviour — an attribute-scoped or
-entity-scoped request resolving to the nearest declared pair and otherwise to
-the generic pull — or the selection chain has stopped honouring
-`:seon.render.walk/attribute`. (1)-(3) are expectation drift and can be
-updated in the same pass once that is settled; updating all nine to match
-current behaviour first would erase the only check that pins this chain.
+The owner ruled decision 9 option 1 on 2026-09-17: **no render fallback**. An
+attribute-scoped render request that finds no declared pair for that attribute
+resolves to the generic printer; it never borrows the owning entity's or a
+neighbour's declared form, so every uncurated attribute is visibly generic and
+therefore findable by the render-pair curation task.
+
+`src/seon/render.clj` now asks `attribute-scoped?` instead of guessing from the
+value's keys: an attribute-scoped request resolves to that attribute's declared
+pair or falls through the schema stage to the floor. The neighbour case the old
+`attribute-value?` guard protected is preserved at its authority —
+`seon.render.walk/scoped-attribute` stamps `:seon.render.walk/attribute` on a
+render request only for a member the walk synthesized FOR an attribute, never
+for a neighbour entity it merely reached THROUGH one.
+
+The four drift assertions (1)-(3) were updated to the declarations already in
+the tree, the fixture now seeds `:seon.message/inbox` and `:seon.agent/agent`,
+and (4) and (5) assert the ruled behaviour. A new regression,
+`seon.render.history-test/a-neighbour-the-walk-reached-renders-by-its-own-shape`,
+pins the neighbour case. In process on `default`: 14/0/0 and 4/0/0.
+
+One observation was filed rather than absorbed:
+[a-generic-attribute-scoped-render-answers-with-the-owning-entity](a-generic-attribute-scoped-render-answers-with-the-owning-entity.md).
 
 ## Owned by
 
