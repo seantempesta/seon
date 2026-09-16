@@ -216,7 +216,14 @@
     (sequential? rendered) [{:seon.repl/form rendered}]
     :else []))
 
-(defn- namespace-subject
+(defn- lookup-namespace-name
+  "The namespace NAME a `[:seon.ns/name my.foo]` lookup identifies, or nil.
+
+  The name is what an executable `dir` form and a demonstration-namespace
+  membership test need. It is never a candidate's subject: a subject is the
+  entity the candidate is about, spelled as the `:seon.render.walk/lookup`
+  every other candidate producer hands, and `seon.render.walk/reference-keys`
+  already relates that lookup to this bare symbol for the frontier."
   [lookup]
   (when (and (vector? lookup) (= :seon.ns/name (first lookup)))
     (second lookup)))
@@ -280,7 +287,7 @@
 
 (defn- executable-namespace-entry
   [lookup entry]
-  (if-let [namespace-name (namespace-subject lookup)]
+  (if-let [namespace-name (lookup-namespace-name lookup)]
     (assoc entry :seon.repl/form (list 'dir namespace-name))
     entry))
 
@@ -309,20 +316,19 @@
                    rendered-entries
                    (let [rendered-entries (entries rendered)]
                      (if (and own-results?
-                              (namespace-subject lookup)
+                              (lookup-namespace-name lookup)
                               (contains? demonstration-namespaces
-                                         (namespace-subject lookup)))
+                                         (lookup-namespace-name lookup)))
                        (take 1 rendered-entries)
-                       rendered-entries))
-                   subject (or (namespace-subject lookup) lookup)]
+                       rendered-entries))]
                (when (or (= lookup root)
-                         (namespace-subject lookup)
+                         (lookup-namespace-name lookup)
                          (some seq (map (comp walk/form-symbols :seon.repl/form)
                                         rendered-entries)))
                  (map-indexed
                   (fn [index entry]
                     {:seon.repl/key [lookup index]
-                     :seon.repl/subject subject
+                     :seon.repl/subject lookup
                      :seon.repl/previous-key
                      (when (pos? index) [lookup (dec index)])
                      :seon.repl/entry

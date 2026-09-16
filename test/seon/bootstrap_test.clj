@@ -13,6 +13,7 @@
             [seon.db :as db]
             [seon.render.walk :as walk]
             [seon.sci.admit :as admit]
+            [seon.schema :as schema]
             [seon.test-support :as support]))
 
 (def ^:private agent-id "bootstrap-agent")
@@ -100,7 +101,7 @@
             "same agent state derives byte-identical episode data")
         (is (= '(help) (:seon.repl/form first-entry))
             "the zero-form run derives help from its live situation")
-        (is (not-any? #(= 'outside.pull (:seon.repl/subject %))
+        (is (not-any? #(= [:seon.ns/name 'outside.pull] (:seon.repl/subject %))
                       (:seon.repl/candidates pull))
             "membership comes only from the bounded pull")
         (let [opening-source (pr-str (:seon.repl/form first-entry))
@@ -213,7 +214,9 @@
         (is (contains? (:seon.print/identity-attributes pull)
                        :seon.ns/name)
             "the exact cluster projection preserves namespace identities")
-        (is (= namespace-name (:seon.repl/subject namespace-candidate)))
+        (is (= [:seon.ns/name namespace-name]
+               (:seon.repl/subject namespace-candidate))
+            "a namespace candidate's subject is its entity lookup")
         (is (= (list 'dir namespace-name)
                (get-in namespace-candidate
                        [:seon.repl/entry :seon.repl/form]))
@@ -223,6 +226,62 @@
             "the content-bearing own namespace is the first gap after help")
         (is (not-any? #(and (seq? %) (= 'defn (first %))) candidate-forms)
             "a green authored usage result removes the worked defn lesson")))))
+
+(deftest every-opening-candidate-subject-is-an-entity-lookup
+  ;; A candidate's subject is the entity the candidate is ABOUT, and the one
+  ;; spelling for that is :seon.render.walk/lookup. A producer that handed a
+  ;; lookup's VALUE instead made seon.render.walk/ordered-episode refuse the
+  ;; whole opening, so the class regression drives the real armed walk over
+  ;; the candidates seon.bootstrap actually produces.
+  (support/with-database
+    (fn [connection]
+      (seed-cluster! connection "candidate-subject-lookups")
+      (cluster/ensure-entity!
+       connection cluster/boot-process-identity
+       {:seon.agent/id agent-id
+        :seon.cluster/name "candidate-subject-lookups"
+        :seon.ns/name namespace-name})
+      (support/transacted!
+       connection
+       [{:seon.fn/sym (str namespace-name "/current-items")
+         :seon.schema.admission/source :core
+         :seon.fn/ns [:seon.ns/name namespace-name]
+         :seon.fn/source "(defn current-items [items] items)"
+         :seon.fn/arglists "([items])"
+         :seon.fn/private? false
+         :seon.fn/spec "[:=> [:cat [:vector :int]] [:vector :int]]"}
+        {:seon.test/sym (str namespace-name "/current-items-test")
+         :seon.schema.admission/source :core
+         :seon.test/ns [:seon.ns/name namespace-name]
+         :seon.test/source "(deftest current-items-test)"
+         :seon.test/usage true
+         :seon.test/pass-count 1
+         :seon.test/fail-count 0
+         :seon.test/error-count 0
+         :seon.test/run-basis-t (db/basis-t @connection)
+         :seon.test/run-at (java.util.Date. 1786500000000)}])
+      (let [pull (bootstrap/pull-result (generator-request connection))
+            candidates (:seon.repl/candidates pull)
+            namespace-subjects
+            (filter #(= :seon.ns/name (first (:seon.repl/subject %)))
+                    candidates)]
+        (is (seq candidates)
+            "the opening pull produces candidates at all")
+        (is (seq namespace-subjects)
+            "a namespace candidate is among them — the producer that broke")
+        (doseq [candidate candidates]
+          (is (schema/valid-candidate-value?
+               :seon.render.walk/lookup (:seon.repl/subject candidate))
+              (str "candidate " (pr-str (:seon.repl/key candidate))
+                   " carries subject " (pr-str (:seon.repl/subject candidate))
+                   ", which is not a :seon.render.walk/lookup")))
+        (let [episode (walk/ordered-episode
+                       (assoc pull :seon.repl/settled []))]
+          (is (vector? episode)
+              "the armed walk derives an episode from the real candidates")
+          (is (= [(:seon.repl/root-key pull)]
+                 (mapv :seon.repl/key episode))
+              "with nothing settled the episode is exactly the root entry"))))))
 
 (deftest authored-plan-machinery-is-deleted
   (is (nil? (io/resource "seon/bootstrap.edn")))
