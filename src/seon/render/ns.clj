@@ -13,6 +13,7 @@
             [seon.cluster.agent :as agent]
             [seon.repl :as repl]
             [seon.render.block :as block]
+            [seon.render.route :as route]
             [seon.render.hiccup :as hiccup]))
 
 ;;; ---------------------------------------------------------------------------
@@ -831,11 +832,40 @@
   [unit]
   (list 'dir (list 'quote (:seon.ns/name unit))))
 
-(defn function-form
-  "Return the ordinary `doc` form for a function entity."
-  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/form]}
+(defn function-ai
+  "Emit one documentation read and exact, unevaluated queries for linked facts."
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/source]}
   [unit]
-  (list 'doc (list 'quote (symbol (:seon.fn/sym unit)))))
+  (let [entity (or (:seon.render/value unit) unit)
+        function-name (:seon.fn/sym entity)
+        lookup [:seon.fn/sym function-name]
+        installed (when-let [database (:seon.db/db unit)]
+                    (:schema (db/schema-database database)))
+        links (cond-> [[:seon.fn/_calls :seon.fn/sym]]
+                (get installed :seon.lint/fn) (conj [:seon.lint/_fn :seon.lint/id])
+                (get installed :seon.error/fn) (conj [:seon.error/_fn :seon.error/signature]))]
+    (str ";; Function " function-name ". Read its contract and docstring.\n"
+         (str/join "\n"
+           (for [[attribute identity-attribute] links]
+             (str ";; " attribute " (run to inspect): "
+                  (pr-str (list 'seon.db/pull
+                                (list 'quote [{attribute [identity-attribute]}]) lookup)))))
+         "\n;; Reaching tests (run to inspect): "
+         (pr-str (list 'seon.fn/tests-reaching (list 'seon.db/db) function-name))
+         "\n" (repl/source-text (list 'doc (symbol function-name))))))
+
+(defn function-html
+  "Render a function block with its namespace link and unevaluated queries."
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
+  [unit]
+  (let [entity (or (:seon.render/value unit) unit)
+        function-name (:seon.fn/sym entity)]
+    [:section {:class "seon-family-entry seon-function"}
+     [:h3 [:a {:href (route/path :seon.render.route/namespace
+                       {:namespace (namespace (symbol function-name))})} function-name]]
+     (when-let [doc (:seon.fn/doc entity)] [:p doc])
+     (when-let [spec (:seon.fn/spec entity)] [:pre spec])
+     [:pre (function-ai unit)]]))
 
 (defn schema-form
   "Return the ordinary `doc` form for a schema entity."

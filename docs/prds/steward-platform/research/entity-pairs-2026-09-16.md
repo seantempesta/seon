@@ -1,10 +1,127 @@
 ---
 type: research
-status: decision needed
+status: implementation verified; integration pending
 tags: [research, render, test, steward]
 ---
 
-# Entity pairs — pre-edit design probe
+# Entity pairs — P2 implementation and live probes
+
+## Landing result (2026-09-16)
+
+The owner approved exact, unevaluated query forms for **all** function
+relationships. The implementation now declares one AI/HTML pair on each
+entity schema. Function rendering never computes relationship counts or
+test reach. Its only executable AI form is `doc`; the query forms remain
+comments for the agent to run deliberately. The legacy `function-form`
+definition and schema reference are removed together.
+
+The test pair lives in `src/seon/render/test.clj`: presentation belongs
+beside the other rendering owners, while execution remains in `seon.test`.
+It reads stored result evidence, emits one pull including called-function
+links, and supplies exact `seon.test/run` and `my.test/check` forms. Missing
+results are explicitly unrun/incomplete. HTML links to namespace pages and
+shows present result facts without clipping. No source is copied into AI.
+
+Guarantee: a function or test reached by the existing walk selects its
+entity-schema pair and renders even when optional result facts are absent.
+
+### Recorded in-process proof
+
+All four renderer definitions were evaluated through MCP JVM before their
+source edits, and their complete individual return values were inspected.
+Isolated prototype calls took 0.27–0.59 ms; these are renderer-body timings,
+not end-to-end web latency. Attempts to run the regressions before editing
+recorded fixture acquisition errors, not green assertions. This is an
+explicit limit of the requested pre-edit proof; later successful runs do
+not retroactively make those attempts green.
+
+After source edits, canonical fixture acquisition was warmed in the same
+development JVM with CLI-resolved `:test` dependencies carried by a scoped
+DynamicClassLoader (the existing development-adoption test-support issue
+documents that procedure). No test JVM was launched. Warm acquisition took
+27260 ms; it included the new renderer contracts. The exact test calls were:
+
+```clojure
+(seon.test/run
+ #'seon.render.entity-pairs-test/function-entity-pair-is-selected-through-the-issue-walk
+ (seon.operator/connection "default"))
+(seon.test/run
+ #'seon.render.entity-pairs-test/test-entity-pair-is-total-through-the-issue-walk
+ (seon.operator/connection "default"))
+```
+
+| Test | Recorded result entity | Run basis | Pass/fail/error | Tool form time |
+|---|---:|---:|---|---:|
+| Function pair | 51140 | 536871254 | 17 / 0 / 0 | 1883 ms |
+| Test pair | 51142 | 536871256 | 24 / 0 / 0 | 1183 ms |
+
+Runs occurred at 01:58:02Z and 01:58:21Z. A subsequent live
+`seon.instrument/instrumented` probe found all four renderer Vars armed.
+Both tests use `seon.test-support/with-database`, real SCI contexts, the
+complete schema population, and explicit render profiles. Each asserts
+selection, total rendering, and equality with a distance-1 issue-root walk
+whose issue refs an agent. The function test observes no database reads
+while producing its queries. The test test covers absent, pass, fail, and
+error result facts. No separate registry, walker, or execution path was
+introduced.
+
+### Live adoption and browser boundary
+
+The default JVM (PID 7595) contains the four armed Vars and indexed
+function contracts. This proves loaded definitions, not complete adoption:
+the source marker query returned no `:seon.source/commit-id`, while
+`seon.cluster.source/current` returned
+`6aa9f7e0-1949-5e5b-9543-701c4530a60a`.
+
+Chrome observation of `/agent/root/debug?subject=[:seon.issue/id
+"quoted-private-capability-symbol-was-not-indexable"]` showed actual
+function/test references, but the attribute collection previews still
+used the generic value renderer and included test source. It did **not**
+prove the requested pair blocks on that page. Canonical walk proof is
+green; debug paint parity remains an integration requirement. The debug
+owner (`src/seon/render/web.clj`, inspection selection around line 1455)
+and value/walk owners are outside this lane's edits.
+
+A final MCP timing probe returned `:seon.dev.mcp/projection-failed` for a
+map; `(pr-str *1)` returned the same error for a string. Neither returned
+value envelope could support a timing claim. A subsequent `(prn *2)` through
+the **same MCP session** recovered the complete raw result through its
+stdout event: function AI for `seon.id/id` took **1.081541 ms**, with all
+four exact relationship query comments and the single `doc` form. The
+ordinary projection error is independently recorded in
+[the existing MCP issue](../../../seon/issues/mcp-jvm-small-result-projection-fails-during-live-adoption.md).
+Publication was explicitly requested
+for the four owned source/schema paths; it waited behind a foreign
+`init --dev default` lifecycle lock. No foreign process was operated.
+
+### Gate request and exact boundaries
+
+Orchestrator: after the shared schema/adoption changes settle, run serially:
+
+```sh
+bin/test --paths src/seon/render/ns.clj src/seon/render/test.clj resources/seon/schemas/seon.fn.edn resources/seon/schemas/seon.test.edn test/seon/render/entity_pairs_test.clj -- seon.render.entity-pairs-test
+bin/test --platform
+```
+
+No lane gate or test JVM was launched. The test schema has concurrent
+reach-digest edits; only its entity-map render properties are this lane's.
+Do not include other schema hunks in the entity-pairs commit. The remaining
+integration proofs are final gate, complete development adoption, and debug
+page parity. This P2 slice does not close N1 or any unnamed class members.
+
+Dependency ledger: Malli contracts are the existing selection inputs
+(`src/seon/render.clj`); Datahike refs/pull flow through `src/seon/db.clj`
+and `reference-code/datahike/src/datahike/pull_api.cljc`; SCI contexts use
+the canonical fixture and `reference-code/sci/src/sci/core.cljc`; namespace
+links use `src/seon/render/route.clj`; source grammar uses
+`src/seon/repl.clj`. No dependency implementation changed.
+
+The 7217.67325 ms shared reach finding remains open in
+[the query-cost issue](../../../seon/issues/function-entity-render-reach-query-cost.md).
+The fixture-delay observation is recorded in
+[the runner issue](../../../seon/issues/in-process-runner-rethrows-failed-fixture-delay.md).
+
+## Historical pre-edit design probe
 
 ## Scope and structural change
 

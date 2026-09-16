@@ -22,7 +22,8 @@
           :fn
           [:map
            {:seon.db/attributes true,
-            :seon.render/form seon.render.ns/function-form}
+            :seon.render/ai seon.render.ns/function-ai
+            :seon.render/html seon.render.ns/function-html}
            [:seon.fn/sym :seon.fn/sym]
            [:seon.test/subject {:optional true} :seon.test/subject]
            [:seon.schema.admission/source

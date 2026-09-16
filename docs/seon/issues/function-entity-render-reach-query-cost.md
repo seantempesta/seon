@@ -5,14 +5,14 @@ severity: friction
 tags: [issue, render, performance, wave/render-producers]
 ---
 
-# Function entity rendering would synchronously recompute test reach
+# Exact test reach takes 7.22 seconds for one function
 
 ## Problem
 
-Steward-platform P2 requests an eager reaching-test count for every function
-block. The existing exact query takes seconds on default. Calling it for
-each AI and HTML block adds that work to the render path. No production pair
-was added by this observation.
+The existing exact query takes seconds on default. Owner-approved P2 renders
+only its exact query form and never eagerly computes counts (2026-09-16).
+That keeps the entity block fast, but an agent explicitly asking for reach
+still pays the measured query cost. Improve the shared query owner separately.
 
 ## Evidence
 
@@ -38,8 +38,7 @@ introduce a second traversal or a stored count that can drift.
 
 ## Acceptance
 
-Choose eager or explicit-read counts for P2. If eager counts remain required,
-measure the existing query owner after improvement and prove the function
-pair through selection and the walk under the normal render bound, using
-the canonical fixture and armed contracts. Preserve subject and
-pending-subject reach semantics.
+Measure the existing query owner after improvement on the same function and
+representative sparse/dense reach sets, with canonical armed regressions.
+Preserve subject and pending-subject reach semantics. Keep P2's explicit-read
+queries; do not introduce a second traversal or cache in renderers.
