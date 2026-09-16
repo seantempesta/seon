@@ -875,3 +875,19 @@ repaired; request `fixture-write-sweep.txt`). ALL cold gates stay held —
 not only platform/registry — until the wipe investigation names the root
 resolution, because any destructive fixture with the same defect would
 empty the store again.
+
+### 2026-09-16 ~11:40Z — wipe verdict (`fbd9c0cd9`): genesis re-creation via an unset root
+
+The store was deleted and re-created from genesis (`:branches` = `#{:db}`),
+not collected: Datahike's gc only reads `:branches`; registry-test's fixture
+builds its own `tmp/registry-test/<uuid>/store`. Healthy at 10:17:35Z;
+window 10:17:35 → ~10:50Z; batch 61 A's platform tier began 10:18:11Z inside
+it. Paths of the shape `(io/file <root> "data" "store")` with a nil/relative
+root — `operator.clj:277/:294` cleanup and `store.clj:281` create-store! —
+with root fallbacks at `cluster.clj:792` and `test_support.clj:112`
+(bin/test-fast sets no operator root): the `86b4c8ff4` class. Exact caller
+not established (no delete is logged; the evidence copy lost mtimes). Opus
+fix lane launched: a bad root is unconstructable at both owners (typed
+refusal before any delete, the owner's explicit `reset --force` kept), a
+log line before every delete, the fallbacks removed, a symlinked-sentinel
+class regression. All gates held until it lands.
