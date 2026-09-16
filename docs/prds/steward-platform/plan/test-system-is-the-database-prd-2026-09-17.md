@@ -66,6 +66,36 @@ deletes. Read the parent PRD's §1b–§1d and §4b (lane rules) first, then
   member; report entities only for failures and errors, keyed by signature;
   the platform marker with a reason).
 
+## 0c. Rulings of 2026-09-16 evening (owner)
+
+- **Measured premise correction.** The tests are not IO-bound and the worker
+  pool is already a dynamically claimed queue at 83–91% utilisation
+  (`../research/test-execution-model-2026-09-16.md`). Flow is not the
+  execution model for the first-party suite. Isolated worker JVMs stay for
+  the destructive tier and for gating a checkout snapshot; the cluster's own
+  JVM hosts the rest, serially until a derived fact names which Vars a test
+  redefines (`with-redefs` is process-wide), after which two bodies may run
+  concurrently only when that fact says they cannot collide.
+- **Preparation costs come first.** A cold gate spends 42% publishing the
+  program facts of the snapshot from scratch, 7% rebuilding the program graph
+  the base already carries, and 16 s per worker rebuilding the fixture base;
+  test bodies are 27%. Publication of a snapshot derives from the nearest
+  published base plus the changed files (the edit hook's own path), never a
+  full rebuild on a digest miss. Lane `test-preparation-costs`.
+- **New code is where fixes go; old paths are deleted as callers migrate**
+  ("We are migrating to the new test code so fix everything in the new code
+  and we can remove the old test code and migrate it to call the new code").
+  No repair lands on a path this document deletes.
+- **The `orchestrator-only` test mode is deleted** (`fa971495f`): it refused
+  every lane invocation including `bin/test-fast`, so lanes committed
+  untested. The two-slot bound remains the load cap.
+- **Two facts the stage-1 selection needs first:** `:seon.test/platform`
+  becomes an indexed attribute lifted through `seon.program/test-marker-attributes`
+  (today it is Var metadata; 0 of 1,833 rows carry it), and the bare
+  namespace set derives from `:seon.ns/name` rows under the declared `test`
+  source root minus a `:seon.test/fixture` marker, never from a filename
+  `find` (`../research/platform-tier-is-a-fact-2026-09-16.md`).
+
 ## 1. Principles that decide every design question below
 
 P1. **One function per concern, called from both hosts.** Selection,
