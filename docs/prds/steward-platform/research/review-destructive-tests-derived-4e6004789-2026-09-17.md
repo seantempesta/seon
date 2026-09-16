@@ -52,3 +52,17 @@ editing lanes until S9/S5 change how adoption is requested.
 
 **Gate requested:** batch 105 = platform, then `seon.test-reaching-test
 seon.test.runner-test seon.test-runner-test seon.fn-test`.
+
+## Addendum — `67c1364b6` (batch 105 reds, 2026-09-17 22:50Z): approved
+
+Three reds, all three the lane's own and fixed at the cause: (1) the
+`:seon.fn/destroys` declarations were multi-line source strings, so the
+agent would have read an escaped newline mid-sentence (the ugly-output rule)
+— now one line each, the rule stated in the attribute's schema, the
+regression asserting the ruled line against `host-text`, the AI render and
+the HTML render; (2) the exclusion entry carries `:seon.fn/destroys` and the
+test reads it from the owner's row; (3) the agent-fork fixture evaluated an
+ad hoc deftest that was never admitted, so the typed unknown was correct —
+the fixture now admits its test through the canonical path (the idiom an
+existing test-reaching regression already uses). Nothing ran in process
+(blocker); gate `seon.test-reaching-test seon.test-runner-test` queued.
