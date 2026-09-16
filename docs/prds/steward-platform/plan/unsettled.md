@@ -1516,6 +1516,32 @@ sweep row corrected `dbb40efcf`. Last queued continuation launched: bin/test
 preparation bounds. Editors: no-default, tier-0, environment, fault-path,
 bin/test bounds + codex integrator.
 
+**UNBREAKABLE CONNECTIONS INVENTORY LANDED** (`b4c7e86c9`,
+`unbreakable-connections-2026-09-16.md`, C1–C16): the dial exists and is
+unset — every program-graph edge on the function entity is optional
+(seon.fn.edn:133-137), which is exactly why deleting a function with five
+live callers is silent; `:seon.fn/ns` and `:seon.schedule.task/function`
+already refuse by accident. NO agent-facing refactoring surface exists
+(src/my/: thirteen namespaces, none can delete/rename/change a contract/ask
+what breaks; only text editing via my.edit). PRD §2.2 stale: S1 landed, agent
+rows carry real call edges and wrong-arity calls to declared functions are
+caught before the row is written. Live graph: 63,469 call edges; 31,020
+call sites with known arity, 3,412 resolvable, 0 violations (arity
+invariant can be switched on and goes green); 79/1,204 public functions
+without a contract, 1,693 functions no test reaches — the first agent tasks
+are one query each. Four enforcement seams, no fifth. Tier 1 (no reset:
+`:seon.fn/file` required; regress the two accidental refusals; arity
+invariant at the write; render pair with no row refused) handed to the
+codex integrator on its seam while `selection.clj` is held (tier-0 agent
+asked to land it first). Tier 2 = the deletion contract (reset). Tier 3 =
+implementations as declarations (analyzer computes and discards them),
+provenance deciding loading. Four operations to teach agents first:
+`delete!`, `rename!` (hands back call-site spans), `define!`/`change-
+contract!` (gate-function-install already the strongest gate), and
+`breaks` — the read returning what delete! would refuse with. Honest gaps
+typed: dynamic dispatch, apply, macros, defmethod/protocol bodies, var
+quotes; argument SHAPES are never checkable (count only).
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
