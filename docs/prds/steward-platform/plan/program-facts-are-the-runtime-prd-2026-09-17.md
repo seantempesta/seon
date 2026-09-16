@@ -711,6 +711,48 @@ status says so and continuation stops; the agent page shows the comments as
 thinking and the results with their HTML renders; budget exhaustion without
 a reply is a typed outcome plus one root message, exactly as for issues.
 
+### S11 — Composable history: select whole units, delete the re-fit (F3)
+
+**Grounding.** `docs/prds/steward-platform/research/composable-history-2026-09-17.md`.
+The prompt already renders one unit per evaluation through the evaluation
+schema's AI pair (`seon.render.walk/history`, `src/seon/render/walk.clj:891`;
+`history-segments`, `src/seon/render/web.clj:2381`). The defect is a second
+clipping spot: `seon.render.transcript/bounded-scalar` / `floor-text`
+(`src/seon/render/transcript.clj:412-435`) re-admits an already-rendered AI
+string as a scalar node and re-fits it with `seon.print/fit-text` — the
+batch-70 bytes match its fields exactly. The prompt budget only reports a
+verdict (`seon.ai.tokens/budget-report`).
+
+**Change (research Option A, no schema change, no reset).**
+1. Each history unit carries `:seon.ai.tokens/estimate`, DERIVED at
+   composition from its stored shown text (never stored: calibration
+   drifts).
+2. Pure `select`: given the units in turn order and the prompt budget,
+   keep whole units newest-first until the budget is spent, oldest dropped
+   first, and emit ONE elision value naming the dropped count, the oldest
+   surviving ordinal and the requery form. Pure `compose`: the kept units
+   joined. `acquire-context-report` (`src/seon/cluster/prompt.clj`) calls
+   them; `budget-report` stays as the verdict on the composed result.
+3. DELETE the transcript re-fit (`bounded-scalar`/`floor-text` on rendered
+   units); the value renderer already bounded each shown text at evaluation
+   time, which is the one clipping spot.
+4. `;;` comments (`:seon.cluster.eval/comment`, stored separately) render as
+   their own "thinking" block in the HTML pair; the AI pair keeps them in the
+   REPL grammar as today.
+
+**Acceptance.** (a) with a budget smaller than the history, the prompt
+contains whole evaluations only, the newest ones, and one elision value —
+never a mid-form cut (the batch-70 assertion class goes green); (b) with a
+budget larger than the history, the prompt is byte-identical to today's
+composition; (c) the agent page shows a comment as a thinking block and a
+result through its HTML pair; (d) no call to `fit-text` remains on the
+history path (assert by reach: `tests-reaching`/`calls` from
+`acquire-context-report` do not reach `seon.print/fit-text`).
+
+**Boundary.** In-process on `default`; cold gate on `seon.cluster.prompt-test
+seon.render.transcript-run-test seon.concurrency-independence-test
+seon.render.web-debug-test`.
+
 ### S6 — The identity list derives from the declarations (I6; open issue)
 
 `seon.program/identity-attributes` is a literal vector while

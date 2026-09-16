@@ -229,7 +229,7 @@ system-only turn or opening alone does not (`src/seon/turn.clj:2823`).
 System turn 0 stores
 the opening. Before each agent turn, the since-diff checks every distinct
 read form's latest evaluation and appends changed reads in a system turn;
-writes and effects never rerun. `src/seon/turn.clj:2039` owns the system turn;
+writes and effects never rerun. `src/seon/turn.clj:2191` owns the system turn;
 `src/seon/turn.clj:4933` advances the ordinary agent proc.
 
 **Errors are two classes, never mixed.** An agent mistake becomes a flat
@@ -555,7 +555,7 @@ writing.
 | accretion / breakage | a change that requires no more and provides no less | graduation, nursery |
 | **[TARGET]** source initialization rows, transaction data | Static source population is admitted transaction data; the agent's opening is separately evaluated and stored as system turn 0 ([turn PRD §13–§15](docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md); `src/seon/bootstrap.clj`) | bootstrap-plan rows, seed bundle |
 | process record, generation, (pid, start-instant) | operator-managed process descriptors (`script/seon/fresh_operator.clj` ↔ `src/seon/cluster/process.clj`) | orphan registry, liveness flag |
-| system turn | An ordinary turn with a reply and no provider attempt; "system" is derived, never stamped. `seon.turn/system-turn` computes the opening and changed reads and optionally stores their evaluations ([owner](src/seon/turn.clj:2039), [debug controls](src/seon/render/web.clj:709)); the wake-answering `:t` rule remains specified by [turn PRD §14](docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md) and implemented at `src/seon/turn.clj:2823`. | generated opening episode, generated run |
+| system turn | An ordinary turn with a reply and no provider attempt; "system" is derived, never stamped. `seon.turn/system-turn` computes the opening and changed reads and optionally stores their evaluations ([owner](src/seon/turn.clj:2191), [debug controls](src/seon/render/web.clj:709)); the wake-answering `:t` rule remains specified by [turn PRD §14](docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md) and implemented at `src/seon/turn.clj:2823`. | generated opening episode, generated run |
 | turn loop | The per-agent Flow proc derives work from database facts, advances open/call/evaluations/close, and rewakes when work remains. Its proc and transitions share `seon.turn` ([step](src/seon/turn.clj:4933), [next-agent-work](src/seon/turn.clj:2753), [turn](src/seon/turn.clj:4723)); the agent owner supplies its [graph](src/seon/cluster/agent.clj:422). The full additive-context algorithm remains specified by [turn PRD §14–§16](docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md). | run loop, driver, driving |
 | `seon.effect`, `effect/request!` | the system-side owner for declared capability requests (fs, web, llm); database writes enter `seon.db/transact!` (`src/seon/db.clj:3213`) — about effects crossing out, never about which functions an agent may call | the door, capability dispatch |
 | every function is callable | an agent may call ANY function in its cluster's program graph; what differs per agent is only what is RENDERED into its context, which never gates execution | toolkit, grants, allowlist |
