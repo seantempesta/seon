@@ -123,6 +123,11 @@
                [:seon.agent/id
                 {:optional true}
                 :seon.agent/id]
+               [:seon.sci.eval/projection-state
+                {:optional true
+                 :description
+                 "This evaluation's schema projection state, named so a detached handler can rebuild the frame instead of hoping its executor inherited one."}
+                :seon.sci.eval/projection-state]
                [:seon.flow/work-launcher
                 {:optional true}
                 :seon.flow/work-launcher]],

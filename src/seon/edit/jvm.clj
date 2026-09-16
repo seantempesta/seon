@@ -74,10 +74,25 @@
     {:seon.effect/file (.getCanonicalPath (io/file (:my.edit/path request)))
      :seon.effect/form-span (:seon.edit/form-span transformed)}}))
 
-(defn- edit
-  {:malli/schema
-   [:=> [:cat :seon.edit/request :seon.config/effective]
-    [:or :my.edit/result :seon.error/value]]}
+(defn- filesystem-refusal
+  "One filesystem refusal as the typed value it already carries.
+
+  `seon.fs.jvm`'s internals refuse by THROWING, and `my.fs`'s own handlers
+  convert that back into the flat value an agent reads. This handler calls
+  those internals directly (`#'fs.jvm/read-complete`, `#'fs.jvm/write`), so
+  it owes the same conversion: without it a `:my.fs/path-refused` naming the
+  exact path and a `:my.fs/read-limit` naming its ceiling both reach the
+  agent as `:seon.effect/handler-failed`, whose whole evidence is the owner
+  symbol. Anything that is NOT a classified refusal is a genuine fault and
+  is rethrown to the effect boundary unchanged."
+  [throwable]
+  (let [classified (ex-data throwable)]
+    (if (and (keyword? (:seon.error/kind classified))
+             (string? (:seon.error/message classified)))
+      classified
+      (throw throwable))))
+
+(defn- edit*
   [request effective]
   (let [path (:my.edit/path request)
         before (#'fs.jvm/read-complete
@@ -105,3 +120,13 @@
                 (if (:seon.error/kind written)
                   (edit-error written request actual-digest)
                   (result request before transformed written))))))))))
+
+(defn- edit
+  {:malli/schema
+   [:=> [:cat :seon.edit/request :seon.config/effective]
+    [:or :my.edit/result :seon.error/value]]}
+  [request effective]
+  (try
+    (edit* request effective)
+    (catch clojure.lang.ExceptionInfo failure
+      (filesystem-refusal failure))))

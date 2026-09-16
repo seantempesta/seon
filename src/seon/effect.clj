@@ -436,6 +436,17 @@
   The far side therefore REBUILDS the frame from the value its submission
   carried instead of hoping to inherit one.
 
+  THE SCHEMA PROJECTION IS PART OF THAT FRAME. A detached handler that
+  resolves a declaration — `seon.sci.eval/build-base-ctx` is one, and every
+  armed contract it compiles is another — asks for the projection state, and
+  on a flow thread that had none it refused with
+  `:seon.schema/missing-projection`. The foreground path never showed it,
+  because `bound-fn` carries the requesting thread's whole frame; the
+  detached path carries only what its submission names, so the projection
+  state is named here alongside the connection. A submission that carried
+  none still runs, and the refusal it meets names the missing projection
+  rather than pretending one.
+
   These two dynamic vars are named readers on the seon.env Phase 3 deletion
   list (`src/seon/shell/jvm.clj:290` is the one this repaired). When a
   handler takes its environment as an argument, this wrapper goes with
@@ -443,7 +454,9 @@
   [context work]
   (binding [*request-context* context
             db/*conn* (:seon.db/connection context)]
-    (work)))
+    (if-let [projection-state (:seon.sci.eval/projection-state context)]
+      (schema/call-with-projection-state projection-state work)
+      (work))))
 
 (defn- dispatch
   [handler owner-sym effect-id request effective]

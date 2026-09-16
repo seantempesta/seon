@@ -241,3 +241,107 @@ program graph. Gate request:
   refuses its retry until that lane lands. Reported, not worked around.
 - The four database regressions are gate-only; see the verification boundary
   above.
+
+---
+
+# Batch 43 attribution (same day, second pass)
+
+Gate `e3bfa76d1`, results `tmp/orchestrator/gate-results/batch-43/named.md`
+(the retained run root was swept; the FAIL/ERROR blocks in that file carry the
+expected/actual this attribution rests on). `seon.fn-test` green.
+`seon.issue-generate-test` is another lane's.
+
+## Nothing here narrowed an input
+
+The coordinator's first hypothesis — that requiring `:my.edit/expected-digest`
+was breakage under §2.5 — is **refuted by `git show 0e15593aa^`**:
+
+```clojure
+;; resources/seon/schemas/my.edit.edn BEFORE this lane touched it
+:my.edit/expected-digest :my.fs/digest
+:my.edit/form-request
+[:and [:map … [:my.edit/expected-digest :my.edit/expected-digest] …]
+      [:fn {…} seon.edit/valid-form-operation?]]
+```
+
+The key was already required, in `form-request` and `exact-request` alike, and
+the `[:fn …]` operation predicate was already there. This lane's only change to
+those declarations is a `:seon.db/index true` marker. What changed is that the
+contracts are now ENFORCED where these fixtures run — this lane's
+`seon.edit-test` requires `my.edit`, whose `defonce` registers
+`seon.edit/valid-form-operation?` as a core predicate (`src/my/edit.clj:27`),
+and the changed declarations re-armed the wrappers that reference them.
+
+So three of the reds are my own fixtures violating a contract that was always
+declared, and one is a PRE-EXISTING test that was green only while unarmed:
+
+| red | cause | fix |
+|---|---|---|
+| `form-edit-records-its-span-in-utf8-bytes` | my `edit/exact` / `edit/lines` fixtures omitted `:my.edit/expected-digest` | supply it (named `zero-digest`, with why) |
+| `form-edit-refs-the-program-entity-it-changed`, `changed-programs-since-basis-is-a-query` | my fixtures wrote to the system temp directory, outside `:seon.config.fs/roots` (`["."]`) | derive the scratch directory from `:seon.config.fs/working-root`, the same config the handler reads |
+| `effect-request-lands-declared-attributes` | same root refusal; `created? nil` follows from it | same derivation |
+| `form-failures-never-fall-back-to-text` "malformed replacement" | passes `"(defn stable ["` — a request `:my.edit/form-request` has ALWAYS refused; it passed only unarmed | assert the ruled ARMED refusal. `matched-form-result` keeps its `:my.edit/invalid-replacement` branch: the edit hook loads `seon.edit` uninstrumented while Seon is down |
+
+## Two real defects the gate output exposed
+
+### 1. The detached capability path drops the schema projection (§2.1)
+
+Not a lost interrupt. The evidence in the failure blocks is
+`{:armed? true, :deadline-remaining-ms 295, :connection? true, :outcome
+:failed}` — the arm and the connection were rebuilt on the flow thread, and
+the handler's own `try` caught something that is not an interrupt. The third
+case expects `:completed` from a 20 000-iteration pure loop and also answered
+`:failed`, which no deadline explains.
+
+Measured live on `default` (jvm mode, explicit custody):
+
+```clojure
+{:without :seon.schema/missing-projection   ; no projection state bound
+ :with    :ok}                              ; under call-with-projection-state
+```
+
+`seon.sci.eval/build-base-ctx` requires a bound projection state.
+`seon.effect/with-request-context` rebuilt `*request-context*` and
+`db/*conn*` from the submission and nothing else, and the production request
+context (`src/seon/sci/eval.clj:2310`) never named the projection at all. The
+foreground path never showed it because `dispatch` uses `bound-fn`, which
+carries the requesting thread's whole frame. `probe-ctx` is a `defonce` delay,
+so the first refusal is cached and every later case in that worker JVM reads
+`:failed` — the same delay-caches-a-throwable amplifier as the shared fixture
+base. The test was green while a FOREGROUND test (`effect_test.clj:296`,
+`(let [ctx @probe-ctx] …)`) happened to force the delay first in the same
+worker; adding two tests to `seon.effect-test` changed the pool distribution
+and the latent defect surfaced.
+
+Fixed by naming the frame in the submission: `seon.sci.eval` puts
+`:seon.sci.eval/projection-state` in the request context, the schema declares
+it, and `with-request-context` binds it on the far side. Both fixtures hand it
+explicitly, exactly as production does (§5.2). Regression: the detached test
+now asserts `:seon.effect-test/projection?`, so this class fails by NAME
+instead of as an unexplained `:failed`.
+
+### 2. `seon.edit.jvm` degraded typed filesystem refusals (§2.4)
+
+`seon.fs.jvm/refuse!` THROWS (`src/seon/fs/jvm.clj:42`), and `my.fs`'s own
+handlers convert that back into the flat value an agent reads. `seon.edit.jvm`
+calls those internals directly (`#'fs.jvm/read-complete`, `#'fs.jvm/write`)
+and had no such conversion, so a `:my.fs/path-refused` naming the exact path —
+and a `:my.fs/read-limit` naming its ceiling — reached the agent as
+`:seon.effect/handler-failed`, whose entire evidence is `{:seon.fn/sym
+"my.edit/form!"}`. That is why the batch-43 block for
+`form-edit-refs-the-program-entity-it-changed` says only "The capability
+handler failed": the diagnosing agent is handed nothing.
+
+Fixed with `seon.edit.jvm/filesystem-refusal`: a classified refusal comes back
+as its own value, anything else is rethrown to the effect boundary unchanged.
+Regression `edit-refusals-keep-their-filesystem-evidence` edits a path outside
+the declared roots and asserts `:my.fs/path-refused` **and the path it names** —
+turning my own fixture mistake into the class's proof.
+
+## Verification boundary for this pass
+
+Unchanged: `default`'s shared fixture base predates the schema change, so no
+db-backed in-process runs. What is measured here is the projection refusal and
+its repair (`build-base-ctx` with and without a bound state) and the schema
+history that refutes the narrowing hypothesis. The contract-arming claim and
+every fixture repair are proven by the next cold gate.

@@ -2327,6 +2327,13 @@
                           :seon.boot/cluster-name cluster-name
                           :seon.sci.admit/caps caps
                           :seon.config/on-core-error on-core-error
+                          ;; Named so a DETACHED capability handler can rebuild
+                          ;; this evaluation's schema frame from data. Without
+                          ;; it a background handler resolving any declaration
+                          ;; refuses with :seon.schema/missing-projection, and a
+                          ;; cached delay turns that one refusal into every
+                          ;; later failure in the JVM.
+                          :seon.sci.eval/projection-state projection-state
                           :seon.effect/counter (atom -1)})}
       (try
         (let [_ (vreset! arm-state (kernel/arm evaluation-ctx time-limit-ms))

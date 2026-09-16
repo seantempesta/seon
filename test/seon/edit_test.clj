@@ -14,10 +14,16 @@
            [java.nio.file Files]
            [java.util Arrays]))
 
+(def ^:private zero-digest
+  "A digest-shaped value: these pure transformations never read a file, but
+  `:my.edit/*-request` declares the fence, and the armed contract holds
+  callers to what is declared."
+  (apply str (repeat 64 "0")))
+
 (defn- form-request
   [selector operation source]
   (cond-> {:my.edit/path "sample.clj"
-           :my.edit/expected-digest (apply str (repeat 64 "0"))
+           :my.edit/expected-digest zero-digest
            :my.edit/form selector
            :my.edit/operation operation}
     source (assoc :my.edit/source source)))
@@ -96,15 +102,19 @@
                      8192)]
       (is (= :my.edit/parse-refused (:seon.error/kind result)))
       (is (nil? (:seon.edit/source result)))))
-  (testing "malformed replacement refuses without a candidate"
-    (let [result
-          (edit/form "(defn stable [] :old)\n"
-                     (form-request {:my.edit.form/head 'defn
-                                    :my.edit.form/name 'stable}
-                                   :replace "(defn stable []")
-                     8192)]
-      (is (= :my.edit/invalid-replacement (:seon.error/kind result)))
-      (is (nil? (:seon.edit/source result)))))
+  (testing "malformed replacement is refused by the declared contract"
+    ;; `:my.edit/form-request` has always required one readable form in
+    ;; `:my.edit/source` (`seon.edit/valid-form-operation?`), so an armed
+    ;; caller never reaches the body. `matched-form-result` keeps its own
+    ;; `:my.edit/invalid-replacement` branch because the edit hook loads this
+    ;; namespace uninstrumented while Seon is down; what is asserted here is
+    ;; the ruled armed behaviour, not the lenient shape.
+    (is (thrown? clojure.lang.ExceptionInfo
+                 (edit/form "(defn stable [] :old)\n"
+                            (form-request {:my.edit.form/head 'defn
+                                           :my.edit.form/name 'stable}
+                                          :replace "(defn stable []")
+                            8192))))
   (testing "not-found returns bounded nearby structural evidence"
     (let [result
           (edit/form "(def present 1)\n"
@@ -193,11 +203,13 @@
       (doseq [[label candidate]
               [[:exact (edit/exact source
                                    {:my.edit/path "sample.clj"
+                                    :my.edit/expected-digest zero-digest
                                     :my.edit/old-string "(def bar 2)"
                                     :my.edit/new-string "(def bar 3)"}
                                    4096)]
                [:lines (edit/lines source
                                    {:my.edit/path "sample.clj"
+                                    :my.edit/expected-digest zero-digest
                                     :my.edit/from-line 2 :my.edit/to-line 2
                                     :my.edit/old-window "(def bar 2)\n"
                                     :my.edit/new-window "(def bar 3)\n"}
@@ -211,11 +223,25 @@
                                  StandardCharsets/UTF_8)))
               (str label " span selects the written bytes")))))))
 
+(defn- declared-root-directory!
+  "A scratch directory INSIDE a declared filesystem root.
+
+  `:seon.config.fs/roots` is what `my.fs` admits, so a fixture writing to the
+  system temp directory is refused before any capability runs — the root is
+  derived here from the same config the handler reads, never assumed."
+  [connection prefix]
+  (let [effective (config/effective (db/db connection) "default")
+        working (java.io.File. ^String (:seon.config.fs/working-root effective))
+        scratch (java.io.File. working "tmp")]
+    (.mkdirs scratch)
+    (.toFile (Files/createTempDirectory
+              (.toPath scratch) prefix
+              (into-array java.nio.file.attribute.FileAttribute [])))))
+
 (defn- indexed-fixture-file!
   "Write one real Clojure file and index it with the production indexer."
   [connection source]
-  (let [directory (.toFile (Files/createTempDirectory
-                            "seon-edit-write-back" (into-array java.nio.file.attribute.FileAttribute [])))
+  (let [directory (declared-root-directory! connection "seon-edit-write-back")
         file (java.io.File. directory "fixture_subject.clj")
         _ (spit file source)
         artifact (fn/build-artifact
@@ -236,6 +262,9 @@
    :seon.boot/cluster-name "default"
    :seon.sci.admit/caps (config/result-caps (config/defaults))
    :seon.config/on-core-error :record
+   ;; Handed explicitly, exactly as `seon.sci.eval` hands it.
+   :seon.sci.eval/projection-state
+   (atom {:seon.schema/projection (db/carried-projection (db/db connection))})
    :seon.effect/counter (atom -1)})
 
 (defn- seed-write-back-cluster!
@@ -375,3 +404,38 @@
                  "facts, with no file read and no source comparison"))
         (.delete file)
         (.delete (.getParentFile file))))))
+
+(deftest edit-refusals-keep-their-filesystem-evidence
+  ;; THE CLASS: a typed refusal degraded into an opaque one. `seon.fs.jvm`'s
+  ;; internals refuse by throwing, and this handler calls them directly, so
+  ;; every filesystem refusal an edit met — a path outside the declared
+  ;; roots, a file past the read ceiling — reached the agent as
+  ;; `:seon.effect/handler-failed`, whose entire evidence is the owner
+  ;; symbol. The diagnosing agent then has nothing: that is the absence-as-
+  ;; health failure at an error boundary.
+  (test-support/with-database
+    (fn [connection]
+      (seed-write-back-cluster! connection)
+      (let [outside (.getCanonicalPath
+                     (java.io.File.
+                      (.toFile (Files/createTempDirectory
+                                "seon-edit-outside-roots"
+                                (into-array java.nio.file.attribute.FileAttribute [])))
+                      "subject.clj"))
+            _ (spit outside "(defn subject [] 1)\n")
+            refused
+            (binding [effect/*request-context*
+                      (write-back-request-context connection 7)]
+              (my.edit/form! {:my.edit/path outside
+                              :my.edit/expected-digest zero-digest
+                              :my.edit/form {:my.edit.form/head 'defn
+                                             :my.edit.form/name 'subject}
+                              :my.edit/operation :replace
+                              :my.edit/source "(defn subject [] 2)"}))]
+        (is (= :my.fs/path-refused (:seon.error/kind refused))
+            (str "the refusal must name what was missing, not collapse into "
+                 "a handler failure; got " (pr-str refused)))
+        (is (= outside (get-in refused [:seon.error/data :my.fs/path]))
+            "and it must carry the exact path it refused")
+        (.delete (java.io.File. outside))
+        (.delete (.getParentFile (java.io.File. outside)))))))

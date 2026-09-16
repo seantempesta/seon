@@ -11,6 +11,7 @@
             [seon.effect :as effect]
             [seon.flow :as flow]
             [seon.id :as id]
+            [seon.schema :as schema]
             [seon.sci.eval :as sci.eval]
             [seon.sci.kernel :as kernel]
             [seon.test-support :as test-support])
@@ -74,6 +75,13 @@
                unbounded-loop
                bounded-loop)]
     {:seon.effect-test/armed? (some? (kernel/current-arm))
+     ;; THE FRAME, NOT ONLY THE ARM. A detached handler rebuilds its world
+     ;; from the submission; when the schema projection was left out of that
+     ;; rebuild, every declaration this handler resolves — starting with the
+     ;; base SCI context below — refused with
+     ;; :seon.schema/missing-projection, and the cached delay turned that one
+     ;; refusal into :failed for every later case in the JVM.
+     :seon.effect-test/projection? (some? (schema/handed-projection))
      ;; Which arm, not merely whether one: a detached submission runs under
      ;; a FRESH arm whose deadline is its own, so the remaining milliseconds
      ;; here separate "bounded by my own limit" from "bounded by the turn's".
@@ -190,6 +198,12 @@
     :seon.flow/work-launcher launcher
     :seon.sci.admit/caps (config/result-caps (config/defaults))
     :seon.config/on-core-error :record
+    ;; Handed explicitly, exactly as `seon.sci.eval` hands it: a DETACHED
+    ;; handler rebuilds this frame from the submission, and without it any
+    ;; declaration it resolves refuses with :seon.schema/missing-projection.
+    :seon.sci.eval/projection-state
+    (atom {:seon.schema/projection
+           (db/carried-projection (db/db connection))})
     :seon.effect/counter (atom -1)}))
 
 (deftest background-settlement-carries-its-connection-across-a-thread-hop
@@ -505,6 +519,10 @@
                         {:seon.effect/background? true})))
                    (fn []))
           elapsed-ms (quot (- (System/nanoTime) started) 1000000)]
+      (is (true? (:seon.effect-test/projection? settled))
+          (str "a detached handler must carry its schema projection; without "
+               "it every declaration it resolves refuses. Got "
+               (pr-str settled)))
       (is (= :seon.effect-test/interrupted
              (:seon.effect-test/outcome settled))
           (str "an unbounded detached handler must be cut by the cluster's "
@@ -820,9 +838,18 @@
            [:seon.effect/id (id/digest 12 [:seon.effect/id "effect-run" 3 0])]))
 
 (defn- temporary-path
-  []
-  (let [directory (.toFile (java.nio.file.Files/createTempDirectory
-                            "seon-effect-facts"
+  "A fixture path INSIDE a declared filesystem root.
+
+  `:seon.config.fs/roots` is what `my.fs` admits, so a fixture writing to the
+  system temp directory is refused before the capability runs. The root is
+  derived from the same config the handler reads."
+  [connection]
+  (let [effective (config/effective (db/db connection) "default")
+        working (java.io.File. ^String (:seon.config.fs/working-root effective))
+        scratch (java.io.File. working "tmp")
+        _ (.mkdirs scratch)
+        directory (.toFile (java.nio.file.Files/createTempDirectory
+                            (.toPath scratch) "seon-effect-facts"
                             (into-array java.nio.file.attribute.FileAttribute [])))]
     (.getCanonicalPath (java.io.File. directory "written.txt"))))
 
@@ -830,7 +857,7 @@
   (test-support/with-database
     (fn [connection]
       (seed-effect-run! connection)
-      (let [path (temporary-path)
+      (let [path (temporary-path connection)
             written
             (binding [effect/*request-context* (request-context connection)]
               (my.fs/write! {:my.fs/path path
@@ -862,7 +889,7 @@
          :seon.cluster.eval/run [:seon.turn/id "effect-run"]
          :seon.cluster.eval/ordinal 3
          :seon.cluster.eval/at (Date.)}])
-      (let [path (temporary-path)]
+      (let [path (temporary-path connection)]
         (binding [effect/*request-context* (request-context connection)]
           (my.fs/write! {:my.fs/path path
                          :my.fs/content {:my.fs/text "written\n"}
