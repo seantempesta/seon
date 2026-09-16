@@ -48,7 +48,17 @@
     ;; These ordinary public functions are therefore visible to the derived
     ;; custody census and require the same explicit review as prior members.
     ["seon.operator/connection" :seon.db/connection]
-    ["seon.sci.eval/fork-candidate-ctx" :seon.sci.eval/ctx]})
+    ["seon.sci.eval/fork-candidate-ctx" :seon.sci.eval/ctx]
+    ;; Reviewed 2026-09-16. `acquire-context!` IS the per-agent context
+    ;; acquisition owner: it forks the cluster ctx once per agent and keeps
+    ;; the fork under the cluster's context-state monitor, so the custody it
+    ;; returns is the custody it just minted for that agent.
+    ["seon.cluster.agent/acquire-context!" :seon.sci.eval/ctx]
+    ;; `carry-connection-projection-state!` returns the very connection it was
+    ;; handed after attaching the owning projection state (law 2.1). Like
+    ;; `seon.db/supplied-connection` it widens no custody: it can only return
+    ;; the connection its caller already holds.
+    ["seon.db/carry-connection-projection-state!" :seon.db/connection]})
 
 (def ^:private custody-returning-query
   '[:find ?function-symbol ?schema-key
@@ -263,21 +273,33 @@
           (let [ctx-a (eval/cluster-ctx @connection-a connection-a)
                 _ (sci/intern ctx-a 'user 'own-connection connection-a)
                 _ (sci/intern ctx-a 'user 'foreign-connection connection-b)
+                ;; A message is its recipient and its content: the declared
+                ;; entity requires `:seon.message/to` and
+                ;; `:seon.message/content`, so each write mints (upserts) the
+                ;; one recipient agent in the same transaction and addresses
+                ;; the message to it. A refused transaction would make every
+                ;; isolation assertion below vacuously true.
+                message-data
+                (fn [message-id]
+                  (str "[{:db/id -1 :seon.agent/id \"custody-recipient\"} "
+                       "{:seon.message/id \"" message-id "\" "
+                       ":seon.message/to -1 "
+                       ":seon.message/content \"custody isolation probe\"}]"))
                 own
                 (evaluate-in
                  ctx-a
                  (str "(seon.db/transact! own-connection "
-                      "[{:seon.message/id \"custody-own\"}])"))
+                      (message-data "custody-own") ")"))
                 ambient
                 (evaluate-in
                  ctx-a
                  (str "(seon.db/transact! "
-                      "[{:seon.message/id \"custody-ambient\"}])"))
+                      (message-data "custody-ambient") ")"))
                 foreign
                 (evaluate-in
                  ctx-a
                  (str "(seon.db/transact! foreign-connection "
-                      "[{:seon.message/id \"custody-foreign\"}])"))
+                      (message-data "custody-foreign") ")"))
                 message-ids
                 (fn [connection]
                   (set
