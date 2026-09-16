@@ -834,4 +834,5 @@ warm (the night's opening complaint of 1.8 s stands fixed across every
 landing). Store: 99 MB at the reset → 3.6 GB two and a half hours later
 (~1.4 GB/hour of copy-on-write leaves with only the weekly GC) — the owner's
 GC-signal decision is the standing priority. `bin/issues-index --check`
-exits 1 (detail in the next note).
+exited 1 on five notes declared `type: defect` (the README's one type is
+`issue`); corrected → exit 0, 268 open notes, 0 refusals.
