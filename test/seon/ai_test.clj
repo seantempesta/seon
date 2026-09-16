@@ -422,10 +422,10 @@
              :seon.ai.model/last-used-at (java.util.Date. 2000)
              :seon.ai.model/last-latency-ms 200
              :seon.ai/usage {"completion_tokens" 20}}]
-        (db/transact! connection
-                      (ai/model-observation-tx @connection first-observation))
-        (db/transact! connection
-                      (ai/model-observation-tx @connection second-observation))
+        (test-support/transacted! connection
+                                  (ai/model-observation-tx @connection first-observation))
+        (test-support/transacted! connection
+                                  (ai/model-observation-tx @connection second-observation))
         (is (= 100.0
                (:seon.ai.model/last-tokens-per-second
                 (ai/model-row @connection "registered-model"))))
@@ -622,11 +622,11 @@
 (deftest agent-overlay-reads-only-derived-per-agent-attributes
   (test-support/with-database
     (fn [connection]
-      (db/transact! connection
-                  [{:seon.agent/id "planner"
-                    :seon.agent/settings
-                    {:seon.config.ai/model "planner-model"
-                     :seon.config.ai/thinking :high}}])
+      (test-support/transacted! connection
+                              [{:seon.agent/id "planner"
+                                :seon.agent/settings
+                                {:seon.config.ai/model "planner-model"
+                                 :seon.config.ai/thinking :high}}])
       (is (= {:seon.config.ai/model "planner-model"
               :seon.config.ai/thinking :high}
              (ai/agent-overlay @connection "planner")))

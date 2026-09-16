@@ -9,10 +9,10 @@
 (deftest a-held-database-value-is-immutable-under-later-transactions
   (test-support/with-database
     (fn [connection]
-      (db/transact! connection [{:seon.cluster/name "held-basis"}])
+      (test-support/transacted! connection [{:seon.cluster/name "held-basis"}])
       (let [held @connection
             basis (db/basis-t held)]
-        (db/transact! connection [{:seon.cluster/name "after-held"}])
+        (test-support/transacted! connection [{:seon.cluster/name "after-held"}])
         (is (= basis (db/basis-t held))
             "a held value's basis never advances")
         (is (= ["held-basis"]

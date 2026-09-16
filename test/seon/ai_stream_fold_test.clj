@@ -347,9 +347,9 @@
             "the JDK value remains an Integer until the transaction boundary")
         (support/with-database
           (fn [connection]
-            (db/transact! connection
-                        [{:seon.agent/id "status-agent"}
-                         {:seon.turn/id "status-run" :seon.turn/agent [:seon.agent/id "status-agent"] :seon.turn/opened-tx "datomic.tx"}])
+            (support/transacted! connection
+                               [{:seon.agent/id "status-agent"}
+                                {:seon.turn/id "status-run" :seon.turn/agent [:seon.agent/id "status-agent"] :seon.turn/opened-tx "datomic.tx"}])
             ((ns-resolve 'seon.turn 'record-attempt!)
              {:seon.db/connection connection
               :seon.db.process/id "process/status-test"
@@ -374,10 +374,10 @@
   (support/with-database
     {::support/fresh-store? true}
     (fn [connection]
-      (db/transact! connection
-                  [{:seon.config.eval.result/blob-threshold 65536}
-                   {:seon.agent/id "reasoning-agent"}
-                   {:seon.turn/id "reasoning-run" :seon.turn/agent [:seon.agent/id "reasoning-agent"] :seon.turn/opened-tx "datomic.tx"}])
+      (support/transacted! connection
+                         [{:seon.config.eval.result/blob-threshold 65536}
+                          {:seon.agent/id "reasoning-agent"}
+                          {:seon.turn/id "reasoning-run" :seon.turn/agent [:seon.agent/id "reasoning-agent"] :seon.turn/opened-tx "datomic.tx"}])
       (let [inline-reasoning "private reasoning"
             large (apply str (repeat 65537 "x"))
             cluster {:seon.db/connection connection

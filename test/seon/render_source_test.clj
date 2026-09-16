@@ -55,15 +55,15 @@
   (support/with-database
    (fn [connection]
      (support/seed-cluster! connection "memory-preview")
-     (db/transact! connection
-                   (into (agent/creation-tx
-                          {:seon.agent/id "memory-preview-agent"
-                           :seon.ns/name 'my.agents.memory-preview
-                           :seon.cluster/name "memory-preview"})
-                         [{:my.plan.item/id "preview-item" :my.plan.item/title "Before"}]))
-     (db/transact! connection
-                   (turn/open-tx
-                    {:seon.turn/id "agent-is-busy" :seon.turn/agent [:seon.agent/id "memory-preview-agent"] :seon.turn/opened-tx "datomic.tx"}))
+     (support/transacted! connection
+                          (into (agent/creation-tx
+                                 {:seon.agent/id "memory-preview-agent"
+                                  :seon.ns/name 'my.agents.memory-preview
+                                  :seon.cluster/name "memory-preview"})
+                                [{:my.plan.item/id "preview-item" :my.plan.item/title "Before"}]))
+     (support/transacted! connection
+                          (turn/open-tx
+                           {:seon.turn/id "agent-is-busy" :seon.turn/agent [:seon.agent/id "memory-preview-agent"] :seon.turn/opened-tx "datomic.tx"}))
      (let [database @connection
            ctx (support/fork-cluster-ctx connection)
            channel (async/chan 1)
@@ -128,7 +128,7 @@
          (is (= (db/basis-t database) (db/basis-t @connection))
              "previewing, including the busy agent, changes no facts")
          (is (nil? (db/pull @connection [:seon.turn/id] [:seon.turn/id cached-id])))
-         (db/transact! connection [{:my.plan.item/id "preview-item" :my.plan.item/title "After"}])
+         (support/transacted! connection [{:my.plan.item/id "preview-item" :my.plan.item/title "After"}])
          (let [next-calls (atom {})
                next-output (source-call
                             (assoc request :seon.db/db @connection
@@ -143,10 +143,10 @@
 (deftest default-source-reproduces-the-exact-reached-value
   (support/with-database
    (fn [connection]
-     (db/transact!
-      connection
-      [{:my.plan.item/id "source-provenance"
-        :my.plan.item/title "Exact title"}])
+     (support/transacted!
+             connection
+             [{:my.plan.item/id "source-provenance"
+               :my.plan.item/title "Exact title"}])
      (let [database @connection
            lookup [:my.plan.item/id "source-provenance"]
            entity (db/pull database '[*] lookup)
@@ -222,11 +222,11 @@
   (support/with-database
    (fn [connection]
      (support/seed-cluster! connection "source-contract")
-     (db/transact! connection
-                   (agent/creation-tx
-                    {:seon.agent/id "source-contract-agent"
-                     :seon.ns/name 'my.agents.source-contract
-                     :seon.cluster/name "source-contract"}))
+     (support/transacted! connection
+                          (agent/creation-tx
+                           {:seon.agent/id "source-contract-agent"
+                            :seon.ns/name 'my.agents.source-contract
+                            :seon.cluster/name "source-contract"}))
      (doseq [[run-id source result] [["declared-source" "(+ 1 1)"
                                      "#:seon.print{:face :seon.print/number, :value 2}"]
                                     ["stored-transcript" "(println \"already ran\")"

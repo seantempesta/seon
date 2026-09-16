@@ -283,8 +283,8 @@
          (is (= (assoc refusal :seon.error/message "classified transition refusal")
                 (db/transact! connection []))
              "the classified exception supplies its message; a deeper wrapper cannot replace it")))
-     (db/transact! connection
-                   [{:seon.agent/id "busy-agent"}])
+     (test-support/transacted! connection
+                               [{:seon.agent/id "busy-agent"}])
      (is (map? (db/transact!
                 connection
                 (turn/open-tx
@@ -394,7 +394,7 @@
 (deftest instrumented-wildcard-pull-keeps-unparsed-database-fields-ordinary
   (test-support/with-database
    (fn [connection]
-     (db/transact! connection [{:seon.agent/id "wildcard-agent"}])
+     (test-support/transacted! connection [{:seon.agent/id "wildcard-agent"}])
      (test-support/preserving-instrumentation-state
       (fn []
        (instrument/apply! {:seon.config/on-core-error :panic
@@ -458,10 +458,10 @@
     (schema.datahike/malli->datahike-schema-in
      fixture-projection [::row-id])}
    (fn [connection]
-     (db/transact! connection
-                   [{::row-id "charlie"}
-                    {::row-id "alpha"}
-                    {::row-id "bravo"}])
+     (test-support/transacted! connection
+                               [{::row-id "charlie"}
+                                {::row-id "alpha"}
+                                {::row-id "bravo"}])
      (is (= [{:id "alpha"}
              {:id "bravo"}]
             (db/q {:query '[:find ?id
@@ -594,7 +594,7 @@
 (deftest retained-read-evidence-invalidates-only-on-a-depended-attribute
   (test-support/with-database
    (fn [connection]
-     (db/transact! connection [[:db/add "evidence-a" :seon.cluster/name "evidence-a"]])
+     (test-support/transacted! connection [[:db/add "evidence-a" :seon.cluster/name "evidence-a"]])
      (let [captured (atom [])]
        (binding [db/*read-evidence-sink* captured]
          (db/q '[:find [?name ...]
@@ -604,11 +604,11 @@
          (is (every? #(schema/valid-candidate-value?
                        :seon.db/read-evidence %)
                      evidence))
-         (db/transact! connection
-                       [{:seon.agent/id "unrelated-agent"}])
+         (test-support/transacted! connection
+                                   [{:seon.agent/id "unrelated-agent"}])
          (is (db/read-evidence-current? @connection evidence)
              "an unrelated attribute revision retains the renderer read")
-         (db/transact! connection [[:db/add "evidence-b" :seon.cluster/name "evidence-b"]])
+         (test-support/transacted! connection [[:db/add "evidence-b" :seon.cluster/name "evidence-b"]])
          (is (not (db/read-evidence-current? @connection evidence))
              "a depended attribute revision makes the retained read stale"))))))
 
@@ -667,16 +667,16 @@
            "durable pull evidence retains only a fixed-size result digest")
        (is (every? #(find % :seon.db/read-result) process-local)
            "the explicit process-local cache retains stable replay values")
-       (db/transact! connection
-                     [{:seon.message/id "semantic-replay-unrelated"
-                       :seon.message/content "unrelated"}])
+       (test-support/transacted! connection
+                                 [{:seon.message/id "semantic-replay-unrelated"
+                                   :seon.message/content "unrelated"}])
        (is (true? (db/read-evidence-current? @connection durable))
            "an equal wildcard replay survives an unrelated transaction")
        (is (true? (db/read-evidence-current? @connection process-local))
            "an equal bounded replay keeps the process-local read current")
-       (db/transact! connection
-                     [{:seon.ns/name 'seon.flow
-                       :seon.ns/doc "semantic-replay-changed"}])
+       (test-support/transacted! connection
+                                 [{:seon.ns/name 'seon.flow
+                                   :seon.ns/doc "semantic-replay-changed"}])
        (is (false? (db/read-evidence-current? @connection process-local))
            "a changed selected value invalidates the retained read")))))
 
@@ -703,14 +703,14 @@
            (is (< (count (pr-str evidence)) 2000)
                "durable evidence size does not scale with the pull result")
            (when (= :seon.message/id (first subject))
-             (db/transact!
-              connection
-              [{:seon.cluster.eval/id "digest-persistence"
-                :seon.cluster.eval/run "datomic.tx"
-                :seon.cluster.eval/ordinal 0
-                :seon.cluster.eval/at #inst "2026-09-09T00:00:00Z"
-                :seon.cluster.eval/read-evidence
-                [(assoc (first evidence) :db/id "digest-persistence/0")]}])
+             (test-support/transacted!
+                          connection
+                          [{:seon.cluster.eval/id "digest-persistence"
+                            :seon.cluster.eval/run "datomic.tx"
+                            :seon.cluster.eval/ordinal 0
+                            :seon.cluster.eval/at #inst "2026-09-09T00:00:00Z"
+                            :seon.cluster.eval/read-evidence
+                            [(assoc (first evidence) :db/id "digest-persistence/0")]}])
              (is (= (:seon.db/read-result-digest (first evidence))
                     (get-in
                      (db/pull
@@ -763,11 +763,11 @@
   (with-codec-database
    {:seon.test-support/extra-schema component-evidence-schema}
    (fn [connection]
-     (db/transact! connection
-                   [{::component-root-id "root"
-                     ::component-child "child"}
-                    {:db/id "child"
-                     ::component-value "before"}])
+     (test-support/transacted! connection
+                               [{::component-root-id "root"
+                                 ::component-child "child"}
+                                {:db/id "child"
+                                 ::component-value "before"}])
      (let [captured (atom [])
            result (binding [db/*read-evidence-sink* captured]
                     (db/pull @connection
@@ -782,8 +782,8 @@
                       [0 :datahike.read/revision
                        :datahike.read/attributes]))
            "automatic component expansion retains every attribute read")
-       (db/transact! connection
-                     [[:db/add child-id ::component-value "after"]])
+       (test-support/transacted! connection
+                                 [[:db/add child-id ::component-value "after"]])
        (is (false? (db/read-evidence-current? @connection evidence))
            "a component-child-only change makes the retained pull stale")
        (let [changed-captured (atom [])]
@@ -792,8 +792,8 @@
                     [::component-child]
                     [::component-root-id "root"]))
          (let [changed-evidence (db/read-evidence @changed-captured)]
-           (db/transact! connection
-                         [[:db/retract child-id ::component-value]])
+           (test-support/transacted! connection
+                                     [[:db/retract child-id ::component-value]])
            (is (false? (db/read-evidence-current?
                         @connection changed-evidence))
                "retracting a component child attribute makes it stale")))))))
@@ -820,7 +820,7 @@
 (deftest every-database-value-reader-answers-for-all-four-view-shapes
   (test-support/with-database
    (fn [connection]
-     (db/transact! connection [{:seon.cluster/name "four-view"}])
+     (test-support/transacted! connection [{:seon.cluster/name "four-view"}])
      (let [views (four-view-table @connection)]
        (is (= #{:current :as-of :since :history} (set (keys views))))
        (doseq [[view database] views]
@@ -852,7 +852,7 @@
 (deftest an-as-of-view-is-keyed-on-its-own-fixed-point
   (test-support/with-database
    (fn [connection]
-     (db/transact! connection [{:seon.cluster/name "fixed-point-a"}])
+     (test-support/transacted! connection [{:seon.cluster/name "fixed-point-a"}])
      (let [database @connection
            earlier (db/as-of database (dec (long (db/basis-t database))))
            revision (fn [value]
@@ -972,12 +972,12 @@
   ;; `:seon.ns/steward`, which is a different attribute entirely.
   (test-support/with-database
    (fn [connection]
-     (db/transact!
-      connection
-      [{:seon.ns/name 'my.agents.db-shared}
-       {:seon.agent/id "db-shared-first"
-        :seon.agent/namespace
-        [:seon.ns/name 'my.agents.db-shared]}])
+     (test-support/transacted!
+                  connection
+                  [{:seon.ns/name 'my.agents.db-shared}
+                   {:seon.agent/id "db-shared-first"
+                    :seon.agent/namespace
+                    [:seon.ns/name 'my.agents.db-shared]}])
      (let [accepted
            (binding [db/*conn* connection]
              (db/transact!
@@ -1002,12 +1002,12 @@
 (deftest unique-rejection-names-the-existing-owner-as-data
   (test-support/with-database
    (fn [connection]
-     (db/transact!
-      connection
-      [{:seon.ns/name 'my.agents.db-conflict}
-       [:db/add "db-conflict-owner" :seon.cluster.eval/id "db-conflict-owner"]
-       [:db/add "db-conflict-owner" :seon.cluster.eval/refreshes
-        [:seon.ns/name 'my.agents.db-conflict]]])
+     (test-support/transacted!
+                  connection
+                  [{:seon.ns/name 'my.agents.db-conflict}
+                   [:db/add "db-conflict-owner" :seon.cluster.eval/id "db-conflict-owner"]
+                   [:db/add "db-conflict-owner" :seon.cluster.eval/refreshes
+                    [:seon.ns/name 'my.agents.db-conflict]]])
      (let [rejected
            (binding [db/*conn* connection]
              (db/transact!
@@ -1046,9 +1046,9 @@
 (deftest non-unique-writer-rejections-retain-their-datahike-data
   (test-support/with-database
    (fn [connection]
-     (db/transact!
-      connection
-      [{:seon.agent/id "db-cas-owner"}])
+     (test-support/transacted!
+                  connection
+                  [{:seon.agent/id "db-cas-owner"}])
      (let [rejected
            (db/transact!
             connection
@@ -1074,8 +1074,8 @@
            ;; that both `as-of` calls accepted while comparing two views of
            ;; nothing, until the armed contract asked what a time point is.
            before-t (db/basis-t before)]
-       (db/transact! connection
-                     [{:seon.message/id "db-test-temporal"}])
+       (test-support/transacted! connection
+                                 [{:seon.message/id "db-test-temporal"}])
        (let [after @connection]
          (binding [db/*conn* connection]
            (is (= (db/q exam-query (db/history after))
@@ -1104,13 +1104,13 @@
      (seed-diff-messages! connection)
      (let [before (db/basis-t @connection)
            at (:db/txInstant (db/pull @connection [:db/txInstant] before))]
-       (db/transact!
-        connection
-        [[:db/add [:seon.message/id "db-diff-m1"]
-          :seon.message/content "hello, edited"]
-         [:db.fn/retractEntity
-          [:seon.message/id "db-diff-m2"]]
-         {:seon.message/id "db-diff-m3" :seon.message/to [:seon.agent/id "db-diff-bob"] :seon.message/content "added" :seon.message/inbox [:seon.agent/id "db-diff-bob"]}])
+       (test-support/transacted!
+                    connection
+                    [[:db/add [:seon.message/id "db-diff-m1"]
+                      :seon.message/content "hello, edited"]
+                     [:db.fn/retractEntity
+                      [:seon.message/id "db-diff-m2"]]
+                     {:seon.message/id "db-diff-m3" :seon.message/to [:seon.agent/id "db-diff-bob"] :seon.message/content "added" :seon.message/inbox [:seon.agent/id "db-diff-bob"]}])
        (binding [db/*conn* connection]
          (let [result (db/diff before #'message/inbox "db-diff-bob")
                current (db/basis-t @connection)]
@@ -1241,8 +1241,8 @@
 (deftest invalid-read-identities-are-diagnostics-never-absence
   (test-support/with-database
    (fn [connection]
-     (db/transact! connection
-                   [{:seon.agent/id "identity-admission-present"}])
+     (test-support/transacted! connection
+                               [{:seon.agent/id "identity-admission-present"}])
      (let [unknown-attribute
            (db/q '[:find ?entity
                    :where [?entity :seon.agent/idd _]]
@@ -1303,8 +1303,8 @@
 (deftest uninstalled-pull-attributes-refuse-without-writing
   (test-support/with-database
    (fn [connection]
-     (db/transact! connection
-                   [[:db/add "diagnostic-pull-run" :seon.turn/id "diagnostic-pull-run"]])
+     (test-support/transacted! connection
+                               [[:db/add "diagnostic-pull-run" :seon.turn/id "diagnostic-pull-run"]])
      (let [database @connection
            basis-before (db/basis-t database)
            uninstalled [:seon.turn/generated-at
@@ -1331,8 +1331,8 @@
 (deftest temporal-database-identities-use-the-origin-schema
   (test-support/with-database
    (fn [connection]
-     (db/transact! connection
-                   [{:seon.agent/id "temporal-schema-present"}])
+     (test-support/transacted! connection
+                               [{:seon.agent/id "temporal-schema-present"}])
      (let [database @connection
            basis (db/basis-t database)
            views [(db/history database)

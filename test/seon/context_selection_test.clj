@@ -130,31 +130,31 @@
   (test-support/with-database
    (fn [connection]
      (let [closed-at #inst "2026-09-06T00:00:00Z"
-           _ (db/transact!
-              connection
-              [{:seon.agent/id "compact-agent"}
-               {:seon.turn/id "compact-before" :seon.turn/agent [:seon.agent/id "compact-agent"] :seon.turn/closed-tx "datomic.tx"}
-               {:seon.turn/id "compact-after" :seon.turn/agent [:seon.agent/id "compact-agent"] :seon.turn/closed-tx "datomic.tx"}
-               {:seon.ns/name 'compact.context}
-               {:seon.cluster.eval/id "compact-before-0"
-                :seon.cluster.eval/run
-                [:seon.turn/id "compact-before"]
-                :seon.cluster.eval/ordinal 0
-                :seon.cluster.eval/author :system
-                :seon.cluster.eval/source "(identity 1)"
-                :seon.cluster.eval/ns [:seon.ns/name 'compact.context]
-                :seon.cluster.eval/result-edn "1"}
-               {:seon.cluster.eval/id "compact-after-0"
-                :seon.cluster.eval/run
-                [:seon.turn/id "compact-after"]
-                :seon.cluster.eval/ordinal 0
-                :seon.cluster.eval/author :system
-                :seon.cluster.eval/source "(identity 1)"
-                :seon.cluster.eval/ns [:seon.ns/name 'compact.context]
-                :seon.cluster.eval/result-edn "2"}])
-           _ (db/transact!
-              connection
-              [(append-call "compact-agent" "compact-before" "compact-choice")])
+           _ (test-support/transacted!
+                          connection
+                          [{:seon.agent/id "compact-agent"}
+                           {:seon.turn/id "compact-before" :seon.turn/agent [:seon.agent/id "compact-agent"] :seon.turn/closed-tx "datomic.tx"}
+                           {:seon.turn/id "compact-after" :seon.turn/agent [:seon.agent/id "compact-agent"] :seon.turn/closed-tx "datomic.tx"}
+                           {:seon.ns/name 'compact.context}
+                           {:seon.cluster.eval/id "compact-before-0"
+                            :seon.cluster.eval/run
+                            [:seon.turn/id "compact-before"]
+                            :seon.cluster.eval/ordinal 0
+                            :seon.cluster.eval/author :system
+                            :seon.cluster.eval/source "(identity 1)"
+                            :seon.cluster.eval/ns [:seon.ns/name 'compact.context]
+                            :seon.cluster.eval/result-edn "1"}
+                           {:seon.cluster.eval/id "compact-after-0"
+                            :seon.cluster.eval/run
+                            [:seon.turn/id "compact-after"]
+                            :seon.cluster.eval/ordinal 0
+                            :seon.cluster.eval/author :system
+                            :seon.cluster.eval/source "(identity 1)"
+                            :seon.cluster.eval/ns [:seon.ns/name 'compact.context]
+                            :seon.cluster.eval/result-edn "2"}])
+           _ (test-support/transacted!
+                          connection
+                          [(append-call "compact-agent" "compact-before" "compact-choice")])
            before (first (context/selection @connection "compact-agent"))
            expected (:seon.context.contribution/evaluations before)
            comparison

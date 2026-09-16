@@ -53,10 +53,10 @@
 (deftest program-identity-excludes-results-and-includes-admitted-source
   (support/with-database
     (fn [connection]
-      (db/transact! connection
-                    [{:seon.test/sym "provenance.example/check"
-                      :seon.schema.admission/source :core
-                      :seon.test/source "(deftest check (is true))"}])
+      (support/transacted! connection
+                           [{:seon.test/sym "provenance.example/check"
+                             :seon.schema.admission/source :core
+                             :seon.test/source "(deftest check (is true))"}])
       (let [before (runner/program-digest @connection)
             captured (completion @connection 1)]
         (runner/commit-results! connection captured)
@@ -75,10 +75,10 @@
       (let [symbol "provenance.example/check"
             digest (runner/program-digest @connection)]
         (is (false? (seon-test/verified? @connection symbol digest)))
-        (db/transact! connection
-                      [{:seon.test/sym symbol
-                        :seon.schema.admission/source :core
-                        :seon.test/source "(deftest check (is true))"}])
+        (support/transacted! connection
+                             [{:seon.test/sym symbol
+                               :seon.schema.admission/source :core
+                               :seon.test/source "(deftest check (is true))"}])
         (let [captured (completion @connection 1)
               digest (get-in captured [:seon.test.run/provenance :seon.test.run/program-digest])]
           (is (false? (seon-test/verified? @connection symbol digest)))

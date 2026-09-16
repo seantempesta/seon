@@ -244,16 +244,16 @@
   (support/with-database
    (fn [connection]
      (config/apply! {:seon.db/connection connection})
-     (db/transact!
-      connection
-      (into (agent/creation-tx
-             {:seon.agent/id "usage-facts"
-              :seon.ns/name 'my.agents.usage-facts
-              :seon.cluster/name "default"})
-            (turn/open-tx
-             {:seon.turn/id "usage-facts-turn"
-              :seon.turn/agent [:seon.agent/id "usage-facts"]
-              :seon.turn/opened-tx "datomic.tx"})))
+     (support/transacted!
+             connection
+             (into (agent/creation-tx
+                    {:seon.agent/id "usage-facts"
+                     :seon.ns/name 'my.agents.usage-facts
+                     :seon.cluster/name "default"})
+                   (turn/open-tx
+                    {:seon.turn/id "usage-facts-turn"
+                     :seon.turn/agent [:seon.agent/id "usage-facts"]
+                     :seon.turn/opened-tx "datomic.tx"})))
      (let [usage {"prompt_tokens" 22134 "completion_tokens" 184
                   "total_tokens" 22318
                   "prompt_tokens_details" {"cached_tokens" 21504}
@@ -283,16 +283,16 @@
   (support/with-database
    (fn [connection]
      (config/apply! {:seon.db/connection connection})
-     (db/transact!
-      connection
-      (into (agent/creation-tx
-             {:seon.agent/id "usage-facts"
-              :seon.ns/name 'my.agents.usage-facts
-              :seon.cluster/name "default"})
-            (turn/open-tx
-             {:seon.turn/id "usage-facts-turn"
-              :seon.turn/agent [:seon.agent/id "usage-facts"]
-              :seon.turn/opened-tx "datomic.tx"})))
+     (support/transacted!
+             connection
+             (into (agent/creation-tx
+                    {:seon.agent/id "usage-facts"
+                     :seon.ns/name 'my.agents.usage-facts
+                     :seon.cluster/name "default"})
+                   (turn/open-tx
+                    {:seon.turn/id "usage-facts-turn"
+                     :seon.turn/agent [:seon.agent/id "usage-facts"]
+                     :seon.turn/opened-tx "datomic.tx"})))
      (let [usage {"prompt_tokens" 22134 "completion_tokens" 184
                   "total_tokens" 22318
                   "prompt_tokens_details" {"cached_tokens" 21504}
@@ -324,20 +324,20 @@
   (support/with-database
    (fn [connection]
      (support/seed-cluster! connection "renderer-facts")
-     (db/transact! connection
-       [{:seon.ns/name 'user}
-        {:seon.agent/id "renderer-facts"}
-        {:seon.turn/id "renderer-facts-turn"
-         :seon.turn/agent [:seon.agent/id "renderer-facts"]
-         :seon.turn/opened-tx "datomic.tx"}])
+     (support/transacted! connection
+              [{:seon.ns/name 'user}
+               {:seon.agent/id "renderer-facts"}
+               {:seon.turn/id "renderer-facts-turn"
+                :seon.turn/agent [:seon.agent/id "renderer-facts"]
+                :seon.turn/opened-tx "datomic.tx"}])
      (let [ctx (support/fork-cluster-ctx connection "renderer-facts")
            configuration (support/effective-config)]
        (doseq [[ordinal source expected] [[0 "(dir seon.repl)" 'seon.repl/render-directory-ai]
                                           [1 "{:example/plain 1}" nil]]]
-         (db/transact! connection
-           (turn/receipt-start-tx
-            {:seon.turn/id "renderer-facts-turn"
-             :seon.cluster.eval/ordinal ordinal :seon.cluster.eval/at (java.util.Date.)}))
+         (support/transacted! connection
+                  (turn/receipt-start-tx
+                   {:seon.turn/id "renderer-facts-turn"
+                    :seon.cluster.eval/ordinal ordinal :seon.cluster.eval/at (java.util.Date.)}))
          (let [evaluation (seon.sci.eval/evaluate
                             {:seon.cluster.eval/source source
                              :seon.sci.eval/ctx ctx :seon.db/db (db/db connection)

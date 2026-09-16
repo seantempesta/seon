@@ -207,10 +207,10 @@
   (test-support/with-database
     {::test-support/extra-schema fault-schema}
     (fn [connection]
-      (db/transact!
-       connection
-       [{::core-error-config-id "testbed"
-         ::on-core-error :record}])
+      (test-support/transacted!
+                   connection
+                   [{::core-error-config-id "testbed"
+                     ::on-core-error :record}])
       (body connection))))
 
 (defn- core-error-mode
@@ -226,11 +226,11 @@
   [connection fault]
   (let [message (ex-message (::flow/ex fault))
         signature (str (::flow/pid fault) "|" message)]
-    (db/transact!
-     connection
-     [{::fault-id (random-uuid)
-       ::fault-proc (::flow/pid fault)
-       ::fault-message message}])
+    (test-support/transacted!
+                 connection
+                 [{::fault-id (random-uuid)
+                   ::fault-proc (::flow/pid fault)
+                   ::fault-message message}])
     [{:seon.error/signature signature} ::sut/committed false]))
 
 (defn- committed-faults

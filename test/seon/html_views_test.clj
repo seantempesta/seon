@@ -37,7 +37,7 @@
 (deftest plan-pairs-are-readable-with-unchanged-ai
   (support/with-database
     (fn [connection]
-      (db/transact! connection [{:seon.agent/id "alice"}])
+      (support/transacted! connection [{:seon.agent/id "alice"}])
       (plan/plan! {:my.plan/objective "Ship a clear plan"
                    :my.plan/steps [{:my.plan.item/id "first" :my.plan.item/title "Prepare"}
                                    {:my.plan.item/id "second" :my.plan.item/title "Ship"
@@ -61,8 +61,8 @@
   (support/with-database
     (fn [connection]
       (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "html-views"})
-      (db/transact! connection [{:seon.agent/id "alice"
-                                 :seon.agent/settings {:seon.config.eval/time-limit-ms 10000}}])
+      (support/transacted! connection [{:seon.agent/id "alice"
+                                        :seon.agent/settings {:seon.config.eval/time-limit-ms 10000}}])
       (let [unit {:seon.db/db @connection :seon.agent/id "alice"}
             html (agent/render-settings-html unit)
             printed (hiccup/->string html)]
@@ -75,29 +75,29 @@
 (deftest message-pairs-derive-unread-and-preserve-ai
   (support/with-database
     (fn [connection]
-      (db/transact! connection [{:seon.agent/id "alice"} {:seon.agent/id "bob"}])
-      (db/transact! connection [{:seon.message/id "hello" :seon.message/content "Hello\nagain"
-                                 :seon.message/from [:seon.agent/id "bob"]
-                                 :seon.message/to [:seon.agent/id "alice"]
-                                 :seon.message/inbox [:seon.agent/id "alice"]}])
+      (support/transacted! connection [{:seon.agent/id "alice"} {:seon.agent/id "bob"}])
+      (support/transacted! connection [{:seon.message/id "hello" :seon.message/content "Hello\nagain"
+                                        :seon.message/from [:seon.agent/id "bob"]
+                                        :seon.message/to [:seon.agent/id "alice"]
+                                        :seon.message/inbox [:seon.agent/id "alice"]}])
       (let [row (db/pull @connection '[*] [:seon.message/id "hello"])
             unit (assoc row :seon.db/db @connection)]
         (readable! (message/render-html unit) ["Hello\nagain" "unread" "alice" "bob" "title="])
         (readable! (message/render-inbox-html [row] @connection) ["Messages (1)" "unread"])
         (is (= (golden :message) (message/render-ai unit)))
         (is (= (golden :inbox) (message/render-inbox-ai [row])))
-        (db/transact! connection [[:db/retract [:seon.message/id "hello"] :seon.message/inbox]])
+        (support/transacted! connection [[:db/retract [:seon.message/id "hello"] :seon.message/inbox]])
         (readable! (message/render-html (assoc (db/pull @connection '[*] [:seon.message/id "hello"])
                                               :seon.db/db @connection)) ["handled"])))))
 
 (deftest note-pairs-link-titles-and-preserve-ai
   (support/with-database
     (fn [connection]
-      (db/transact! connection [{:seon.agent/id "alice"}
-                                 {:my.plan.item/id "first" :my.plan.item/title "Prepare"}])
-      (db/transact! connection [{:my.note/id "observation" :my.note/content "Verified"
-                                 :my.note/agent [:seon.agent/id "alice"]
-                                 :my.note/about [:my.plan.item/id "first"]}])
+      (support/transacted! connection [{:seon.agent/id "alice"}
+                                        {:my.plan.item/id "first" :my.plan.item/title "Prepare"}])
+      (support/transacted! connection [{:my.note/id "observation" :my.note/content "Verified"
+                                        :my.note/agent [:seon.agent/id "alice"]
+                                        :my.note/about [:my.plan.item/id "first"]}])
       (let [row (assoc (db/pull @connection '[*] [:my.note/id "observation"]) :seon.db/db @connection)
             unit {:seon.agent/id "alice" :seon.db/db @connection}]
         (readable! (note/render-note-html row) ["observation" "Verified" "Prepare" "datetime="])
@@ -118,9 +118,9 @@
 (deftest identity-pairs-preserve-ai
   (support/with-database
     (fn [connection]
-      (db/transact! connection (cluster.agent/creation-tx
-                               {:seon.agent/id "alice" :seon.ns/name 'my.agents.alice
-                                :seon.cluster/name "fixture"}))
+      (support/transacted! connection (cluster.agent/creation-tx
+                                      {:seon.agent/id "alice" :seon.ns/name 'my.agents.alice
+                                       :seon.cluster/name "fixture"}))
       (let [unit {:seon.agent/id "alice" :seon.db/db @connection}
             creation {:seon.agent/id "alice" :seon.ns/name 'my.agents.alice
                       :seon.cluster/name "fixture" :seon.turn/id "opening"}]

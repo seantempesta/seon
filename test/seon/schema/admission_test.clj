@@ -21,10 +21,10 @@
         _ (d/create-database configuration)
         connection (d/connect configuration)]
     (try
-      (db/transact!
-       connection
-       (schema.datahike/malli->datahike-schema
-        (schema/canonical-database-attributes)))
+      (test-support/transacted!
+                   connection
+                   (schema.datahike/malli->datahike-schema
+                    (schema/canonical-database-attributes)))
       (body connection)
       (finally
         (d/release connection)

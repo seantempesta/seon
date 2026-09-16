@@ -73,10 +73,10 @@
              :seon.maintenance.result/process-census-processes)))))
     (test-support/with-database
       (fn [connection]
-        (db/transact!
-         connection
-         [(assoc projected
-                 :seon.maintenance.result/id "census-result/1")])
+        (test-support/transacted!
+                     connection
+                     [(assoc projected
+                             :seon.maintenance.result/id "census-result/1")])
         (is (= #{[41 false "default"]}
                (db/q
                 '[:find ?pid ?responsive ?advertisement
@@ -168,9 +168,9 @@
                 :seon.operator.reap/result public-result)))
     (test-support/with-database
       (fn [connection]
-        (db/transact!
-         connection
-         [(assoc projected :seon.maintenance.result/id "reap-result/1")])
+        (test-support/transacted!
+                     connection
+                     [(assoc projected :seon.maintenance.result/id "reap-result/1")])
         (is (= #{[51 :prepl]}
                (db/q
                 '[:find ?pid ?stop-path
@@ -213,9 +213,9 @@
                 :seon.operator.cluster-cleanup/result public-result)))
     (test-support/with-database
       (fn [connection]
-        (db/transact!
-         connection
-         [(assoc projected :seon.maintenance.result/id "cleanup-result/1")])
+        (test-support/transacted!
+                     connection
+                     [(assoc projected :seon.maintenance.result/id "cleanup-result/1")])
         (is (= #{["retired" :cluster/retired 8192 true]}
                (db/q
                 '[:find ?cluster ?branch ?bytes ?complete
@@ -286,12 +286,12 @@
         footprint-handler "seon.operator/observe-footprint!"
         census-task "root/maintenance/process-census"
         census-handler "seon.operator/census-processes!"]
-    (db/transact!
-     connection
-     (into [{:seon.agent/id "root"}]
-           cat
-           [(task-transaction footprint-task footprint-handler)
-            (task-transaction census-task census-handler)]))
+    (test-support/transacted!
+                 connection
+                 (into [{:seon.agent/id "root"}]
+                       cat
+                       [(task-transaction footprint-task footprint-handler)
+                        (task-transaction census-task census-handler)]))
     {:footprint-task footprint-task
      :footprint-handler footprint-handler
      :census-task census-task
@@ -307,42 +307,42 @@
           (is (= "Maintenance: no task has run yet."
                  (maintenance/render-report-ai
                   (maintenance/report @connection)))))
-        (db/transact!
-         connection
-         (into [] cat
-          [(receipt
-           footprint-task footprint-handler "footprint/1" at-1
-           {:seon.maintenance.receipt/completed-at at-1
-            :seon.maintenance.receipt/result
-            {:seon.maintenance.result/id "footprint-result/1"
-             :seon.operator.footprint/root "/repo/operator"
-             :seon.operator.footprint/file-bytes 4096
-             :seon.operator.footprint/usable-bytes 10737418240
-             :seon.operator.footprint/total-bytes 21474836480
-             :seon.operator.footprint/usable-ratio 0.5
-             :seon.operator.footprint/observed-at at-1
-             :seon.operator/low-space? false}})
-          (receipt
-           census-task census-handler "census/1" at-1
-           {:seon.maintenance.receipt/completed-at at-1
-            :seon.maintenance.receipt/result
-            (assoc (maintenance/result-entity
-                    (assoc (census-result)
-                           :seon.operator.process-census/complete? true
-                           :seon.operator.process-census/unresponsive []
-                           :seon.operator.process-census/unclaimed []
-                           :seon.operator.process-census/claim-errors []))
-                   :seon.maintenance.result/id "census-result/2")})]))
+        (test-support/transacted!
+                     connection
+                     (into [] cat
+                      [(receipt
+                       footprint-task footprint-handler "footprint/1" at-1
+                       {:seon.maintenance.receipt/completed-at at-1
+                        :seon.maintenance.receipt/result
+                        {:seon.maintenance.result/id "footprint-result/1"
+                         :seon.operator.footprint/root "/repo/operator"
+                         :seon.operator.footprint/file-bytes 4096
+                         :seon.operator.footprint/usable-bytes 10737418240
+                         :seon.operator.footprint/total-bytes 21474836480
+                         :seon.operator.footprint/usable-ratio 0.5
+                         :seon.operator.footprint/observed-at at-1
+                         :seon.operator/low-space? false}})
+                      (receipt
+                       census-task census-handler "census/1" at-1
+                       {:seon.maintenance.receipt/completed-at at-1
+                        :seon.maintenance.receipt/result
+                        (assoc (maintenance/result-entity
+                                (assoc (census-result)
+                                       :seon.operator.process-census/complete? true
+                                       :seon.operator.process-census/unresponsive []
+                                       :seon.operator.process-census/unclaimed []
+                                       :seon.operator.process-census/claim-errors []))
+                               :seon.maintenance.result/id "census-result/2")})]))
         (testing "all latest receipts render one green line"
           (let [report-value (maintenance/report @connection)]
             (is (= "Maintenance: 2 tasks succeeded; latest 2026-08-05T12:34:00Z; 0 errors."
                    (maintenance/render-report-ai report-value)))
             (is (= :article (first (maintenance/render-report-html
                                     report-value))))))
-        (db/transact!
-         connection
-         (receipt census-task census-handler "census/2" at-2
-                  {:seon.maintenance.receipt/interrupted-at at-2}))
+        (test-support/transacted!
+                     connection
+                     (receipt census-task census-handler "census/2" at-2
+                              {:seon.maintenance.receipt/interrupted-at at-2}))
         (testing "only the latest receipt per task determines the red face"
           (let [report-value (maintenance/report @connection)
                 rendered (maintenance/render-report-ai report-value)]

@@ -99,49 +99,49 @@
             receipt-id "maintenance-schema-test/receipt"
             nominal-at (instant "2026-08-05T02:00:00Z")
             observed-at (instant "2026-08-05T02:00:01Z")]
-        (db/transact!
-         connection
-         [{:seon.agent/id "maintenance-schema-test/root"}
-          {:seon.fn/sym handler}
-          {:seon.schedule/id schedule-id
-           :seon.schedule/expression "0 2 * * *"
-           :seon.schedule/zone-id "UTC"}
-          {:seon.schedule.task/id task-id
-           :seon.schedule.task/owner
-           [:seon.agent/id "maintenance-schema-test/root"]
-           :seon.schedule.task/function [:seon.fn/sym handler]
-           :seon.schedule.task/schedule [:seon.schedule/id schedule-id]}
-          {:seon.schedule.fire/id fire-id
-           :seon.schedule.fire/task [:seon.schedule.task/id task-id]
-           :seon.schedule.fire/nominal-at nominal-at
-           :seon.schedule.fire/observed-at observed-at}
-          {:seon.maintenance.receipt/id receipt-id
-           :seon.maintenance.receipt/fire [:seon.schedule.fire/id fire-id]
-           :seon.maintenance.receipt/task [:seon.schedule.task/id task-id]
-           :seon.maintenance.receipt/handler [:seon.fn/sym handler]
-           :seon.maintenance.receipt/request
-           {:seon.maintenance.request/id receipt-id
-            :seon.maintenance.request/task
-            [:seon.schedule.task/id task-id]
-            :seon.maintenance.request/fire
-            [:seon.schedule.fire/id fire-id]
-            :seon.maintenance.request/handler [:seon.fn/sym handler]
-            :seon.maintenance.request/agent
-            [:seon.agent/id "maintenance-schema-test/root"]
-            :seon.maintenance.request/cluster-name "default"
-            :seon.maintenance.request/repository-root "/repo"
-            :seon.maintenance.request/managed-root "/repo"
-            :seon.maintenance.request/log-dir
-            "/repo/data/clusters/default/logs"
-            :seon.maintenance.request/nominal-at nominal-at
-            :seon.maintenance.request/observed-at observed-at
-            :seon.config.maintenance/min-usable-bytes 1}
-           :seon.maintenance.receipt/started-at observed-at
-           :seon.maintenance.receipt/completed-at observed-at
-           :seon.maintenance.receipt/result
-           {:seon.maintenance.result/id receipt-id
-            :seon.operator.footprint/file-bytes 4096
-            :seon.operator/low-space? false}}])
+        (test-support/transacted!
+                     connection
+                     [{:seon.agent/id "maintenance-schema-test/root"}
+                      {:seon.fn/sym handler}
+                      {:seon.schedule/id schedule-id
+                       :seon.schedule/expression "0 2 * * *"
+                       :seon.schedule/zone-id "UTC"}
+                      {:seon.schedule.task/id task-id
+                       :seon.schedule.task/owner
+                       [:seon.agent/id "maintenance-schema-test/root"]
+                       :seon.schedule.task/function [:seon.fn/sym handler]
+                       :seon.schedule.task/schedule [:seon.schedule/id schedule-id]}
+                      {:seon.schedule.fire/id fire-id
+                       :seon.schedule.fire/task [:seon.schedule.task/id task-id]
+                       :seon.schedule.fire/nominal-at nominal-at
+                       :seon.schedule.fire/observed-at observed-at}
+                      {:seon.maintenance.receipt/id receipt-id
+                       :seon.maintenance.receipt/fire [:seon.schedule.fire/id fire-id]
+                       :seon.maintenance.receipt/task [:seon.schedule.task/id task-id]
+                       :seon.maintenance.receipt/handler [:seon.fn/sym handler]
+                       :seon.maintenance.receipt/request
+                       {:seon.maintenance.request/id receipt-id
+                        :seon.maintenance.request/task
+                        [:seon.schedule.task/id task-id]
+                        :seon.maintenance.request/fire
+                        [:seon.schedule.fire/id fire-id]
+                        :seon.maintenance.request/handler [:seon.fn/sym handler]
+                        :seon.maintenance.request/agent
+                        [:seon.agent/id "maintenance-schema-test/root"]
+                        :seon.maintenance.request/cluster-name "default"
+                        :seon.maintenance.request/repository-root "/repo"
+                        :seon.maintenance.request/managed-root "/repo"
+                        :seon.maintenance.request/log-dir
+                        "/repo/data/clusters/default/logs"
+                        :seon.maintenance.request/nominal-at nominal-at
+                        :seon.maintenance.request/observed-at observed-at
+                        :seon.config.maintenance/min-usable-bytes 1}
+                       :seon.maintenance.receipt/started-at observed-at
+                       :seon.maintenance.receipt/completed-at observed-at
+                       :seon.maintenance.receipt/result
+                       {:seon.maintenance.result/id receipt-id
+                        :seon.operator.footprint/file-bytes 4096
+                        :seon.operator/low-space? false}}])
         (is (= #{[receipt-id task-id 4096 false]}
                (db/q
                 '[:find ?receipt-id ?task-id ?bytes ?low-space
@@ -180,12 +180,12 @@
              :seon.operator.collect/reclaimed-bytes 4096
              :seon.operator.collect/verification-pass-swept 0
              :seon.operator.collect/complete? true}]
-        (db/transact!
-         connection
-         [(assoc (maintenance/result-entity log-result)
-                 :seon.maintenance.result/id "maintenance-result/log")
-          (assoc (maintenance/result-entity collect-result)
-                 :seon.maintenance.result/id "maintenance-result/collect")])
+        (test-support/transacted!
+                     connection
+                     [(assoc (maintenance/result-entity log-result)
+                             :seon.maintenance.result/id "maintenance-result/log")
+                      (assoc (maintenance/result-entity collect-result)
+                             :seon.maintenance.result/id "maintenance-result/collect")])
         (is (= "/repo/operator/logs/seon.log"
                (db/q '[:find ?path .
                        :where
@@ -215,11 +215,11 @@
                           :where [?task :seon.schedule.task/id ?task-id]]
                         @connection))
           "the config population does not own agent schedule rows")
-      (db/transact!
-       connection
-       (into [{:seon.agent/id "root"}]
-             (map (fn [row] {:seon.fn/sym (:seon.fn/sym row)}))
-             portfolio))
+      (test-support/transacted!
+                   connection
+                   (into [{:seon.agent/id "root"}]
+                         (map (fn [row] {:seon.fn/sym (:seon.fn/sym row)}))
+                         portfolio))
       (let [first-result
             (db/transact!
              connection [[:db.fn/call #'schedule/root-maintenance-seed-call]])]
@@ -244,10 +244,10 @@
                   [?schedule :seon.schedule/expression ?expression]
                   [?schedule :seon.schedule/zone-id ?zone-id]]
                 @connection))))
-      (db/transact!
-       connection
-       [{:seon.schedule/id "root/maintenance/footprint-schedule"
-         :seon.schedule/expression "7 4 * * *"}])
+      (test-support/transacted!
+                   connection
+                   [{:seon.schedule/id "root/maintenance/footprint-schedule"
+                     :seon.schedule/expression "7 4 * * *"}])
       (let [second-result
             (db/transact!
              connection [[:db.fn/call #'schedule/root-maintenance-seed-call]])]

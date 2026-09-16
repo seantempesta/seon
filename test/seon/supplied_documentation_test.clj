@@ -27,7 +27,7 @@
   (support/with-database
    (fn [connection]
      (support/seed-cluster! connection "supplied-docs")
-     (db/transact! connection [{:seon.agent/id "supplied-docs"} {:seon.agent/id "root"}])
+     (support/transacted! connection [{:seon.agent/id "supplied-docs"} {:seon.agent/id "root"}])
      (let [ctx (support/fork-cluster-ctx connection "supplied-docs")]
        (doseq [sym ['my.message/send 'my.note/add!]]
          (let [documented (evaluate ctx connection (str "(doc " sym ")"))

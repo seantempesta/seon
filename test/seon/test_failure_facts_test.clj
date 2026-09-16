@@ -296,12 +296,12 @@
         (runner/commit-results! connection (completion (db/db connection) s 1))
         (is (= :seon.test/unknown (:seon.error/kind (sut/changed-since-green (db/db connection) s))))
         (runner/commit-results! connection (completion (db/db connection) s 0))
-        (db/transact! connection [[:db/add [:seon.fn/sym a] :seon.fn/source "intermediate"]])
+        (support/transacted! connection [[:db/add [:seon.fn/sym a] :seon.fn/source "intermediate"]])
         (runner/commit-results! connection (completion (db/db connection) s 0))
         (is (= [] (sut/changed-since-green (db/db connection) s))
             "the later green is recognized even when its zero counts are unchanged")
-        (db/transact! connection [[:db.fn/retractAttribute [:seon.fn/sym a] :seon.fn/spec]
-                                 [:db/add [:seon.fn/sym b] :seon.fn/source "unrelated"]])
+        (support/transacted! connection [[:db.fn/retractAttribute [:seon.fn/sym a] :seon.fn/spec]
+                                        [:db/add [:seon.fn/sym b] :seon.fn/source "unrelated"]])
         (runner/commit-results! connection (completion (db/db connection) s 1))
         (is (= [a] (mapv :seon.fn/sym (sut/changed-since-green (db/db connection) s)))
             "spec retraction counts; a changed function outside the tested closure does not")))))

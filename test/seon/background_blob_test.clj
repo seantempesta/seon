@@ -80,15 +80,15 @@
 (deftest ^{:seon.test/fixture-observation "Background binary results must round-trip through the physical blob backend on both sides of the inline threshold."} background-binary-results-remain-exact-across-the-inline-threshold
   (with-file-effect-store
     (fn [connection]
-      (db/transact!
-       connection
-       [(assoc (config/defaults)
-               :seon.config/cluster "default"
-               :seon.config.eval.result/blob-threshold 8)
-        {:seon.agent/id "binary-agent"}
-        {:seon.turn/id "binary-run"
-         :seon.turn/agent
-         [:seon.agent/id "binary-agent"]}])
+      (support/transacted!
+              connection
+              [(assoc (config/defaults)
+                      :seon.config/cluster "default"
+                      :seon.config.eval.result/blob-threshold 8)
+               {:seon.agent/id "binary-agent"}
+               {:seon.turn/id "binary-run"
+                :seon.turn/agent
+                [:seon.agent/id "binary-agent"]}])
       (install-capability! connection)
       (let [threshold
             (db/q '[:find ?threshold .

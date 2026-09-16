@@ -323,8 +323,8 @@
                     :seon.schedule.fire/observed-at observed-at})]
         (seed-task! connection task-id
                     "seon.schedule-test/successful-handler")
-        (db/transact! connection
-                      {:tx-data [[:db.fn/call #'schedule/fire-call request]]})
+        (test-support/transacted! connection
+                                  {:tx-data [[:db.fn/call #'schedule/fire-call request]]})
         (#'cluster/recover-runs! connection)
         (is (= 0 (schedule/fire-due! connection "root" observed-at
                                      (execution-context))))

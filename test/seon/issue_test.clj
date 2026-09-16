@@ -156,9 +156,9 @@
    (let [shared (first (sort (filter #(clojure.string/starts-with? % "seon.db/")
                                      (seon.db/q '[:find [?sym ...] :where [_ :seon.fn/sym ?sym]]
                                                 (seon.db/db connection)))))
-         _ (seon.db/transact! connection [{:seon.issue/id shared :seon.issue/title "Shared spelling"
-                                           :seon.issue/status :open :seon.issue/severity :cleanup
-                                           :seon.issue/problem "Two identities, one spelling."}])
+         _ (seon.test-support/transacted! connection [{:seon.issue/id shared :seon.issue/title "Shared spelling"
+                                                       :seon.issue/status :open :seon.issue/severity :cleanup
+                                                       :seon.issue/problem "Two identities, one spelling."}])
          selected [{:seon.issue/path "docs/seon/issues/probe-ambiguous.md"
                     :seon.issue/text (str "---\ntype: issue\nstatus: open\nseverity: cleanup\ntags: [issue]\n---\n"
                                           "# Ambiguous\n## Problem\n" shared)}]
@@ -219,10 +219,10 @@
    (let [test-name "seon.issue-test/issue-worker-creation-is-atomic"
          issue-id "issue-family-opening"
          aid (seon.id/id [issue-id])]
-    (seon.db/transact! c [{:seon.issue/id issue-id :seon.issue/title "Verify issue opening"
-                          :seon.issue/status :open :seon.issue/severity :cleanup
-                          :seon.issue/problem "Read the issue and its success tests."
-                          :seon.issue/tests #{[:seon.test/sym test-name]}}])
+    (seon.test-support/transacted! c [{:seon.issue/id issue-id :seon.issue/title "Verify issue opening"
+                                      :seon.issue/status :open :seon.issue/severity :cleanup
+                                      :seon.issue/problem "Read the issue and its success tests."
+                                      :seon.issue/tests #{[:seon.test/sym test-name]}}])
     (let [started (seon.issue/start! {:seon.db/connection c :seon.issue/id issue-id
                                     :seon.issue/budget 1 :seon.ns/name 'my.agents.issue-opening
                                     :seon.config.ai/no-provider true})
@@ -277,8 +277,8 @@
  (seon.test-support/with-database
   (fn [c]
    (seon.test-support/seed-cluster! c "issue-family")
-   (seon.db/transact! c (seon.cluster.agent/creation-tx
-                         {:seon.agent/id "issue-author" :seon.ns/name 'my.agents.issue-author :seon.cluster/name "issue-family"}))
+   (seon.test-support/transacted! c (seon.cluster.agent/creation-tx
+                                     {:seon.agent/id "issue-author" :seon.ns/name 'my.agents.issue-author :seon.cluster/name "issue-family"}))
    (let [d (seon.db/db c)
          test-ref [:seon.test/sym (first (sort (seon.db/q '[:find [?s ...] :where [_ :seon.test/sym ?s]] d)))]
          request {:seon.db/connection c :seon.agent/id "issue-author"

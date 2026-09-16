@@ -159,7 +159,7 @@
       (test-support/with-database
         (fn [connection]
           (install-forms! connection forms)
-          (db/transact! connection [{used-key 7}])
+          (test-support/transacted! connection [{used-key 7}])
           (let [before @connection
                 result
                 (transact-result
@@ -188,7 +188,7 @@
   (test-support/with-database
     (fn [connection]
       (install-forms! connection {base-key (get forms base-key)})
-      (db/transact! connection [{base-key 7}])
+      (test-support/transacted! connection [{base-key 7}])
       (let [result
             (transact-result
              connection
@@ -208,16 +208,16 @@
   (test-support/with-database
     (fn [connection]
       (install-forms! connection {base-key (get forms base-key)})
-      (db/transact!
-       connection
-       [(schema-row unrelated-key [:string {:seon.db/index true}])])
+      (test-support/transacted!
+                   connection
+                   [(schema-row unrelated-key [:string {:seon.db/index true}])])
       (is (not (contains? (:schema @connection) unrelated-key)))
-      (db/transact! connection [{base-key 7}])
+      (test-support/transacted! connection [{base-key 7}])
       (let [entity (db/q '[:find ?entity .
                           :in $ ?attribute
                           :where [?entity ?attribute _]]
                         @connection base-key)]
-        (db/transact! connection [[:db/retract entity base-key]])
+        (test-support/transacted! connection [[:db/retract entity base-key]])
         (let [result
               (transact-result
                connection
@@ -225,7 +225,7 @@
                 (schema-row base-key
                             [:int {:min 1 :seon.db/index true}])))]
           (is (nil? (:error result)))
-          (db/transact! connection [{base-key 8}])
+          (test-support/transacted! connection [{base-key 8}])
           (is (= 8
                  (db/q '[:find ?value .
                         :in $ ?attribute
@@ -254,15 +254,15 @@
             request {:seon.turn/id run-id}]
         (install-forms! connection {base-key (get forms base-key)
                                     unrelated-key [:int {:seon.db/index true}]})
-        (db/transact! connection [{:seon.ns/name namespace-name
-                                   :seon.ns/source "(ns my.agents.schema-usage-guard)"}
-                                  {:seon.agent/id agent-id
-                                   :seon.agent/namespace
-                                   [:seon.ns/name namespace-name]}])
-        (db/transact! connection [{base-key 7}])
-        (db/transact!
-         connection
-         (turn/open-tx {:seon.turn/id run-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}))
+        (test-support/transacted! connection [{:seon.ns/name namespace-name
+                                               :seon.ns/source "(ns my.agents.schema-usage-guard)"}
+                                              {:seon.agent/id agent-id
+                                               :seon.agent/namespace
+                                               [:seon.ns/name namespace-name]}])
+        (test-support/transacted! connection [{base-key 7}])
+        (test-support/transacted!
+                     connection
+                     (turn/open-tx {:seon.turn/id run-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}))
         (testing "current data answers with the guard's typed refusal"
           (let [refusal
                 (transact-result
@@ -280,7 +280,7 @@
                                :in $ ?attribute
                                :where [?entity ?attribute _]]
                              @connection base-key)]
-            (db/transact! connection [[:db/retract entity base-key]])
+            (test-support/transacted! connection [[:db/retract entity base-key]])
             (is (nil? (:error
                        (transact-result
                         connection
@@ -292,9 +292,9 @@
                   (db/pull @connection [:seon.schema/form]
                            [:seon.schema/key base-key])))))
         (testing "a form another writer changed since the run opened refuses"
-          (db/transact! connection [{:seon.schema/key unrelated-key
-                                     :seon.schema/form
-                                     (pr-str [:string {:seon.db/index true}])}])
+          (test-support/transacted! connection [{:seon.schema/key unrelated-key
+                                                 :seon.schema/form
+                                                 (pr-str [:string {:seon.db/index true}])}])
           (let [refusal
                 (transact-result
                  connection
@@ -327,10 +327,10 @@
              entity-child-key [:int {:seon.db/index true}]
              entity-key entity-form}]
         (install-forms! connection selected-forms)
-        (db/transact!
-         connection
-         [(schema-row unrelated-key [:string {:seon.db/index true}])])
-        (db/transact! connection [{entity-child-key 7}])
+        (test-support/transacted!
+                     connection
+                     [(schema-row unrelated-key [:string {:seon.db/index true}])])
+        (test-support/transacted! connection [{entity-child-key 7}])
         (let [before @connection
               refusal
               (transact-result
@@ -350,7 +350,7 @@
                      :in $ ?attribute
                      :where [?entity ?attribute _]]
                    @connection entity-child-key)]
-          (db/transact! connection [[:db/retract entity entity-child-key]])
+          (test-support/transacted! connection [[:db/retract entity entity-child-key]])
           (let [result
                 (transact-result
                  connection
@@ -412,8 +412,8 @@
         (doseq [leaf-key [entity-id-key entity-child-key]]
           (is (live-schema-row? @connection leaf-key))
           (is (contains? (:schema @connection) leaf-key)))
-        (db/transact! connection [{entity-id-key "survivor"
-                                 entity-child-key 7}])
+        (test-support/transacted! connection [{entity-id-key "survivor"
+                                             entity-child-key 7}])
         (is (= ["survivor" 7]
                (db/q '[:find [?id ?child]
                       :in $ ?id-attribute ?child-attribute
@@ -444,14 +444,14 @@
   (test-support/with-database
     (fn [connection]
       (install-forms! connection {base-key (get forms base-key)})
-      (db/transact! connection [{base-key 7}])
+      (test-support/transacted! connection [{base-key 7}])
       (let [data-t (:max-tx @connection)
             entity
             (db/q '[:find ?entity .
                    :in $ ?attribute
                    :where [?entity ?attribute _]]
                  @connection base-key)]
-        (db/transact! connection [[:db/retract entity base-key]])
+        (test-support/transacted! connection [[:db/retract entity base-key]])
         (let [result
               (transact-result
                connection
@@ -490,14 +490,14 @@
             definition
             [:int {:seon.db/index true :seon.db/no-history? true}]]
         (install-forms! connection {schema-key definition})
-        (db/transact! connection [{schema-key 7}])
+        (test-support/transacted! connection [{schema-key 7}])
         (let [data-t (:max-tx @connection)
               entity
               (db/q '[:find ?entity .
                      :in $ ?attribute
                      :where [?entity ?attribute _]]
                    @connection schema-key)]
-          (db/transact! connection [[:db/retract entity schema-key]])
+          (test-support/transacted! connection [[:db/retract entity schema-key]])
           (is (nil?
                (db/q '[:find ?value .
                       :in $ ?attribute

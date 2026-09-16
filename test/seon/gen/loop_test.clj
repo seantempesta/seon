@@ -136,13 +136,13 @@
                     :seon.config.flow.io/concurrency 2)})]
       (try
        (test-support/seed-cluster! connection "generate-code-v0")
-       (db/transact! connection
-                   (conj cast-rows
-                         (:seon.config/desired-row
-                          (config/compile-manifest
-                           {:seon.boot/cluster-name "generate-code-v0"
-                            :seon.config/manifest
-                            {:seon.config.run/max-episode-runs 100}}))))
+       (test-support/transacted! connection
+                               (conj cast-rows
+                                     (:seon.config/desired-row
+                                      (config/compile-manifest
+                                       {:seon.boot/cluster-name "generate-code-v0"
+                                        :seon.config/manifest
+                                        {:seon.config.run/max-episode-runs 100}}))))
        ;; Unresolved calls cross the ordinary evaluator boundary; the
        ;; run loop's second static-admission pass was deleted with the
        ;; minimal turn, so no lint bypass is needed.
@@ -446,9 +446,9 @@
        ;; THE SURFACE: no new agent-facing construct — root's goal is an
        ;; ordinary message, and everything after it is the system's own
        ;; doing.
-       (db/transact! connection
-                   [{:seon.message/id "goal-1" :seon.message/to [:seon.agent/id "planner"] :seon.message/from [:seon.agent/id "root"] :seon.message/content (str "Build the widget helpers: my.gen.alpha owns "
-                          "the arithmetic and my.gen.beta owns the label.") :seon.message/inbox [:seon.agent/id "planner"]}])
+       (test-support/transacted! connection
+                               [{:seon.message/id "goal-1" :seon.message/to [:seon.agent/id "planner"] :seon.message/from [:seon.agent/id "root"] :seon.message/content (str "Build the widget helpers: my.gen.alpha owns "
+                                      "the arithmetic and my.gen.beta owns the label.") :seon.message/inbox [:seon.agent/id "planner"]}])
        (let [run-id (with-redefs [ai/complete staged-reply]
                       (drive! cluster 12 7))
              db @connection]
@@ -616,8 +616,8 @@
   (with-gen-cluster
    (fn [cluster]
      (let [connection (:seon.db/connection cluster)]
-       (db/transact! connection
-                   [{:seon.message/id "goal-1" :seon.message/to [:seon.agent/id "planner"] :seon.message/from [:seon.agent/id "root"] :seon.message/content "Count the primes." :seon.message/inbox [:seon.agent/id "planner"]}])
+       (test-support/transacted! connection
+                               [{:seon.message/id "goal-1" :seon.message/to [:seon.agent/id "planner"] :seon.message/from [:seon.agent/id "root"] :seon.message/content "Count the primes." :seon.message/inbox [:seon.agent/id "planner"]}])
        (let [run-id
              (with-redefs [ai/complete
                            (fn [{prompt :seon.ai/prompt}]
@@ -649,8 +649,8 @@
   (with-gen-cluster
    (fn [cluster]
      (let [connection (:seon.db/connection cluster)]
-       (db/transact! connection
-                   [{:seon.message/id "goal-1" :seon.message/to [:seon.agent/id "planner"] :seon.message/from [:seon.agent/id "root"] :seon.message/content "Build the helpers." :seon.message/inbox [:seon.agent/id "planner"]}])
+       (test-support/transacted! connection
+                               [{:seon.message/id "goal-1" :seon.message/to [:seon.agent/id "planner"] :seon.message/from [:seon.agent/id "root"] :seon.message/content "Build the helpers." :seon.message/inbox [:seon.agent/id "planner"]}])
        ;; every owner is mute; only the planner ever answers, and it
        ;; answers by claiming it is done
        (let [run-id

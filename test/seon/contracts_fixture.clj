@@ -71,8 +71,8 @@
      (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "contracts-plan"
                     :seon.config/manifest {:seon.config.ai/no-provider true
                                            :seon.config/on-core-error :panic}})
-     (db/transact! connection [{:seon.agent/id "contracts-plan"
-                               :seon.agent/namespace {:seon.ns/name 'my.agents.juniper}}])
+     (support/transacted! connection [{:seon.agent/id "contracts-plan"
+                                      :seon.agent/namespace {:seon.ns/name 'my.agents.juniper}}])
      (let [database (db/db connection)
            projection (schema/projection-from-database database)
            state (env/environment-state

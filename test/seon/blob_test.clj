@@ -33,19 +33,19 @@
       (support/delete-recursively! root-file))
     (let [opened (store/open-store! {:seon.store/dir (str root "/store")})]
       (try
-        (db/transact!
-         (:seon.store/connection-object opened)
-         [{:db/ident :seon.config.eval.result/blob-threshold
-           :db/valueType :db.type/long
-           :db/cardinality :db.cardinality/one}])
+        (support/transacted!
+                (:seon.store/connection-object opened)
+                [{:db/ident :seon.config.eval.result/blob-threshold
+                  :db/valueType :db.type/long
+                  :db/cardinality :db.cardinality/one}])
         (registry/branch! {:seon.store/store opened
                            :seon.cluster.registry/from :db
                            :seon.store/branch :blob-binary-test})
         (let [connection (store/open-branch! opened :blob-binary-test)]
           (try
-            (db/transact!
-             connection
-             [{:seon.config.eval.result/blob-threshold binary-threshold}])
+            (support/transacted!
+                    connection
+                    [{:seon.config.eval.result/blob-threshold binary-threshold}])
             (f connection root)
             (finally
               (d/release connection))))

@@ -203,7 +203,7 @@
        [(schema.datahike/malli->datahike-attr-in projection ::title)]}
       (fn [connection]
         (testing "derive, install, transact, and read through the public call shape"
-          (db/transact! connection [{::title "Alpha"}])
+          (support/transacted! connection [{::title "Alpha"}])
           (is (= "Alpha"
                  (db/q '[:find ?title .
                          :where [_ ::title ?title]]
@@ -236,9 +236,9 @@
               connection [[:db.fn/call row-tx {} row]]))
            attribute-form [:string {:seon.db/identity true}]
            argument-form [:map [attribute attribute]]]
-       (db/transact! connection
-                     [{:seon.ns/name namespace-name
-                       :seon.ns/source (pr-str (list 'ns namespace-name))}])
+       (support/transacted! connection
+                            [{:seon.ns/name namespace-name
+                              :seon.ns/source (pr-str (list 'ns namespace-name))}])
        (transact-row!
         {:seon.schema/key attribute
          :seon.schema/form (pr-str attribute-form)})
@@ -265,7 +265,7 @@
           [:map
            (merge {:seon.db/attributes true} renderers)
            [attribute attribute]])})
-       (db/transact! connection [{attribute "plan-1"}])
+       (support/transacted! connection [{attribute "plan-1"}])
        (let [raw-row
              (d/pull (db/db connection)
                      [:seon.render/ai :seon.render/html :seon.render/form]

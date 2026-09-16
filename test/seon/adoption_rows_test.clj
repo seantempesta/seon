@@ -27,28 +27,28 @@
             (str "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
                  "good [x] (inc x))")
 ]
-        (db/transact!
-         connection
-         [{:seon.agent/id agent-id
-           :seon.agent/namespace
-           {:seon.ns/name namespace-name
-            :seon.ns/source "(ns acquire.rows)"}}
-          {:seon.fn/sym "acquire.rows/bad"
-           :seon.schema.admission/source :agent
-           :seon.fn/ns [:seon.ns/name namespace-name]
-           :seon.fn/source
-           (str "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
-                "bad [x] (unavailable-function x))")
-           :seon.fn/arglists "([x])"
-           :seon.fn/private? false
-           :seon.fn/spec "[:=> [:cat :int] :int]"}
-          {:seon.fn/sym "acquire.rows/good"
-           :seon.schema.admission/source :agent
-           :seon.fn/ns [:seon.ns/name namespace-name]
-           :seon.fn/source good-source
-           :seon.fn/arglists "([x])"
-           :seon.fn/private? false
-           :seon.fn/spec "[:=> [:cat :int] :int]"}])
+        (test-support/transacted!
+                     connection
+                     [{:seon.agent/id agent-id
+                       :seon.agent/namespace
+                       {:seon.ns/name namespace-name
+                        :seon.ns/source "(ns acquire.rows)"}}
+                      {:seon.fn/sym "acquire.rows/bad"
+                       :seon.schema.admission/source :agent
+                       :seon.fn/ns [:seon.ns/name namespace-name]
+                       :seon.fn/source
+                       (str "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
+                            "bad [x] (unavailable-function x))")
+                       :seon.fn/arglists "([x])"
+                       :seon.fn/private? false
+                       :seon.fn/spec "[:=> [:cat :int] :int]"}
+                      {:seon.fn/sym "acquire.rows/good"
+                       :seon.schema.admission/source :agent
+                       :seon.fn/ns [:seon.ns/name namespace-name]
+                       :seon.fn/source good-source
+                       :seon.fn/arglists "([x])"
+                       :seon.fn/private? false
+                       :seon.fn/spec "[:=> [:cat :int] :int]"}])
         (let [ctx
               (assoc (eval/build-base-ctx)
                      :seon.sci.eval/custody

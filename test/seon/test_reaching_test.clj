@@ -66,12 +66,12 @@
                    (clojure.core/refer 'clojure.core)
                    (eval source))]
     (try
-      (db/transact! connection
-                    [{:seon.ns/name namespace-name}
-                     {:seon.test/sym test-symbol
-                      :seon.schema.admission/source :core
-                      :seon.test/ns [:seon.ns/name namespace-name]
-                      :seon.test/source (pr-str source)}])
+      (support/transacted! connection
+                           [{:seon.ns/name namespace-name}
+                            {:seon.test/sym test-symbol
+                             :seon.schema.admission/source :core
+                             :seon.test/ns [:seon.ns/name namespace-name]
+                             :seon.test/source (pr-str source)}])
       (assertion test-symbol test-var)
       (finally (remove-ns namespace-name)))))
 
@@ -194,7 +194,7 @@
     (fn [connection]
       (support/seed-cluster! connection "default")
       (let [namespace-name 'my.agents.reach-digest
-            _ (db/transact! connection [{:seon.ns/name namespace-name}])
+            _ (support/transacted! connection [{:seon.ns/name namespace-name}])
             ctx (support/fork-cluster-ctx connection)
             effective (seon.config/effective (db/db connection) "default")
             sources ["(defn largest-customer {:malli/schema [:=> [:cat [:vector {:min 1} [:map [:seon.test/pass-count :seon.test/pass-count]]]] [:map [:seon.test/pass-count :seon.test/pass-count]]]} [rows] (apply max-key :seon.test/pass-count rows))"

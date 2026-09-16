@@ -41,7 +41,7 @@
   (test-support/with-database
     (fn [connection]
       (config/apply! {:seon.db/connection connection})
-      (db/transact! connection [{:seon.agent/id "agent-a"}])
+      (test-support/transacted! connection [{:seon.agent/id "agent-a"}])
       (body connection))))
 
 (defn problems-surface
@@ -92,11 +92,11 @@
 
 (defn- commit-failed-run!
   [connection]
-  (db/transact! connection
-                [{:seon.turn/id "run-failed"
-                  :seon.turn/agent [:seon.agent/id "agent-a"]
-                  :seon.turn/opened-tx "datomic.tx"
-                  :seon.turn/closed-tx "datomic.tx"}])
+  (test-support/transacted! connection
+                            [{:seon.turn/id "run-failed"
+                              :seon.turn/agent [:seon.agent/id "agent-a"]
+                              :seon.turn/opened-tx "datomic.tx"
+                              :seon.turn/closed-tx "datomic.tx"}])
   (db/transact! connection
                 (error/commit-tx
                  (db/db connection)
@@ -212,13 +212,13 @@
 (deftest configured-models-without-registry-rows-are-derived
   (with-db
     (fn [connection]
-      (db/transact!
-       connection
-       [[:db/add [:seon.config/cluster "default"] :seon.config.ai/model "z-cluster-model"]
-        {:seon.agent/id "agent-a"
-         :seon.config.ai/model "a-agent-model"}
-        {:seon.agent/id "agent-b"
-         :seon.config.ai/model "z-cluster-model"}])
+      (test-support/transacted!
+                   connection
+                   [[:db/add [:seon.config/cluster "default"] :seon.config.ai/model "z-cluster-model"]
+                    {:seon.agent/id "agent-a"
+                     :seon.config.ai/model "a-agent-model"}
+                    {:seon.agent/id "agent-b"
+                     :seon.config.ai/model "z-cluster-model"}])
       (let [value (found connection)
             entries (:seon.problems/missing-models value)]
         (is (= [{:seon.config.ai/model "a-agent-model"}
@@ -245,8 +245,8 @@
 (deftest a-matching-model-registry-row-prevents-the-finding
   (with-db
     (fn [connection]
-      (db/transact! connection
-                    [[:db/add [:seon.config/cluster "default"] :seon.config.ai/model "registered-model"]])
+      (test-support/transacted! connection
+                                [[:db/add [:seon.config/cluster "default"] :seon.config.ai/model "registered-model"]])
       (is (= [{:seon.config.ai/model "registered-model"}]
              (:seon.problems/missing-models (found connection))))
       (is (nil?
@@ -333,9 +333,9 @@
 (deftest every-committed-error-fact-shape-is-projectable
   (with-db
     (fn [connection]
-      (db/transact! connection [{:seon.turn/id "generated-error-run"
-                                :seon.turn/agent [:seon.agent/id "agent-a"]
-                                :seon.turn/opened-tx "datomic.tx"}])
+      (test-support/transacted! connection [{:seon.turn/id "generated-error-run"
+                                            :seon.turn/agent [:seon.agent/id "agent-a"]
+                                            :seon.turn/opened-tx "datomic.tx"}])
       (doseq [[ordinal attribution] (map-indexed vector error-attribution-cases)]
         (let [fact (generated-error-fact ordinal (keys optional-error-evidence) attribution)
               result (db/transact! connection

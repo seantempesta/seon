@@ -61,8 +61,8 @@
 (deftest defining-forms-share-one-form-local-kondo-batch
   (test-support/with-database
     (fn [connection]
-      (db/transact! connection
-                    {:tx-data [{:seon.ns/name 'sample.runtime-batch}]})
+      (test-support/transacted! connection
+                                {:tx-data [{:seon.ns/name 'sample.runtime-batch}]})
       (let [namespace-ref [:seon.ns/name 'sample.runtime-batch]
             shadow-source
             "(defn shadowed [x] (identity (let [map identity] (map x))))"
@@ -563,37 +563,37 @@
                         :seon.test/subject])]
       (test-support/with-database
         (fn [connection]
-          (db/transact!
-           connection
-           ;; The indexed row carries its file ref, so the emitted file rows
-           ;; are admitted first exactly as publication admits them.
-           (into (filterv :seon.fn.file/path rows)
-            [{:seon.ns/name namespace-name
-             :seon.ns/source "(ns sample.settlement-parity)"}
-            {:seon.fn/sym "sample.settlement-parity/helper"
-             :seon.schema.admission/source :core
-             :seon.fn/ns [:seon.ns/name namespace-name]
-             :seon.fn/source "(defn helper [value] value)"
-             :seon.fn/arglists "([value])"
-             :seon.fn/private? false}
-            {:seon.agent/id "settlement-parity-agent"
-             :seon.agent/namespace
-             [:seon.ns/name namespace-name]}]))
-          (db/transact!
-           connection
-           (turn/open-tx
-            {:seon.turn/id "settlement-parity-run" :seon.turn/agent [:seon.agent/id "settlement-parity-agent"] :seon.turn/opened-tx "datomic.tx"}))
+          (test-support/transacted!
+                       connection
+                       ;; The indexed row carries its file ref, so the emitted file rows
+                       ;; are admitted first exactly as publication admits them.
+                       (into (filterv :seon.fn.file/path rows)
+                        [{:seon.ns/name namespace-name
+                         :seon.ns/source "(ns sample.settlement-parity)"}
+                        {:seon.fn/sym "sample.settlement-parity/helper"
+                         :seon.schema.admission/source :core
+                         :seon.fn/ns [:seon.ns/name namespace-name]
+                         :seon.fn/source "(defn helper [value] value)"
+                         :seon.fn/arglists "([value])"
+                         :seon.fn/private? false}
+                        {:seon.agent/id "settlement-parity-agent"
+                         :seon.agent/namespace
+                         [:seon.ns/name namespace-name]}]))
+          (test-support/transacted!
+                       connection
+                       (turn/open-tx
+                        {:seon.turn/id "settlement-parity-run" :seon.turn/agent [:seon.agent/id "settlement-parity-agent"] :seon.turn/opened-tx "datomic.tx"}))
 
-          (db/transact!
-           connection
-           (turn/plan-tx
-            {:seon.turn/id "settlement-parity-run" :seon.db.process/id (second boot-process) :seon.turn/starting-ns [:seon.ns/name namespace-name] :seon.turn/sources [{:seon.cluster.eval/source source}]}))
-          (db/transact!
-           connection
-           (turn/receipt-start-tx
-            {:seon.turn/id "settlement-parity-run"
-             :seon.cluster.eval/ordinal 0
-             :seon.cluster.eval/at (java.util.Date.)}))
+          (test-support/transacted!
+                       connection
+                       (turn/plan-tx
+                        {:seon.turn/id "settlement-parity-run" :seon.db.process/id (second boot-process) :seon.turn/starting-ns [:seon.ns/name namespace-name] :seon.turn/sources [{:seon.cluster.eval/source source}]}))
+          (test-support/transacted!
+                       connection
+                       (turn/receipt-start-tx
+                        {:seon.turn/id "settlement-parity-run"
+                         :seon.cluster.eval/ordinal 0
+                         :seon.cluster.eval/at (java.util.Date.)}))
           (let [settlement
                 (db/transact!
                  connection
@@ -807,13 +807,13 @@
                           [?function :seon.fn/ast]]
                         @connection)))]
         (is (= 2 (count functions)))
-        (db/transact!
-         connection
-         (into []
-               (mapcat (fn [function]
-                         [[:db.fn/retractAttribute function :seon.fn/arities]
-                          [:db.fn/retractAttribute function :seon.fn/ast]]))
-               functions))
+        (test-support/transacted!
+                     connection
+                     (into []
+                           (mapcat (fn [function]
+                                     [[:db.fn/retractAttribute function :seon.fn/arities]
+                                      [:db.fn/retractAttribute function :seon.fn/ast]]))
+                           functions))
         (let [before (:max-tx @connection)
               first-result
               (seon.fn/backfill-contract-facts!
@@ -1213,20 +1213,20 @@
       (testing "the indexed facts answer the motivating query"
         (test-support/with-database
           (fn [connection]
-            (db/transact!
-             connection
-             ;; Declaration rows refer to their file row, so the file rows
-             ;; are admitted with them exactly as publication admits them.
-             (into (mapv #(dissoc % :seon.fn/keywords :seon.fn/calls)
-                         (filter #(or (:seon.fn.file/path %) (:seon.ns/name %)
-                                      (:seon.fn/sym %) (:seon.test/sym %))
-                                 rows))
-                   (mapcat (fn [row]
-                             (map (fn [used]
-                                    [:db/add (program/row-identity row)
-                                     :seon.fn/keywords used])
-                                  (:seon.fn/keywords row))))
-                   rows))
+            (test-support/transacted!
+                         connection
+                         ;; Declaration rows refer to their file row, so the file rows
+                         ;; are admitted with them exactly as publication admits them.
+                         (into (mapv #(dissoc % :seon.fn/keywords :seon.fn/calls)
+                                     (filter #(or (:seon.fn.file/path %) (:seon.ns/name %)
+                                                  (:seon.fn/sym %) (:seon.test/sym %))
+                                             rows))
+                               (mapcat (fn [row]
+                                         (map (fn [used]
+                                                [:db/add (program/row-identity row)
+                                                 :seon.fn/keywords used])
+                                              (:seon.fn/keywords row))))
+                               rows))
             ;; Keywords transact as explicit datoms: inside a map, Datahike
             ;; reads a two-element collection whose first element is a
             ;; unique-identity keyword as a lookup ref and refuses the entity.
@@ -1293,36 +1293,36 @@
                       :seon.test/source (str "(deftest "
                                              (name (symbol test-symbol)) ")")}
                      references))]
-        (db/transact!
-         connection
-         [{:seon.ns/name 'sample.reach
-           :seon.ns/source "(ns sample.reach)"}
-          (function-row "sample.reach/target" nil)
-          (function-row "sample.reach/bridge"
-                        [[:seon.fn/sym "sample.reach/target"]])
-          (function-row "sample.reach/direct"
-                        [[:seon.fn/sym "sample.reach/target"]])
-          (function-row "sample.reach/untested" nil)])
-        (db/transact!
-         connection
-         [(test-row "sample.reach/direct"
-                    {:seon.fn/calls
-                     [[:seon.fn/sym "sample.reach/target"]]
-                     :seon.test/pass-count 0
-                     :seon.test/fail-count 1
-                     :seon.test/error-count 0})
-          (test-row "sample.reach/indirect"
-                    {:seon.fn/calls
-                     [[:seon.fn/sym "sample.reach/bridge"]]
-                     :seon.test/pass-count 1
-                     :seon.test/fail-count 0
-                     :seon.test/error-count 0})
-          (test-row "sample.reach/property"
-                    {:seon.test/subject
-                     [:seon.fn/sym "sample.reach/bridge"]
-                     :seon.test/pass-count 1
-                     :seon.test/fail-count 0
-                     :seon.test/error-count 0})])
+        (test-support/transacted!
+                     connection
+                     [{:seon.ns/name 'sample.reach
+                       :seon.ns/source "(ns sample.reach)"}
+                      (function-row "sample.reach/target" nil)
+                      (function-row "sample.reach/bridge"
+                                    [[:seon.fn/sym "sample.reach/target"]])
+                      (function-row "sample.reach/direct"
+                                    [[:seon.fn/sym "sample.reach/target"]])
+                      (function-row "sample.reach/untested" nil)])
+        (test-support/transacted!
+                     connection
+                     [(test-row "sample.reach/direct"
+                                {:seon.fn/calls
+                                 [[:seon.fn/sym "sample.reach/target"]]
+                                 :seon.test/pass-count 0
+                                 :seon.test/fail-count 1
+                                 :seon.test/error-count 0})
+                      (test-row "sample.reach/indirect"
+                                {:seon.fn/calls
+                                 [[:seon.fn/sym "sample.reach/bridge"]]
+                                 :seon.test/pass-count 1
+                                 :seon.test/fail-count 0
+                                 :seon.test/error-count 0})
+                      (test-row "sample.reach/property"
+                                {:seon.test/subject
+                                 [:seon.fn/sym "sample.reach/bridge"]
+                                 :seon.test/pass-count 1
+                                 :seon.test/fail-count 0
+                                 :seon.test/error-count 0})])
         (is (not= (:db/id (db/pull @connection [:db/id]
                                    [:seon.fn/sym "sample.reach/direct"]))
                   (:db/id (db/pull @connection [:db/id]

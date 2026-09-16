@@ -866,8 +866,8 @@
       (config/apply! {:seon.db/connection connection
                       :seon.boot/cluster-name "error-test"})
       (test-support/seed-cluster! connection "error-test")
-      (db/transact! connection [{:seon.agent/id "root"}
-                              {:seon.agent/id "agent-3"}])
+      (test-support/transacted! connection [{:seon.agent/id "root"}
+                                          {:seon.agent/id "agent-3"}])
       (body connection))))
 
 (defn- commit-request
@@ -885,8 +885,8 @@
 (defn- commit!
   "Commit one error and return [fact-count messages-by-recipient]."
   [connection source extra]
-  (db/transact! connection
-              (error/commit-tx @connection (commit-request source extra)))
+  (test-support/transacted! connection
+                          (error/commit-tx @connection (commit-request source extra)))
   (let [db @connection]
     [(count (db/q '[:find ?e :where [?e :seon.error/id _]] db))
      ;; ?message is bound so two messages to one recipient are two
@@ -1005,8 +1005,8 @@
             tx (error/commit-tx @connection request)]
         ;; the SAME request committed twice: re-execution after a crash
         ;; must upsert, never double-send
-        (db/transact! connection tx)
-        (db/transact! connection tx)
+        (test-support/transacted! connection tx)
+        (test-support/transacted! connection tx)
         (let [db @connection]
           (is (= 1 (count (db/q '[:find ?e :where [?e :seon.error/id _]] db))))
           (is (= 1 (count (db/q '[:find ?m :where

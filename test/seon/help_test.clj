@@ -98,16 +98,16 @@
            (is (true? (db/read-evidence-current? @connection evidence)))
            (is (= 'seon.bootstrap/render-help-ai (:seon.eval/renderer saved)))
            (is (= (:seon.eval/shown saved) (repl/response (repl/entity-emission saved))))
-           (db/transact! connection [{:seon.agent/id "unrelated"}])
+           (support/transacted! connection [{:seon.agent/id "unrelated"}])
            (is (true? (db/read-evidence-current? @connection evidence)))
            (is (= shown (repl/render-ai (first (evaluation/of-agent @connection "help")))))
            (let [source (:seon.fn/source
                          (db/pull @connection [:seon.fn/source]
                                   [:seon.fn/sym "seon.bootstrap/help-value"]))]
              (is (string? source))
-             (db/transact! connection
-                           [[:db/add [:seon.fn/sym "seon.bootstrap/help-value"]
-                             :seon.fn/source (str source "\n")]])
+             (support/transacted! connection
+                                  [[:db/add [:seon.fn/sym "seon.bootstrap/help-value"]
+                                    :seon.fn/source (str source "\n")]])
              (is (false? (db/read-evidence-current? @connection evidence))))
            (let [initial (subvec (evaluation/of-agent @connection "help") 2 6)
                  written (db/transact!

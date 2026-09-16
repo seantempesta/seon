@@ -30,10 +30,10 @@
       (support/with-published-file-database
        root :my-web-test
        (fn [connection]
-          (db/transact!
-           connection
-           [{:seon.config/cluster "default"
-             :seon.config.eval.result/blob-threshold 8}])
+          (support/transacted!
+                  connection
+                  [{:seon.config/cluster "default"
+                    :seon.config.eval.result/blob-threshold 8}])
           (body connection)))
       (finally
         (when (.exists root)
@@ -346,15 +346,15 @@
     (fn [connection]
       (with-server
         (fn [{:keys [base-url]}]
-          (db/transact!
-           connection
-           [(merge (seon-config/defaults)
-                   {:seon.config/cluster "default"}
-                   (config base-url))
-            {:seon.agent/id "web-agent"}
-            {:seon.turn/id "web-receipt-run"
-             :seon.turn/agent
-             [:seon.agent/id "web-agent"]}])
+          (support/transacted!
+                  connection
+                  [(merge (seon-config/defaults)
+                          {:seon.config/cluster "default"}
+                          (config base-url))
+                   {:seon.agent/id "web-agent"}
+                   {:seon.turn/id "web-receipt-run"
+                    :seon.turn/agent
+                    [:seon.agent/id "web-agent"]}])
           (let [result
                 (with-redefs-fn
                   {(ns-resolve 'seon.web.jvm 'credential)
@@ -387,16 +387,16 @@
     (fn [connection]
       (with-server
         (fn [{:keys [base-url]}]
-          (db/transact!
-           connection
-           [(merge (seon-config/defaults)
-                   {:seon.config/cluster "default"}
-                   (config base-url)
-                   {:seon.config.web/max-inline-bytes 4096})
-            {:seon.agent/id "web-agent"}
-            {:seon.turn/id "web-receipt-run"
-             :seon.turn/agent
-             [:seon.agent/id "web-agent"]}])
+          (support/transacted!
+                  connection
+                  [(merge (seon-config/defaults)
+                          {:seon.config/cluster "default"}
+                          (config base-url)
+                          {:seon.config.web/max-inline-bytes 4096})
+                   {:seon.agent/id "web-agent"}
+                   {:seon.turn/id "web-receipt-run"
+                    :seon.turn/agent
+                    [:seon.agent/id "web-agent"]}])
           (let [context (effect-context connection)
                 [text-result binary-result]
                 (binding [db/*conn* connection

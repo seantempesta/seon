@@ -50,9 +50,9 @@
            namespace-name 'my.agents.issue-settlement
            test-symbol "my.agents.issue-settlement/success-test"
            steady-symbol "my.agents.issue-settlement/steady-test"
-           _ (db/transact! connection
-               (agent/creation-tx {:seon.agent/id aid :seon.ns/name namespace-name
-                                   :seon.cluster/name "issue-settlement"}))
+           _ (support/transacted! connection
+                     (agent/creation-tx {:seon.agent/id aid :seon.ns/name namespace-name
+                                         :seon.cluster/name "issue-settlement"}))
            ctx (support/fork-cluster-ctx connection)
            handle (support/cluster-handle
                    {:seon.db/connection connection :seon.cluster/name "issue-settlement"
@@ -172,16 +172,16 @@
            ;; the expiry is recorded against the test rather than swallowed.
            (admit! connection ctx namespace-name
                    "(defn answer {:malli/schema [:=> [:cat] :int]} [] (loop [] (recur)))")
-           (db/transact! connection
-             [{:seon.agent/id aid :seon.agent/settings {:seon.config.eval/time-limit-ms 100}}])
+           (support/transacted! connection
+                   [{:seon.agent/id aid :seon.agent/settings {:seon.config.eval/time-limit-ms 100}}])
            (plan/run-issue-tests! handle aid)
            (let [expired (evidence test-symbol)]
              (is (pos? (:seon.test/error-count expired)) (pr-str expired))
              (is (seq (:seon.test/failure-message expired)))
              (is (= steady-run (run-id steady-symbol)))
              (is (nil? (:my.plan.item/completed-tx (step)))))
-           (db/transact! connection
-             [{:seon.agent/id aid :seon.agent/settings {:seon.config.eval/time-limit-ms 10000}}])
+           (support/transacted! connection
+                   [{:seon.agent/id aid :seon.agent/settings {:seon.config.eval/time-limit-ms 10000}}])
            (admit! connection ctx namespace-name
                    "(defn answer {:malli/schema [:=> [:cat] :int]} [] 1)")
            (close-ordinary-turn!)
@@ -217,7 +217,7 @@
                         [(seon.schema.datahike/malli->datahike-attr-in
                           retention-projection :seon.issue/created-by)])))
         (support/seed-cluster! connection "issue-settlement")
-        (db/transact! connection [{:seon.ns/name 'my.agents.retention}])
+        (support/transacted! connection [{:seon.ns/name 'my.agents.retention}])
         (let [ctx (support/fork-cluster-ctx connection)]
           (admit! connection ctx 'my.agents.retention
                   "(clojure.test/deftest a (clojure.test/is true))")

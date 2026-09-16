@@ -887,9 +887,9 @@
                                               [?f :seon.test.failure/id ?id]]
                                      @connection test-symbol))]
         (is (seq failure-ids) "the retracted test owns actual failure components")
-        (db/transact!
-         connection
-         [[:db.fn/retractEntity [:seon.test/sym test-symbol]]])
+        (test-support/transacted!
+                     connection
+                     [[:db.fn/retractEntity [:seon.test/sym test-symbol]]])
         (let [recorded (runner/commit-results! connection completion)]
           (is (not (:seon.error/kind recorded))
               "recording after the retraction still commits")
@@ -927,12 +927,12 @@
                  (mapv #(select-keys % [:seon.test/sym :seon.test/pass-count
                                        :seon.test/fail-count :seon.test/error-count]) committed)))
           (is (seq (mapcat :seon.test/failures committed))))
-        (db/transact!
-         connection
-         (agent/creation-tx
-          {:seon.agent/id "fixture-owner"
-           :seon.cluster/name "test"
-           :seon.ns/name 'seon.test-runner-failure-fixture}))
+        (test-support/transacted!
+                     connection
+                     (agent/creation-tx
+                      {:seon.agent/id "fixture-owner"
+                       :seon.cluster/name "test"
+                       :seon.ns/name 'seon.test-runner-failure-fixture}))
         (is
          (= #{["seon.test-runner-failure-fixture/failing-example"
                 "fixture-owner"

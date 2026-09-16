@@ -114,7 +114,7 @@
              rows (:seon.message/rows delivery)
              expected-ids (mapv #(str "streams-test-message-run-1-message-" %)
                                 (range 12))]
-         (db/transact! connection rows)
+         (test-support/transacted! connection rows)
          (let [database @connection
                facts
                (db/q '[:find ?id ?content ?ordinal

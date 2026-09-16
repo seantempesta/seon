@@ -19,8 +19,8 @@
    (fn [connection]
      (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "trial"
                     :seon.config/manifest {:seon.config.ai/no-provider true}})
-     (db/transact! connection [{:seon.agent/id "root"
-                               :seon.agent/namespace {:seon.ns/name 'my.agents.root}}])
+     (support/transacted! connection [{:seon.agent/id "root"
+                                      :seon.agent/namespace {:seon.ns/name 'my.agents.root}}])
      (cluster/ensure-cluster-entity! connection "trial" cluster/boot-process-identity)
      (let [ctx (support/fork-cluster-ctx connection)
            environment (support/environment "trial" connection)
@@ -67,12 +67,12 @@
                (is (nil? (:seon.error/kind report)) (pr-str report)))
              (is (thrown-with-msg? clojure.lang.ExceptionInfo #"initial fixture" (check! @connection)))
              (is (= admitted (check! initial)) "an advancing connection cannot change the checked value")
-             (db/transact! connection [[:db.fn/retractEntity [:seon.message/id "trial/pollution"]]
-                                      [:db/add [:example/order "a1"] :example/amount 61]])
+             (support/transacted! connection [[:db.fn/retractEntity [:seon.message/id "trial/pollution"]]
+                                             [:db/add [:example/order "a1"] :example/amount 61]])
              (is (thrown-with-msg? clojure.lang.ExceptionInfo #"initial fixture" (check! @connection)))
-             (db/transact! connection [[:db/add [:example/order "a1"] :example/amount 60]
-                                      [:db/add (:db/id (first (:seon.trial/evaluations admitted)))
-                                       :seon.cluster.eval/source "(+ 1 2)"]])
+             (support/transacted! connection [[:db/add [:example/order "a1"] :example/amount 60]
+                                             [:db/add (:db/id (first (:seon.trial/evaluations admitted)))
+                                              :seon.cluster.eval/source "(+ 1 2)"]])
              (is (thrown-with-msg? clojure.lang.ExceptionInfo #"initial fixture" (check! @connection))))))))))
 
 (def answers

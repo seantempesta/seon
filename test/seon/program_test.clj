@@ -163,9 +163,9 @@
             (row "sample/mapped"
                  "(defn mapped [{:sample/keys [ambient]}] ambient)"
                  '([{:sample/keys [ambient]}]) map-spec)]
-        (db/transact! connection
-                      [{:seon.ns/name 'sample :seon.ns/source "(ns sample)"}
-                       schema-row positional mapped])
+        (test-support/transacted! connection
+                                  [{:seon.ns/name 'sample :seon.ns/source "(ns sample)"}
+                                   schema-row positional mapped])
         (let [positional-address
               (db/q '[:find ?index ?binding-shape ?value-fingerprint
                       ?return-fingerprint
@@ -438,7 +438,7 @@
                     :seon.fn/ns [:seon.ns/name 'seon.program]
                     :seon.fn/spec (pr-str new-spec)}
                    (parsed-contract function-symbol new-spec {}))]
-        (db/transact! connection [old-row])
+        (test-support/transacted! connection [old-row])
         (let [current
               (db/pull @connection
                        '[* {:seon.fn/arities
@@ -468,8 +468,8 @@
                              (map #(get-in % [:seon.fn.argument/schema :db/id])
                                   (:seon.fn.arity/arguments arity)))))
                     (:seon.fn/arities current))]
-          (db/transact! connection
-                      (program/exact-replacement-tx current new-row))
+          (test-support/transacted! connection
+                                  (program/exact-replacement-tx current new-row))
           (let [redefined
                 (db/pull @connection
                         [:seon.fn/spec
@@ -534,9 +534,9 @@
                         :seon.fn/spec (pr-str spec)}
                        (parsed-contract function-symbol spec {}))
             row-tx (ns-resolve 'seon.turn 'row-tx)]
-        (db/transact! connection [{:seon.ns/name 'sample
-                                   :seon.ns/source "(ns sample)"}])
-        (db/transact! connection (row-tx (db/db connection) {} row))
+        (test-support/transacted! connection [{:seon.ns/name 'sample
+                                               :seon.ns/source "(ns sample)"}])
+        (test-support/transacted! connection (row-tx (db/db connection) {} row))
         (let [before (db/pull @connection '[*]
                               [:seon.fn/sym function-symbol])
               replacement (row-tx (db/db connection) {} row)]
@@ -565,9 +565,9 @@
                    "(defn redefined {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))")
             row-tx (ns-resolve 'seon.turn 'row-tx)
             declared-content (ns-resolve 'seon.turn 'declared-content)]
-        (db/transact! connection [{:seon.ns/name 'sample
-                                   :seon.ns/source "(ns sample)"}])
-        (db/transact! connection (row-tx (db/db connection) {} original))
+        (test-support/transacted! connection [{:seon.ns/name 'sample
+                                               :seon.ns/source "(ns sample)"}])
+        (test-support/transacted! connection (row-tx (db/db connection) {} original))
         (let [current (db/pull @connection '[*]
                                [:seon.fn/sym function-symbol])
               replacement (row-tx (db/db connection) {} changed)]
@@ -575,7 +575,7 @@
                     (declared-content (db/db connection) changed))
               "declared content receives the database before the row")
           (is (seq replacement))
-          (db/transact! connection replacement)
+          (test-support/transacted! connection replacement)
           (is (= (:seon.fn/source changed)
                  (:seon.fn/source
                   (db/pull @connection [:seon.fn/source]
@@ -606,9 +606,9 @@
             (assoc original :seon.fn/source
                    "(defn unmeasured {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))")
             row-tx (ns-resolve 'seon.turn 'row-tx)]
-        (db/transact! connection [{:seon.ns/name 'sample
-                                   :seon.ns/source "(ns sample)"}])
-        (db/transact! connection (row-tx (db/db connection) {} original))
+        (test-support/transacted! connection [{:seon.ns/name 'sample
+                                               :seon.ns/source "(ns sample)"}])
+        (test-support/transacted! connection (row-tx (db/db connection) {} original))
         (testing "a request with no run opened on nothing and claims nothing"
           (is (seq (row-tx (db/db connection) {} changed))))
         (testing "a request naming a run with no opening basis says so"
@@ -828,34 +828,34 @@
              :seon.cluster.eval/ns
              [:seon.ns/name 'my.agents.someone-else]
              :seon.program/row deletion}]
-        (db/transact!
-         connection
-         [{:seon.ns/name namespace-name
-           :seon.ns/source "(ns my.agents.registration-test)"}
-          {:seon.ns/name 'my.agents.someone-else
-           :seon.ns/source "(ns my.agents.someone-else)"}
-          {:seon.agent/id "registration-test"
-           :seon.agent/namespace namespace-ref}
-          {:seon.fn/sym function-sym
-           :seon.fn/ns namespace-ref
-           :seon.schema.admission/source :agent
-           :seon.fn/source "(defn same-name [] 1)"
-           :seon.fn/arglists "([])"
-           :seon.fn/private? false
-           :seon.fn/spec "[:=> [:cat] :int]"}
-          {:seon.test/sym function-sym
-           :seon.test/ns namespace-ref
-           :seon.schema.admission/source :agent
-           :seon.test/source "(clojure.test/deftest same-name)"}])
-        (db/transact!
-         connection
-         (turn/open-tx {:seon.turn/id "registration-delete" :seon.turn/agent [:seon.agent/id "registration-test"] :seon.turn/opened-tx "datomic.tx"}))
-        (db/transact!
-         connection
-         (turn/receipt-start-tx
-          {:seon.turn/id "registration-delete"
-           :seon.cluster.eval/ordinal 0
-           :seon.cluster.eval/at now}))
+        (test-support/transacted!
+                     connection
+                     [{:seon.ns/name namespace-name
+                       :seon.ns/source "(ns my.agents.registration-test)"}
+                      {:seon.ns/name 'my.agents.someone-else
+                       :seon.ns/source "(ns my.agents.someone-else)"}
+                      {:seon.agent/id "registration-test"
+                       :seon.agent/namespace namespace-ref}
+                      {:seon.fn/sym function-sym
+                       :seon.fn/ns namespace-ref
+                       :seon.schema.admission/source :agent
+                       :seon.fn/source "(defn same-name [] 1)"
+                       :seon.fn/arglists "([])"
+                       :seon.fn/private? false
+                       :seon.fn/spec "[:=> [:cat] :int]"}
+                      {:seon.test/sym function-sym
+                       :seon.test/ns namespace-ref
+                       :seon.schema.admission/source :agent
+                       :seon.test/source "(clojure.test/deftest same-name)"}])
+        (test-support/transacted!
+                     connection
+                     (turn/open-tx {:seon.turn/id "registration-delete" :seon.turn/agent [:seon.agent/id "registration-test"] :seon.turn/opened-tx "datomic.tx"}))
+        (test-support/transacted!
+                     connection
+                     (turn/receipt-start-tx
+                      {:seon.turn/id "registration-delete"
+                       :seon.cluster.eval/ordinal 0
+                       :seon.cluster.eval/at now}))
         (is (= {:seon.program/delete-identities
                 [[:seon.fn/sym function-sym]
                  [:seon.test/sym function-sym]]
@@ -863,7 +863,7 @@
                 "(ns-unmap 'my.agents.registration-test 'same-name)"
                 :seon.program/ns namespace-ref}
                deletion))
-        (db/transact! connection (turn/receipt-settle-tx settlement))
+        (test-support/transacted! connection (turn/receipt-settle-tx settlement))
         ;; Ruling 47 makes program identities permanent: ns-unmap retracts
         ;; definition facts, not the identity row (nor a retained ns ref).
         (doseq [[identity-attribute namespace-attribute]

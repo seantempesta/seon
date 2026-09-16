@@ -20,10 +20,10 @@
 
 (defn- seed-cluster! [connection cluster-name]
   (support/seed-cluster! connection cluster-name)
-  (db/transact!
-   connection
-   [{:seon.config/cluster cluster-name
-     :seon.config.bootstrap/beyond-closure-token-budget 1024}])
+  (support/transacted!
+          connection
+          [{:seon.config/cluster cluster-name
+            :seon.config.bootstrap/beyond-closure-token-budget 1024}])
   (cluster/ensure-cluster-entity!
    connection cluster-name cluster/boot-process-identity))
 
@@ -114,21 +114,21 @@
                       :seon.sci.admit/caps
                       (config/result-caps (config/defaults))
                       :seon.config/on-core-error :record}))]
-          (db/transact!
-           connection
-           (turn/append-generated-tx
-            {:seon.turn/id (bootstrap/run-id agent-id)
-             :seon.db.process/id cluster/boot-process-identity
-             :seon.cluster.eval/at (java.util.Date.)
-             :seon.cluster.eval/ordinal 0
-             :seon.cluster.eval/source opening-source
-             :seon.ns/name namespace-name}))
-          (db/transact!
-           connection
-           (turn/receipt-settle-tx
-            {:seon.turn/id (bootstrap/run-id agent-id)
-             :seon.cluster.eval/ordinal 0
-             :seon.cluster.eval/result-edn (pr-str node)}))
+          (support/transacted!
+                  connection
+                  (turn/append-generated-tx
+                   {:seon.turn/id (bootstrap/run-id agent-id)
+                    :seon.db.process/id cluster/boot-process-identity
+                    :seon.cluster.eval/at (java.util.Date.)
+                    :seon.cluster.eval/ordinal 0
+                    :seon.cluster.eval/source opening-source
+                    :seon.ns/name namespace-name}))
+          (support/transacted!
+                  connection
+                  (turn/receipt-settle-tx
+                   {:seon.turn/id (bootstrap/run-id agent-id)
+                    :seon.cluster.eval/ordinal 0
+                    :seon.cluster.eval/result-edn (pr-str node)}))
           (let [post-receipt-pull
                 (bootstrap/pull-result (generator-request connection))
                 listing-candidates
@@ -170,23 +170,23 @@
        {:seon.agent/id agent-id
         :seon.cluster/name "reborn-namespace-membership"
         :seon.ns/name namespace-name})
-      (db/transact!
-       connection
-       [{:seon.fn/sym (str namespace-name "/current-items")
-         :seon.fn/ns [:seon.ns/name namespace-name]
-         :seon.fn/source "(defn current-items [items] items)"
-         :seon.fn/arglists "([items])"
-         :seon.fn/private? false
-         :seon.fn/spec "[:=> [:cat [:vector :int]] [:vector :int]]"}
-        {:seon.test/sym (str namespace-name "/current-items-test")
-         :seon.test/ns [:seon.ns/name namespace-name]
-         :seon.test/source "(deftest current-items-test)"
-         :seon.test/usage true
-         :seon.test/pass-count 1
-         :seon.test/fail-count 0
-         :seon.test/error-count 0
-         :seon.test/run-basis-t (db/basis-t @connection)
-         :seon.test/run-at (java.util.Date. 1786500000000)}])
+      (support/transacted!
+              connection
+              [{:seon.fn/sym (str namespace-name "/current-items")
+                :seon.fn/ns [:seon.ns/name namespace-name]
+                :seon.fn/source "(defn current-items [items] items)"
+                :seon.fn/arglists "([items])"
+                :seon.fn/private? false
+                :seon.fn/spec "[:=> [:cat [:vector :int]] [:vector :int]]"}
+               {:seon.test/sym (str namespace-name "/current-items-test")
+                :seon.test/ns [:seon.ns/name namespace-name]
+                :seon.test/source "(deftest current-items-test)"
+                :seon.test/usage true
+                :seon.test/pass-count 1
+                :seon.test/fail-count 0
+                :seon.test/error-count 0
+                :seon.test/run-basis-t (db/basis-t @connection)
+                :seon.test/run-at (java.util.Date. 1786500000000)}])
       (let [request (generator-request connection)
             pull (bootstrap/pull-result request)
             namespace-key [[:seon.ns/name namespace-name] 0]
@@ -246,26 +246,26 @@
        {:seon.agent/id agent-id
         :seon.cluster/name "intent-membership"
         :seon.ns/name namespace-name})
-      (db/transact!
-       connection
-       [{:seon.ns/name 'fixture.intent}
-        {:seon.fn/sym "fixture.intent/target"
-         :seon.fn/ns [:seon.ns/name 'fixture.intent]
-         :seon.fn/source "(defn target [x] (inc x))"
-         :seon.fn/arglists "([x])"
-         :seon.fn/private? false
-         :seon.fn/spec "[:=> [:cat :int] :int]"}
-        {:seon.test/sym "fixture.intent/target-usage"
-         :seon.test/ns [:seon.ns/name 'fixture.intent]
-         :seon.test/source
-         "(clojure.test/deftest target-usage (clojure.test/is (= 2 (target 1))))"
-         :seon.test/usage true
-         :seon.fn/calls [[:seon.fn/sym "fixture.intent/target"]]
-         :seon.test/pass-count 1
-         :seon.test/fail-count 0
-         :seon.test/error-count 0
-         :seon.test/run-basis-t (db/basis-t @connection)
-         :seon.test/run-at (java.util.Date. 1786500000000)}])
+      (support/transacted!
+              connection
+              [{:seon.ns/name 'fixture.intent}
+               {:seon.fn/sym "fixture.intent/target"
+                :seon.fn/ns [:seon.ns/name 'fixture.intent]
+                :seon.fn/source "(defn target [x] (inc x))"
+                :seon.fn/arglists "([x])"
+                :seon.fn/private? false
+                :seon.fn/spec "[:=> [:cat :int] :int]"}
+               {:seon.test/sym "fixture.intent/target-usage"
+                :seon.test/ns [:seon.ns/name 'fixture.intent]
+                :seon.test/source
+                "(clojure.test/deftest target-usage (clojure.test/is (= 2 (target 1))))"
+                :seon.test/usage true
+                :seon.fn/calls [[:seon.fn/sym "fixture.intent/target"]]
+                :seon.test/pass-count 1
+                :seon.test/fail-count 0
+                :seon.test/error-count 0
+                :seon.test/run-basis-t (db/basis-t @connection)
+                :seon.test/run-at (java.util.Date. 1786500000000)}])
       (plan/add! {:my.plan.item/id "use-target"
                   :my.plan.item/title "Use the target"}
                  connection agent-id)
@@ -275,11 +275,11 @@
         (is (= before-bytes
                (candidate-sources (bootstrap/pull-result request)))
             "an agent with no :about refs has a byte-identical opening")
-        (db/transact!
-         connection
-         [[:db/add [:my.plan.item/id "use-target"]
-           :my.plan.item/about
-           ['fixture.intent/target]]])
+        (support/transacted!
+                connection
+                [[:db/add [:my.plan.item/id "use-target"]
+                  :my.plan.item/about
+                  ['fixture.intent/target]]])
         (let [after (bootstrap/pull-result (generator-request connection))
               before-sources (set (candidate-sources before))
               delta (into []
@@ -301,15 +301,15 @@
           (is (= (set delta)
                  (set (remove before-sources (candidate-sources after))))
               "the opening delta is exactly the admitted subject units"))
-        (db/transact!
-         connection
-         [[:db/add
-           (db/q '[:find ?config .
-                   :where
-                   [?cluster :seon.cluster/name "intent-membership"]
-                   [?cluster :seon.cluster/config ?config]]
-                 @connection)
-           :seon.config.bootstrap/beyond-closure-token-budget 1]])
+        (support/transacted!
+                connection
+                [[:db/add
+                  (db/q '[:find ?config .
+                          :where
+                          [?cluster :seon.cluster/name "intent-membership"]
+                          [?cluster :seon.cluster/config ?config]]
+                        @connection)
+                  :seon.config.bootstrap/beyond-closure-token-budget 1]])
         (let [capped (bootstrap/pull-result (generator-request connection))]
           (is (empty? (remove (set (candidate-sources before))
                               (candidate-sources capped)))
@@ -365,21 +365,21 @@
   (support/with-database
     (fn [connection]
       (seed-cluster! connection "supervision")
-      (db/transact!
-       connection
-       (into (cluster.agent/creation-tx
-              {:seon.agent/id "root"
-               :seon.cluster/name "supervision"
-               :seon.ns/name 'my.agents.root})
-             (cluster.agent/creation-tx
-              {:seon.agent/id "worker"
-               :seon.cluster/name "supervision"
-               :seon.ns/name 'my.agents.worker})))
+      (support/transacted!
+              connection
+              (into (cluster.agent/creation-tx
+                     {:seon.agent/id "root"
+                      :seon.cluster/name "supervision"
+                      :seon.ns/name 'my.agents.root})
+                    (cluster.agent/creation-tx
+                     {:seon.agent/id "worker"
+                      :seon.cluster/name "supervision"
+                      :seon.ns/name 'my.agents.worker})))
       (let [tx (bootstrap/supervision-tx
                 @connection cluster/boot-process-identity
                 "worker")]
         (is (seq tx))
-        (db/transact! connection tx)
+        (support/transacted! connection tx)
         (let [sources
               (db/q '[:find [?source ...]
                       :in $ ?run-id

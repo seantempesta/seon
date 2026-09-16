@@ -54,7 +54,7 @@
         (is (= (db/basis-t (:db-after written)) (:db/id completion)))
         (is (inst? (:db/txInstant completion)))
         (is (= {} (plan/current @connection "worker")))
-        (db/transact! connection [[:db.fn/call #'plan/settle-call "worker"]])
+        (support/transacted! connection [[:db.fn/call #'plan/settle-call "worker"]])
         (is (= completed (db/pull @connection
                                   '[{:my.plan.item/completed-tx [:db/id :db/txInstant]}]
                                   [:my.plan.item/id "report"]))))

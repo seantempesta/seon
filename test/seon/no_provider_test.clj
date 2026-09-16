@@ -20,16 +20,16 @@
        (config/apply! {:seon.db/connection connection
                       :seon.boot/cluster-name cluster-name})
        (support/seed-cluster! connection cluster-name)
-       (db/transact! connection
-                     (agent/creation-tx
-                      {:seon.agent/id agent-id
-                       :seon.ns/name 'my.agents.refused
-                       :seon.cluster/name cluster-name}))
-       (db/transact! connection
-                     [{:seon.agent/id agent-id
-                       :seon.agent/settings
-                       {:seon.config.ai/api-key-variable credential}}
-                      {:seon.message/id "refusal-trigger" :seon.message/to [:seon.agent/id agent-id] :seon.message/content "Take one turn." :seon.message/inbox [:seon.agent/id agent-id]}])
+       (support/transacted! connection
+                            (agent/creation-tx
+                             {:seon.agent/id agent-id
+                              :seon.ns/name 'my.agents.refused
+                              :seon.cluster/name cluster-name}))
+       (support/transacted! connection
+                            [{:seon.agent/id agent-id
+                              :seon.agent/settings
+                              {:seon.config.ai/api-key-variable credential}}
+                             {:seon.message/id "refusal-trigger" :seon.message/to [:seon.agent/id agent-id] :seon.message/content "Take one turn." :seon.message/inbox [:seon.agent/id agent-id]}])
        (let [cluster (support/cluster-handle
                       {:seon.db/connection connection
                        :seon.cluster/name cluster-name
@@ -63,8 +63,8 @@
          (is (nil? (turn/next-agent-work @connection request)))
          (is (false? (turn/more-agent-work? @connection request)))
          (is (seq (turn/unanswered-wakes @connection agent-id {})))
-         (db/transact! connection
-                       [{:seon.message/id "new-outside-trigger" :seon.message/to [:seon.agent/id agent-id] :seon.message/content "Configuration repaired; try again." :seon.message/inbox [:seon.agent/id agent-id]}])
+         (support/transacted! connection
+                              [{:seon.message/id "new-outside-trigger" :seon.message/to [:seon.agent/id agent-id] :seon.message/content "Configuration repaired; try again." :seon.message/inbox [:seon.agent/id agent-id]}])
          (is (= :open (:seon.turn.work/situation
                         (turn/next-agent-work @connection request)))))))))
 
