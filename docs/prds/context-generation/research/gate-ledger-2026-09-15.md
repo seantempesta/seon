@@ -987,3 +987,16 @@ Verdict: the steward resets `default` (`reset --force`); lanes paused;
 batch 68 runs cold and is unaffected. The regression for class 2 belongs
 in `seon.turn` (a repeated `:db.fn/call` refusal closes the turn with a
 fault); for class 1 in `seon.test-support`.
+
+### 2026-09-16 — open ruling for the owner: partial upserts and required keys
+
+From the steward's fixture-write sweep: write admission validates a
+PARTIAL upsert of an existing entity (a map naming its identity plus one
+changed attribute) against the entity's complete required-key set, so an
+honest one-attribute update is refused for keys it never meant to touch.
+Two readings: (a) admission validates only the keys present against their
+own schemas, and required-ness is checked on the entity's resulting state
+(a `:db.fn/call` at the authority); (b) an upsert must always be complete.
+Reading (a) matches "adding is free, omitted keys are left unchanged"
+(CLAUDE.md §3, datahike skill). Not decided here; the admission owner and
+the owner rule.
