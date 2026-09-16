@@ -266,9 +266,9 @@
                     (prompt/agent-calibration @connection "walker" model)))
            "another agent's usage cannot replace this agent's configured prior")
        (doseq [ordinal (reverse (range 12))]
-         (db/transact! connection
-                       (recorded-usage-tx model ordinal
-                                          (if (< ordinal 2) 6400 2800) 1000)))
+         (support/transacted! connection
+                              (recorded-usage-tx model ordinal
+                                                 (if (< ordinal 2) 6400 2800) 1000)))
        (support/transacted! connection (recorded-usage-tx model 100 10000 0))
        (let [calibration (prompt/agent-calibration @connection "walker" model)
              rendered (prompt/prompt @connection (dissoc (request connection ctx) :seon.turn/id))]

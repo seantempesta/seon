@@ -627,10 +627,10 @@
                              {:seon.agent/id "batch"}
                              {:seon.turn/id "batch" :seon.turn/agent [:seon.agent/id "batch"] :seon.turn/opened-tx "datomic.tx"}])
        (doseq [ordinal (range 2)]
-         (db/transact! connection
-                       (turn/receipt-start-tx
-                        {::turn/id "batch" :seon.cluster.eval/ordinal ordinal
-                         :seon.cluster.eval/at now})))
+         (support/transacted! connection
+                              (turn/receipt-start-tx
+                               {::turn/id "batch" :seon.cluster.eval/ordinal ordinal
+                                :seon.cluster.eval/at now})))
        (let [result (db/transact!
                      connection
                      (turn/receipt-settle-batch-tx
@@ -1098,12 +1098,12 @@
             settle!
             (fn [run-id start?]
               (when start?
-                (db/transact!
-                 connection
-                 (turn/receipt-start-tx
-                  {::turn/id run-id
-                   :seon.cluster.eval/ordinal 0
-                   :seon.cluster.eval/at t0})))
+                (support/transacted!
+                        connection
+                        (turn/receipt-start-tx
+                         {::turn/id run-id
+                          :seon.cluster.eval/ordinal 0
+                          :seon.cluster.eval/at t0})))
               (db/transact!
                connection
                (turn/receipt-settle-tx
@@ -1334,9 +1334,9 @@
                  {:seon.agent/id agent-a}
                  {:seon.agent/id agent-b}])
         (doseq [[run-id agent-id] [[run-a agent-a] [run-b agent-b]]]
-          (db/transact!
-           connection
-           (turn/open-tx {::turn/id run-id ::turn/agent (agent-ref agent-id) :seon.turn/opened-tx "datomic.tx"})))
+          (support/transacted!
+                  connection
+                  (turn/open-tx {::turn/id run-id ::turn/agent (agent-ref agent-id) :seon.turn/opened-tx "datomic.tx"})))
 
         (start! run-a 0)
         (is (= ::committed
@@ -1712,9 +1712,9 @@
                                           (str "boom-" ordinal))))
                                states)))
                  (when generated?
-                   (db/transact! connection
-                                 [{::turn/id run-id
-                                   :seon.turn.work/situation :generate}]))
+                   (support/transacted! connection
+                                        [{::turn/id run-id
+                                          :seon.turn.work/situation :generate}]))
                  (let [terminals-before (pull-terminals connection run-id)
                        recovery
                        (turn/recover-tx

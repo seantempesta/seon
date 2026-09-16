@@ -80,7 +80,7 @@
            (message/delivery
             @connection
             {:my.message/value (seon.cluster.message/send "alpha" "stale assignment" "resume-problem-1") :seon.agent/id "planner" :seon.turn/id "stale-assignment-run" :seon.cluster.eval/ordinal 0 :seon.config.message/max-chain 16})]
-       (db/transact! connection (:seon.message/rows delivery)))
+       (test-support/transacted! connection (:seon.message/rows delivery)))
      (is (= :unrouted-red
             (:seon.turn.work/form-state
              (turn/form-settlement @connection "resume-receipt-1")))

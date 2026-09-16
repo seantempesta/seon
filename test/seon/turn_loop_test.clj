@@ -532,11 +532,11 @@
   [{connection :seon.db/connection :as cluster} agent-id run-id message-id]
   (test-support/transacted! connection
                           [{:seon.message/id message-id :seon.message/to [:seon.agent/id agent-id] :seon.message/content "prove live settings" :seon.message/inbox [:seon.agent/id agent-id]}])
-  (db/transact!
-   connection
-   [{:seon.turn/id run-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/trigger [:seon.message/id message-id] :seon.turn/opened-tx "datomic.tx"}
-    {:seon.agent/id agent-id
-     }]))
+  (test-support/transacted!
+               connection
+               [{:seon.turn/id run-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/trigger [:seon.message/id message-id] :seon.turn/opened-tx "datomic.tx"}
+                {:seon.agent/id agent-id
+                 }]))
 
 (defn- call-work
   [agent-id run-id]
@@ -1051,16 +1051,16 @@
                                 "(+ (answer-count) 1)"}]})]))
         (doseq [[ordinal value] [[0 "#'my.agents.undisposed-agent/answer-count"]
                                  [1 "2"]]]
-          (db/transact!
-           connection
-           (into (turn/receipt-start-tx
-                  {:seon.turn/id run-id
-                   :seon.cluster.eval/ordinal ordinal
-                   :seon.cluster.eval/at now})
-                 (turn/receipt-settle-tx
-                  {:seon.turn/id run-id
-                   :seon.cluster.eval/ordinal ordinal
-                   :seon.eval/shown value}))))
+          (test-support/transacted!
+                       connection
+                       (into (turn/receipt-start-tx
+                              {:seon.turn/id run-id
+                               :seon.cluster.eval/ordinal ordinal
+                               :seon.cluster.eval/at now})
+                             (turn/receipt-settle-tx
+                              {:seon.turn/id run-id
+                               :seon.cluster.eval/ordinal ordinal
+                               :seon.eval/shown value}))))
         (test-support/transacted!
                      connection
                      (turn/receipt-start-tx
@@ -1084,7 +1084,7 @@
                 {:seon.eval/shown "3"
                  :seon.sci.admit/value 3}
                 :seon.message/trigger message-id})]
-          (db/transact! connection (:seon.db/tx-data prepared)))
+          (test-support/transacted! connection (:seon.db/tx-data prepared)))
         (let [terminal
               (eval.drive/terminal-state @connection agent-id process
                                          message-id 6)
@@ -1260,49 +1260,49 @@
       (body connection))))
 
 (defn- commit-run! [connection {:keys [planned? receipts closed?]}]
-  (db/transact!
-   connection
-   {:tx-data
-    (cond-> [(cond-> {:seon.turn/id "run-1" :seon.turn/agent [:seon.agent/id "agent-a"] :seon.turn/trigger [:seon.message/id "m-1"] :seon.turn/opened-tx "datomic.tx"}
-               planned? (assoc :seon.turn/reply-size 64)
-               closed? (assoc :seon.turn/closed-tx "datomic.tx"))]
-      (not closed?)
-      (conj {:seon.agent/id "agent-a"
-             })
-      closed?
-      (conj {:seon.ai.attempt/id "closed-attempt"
-             :seon.turn/_attempts [:seon.turn/id "run-1"]
-             :seon.ai.attempt/ordinal 0
-             :seon.ai.attempt/at now})
+  (test-support/transacted!
+               connection
+               {:tx-data
+                (cond-> [(cond-> {:seon.turn/id "run-1" :seon.turn/agent [:seon.agent/id "agent-a"] :seon.turn/trigger [:seon.message/id "m-1"] :seon.turn/opened-tx "datomic.tx"}
+                           planned? (assoc :seon.turn/reply-size 64)
+                           closed? (assoc :seon.turn/closed-tx "datomic.tx"))]
+                  (not closed?)
+                  (conj {:seon.agent/id "agent-a"
+                         })
+                  closed?
+                  (conj {:seon.ai.attempt/id "closed-attempt"
+                         :seon.turn/_attempts [:seon.turn/id "run-1"]
+                         :seon.ai.attempt/ordinal 0
+                         :seon.ai.attempt/at now})
 
-      ;; ONE ENTITY PER (run, ordinal), under the ONE identity derivation the
-      ;; writer uses: the freeze asserts the source and the start instant, and
-      ;; the terminal facts accrete onto that same entity.
-      planned?
-      (into (map (fn [ordinal]
-                   {:seon.cluster.eval/id (turn/receipt-identity "run-1" ordinal)
-                    :seon.cluster.eval/run [:seon.turn/id "run-1"]
-                    :seon.cluster.eval/ordinal ordinal
-                    :seon.cluster.eval/at now
-                    :seon.cluster.eval/source "(+ 1 1)"
-                    :seon.cluster.eval/ns [:seon.ns/name 'user]})
-                 (range 2)))
+                  ;; ONE ENTITY PER (run, ordinal), under the ONE identity derivation the
+                  ;; writer uses: the freeze asserts the source and the start instant, and
+                  ;; the terminal facts accrete onto that same entity.
+                  planned?
+                  (into (map (fn [ordinal]
+                               {:seon.cluster.eval/id (turn/receipt-identity "run-1" ordinal)
+                                :seon.cluster.eval/run [:seon.turn/id "run-1"]
+                                :seon.cluster.eval/ordinal ordinal
+                                :seon.cluster.eval/at now
+                                :seon.cluster.eval/source "(+ 1 1)"
+                                :seon.cluster.eval/ns [:seon.ns/name 'user]})
+                             (range 2)))
 
-      (seq receipts)
-      ;; the evaluation's state is WHICH terminal fact it carries: :done →
-      ;; result-edn, :interrupted → interrupted-at, none → running
-      (into (map (fn [[ordinal state]]
-                   (cond-> {:seon.cluster.eval/id
-                            (turn/receipt-identity "run-1" ordinal)
-                            :seon.cluster.eval/run
-                            [:seon.turn/id "run-1"]
-                            :seon.cluster.eval/ordinal ordinal
-                            :seon.cluster.eval/at now}
-                     (= :done state)
-                     (assoc :seon.eval/shown "2")
-                     (= :interrupted state)
-                     (assoc :seon.cluster.eval/interrupted-at now)))
-                 receipts)))}))
+                  (seq receipts)
+                  ;; the evaluation's state is WHICH terminal fact it carries: :done →
+                  ;; result-edn, :interrupted → interrupted-at, none → running
+                  (into (map (fn [[ordinal state]]
+                               (cond-> {:seon.cluster.eval/id
+                                        (turn/receipt-identity "run-1" ordinal)
+                                        :seon.cluster.eval/run
+                                        [:seon.turn/id "run-1"]
+                                        :seon.cluster.eval/ordinal ordinal
+                                        :seon.cluster.eval/at now}
+                                 (= :done state)
+                                 (assoc :seon.eval/shown "2")
+                                 (= :interrupted state)
+                                 (assoc :seon.cluster.eval/interrupted-at now)))
+                             receipts)))}))
 
 (deftest install-gate-failure-settles-the-started-receipt-as-a-failure
   (with-database
@@ -1447,15 +1447,15 @@
   no disposition — reads authorship and last ordinal from facts, so a
   fixture that mints an unauthored receipt is asserting a different run."
   [connection]
-  (db/transact!
-   connection
-   [{:seon.cluster.eval/id (turn/receipt-identity "run-1" 0)
-     :seon.cluster.eval/run [:seon.turn/id "run-1"]
-     :seon.cluster.eval/ordinal 0
-     :seon.cluster.eval/at now
-     :seon.cluster.eval/author :agent
-     :seon.cluster.eval/source "(def probe-staged-def …)"
-     :seon.cluster.eval/ns [:seon.ns/name 'user]}]))
+  (test-support/transacted!
+               connection
+               [{:seon.cluster.eval/id (turn/receipt-identity "run-1" 0)
+                 :seon.cluster.eval/run [:seon.turn/id "run-1"]
+                 :seon.cluster.eval/ordinal 0
+                 :seon.cluster.eval/at now
+                 :seon.cluster.eval/author :agent
+                 :seon.cluster.eval/source "(def probe-staged-def …)"
+                 :seon.cluster.eval/ns [:seon.ns/name 'user]}]))
 
 (defn- settle-staged-def!
   [connection cluster-name]
@@ -1546,17 +1546,17 @@
 (defn- commit-agent-receipts!
   "Two agent-authored evaluations, the shape a stored reply leaves."
   [connection]
-  (db/transact!
-   connection
-   (mapv (fn [ordinal]
-           {:seon.cluster.eval/id (turn/receipt-identity "run-1" ordinal)
-            :seon.cluster.eval/run [:seon.turn/id "run-1"]
-            :seon.cluster.eval/ordinal ordinal
-            :seon.cluster.eval/at now
-            :seon.cluster.eval/author :agent
-            :seon.cluster.eval/source (str "(+ " ordinal " 1)")
-            :seon.cluster.eval/ns [:seon.ns/name 'user]})
-         [0 1])))
+  (test-support/transacted!
+               connection
+               (mapv (fn [ordinal]
+                       {:seon.cluster.eval/id (turn/receipt-identity "run-1" ordinal)
+                        :seon.cluster.eval/run [:seon.turn/id "run-1"]
+                        :seon.cluster.eval/ordinal ordinal
+                        :seon.cluster.eval/at now
+                        :seon.cluster.eval/author :agent
+                        :seon.cluster.eval/source (str "(+ " ordinal " 1)")
+                        :seon.cluster.eval/ns [:seon.ns/name 'user]})
+                     [0 1])))
 
 (deftest a-refused-batch-settlement-closes-the-turn-and-the-agent-turns-again
   (with-database

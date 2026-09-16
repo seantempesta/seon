@@ -9,17 +9,17 @@
 
 (defn- seed-situation!
   [connection]
-  (db/transact!
-   connection
-   [{:seon.ns/name 'my.turn}
-    {:seon.ns/name 'my.message}
-    {:seon.ns/name 'my.agents.situation
-     :seon.ns/requires [[:seon.ns/name 'my.turn]
-                        [:seon.ns/name 'my.message]]}
-    {:seon.agent/id "situation"
-     :seon.agent/namespace [:seon.ns/name 'my.agents.situation]}
-    {:seon.turn/id "situation-run" :seon.turn/agent [:seon.agent/id "situation"] :seon.turn/opened-tx "datomic.tx" :seon.turn/starting-ns [:seon.ns/name 'my.agents.situation]}
-    {:seon.message/id "unread" :seon.message/to [:seon.agent/id "situation"] :seon.message/content "Read me" :seon.message/inbox [:seon.agent/id "situation"]}]))
+  (support/transacted!
+          connection
+          [{:seon.ns/name 'my.turn}
+           {:seon.ns/name 'my.message}
+           {:seon.ns/name 'my.agents.situation
+            :seon.ns/requires [[:seon.ns/name 'my.turn]
+                               [:seon.ns/name 'my.message]]}
+           {:seon.agent/id "situation"
+            :seon.agent/namespace [:seon.ns/name 'my.agents.situation]}
+           {:seon.turn/id "situation-run" :seon.turn/agent [:seon.agent/id "situation"] :seon.turn/opened-tx "datomic.tx" :seon.turn/starting-ns [:seon.ns/name 'my.agents.situation]}
+           {:seon.message/id "unread" :seon.message/to [:seon.agent/id "situation"] :seon.message/content "Read me" :seon.message/inbox [:seon.agent/id "situation"]}]))
 
 (deftest situation-is-the-live-derived-control-surface
   (support/with-database

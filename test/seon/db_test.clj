@@ -690,10 +690,10 @@
      (doseq [subject [[:seon.ns/name 'seon.db-test/missing]
                       [:seon.message/id "large-digest"]]]
        (when (= :seon.message/id (first subject))
-         (db/transact! connection
-                       [{:seon.message/id (second subject)
-                         :seon.message/content
-                         (apply str (repeat 100000 "x"))}]))
+         (test-support/transacted! connection
+                                   [{:seon.message/id (second subject)
+                                     :seon.message/content
+                                     (apply str (repeat 100000 "x"))}]))
        (let [captured (atom [])]
          (binding [db/*read-evidence-sink* captured]
            (db/pull @connection '[*] subject))
@@ -1091,12 +1091,12 @@
 
 (defn- seed-diff-messages!
   [connection]
-  (db/transact!
-   connection
-   [{:seon.agent/id "db-diff-alice"}
-    {:seon.agent/id "db-diff-bob"}
-    {:seon.message/id "db-diff-m1" :seon.message/to [:seon.agent/id "db-diff-bob"] :seon.message/from [:seon.agent/id "db-diff-alice"] :seon.message/content "hello" :seon.message/inbox [:seon.agent/id "db-diff-bob"]}
-    {:seon.message/id "db-diff-m2" :seon.message/to [:seon.agent/id "db-diff-bob"] :seon.message/content "removed" :seon.message/inbox [:seon.agent/id "db-diff-bob"]}]))
+  (test-support/transacted!
+               connection
+               [{:seon.agent/id "db-diff-alice"}
+                {:seon.agent/id "db-diff-bob"}
+                {:seon.message/id "db-diff-m1" :seon.message/to [:seon.agent/id "db-diff-bob"] :seon.message/from [:seon.agent/id "db-diff-alice"] :seon.message/content "hello" :seon.message/inbox [:seon.agent/id "db-diff-bob"]}
+                {:seon.message/id "db-diff-m2" :seon.message/to [:seon.agent/id "db-diff-bob"] :seon.message/content "removed" :seon.message/inbox [:seon.agent/id "db-diff-bob"]}]))
 
 (deftest ^{:seon.test/usage true} diff-replays-one-read-by-derived-identity
   (test-support/with-database

@@ -231,16 +231,16 @@
                                      "#:seon.print{:face :seon.print/number, :value 2}"]
                                     ["stored-transcript" "(println \"already ran\")"
                                      "#:seon.print{:face :seon.print/nil, :value nil}"]]]
-       (db/transact!
-        connection
-        [{:seon.turn/id run-id :seon.turn/agent [:seon.agent/id "source-contract-agent"] :seon.turn/opened-tx "datomic.tx" :seon.turn/closed-tx "datomic.tx" :seon.turn/starting-ns [:seon.ns/name 'my.agents.source-contract]}
-         {:seon.cluster.eval/id (str run-id "/0")
-          :seon.cluster.eval/run [:seon.turn/id run-id]
-          :seon.cluster.eval/ordinal 0
-          :seon.cluster.eval/at #inst "2026-09-06T20:00:00Z"
-          :seon.cluster.eval/source source
-          :seon.cluster.eval/ns [:seon.ns/name 'my.agents.source-contract]
-          :seon.cluster.eval/result-edn result}]))
+       (support/transacted!
+               connection
+               [{:seon.turn/id run-id :seon.turn/agent [:seon.agent/id "source-contract-agent"] :seon.turn/opened-tx "datomic.tx" :seon.turn/closed-tx "datomic.tx" :seon.turn/starting-ns [:seon.ns/name 'my.agents.source-contract]}
+                {:seon.cluster.eval/id (str run-id "/0")
+                 :seon.cluster.eval/run [:seon.turn/id run-id]
+                 :seon.cluster.eval/ordinal 0
+                 :seon.cluster.eval/at #inst "2026-09-06T20:00:00Z"
+                 :seon.cluster.eval/source source
+                 :seon.cluster.eval/ns [:seon.ns/name 'my.agents.source-contract]
+                 :seon.cluster.eval/result-edn result}]))
      (let [database @connection
            ctx (support/fork-cluster-ctx connection)
            source-call (ns-resolve 'seon.render.web 'render-source-call)

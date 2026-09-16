@@ -97,34 +97,34 @@
                               :seon.turn/agent [:seon.agent/id "agent-a"]
                               :seon.turn/opened-tx "datomic.tx"
                               :seon.turn/closed-tx "datomic.tx"}])
-  (db/transact! connection
-                (error/commit-tx
-                 (db/db connection)
-                 {:seon.error/source {:seon.error/kind :seon.ai/provider-error
-                                      :seon.error/message "the model did not answer"}
-                  :seon.error/id "run-failed-error" :seon.error/at now
-                  :seon.error/process live :seon.sci.admit/caps caps
-                  :seon.config.error/max-evidence-bytes 16384
-                  :seon.config.error/recurrence-limit 3
-                  :seon.turn/id "run-failed" :seon.agent/id "agent-a"})))
+  (test-support/transacted! connection
+                            (error/commit-tx
+                             (db/db connection)
+                             {:seon.error/source {:seon.error/kind :seon.ai/provider-error
+                                                  :seon.error/message "the model did not answer"}
+                              :seon.error/id "run-failed-error" :seon.error/at now
+                              :seon.error/process live :seon.sci.admit/caps caps
+                              :seon.config.error/max-evidence-bytes 16384
+                              :seon.config.error/recurrence-limit 3
+                              :seon.turn/id "run-failed" :seon.agent/id "agent-a"})))
 
 (defn- commit-errored-receipt!
   [connection]
-  (db/transact! connection
-              [{:seon.turn/id "run-with-receipt" :seon.turn/agent [:seon.agent/id "agent-a"] :seon.turn/opened-tx "datomic.tx" :seon.turn/closed-tx "datomic.tx"}
-               {:seon.cluster.eval/id "receipt-1"
-                :seon.cluster.eval/run [:seon.turn/id "run-with-receipt"]
-                :seon.cluster.eval/ordinal 0
-                :seon.cluster.eval/at now
-                ;; the error's presence IS the errored state
-                :seon.error/kind :seon.sci.eval/evaluation-failed
-                :seon.cluster.eval/error "Unable to resolve symbol: widgets"
-                :seon.cluster.eval/source "(widgets)"}]))
+  (test-support/transacted! connection
+                          [{:seon.turn/id "run-with-receipt" :seon.turn/agent [:seon.agent/id "agent-a"] :seon.turn/opened-tx "datomic.tx" :seon.turn/closed-tx "datomic.tx"}
+                           {:seon.cluster.eval/id "receipt-1"
+                            :seon.cluster.eval/run [:seon.turn/id "run-with-receipt"]
+                            :seon.cluster.eval/ordinal 0
+                            :seon.cluster.eval/at now
+                            ;; the error's presence IS the errored state
+                            :seon.error/kind :seon.sci.eval/evaluation-failed
+                            :seon.cluster.eval/error "Unable to resolve symbol: widgets"
+                            :seon.cluster.eval/source "(widgets)"}]))
 
 (defn- commit-missing-model!
   [connection]
-  (db/transact! connection
-                [[:db/add [:seon.config/cluster "default"] :seon.config.ai/model "missing-model"]]))
+  (test-support/transacted! connection
+                            [[:db/add [:seon.config/cluster "default"] :seon.config.ai/model "missing-model"]]))
 
 (def ^:private families
   {:seon.problems/error-signatures commit-error!

@@ -286,8 +286,8 @@ handle))}}
 (defn- open-run!
   "Open a minimal run row for one renderer presence-gate test."
   [connection run-id]
-  (db/transact! connection
-              [{:seon.turn/id run-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}]))
+  (support/transacted! connection
+                     [{:seon.turn/id run-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}]))
 
 (defn- client [] (.build (HttpClient/newBuilder)))
 
@@ -1632,10 +1632,10 @@ handle))}}
           (let [before (derivations context)
                 m 6]
             (doseq [n (range m)]
-              (db/transact! connection
-                          [{:seon.ns/name 'my.agents.root
-                            :seon.ns/source
-                            (str "(ns my.agents.root)\n(def burst " n ")")}]))
+              (support/transacted! connection
+                                 [{:seon.ns/name 'my.agents.root
+                                   :seon.ns/source
+                                   (str "(ns my.agents.root)\n(def burst " n ")")}]))
             (let [settled (read-until! tab "def burst 5")]
               (is (< (patches settled) m)
                   (str "the tab saw " (patches settled) " repaints for "

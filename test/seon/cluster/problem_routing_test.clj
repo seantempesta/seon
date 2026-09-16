@@ -63,7 +63,7 @@
          @connection
          {:my.message/value value :seon.agent/id sender :seon.turn/id run-id :seon.cluster.eval/ordinal 0 :seon.config.message/max-chain 16})]
     (is (empty? (:seon.error/values delivery)))
-    (db/transact! connection (:seon.message/rows delivery))))
+    (test-support/transacted! connection (:seon.message/rows delivery))))
 
 (defn- assign!
   [connection ordinal]

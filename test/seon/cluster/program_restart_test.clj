@@ -18,12 +18,12 @@
 
 (defn- transact-inbound!
   [connection agent-id content]
-  (db/transact!
-   connection
-   {:tx-data
-    [[:db.fn/call
-      #'message/inbound-tx
-      {:seon.agent/id agent-id :seon.message/inbound-content content :seon.config.eval.result/max-string 4096}]]}))
+  (test-support/transacted!
+               connection
+               {:tx-data
+                [[:db.fn/call
+                  #'message/inbound-tx
+                  {:seon.agent/id agent-id :seon.message/inbound-content content :seon.config.eval.result/max-string 4096}]]}))
 
 (defn- await-commit!
   "Wait on Datahike's commit event, with a loud test-only backstop."

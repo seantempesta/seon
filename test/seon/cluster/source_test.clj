@@ -38,8 +38,8 @@
 (defn populate!
   [{:keys [:seon.db/connection :seon.source/digest]}]
   (test-support/transacted! connection probe-schema)
-  (db/transact! connection
-              [{:seon.source.test/marker digest}]))
+  (test-support/transacted! connection
+                          [{:seon.source.test/marker digest}]))
 
 (defn populate-fails!
   [_]
@@ -48,7 +48,7 @@
 (defn populate-from-data!
   [{:keys [:seon.db/connection :seon.source.test/marker]}]
   (test-support/transacted! connection probe-schema)
-  (db/transact! connection [{:seon.source.test/marker marker}]))
+  (test-support/transacted! connection [{:seon.source.test/marker marker}]))
 
 (defn populate-blocked!
   [request]

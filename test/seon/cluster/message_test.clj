@@ -46,8 +46,8 @@
 
 (defn- commit-inbound!
   [connection request]
-  (db/transact! connection
-              [[:db.fn/call #'message/inbound-tx request]]))
+  (test-support/transacted! connection
+                          [[:db.fn/call #'message/inbound-tx request]]))
 
 (defn- with-database
   [body]
@@ -287,7 +287,7 @@
                     trigger (assoc :seon.message/trigger trigger)))
         rows (:seon.message/rows delivery)]
     (when (seq rows)
-      (db/transact! connection rows))
+      (test-support/transacted! connection rows))
     delivery))
 
 (def ^:private agent-ids ["alice" "bob" "carol" "dana"])
@@ -464,7 +464,7 @@
             delivery (message/delivery @connection request)
             rows (:seon.message/rows delivery)]
         (when (seq rows)
-          (db/transact! connection rows))
+          (test-support/transacted! connection rows))
         [next-model
          (and
           (or (nil? chain-limit)

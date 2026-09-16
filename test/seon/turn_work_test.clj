@@ -55,8 +55,8 @@
 (defn- add-trigger!
   "Commit one trigger message for the agent."
   [connection]
-  (db/transact! connection
-              [{:seon.message/id message-id :seon.message/to [:seon.agent/id agent-id] :seon.message/content "do the thing" :seon.message/inbox [:seon.agent/id agent-id]}]))
+  (support/transacted! connection
+                     [{:seon.message/id message-id :seon.message/to [:seon.agent/id agent-id] :seon.message/content "do the thing" :seon.message/inbox [:seon.agent/id agent-id]}]))
 
 (defn- model-attempt
   "The row that makes a turn an ANSWERING turn.
@@ -77,26 +77,26 @@
 (defn- open-run!
   "Open a turn, optionally planned."
   [connection {:keys [planned? triggered?]}]
-  (db/transact!
-   connection
-   (cond-> {:tx-data
-            (cond-> [(cond-> {:seon.turn/id run-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}
-                       triggered?
-                       (assoc :seon.turn/trigger
-                              [:seon.message/id message-id])
-                       true (assoc :seon.turn.work/situation :call)
-                       planned? (assoc :seon.turn/reply-size (long (count digest))))
-                     {:seon.agent/id agent-id
-                      }
-                     (model-attempt run-id now)]
-              planned?
-              (into (map (fn [ordinal]
-                           {:seon.cluster.eval/id (str run-id "-" ordinal)
-                            :seon.cluster.eval/run
-                            [:seon.turn/id run-id]
-                            :seon.cluster.eval/ordinal ordinal
-                            :seon.cluster.eval/source (str "(+ " ordinal " 1)")})
-                         (range 2))))})))
+  (support/transacted!
+          connection
+          (cond-> {:tx-data
+                   (cond-> [(cond-> {:seon.turn/id run-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}
+                              triggered?
+                              (assoc :seon.turn/trigger
+                                     [:seon.message/id message-id])
+                              true (assoc :seon.turn.work/situation :call)
+                              planned? (assoc :seon.turn/reply-size (long (count digest))))
+                            {:seon.agent/id agent-id
+                             }
+                            (model-attempt run-id now)]
+                     planned?
+                     (into (map (fn [ordinal]
+                                  {:seon.cluster.eval/id (str run-id "-" ordinal)
+                                   :seon.cluster.eval/run
+                                   [:seon.turn/id run-id]
+                                   :seon.cluster.eval/ordinal ordinal
+                                   :seon.cluster.eval/source (str "(+ " ordinal " 1)")})
+                                (range 2))))})))
 
 (defn- terminal-receipt!
   ([connection ordinal]
@@ -111,21 +111,21 @@
                  :seon.eval/shown shown-text}])))
 
 (defn- close-run! [connection]
-  (db/transact! connection
-              [[:db/add [:seon.turn/id run-id]
-                :seon.turn/closed-tx "datomic.tx"]
-               ]))
+  (support/transacted! connection
+                     [[:db/add [:seon.turn/id run-id]
+                       :seon.turn/closed-tx "datomic.tx"]
+                      ]))
 
 (defn- configure-cap!
   [connection limit]
-  (db/transact! connection
-              [{:seon.config/cluster "work-test"
-                :seon.config.run/max-episode-runs limit}]))
+  (support/transacted! connection
+                     [{:seon.config/cluster "work-test"
+                       :seon.config.run/max-episode-runs limit}]))
 
 (defn- add-outside-trigger!
   [connection id at]
-  (db/transact! connection
-              [{:seon.message/id id :seon.message/to [:seon.agent/id agent-id] :seon.message/content id :seon.message/inbox [:seon.agent/id agent-id]}]))
+  (support/transacted! connection
+                     [{:seon.message/id id :seon.message/to [:seon.agent/id agent-id] :seon.message/content id :seon.message/inbox [:seon.agent/id agent-id]}]))
 
 (defn- closed-run!
   "Commit one complete turn, with each supplied value as a receipt result."
@@ -160,10 +160,10 @@
                :seon.cluster.eval/at at
                :seon.eval/shown (pr-str value)})
             result-values)))
-  (db/transact! connection
-              [[:db/add [:seon.turn/id id]
-                :seon.turn/closed-tx at]
-               ]))
+  (support/transacted! connection
+                     [[:db/add [:seon.turn/id id]
+                       :seon.turn/closed-tx at]
+                      ]))
 
 (def ^:private request
   "The AGENT-SCOPED request (F2 §3.2). The global one died with the
@@ -684,8 +684,8 @@
     (fn [connection]
       (doseq [[id at] [["m-2" (Date. 2000)] ["m-1" (Date. 1000)]
                        ["m-3" (Date. 3000)]]]
-        (db/transact! connection
-                    [{:seon.message/id id :seon.message/to [:seon.agent/id agent-id] :seon.message/content id :seon.message/inbox [:seon.agent/id agent-id]}]))
+        (support/transacted! connection
+                           [{:seon.message/id id :seon.message/to [:seon.agent/id agent-id] :seon.message/content id :seon.message/inbox [:seon.agent/id agent-id]}]))
       (is (= ["m-1" "m-2" "m-3"]
              (mapv :seon.message/id
                    (turn/unanswered-triggers (db/db connection) agent-id)))

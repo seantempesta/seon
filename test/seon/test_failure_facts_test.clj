@@ -233,13 +233,13 @@
        :seon.test/fail-count failures :seon.test/error-count 0}]}))
 
 (defn- transact! [connection rows]
-  (db/transact! connection
-    (mapv (fn [row]
-            (cond-> row
-              (and (map? row) (:seon.fn/sym row))
-              (assoc :seon.fn/ns [:seon.ns/name 'seon.id] :seon.schema.admission/source :core)
-              (and (map? row) (:seon.test/sym row))
-              (assoc :seon.schema.admission/source :core))) rows)))
+  (support/transacted! connection
+           (mapv (fn [row]
+                   (cond-> row
+                     (and (map? row) (:seon.fn/sym row))
+                     (assoc :seon.fn/ns [:seon.ns/name 'seon.id] :seon.schema.admission/source :core)
+                     (and (map? row) (:seon.test/sym row))
+                     (assoc :seon.schema.admission/source :core))) rows)))
 
 (deftest publication-replaces-cardinality-many-tuples
   (support/with-database

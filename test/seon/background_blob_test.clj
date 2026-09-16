@@ -53,19 +53,19 @@
 (defn- install-capability!
   [connection]
   (let [handler-meta (meta #'binary-handler)]
-    (db/transact!
-     connection
-     [{:seon.schema/key :seon.background-blob-test/request
-       :seon.schema/form
-       (pr-str [:map [:seon.background-blob-test/size :int]])}
-      {:seon.fn/sym "seon.background-blob-test/binary-capability"
-       :seon.fn/spec
-       (pr-str [:=> [:cat :seon.background-blob-test/request]
-                :seon.blob/octet-array])
-       :seon.fn/workload :io
-       :seon.effect/capability
-       (symbol (str (ns-name (:ns handler-meta)))
-               (str (:name handler-meta)))}])))
+    (support/transacted!
+            connection
+            [{:seon.schema/key :seon.background-blob-test/request
+              :seon.schema/form
+              (pr-str [:map [:seon.background-blob-test/size :int]])}
+             {:seon.fn/sym "seon.background-blob-test/binary-capability"
+              :seon.fn/spec
+              (pr-str [:=> [:cat :seon.background-blob-test/request]
+                       :seon.blob/octet-array])
+              :seon.fn/workload :io
+              :seon.effect/capability
+              (symbol (str (ns-name (:ns handler-meta)))
+                      (str (:name handler-meta)))}])))
 
 (defn- exact-bytes
   [connection digest size chunk-size]

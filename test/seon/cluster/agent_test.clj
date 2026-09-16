@@ -303,13 +303,13 @@
 
 (defn- outside-trigger!
   [connection agent-id message-id content]
-  (db/transact! connection
-              [{:seon.message/id message-id :seon.message/to [:seon.agent/id agent-id] :seon.message/content content :seon.message/inbox [:seon.agent/id agent-id]}]))
+  (test-support/transacted! connection
+                          [{:seon.message/id message-id :seon.message/to [:seon.agent/id agent-id] :seon.message/content content :seon.message/inbox [:seon.agent/id agent-id]}]))
 
 (defn- agent-trigger!
   [connection from-id to-id message-id content]
-  (db/transact! connection
-              [{:seon.message/id message-id :seon.message/to [:seon.agent/id to-id] :seon.message/from [:seon.agent/id from-id] :seon.message/content content :seon.message/inbox [:seon.agent/id to-id]}]))
+  (test-support/transacted! connection
+                          [{:seon.message/id message-id :seon.message/to [:seon.agent/id to-id] :seon.message/from [:seon.agent/id from-id] :seon.message/content content :seon.message/inbox [:seon.agent/id to-id]}]))
 
 (defn- open-runs
   [db]
@@ -1291,8 +1291,8 @@
                   [{:seon.cluster.eval/source "(identity nil)"
                     :seon.ns/name namespace-name}]}))]
     (is (some? (:db-after result)) (pr-str result)))
-  (db/transact! connection
-              (turn/close-tx {:seon.turn/id run-id :seon.db.process/id process :seon.turn/closed-tx "datomic.tx"})))
+  (test-support/transacted! connection
+                          (turn/close-tx {:seon.turn/id run-id :seon.db.process/id process :seon.turn/closed-tx "datomic.tx"})))
 
 (deftest episode-cap-refusal-test
   ;; seed 2026072814 — the derivation is asserted DIRECTLY (the cited

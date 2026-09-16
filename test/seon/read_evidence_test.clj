@@ -123,8 +123,8 @@
                                  [[:db/add [:seon.message/id "mine"]
                                    :seon.message/content "changed"]]))))
          (is (false? (db/read-evidence-current? @connection evidence)))
-         (db/transact! connection [[:db/add [:seon.message/id "mine"]
-                                   :seon.message/content "mine"]])))
+         (test-support/transacted! connection [[:db/add [:seon.message/id "mine"]
+                                               :seon.message/content "mine"]])))
      (let [captured (atom [])
            query '[:find [?m ...] :in $ ?recipient
                    :where [?m :seon.message/to ?recipient]

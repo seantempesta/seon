@@ -282,22 +282,22 @@
 
 (defn- seed-registry!
   [connection]
-  (db/transact!
-   connection
-   [{:seon.ai.model/provider-id "test-provider"
-     :seon.config.ai/endpoint "https://example.invalid/v1/chat/completions"
-     :seon.config.ai/api-key-variable "TEST_PROVIDER_KEY"
-     :seon.ai.model/openai-chat-completions true
-     :seon.ai.model/output-token-wire-key "max_completion_tokens"}
-    {:seon.ai.model/id "registered-model"
-     :seon.ai.model/provider
-     [:seon.ai.model/provider-id "test-provider"]
-     :seon.ai.model/context-window-tokens 1000000
-     :seon.ai.model/max-output-tokens 100
-     :seon.ai.model/input-usd-per-mtok 0.25
-     :seon.ai.model/output-usd-per-mtok 1.0
-     :seon.ai.model/input-modalities #{:text}
-     :seon.ai.model/thinking-dials #{:high}}]))
+  (test-support/transacted!
+               connection
+               [{:seon.ai.model/provider-id "test-provider"
+                 :seon.config.ai/endpoint "https://example.invalid/v1/chat/completions"
+                 :seon.config.ai/api-key-variable "TEST_PROVIDER_KEY"
+                 :seon.ai.model/openai-chat-completions true
+                 :seon.ai.model/output-token-wire-key "max_completion_tokens"}
+                {:seon.ai.model/id "registered-model"
+                 :seon.ai.model/provider
+                 [:seon.ai.model/provider-id "test-provider"]
+                 :seon.ai.model/context-window-tokens 1000000
+                 :seon.ai.model/max-output-tokens 100
+                 :seon.ai.model/input-usd-per-mtok 0.25
+                 :seon.ai.model/output-usd-per-mtok 1.0
+                 :seon.ai.model/input-modalities #{:text}
+                 :seon.ai.model/thinking-dials #{:high}}]))
 
 (deftest registry-resolution-accretes-provider-facts-onto-a-working-target
   (test-support/with-database

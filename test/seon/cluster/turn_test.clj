@@ -2609,11 +2609,11 @@
 
 (defn- recover-cut-run!
   [connection run-id]
-  (db/transact!
-   connection
-   (turn/recover-tx {:seon.turn/id run-id
+  (test-support/transacted!
+               connection
+               (turn/recover-tx {:seon.turn/id run-id
 
-                    :seon.turn/now (Date. 1700000001000)})))
+                                :seon.turn/now (Date. 1700000001000)})))
 
 (deftest turn-intent-is-the-complete-crash-falsifier
   (doseq [prefix-count [0 2]]
@@ -3084,15 +3084,15 @@
                             {:seon.agent/id "agent-a"
                              }])
               (when evaluation?
-                (db/transact!
-                 connection
-                 (turn/receipt-start-tx
-                  {:seon.turn/id run-id
-                   :seon.cluster.eval/ordinal 0
-                   :seon.cluster.eval/at now
-                   :seon.cluster.eval/source "(identity :phase-probe)"
-                   :seon.cluster.eval/ns [:seon.ns/name 'my.agents.agent-a]
-                   :seon.cluster.eval/author :agent})))
+                (test-support/transacted!
+                             connection
+                             (turn/receipt-start-tx
+                              {:seon.turn/id run-id
+                               :seon.cluster.eval/ordinal 0
+                               :seon.cluster.eval/at now
+                               :seon.cluster.eval/source "(identity :phase-probe)"
+                               :seon.cluster.eval/ns [:seon.ns/name 'my.agents.agent-a]
+                               :seon.cluster.eval/author :agent})))
               (let [settled
                     (turn/settle!
                      (cond-> {:seon.turn.loop/cluster cluster

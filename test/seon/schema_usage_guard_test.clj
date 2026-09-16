@@ -59,14 +59,14 @@
             {:seon.schema.admission/source :core}))
          (schema/projection-from-database @connection)
          selected-forms)]
-    (db/transact!
-     connection
-     (into
-      (schema.datahike/malli->datahike-schema-in
-       projection
-       (schema.datahike/database-attributes-for-in
-        projection selected-forms))
-      (schema/canonical-schema-rows selected-forms)))))
+    (test-support/transacted!
+                 connection
+                 (into
+                  (schema.datahike/malli->datahike-schema-in
+                   projection
+                   (schema.datahike/database-attributes-for-in
+                    projection selected-forms))
+                  (schema/canonical-schema-rows selected-forms)))))
 
 (defn- schema-reference-edges
   [database]
@@ -138,7 +138,7 @@
       (test-support/with-database
         (fn [connection]
           (install-forms! connection selected-forms)
-          (when extra-row (db/transact! connection [extra-row]))
+          (when extra-row (test-support/transacted! connection [extra-row]))
           (let [before @connection
                 result
                 (transact-result

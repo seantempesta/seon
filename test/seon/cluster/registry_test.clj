@@ -69,7 +69,7 @@
             @connection)))
 
 (defn- write-marker! [connection marker]
-  (db/transact! connection {:tx-data [{:seon.registry.test/marker marker}]}))
+  (test-support/transacted! connection {:tx-data [{:seon.registry.test/marker marker}]}))
 
 (defn- refusal
   "Run `thunk`, returning its refusal ex-data — or ::committed."
@@ -138,8 +138,8 @@
                 (:db/id
                  (db/pull (:db-after report) [:db/id]
                          [:seon.registry.test/marker "historical payload"]))]
-            (db/transact! connection
-                        [[:db/retract entity-id :seon.registry.test/archive-blob digest]]))
+            (test-support/transacted! connection
+                                    [[:db/retract entity-id :seon.registry.test/archive-blob digest]]))
           (finally
             (d/release connection)))
         (registry/collect! opened)
@@ -370,14 +370,14 @@
             connection (store/open-branch! opened doomed)]
         (try
           (doseq [batch (partition-all 100 (range 500))]
-            (db/transact!
-             connection
-             {:tx-data
-              (mapv (fn [n]
-                      {:seon.registry.test/marker
-                       (str "dry-run-" n " "
-                            (apply str (repeat 200 \x)))})
-                    batch)}))
+            (test-support/transacted!
+                         connection
+                         {:tx-data
+                          (mapv (fn [n]
+                                  {:seon.registry.test/marker
+                                   (str "dry-run-" n " "
+                                        (apply str (repeat 200 \x)))})
+                                batch)}))
           (finally
             (d/release connection)))
         (registry/retire-branch! {:seon.store/store opened
@@ -420,12 +420,12 @@
                           opened (registry/cluster-branch cluster-name))]
           (try
             (doseq [batch (partition-all 250 (range 1000))]
-              (db/transact! connection
-                          {:tx-data (mapv (fn [n]
-                                            {:seon.registry.test/marker
-                                             (str prefix n " "
-                                                  (apply str (repeat 200 \x)))})
-                                          batch)}))
+              (test-support/transacted! connection
+                                      {:tx-data (mapv (fn [n]
+                                                        {:seon.registry.test/marker
+                                                         (str prefix n " "
+                                                              (apply str (repeat 200 \x)))})
+                                                      batch)}))
             (finally
               (d/release connection)))))
       (let [dir (:seon.store/dir opened)

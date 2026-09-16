@@ -52,12 +52,12 @@
 
 (defn- create-agent!
   [connection cluster-name agent-id namespace-name]
-  (db/transact!
-   connection
-   (agent/creation-tx
-    {:seon.agent/id agent-id
-     :seon.ns/name namespace-name
-     :seon.cluster/name cluster-name})))
+  (test-support/transacted!
+               connection
+               (agent/creation-tx
+                {:seon.agent/id agent-id
+                 :seon.ns/name namespace-name
+                 :seon.cluster/name cluster-name})))
 
 (deftest unique-namespace-race-keeps-one-winner-and-one-flat-refusal
   (test-support/with-database

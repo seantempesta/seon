@@ -31,10 +31,10 @@
 
 (defn- artifact-root!
   [connection digest]
-  (db/transact!
-   connection
-   [{:seon.dev.mcp.artifact/id digest
-     :seon.dev.mcp.artifact/digest digest}]))
+  (support/transacted!
+          connection
+          [{:seon.dev.mcp.artifact/id digest
+            :seon.dev.mcp.artifact/digest digest}]))
 
 (defn- rooted-digests
   [connection]
