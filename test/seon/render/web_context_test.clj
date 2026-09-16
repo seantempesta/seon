@@ -92,10 +92,13 @@
                  (is (= 1 @walks) "current retained history is not queried and folded again")
                  (is (identical? (:seon.render.history/entries first-result)
                                  (:seon.render.history/entries second-result)))
+                 ;; UNRELATED means unrelated: an inbox edge to the agent under
+                 ;; test is a LISTENED attribute and would be a wake, not a
+                 ;; neutral transaction.
                  (support/transacted! connection
-                          [{:seon.message/id "context-probe-message"
-                            :seon.message/to [:seon.agent/id "root"]
-                            :seon.message/inbox [:seon.agent/id "root"]
+                          [{:seon.agent/id "context-bystander"}
+                           {:seon.message/id "context-probe-message"
+                            :seon.message/to [:seon.agent/id "context-bystander"]
                             :seon.message/content "Does not change saved evaluations."}])
                  (let [unrelated (render/acquire-context! (assoc request :seon.db/db @connection))]
                    (is (= 1 @walks) "an unrelated transaction preserves the acquired history")

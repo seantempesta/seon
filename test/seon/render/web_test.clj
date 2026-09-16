@@ -1052,9 +1052,9 @@ handle))}}
                     "the initial comparison executes its applicable render functions")
                 (support/transacted!
                         connection
-                        [{:seon.message/id "debug-cache-unrelated"
-                          :seon.message/to [:seon.agent/id agent-id]
-                          :seon.message/inbox [:seon.agent/id agent-id]
+                        [{:seon.agent/id "debug-cache-bystander"}
+                         {:seon.message/id "debug-cache-unrelated"
+                          :seon.message/to [:seon.agent/id "debug-cache-bystander"]
                           :seon.message/content
                           "does not affect the inspected namespace"}])
                 (is (< pass-before (settle-render! context)))
