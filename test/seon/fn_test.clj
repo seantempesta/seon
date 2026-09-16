@@ -981,10 +981,19 @@
         (first (filter #(= "artifact.beta/caller" (:seon.fn/sym %))
                        (:seon.fn.file/rows beta-artifact)))
         incremental
+        ;; The same file under the SAME roots: both seams ask one function
+        ;; which root holds it, so the file row they mint — root fact
+        ;; included — is identical.
         (seon.fn/build-artifact
          {:seon.fn.file/path (.getPath beta)
+          :seon.fn/roots (:seon.fn/roots request)
           :seon.fn.file/first-party-functions
-          ["artifact.alpha/target"]})]
+          ["artifact.alpha/target"]})
+        file-root (fn [artifact]
+                    (->> (:seon.fn.file/rows artifact)
+                         (filter :seon.fn.file/path)
+                         first
+                         :seon.fn.file/root))]
     (testing "the complete manifest is stable and partitions every file"
       (is (= manifest repeated))
       (is (every? #(= :core (:seon.schema.admission/source %))
@@ -1026,6 +1035,9 @@
                [:seon.fn/sym "clojure.core/str"]
                [:seon.fn/sym "clojure.string/trim"]}
              (:seon.fn/calls beta-caller)))
+      (is (= (.getPath root) (file-root beta-artifact)))
+      (is (= (file-root beta-artifact) (file-root incremental))
+          "the walk and the changed-path seam write the same root fact")
       (is (= beta-artifact incremental)))
     (testing "the file digest covers exact bytes, including CRLF"
       (is (re-matches #"[0-9a-f]{64}"
@@ -1937,3 +1949,55 @@
         (is (nil? (:seon.fn.file/root (file-row (artifact {}))))
             "a file under no declared source root carries no root"))
       (finally (test-support/delete-recursively! root)))))
+
+(deftest the-indexer-emits-no-attribute-the-program-row-schema-drops
+  ;; The 2026-09-16 class, twice in one day (7cfe02790, 925ca19fe): the
+  ;; analyzer derived an owned facet, and the canonical row silently dropped
+  ;; it because a second literal list did not name it. This compares the rows
+  ;; the analysis emits with the rows the artifact carries, so a dropped facet
+  ;; is a red regression rather than an absent fact nobody notices.
+  (let [root (fixture-root)
+        source (str "(ns indexed.sample\n"
+                    "  (:require [seon.db :as db]))\n"
+                    "(defn write!\n"
+                    "  \"Writes one declared attribute.\"\n"
+                    "  {:malli/schema [:=> [:cat :seon.db/connection] :map]}\n"
+                    "  [connection]\n"
+                    "  (db/transact! connection [{:seon.agent/id \"a\"}]))\n"
+                    "(defn- helper [] (write! nil))\n")
+        file (write-source! root "indexed/sample.clj" source)
+        path (.getCanonicalPath file)
+        analysis (analyzer/analyze {::analyzer/paths [path]})
+        contexts (#'seon.fn/source-contexts [file])
+        first-party (#'seon.fn/first-party-function-symbols analysis)
+        emitted (get (#'seon.fn/analysis-rows-by-file analysis first-party contexts)
+                     path)
+        artifact (seon.fn/build-artifact
+                  {:seon.fn.file/path (.getPath file)
+                   :seon.fn.file/first-party-functions []})
+        kept (:seon.fn.file/rows artifact)
+        attributes (fn [rows] (into #{} (mapcat keys) rows))
+        emitted-attributes (attributes emitted)
+        kept-attributes (attributes kept)]
+    (is (seq emitted) "the analysis emitted declaration rows")
+    (is (<= 10 (count emitted-attributes))
+        (str "the analysis emitted a rich row set, not an empty one: "
+             (pr-str (sort emitted-attributes))))
+    (is (contains? emitted-attributes :seon.fn/writes)
+        "the write facet is among the emitted attributes")
+    (is (empty? (remove kept-attributes emitted-attributes))
+        (str "attributes the analysis emitted and the canonical row dropped: "
+             (pr-str (sort (remove kept-attributes emitted-attributes)))))
+    (doseq [row emitted
+            :when (program/row-identity row)
+            :let [canonical (set (keys (program/canonical-row row)))
+                  carried (into []
+                                (keep (fn [[attribute value]]
+                                        (when-not (or (nil? value)
+                                                      (and (coll? value) (empty? value)))
+                                          attribute)))
+                                row)]]
+      (is (empty? (remove canonical carried))
+          (str "the canonical row dropped "
+               (pr-str (vec (remove canonical carried)))
+               " from " (pr-str (program/row-identity row)))))))
