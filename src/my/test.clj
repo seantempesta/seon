@@ -25,6 +25,11 @@
   :seon.test/fail-count and :seon.test/error-count maps. [] means no tests
   are declared; it is not evidence that any test passed.
 
+  My tests run as MY cluster's work: `seon.test/run-owned` receives my
+  connection from call preparation and hands it to the test body, so a
+  `seon.db` call my test elides inside reaches my cluster exactly as the rest
+  of my evaluation does.
+
   Example:
   (my.test/run)"
   ([] (list 'my.test/run {}))
@@ -33,5 +38,6 @@
       (if (:seon.error/kind symbols#)
         symbols#
         (mapv (fn [test-symbol#]
-                (seon.test/run (resolve (symbol test-symbol#))))
+                (seon.test/run-owned
+                 {:seon.test/var (resolve (symbol test-symbol#))}))
               symbols#)))))

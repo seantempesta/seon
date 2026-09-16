@@ -123,9 +123,9 @@
   (with-test-loader
     #(long (* 1000 @(requiring-resolve 'seon.test-support/event-backstop-seconds)))))
 
-(defn- bounded-result [test-var timeout-ms]
+(defn- bounded-result [test-var timeout-ms custody]
   (let [test-symbol (str (:ns (meta test-var)) "/" (:name (meta test-var)))
-        task (FutureTask. (bound-fn [] (with-test-loader #(runner/run-var! test-var))))
+        task (FutureTask. (bound-fn [] (with-test-loader #(runner/run-var! test-var custody))))
         thread (.unstarted (Thread/ofVirtual) task)]
     (.start thread)
     (try
@@ -304,7 +304,7 @@
                :seon.test/next-tier :none}))))))))
 
 (defn run
-  "Run one declared test Var, commit its result facts, and return them.\n\n  The connection is ordinarily supplied by call preparation from the calling\n  agent's environment. The returned value is pulled from the transaction's\n  `:db-after`, so it cannot disagree with the facts that were committed.\n\n  A test whose program-graph reach includes a declared destructive owner is\n  REFUSED, without executing, in a JVM whose declared operator root is the\n  development checkout it runs in; the refusal names the test, the owner, the\n  call path, and the cold invocation that may run it. `:seon.test/declared-root`\n  in the options is that declaration when the caller genuinely holds one;\n  absent, this JVM's own is read once here."
+  "Run one declared test Var, commit its result facts, and return them.\n\n  The connection is ordinarily supplied by call preparation from the calling\n  agent's environment. The returned value is pulled from the transaction's\n  `:db-after`, so it cannot disagree with the facts that were committed.\n\n  A test whose program-graph reach includes a declared destructive owner is\n  REFUSED, without executing, in a JVM whose declared operator root is the\n  development checkout it runs in; the refusal names the test, the owner, the\n  call path, and the cold invocation that may run it. `:seon.test/declared-root`\n  in the options is that declaration when the caller genuinely holds one;\n  absent, this JVM's own is read once here.\n\n  The test BODY runs under exactly the custody the options hand it:\n  `:seon.db/connection` present means the run is that cluster's own work and\n  the body's elided `seon.db` arities reach it; absent means none, which is\n  what a host REPL calling this is. `run-owned` is the agent's entry and\n  supplies its evaluation's connection. The `connection` argument is where\n  the RESULT FACTS are committed and never decides the body's custody."
   {:malli/schema
    [:function
     [:=> [:cat :seon.test/var :seon.db/connection] [:or :seon.test/result :seon.error/value]]
@@ -346,7 +346,8 @@
                        :else
                        (schema/call-with-projection
                          (db/carried-projection database)
-                         #(bounded-result test-var (:seon.test/remaining-ms options))))
+                         #(bounded-result test-var (:seon.test/remaining-ms options)
+                                          (select-keys options [:seon.db/connection]))))
               restored (runner/restore-live-cluster-schema! registry-before)
               result (if (or (:seon.error/kind result) (empty? restored))
                        result
@@ -366,6 +367,34 @@
                                :seon.test/run-at (:seon.test.run/at provenance),
                                :seon.test.run/provenance provenance})]
               (if (:seon.error/kind committed) committed (first committed)))))))))
+
+
+(defn run-owned
+  "Run one of MY declared tests, under my own cluster's custody.
+
+  `my.test/run` resolves each test symbol my namespace declares and calls
+  this with the Var. My connection is supplied by call preparation — the same
+  connection my evaluation reads and writes through — and it is handed down
+  as a VALUE to the test body, so a `seon.db` call my test elides inside
+  reaches my cluster instead of refusing (the elided arity is the documented
+  affordance inside an evaluation, AGENTS §3).
+
+  `run` itself hands nothing: a host REPL running the same Var is not any
+  cluster's own work, and its body's elided arities refuse and say so."
+  {:malli/schema [:=> [:cat :seon.test/run-owned-request]
+                  [:or :seon.test/result :seon.error/value]]}
+  [{connection :seon.db/connection test-var :seon.test/var}]
+  (let [database (db/db connection)]
+    (if (:seon.error/kind database)
+      database
+      (let [provenance (runner/provenance database)]
+        (if (:seon.error/kind provenance)
+          provenance
+          (run test-var connection
+               {:seon.db/db database
+                :seon.db/connection connection
+                :seon.test.run/provenance provenance
+                :seon.test/remaining-ms (event-backstop-ms)}))))))
 
 (defn- identity-tests [database changed]
   (let [[attribute value :as program-identity]

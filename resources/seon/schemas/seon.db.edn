@@ -144,6 +144,10 @@
             :seon.schema/identity-only true
             :seon.schema/identity-projection seon.db/connection-identity}
            seon.db/connection-object?],
+          :custody-request
+          [:map
+           {:description "The cluster custody one scope hands to another as a value. The connection present means the scope runs as that cluster's own work and the elided seon.db arities reach it; absent means no custody, and those arities refuse."}
+           [:seon.db/connection {:optional true} :seon.db/connection]],
           :connection-id [:vector [:or :uuid :keyword]],
           :connection-identity
           [:map

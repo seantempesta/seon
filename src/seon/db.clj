@@ -256,6 +256,29 @@
 
     :else {:datahike/connection-id (connection-id connection)}))
 
+(defn call-with-custody
+  "Call `f` with EXACTLY the cluster custody its caller handed over.
+
+  The custody is a VALUE on the request: `:seon.db/connection` present means
+  `f` runs as that cluster's own work and the elided `seon.db` arities reach
+  it; the key ABSENT means no custody at all, and those arities refuse and
+  name what they needed. Nothing here re-reads a dynamic var to decide — the
+  caller that knows whose work this is says so, and this binds that answer.
+
+  A read basis is never inherited: `*read-database*` is scoped by ONE
+  evaluation, so a scope that switches custody starts from the connection.
+
+  `seon.test.runner/run-var!` is the caller this exists for. An agent running
+  its own tests inside its evaluation is doing that cluster's work; a host
+  REPL running the same test Var is not, and hands nothing."
+  {:malli/schema [:=> [:cat :seon.db/custody-request [:fn clojure.core/ifn?]]
+                  [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
+                         :seon.schema.admission/reason "A scope wrapper returns its body's arbitrary result unchanged."
+                         :gen/elements [nil false 0 "" :k [] {}]}]]}
+  [request f]
+  (binding [*conn* (:seon.db/connection request) *read-database* nil]
+    (f)))
+
 (defn call-without-custody
   "Call `f` with NO ambient cluster custody bound on this thread.
 
@@ -269,14 +292,16 @@
   Removing the bindings turns that silence into the ordinary loud refusal
   `seon.db` already has: a read or write with no connection names what it
   needed. Absence is the honest answer here, never a fallback to whichever
-  cluster happens to be in scope."
+  cluster happens to be in scope.
+
+  This is `call-with-custody` with nothing handed: ONE scope, and absence is
+  one of its two ordinary answers."
   {:malli/schema [:=> [:cat [:fn clojure.core/ifn?]]
                   [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
                          :seon.schema.admission/reason "A scope wrapper returns its body's arbitrary result unchanged."
                          :gen/elements [nil false 0 "" :k [] {}]}]]}
   [f]
-  (binding [*conn* nil *read-database* nil]
-    (f)))
+  (call-with-custody {} f))
 
 (defn database-value-identity
   "Plain-data identity of a COMMITTED immutable Datahike database value.

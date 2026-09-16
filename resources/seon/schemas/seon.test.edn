@@ -160,8 +160,15 @@
  :seon.test/run-options
  [:map [:seon.test.run/provenance :seon.test.run/provenance]
   [:seon.db/db {:optional true} :seon.db/database-value]
+  [:seon.db/connection {:optional true}
+   [:and {:description "The custody the test BODY runs under: present means the run is that cluster's own work and the body's elided seon.db arities reach it; absent means none. It is not the connection the result facts are committed through, which is the call's own argument."}
+    :seon.db/connection]]
   [:seon.test/declared-root {:optional true} :seon.test/declared-root]
   [:seon.test/remaining-ms [:int {:min 1}]]]
+ :seon.test/run-owned-request
+ [:map {:description "One of the calling agent's own declared tests, with the connection call preparation supplies from its environment."}
+  [:seon.db/connection :seon.db/connection]
+  [:seon.test/var :seon.test/var]]
  :seon.test/declared-root
  [:string {:min 1
            :description "The operator root the caller genuinely holds; absent means this JVM's own declaration is read."}]

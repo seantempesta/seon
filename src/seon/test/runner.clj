@@ -559,52 +559,67 @@
 (declare ambient-snapshot ambient-drift)
 
 (defn run-var!
-  "Run one host or SCI test Var and return its captured assertion result.
+  "Run one host or SCI test Var under the custody its caller hands it, and
+  return its captured assertion result.
 
   This is the same capture and reporter path used by `bin/test`; it performs
   no database write. Each invocation owns its counters, test context and terminal
   reporter; nested runs cannot contribute evidence to their caller.
-  `commit-results!` is the sole completion writer."
+  `commit-results!` is the sole completion writer.
+
+  THE CUSTODY IS A VALUE, NEVER A RE-READ. `:seon.db/connection` on the
+  supplied request is the cluster whose work this run IS: an agent running
+  its own declared tests inside its evaluation reaches that cluster through
+  the elided `seon.db` arities, exactly as the rest of its evaluation does.
+  The one-argument arity hands none — a host REPL or a `bin/test` worker
+  running the same Var is nobody's cluster work, and an elided arity there
+  refuses loudly and names what it needed.
+
+  Whatever custody this thread INHERITED decides nothing. A `bound-fn` or a
+  virtual thread carries the bindings of whoever created it, so before this
+  seam took the connection as a value an agent's own test silently read and
+  wrote whichever cluster happened to be in scope — on 2026-09-17 that put a
+  test's synthetic schema rows into `default`'s datoms and every later write
+  on the cluster was refused, and the repair then left the agent's own tests
+  with no cluster at all. The caller that knows whose work a run is says so;
+  this binds exactly that answer (AGENTS §2.1)."
   {:malli/schema
-   [:=> [:cat :seon.test/var]
-    [:or :seon.test.runner/captured-result
-     :seon.test/not-runnable-error]]}
-  [test-var]
-  (if-not (ifn? (:test (meta test-var)))
-    {:seon.error/kind ::not-runnable
-     :seon.test/not-runnable (str test-var)
-     :seon.error/message "The supplied Var has no clojure.test function."}
-    (let [test-symbol (var-symbol test-var)
-          selected-namespaces #{(symbol (namespace test-symbol))}
-          options (report-options)
-          capture (atom {::order [] ::results {}})
-          reported-signatures (atom #{})
-          default-report (.getRawRoot #'test/report)
-          before (ambient-snapshot)]
-      (binding [test/*report-counters* (ref test/*initial-report-counters*)
-                test/*testing-vars* ()
-                test/*testing-contexts* ()
-                test/report
-                (fn [event]
-                  (capture-and-report-event!
-                   options capture selected-namespaces default-report
-                   reported-signatures event))]
-        ;; A TEST BODY OWNS NOTHING GLOBAL, INCLUDING CUSTODY. In a live
-        ;; cluster JVM this Var runs on a thread that inherited the agent
-        ;; evaluation's `seon.db` custody bindings, so any fixture helper
-        ;; using an elided arity wrote the LIVE cluster instead of its own
-        ;; fixture — silently, until the cluster's writer started refusing
-        ;; every transaction (2026-09-17). Without the bindings the elided
-        ;; arity refuses loudly and names what it needed. In a `bin/test`
-        ;; worker nothing is bound, so this is a no-op there.
-        (db/call-without-custody #(test/test-vars [test-var])))
-      (let [result (first (captured-results @capture))
-            drift (ambient-drift before (ambient-snapshot))]
-        (cond-> result
-          (seq drift) (update :seon.test/error-count (fnil inc 0))
-          (seq drift) (update :seon.test/failure-message
-                             #(str (when % (str % "\n"))
-                                   "Worker-global state changed: " (pr-str drift))))))))
+   [:function
+    [:=> [:cat :seon.test/var]
+     [:or :seon.test.runner/captured-result
+      :seon.test/not-runnable-error]]
+    [:=> [:cat :seon.test/var :seon.db/custody-request]
+     [:or :seon.test.runner/captured-result
+      :seon.test/not-runnable-error]]]}
+  ([test-var] (run-var! test-var {}))
+  ([test-var custody]
+   (if-not (ifn? (:test (meta test-var)))
+     {:seon.error/kind ::not-runnable
+      :seon.test/not-runnable (str test-var)
+      :seon.error/message "The supplied Var has no clojure.test function."}
+     (let [test-symbol (var-symbol test-var)
+           selected-namespaces #{(symbol (namespace test-symbol))}
+           options (report-options)
+           capture (atom {::order [] ::results {}})
+           reported-signatures (atom #{})
+           default-report (.getRawRoot #'test/report)
+           before (ambient-snapshot)]
+       (binding [test/*report-counters* (ref test/*initial-report-counters*)
+                 test/*testing-vars* ()
+                 test/*testing-contexts* ()
+                 test/report
+                 (fn [event]
+                   (capture-and-report-event!
+                    options capture selected-namespaces default-report
+                    reported-signatures event))]
+         (db/call-with-custody custody #(test/test-vars [test-var])))
+       (let [result (first (captured-results @capture))
+             drift (ambient-drift before (ambient-snapshot))]
+         (cond-> result
+           (seq drift) (update :seon.test/error-count (fnil inc 0))
+           (seq drift) (update :seon.test/failure-message
+                               #(str (when % (str % "\n"))
+                                     "Worker-global state changed: " (pr-str drift)))))))))
 
 (defn- test-vars-in
   [namespaces]
