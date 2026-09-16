@@ -550,29 +550,51 @@
         [(seon.test/verified? $ ?symbol) ?verified]
         [(true? ?verified)]))])
 
-(defn run-issue-tests!
-  "Run every open issue's tests before settlement, sharing one evaluation deadline.
-  Results, including unavailable or expired tests, use the existing test writer."
-  {:malli/schema [:=> [:cat :seon.turn.loop/cluster :seon.agent/id] :nil]}
-  [cluster agent-id]
-  (let [connection (:seon.db/connection cluster)
-        database (db/db connection)
-        tests (db/q '[:find [?test ...] :in $ ?agent-id
+(defn- stale-issue-tests
+  "The agent's open-issue tests whose reach closure changed or that never ran.
+  A test whose closure is unchanged since its recorded result is not re-run:
+  that result already answers the completion query. A success ref that no
+  longer names a test stays in the set, so the settlement still reports it."
+  [database agent-id]
+  (let [tests (db/q '[:find [?test ...] :in $ ?agent-id
                       :where [?a :seon.agent/id ?agent-id]
                       [?i :seon.issue/agent ?a]
                       (not [?i :seon.issue/resolved-tx])
                       [?i :seon.issue/tests ?test]] database agent-id)]
     (when (error-value? tests)
       (throw (ex-info (:seon.error/message tests) tests)))
-    (when (seq tests)
+    (let [named (mapv (fn [test-eid]
+                        [test-eid (:seon.test/sym
+                                   (db/pull database [:seon.test/sym] test-eid))])
+                      (sort tests))
+          stale ((requiring-resolve 'seon.test/stale)
+                 database (into [] (keep second) named))]
+      (when (error-value? stale)
+        (throw (ex-info (:seon.error/message stale) stale)))
+      (let [changed (set stale)]
+        (filterv (fn [[_ test-symbol]]
+                   (or (nil? test-symbol) (contains? changed test-symbol)))
+                 named)))))
+
+(defn run-issue-tests!
+  "Run an open issue's STALE tests under one shared evaluation deadline.
+  The ordinary turn's close is the one settlement that calls this. A close
+  that changed nothing a test reaches runs nothing and leaves the recorded
+  results standing. Results, including
+  unavailable or expired tests, use the existing test writer."
+  {:malli/schema [:=> [:cat :seon.turn.loop/cluster :seon.agent/id] :nil]}
+  [cluster agent-id]
+  (let [connection (:seon.db/connection cluster)
+        database (db/db connection)
+        pending (stale-issue-tests database agent-id)]
+    (when (seq pending)
       (let [deadline (query-deadline database agent-id)
             provenance ((requiring-resolve 'seon.test.runner/provenance) database)
             ctx ((requiring-resolve 'seon.cluster.agent/acquire-context!) cluster agent-id)]
         (when (error-value? provenance)
           (throw (ex-info (:seon.error/message provenance) provenance)))
-        (doseq [test-eid (sort tests)]
-          (let [test-symbol (:seon.test/sym (db/pull database [:seon.test/sym] test-eid))
-                remaining-ms (quot (- deadline (System/nanoTime)) 1000000)
+        (doseq [[test-eid test-symbol] pending]
+          (let [remaining-ms (quot (- deadline (System/nanoTime)) 1000000)
                 result
                 (if (and test-symbol (pos? remaining-ms))
                   (let [qualified (symbol test-symbol)

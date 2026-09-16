@@ -194,14 +194,24 @@
 
 (defn stale
   "Source-bearing tests with no result or a changed reach digest.
-  Declared fixture observations are always stale."
-  {:malli/schema [:=> [:cat :seon.db/database-value]
-                  [:or [:vector :seon.test/sym] :seon.error/value]]}
-  [database]
-  (let [symbols (db/q '[:find [?s ...] :where
-                        [?t :seon.test/sym ?s] [?t :seon.test/source]] database)]
-    (if (:seon.error/kind symbols) symbols
-        (stale-in database (vec (sort symbols))))))
+  Declared fixture observations are always stale. The named arity answers
+  for exactly the supplied tests, so a caller holding its own set never
+  digests the whole population to learn which of them must run again."
+  {:malli/schema
+   [:function
+    [:=> [:cat :seon.db/database-value]
+     [:or [:vector :seon.test/sym] :seon.error/value]]
+    [:=> [:cat :seon.db/database-value [:sequential :seon.test/sym]]
+     [:or [:vector :seon.test/sym] :seon.error/value]]]}
+  ([database]
+   (let [symbols (db/q '[:find [?s ...] :where
+                         [?t :seon.test/sym ?s] [?t :seon.test/source]] database)]
+     (if (:seon.error/kind symbols) symbols
+         (stale-in database (vec (sort symbols))))))
+  ([database test-symbols]
+   (if (empty? test-symbols)
+     []
+     (stale-in database (vec (sort (distinct test-symbols)))))))
 
 (defn- namespace-tests [database namespaces]
   (db/q '[:find [?symbol ...] :in $ [?ns ...]

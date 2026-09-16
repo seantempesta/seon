@@ -49,6 +49,7 @@
      (let [aid "issue-settlement-worker"
            namespace-name 'my.agents.issue-settlement
            test-symbol "my.agents.issue-settlement/success-test"
+           steady-symbol "my.agents.issue-settlement/steady-test"
            _ (db/transact! connection
                (agent/creation-tx {:seon.agent/id aid :seon.ns/name namespace-name
                                    :seon.cluster/name "issue-settlement"}))
@@ -56,17 +57,54 @@
            handle (support/cluster-handle
                    {:seon.db/connection connection :seon.cluster/name "issue-settlement"
                     :seon.sci.eval/ctx ctx :seon.db.process/id cluster/boot-process-identity})
-           settle (fn []
-                    (let [report (turn/system-turn
-                                   {:seon.turn.loop/cluster handle
-                                    :seon.agent/id aid :seon.turn/write? true})]
-                      (is (nil? (:seon.error/kind report)) (pr-str report)))
-                    (db/pull (db/db connection)
-                      '[:seon.test/pass-count :seon.test/fail-count :seon.test/error-count
-                        :seon.test/failure-message :seon.test/reach-digest
-                        {:seon.test/run [:seon.test.run/id :seon.test.run/basis-t
-                                         :seon.test.run/program-digest]}]
-                      [:seon.test/sym test-symbol]))
+           routing (agent/routing)
+           evidence (fn [test-symbol]
+                      (db/pull (db/db connection)
+                        '[:seon.test/pass-count :seon.test/fail-count :seon.test/error-count
+                          :seon.test/failure-message :seon.test/reach-digest
+                          {:seon.test/run [:seon.test.run/id :seon.test.run/basis-t
+                                           :seon.test.run/program-digest]}]
+                        [:seon.test/sym test-symbol]))
+           run-id (fn [test-symbol]
+                    (get-in (evidence test-symbol) [:seon.test/run :seon.test.run/id]))
+           system-settle
+           (fn []
+             (let [report (turn/system-turn
+                            {:seon.turn.loop/cluster handle
+                             :seon.agent/id aid :seon.turn/write? true})]
+               (is (nil? (:seon.error/kind report)) (pr-str report))))
+           closed? (fn [tid]
+                     (some? (:seon.turn/closed-tx
+                             (db/pull (db/db connection) [:seon.turn/closed-tx]
+                                      [:seon.turn/id tid]))))
+           ;; The ordinary close is the settlement under test, so the fixture
+           ;; drives the real turn transitions rather than a stand-in: submit
+           ;; a reply through the durable source path, then advance that
+           ;; turn's own work until it carries a closed-tx. The pass bound is
+           ;; LOUD — a turn that never closes names itself instead of hanging.
+           close-ordinary-turn!
+           (fn []
+             (let [submitted (turn/virtual-turn!
+                              {:seon.turn.loop/cluster handle :seon.agent/id aid
+                               :seon.agent/routing routing
+                               :seon.cluster.reply/text
+                               "(my.turn/complete {:my.turn/result \"settled\"})"})
+                   tid (:seon.turn/id submitted)]
+               (is (string? tid) (pr-str submitted))
+               (loop [pass 0]
+                 (cond
+                   (closed? tid) tid
+                   (<= 24 pass)
+                   (throw (ex-info "The submitted ordinary turn never closed."
+                                   {:seon.turn/id tid :seon.turn.loop/forms-run pass}))
+                   :else
+                   (do (when-let [work (turn/next-agent-work
+                                        (db/db connection) {:seon.agent/id aid})]
+                         (when (= tid (:seon.turn/id work))
+                           (turn/turn {:seon.turn.loop/cluster handle
+                                       :seon.turn.work/next work}
+                                      (java.util.Date.))))
+                       (recur (inc pass)))))))
            issue-ref [:seon.issue/id "settlement-fixture"]
            step (fn [] (db/pull (db/db connection) [:my.plan.item/completed-tx]
                                 [:my.plan.item/id "settlement-step"]))]
@@ -74,7 +112,11 @@
          (admit! connection ctx namespace-name
                  "(defn answer {:malli/schema [:=> [:cat] :int]} [] 0)")
          (admit! connection ctx namespace-name
+                 "(defn constant {:malli/schema [:=> [:cat] :int]} [] 7)")
+         (admit! connection ctx namespace-name
                  "(clojure.test/deftest success-test (clojure.test/is (= 1 (answer))))")
+         (admit! connection ctx namespace-name
+                 "(clojure.test/deftest steady-test (clojure.test/is (= 7 (constant))))")
          (is (:db-after
               (db/transact! connection
                [{:db/id "issue" :seon.issue/id "settlement-fixture"
@@ -82,7 +124,8 @@
                  :seon.issue/status :open :seon.issue/severity :cleanup
                  :seon.issue/problem "The SCI answer must be one."
                  :seon.issue/agent [:seon.agent/id aid]
-                 :seon.issue/tests #{[:seon.test/sym test-symbol]}}
+                 :seon.issue/tests #{[:seon.test/sym test-symbol]
+                                     [:seon.test/sym steady-symbol]}}
                 {:seon.agent/id aid
                  :seon.agent/plan
                  {:my.plan/objective "Verify the SCI answer"
@@ -91,36 +134,68 @@
                                    :my.plan.item/position 0
                                    :my.plan.item/subject "issue"
                                    :my.plan.item/done-query plan/issue-done-query}]}}])))
-         (let [red (settle)]
+         ;; A SYSTEM TURN RUNS NO ISSUE TESTS. It appends generated reads;
+         ;; nothing it settles can newly satisfy the issue, and the opening
+         ;; settles one form per pass, so a test run there is pure cost.
+         (system-settle)
+         (is (nil? (:seon.test/run (evidence test-symbol))))
+         (is (nil? (:seon.test/run (evidence steady-symbol))))
+         (is (nil? (:my.plan.item/completed-tx (step))))
+         ;; The ordinary close runs the issue's stale tests — here both,
+         ;; because neither has a recorded result yet.
+         (close-ordinary-turn!)
+         (let [red (evidence test-symbol)
+               steady (evidence steady-symbol)
+               red-run (run-id test-symbol)
+               steady-run (run-id steady-symbol)]
            (is (= 1 (:seon.test/fail-count red)) (pr-str red))
-           (is (string? (get-in red [:seon.test/run :seon.test.run/id])))
+           (is (string? red-run))
            (is (string? (:seon.test/reach-digest red)))
+           (is (= 1 (:seon.test/pass-count steady)) (pr-str steady))
            (is (nil? (:my.plan.item/completed-tx (step))))
+           ;; A CLOSE THAT CHANGED NOTHING RUNS NOTHING. Both reach closures
+           ;; are unchanged, so both recorded results stand unaltered.
+           (close-ordinary-turn!)
+           (is (= red-run (run-id test-symbol)))
+           (is (= steady-run (run-id steady-symbol)))
+           (is (nil? (:my.plan.item/completed-tx (step))))
+           ;; Editing one reached function makes exactly its test stale.
            (admit! connection ctx namespace-name
                    "(defn answer {:malli/schema [:=> [:cat] :int]} [] (throw (ex-info \"red\" {})))")
-           (let [errored (settle)]
+           (close-ordinary-turn!)
+           (let [errored (evidence test-symbol)]
              (is (pos? (:seon.test/error-count errored)) (pr-str errored))
+             (is (not= red-run (run-id test-symbol)))
+             (is (= steady-run (run-id steady-symbol)))
              (is (nil? (:my.plan.item/completed-tx (step)))))
+           ;; The shared deadline still owns a test that will not finish, and
+           ;; the expiry is recorded against the test rather than swallowed.
            (admit! connection ctx namespace-name
                    "(defn answer {:malli/schema [:=> [:cat] :int]} [] (loop [] (recur)))")
            (db/transact! connection
              [{:seon.agent/id aid :seon.agent/settings {:seon.config.eval/time-limit-ms 100}}])
-           (let [expired (settle)]
+           (plan/run-issue-tests! handle aid)
+           (let [expired (evidence test-symbol)]
              (is (pos? (:seon.test/error-count expired)) (pr-str expired))
              (is (seq (:seon.test/failure-message expired)))
+             (is (= steady-run (run-id steady-symbol)))
              (is (nil? (:my.plan.item/completed-tx (step)))))
            (db/transact! connection
              [{:seon.agent/id aid :seon.agent/settings {:seon.config.eval/time-limit-ms 10000}}])
            (admit! connection ctx namespace-name
                    "(defn answer {:malli/schema [:=> [:cat] :int]} [] 1)")
-           (let [green (settle)
+           (close-ordinary-turn!)
+           (let [green (evidence test-symbol)
                  completed (:my.plan.item/completed-tx (step))
                  resolved (:seon.issue/resolved-tx (db/pull (db/db connection)
                                                   [:seon.issue/resolved-tx] issue-ref))]
-             (is (not= (get-in red [:seon.test/run :seon.test.run/id])
-                       (get-in green [:seon.test/run :seon.test.run/id])))
              (is (= 1 (:seon.test/pass-count green)) (pr-str green))
+             (is (not= red-run (get-in green [:seon.test/run :seon.test.run/id])))
              (is (true? (tests/verified? (db/db connection) test-symbol)))
+             ;; The step completes on RECORDED evidence: steady-test has not
+             ;; re-run since its first green, and still answers the query.
+             (is (= steady-run (run-id steady-symbol)))
+             (is (true? (tests/verified? (db/db connection) steady-symbol)))
              (is (some? completed))
              (is (= completed resolved))))
          (finally

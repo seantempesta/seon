@@ -2239,7 +2239,9 @@
                 (let [prepared (when (seq evaluated)
                                  (record-evaluated-tx
                                   {:seon.turn.loop/cluster handle :seon.db/db database :seon.turn/id turn-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/starting-ns [:seon.ns/name namespace-name] :seon.turn/reply (str/join "\n" (map :seon.cluster.eval/source selected)) :seon.turn/opened-tx "datomic.tx" :seon.turn/closed-tx "datomic.tx" :seon.turn.loop/evaluated-sources evaluated}))
-                      _ (plan/run-issue-tests! handle agent-id)
+                      ;; A SYSTEM TURN RUNS NO ISSUE TESTS. It appends
+                      ;; generated reads; it is not the agent answering, so
+                      ;; nothing it settles can newly satisfy an issue.
                       report (blob/with-publication!
                               connection (vec (:seon.blob/staged-writes prepared))
                               #(db/transact!
@@ -3371,6 +3373,16 @@
               (or (ex-message failure) (.getName (class failure))) :seon.turn.loop/phase-failed true}
              (error/refusal failure)))))
 
+(defn- closing-settlement?
+  "True when this settlement closes the ordinary turn.
+  Derived from the settled disposition and the undisposed agent form, the
+  same two facts that emit `close-tx`, so the close and everything that
+  belongs to it cannot disagree. A generated opening form settles without
+  closing, which is why it costs no issue test run."
+  [{undisposed? :seon.turn.loop/undisposed? settled :seon.turn.loop/settled}]
+  (boolean (or undisposed?
+               (contains? #{:completed :wait} (:my.turn/disposition settled)))))
+
 (defn- evaluation-terminal-data
   [{cluster :seon.turn.loop/cluster
     now :seon.turn.loop/now
@@ -3456,14 +3468,14 @@
                   :seon.turn.loop/settlement-evaluation settlement-evaluation}
            problem (assoc :seon.problems/form-problem problem)
            settled (assoc :my.turn/value settled)))
+        closing? (closing-settlement? {:seon.turn.loop/undisposed? undisposed?
+                                       :seon.turn.loop/settled settled})
         side-tx
         (concat
          (when settled
            [[:db/add [:seon.turn/id run-id]
              :seon.turn/disposition (:my.turn/disposition settled)]])
-         (when (or undisposed?
-                   (contains? #{:completed :wait}
-                              (:my.turn/disposition settled)))
+         (when closing?
            (close-tx
             {:seon.turn/id run-id :seon.db.process/id process}))
          (:seon.message/rows delivery)
@@ -3471,7 +3483,10 @@
         tx-data (if batch?
                   (vec side-tx)
                   (do
-                    (plan/run-issue-tests! cluster agent-id)
+                    ;; ONLY THE CLOSE ASKS THE QUESTION. A mid-turn form
+                    ;; settles without the agent having replied, so rerunning
+                    ;; its issue's tests there cannot change the answer.
+                    (when closing? (plan/run-issue-tests! cluster agent-id))
                     (conj (into (receipt-settle-tx database receipt) side-tx)
                           [:db.fn/call #'plan/settle-call agent-id])))]
     {:seon.turn.loop/settled settled
@@ -3503,6 +3518,16 @@
                (distinct)
                (map (fn [namespace-name] {:seon.ns/name namespace-name})))
               prepared)
+        ;; The batch settles every generated opening form as well as the
+        ;; agent's own. Only the settlement that CLOSES the turn asks whether
+        ;; the issue is done, so an opening pass runs no issue tests at all.
+        _ (doseq [agent-id (into #{}
+                                 (keep identity)
+                                 (map (fn [request entry]
+                                        (when (closing-settlement? entry)
+                                          (:seon.agent/id request)))
+                                      requests prepared))]
+            (plan/run-issue-tests! cluster agent-id))
         transaction
         {:seon.blob/staged-writes
          (into [] (mapcat :seon.blob/staged-writes) prepared)
@@ -3512,9 +3537,7 @@
                       (receipt-settle-batch-tx (mapv :seon.turn.loop/receipt prepared)))
                 (mapcat :seon.db/tx-data)
                 prepared)
-          (map (fn [agent-id]
-                 (plan/run-issue-tests! cluster agent-id)
-                 [:db.fn/call #'plan/settle-call agent-id]))
+          (map (fn [agent-id] [:db.fn/call #'plan/settle-call agent-id]))
           (distinct (map :seon.agent/id requests)))}
         ;; `with-publication!` IS TOTAL OVER AN EMPTY VECTOR — it calls the
         ;; commit directly — so the caller has no branch to get wrong. The
