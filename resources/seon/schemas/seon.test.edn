@@ -16,6 +16,9 @@
             :long
             [:string {:min 1
                       :description "The declared reason this test is long: a real boot, a multi-minute fixture, or another cost an ordinary branch pays once. Indexed from the test Var's :seon.test/long metadata, so an in-process check can exclude it by query instead of by loading the Var."}],
+            :long-ms
+            [:int {:min 1
+                   :description "The declared completion allowance in milliseconds for a :seon.test/long test. The cold runner widens that test's per-worker-exchange bound to it, so the bound derives from the declaration instead of standing in for it. Absent means the ordinary per-exchange bound applies."}],
             :pass-count [:int {:min 0}],
             :fail-count [:int {:min 0}],
             :error-count [:int {:min 0}],
@@ -104,6 +107,7 @@
              [:seon.test/fixture-observation {:optional true}
               :seon.test/fixture-observation]
              [:seon.test/long {:optional true} :seon.test/long]
+             [:seon.test/long-ms {:optional true} :seon.test/long-ms]
              [:seon.test/subject {:optional true} :seon.test/subject]
              [:seon.test/pending-subject
               {:optional true

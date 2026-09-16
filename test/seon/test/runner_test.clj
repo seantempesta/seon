@@ -335,3 +335,99 @@
                                 (long (* 1000 test-support/event-backstop-seconds))
                                 ::never-arrived)))
          (finally (.shutdownNow executor)))))))
+
+(deftest the-exchange-bound-derives-from-the-long-declaration
+  ;; §2.3: a bound that ignores the declaration is a tuned constant standing
+  ;; in for an observable event. A `:seon.test/long` test says it runs past
+  ;; the ordinary per-exchange bound; `:seon.test/long-ms` says how long, so
+  ;; the bound derives from the declaration instead of expiring the test the
+  ;; program already admitted would take longer.
+  (let [root (doto (io/file "tmp" (str "long-bound-" (id/id))) .mkdirs)
+        file (io/file root "declarations.clj")
+        namespace-name (symbol (str "seon.fixture.long-bound-" (id/id)))
+        reason "Boots two co-hosted clusters against a real store."
+        plain-reason "Forks a published root once."
+        allowance-ms 900000
+        support (program-fn/build-artifact
+                 {:seon.fn.file/path "test/seon/test_support.clj"
+                  :seon.fn.file/first-party-functions []})
+        known (vec (keep :seon.fn/sym (:seon.fn.file/rows support)))]
+    (try
+      (spit file
+            (str "(ns " namespace-name
+                 " (:require [clojure.test :refer [deftest is]]))\n"
+                 "(deftest ^{:seon.test/long " (pr-str reason)
+                 " :seon.test/long-ms " allowance-ms "} allowed (is true))\n"
+                 "(deftest ^{:seon.test/long " (pr-str plain-reason)
+                 "} declared (is true))\n"
+                 "(deftest ordinary (is true))\n"))
+      (load-file (str file))
+      (let [manifest {:seon.fn.manifest/artifacts
+                      [support (program-fn/build-artifact
+                                {:seon.fn.file/path (str file)
+                                 :seon.fn.file/first-party-functions known})]}
+            declarations (#'runner/long-declarations manifest)
+            all-vars (mapv #(ns-resolve namespace-name %)
+                           '[allowed declared ordinary])
+            task-for (fn [name-symbol]
+                       (first (#'runner/test-tasks
+                               all-vars [(ns-resolve namespace-name name-symbol)]
+                               declarations)))
+            default-bound (#'runner/exchange-bound-seconds)]
+        (is (= {(str namespace-name "/allowed")
+                {:seon.test/long reason :seon.test/long-ms allowance-ms}
+                (str namespace-name "/declared")
+                {:seon.test/long plain-reason}}
+               declarations)
+            "both halves of the declaration are lifted onto the program row")
+        (let [task (task-for 'allowed)
+              bound (#'runner/task-exchange-bound-seconds task)]
+          (is (true? (::runner/task-long? task)))
+          (is (= allowance-ms (::runner/task-long-ms task)))
+          (is (= 900 bound)
+              "the declared allowance, not the default, bounds the exchange")
+          (is (> bound default-bound))
+          (let [notice (#'runner/task-bound-notice "pool-1" task bound)]
+            (is (str/includes? notice "bound=900s") notice)
+            (is (str/includes? notice ":seon.test/long-ms 900000") notice)
+            (is (str/includes? notice reason) notice)))
+        (let [task (task-for 'declared)]
+          (is (true? (::runner/task-long? task)))
+          (is (nil? (::runner/task-long-ms task)))
+          (is (= default-bound (#'runner/task-exchange-bound-seconds task))
+              "a declaration without an allowance keeps the default bound")
+          (is (str/includes? (#'runner/task-bound-notice "pool-1" task default-bound)
+                             "(default per-exchange bound)")))
+        (let [task (task-for 'ordinary)]
+          (is (false? (::runner/task-long? task)))
+          (is (= default-bound (#'runner/task-exchange-bound-seconds task))
+              "an undeclared test keeps the default bound"))
+        (is (nil? (#'runner/verify-long-declarations-indexed! declarations all-vars))
+            "the indexed rows agree with the Vars that declared them")
+        (let [refusal (try (#'runner/verify-long-declarations-indexed!
+                            (dissoc declarations (str namespace-name "/allowed"))
+                            all-vars)
+                           nil
+                           (catch clojure.lang.ExceptionInfo failure failure))]
+          (is (some? refusal)
+              "an unindexed declaration refuses instead of reading the row as NOT-LONG")
+          (is (= [(str namespace-name "/allowed")]
+                 (mapv :seon.test/sym
+                       (:seon.test.runner/drifted-long-declarations
+                        (ex-data refusal)))))))
+      (finally
+        (remove-ns namespace-name)
+        (test-support/delete-recursively! root)))))
+
+(deftest a-declared-long-exchange-widens-the-silence-horizon
+  ;; The suite watchdog and the per-exchange bound cannot both be tuned
+  ;; constants: when a declared allowance exceeds the silence horizon, the
+  ;; watchdog would dump every JVM for a wait the program declared legal.
+  (let [progress (atom {::runner/description "probe"
+                        ::runner/at-nanos (System/nanoTime)})]
+    (swap! progress assoc-in [::runner/silence-allowances "task-a"] 630)
+    (#'runner/announce! progress "BEGIN probe")
+    (is (= {"task-a" 630} (::runner/silence-allowances @progress))
+        "an announcement never drops a declared allowance from the horizon")
+    (swap! progress update ::runner/silence-allowances dissoc "task-a")
+    (is (= {} (::runner/silence-allowances @progress)))))

@@ -298,10 +298,12 @@
   [progress description]
   (let [at (Instant/now)]
     (locking progress
-      (reset! progress
-              {::description description
-               ::at-nanos (System/nanoTime)
-               ::at at})
+      ;; assoc, never reset: the silence horizon's declared allowances live
+      ;; in this same atom and must survive every announcement.
+      (swap! progress assoc
+             ::description description
+             ::at-nanos (System/nanoTime)
+             ::at at)
       (println "bin/test:" (str at) description)
       (flush))))
 
@@ -524,13 +526,19 @@
         check
         (reify Runnable
           (run [_]
-            (let [silent-nanos (- (System/nanoTime) (::at-nanos @progress))]
+            (let [{::keys [at-nanos silence-allowances]} @progress
+                  ;; A declared-long task legitimately runs silently past the
+                  ;; ordinary horizon: the declaration widens the horizon
+                  ;; exactly while that task is in flight, so the watchdog
+                  ;; never races a bound the program itself declared.
+                  limit (+ silence-limit-seconds
+                           (reduce max 0 (vals silence-allowances)))
+                  silent-nanos (- (System/nanoTime) at-nanos)]
               (when (and (>= silent-nanos
-                             (.toNanos TimeUnit/SECONDS
-                                       silence-limit-seconds))
+                             (.toNanos TimeUnit/SECONDS limit))
                          (compare-and-set! fired? false true))
                 (fire-liveness-backstop!
-                 progress silence-limit-seconds suite-start)))))]
+                 progress limit suite-start)))))]
     (.scheduleAtFixedRate executor check 1 1 TimeUnit/SECONDS)
     executor))
 
@@ -628,9 +636,72 @@
            ::value marker :seon.test.runner/invalid-marker-reason true})))
       marker)))
 
-(defn- long-reason
-  [test-var]
-  (marker-reason test-var :seon.test/long))
+(defn- manifest-rows
+  [manifest]
+  (vec (mapcat :seon.fn.file/rows (:seon.fn.manifest/artifacts manifest))))
+
+(defn- long-declarations
+  "The declared long tests, as indexed program rows keyed by test symbol.
+
+  ONE derivation: `:seon.test/long` and its optional `:seon.test/long-ms`
+  allowance are lifted onto the test row at the two definition seams
+  (`seon.fn/var-row`, `seon.sci.eval`), so selection and the per-exchange
+  bound both read the same fact. The runner no longer re-reads Var metadata
+  for this marker; `verify-long-declarations-indexed!` is the drift check
+  that keeps the row from silently answering for a Var it never indexed."
+  [manifest]
+  (into {}
+        (keep (fn [row]
+                (when-let [reason (:seon.test/long row)]
+                  [(:seon.test/sym row)
+                   (cond-> {:seon.test/long reason}
+                     (:seon.test/long-ms row)
+                     (assoc :seon.test/long-ms (:seon.test/long-ms row)))])))
+        (manifest-rows manifest)))
+
+(defn- verify-long-declarations-indexed!
+  "Refuse when a Var declares `:seon.test/long` and the program row does not.
+
+  Selection and the bound read the row. An unindexed declaration would make
+  the row answer NOT-LONG for a test that genuinely is one — absence read as
+  health, the class this whole runner is built against — so the drift is
+  named here instead of silently running a real-boot drill in the pool."
+  [declarations test-vars]
+  (let [drifted
+        (into []
+              (keep (fn [test-var]
+                      (let [test-symbol (str (var-symbol test-var))
+                            declared (get declarations test-symbol)
+                            metadata (meta test-var)
+                            var-reason (marker-reason test-var :seon.test/long)
+                            var-allowance (:seon.test/long-ms metadata)]
+                        ;; Only the dangerous direction refuses: a Var that
+                        ;; declares while the row does not would run a long
+                        ;; test under the ordinary bound. A row that declares
+                        ;; more than its Var is conservative on its own.
+                        (when (and (or var-reason var-allowance)
+                                   (or (not= var-reason (:seon.test/long declared))
+                                       (not= var-allowance
+                                             (:seon.test/long-ms declared))))
+                          {:seon.test/sym test-symbol
+                           ::declared-on-var
+                           (cond-> {} var-reason (assoc :seon.test/long var-reason)
+                                   var-allowance
+                                   (assoc :seon.test/long-ms var-allowance))
+                           ::indexed-row (or declared {})}))))
+              test-vars)]
+    (when (seq drifted)
+      (throw
+       (ex-info
+        (str "The indexed program rows disagree with the declared long tests: "
+             (str/join ", " (map :seon.test/sym drifted))
+             ". Selection and the per-exchange bound read the row, so an "
+             "unindexed declaration runs a long test under the ordinary "
+             "bound; publish the tree so the declaration is indexed.")
+        {:seon.error/kind ::long-declaration-drift
+         ::drifted-long-declarations drifted
+         :seon.test.runner/long-declaration-drift true}))))
+  nil)
 
 (defn fixture-observation!
   "Require the declared observation before acquiring an expensive fixture.
@@ -664,11 +735,13 @@
   fails in seconds instead of poisoning the bulk. `selected-symbols` bounds
   the bulk tier to the tests one change can reach; `:all` runs every
   eligible test."
-  [namespaces {::keys [include-long? selected-symbols]}]
+  [namespaces {declarations ::long-declarations
+               ::keys [include-long? selected-symbols]}]
   (reduce
    (fn [selection test-var]
      (let [test-symbol (var-symbol test-var)
-           long-marker (long-reason test-var)
+           long-marker (get-in declarations
+                               [(str test-symbol) :seon.test/long])
            platform (platform-reason test-var)]
        (cond
          (and (not include-long?) long-marker)
@@ -694,8 +767,9 @@
 
 (defn- test-tasks
   "Derived worker tasks preserving namespace-wide fixture boundaries."
-  [all-vars selected-vars]
-  (let [ordinal-by-symbol
+  [all-vars selected-vars declarations]
+  (let [declared #(get declarations (str (var-symbol %)))
+        ordinal-by-symbol
         (into {} (map-indexed (fn [ordinal test-var]
                                [(var-symbol test-var) ordinal])) all-vars)
         selected-by-namespace (group-by (comp :ns meta) selected-vars)]
@@ -708,15 +782,23 @@
                 [ordered]
                 (mapv vector ordered)))))
          (map (fn [task-vars]
-                (let [symbols (mapv (comp str var-symbol) task-vars)]
-                  {::task-id (str (random-uuid))
-                   ::task-ordinal
-                   (apply min (map #(ordinal-by-symbol (var-symbol %))
-                                   task-vars))
-                   ::task-namespace
-                   (str (ns-name (:ns (meta (first task-vars)))))
-                   ::task-symbols symbols
-                   ::task-long? (boolean (some long-reason task-vars))})))
+                (let [symbols (mapv (comp str var-symbol) task-vars)
+                      reason (some->> task-vars
+                                      (keep #(:seon.test/long (declared %)))
+                                      seq (str/join "; "))
+                      allowance (some->> task-vars
+                                         (keep #(:seon.test/long-ms (declared %)))
+                                         seq (apply max))]
+                  (cond-> {::task-id (str (random-uuid))
+                           ::task-ordinal
+                           (apply min (map #(ordinal-by-symbol (var-symbol %))
+                                           task-vars))
+                           ::task-namespace
+                           (str (ns-name (:ns (meta (first task-vars)))))
+                           ::task-symbols symbols
+                           ::task-long? (boolean (some declared task-vars))}
+                    reason (assoc ::task-long-reason reason)
+                    allowance (assoc ::task-long-ms allowance)))))
          (sort-by (juxt (comp not ::task-long?) ::task-ordinal))
          vec)))
 
@@ -777,10 +859,6 @@
   #{"seon.test-support/populate-published-root!"
     "seon.test-support/populate-published-operator-root!"
     "seon.operator/cleanup-root-under-lock!"})
-
-(defn- manifest-rows
-  [manifest]
-  (vec (mapcat :seon.fn.file/rows (:seon.fn.manifest/artifacts manifest))))
 
 (defn- destructive-owner-rows
   "The program rows of every declared destructive owner, or a refusal.
@@ -2817,11 +2895,22 @@
   (pos? (+ (get-in task-result [::task-summary ::fail-count] 0)
            (get-in task-result [::task-summary ::error-count] 0))))
 
-(defn- execute-worker-task!
-  [progress worker task]
-  (announce! progress
-             (str "BEGIN worker=" (::worker-id worker)
-                  " task=" (str/join "," (::task-symbols task))))
+(defn- task-exchange-bound-seconds
+  "The per-exchange bound for one task, widened by its declared allowance.
+
+  The ordinary bound stands in for `a worker exchange that should have
+  answered by now`. A `:seon.test/long` test is the declared exception, and
+  `:seon.test/long-ms` states how long it legitimately takes — so the bound
+  DERIVES from that declaration instead of expiring a test the program
+  already said would run longer."
+  [task]
+  (let [default (exchange-bound-seconds)
+        declared (when-let [allowance (::task-long-ms task)]
+                   (long (Math/ceil (/ (double allowance) 1000.0))))]
+    (max default (or declared 0))))
+
+(defn- execute-bounded-worker-task!
+  [progress worker task bound-seconds]
   (let [result
         (worker-exchange!
          {::worker worker
@@ -2829,7 +2918,7 @@
           ::exchange-id (::task-id task)
           ::expected-worker-event :task-complete
           ::task-symbols (::task-symbols task)
-          ::completion-bound-seconds (exchange-bound-seconds)})
+          ::completion-bound-seconds bound-seconds})
         journal (::worker-journal worker)
         _ (when-let [drift (::task-ambient-drift result)]
             (when journal
@@ -2885,6 +2974,34 @@
       (assoc ::prior-ambient-drift
              (filterv #(not= (::task-symbols task) (::task-symbols %))
                       @journal)))))
+
+(defn- task-bound-notice
+  "The coordinator's one line naming the bound it applied to a task and why."
+  [worker-id task bound]
+  (str "BEGIN worker=" worker-id
+       " task=" (str/join "," (::task-symbols task))
+       " bound=" bound "s "
+       (if (pos? (- bound (exchange-bound-seconds)))
+         (str "(declared :seon.test/long-ms " (::task-long-ms task)
+              " — " (::task-long-reason task) ")")
+         "(default per-exchange bound)")))
+
+(defn- execute-worker-task!
+  [progress worker task]
+  (let [default-bound (exchange-bound-seconds)
+        bound (task-exchange-bound-seconds task)
+        allowance (- bound default-bound)]
+    (announce! progress (task-bound-notice (::worker-id worker) task bound))
+    ;; The suite's silence horizon is widened for exactly as long as this
+    ;; declared-long exchange is in flight, so the watchdog cannot win the
+    ;; race the declaration already resolved.
+    (when (pos? allowance)
+      (swap! progress assoc-in [::silence-allowances (::task-id task)] allowance))
+    (try
+      (execute-bounded-worker-task! progress worker task bound)
+      (finally
+        (when (pos? allowance)
+          (swap! progress update ::silence-allowances dissoc (::task-id task)))))))
 
 (defn- run-task-pool!
   [progress workers serial-worker resolved-tasks unresolved-tasks]
@@ -3442,6 +3559,8 @@
               explicit? (= "explicit" selection-mode)
               bulk (when-not explicit? (bulk-selection selection-mode manifest))
               all-vars (test-vars-in namespaces)
+              declarations (long-declarations manifest)
+              _ (verify-long-declarations-indexed! declarations all-vars)
             {::keys [platform selected skipped unreached]}
             (if explicit?
               {::platform [] ::selected (if (seq confirming)
@@ -3450,6 +3569,7 @@
                ::skipped [] ::unreached []}
               (test-selection namespaces
                               {::include-long? (= "full" selection-mode)
+                               ::long-declarations declarations
                                ::selected-symbols (::symbols bulk)}))
             _ (when bulk
                 (announce! progress
@@ -3458,8 +3578,8 @@
                                 "; platform " (count platform)
                                 ", bulk " (count selected)
                                 ", not reached " (count unreached))))
-              platform-tasks (test-tasks all-vars platform)
-              selected-tasks (test-tasks all-vars selected)
+              platform-tasks (test-tasks all-vars platform declarations)
+              selected-tasks (test-tasks all-vars selected declarations)
               _ (verify-platform-tier-carries-no-destructive-drill!
                  manifest platform)
               _ (verify-fixture-observations! manifest (concat platform selected))
