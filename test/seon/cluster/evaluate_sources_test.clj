@@ -129,7 +129,16 @@
            (is (= (db/q '[:find (count ?run) . :where [?run :seon.turn/id]] database)
                   (db/q '[:find (count ?run) . :where [?run :seon.turn/id]] @connection)))
            (is (every? #(inst? (get-in % [:seon.sci.eval/evaluation :seon.cluster.eval/at])) outcomes))
-           (db/transact! connection [{:seon.turn/id "preview-run" :seon.turn/closed-tx "datomic.tx"}])
+           ;; CLOSE THROUGH THE TRANSITION AND CHECK ITS REPORT: a bare
+           ;; `{:seon.turn/id _ :seon.turn/closed-tx _}` map is refused by
+           ;; `seon.db/transact!`'s write admission (the turn entity schema
+           ;; requires `:seon.turn/agent`), so an unchecked close left the
+           ;; turn open and the later recording read that refusal as behaviour.
+           (is (nil? (:seon.error/kind
+                      (db/transact! connection
+                                    (turn/close-tx
+                                     {:seon.turn/id "preview-run"
+                                      :seon.turn/closed-tx "datomic.tx"})))))
            (is (nil? (:seon.error/kind
                       (db/transact! connection
                                     (turn/open-tx
@@ -138,9 +147,12 @@
                  prepared (turn/record-evaluated-tx request)
                  _refusal (is (:seon.error/kind
                                (db/transact! connection (:seon.db/tx-data prepared))))
-                 _close (db/transact!
-                         connection
-                         [{:seon.turn/id "active-during-add" :seon.turn/closed-tx "datomic.tx"}])
+                 _close (is (nil? (:seon.error/kind
+                                   (db/transact!
+                                    connection
+                                    (turn/close-tx
+                                     {:seon.turn/id "active-during-add"
+                                      :seon.turn/closed-tx "datomic.tx"})))))
                  committed
                  (with-redefs [sci.eval/evaluate
                                (fn [& _] (throw (ex-info "saving re-executed source" {})))]
@@ -163,7 +175,16 @@
                               [:seon.turn/id]
                               [:seon.turn/id "saved-preview"]))))
              (is (= raw-source (:seon.turn/reply saved)))
-             (is (= closed-at (:seon.turn/closed-tx saved)))
+             ;; `closed-tx` IS THE TRANSACTION, never an instant: the saved
+             ;; recording points at the transaction that wrote it, so the
+             ;; observable is that transaction's `:db/txInstant`, at or after
+             ;; the moment the evaluations finished.
+             (let [closed-instant
+                   (db/q '[:find ?instant . :in $ ?tx
+                           :where [?tx :db/txInstant ?instant]]
+                         @connection (:db/id (:seon.turn/closed-tx saved)))]
+               (is (inst? closed-instant))
+               (is (<= (inst-ms closed-at) (inst-ms closed-instant))))
 
              (is (nil?
                    (turn/open-for-agent @connection
@@ -175,7 +196,14 @@
                     (mapv :seon.cluster.eval/at receipts)))
              (let [conflict (-> prepared :seon.db/tx-data first
                                 (update 2 assoc :seon.turn/reply "different source"))
-                   refused (db/transact! connection [{:my.plan.item/id "must-rollback"} conflict])]
+                   ;; THE ROLLBACK PROBE MUST REACH THE WRITER: a plan item
+                   ;; without its required `:my.plan.item/title` is refused by
+                   ;; write admission first, so the transaction never gets far
+                   ;; enough to prove the content conflict rolls it back.
+                   refused (db/transact! connection
+                                         [{:my.plan.item/id "must-rollback"
+                                           :my.plan.item/title "must rollback"}
+                                          conflict])]
                (is (= :seon.turn/recorded-content-conflict
                       (:seon.turn/refused refused)))
                (is (nil? (db/pull @connection [:my.plan.item/id]

@@ -1469,6 +1469,15 @@
            (set (map #(dissoc % :db/id)
                      (:seon.cluster.eval/read-evidence request))))))
 
+(defn- recorded-run
+  "The run fields a duplicate recording compares.
+
+  The TRANSACTION REFS ARE NOT CONTENT: `opened-tx`/`closed-tx` enter as the
+  writer's own \"datomic.tx\" tempid and come back as the resolved transaction
+  entity, so comparing them made an identical re-record conflict with itself."
+  [run]
+  (dissoc run ::opened-tx ::closed-tx))
+
 (defn- stored-record-content
   [database id]
   (let [run (current-run database id)
@@ -1481,7 +1490,7 @@
                 :where [?evaluation :seon.cluster.eval/run ?run]]
               database (:db/id run))]
     {::recorded-run
-     (-> (select-keys run [::id ::agent ::starting-ns ::opened-tx ::closed-tx
+     (-> (select-keys run [::id ::agent ::starting-ns
                            ::reply ::reply-blob ::reply-size])
          (update ::agent :db/id)
          (update ::starting-ns #(resolve-namespace-name database (:db/id %))))
@@ -1528,7 +1537,7 @@
                   (assoc :seon.cluster.eval/source
                          (:seon.cluster.eval/source source))))
               (range) sources evaluations)
-        expected {::recorded-run run
+        expected {::recorded-run (recorded-run run)
                   ::evaluations (mapv recorded-evaluation prepared-evaluations)}
         namespace-rows
         (into []
