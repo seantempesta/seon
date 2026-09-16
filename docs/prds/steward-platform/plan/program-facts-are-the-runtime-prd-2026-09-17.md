@@ -686,6 +686,31 @@ namespaces (`seon.test.runner-test`, `seon.test-runner-test`,
 `seon.test-support-test`, `my.test-test`) and the platform tier. Astra lane,
 design review at `high` effort before implementation.
 
+### S10 — The conversational reply and per-turn feedback (F4)
+
+**Ruling.** A conversational agent gets its N turns like everyone else. Its
+done condition is a fact: a reply entity exists for the triggering message
+(a Markdown reply, addressed back to the sender through the one message
+owner, `seon.cluster.message` / `my.message`). Every turn, exactly as the
+issue task loop does with `my.issue/status`, the system re-evaluates a
+generated read that tells the agent whether it has replied and, if not, the
+exact form to call. Nothing it does on the way is invisible: `;;` comments
+are saved and rendered as a distinct thinking block on the agent page,
+evaluation results render through their value's HTML pair, and the AI
+history shows the same units. No agent burns its budget with zero feedback.
+
+**Depends on.** S7 (the task-loop mechanics: derived continuation, per-turn
+status as a generated read, budget exhaustion) and the composable-history
+research (F3) for the unit rendering. Design inputs arrive from
+`docs/prds/steward-platform/research/composable-history-2026-09-17.md` §4.
+
+**Acceptance (to be sharpened by the research):** a message to an agent →
+turn 1's history carries "you have not replied to message X; reply with
+(my.message/reply {...})"; after the agent writes the reply entity, the next
+status says so and continuation stops; the agent page shows the comments as
+thinking and the results with their HTML renders; budget exhaustion without
+a reply is a typed outcome plus one root message, exactly as for issues.
+
 ### S6 — The identity list derives from the declarations (I6; open issue)
 
 `seon.program/identity-attributes` is a literal vector while
