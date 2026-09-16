@@ -276,6 +276,18 @@ gate counts are recorded in
 
 ## Owner
 
+Batch 103 (`7e5ffad79`, 2026-09-16 UTC) again bounded
+`incremental-source-refresh-preserves-agreement-across-real-edits` at the
+270-second worker exchange, with no completion from pool-2 PID 19242.
+Two bootstrap-fact waits hit the 20-second fixture bound, and the generated
+prefix child hit its 60-second readiness bound. These happened at
+19:49–19:59Z, before the reported 20:10–20:50Z contention interval; load is
+not established. Retained worker logs contain no blocked stack; pool-1
+also reports untimestamped missing store files and a 600000 ms turn bound.
+Do not classify those as load or publication regressions without a causal
+observation. Exact paths, timestamps, and verification limits are in the
+[batch-103 landing note](../../prds/steward-platform/research/adoption-write-volume-fix-2026-09-17.md#batch-103-follow-up--review-boundary).
+
 The test and production owner of each resource named during triage: clj-kondo
 analysis/cache ownership, fresh-operator process lifecycle, cluster restart,
 and SCI evaluation fixtures. The parallel runner remains the stress and

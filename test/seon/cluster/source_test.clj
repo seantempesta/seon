@@ -643,15 +643,19 @@
                                                            (get-in completed [:seon.test.run/provenance :seon.test.run/id]))
                                                     (swap! conflicts inc))]
                                       (when (and ordinal (<= ordinal 3))
-                                        (upsert opened
-                                                (:seon.source/commit-id (source/current opened))
-                                                (if (= 1 ordinal) digest-a digest-b) []))
+                                        (let [before (:seon.source/commit-id (source/current opened))
+                                              published (upsert opened before
+                                                                (if (= 1 ordinal) digest-a digest-b) [])]
+                                          (is (= (= 3 ordinal)
+                                                 (= before (:seon.source/commit-id published)))
+                                              "A and B move the head; repeating B with empty rows leaves it unchanged")))
                                       result))]
                       (source/record-results! opened next-completion))
                     final-db (source/database opened
                                               (:seon.source/commit-id (source/current opened)))]
                 (is (= 1 (:seon.test/pass-count (first recorded))) (pr-str recorded))
-                (is (= 4 @conflicts) "three real competing publications still commit the evidence")
+                (is (= 3 @conflicts)
+                    "two changed seals conflict; the third, unchanged B seal needs no retry")
                 (is (= digest-b (db/q '[:find ?digest . :where [_ :seon.source/digest ?digest]]
                                      final-db)))
                 (is (number? (db/q '[:find ?run . :in $ ?id :where [?run :seon.test.run/id ?id]]

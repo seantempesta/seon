@@ -238,3 +238,75 @@ Review must include the expanded seal delta, the missing-closure case, the
 database-owned cache guard, and the cold two-cluster regression. The
 orchestrator's requested gate remains `seon.cluster.boot-test`,
 `seon.cluster.source-test`, and `seon.test-test`, after its diff-review note.
+
+## Batch 103 follow-up — review boundary
+
+Read the complete `tmp/orchestrator/gate-results/batch-103.log` (320 lines),
+both retained workers' complete stderr and dispatch logs, this note, and the
+updated `tmp/orchestrator/wave2/repl-rule.txt`. Batch 103 at `7e5ffad79`
+reported 51 tests / 301 assertions, 2 failures / 4 errors (log:302–320).
+
+The evidence-recording count is C2, not C1. The competing upserts request
+digests A, B, B with empty rows (`test/seon/cluster/source_test.clj:645`).
+The last B has neither rows nor a changed seal: `activation-seal-tx`
+returns `[]` (`src/seon/cluster/source.clj:231`), and `upsert!` does not
+force the branch when its transaction basis is unchanged (`:745`). The
+counter counts recording attempts, not conflicts: two stale heads require
+three attempts. The earlier separate single-conflict scenario accounts for
+the third stale-head diagnostic in the log (:281–286). The revised test
+expects three attempts and additionally asserts that A and B change the head
+while the repeated B preserves it (:646–658). No real conflict is suppressed.
+
+The cluster bound remains strictly below 500 datoms. Its failure now reports
+the ten largest attribute namespaces, derived from the same historical
+transaction datoms (`test/seon/cluster/boot_test.clj:1159–1167`). Batch 103's
+15,963 total is unchanged evidence; that run did not record an attribute
+breakdown. The earlier live edit's 15,860 `seon.issue` datoms must not be
+presented as a fresh batch-103 measurement. The protected issue adopter
+remains S7's boundary; this lane changed no production code in this follow-up.
+
+The four errors cannot honestly be classified as load from the retained
+evidence. In particular, they precede the cited 20:10–20:50Z contention:
+
+| Test | Observed interval UTC | Exact bound / missing event |
+|---|---|---|
+| `a-dead-holders-run-is-unclaimed-by-the-time-start-returns` | 19:49:56–19:51:07 | 20 s `test-support/event-backstop-seconds`; bootstrap turn's `closed-tx` via `await-bootstrap!` |
+| `boot-order-completes-in-one-start` | 19:52:09–19:52:48 | Same 20 s database-fact channel backstop |
+| `a-generated-prefix-resumes-on-the-same-run-after-jvm-kill` | 19:51:21–19:52:23 | `CompletableFuture.get` readiness, 60 seconds, awaiting child's `deriving <run-id>` output |
+| `incremental-source-refresh-preserves-agreement-across-real-edits` | 19:54:54.124–19:59:24.385 | 270 s worker exchange, missing `:task-complete`, pool-2 PID 19242 |
+
+Sources: batch log:28–50, :138–169, :183–190, :223–235, :273;
+frozen `7e5ffad79:test/seon/test_support.clj:29–31,807–817` and
+`test/seon/cluster/boot_test.clj:123–149,1719–1730`. The batch coordinator
+declares two workers (log:19), not three. Pool-2 stderr:1–5 contains only
+startup/instrumentation/vectorization messages; its dispatch log:8 records
+the exchange but no completion or blocked stack. Pool-1 stderr:6–52 also
+contains an untimestamped missing `.ksv…new` file during a write and a
+600000 ms agent-turn completion fault under root `fc045207-…`. It does not
+identify which test owned that root. These are insufficient to assign a
+cause to any of the four errors. No retained thread dump was found under
+the run's `tmp/`; no child-output transcript survives. Keep the errors open
+for the orchestrator's bounded cold rerun; neither increase bounds nor
+claim a publication regression or load-only pass without that evidence.
+The existing parallel-test classification issue records this recurrence.
+
+Verification: default remains PID 53320; MCP runtime status answers. The
+namespace-count expression was evaluated against real default history and
+returned `[:seon.issue/* 332611]` as its largest group (whole history, not
+an edit measurement). Reloaded only `seon.cluster.source-test` through
+`seon.test/with-test-loader`, then attempted the changed evidence regression
+on a future through the exact three-argument `seon.test/run`, explicit
+default connection/provenance and `:seon.test/remaining-ms 180000`. It
+executed no test: `:seon.error/kind :seon.test/unknown`,
+`:seon.test/unknown :seon.fn/destroys`, message “No function in this program
+declares :seon.fn/destroys”. No refusal is counted as a pass. Boot fixtures
+were not run in process. The edit hook's publication
+`a47135e6-78ef-434c-b57a-10ebd6d27ccc` was refused; the observed diagnostic
+was “Source changed while incremental publication was being analyzed.”
+The test namespace is loaded; converged adoption is not claimed.
+
+Kondo reported only pre-existing shadowed-var warnings in the two test
+files. Path-limited diff whitespace validation passed. No test JVM, gate,
+default restart, or foreign-session action was performed. The retained
+batch root was preserved. Stop here for orchestrator review before the
+cloned-base gate request is rerun.

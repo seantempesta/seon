@@ -1156,7 +1156,15 @@
                            (is (some #(str/starts-with? % "incremental scalar publication") @phases))
                            (is (<= 1 (- (:max-tx source-after) (:max-tx source-before)) 2))
                            (is (< (count source-datoms) 2000) (str "source datoms: " (count source-datoms)))
-                           (is (< (count cluster-datoms) 500) (str "cluster datoms: " (count cluster-datoms)))
+                           (is (< (count cluster-datoms) 500)
+                               (str "cluster datoms: " (count cluster-datoms)
+                                    "; top attribute namespaces: "
+                                    (pr-str
+                                     (take 10
+                                           (sort-by (comp - val)
+                                                    (frequencies
+                                                     (map #(keyword (namespace (:a %)) "*")
+                                                          cluster-datoms)))))))
                            (d/release-materialized-db source-after))
                          (d/release-materialized-db source-before))))
                    (finally (cluster/stop! beta))))
