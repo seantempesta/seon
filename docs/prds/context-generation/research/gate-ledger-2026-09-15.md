@@ -1240,3 +1240,13 @@ refusal replaced by opaque invalid-schema) and one filed
 (`bootstrap-next-entry-has-no-production-caller.md`). Unmeasured cost:
 `declaration-changes` runs twice at boot (dissolution noted). Landing note
 `boot-test-residue-2026-09-16.md`. Batch 97 gates it.
+
+## Batch 97 (relaunched by the orchestrator, 2026-09-17 08:00Z)
+
+The peer's batch 97 was terminated on the owner's stop order (root
+`run.bdhKzh`, swept). Relaunched from this session: `bin/test --paths --
+seon.cluster.boot-test seon.cluster-test seon.cluster.source-test
+seon.background-blob-test` on HEAD ≥ `e4195742c` (boot-test residue landing)
+with `5b8a5b4c0` (background-blob effect ref derived). Platform tier first.
+Log: `tmp/orchestrator/gate-results/batch-97.log`. From this batch on the
+orchestrator runs every gate itself.
