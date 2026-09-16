@@ -1143,6 +1143,15 @@ declared value in scope, two production regexes, `doc`/`dir` empty-contract
 lie, silent green-basis nil, self-namespace requiring-resolve, the 218 MB
 CLJS worktree).
 
+**Batch 112 (pulled-ref namespaces, 00:05Z): 105 tests, 25F/0E** — 17 are the
+class regression's own known set/vector mismatches (documented, owned by the
+pulled-form derivation step B), 5 the thinking block (S11 lane in flight), 3
+`seon.eval-test/history-orders-turn-transactions-before-ordinals-and-keeps-unfinished-forms`
+(eval_test.clj:30): the fixture retracts `:seon.turn/agent` from a turn,
+leaving an entity the schema refuses — the fixture-completeness class; hand
+to `composable-history-cold-reds` on its next resume (it owns the history
+tests) or fix with step B.
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
