@@ -1251,15 +1251,26 @@
       (body connection))))
 
 (defn- commit-run! [connection {:keys [planned? receipts closed?]}]
+  ;; OPEN THROUGH THE WRITER. Since ae0e54841 the agent's open turn is read
+  ;; through its runtime component (seon.turn/open-for-agent), and only
+  ;; `open-call` writes that edge — an authored {:seon.turn/id …} row leaves
+  ;; `agent-run` nil, so every row of this table derived `:open`.
+  (test-support/transacted!
+   connection
+   (turn/open-tx {:seon.turn/id "run-1"
+                  :seon.turn/agent [:seon.agent/id "agent-a"]
+                  :seon.turn/trigger [:seon.message/id "m-1"]
+                  :seon.turn/opened-tx "datomic.tx"}))
   (test-support/transacted!
                connection
                {:tx-data
-                (cond-> [(cond-> {:seon.turn/id "run-1" :seon.turn/agent [:seon.agent/id "agent-a"] :seon.turn/trigger [:seon.message/id "m-1"] :seon.turn/opened-tx "datomic.tx"}
-                           planned? (assoc :seon.turn/reply-size 64)
-                           closed? (assoc :seon.turn/closed-tx "datomic.tx"))]
-                  (not closed?)
-                  (conj {:seon.agent/id "agent-a"
-                         })
+                (cond-> []
+                  planned?
+                  (conj [:db/add [:seon.turn/id "run-1"]
+                         :seon.turn/reply-size 64])
+                  closed?
+                  (conj [:db/add [:seon.turn/id "run-1"]
+                         :seon.turn/closed-tx "datomic.tx"])
                   closed?
                   (conj {:seon.ai.attempt/id "closed-attempt"
                          :seon.turn/_attempts [:seon.turn/id "run-1"]
