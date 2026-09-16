@@ -382,3 +382,30 @@ without following it; the owned worktree/root and scratch directory were removed
 Shared dependency files, foreign worktrees, foreign processes and dirty source
 paths were preserved. No background command or test future remains owned by
 this continuation.
+
+
+## Batch-28 continuation: evaluation call facts
+
+Read the replacement AGENTS.md, batch-28 report, and exact loader/fixture-base
+rules end to end; read commits `20d30a0bd`, `76774d044` and `3596cfb96`.
+Initial HEAD was `bb3f19370`; default PID 53378. Test namespaces were reloaded
+through `seon.test/with-test-loader`, and test Vars resolved with
+`seon.test/resolve-test`. All runs use explicit default connection custody,
+serial daemon futures and canonical fixture branches. No fixture base was
+replaced and no test JVM was launched.
+
+The cold fork and SCI namespaces passed batch 28 at `258150603`. The six
+remaining members are now in scope. First re-baseline: settlement 50462
+**9/1/0**; virtual-turn 50463 hit the 20000 ms runner bound. Its subsequent
+120000 ms diagnostic run 50468 returned **125/3/1**: the three old datom-count
+expectations remain, and the second fixture run missed its required closed
+event. The older renderer-ref error did not recur. The event bound was not
+relaxed. A result-inspection MCP timeout was recorded before a smaller probe
+confirmed completion and the complete result was saved.
+
+`settlement-mints-rows-for-unindexed-call-targets` now requires the exact
+resolved `seon.bootstrap/help` edge, as introduced by `76774d044`; unresolved
+mentions must still produce no dangling edge. Candidate run **52264 10/0/0**;
+after file edit and explicit loader reload, **52265 10/0/0**. This is a
+ruled expectation repair, with no production change. Hook publication queued;
+this proof claims explicit test-file reload, not complete default adoption.

@@ -1040,8 +1040,9 @@
                           [{:seon.fn/calls [:seon.fn/sym]}]
                           [:seon.cluster.eval/id
                            (turn/receipt-identity "macro-call-run" 0)])]
-        (is (empty? (:seon.fn/calls form))
-            "an ordinary evaluation does not duplicate program-graph call edges"))
+        (is (= [{:seon.fn/sym "seon.bootstrap/help"}]
+               (:seon.fn/calls form))
+            "the evaluation records its resolved call against the published identity"))
       (let [result
             (db/transact!
              connection

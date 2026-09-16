@@ -7,6 +7,13 @@ tags: [issue, mcp, runtime]
 
 # Default component probe timed out after development adoption
 
+Batch-28 turn-test continuation, 2026-09-16: default PID 53378 accepted a
+daemon-future test run through `seon.test`'s own loader. Inspecting
+`(if (realized? turn-reds-b28-virtual) @turn-reds-b28-virtual :pending)` then
+timed out at 10000 ms. The test was not repeated on that evidence; result
+delivery and completion were unknown at the timeout. No alternate transport
+or default lifecycle operation was used.
+
 Turn-test-reds, 2026-09-16 04:50 UTC: the final read-only MCP runtime-status
 probe returned health and Flow unknown with `Read timed out` after 30 seconds.
 It selected default PID 53378, start 04:10:35Z, PREPL 61867. No cause or
