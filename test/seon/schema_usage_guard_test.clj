@@ -81,6 +81,22 @@
    :seon.schema/form (pr-str definition)
    :seon.schema.admission/source :core})
 
+(defn- advance-fixture-projection!
+  "Advance the fixture's projection state to the database it just wrote.
+
+  Production's declaration path does this at every declaration
+  (`seon.sci.eval/advance-context-projection!`), which is what makes the next
+  `:db.fn/call` compile against a population holding the references it was
+  just given. A fixture that writes a declaration ROW and leaves the
+  projection behind hands the writer a world its own facts contradict."
+  [connection]
+  (let [database (db/db connection)]
+    (when-let [state (:seon.sci.eval/projection-state (meta database))]
+      (env/advance-projection!
+       state (db/basis-t database)
+       (schema/projection-from-database database)))
+    database))
+
 (defn- install-forms!
   "Install synthetic declarations through ONE seam the registry and the writer
   both see.
@@ -112,11 +128,7 @@
            (schema.datahike/database-attributes-for-in
             projection selected-forms))
           (schema/canonical-schema-rows selected-forms)))
-        database (db/db connection)]
-    (when-let [state (:seon.sci.eval/projection-state (meta database))]
-      (env/advance-projection!
-       state (db/basis-t database)
-       (schema/projection-from-database database)))
+        _ (advance-fixture-projection! connection)]
     report))
 
 (defn- schema-reference-edges
@@ -138,14 +150,20 @@
 
 (deftest unregister-stages-removal-in-the-evaluation-delta
   (let [projection (probe-projection {base-key :int})
+        ;; The invariant is that STAGING does not mutate the source
+        ;; projection — not that the source happens to hold one key. Comparing
+        ;; against a literal one-key map asserted the hand-rostered population
+        ;; instead, which is the thing the probe projection stopped being.
+        entering (:seon.schema.projection/forms projection)
         delta (schema/begin-registration-delta projection)]
     (is (= base-key
            (schema/call-with-registration-delta
             delta #(schema/unregister! base-key))))
     (is (= #{base-key} (schema/changed-keys delta)))
     (is (nil? (schema/registration-delta-form delta base-key)))
-    (is (= {base-key :int}
-           (:seon.schema.projection/forms projection))
+    (is (= :int (get entering base-key))
+        "the probe key entered the source projection")
+    (is (= entering (:seon.schema.projection/forms projection))
         "staging does not mutate the source projection")))
 
 (deftest schema-removal-refuses-schema-and-function-dependencies
@@ -198,7 +216,11 @@
           (when extra-row
             (test-support/transacted!
              connection
-             [{:seon.ns/name 'seon.schema-usage-guard} extra-row]))
+             [{:seon.ns/name 'seon.schema-usage-guard} extra-row])
+            ;; The fn contract this row declares is what BLOCKS the deletion
+            ;; below. It has to be in the projection the writer compiles, not
+            ;; only in the datoms.
+            (advance-fixture-projection! connection))
           (let [before @connection
                 result
                 (transact-result
