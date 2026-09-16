@@ -273,6 +273,60 @@
                               :seon.store/branch scratch})
     (catch Throwable _ nil)))
 
+(defn- identity-tempid [sym] (str "evidence-identity:" sym))
+(defn- identity-namespace [sym] (symbol (namespace (symbol sym))))
+(defn- identity-namespace-tempid [namespace-name]
+  (str "evidence-identity-ns:" namespace-name))
+
+(defn absent-program-identities
+  "The function identities this database value has no row for.
+
+  Ruling 47 — PROGRAM IDENTITY ROWS NEVER RETRACT — makes a ref to a deleted
+  declaration stable forever, because deletion retracts definition facts and
+  leaves the identity behind as a tombstone. A database built FRESH from later
+  source has nothing to tombstone, so evidence that crosses a publication (a
+  recorded `:seon.test/reach` member, a failure site) can name an identity that
+  value never minted. The decision is made HERE, on the writer's own database,
+  never on a caller's pre-read of the database the evidence came from."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:sequential :seon.fn/sym]]
+                  [:set :seon.fn/sym]]}
+  [database-value syms]
+  (into #{}
+        (comp (distinct)
+              (remove #(some? (db/pull database-value [:db/id] [:seon.fn/sym %]))))
+        syms))
+
+(defn identity-tombstone-rows
+  "Mint each absent identity as a tombstone: the identity and nothing else.
+
+  This restores the population invariant at the writer rather than rejecting
+  the whole transaction on the first absent lookup ref. The minted row carries
+  no source, span, or contract — it asserts only that the name once existed,
+  exactly as an ordinary deletion leaves it."
+  {:malli/schema [:=> [:cat [:set :seon.fn/sym]] [:vector :map]]}
+  [absent]
+  (let [namespaces (distinct (map identity-namespace absent))]
+    (into (mapv (fn [namespace-name]
+                  {:db/id (identity-namespace-tempid namespace-name)
+                   :seon.ns/name namespace-name})
+                namespaces)
+          (map (fn [sym]
+                 {:db/id (identity-tempid sym)
+                  :seon.fn/sym sym
+                  :seon.fn/ns (identity-namespace-tempid (identity-namespace sym))
+                  :seon.schema.admission/source :core}))
+          (sort absent))))
+
+(defn identity-ref
+  "The portable ref for this identity: its lookup ref, or the minted tempid.
+
+  A tempid is used for an absent identity because the minted row lands in the
+  SAME transaction; a lookup ref would be resolved against the value before it."
+  {:malli/schema [:=> [:cat [:set :seon.fn/sym] :seon.fn/sym]
+                  [:or [:tuple :qualified-keyword :seon.fn/sym] :string]]}
+  [absent sym]
+  (if (contains? absent sym) (identity-tempid sym) [:seon.fn/sym sym]))
+
 (defn- result-preservation-tx
   "Carry latest evidence from the published head, never the rebuild's base.
   Keep the original run fingerprint even when a definition changed. Evidence
@@ -322,6 +376,42 @@
                                  (assoc :seon.test.failure/file [:seon.fn.file/path (get-in failure [:seon.test.failure/file :seon.fn.file/path])])))
                              failures)))))))
             results))))
+
+(defn- preserved-evidence-tx
+  "Rewrite carried evidence against the database it is written into.
+
+  Evidence outlives declarations: a `:seon.test/reach` member or a failure
+  site can name a declaration this rebuilt source no longer has. An absent
+  function identity is MINTED as a tombstone and referred to by its tempid,
+  so refs to identities stay stable by construction. A file identity cannot
+  be minted honestly — `:seon.fn.file/file` requires the digest of the file
+  that was walked — so an absent site keeps its line and reports its path as
+  the typed `:seon.test.failure/reported-file` instead of a dangling ref.
+  Either way the rest of the evidence commits."
+  [database-value evidence]
+  (let [syms (into [] (comp (keep :seon.test/reach) cat (keep second)) evidence)
+        absent (absent-program-identities database-value syms)
+        file-present?
+        (memoize #(some? (db/pull database-value [:db/id] [:seon.fn.file/path %])))
+        portable-failure
+        (fn [failure]
+          (let [path (second (:seon.test.failure/file failure))]
+            (if (or (nil? path) (file-present? path))
+              failure
+              (-> failure
+                  (dissoc :seon.test.failure/file)
+                  (assoc :seon.test.failure/reported-file path)))))]
+    (into (identity-tombstone-rows absent)
+          (map (fn [row]
+                 (cond-> row
+                   (:seon.test/reach row)
+                   (update :seon.test/reach
+                           #(mapv (fn [reference]
+                                    (identity-ref absent (second reference)))
+                                  %))
+                   (:seon.test/failures row)
+                   (update :seon.test/failures #(mapv portable-failure %)))))
+          evidence)))
 
 (defn- record-results-at-head!
   [held-store completion]
@@ -442,7 +532,11 @@
                               (database store expected-commit))]
                 (when (seq evidence)
                   (require-committed!
-                   (db/transact! connection [[:db.fn/call (fn [_] evidence)]])
+                   (db/transact!
+                    connection
+                    [[:db.fn/call
+                      (fn [database-value]
+                        (preserved-evidence-tx database-value evidence))]])
                    ::source-seal-refused
                    "The rebuilt source could not preserve test evidence."
                    {:seon.source/digest source-digest}))))

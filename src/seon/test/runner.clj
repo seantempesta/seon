@@ -1755,6 +1755,37 @@
         basis-t (:seon.test.run/basis-t run)
         at (:seon.test.run/at run)
         run-ref [:seon.test.run/id run-id]
+        ;; The reach members were derived from the TESTED value; this
+        ;; transaction lands in the writer's own database, which a
+        ;; publication may have rebuilt without the identity a member
+        ;; names. The absence decision is made here, against the value
+        ;; actually written into, and an absent identity is minted as a
+        ;; tombstone rather than rejecting the whole completion.
+        absent-identities
+        (source/absent-program-identities
+         database
+         (into [] (comp (filter (fn [[_ refs]] (vector? refs)))
+                        (mapcat val)
+                        (keep second))
+               reaches))
+        portable-reach
+        (fn [refs]
+          (mapv (fn [reference]
+                  (source/identity-ref absent-identities (second reference)))
+                refs))
+        file-present?
+        (memoize #(some? (db/pull database [:db/id] [:seon.fn.file/path %])))
+        ;; A file identity cannot be minted honestly: `:seon.fn.file/file`
+        ;; requires the digest of the file the indexer walked. An absent site
+        ;; keeps its line and reports its path as the typed unknown.
+        portable-failure
+        (fn [failure]
+          (let [path (second (:seon.test.failure/file failure))]
+            (if (or (nil? path) (file-present? path))
+              failure
+              (-> failure
+                  (dissoc :seon.test.failure/file)
+                  (assoc :seon.test.failure/reported-file path)))))
         previous (db/pull database (vec (keys run)) run-ref)]
     (when (and previous (not= run (dissoc previous :db/id)))
       (throw (ex-info "A test run's provenance is immutable."
@@ -1762,7 +1793,8 @@
                        :seon.test.run/immutable run-id
                        :seon.test.run/id run-id})))
     (into
-     (into [(assoc run :db/id "test-run")]
+     (into (into (source/identity-tombstone-rows absent-identities)
+                 [(assoc run :db/id "test-run")])
            (map (fn [namespace-name]
                   {:db/id (namespace-tempid namespace-name)
                    :seon.ns/name namespace-name}))
@@ -1773,7 +1805,7 @@
               test-ref [:seon.test/sym test-symbol]
               exists? (some? (db/pull database [:db/id] test-ref))
               test-row-id (if exists? test-ref (str "test-result:" test-symbol))
-              failures (:seon.test/failures result)
+              failures (mapv portable-failure (:seon.test/failures result))
               result-row
               (cond-> (assoc (dissoc result :seon.test/failures)
                              :db/id test-row-id
@@ -1783,7 +1815,7 @@
                 (string? (get digests test-symbol))
                 (assoc :seon.test/reach-digest (get digests test-symbol))
                 (vector? (get reaches test-symbol))
-                (assoc :seon.test/reach (get reaches test-symbol))
+                (assoc :seon.test/reach (portable-reach (get reaches test-symbol)))
                 (not (vector? (get reaches test-symbol)))
                 (assoc :seon.test/reach-unknown
                        (or (:seon.error/message reaches)

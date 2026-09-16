@@ -9,6 +9,7 @@
             [seon.db :as db]
             [seon.test :as sut]
             [seon.program :as program]
+            [seon.cluster.source]
             [seon.test.runner :as runner]
             [seon.test-support :as support]))
 
@@ -344,3 +345,87 @@
         (let [known (runner/commit-results! connection (completion (db/db connection) s 0))]
           (is (vector? known))
           (is (nil? (:seon.test/reach-unknown (first known)))))))))
+
+(deftest recording-mints-an-absent-identity-instead-of-rejecting-the-completion
+  (testing "evidence that outlived a declaration is recorded, never refused"
+    (support/with-database
+      (fn [connection]
+        (let [s "absent.facts/check"
+              present "absent.facts/present"
+              deleted "absent.facts/deleted"
+              path "/absent/facts/no-such-file.clj"]
+          (is (:db-after (transact! connection [{:seon.fn/sym present}
+                                                {:seon.test/sym s}])))
+          (let [database (db/db connection)
+                _ (is (nil? (db/pull database [:db/id] [:seon.fn/sym deleted]))
+                      "the fixture database genuinely has no row for the named symbol")
+                captured
+                (-> (completion database s 1)
+                    (assoc :seon.test/reaches
+                           {s [[:seon.fn/sym present] [:seon.fn/sym deleted]]})
+                    (assoc-in [:seon.test.runner/results 0 :seon.test.failure/reports]
+                              [{:seon.test.failure/type :fail
+                                :seon.test.failure/message "claim"
+                                :seon.test.failure/reported-file path
+                                :seon.test.failure/line 21}]))
+                result (runner/commit-results! connection captured)
+                recorded (db/db connection)]
+            (is (vector? result) (pr-str result))
+            (is (= 1 (:seon.test/fail-count (first result)))
+                "the rest of the completion commits")
+            (is (= #{present deleted}
+                   (set (db/q '[:find [?sym ...] :in $ ?test
+                                :where [?t :seon.test/sym ?test]
+                                       [?t :seon.test/reach ?f]
+                                       [?f :seon.fn/sym ?sym]] recorded s)))
+                "both members are recorded, the absent one through a minted identity")
+            (is (= {:seon.fn/sym deleted}
+                   (dissoc (db/pull recorded '[* {:seon.fn/ns [:seon.ns/name]}]
+                                    [:seon.fn/sym deleted])
+                           :db/id :seon.fn/ns :seon.schema.admission/source))
+                "the minted row is a tombstone: the identity and nothing else")
+            (is (= 'absent.facts
+                   (get-in (db/pull recorded '[{:seon.fn/ns [:seon.ns/name]}]
+                                    [:seon.fn/sym deleted])
+                           [:seon.fn/ns :seon.ns/name])))
+            (let [failure (first (:seon.test/failures (first result)))]
+              (is (= path (:seon.test.failure/reported-file failure))
+                  "an unmintable file identity is named as the typed unknown")
+              (is (nil? (:seon.test.failure/file failure))))))))))
+
+(deftest preserved-evidence-survives-a-rebuild-that-deleted-a-declaration
+  (support/with-database
+    (fn [connection]
+      (let [deleted "rebuilt.facts/deleted"
+            path "/rebuilt/facts/no-such-file.clj"
+            evidence [{:seon.test/sym "rebuilt.facts/check"
+                       :seon.schema.admission/source :core
+                       :seon.test/pass-count 0 :seon.test/fail-count 1
+                       :seon.test/error-count 0
+                       :seon.test/reach [[:seon.fn/sym deleted]]
+                       :seon.test/failures
+                       [{:seon.test.failure/id (id/id ["rebuilt" 0])
+                         :seon.test.failure/type :fail
+                         :seon.test.failure/ordinal 0
+                         :seon.test.failure/file [:seon.fn.file/path path]
+                         :seon.test.failure/line 7}]}]
+            database (db/db connection)]
+        (is (nil? (db/pull database [:db/id] [:seon.fn/sym deleted]))
+            "the rebuilt source never minted the deleted declaration")
+        (let [rewritten (#'seon.cluster.source/preserved-evidence-tx database evidence)
+              report (db/transact! connection [[:db.fn/call (fn [_] rewritten)]])
+              committed (db/db connection)]
+          (is (:db-after report) (pr-str report))
+          (is (= [deleted]
+                 (mapv :seon.fn/sym
+                       (:seon.test/reach
+                        (db/pull committed '[{:seon.test/reach [:seon.fn/sym]}]
+                                 [:seon.test/sym "rebuilt.facts/check"]))))
+              "the carried member still resolves, through a minted tombstone")
+          (let [failure (first (:seon.test/failures
+                                (db/pull committed
+                                         '[{:seon.test/failures [*]}]
+                                         [:seon.test/sym "rebuilt.facts/check"])))]
+            (is (= path (:seon.test.failure/reported-file failure)))
+            (is (= 7 (:seon.test.failure/line failure))
+                "the site keeps its line without a dangling file ref")))))))
