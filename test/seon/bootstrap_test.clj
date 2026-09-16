@@ -126,7 +126,7 @@
                   (turn/receipt-settle-tx
                    {:seon.turn/id (bootstrap/run-id agent-id)
                     :seon.cluster.eval/ordinal 0
-                    :seon.cluster.eval/result-edn (pr-str node)}))
+                    :seon.eval/shown (pr-str node)}))
           (let [post-receipt-pull
                 (bootstrap/pull-result (generator-request connection))
                 listing-candidates
@@ -171,6 +171,7 @@
       (support/transacted!
               connection
               [{:seon.fn/sym (str namespace-name "/current-items")
+                :seon.schema.admission/source :core
                 :seon.fn/ns [:seon.ns/name namespace-name]
                 :seon.fn/source "(defn current-items [items] items)"
                 :seon.fn/arglists "([items])"
@@ -248,6 +249,7 @@
               connection
               [{:seon.ns/name 'fixture.intent}
                {:seon.fn/sym "fixture.intent/target"
+                :seon.schema.admission/source :core
                 :seon.fn/ns [:seon.ns/name 'fixture.intent]
                 :seon.fn/source "(defn target [x] (inc x))"
                 :seon.fn/arglists "([x])"
@@ -388,7 +390,7 @@
                     @connection (bootstrap/supervision-run-id))]
           (is (= 2 (count sources)))
           (is (some #(str/includes? % "my.message/send") sources))
-          (is (some #(str/includes? % "seon.cluster.eval/result-edn") sources))
+          (is (some #(str/includes? % "seon.eval/shown") sources))
           (is (every? #(or (str/includes? % "run/complete")
                            (not (str/includes? % "my.message/send")))
                       sources))

@@ -122,10 +122,13 @@
         (is (= computed (cluster-toolkit @connection "toolkit")))
         (test-support/transacted!
                      connection
+                     ;; One attribute on a cluster that already exists is a
+                     ;; datom: an identity-keyed map is read against the whole
+                     ;; cluster schema and refused for :seon.cluster/config.
                      (cond-> [{:seon.ns/name 'my.stale.toolkit}
-                              {:seon.cluster/name "toolkit"
+                              [:db/add [:seon.cluster/name "toolkit"]
                                :seon.cluster/toolkit
-                               [:seon.ns/name 'my.stale.toolkit]}]
+                               [:seon.ns/name 'my.stale.toolkit]]]
                        removed
                        (conj [:db/retract
                               [:seon.cluster/name "toolkit"]

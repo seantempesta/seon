@@ -94,6 +94,8 @@
                                  (:seon.render.history/entries second-result)))
                  (support/transacted! connection
                           [{:seon.message/id "context-probe-message"
+                            :seon.message/to [:seon.agent/id "root"]
+                            :seon.message/inbox [:seon.agent/id "root"]
                             :seon.message/content "Does not change saved evaluations."}])
                  (let [unrelated (render/acquire-context! (assoc request :seon.db/db @connection))]
                    (is (= 1 @walks) "an unrelated transaction preserves the acquired history")

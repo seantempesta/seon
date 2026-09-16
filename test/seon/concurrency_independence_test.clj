@@ -572,18 +572,22 @@
                       {:seon.cluster.eval/id (pr-str [run-id 0])
                        :seon.cluster.eval/run [:seon.turn/id run-id]
                        :seon.cluster.eval/ordinal 0
+                       :seon.cluster.eval/at interrupted-at
                        :seon.eval/shown "42"}
                       {:seon.cluster.eval/id (pr-str [run-id 1])
                        :seon.cluster.eval/run [:seon.turn/id run-id]
                        :seon.cluster.eval/ordinal 1
+                       :seon.cluster.eval/at interrupted-at
                        :seon.cluster.eval/error "failed"}
                       {:seon.cluster.eval/id (pr-str [run-id 2])
                        :seon.cluster.eval/run [:seon.turn/id run-id]
                        :seon.cluster.eval/ordinal 2
+                       :seon.cluster.eval/at interrupted-at
                        :seon.error/kind :user-input}
                       {:seon.cluster.eval/id (pr-str [run-id 3])
                        :seon.cluster.eval/run [:seon.turn/id run-id]
                        :seon.cluster.eval/ordinal 3
+                       :seon.cluster.eval/at interrupted-at
                        :seon.cluster.eval/interrupted-at interrupted-at}])
         (is (= #{[run-id 1 :seon.cluster.eval/error "failed"]
                  [run-id 2 :seon.error/kind :user-input]

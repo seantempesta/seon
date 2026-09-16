@@ -195,7 +195,12 @@
   (test-support/with-database
     (fn [connection]
       (config/apply! {:seon.db/connection connection})
-      (test-support/transacted! connection [{:seon.turn/id "gauge-run"}])
+      (test-support/transacted!
+                   connection
+                   [{:seon.agent/id "gauge-agent"}
+                    {:seon.turn/id "gauge-run"
+                     :seon.turn/agent [:seon.agent/id "gauge-agent"]
+                     :seon.turn/opened-tx "datomic.tx"}])
       ((private-loop-fn 'record-attempt!)
        {:seon.db/connection connection}
        {:seon.ai/target
@@ -319,12 +324,15 @@
                        [])})
         (test-support/transacted!
                      connection
-                     [{:seon.turn/id first-run
-                       :seon.turn/reply "(+ 1 1)"}
+                     [[:db/add [:seon.turn/id first-run]
+                       :seon.turn/reply "(+ 1 1)"]
                       {:seon.ai.attempt/id "one-answer-attempt"
                        :seon.turn/_attempts [:seon.turn/id first-run]
                        :seon.ai.attempt/ordinal 0
-                       :seon.ai.attempt/at now}])
+                       :seon.ai.attempt/at now
+                       :seon.ai/endpoint "https://fixture.invalid/v1/chat"
+                       :seon.ai/model "fixture-model"
+                       :seon.ai.attempt/settings-edn "{}"}])
         (test-support/transacted!
                      connection
                      (turn/close-tx
@@ -712,12 +720,6 @@
           (is (= assigned-namespace
                  (get-in planned-form
                          [:seon.cluster.eval/ns :seon.ns/name])))
-          (test-support/transacted!
-                       connection
-                       (turn/receipt-start-tx
-                        {:seon.turn/id run-id
-                         :seon.cluster.eval/ordinal 0
-                         :seon.cluster.eval/at now}))
           (let [evaluation
                 (sci.eval/evaluate
                  {:seon.cluster.eval/source
@@ -1053,20 +1055,12 @@
                                  [1 "2"]]]
           (test-support/transacted!
                        connection
-                       (into (turn/receipt-start-tx
-                              {:seon.turn/id run-id
-                               :seon.cluster.eval/ordinal ordinal
-                               :seon.cluster.eval/at now})
-                             (turn/receipt-settle-tx
-                              {:seon.turn/id run-id
-                               :seon.cluster.eval/ordinal ordinal
-                               :seon.eval/shown value}))))
-        (test-support/transacted!
-                     connection
-                     (turn/receipt-start-tx
-                      {:seon.turn/id run-id
-                       :seon.cluster.eval/ordinal 2
-                       :seon.cluster.eval/at now}))
+                       (turn/receipt-settle-tx
+                        {:seon.turn/id run-id
+                         :seon.cluster.eval/ordinal ordinal
+                         :seon.eval/shown value})))
+        ;; `plan-tx` already minted ordinal 2; it stays unsettled, which is
+        ;; what this test is about.
         (let [prepared
               (terminal-data
                {:seon.turn.loop/cluster

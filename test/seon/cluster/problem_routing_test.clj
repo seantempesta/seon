@@ -86,7 +86,7 @@
    {:seon.error/kind :seon.sci.eval/evaluation-failed
     :seon.error/message message
     :seon.error/data {}}
-   :seon.cluster.eval/result-edn
+   :seon.eval/shown
    (pr-str {:seon.error/kind :seon.sci.eval/evaluation-failed
             :seon.error/message message
             :seon.error/data {}})
@@ -137,7 +137,7 @@
                   [(dissoc
                     (receipt-row
                      0
-                     {:seon.cluster.eval/result-edn
+                     {:seon.eval/shown
                       (pr-str {:seon.error/kind :probe/self-owned-red})
                       :seon.cluster.eval/error "self-owned red"
                       :seon.error/kind :probe/self-owned-red})
@@ -203,17 +203,17 @@
                   (into
                    [(form-row 0)]
                    [(receipt-row 1 {})
-                    (receipt-row 2 {:seon.cluster.eval/result-edn "2"})
-                    (receipt-row 3 {:seon.cluster.eval/result-edn
+                    (receipt-row 2 {:seon.eval/shown "2"})
+                    (receipt-row 3 {:seon.eval/shown
                                     (pr-str {:seon.error/kind :probe/red})
                                     :seon.cluster.eval/error "red 3"
                                     :seon.error/kind :probe/red})
-                    (receipt-row 4 {:seon.cluster.eval/result-edn
+                    (receipt-row 4 {:seon.eval/shown
                                     (pr-str {:seon.error/kind :probe/red})
                                     :seon.cluster.eval/error "red 4"
                                     :seon.error/kind :probe/red})
-                    (receipt-row 5 {:seon.cluster.eval/result-edn "5"})
-                    (receipt-row 6 {:seon.cluster.eval/result-edn
+                    (receipt-row 5 {:seon.eval/shown "5"})
+                    (receipt-row 6 {:seon.eval/shown
                                     (pr-str {:seon.error/kind :probe/red})
                                     :seon.cluster.eval/error "red 6"
                                     :seon.error/kind :probe/red})]))

@@ -47,7 +47,8 @@
 (defn- schema-row
   [schema-key definition]
   {:seon.schema/key schema-key
-   :seon.schema/form (pr-str definition)})
+   :seon.schema/form (pr-str definition)
+   :seon.schema.admission/source :core})
 
 (defn- install-forms!
   [connection selected-forms]
@@ -293,9 +294,9 @@
                   (db/pull @connection [:seon.schema/form]
                            [:seon.schema/key base-key])))))
         (testing "a form another writer changed since the run opened refuses"
-          (test-support/transacted! connection [{:seon.schema/key unrelated-key
-                                                 :seon.schema/form
-                                                 (pr-str [:string {:seon.db/index true}])}])
+          (test-support/transacted! connection
+                                    [(schema-row unrelated-key
+                                                 [:string {:seon.db/index true}])])
           (let [refusal
                 (transact-result
                  connection

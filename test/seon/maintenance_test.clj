@@ -256,6 +256,8 @@
   [task-id handler receipt-id started-at terminal]
   [{:seon.schedule.fire/id (str receipt-id "/fire")
     :seon.schedule.fire/task [:seon.schedule.task/id task-id]
+    ;; A firing carries its owner: the wake router needs no query.
+    :seon.schedule.fire/agent [:seon.agent/id "root"]
     :seon.schedule.fire/nominal-at started-at
     :seon.schedule.fire/observed-at started-at}
    (merge

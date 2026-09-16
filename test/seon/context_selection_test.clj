@@ -50,7 +50,7 @@
                               [:seon.turn/id run-id]
                               :seon.cluster.eval/ordinal ordinal}
                        (not= "selection-pending" run-id)
-                       (assoc :seon.cluster.eval/result-edn (pr-str ordinal)))))))
+                       (assoc :seon.eval/shown (pr-str ordinal)))))))
            _ (is (nil? (:seon.error/kind seed)))
            before-count (db/q '[:find (count ?e) .
                                 :where [?e :seon.cluster.eval/id]] @connection)
@@ -143,7 +143,7 @@
                             :seon.cluster.eval/author :system
                             :seon.cluster.eval/source "(identity 1)"
                             :seon.cluster.eval/ns [:seon.ns/name 'compact.context]
-                            :seon.cluster.eval/result-edn "1"}
+                            :seon.eval/shown "1"}
                            {:seon.cluster.eval/id "compact-after-0"
                             :seon.cluster.eval/run
                             [:seon.turn/id "compact-after"]
@@ -151,7 +151,7 @@
                             :seon.cluster.eval/author :system
                             :seon.cluster.eval/source "(identity 1)"
                             :seon.cluster.eval/ns [:seon.ns/name 'compact.context]
-                            :seon.cluster.eval/result-edn "2"}])
+                            :seon.eval/shown "2"}])
            _ (test-support/transacted!
                           connection
                           [(append-call "compact-agent" "compact-before" "compact-choice")])
@@ -170,7 +170,7 @@
                     {:seon.cluster.eval/source "(identity 1)"
                      :seon.cluster.eval/ns [:seon.ns/name 'compact.context]}
                     :seon.sci.eval/evaluation
-                    {:seon.sci.admit/value 2 :seon.cluster.eval/result-edn "2"}}])
+                    {:seon.sci.admit/value 2 :seon.eval/shown "2"}}])
            memory-comparison (context/comparison @connection memory-request)
            _ (is (= memory-basis (db/basis-t @connection)))
            _ (is (= :ready (:seon.context.comparison/status memory-comparison)))
@@ -185,7 +185,7 @@
                       (update-in memory-request
                                  [:seon.turn.loop/evaluated-sources 0
                                   :seon.sci.eval/evaluation]
-                                 dissoc :seon.cluster.eval/result-edn)))))
+                                 dissoc :seon.eval/shown)))))
            _ (is (= :different-source
                     (:seon.context.comparison/status
                      (context/comparison

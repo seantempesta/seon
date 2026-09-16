@@ -1053,6 +1053,8 @@ handle))}}
                 (support/transacted!
                         connection
                         [{:seon.message/id "debug-cache-unrelated"
+                          :seon.message/to [:seon.agent/id agent-id]
+                          :seon.message/inbox [:seon.agent/id agent-id]
                           :seon.message/content
                           "does not affect the inspected namespace"}])
                 (is (< pass-before (settle-render! context)))

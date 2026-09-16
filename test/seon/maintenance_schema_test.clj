@@ -21,22 +21,27 @@
   [{:seon.schedule.task/id "root/maintenance/footprint"
     :seon.schedule/id "root/maintenance/footprint-schedule"
     :seon.schedule/expression "0 2 * * *"
+    :seon.schedule/zone-id "UTC"
     :seon.fn/sym "seon.operator/observe-footprint!"}
    {:seon.schedule.task/id "root/maintenance/reap-dead-roots"
     :seon.schedule/id "root/maintenance/reap-dead-roots-schedule"
     :seon.schedule/expression "15 2 * * *"
+    :seon.schedule/zone-id "UTC"
     :seon.fn/sym "seon.operator/reap-dead-roots!"}
    {:seon.schedule.task/id "root/maintenance/rotate-logs"
     :seon.schedule/id "root/maintenance/rotate-logs-schedule"
     :seon.schedule/expression "30 2 * * *"
+    :seon.schedule/zone-id "UTC"
     :seon.fn/sym "seon.operator/rotate-logs!"}
    {:seon.schedule.task/id "root/maintenance/process-census"
     :seon.schedule/id "root/maintenance/process-census-schedule"
     :seon.schedule/expression "5 * * * *"
+    :seon.schedule/zone-id "UTC"
     :seon.fn/sym "seon.operator/census-processes!"}
    {:seon.schedule.task/id "root/maintenance/compact"
     :seon.schedule/id "root/maintenance/compact-schedule"
     :seon.schedule/expression "0 3 * * 0"
+    :seon.schedule/zone-id "UTC"
     :seon.fn/sym "seon.operator/collect!"}])
 
 (deftest maintenance-maps-are-open-and-components-are-owned
@@ -45,6 +50,7 @@
         request
         {:seon.schedule.task/id "root/maintenance/footprint"
          :seon.schedule.fire/id "root/maintenance/footprint@1785895200000"
+         :seon.schedule.fire/agent [:seon.agent/id "root"]
          :seon.schedule.fire/nominal-at nominal-at
          :seon.schedule.fire/observed-at observed-at
          :seon.agent/id "root"

@@ -95,6 +95,7 @@
                                    :seon.cluster.eval/run
                                    [:seon.turn/id run-id]
                                    :seon.cluster.eval/ordinal ordinal
+                                   :seon.cluster.eval/at now
                                    :seon.cluster.eval/source (str "(+ " ordinal " 1)")})
                                 (range 2))))})))
 
@@ -161,9 +162,11 @@
                :seon.cluster.eval/at at
                :seon.eval/shown (pr-str value)})
             result-values)))
+  ;; `:seon.turn/closed-tx` is a REF to the closing transaction, not an
+  ;; instant: "datomic.tx" is how a transaction names itself.
   (support/transacted! connection
                      [[:db/add [:seon.turn/id id]
-                       :seon.turn/closed-tx at]
+                       :seon.turn/closed-tx "datomic.tx"]
                       ]))
 
 (def ^:private request
@@ -328,6 +331,7 @@
                 :seon.cluster.eval/run [:seon.turn/id run-id]
                 :seon.cluster.eval/ordinal 0
                 :seon.cluster.eval/author :system
+                :seon.cluster.eval/at now
                 :seon.cluster.eval/source "(help)"}])
       (is (= {:seon.turn.work/situation :resume
               :seon.turn/id run-id

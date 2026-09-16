@@ -37,6 +37,8 @@
                :seon.cluster.eval/run [:seon.turn/id "run-a"]
                :seon.cluster.eval/ordinal 1
                :seon.cluster.eval/author :agent
+               ;; Frozen and never started still has a freeze instant.
+               :seon.cluster.eval/at #inst "2026-09-06T00:00:02.000-00:00"
                :seon.cluster.eval/source "pending-form"}
               {:seon.cluster.eval/id "eval-b"
                :seon.cluster.eval/run [:seon.turn/id "run-b"]
