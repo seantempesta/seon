@@ -1297,6 +1297,17 @@ measures it; its gate pid 34576 still queued), `350df6d34` note. Also
 `53eef8551` (shutdown-agents exit fix). Batch 114 has a slot and is past the
 dependency phase. Misrouted #20 correction re-sent to the environment agent.
 
+**Batch 114 (03:35Z, hook + platform-tier + detector + turn-loop): 149 tests,
+0F/3E**, all in `seon.test.runner-test`: the new bare-namespace regression
+hits a ClassCast at runner.clj:724 (manifest read relocated above the worker
+launch), `initialization-acquires-one-projection` still calls the 2-arity
+`initialize-contracts!` after priming added a third argument, and one fixture
+writes a `:seon.schema` identity without its form. Opus fix agent launched.
+Hook, detector, turn-loop, fn, program namespaces: GREEN cold. Owner's stated
+goal: beyond manual gates to an always-fast suite — stages 1–3 (design lane
+running) + the in-process post-adoption check generalized; my gates are the
+interim.
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
