@@ -1033,7 +1033,20 @@ after a schema-key audit table. Pending: `entity-schema-vs-pulled-shape`
 research (the four per-attribute `[:map [:db/id :int]]` patches — owner: fix
 the root) and the `pulled-ref-is-a-ref` lane implementing the ref-schema fix.
 
-**Codex lanes:** `pulled-ref-is-a-ref` running; `write-admission-validates-all`
+**Research landed 22:05Z:** `entity-schema-vs-pulled-shape-2026-09-16.md` —
+`:seon.db/ref` describes only the transaction-data grammar; twelve hand-written
+descriptions of the pulled shape exist (5 widenings, 2 inline in
+`:malli/schema`, 5 hand-written pulled schemas, two whole second-copy entity
+schemas); the widenings never reached the write path (`write-value`
+substitutes 0 for map refs; the whole-entity pass validates datom-rebuilt
+rows); `:seon.eval/entity` has NO `:seon.db/attributes` so evaluations get no
+whole-entity write validation at all. Ruled direction: (A) the one ref-schema
+alternative now (lane resumed with four corrections), then (B) derive the
+pulled form of an entity schema under a selector in `seon.schema`, registered
+on the projection, and delete every hand-written pulled shape. (C) per-kind
+pulled schemas rejected — already in the tree twice and drifted.
+
+**Codex lanes:** `pulled-ref-is-a-ref` resumed with corrections; `write-admission-validates-all`
 and `call-graph-fidelity-fix` stopped after their reviewed commits. `call-graph-fidelity-fix` landed `3f0be21ed`
 + `51d904a9b` (reviewed, approved; addendum in its review note).
 `write-admission-validates-all` stopped after `b1508dc8a`. Both resumable.
