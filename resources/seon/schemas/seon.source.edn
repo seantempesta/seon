@@ -10,9 +10,10 @@
               :digest
               [:re #:seon.db{:identity true} "^[0-9a-f]{64}$"],
               :digest-request
-              [:map [:seon.source/roots :seon.source/roots]],
+              [:map [:seon.source/roots :seon.source/roots]
+                    [:seon.fn/root {:optional true} :string]],
               :expected-commit-id :uuid,
-              :file-digests [:map-of :string :seon.source/digest],
+              :relative-file-digests [:map-of :string :seon.source/digest],
               :populate :qualified-symbol,
               :previous-database :seon.db/database-value,
               :activation :qualified-symbol,
@@ -48,7 +49,7 @@
               :snapshot
               [:map
                [:seon.source/digest :seon.source/digest]
-               [:seon.source/file-digests :seon.source/file-digests]],
+               [:seon.source/relative-file-digests :seon.source/relative-file-digests]],
               :upsert-row
               [:map-of
                {:description

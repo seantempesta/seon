@@ -21,9 +21,9 @@
         mode (atom :red)
         test-var (intern namespace-object 'probe)
         path (get-in (db/pull (db/db connection)
-                       '[{:seon.fn/file [:seon.fn.file/path]}]
+                       '[{:seon.fn/file [:seon.fn.file/relative-path]}]
                        [:seon.test/sym "seon.test-failure-facts-test/recorded-reach-belongs-to-the-tested-value-and-is-replaced"])
-                     [:seon.fn/file :seon.fn.file/path])]
+                     [:seon.fn/file :seon.fn.file/relative-path])]
     (alter-meta! test-var assoc :test
       (fn []
         (case @mode
@@ -37,7 +37,7 @@
                  [{:seon.ns/name namespace-name}
                   {:seon.test/sym test-symbol :seon.test/ns [:seon.ns/name namespace-name]
                    :seon.schema.admission/source :core
-                   :seon.fn/file [:seon.fn.file/path path]
+                   :seon.fn/file [:seon.fn.file/relative-path path]
                    :seon.test/source "(deftest probe (is (= 1 2)) (is (= :a :b)))"}])]
         (is (:db-after tx) (pr-str tx))
         (when (:seon.error/kind tx)
@@ -72,7 +72,7 @@
                                     :where [?t :seon.test/sym ?s]
                                            [?t :seon.test/failures ?f]
                                            [?f :seon.test.failure/file ?file]
-                                           [?file :seon.fn.file/path]] (db/db connection) s))))))))))
+                                           [?file :seon.fn.file/relative-path]] (db/db connection) s))))))))))
 
 (deftest a-repeated-failure-upserts-its-entity
   (support/with-database
@@ -185,7 +185,7 @@
                       :seon.render/value (db/pull database '[*] [:seon.test/sym s])}
                 [summary _evidence changed-form]
                 (rest (read-string (str "(do\n" (render/render-ai unit) "\n)")))
-                sites (set (map (juxt #(get-in % [:seon.test.failure/file :seon.fn.file/path])
+                sites (set (map (juxt #(get-in % [:seon.test.failure/file :seon.fn.file/relative-path])
                                       :seon.test.failure/line)
                                 (:seon.test/failures red)))
                 links (filter #(and (vector? %) (= :a (first %)) (map? (second %)))
@@ -411,11 +411,11 @@
                            :seon.test.failure/type :fail
                            :seon.test.failure/ordinal 0
                            :seon.test.failure/test [:seon.test/sym renamed]
-                           :seon.test.failure/file [:seon.fn.file/path path]
+                           :seon.test.failure/file [:seon.fn.file/relative-path path]
                            :seon.test.failure/line 7}]}]
               database (db/db connection)]
           (doseq [absent [[:seon.test/sym renamed] [:seon.fn/sym deleted]
-                          [:seon.fn.file/path path]]]
+                          [:seon.fn.file/relative-path path]]]
             (is (nil? (db/pull database [:db/id] absent))
                 "the rebuilt source never minted this identity"))
           (let [rewritten (#'seon.cluster.source/preserved-evidence-tx database evidence)

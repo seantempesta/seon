@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, test, operator, database, class/n9, wave/test-fixture, wave/publication-velocity]
 ---
@@ -74,9 +74,32 @@ because replacing the absolute file identity also requires the explicitly
 protected consumers `seon.effect/write-back-adds` and
 `seon.test/failure-text`. The issue remains open; neither fix nor regression
 has landed. Exact hunks and live artifact evidence are recorded in
-[the landing note](../../prds/steward-platform/research/cloned-base-path-identity-2026-09-17.md).
+[the landing note](../../../prds/steward-platform/research/cloned-base-path-identity-2026-09-17.md).
 
 `19874b71b` touches no path identity and adds no per-row work; the failure
 predates it (batches 68–79). Full triage, with the measured per-call costs
 that grew the operation past the bound, is in
-[docs/prds/context-generation/research/incremental-refresh-exchange-bound-2026-09-16.md](../../prds/context-generation/research/incremental-refresh-exchange-bound-2026-09-16.md).
+[docs/prds/context-generation/research/incremental-refresh-exchange-bound-2026-09-16.md](../../../prds/context-generation/research/incremental-refresh-exchange-bound-2026-09-16.md).
+
+
+## Resolution — 2026-09-17
+
+Interim commit `f1e93fd02` decides mismatched manifest roots before any
+per-file analysis. Its canonical boot regression counts the real analyzer
+and requires exactly one complete pass.
+
+The root implementation replaces absolute file identities, walked roots,
+manifest roots and digest-map keys with explicitly named relative fields.
+The manifest carries one checkout root; the incremental owner rebinds that
+root after relocation. Reported paths are resolved against it and unchanged
+content is not analyzed. File refs, issue citations, effect write-back and
+failure rendering follow the new identity. RESET NEEDED for existing
+clusters: the old identity declarations are deleted, not reinterpreted.
+
+Measured on the exported canonical scratch publication: unchanged clone =
+zero file analyses and the same source commit; one edit = exactly one file
+analysis (`src/seon/ai/tokens.cljc`) and a new commit. Eleven affected
+in-process tests passed 99 assertions, with zero failures/errors. The cold
+boot namespace remains queued with the orchestrator; it was not run here.
+See [the implementation evidence](../../../prds/steward-platform/research/cloned-base-path-identity-2026-09-17.md)
+for exact bytes, test forms, result data, and the verification boundary.

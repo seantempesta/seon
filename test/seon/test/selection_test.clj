@@ -23,35 +23,35 @@
   and by `middle-test`; `leaf-test` calls `leaf` directly; `far-test`
   reaches `leaf` only transitively through `middle`; `stranger-test`
   reaches neither."
-  [{:seon.fn.file/path "src/example/leaf.clj"
+  [{:seon.fn.file/relative-path "src/example/leaf.clj"
     :seon.fn.file/rows
     [{:seon.ns/name 'example.leaf}
      {:seon.fn/sym "example.leaf/leaf"}]}
-   {:seon.fn.file/path "src/example/middle.clj"
+   {:seon.fn.file/relative-path "src/example/middle.clj"
     :seon.fn.file/rows
     [{:seon.ns/name 'example.middle}
      {:seon.fn/sym "example.middle/middle"
       :seon.fn/calls [[:seon.fn/sym "example.leaf/leaf"]]}]}
-   {:seon.fn.file/path "src/example/stranger.clj"
+   {:seon.fn.file/relative-path "src/example/stranger.clj"
     :seon.fn.file/rows
     [{:seon.ns/name 'example.stranger}
      {:seon.fn/sym "example.stranger/stranger"}]}
-   {:seon.fn.file/path "test/example/leaf_test.clj"
+   {:seon.fn.file/relative-path "test/example/leaf_test.clj"
     :seon.fn.file/rows
     [{:seon.ns/name 'example.leaf-test}
      {:seon.test/sym "example.leaf-test/leaf-test"
       :seon.fn/calls [[:seon.fn/sym "example.leaf/leaf"]]}]}
-   {:seon.fn.file/path "test/example/far_test.clj"
+   {:seon.fn.file/relative-path "test/example/far_test.clj"
     :seon.fn.file/rows
     [{:seon.ns/name 'example.far-test}
      {:seon.test/sym "example.far-test/far-test"
       :seon.fn/calls [[:seon.fn/sym "example.middle/middle"]]}]}
-   {:seon.fn.file/path "test/example/subject_test.clj"
+   {:seon.fn.file/relative-path "test/example/subject_test.clj"
     :seon.fn.file/rows
     [{:seon.ns/name 'example.subject-test}
      {:seon.test/sym "example.subject-test/subject-test"
       :seon.test/subject [:seon.fn/sym "example.middle/middle"]}]}
-   {:seon.fn.file/path "test/example/stranger_test.clj"
+   {:seon.fn.file/relative-path "test/example/stranger_test.clj"
     :seon.fn.file/rows
     [{:seon.ns/name 'example.stranger-test}
      {:seon.test/sym "example.stranger-test/stranger-test"

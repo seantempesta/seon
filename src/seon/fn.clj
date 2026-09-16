@@ -9,6 +9,7 @@
             [seon.fn.analyzer :as analyzer]
             [seon.fn.schema-shape :as schema-shape]
             [seon.id :as id]
+            [seon.fs :as fs]
             [seon.program :as program]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
@@ -46,30 +47,9 @@
                :seon.fn/transaction-result result :seon.fn/index-refused true})))
   result)
 
-(defn- project-root
-  []
-  (let [resource (io/resource "seon/fn.clj")]
-    (when-not (= "file" (.getProtocol resource))
-      (throw
-       (ex-info
-        "Program indexing requires a source checkout."
-        {:seon.error/kind ::index-refused
-         ::resource (str resource) :seon.fn/index-refused true})))
-    (-> resource
-        .toURI
-        io/file
-        .getParentFile
-        .getParentFile
-        .getParentFile
-        .getCanonicalFile)))
-
 (defn- rooted-file
-  [root]
-  (let [file (io/file root)]
-    (.getCanonicalFile
-     (if (.isAbsolute file)
-       file
-       (io/file (project-root) root)))))
+  [directory path]
+  (io/file (fs/absolute-path directory path)))
 
 (defn- source-file?
   [file]
@@ -93,15 +73,15 @@
   so the same file under the same roots carries the same root fact by
   construction. Real directory ancestry of canonical files, never a rule about
   the path text, and the value is the root exactly as supplied."
-  [roots ^java.io.File file]
+  [directory roots ^java.io.File file]
   (let [file (.getCanonicalFile file)]
-    (some (fn [root] (when (under-root? (rooted-file root) file) root)) roots)))
+    (some (fn [root] (when (under-root? (rooted-file directory root) file) root)) roots)))
 
 (defn- source-files
-  [roots]
+  [directory roots]
   (into []
         (mapcat (fn [root]
-                  (->> (file-seq (rooted-file root))
+                  (->> (file-seq (rooted-file directory root))
                        (filter source-file?)
                        (sort-by (fn [file]
                                   (.getCanonicalPath ^java.io.File file))))))
@@ -167,7 +147,7 @@
       (merge {:seon.error/kind ::index-refused
               :seon.error/diagnostic-cause ::source-changed-during-analysis
               :seon.fn/index-refused true
-              :seon.fn.file/path path
+              :seon.fn/source-path path
               :seon.fn.file/captured-digest (:seon.fn.file/digest context)
               :seon.fn.file/captured-length (count (:text context))
               ::analysis-span [(::analyzer/row entry) (::analyzer/col entry)
@@ -528,7 +508,7 @@
         namespace-metadata (:namespace-meta
                             (get namespace-contexts namespace-name))
         source (exact-source contexts entry)
-        file [:seon.fn.file/path (::analyzer/filename entry)]
+        file [:seon.fn.file/relative-path (::analyzer/filename entry)]
         span (exact-form-span contexts entry)
         external-sink (:seon.fn/external-sink metadata)
         projection-boundary (:seon.fn/projection-boundary metadata)
@@ -1010,7 +990,7 @@
              (::analyzer/var-definitions analysis)))))
 
 (defn- lint-rows
-  [file context rows findings]
+  [directory file context rows findings]
   (let [path (.getCanonicalPath ^java.io.File file)
         declarations (filter :seon.fn/form-span rows)]
     (mapv
@@ -1030,10 +1010,10 @@
              found (program/declaration-at declarations position)
              declaration (when-not (:seon.error/kind found) found)
              program-identity (program/row-identity declaration)
-             owner (if program-identity (symbol (second program-identity)) path)
+             owner (if program-identity (symbol (second program-identity)) (fs/relative-path directory path))
              finding-type (::analyzer/type finding)]
          (cond-> {:seon.lint/id (id/id [owner finding-type row col])
-                  :seon.lint/file [:seon.fn.file/path path]
+                  :seon.lint/file [:seon.fn.file/relative-path path]
                   :seon.lint/type finding-type
                   :seon.lint/level (::analyzer/level finding)
                   :seon.lint/message (::analyzer/message finding)
@@ -1056,13 +1036,27 @@
       (schema.edn/packaged-forms)))
 
 (defn- artifact
-  [forms file root context rows findings]
-  (let [canonical-path (.getCanonicalPath ^java.io.File file)
-        file-row (cond-> {:seon.fn.file/path canonical-path
+  [forms directory file root context rows findings]
+  (let [canonical-path (fs/relative-path directory (.getCanonicalPath ^java.io.File file))
+        file-row (cond-> {:seon.fn.file/relative-path canonical-path
                           :seon.fn.file/digest (:seon.fn.file/digest context)}
-                   root (assoc :seon.fn.file/root root))
+                   root (assoc :seon.fn.file/relative-root (fs/relative-path directory root)))
         rows (into (into [file-row] rows)
-                   (lint-rows file context rows findings))
+                   (lint-rows directory file context rows findings))
+        rows (walk/postwalk
+              (fn [value]
+                (if (and (vector? value)
+                         (= :seon.fn.file/relative-path (first value))
+                         (= 2 (count value)))
+                  [:seon.fn.file/relative-path (fs/relative-path directory (second value))]
+                  value))
+              rows)
+        findings (mapv (fn [finding]
+                         (-> finding
+                             (assoc :seon.fn.finding/relative-path
+                                    (fs/relative-path directory (::analyzer/filename finding)))
+                             (dissoc ::analyzer/filename)))
+                       findings)
         canonical-rows
         (mapv #(cond-> (assoc (program/canonical-row forms %)
                               :seon.schema.admission/source :core)
@@ -1070,7 +1064,7 @@
                  (update :seon.fn/calls set))
               rows)]
     (cond->
-     {:seon.fn.file/path canonical-path
+     {:seon.fn.file/relative-path canonical-path
       :seon.fn.file/digest (:seon.fn.file/digest context)
       :seon.fn.file/rows canonical-rows
       :seon.fn.file/identities
@@ -1583,20 +1577,22 @@
   {:malli/schema
    [:=>
     [:cat [:map
-           [:seon.fn.file/path [:string {:min 1}]]
+           [:seon.fn/source-path [:string {:min 1}]]
            [:seon.fn.file/first-party-functions
             [:vector [:string {:min 1}]]]
            [:seon.fn/roots {:optional true} :seon.fn/roots]
+           [:seon.fn/root {:optional true} :string]
            [:seon.schema.projection/forms {:optional true} :map]]]
     :seon.fn.file/artifact]}
-  [{path :seon.fn.file/path
+  [{path :seon.fn/source-path
     known-functions :seon.fn.file/first-party-functions
     roots :seon.fn/roots :as request}]
-  (let [file (rooted-file path)]
+  (let [directory (or (:seon.fn/root request) (fs/source-directory))
+        file (rooted-file directory path)]
     (when-not (source-file? file)
       (throw (ex-info "A file artifact requires one existing Clojure file."
                       {:seon.error/kind ::index-refused
-                       :seon.fn.file/path (.getCanonicalPath file) :seon.fn/index-refused true})))
+                       :seon.fn/source-path (.getCanonicalPath file) :seon.fn/index-refused true})))
     (let [canonical-path (.getCanonicalPath file)
           contexts (source-contexts [file])
           analysis (analyzer/analyze
@@ -1608,8 +1604,8 @@
           findings (publication-findings analysis first-party-functions)]
       (assert-clean-analysis! analysis first-party-functions)
       (artifact (declaration-forms request)
-                file
-                (containing-root (or roots source-roots) file)
+                directory file
+                (containing-root directory (or roots source-roots) file)
                 (get contexts canonical-path)
                 (get (analysis-rows-by-file analysis first-party-functions
                                             contexts)
@@ -1618,7 +1614,7 @@
                 findings))))
 
 (defn artifact-by-path
-  "The manifest artifact carrying one canonical file path."
+  "The manifest artifact for a relative or absolute path under its root."
   {:malli/schema
    [:=>
     [:catn
@@ -1626,7 +1622,8 @@
      [:canonical-path [:string {:min 1}]]]
     [:maybe :seon.fn.file/artifact]]}
   [manifest canonical-path]
-  (some #(when (= canonical-path (:seon.fn.file/path %)) %)
+  (some #(when (= (fs/relative-path (:seon.fn.manifest/root manifest) canonical-path)
+                    (:seon.fn.file/relative-path %)) %)
         (:seon.fn.manifest/artifacts manifest)))
 
 (defn manifest-function-symbols
@@ -1642,17 +1639,18 @@
        vec))
 
 (defn- manifest-data
-  [roots artifacts]
+  [directory roots artifacts]
   (let [artifacts (->> artifacts
-                       (sort-by :seon.fn.file/path)
+                       (sort-by :seon.fn.file/relative-path)
                        vec
                        assert-capability-contracts!)
         findings (into [] (mapcat :seon.fn.file/findings) artifacts)]
     (cond->
-     {:seon.fn.manifest/roots roots
+     {:seon.fn.manifest/root directory
+      :seon.fn.manifest/relative-roots roots
       :seon.fn.manifest/digest
       (sha-256 (.getBytes
-                (pr-str (mapv (juxt :seon.fn.file/path
+                (pr-str (mapv (juxt :seon.fn.file/relative-path
                                     :seon.fn.file/digest)
                               artifacts))
                 java.nio.charset.StandardCharsets/UTF_8))
@@ -1675,16 +1673,17 @@
   [manifest desired-artifacts]
   (when-let [duplicate-path
              (some (fn [[path n]] (when (> n 1) path))
-                   (frequencies (map :seon.fn.file/path desired-artifacts)))]
+                   (frequencies (map :seon.fn.file/relative-path desired-artifacts)))]
     (throw (ex-info "Manifest replacement carries a duplicate file path."
                     {:seon.error/kind ::index-refused
-                     :seon.fn.file/path duplicate-path :seon.fn/index-refused true})))
+                     :seon.fn.file/relative-path duplicate-path :seon.fn/index-refused true})))
   (let [desired-by-path
-        (into {} (map (juxt :seon.fn.file/path identity)) desired-artifacts)
+        (into {} (map (juxt :seon.fn.file/relative-path identity)) desired-artifacts)
         retained
-        (remove #(contains? desired-by-path (:seon.fn.file/path %))
+        (remove #(contains? desired-by-path (:seon.fn.file/relative-path %))
                 (:seon.fn.manifest/artifacts manifest))]
-    (manifest-data (:seon.fn.manifest/roots manifest)
+    (manifest-data (:seon.fn.manifest/root manifest)
+                   (:seon.fn.manifest/relative-roots manifest)
                    (concat retained desired-artifacts))))
 
 (defn build-manifest
@@ -1692,12 +1691,14 @@
   {:malli/schema
    [:=> [:cat [:map
               [:seon.fn/roots :seon.fn/roots]
+              [:seon.fn/root {:optional true} :string]
               [:seon.schema.projection/forms {:optional true} :map]]]
     :seon.fn.manifest/manifest]}
   [request]
   (let [forms (declaration-forms request)
+        directory (fs/absolute-path (fs/source-directory) (or (:seon.fn/root request) "."))
         roots (:seon.fn/roots request)
-        files (source-files roots)
+        files (source-files directory roots)
         contexts (source-contexts files)
         analysis (analyzer/analyze
                   {::analyzer/sources (update-vals contexts :text)})
@@ -1710,8 +1711,8 @@
         artifacts
         (mapv (fn [file]
                 (artifact forms
-                          file
-                          (containing-root roots file)
+                          directory file
+                          (containing-root directory roots file)
                           (get contexts (.getCanonicalPath ^java.io.File file))
                           (get rows-by-file
                                (.getCanonicalPath ^java.io.File file)
@@ -1722,7 +1723,8 @@
               files)
         manifest
         (manifest-data
-         (mapv #(.getCanonicalPath ^java.io.File (rooted-file %)) roots)
+         directory
+         (mapv (partial fs/relative-path directory) roots)
          artifacts)]
     (assert-clean-analysis! analysis first-party-functions)
     manifest))
@@ -1811,8 +1813,8 @@
           stale? (conj :stale-artifact)
           uncertain? (conj :uncertain-projection)
           (and current desired
-               (not= (:seon.fn.file/path current)
-                     (:seon.fn.file/path desired)))
+               (not= (:seon.fn.file/relative-path current)
+                     (:seon.fn.file/relative-path desired)))
           (conj :file-move)
           (seq (set/difference current-identities desired-identities))
           (conj :removed-identity)
@@ -1837,9 +1839,9 @@
       (full-rebuild
        reasons
        (cond-> {:seon.fn.change/current-path
-                (:seon.fn.file/path current)
+                (:seon.fn.file/relative-path current)
                 :seon.fn.change/desired-path
-                (:seon.fn.file/path desired)
+                (:seon.fn.file/relative-path desired)
                 :seon.fn.change/removed-identities
                 (->> (set/difference current-identities desired-identities)
                      (sort-by pr-str)
@@ -1850,7 +1852,7 @@
                 (vec (sort changed-attributes))}
          (seq findings) (assoc :seon.fn.change/findings findings)))
       {:seon.fn.change/action :incremental-upsert
-       :seon.fn.change/path (:seon.fn.file/path desired)
+       :seon.fn.change/relative-path (:seon.fn.file/relative-path desired)
        :seon.fn.change/digest (:seon.fn.file/digest desired)
        ;; The artifact is the complete analyzed file projection used to plan
        ;; the next edit. It must not be confused with the transaction delta.

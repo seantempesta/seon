@@ -179,12 +179,12 @@
                                      (seon.issue.detect/public-without-doc database request)))
             unscoped (into #{} (map :seon.fn/sym)
                            (seon.issue.detect/public-without-doc database))
-            production (syms {:seon.fn.file/root "src"})
-            helpers (syms {:seon.fn.file/root "test"})
+            production (syms {:seon.fn.file/relative-root "src"})
+            helpers (syms {:seon.fn.file/relative-root "test"})
             root-of (fn [sym]
                       (seon.db/q '[:find [?root ...] :in $ ?sym :where
                                    [?f :seon.fn/sym ?sym] [?f :seon.fn/file ?file]
-                                   [?file :seon.fn.file/root ?root]]
+                                   [?file :seon.fn.file/relative-root ?root]]
                                  database sym))]
         (clojure.test/is (seq production) "the fixture holds an undocumented production function")
         (clojure.test/is (seq helpers) "the fixture holds an undocumented test helper")

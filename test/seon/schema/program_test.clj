@@ -54,12 +54,13 @@
         {:seon.program/delete-identities [[:seon.fn/sym "sample/f"]]
          :seon.program/source "(ns-unmap 'sample 'f)"}
         artifact
-        {:seon.fn.file/path "/repo/src/sample.clj"
+        {:seon.fn.file/relative-path "/repo/src/sample.clj"
          :seon.fn.file/digest (apply str (repeat 64 "0"))
          :seon.fn.file/rows [declaration]
          :seon.fn.file/identities [[:seon.fn/sym "sample/f"]]}
         manifest
-        {:seon.fn.manifest/roots ["/repo/src"]
+        {:seon.fn.manifest/root "/repo"
+         :seon.fn.manifest/relative-roots ["/repo/src"]
          :seon.fn.manifest/digest (apply str (repeat 64 "1"))
          :seon.fn.manifest/artifacts [artifact]
          :seon.fn.manifest/identities [[:seon.fn/sym "sample/f"]]}]

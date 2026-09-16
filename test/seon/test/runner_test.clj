@@ -25,7 +25,7 @@
            namespace-name (symbol (str "seon.fixture.reason-" (id/id)))
            reason "Observes store-global blob deletion, which a branch cannot isolate."
            support (program-fn/build-artifact
-                    {:seon.fn.file/path "test/seon/test_support.clj"
+                    {:seon.fn/source-path "test/seon/test_support.clj"
                      :seon.fn.file/first-party-functions []})
            known (vec (keep :seon.fn/sym (:seon.fn.file/rows support)))]
        (try
@@ -41,7 +41,7 @@
          (let [manifest
                {:seon.fn.manifest/artifacts
                 [support (program-fn/build-artifact
-                          {:seon.fn.file/path (str file)
+                          {:seon.fn/source-path (str file)
                            :seon.fn.file/first-party-functions known})]}
                selected #(vector (ns-resolve namespace-name %))
                expensive (#'runner/expensive-fixture-tests manifest)]
@@ -86,10 +86,10 @@
         file (io/file root "declarations.clj")
         namespace-name (symbol (str "seon.fixture.destructive-" (id/id)))
         support (program-fn/build-artifact
-                 {:seon.fn.file/path "test/seon/test_support.clj"
+                 {:seon.fn/source-path "test/seon/test_support.clj"
                   :seon.fn.file/first-party-functions []})
         operator (program-fn/build-artifact
-                  {:seon.fn.file/path "src/seon/operator.clj"
+                  {:seon.fn/source-path "src/seon/operator.clj"
                    :seon.fn.file/first-party-functions []})
         known (vec (keep :seon.fn/sym (concat (:seon.fn.file/rows support)
                                               (:seon.fn.file/rows operator))))]
@@ -105,7 +105,7 @@
       (let [manifest {:seon.fn.manifest/artifacts
                       [support operator
                        (program-fn/build-artifact
-                        {:seon.fn.file/path (str file)
+                        {:seon.fn/source-path (str file)
                          :seon.fn.file/first-party-functions known})]}
             selected #(vector (ns-resolve namespace-name %))
             rows (#'runner/manifest-rows manifest)]
@@ -352,7 +352,7 @@
         plain-reason "Forks a published root once."
         allowance-ms 900000
         support (program-fn/build-artifact
-                 {:seon.fn.file/path "test/seon/test_support.clj"
+                 {:seon.fn/source-path "test/seon/test_support.clj"
                   :seon.fn.file/first-party-functions []})
         known (vec (keep :seon.fn/sym (:seon.fn.file/rows support)))]
     (try
@@ -367,7 +367,7 @@
       (load-file (str file))
       (let [manifest {:seon.fn.manifest/artifacts
                       [support (program-fn/build-artifact
-                                {:seon.fn.file/path (str file)
+                                {:seon.fn/source-path (str file)
                                  :seon.fn.file/first-party-functions known})]}
             declarations (#'runner/long-declarations manifest)
             all-vars (mapv #(ns-resolve namespace-name %)
@@ -457,7 +457,7 @@
                  "} overrides (is true))\n"))
       (let [rows (:seon.fn.file/rows
                   (program-fn/build-artifact
-                   {:seon.fn.file/path (str file)
+                   {:seon.fn/source-path (str file)
                     :seon.fn.file/first-party-functions []}))
             by-symbol (into {} (keep (fn [row]
                                        (when-let [s (:seon.test/sym row)]

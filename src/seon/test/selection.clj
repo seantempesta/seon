@@ -141,7 +141,7 @@
   `:seon.test/subject` edges backwards to their callers."
   {:malli/schema [:=> [:cat
                        [:vector [:map
-                                 [:seon.fn.file/path [:string {:min 1}]]]]
+                                 [:seon.fn.file/relative-path [:string {:min 1}]]]]
                        [:sequential [:string {:min 1}]]]
                   [:vector [:string {:min 1}]]]}
   [artifacts changed-paths]
@@ -149,7 +149,7 @@
         rows (mapcat :seon.fn.file/rows artifacts)
         seeds (into #{}
                     (comp (filter #(contains? changed
-                                              (:seon.fn.file/path %)))
+                                              (:seon.fn.file/relative-path %)))
                           (mapcat :seon.fn.file/rows)
                           (mapcat row-identities))
                     artifacts)
@@ -173,19 +173,6 @@
                  (when (= :seon.test/sym attribute) value)))
          sort
          vec)))
-
-(defn manifest-relative-artifacts
-  "Manifest artifacts with repository-relative paths."
-  {:malli/schema [:=> [:cat [:string {:min 1}] [:map]]
-                  [:vector [:map [:seon.fn.file/path [:string {:min 1}]]]]]}
-  [root manifest]
-  (let [root-file (.getCanonicalFile (io/file root))]
-    (mapv (fn [artifact]
-            (update artifact :seon.fn.file/path
-                    (fn [path]
-                      (relative-path root-file
-                                     (.getCanonicalFile (io/file path))))))
-          (:seon.fn.manifest/artifacts manifest))))
 
 (defn- basis-file
   "The recorded green-basis artifact below one checkout root.

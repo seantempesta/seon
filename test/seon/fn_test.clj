@@ -8,6 +8,8 @@
             [seon.turn :as turn]
             [seon.fn :as seon.fn]
             [seon.fn.analyzer :as analyzer]
+            [seon.fs :as fs]
+            [seon.cluster.source :as source]
             [seon.id :as id]
             [seon.program :as program]
             [seon.schema :as schema]
@@ -28,6 +30,9 @@
     (.mkdirs (.getParentFile file))
     (spit file source)
     file))
+
+(defn- relative-file [file]
+  (fs/relative-path (fs/source-directory) (.getCanonicalPath (io/file file))))
 
 (defn- transact-fixture! [connection rows]
   (let [result (db/transact! connection rows)]
@@ -568,7 +573,7 @@
                        connection
                        ;; The indexed row carries its file ref, so the emitted file rows
                        ;; are admitted first exactly as publication admits them.
-                       (into (filterv :seon.fn.file/path rows)
+                       (into (filterv :seon.fn.file/relative-path rows)
                         [{:seon.ns/name namespace-name
                          :seon.ns/source "(ns sample.settlement-parity)"}
                         {:seon.fn/sym "sample.settlement-parity/helper"
@@ -971,9 +976,9 @@
         request {:seon.fn/roots [(.getPath root)]}
         manifest (seon.fn/build-manifest request)
         repeated (seon.fn/build-manifest request)
-        artifacts (into {} (map (juxt :seon.fn.file/path identity))
+        artifacts (into {} (map (juxt :seon.fn.file/relative-path identity))
                         (:seon.fn.manifest/artifacts manifest))
-        beta-artifact (get artifacts (.getCanonicalPath beta))
+        beta-artifact (get artifacts (relative-file beta))
         beta-caller
         (first (filter #(= "artifact.beta/caller" (:seon.fn/sym %))
                        (:seon.fn.file/rows beta-artifact)))
@@ -982,15 +987,15 @@
         ;; which root holds it, so the file row they mint — root fact
         ;; included — is identical.
         (seon.fn/build-artifact
-         {:seon.fn.file/path (.getPath beta)
+         {:seon.fn/source-path (.getPath beta)
           :seon.fn/roots (:seon.fn/roots request)
           :seon.fn.file/first-party-functions
           ["artifact.alpha/target"]})
         file-root (fn [artifact]
                     (->> (:seon.fn.file/rows artifact)
-                         (filter :seon.fn.file/path)
+                         (filter :seon.fn.file/relative-path)
                          first
-                         :seon.fn.file/root))]
+                         :seon.fn.file/relative-root))]
     (testing "the complete manifest is stable and partitions every file"
       (is (= manifest repeated))
       (is (every? #(= :core (:seon.schema.admission/source %))
@@ -1002,7 +1007,7 @@
                         (mapcat :seon.fn.file/rows
                                 (:seon.fn.manifest/artifacts manifest))))
           "cardinality-many call facts retain their declared transaction shape")
-      (is (= #{(.getCanonicalPath alpha) (.getCanonicalPath beta)}
+      (is (= #{(relative-file alpha) (relative-file beta)}
              (set (keys artifacts))))
       (is (re-matches #"[0-9a-f]{64}"
                       (:seon.fn.manifest/digest manifest))))
@@ -1017,15 +1022,15 @@
             changed (seon.fn/replace-manifest-artifacts manifest [changed-beta])]
         (is (= changed-beta
                (seon.fn/artifact-by-path changed (.getCanonicalPath beta))))
-        (is (= (:seon.fn.manifest/roots manifest)
-               (:seon.fn.manifest/roots changed)))
+        (is (= (:seon.fn.manifest/relative-roots manifest)
+               (:seon.fn.manifest/relative-roots changed)))
         (is (= (:seon.fn.manifest/identities manifest)
                (:seon.fn.manifest/identities changed)))
         (is (not= (:seon.fn.manifest/digest manifest)
                   (:seon.fn.manifest/digest changed)))
-        (is (= (sort (map :seon.fn.file/path
+        (is (= (sort (map :seon.fn.file/relative-path
                           (:seon.fn.manifest/artifacts changed)))
-               (map :seon.fn.file/path
+               (map :seon.fn.file/relative-path
                     (:seon.fn.manifest/artifacts changed))))))
     (testing "one-file analysis records every call target (ruling 42b)"
       (is (= #{[:seon.fn/sym "artifact.alpha/target"]
@@ -1039,12 +1044,12 @@
     (testing "the file digest covers exact bytes, including CRLF"
       (is (re-matches #"[0-9a-f]{64}"
                       (:seon.fn.file/digest (get artifacts
-                                                 (.getCanonicalPath alpha)))))
+                                                 (relative-file alpha)))))
       (is (= "(ns artifact.alpha)"
              (:seon.ns/source
               (first (filter :seon.ns/name
                              (:seon.fn.file/rows
-                              (get artifacts (.getCanonicalPath alpha)))))))))))
+                              (get artifacts (relative-file alpha)))))))))))
 
 (deftest changed-file-planning-is-conservative-and-explicit
   (let [path "/repo/src/sample.clj"
@@ -1057,12 +1062,12 @@
                      :seon.fn/arglists "([])"
                      :seon.fn/private? false}
         desired-row (assoc current-row :seon.fn/source "(defn value [] 2)")
-        current {:seon.fn.file/path path
+        current {:seon.fn.file/relative-path path
                  :seon.fn.file/digest "old"
                  :seon.fn.file/rows [namespace-row current-row]
                  :seon.fn.file/identities
                  [[:seon.ns/name 'sample] [:seon.fn/sym "sample/value"]]}
-        desired {:seon.fn.file/path path
+        desired {:seon.fn.file/relative-path path
                  :seon.fn.file/digest "new"
                  :seon.fn.file/rows [namespace-row desired-row]
                  :seon.fn.file/identities
@@ -1073,7 +1078,7 @@
         plan #(seon.fn/plan-file-change (merge base-request %))]
     (testing "same identities with cardinality-one updates are upserts"
       (is (= {:seon.fn.change/action :incremental-upsert
-              :seon.fn.change/path path
+              :seon.fn.change/relative-path path
               :seon.fn.change/digest "new"
               :seon.fn.change/artifact desired
               :seon.fn.change/rows
@@ -1213,7 +1218,7 @@
                          ;; Declaration rows refer to their file row, so the file rows
                          ;; are admitted with them exactly as publication admits them.
                          (into (mapv #(dissoc % :seon.fn/keywords :seon.fn/calls)
-                                     (filter #(or (:seon.fn.file/path %) (:seon.ns/name %)
+                                     (filter #(or (:seon.fn.file/relative-path %) (:seon.ns/name %)
                                                   (:seon.fn/sym %) (:seon.test/sym %))
                                              rows))
                                (mapcat (fn [row]
@@ -1793,7 +1798,7 @@
         (is (= 2 (count declarations)))
         (doseq [row declarations]
           (let [[start end :as span] (:seon.fn/form-span row)]
-            (is (= [:seon.fn.file/path (.getCanonicalPath file)] (:seon.fn/file row)))
+            (is (= [:seon.fn.file/relative-path (relative-file file)] (:seon.fn/file row)))
             (is (= 2 (count span)))
             (when (= 2 (count span))
               (is (= (or (:seon.fn/source row) (:seon.test/source row))
@@ -1805,11 +1810,11 @@
           (is (:db-after report) (pr-str (select-keys report [:seon.error/kind :seon.error/message])))
           (when (:db-after report)
             (doseq [row declarations]
-              (is (= (.getCanonicalPath file)
+              (is (= (relative-file file)
                      (get-in (db/pull (:db-after report)
-                                      [{:seon.fn/file [:seon.fn.file/path]}]
+                                      [{:seon.fn/file [:seon.fn.file/relative-path]}]
                                       (program/row-identity row))
-                             [:seon.fn/file :seon.fn.file/path]))))))))))
+                             [:seon.fn/file :seon.fn.file/relative-path]))))))))))
 
 (def ^:private reconcile-in
   "`seon.fn/reconcile-tx` with the operation's declaration population in hand.
@@ -1843,7 +1848,7 @@
            (let [packaged (schema.edn/packaged-forms)
                  declared (update packaged :seon.fn.file/file conj
                                   [::declared-after {:optional true} :string])
-                 request {:seon.fn.file/path path
+                 request {:seon.fn/source-path path
                           :seon.fn.file/first-party-functions []
                           :seon.fn/roots [(.getPath root)]}
                  undeclared-root
@@ -1851,16 +1856,16 @@
                          (fn [definition]
                            (into []
                                  (remove #(and (vector? %)
-                                               (= :seon.fn.file/root (first %))))
+                                               (= :seon.fn.file/relative-root (first %))))
                                  definition)))
                  rows (:seon.fn.file/rows (seon.fn/build-artifact request))
-                 file-row (first (filter :seon.fn.file/path rows))]
+                 file-row (first (filter :seon.fn.file/relative-path rows))]
              (testing "the population in hand decides what the artifact owns"
                (is (some? file-row) "the file genuinely indexed")
-               (is (= (.getPath root) (:seon.fn.file/root file-row))
+               (is (= (.getPath root) (:seon.fn.file/relative-root file-row))
                    "the authored declarations keep the emitted source root")
                (is (not-any?
-                    :seon.fn.file/root
+                    :seon.fn.file/relative-root
                     (:seon.fn.file/rows
                      (seon.fn/build-artifact
                       (assoc request :seon.schema.projection/forms
@@ -1889,7 +1894,7 @@
                      (is (= "carried"
                             (::declared-after
                              (db/pull (:db-after report) '[*]
-                                      [:seon.fn.file/path path])))
+                                      [:seon.fn.file/relative-path (relative-file path)])))
                          "the attribute reaches the database through the
                           ordinary admission path")))))))))
       (finally (test-support/delete-recursively! root)))))
@@ -1911,7 +1916,7 @@
                             [:seon.lint/id (:seon.lint/id finding)])))
             (spit file "(ns sample.lint)\n(defn chosen [used] used)\n")
             (let [artifact (seon.fn/build-artifact
-                            {:seon.fn.file/path (.getCanonicalPath file)
+                            {:seon.fn/source-path (.getCanonicalPath file)
                              :seon.fn.file/first-party-functions ["sample.lint/chosen"]})
                   corrected (:seon.fn.file/rows artifact)
                   corrected-report
@@ -1923,8 +1928,8 @@
               (when (:db-after corrected-report)
                 (is (empty? (db/q '[:find ?e :in $ ?file
                                     :where [?e :seon.lint/file ?f]
-                                    [?f :seon.fn.file/path ?file]]
-                                  (:db-after corrected-report) (.getCanonicalPath file))))
+                                    [?f :seon.fn.file/relative-path ?file]]
+                                  (:db-after corrected-report) (relative-file file))))
                 (is (= {:seon.lint/id (:seon.lint/id finding)}
                        (db/pull (:db-after corrected-report)
                                 [:seon.lint/id :seon.lint/type :seon.lint/fn]
@@ -2181,12 +2186,12 @@
     (fn [connection]
       (let [database (db/db connection)
             files (into #{} (map first)
-                        (db/q '[:find ?p :where [?f :seon.fn.file/path ?p]] database))
+                        (db/q '[:find ?p :where [?f :seon.fn.file/relative-path ?p]] database))
             rooted (into #{} (map first)
-                         (db/q '[:find ?p :where [?f :seon.fn.file/path ?p]
-                                 [?f :seon.fn.file/root _]] database))
+                         (db/q '[:find ?p :where [?f :seon.fn.file/relative-path ?p]
+                                 [?f :seon.fn.file/relative-root _]] database))
             roots (into #{} (db/q '[:find [?root ...] :where
-                                    [?f :seon.fn.file/root ?root]] database))]
+                                    [?f :seon.fn.file/relative-root ?root]] database))]
         (is (seq files) "the canonical population holds indexed files")
         (is (empty? (remove rooted files)) (pr-str (remove rooted files)))
         (is (= (set seon.fn/source-roots) roots))))))
@@ -2200,33 +2205,33 @@
             root-of (fn [sym]
                       (db/q '[:find [?root ...] :in $ ?sym :where
                               [?f :seon.fn/sym ?sym] [?f :seon.fn/file ?file]
-                              [?file :seon.fn.file/root ?root]]
+                              [?file :seon.fn.file/relative-root ?root]]
                             database sym))]
         (is (= ["src"] (root-of "seon.fn/build-manifest")))
         (is (= ["test"] (root-of "seon.test-support/with-database")))))))
 
-(deftest the-walked-root-travels-with-its-file-and-is-stored-verbatim
+(deftest the-walked-root-travels-with-its-file-relative-to-the-publication
   (let [root (fixture-root)]
     (try
       (let [file (write-source! root "sample/rooted.clj"
                                 "(ns sample.rooted)\n(defn chosen [x] x)\n")
             supplied (.getPath root)
             file-row (fn [artifact]
-                       (first (filter :seon.fn.file/path
+                       (first (filter :seon.fn.file/relative-path
                                       (:seon.fn.file/rows artifact))))
             artifact (fn [request]
                        (seon.fn/build-artifact
-                        (merge {:seon.fn.file/path (.getCanonicalPath file)
+                        (merge {:seon.fn/source-path (.getCanonicalPath file)
                                 :seon.fn.file/first-party-functions []}
                                request)))]
         (is (= supplied
-               (:seon.fn.file/root
-                (first (filter :seon.fn.file/path
+               (:seon.fn.file/relative-root
+                (first (filter :seon.fn.file/relative-path
                                (seon.fn/rows {:seon.fn/roots [supplied]})))))
-            "the walk stores the root exactly as supplied, never canonicalized")
-        (is (= supplied (:seon.fn.file/root (file-row (artifact {:seon.fn/roots [supplied]}))))
+            "the walk stores the normalized root relative to the publication")
+        (is (= supplied (:seon.fn.file/relative-root (file-row (artifact {:seon.fn/roots [supplied]}))))
             "the changed-path seam answers the same root by directory ancestry")
-        (is (nil? (:seon.fn.file/root (file-row (artifact {}))))
+        (is (nil? (:seon.fn.file/relative-root (file-row (artifact {}))))
             "a file under no declared source root carries no root"))
       (finally (test-support/delete-recursively! root)))))
 
@@ -2253,7 +2258,7 @@
         emitted (get (#'seon.fn/analysis-rows-by-file analysis first-party contexts)
                      path)
         artifact (seon.fn/build-artifact
-                  {:seon.fn.file/path (.getPath file)
+                  {:seon.fn/source-path (.getPath file)
                    :seon.fn.file/first-party-functions []})
         kept (:seon.fn.file/rows artifact)
         attributes (fn [rows] (into #{} (mapcat keys) rows))
@@ -2317,7 +2322,7 @@
             (pr-str data))
         (is (= :seon.fn/source-changed-during-analysis
                (:seon.error/diagnostic-cause data)))
-        (is (= path (:seon.fn.file/path data)))
+        (is (= path (:seon.fn/source-path data)))
         (is (= (count captured-source) (:seon.fn.file/captured-length data)))
         (is (= [4 1] (take 2 (:seon.error/diagnostic-offending data))))
         (is (string? (:seon.fn.file/captured-digest data)))
@@ -2356,3 +2361,32 @@
       (is (= "(defn two [] 2)" (#'seon.fn/exact-source contexts (named 'two)))))
     (testing "the live file really did change under the analysis"
       (is (= "(ns changing.analyzed)\n(defn three [] 3)\n" (slurp file))))))
+
+(deftest relocated-artifacts-preserve-path-identity
+  (let [root (fixture-root)
+        a (io/file root "a")
+        b (io/file root "b")
+        text "(ns relocated.sample)\n(defn value [unused] 1)\n"]
+    (try
+      (doseq [directory [a b]]
+        (write-source! directory "src/relocated/sample.clj" text))
+      (let [build (fn [directory]
+                    (seon.fn/build-manifest
+                     {:seon.fn/root (.getCanonicalPath directory)
+                      :seon.fn/roots ["src"]}))
+            before (build a)
+            after (build b)
+            snapshot (fn [directory]
+                       (source/snapshot
+                        {:seon.fn/root (.getCanonicalPath directory)
+                         :seon.source/roots ["src"]}))]
+        (is (= (dissoc before :seon.fn.manifest/root)
+               (dissoc after :seon.fn.manifest/root)))
+        (is (= (snapshot a) (snapshot b)))
+        (is (= ["src"] (:seon.fn.manifest/relative-roots before)))
+        (is (= ["src/relocated/sample.clj"]
+               (mapv :seon.fn.file/relative-path (:seon.fn.manifest/artifacts before))))
+        (is (= (seon.fn/artifact-by-path after "src/./relocated/sample.clj")
+               (seon.fn/artifact-by-path after
+                 (.getCanonicalPath (io/file b "src/relocated/sample.clj"))))))
+      (finally (test-support/delete-recursively! root)))))

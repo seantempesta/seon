@@ -12,7 +12,7 @@
     :seon.test/error-count :seon.test/run-basis-t :seon.test/reach-unknown
     :seon.test/failure-message
     :seon.fn/form-span
-    {:seon.test/failures [* {:seon.test.failure/file [:db/id :seon.fn.file/path]}]}
+    {:seon.test/failures [* {:seon.test.failure/file [:db/id :seon.fn.file/relative-path]}]}
     {:seon.test/run [:seon.test.run/id :seon.test.run/branch]}
     {:seon.fn/calls [:seon.fn/sym]}])
 
@@ -34,7 +34,7 @@
     :else "unrun or incomplete"))
 
 (defn- failures [entity]
-  (sort-by (juxt #(get-in % [:seon.test.failure/file :seon.fn.file/path] "")
+  (sort-by (juxt #(get-in % [:seon.test.failure/file :seon.fn.file/relative-path] "")
                  #(get % :seon.test.failure/line 0) :seon.test.failure/ordinal)
            (:seon.test/failures entity)))
 
@@ -60,7 +60,7 @@
 
 (defn- failure-html [entity failure]
   (let [test-name (:seon.test/sym entity)
-        path (get-in failure [:seon.test.failure/file :seon.fn.file/path])
+        path (get-in failure [:seon.test.failure/file :seon.fn.file/relative-path])
         line (:seon.test.failure/line failure)
         file-id (get-in failure [:seon.test.failure/file :db/id])
         site (when path (str path ":" line))

@@ -10,6 +10,31 @@
 (def ^:private ^"[Ljava.nio.file.LinkOption;" no-follow
   (into-array LinkOption [LinkOption/NOFOLLOW_LINKS]))
 
+(defn source-directory
+  "The checkout directory supplying the loaded filesystem owner."
+  {:malli/schema [:=> [:cat] :string]}
+  []
+  (let [resource (io/resource "seon/fs.clj")]
+    (when-not (= "file" (.getProtocol resource))
+      (throw (ex-info "Source indexing requires a source checkout."
+                      {:seon.fs/resource (str resource)})))
+    (-> resource .toURI io/file .getParentFile .getParentFile
+        .getParentFile .getCanonicalPath)))
+
+(defn absolute-path
+  "Resolve a filesystem path against its explicit directory."
+  {:malli/schema [:=> [:cat :string :string] :string]}
+  [directory path]
+  (let [file (io/file path)]
+    (.getCanonicalPath (if (.isAbsolute file) file (io/file directory path)))))
+
+(defn relative-path
+  "Canonical file identity relative to its explicit directory."
+  {:malli/schema [:=> [:cat :string :string] :string]}
+  [directory path]
+  (str (.relativize (.toPath (.getCanonicalFile (io/file directory)))
+                    (.toPath (io/file (absolute-path directory path))))))
+
 (defn- normalized-path
   ^Path [path]
   (.normalize (.toAbsolutePath (.toPath (io/file path)))))

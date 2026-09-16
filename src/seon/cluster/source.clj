@@ -16,6 +16,7 @@
             [seon.db :as db]
             [seon.error :as error]
             [seon.fn :as fn]
+            [seon.fs :as fs]
             [seon.program :as program]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
@@ -101,9 +102,10 @@
   "The source-tree digest and exact per-file digests of the declared roots."
   {:malli/schema [:=> [:cat :seon.source/digest-request]
                   :seon.source/snapshot]}
-  [{roots :seon.source/roots}]
-  (let [declared (->> roots
-                      (map #(.getCanonicalFile (io/file %)))
+  [{roots :seon.source/roots directory :seon.fn/root}]
+  (let [directory (or directory (fs/source-directory))
+        declared (->> roots
+                      (map #(io/file (fs/absolute-path directory %)))
                       distinct
                       (sort-by #(.getPath ^java.io.File %)))]
     (doseq [^java.io.File root declared]
@@ -130,15 +132,15 @@
                 :let [file-digest
                       (schema/sha-256
                        [(Files/readAllBytes (.toPath ^java.io.File entry))])]]
-            {:path (.getCanonicalPath ^java.io.File entry)
+            {:path (fs/relative-path directory (.getCanonicalPath ^java.io.File entry))
              :relative-path (subs (.getPath ^java.io.File entry) prefix)
              :digest file-digest})]
       {:seon.source/digest
        (schema/sha-256
-        (map (fn [{:keys [relative-path digest]}]
-               (.getBytes (str relative-path "\u0000" digest "\n") "UTF-8"))
+        (map (fn [{:keys [path digest]}]
+               (.getBytes (str path "\u0000" digest "\n") "UTF-8"))
              entries))
-       :seon.source/file-digests
+       :seon.source/relative-file-digests
        (into (sorted-map) (map (juxt :path :digest)) entries)})))
 
 (defn digest
@@ -386,7 +388,7 @@
                      (conj :seon.test/reach-unknown)
                      (get (:schema previous) :seon.test/failures)
                      (conj {:seon.test/failures
-                            ['* {:seon.test.failure/file [:seon.fn.file/path]}
+                            ['* {:seon.test.failure/file [:seon.fn.file/relative-path]}
                              {:seon.test.failure/first-run [:seon.test.run/id]}
                              {:seon.test.failure/last-run [:seon.test.run/id]}]}))]
       (into (mapv #(dissoc (db/pull previous '[*] %) :db/id) runs)
@@ -408,7 +410,7 @@
                                          :seon.test.failure/first-run [:seon.test.run/id (get-in failure [:seon.test.failure/first-run :seon.test.run/id])]
                                          :seon.test.failure/last-run [:seon.test.run/id (get-in failure [:seon.test.failure/last-run :seon.test.run/id])])
                                  (:seon.test.failure/file failure)
-                                 (assoc :seon.test.failure/file [:seon.fn.file/path (get-in failure [:seon.test.failure/file :seon.fn.file/path])])))
+                                 (assoc :seon.test.failure/file [:seon.fn.file/relative-path (get-in failure [:seon.test.failure/file :seon.fn.file/relative-path])])))
                              failures)))))))
             results))))
 

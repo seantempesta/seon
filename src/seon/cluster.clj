@@ -43,6 +43,7 @@
             [seon.env :as env]
             [seon.flow :as flow]
             [seon.fn :as seon.fn]
+            [seon.fs :as fs]
             [seon.instrument :as instrument]
             [seon.operator.runtime :as operator.runtime
              :refer [root-store-holder running-instances]]
@@ -93,7 +94,7 @@
     (report-source-progress!
      (str "WARNING "
           (name (:seon.fn.analyzer/type finding))
-          " " (:seon.fn.analyzer/filename finding)
+          " " (:seon.fn.finding/relative-path finding)
           (when-let [row (:seon.fn.analyzer/row finding)] (str ":" row))
           " — " (:seon.fn.analyzer/message finding))))
   nil)
@@ -1649,7 +1650,8 @@
   re-decided, and the post-adoption digest compare then reports a source change
   that never happened."
   []
-  {:seon.source/roots source-roots
+  {:seon.fn/root (fs/source-directory)
+   :seon.source/roots source-roots
    :seon.fn/roots seon.fn/source-roots})
 
 (defonce ^:private source-refresh-monitor
@@ -1671,15 +1673,17 @@
   roots it captured at its own entry (`publication-roots`)."
   {:malli/schema [:function
                   [:=> [:cat] :seon.source/snapshot]
-                  [:=> [:cat :seon.source/roots] :seon.source/snapshot]]}
+                  [:=> [:cat :seon.source/roots] :seon.source/snapshot]
+                  [:=> [:cat :seon.source/roots :string] :seon.source/snapshot]]}
   ([] (source-snapshot source-roots))
-  ([roots]
+  ([roots] (source-snapshot roots (fs/source-directory)))
+  ([roots directory]
   (let [tree-snapshot
-        (source/snapshot {:seon.source/roots roots})
+        (source/snapshot {:seon.source/roots roots :seon.fn/root directory})
         schema-digest (schema.edn/declaration-digest)
-        schema-path (.getCanonicalPath (io/file "resources/seon/schemas"))
+        schema-path "resources/seon/schemas"
         file-digests
-        (assoc (:seon.source/file-digests tree-snapshot)
+        (assoc (:seon.source/relative-file-digests tree-snapshot)
                schema-path schema-digest)
         digest
         (schema/sha-256
@@ -1688,11 +1692,11 @@
                           "schema\u0000" schema-digest "\n")
                     StandardCharsets/UTF_8)])]
     {:seon.source/digest digest
-     :seon.source/file-digests (into (sorted-map) file-digests)})))
+     :seon.source/relative-file-digests (into (sorted-map) file-digests)})))
 
 (defn- current-source-snapshot
   [roots]
-  (source-snapshot (:seon.source/roots roots)))
+  (source-snapshot (:seon.source/roots roots) (:seon.fn/root roots)))
 
 (defn- publish-current-source!
   [store source-digest manifest roots]
@@ -1860,7 +1864,7 @@
   [published manifest snapshot]
   {:seon.source/digest (:seon.source/digest published)
    :seon.source/commit-id (:seon.source/commit-id published)
-   :seon.source/file-digests (:seon.source/file-digests snapshot)
+   :seon.source/relative-file-digests (:seon.source/relative-file-digests snapshot)
    :seon.fn/manifest manifest})
 
 (defn- current-publication
@@ -1894,15 +1898,19 @@
   (let [snapshot-before (current-source-snapshot roots)
         cached @source-analysis-cache
         cached? (and (= snapshot-before (:seon.source/snapshot cached))
-                     (valid-source-manifest? (:seon.fn/manifest cached)))
+                     (valid-source-manifest? (:seon.fn/manifest cached))
+                     (= (get-in cached [:seon.fn/manifest :seon.fn.manifest/relative-roots])
+                        (mapv (partial fs/relative-path (:seon.fn/root roots))
+                              (:seon.fn/roots roots))))
         _ (report-source-progress!
            (str "analysis started: "
-                (count (:seon.source/file-digests snapshot-before))
+                (count (:seon.source/relative-file-digests snapshot-before))
                 " source inputs"))
         manifest (if cached?
-                   (:seon.fn/manifest cached)
+                   (assoc (:seon.fn/manifest cached) :seon.fn.manifest/root (:seon.fn/root roots))
                    (seon.fn/build-manifest
-                    {:seon.fn/roots (:seon.fn/roots roots)}))
+                    {:seon.fn/roots (:seon.fn/roots roots)
+                     :seon.fn/root (:seon.fn/root roots)}))
         _ (report-source-progress! "analysis complete")
         _ (report-analysis-warnings! manifest)
         snapshot-after (current-source-snapshot roots)]
@@ -1927,8 +1935,8 @@
         cached (read-source-artifact root)
         unchanged
         (when (and (= source-digest (:seon.source/digest cached))
-                   (= (:seon.source/file-digests snapshot)
-                      (:seon.source/file-digests cached))
+                   (= (:seon.source/relative-file-digests snapshot)
+                      (:seon.source/relative-file-digests cached))
                    (= (:seon.source/commit-id cached)
                       (:seon.source/commit-id (source/current store))))
           (current-publication store source-digest))]
@@ -1941,50 +1949,51 @@
                                 (source-artifact published manifest snapshot))
         published))))
 
-(defn- canonical-path
-  [path]
-  (.getCanonicalPath (io/file path)))
-
 (defn- changed-source-paths
   [published-file-digests current-file-digests reported-paths]
   (->> (concat reported-paths
-               (filter #(not= (get published-file-digests %)
-                               (get current-file-digests %))
-                       (set/union (set (keys published-file-digests))
-                                  (set (keys current-file-digests)))))
-       distinct sort vec))
+               (keys published-file-digests)
+               (keys current-file-digests))
+       distinct
+       (filter #(not= (get published-file-digests %)
+                      (get current-file-digests %)))
+       sort vec))
 
 (defn- incremental-source-refresh!
   [root store changed-paths roots]
   (let [cached (read-source-artifact root)
         published (source/current store)
-        manifest (:seon.fn/manifest cached)
+        manifest (some-> (:seon.fn/manifest cached)
+                         (assoc :seon.fn.manifest/root (:seon.fn/root roots)))
         expected-commit (:seon.source/commit-id published)]
     (if-not (and (valid-source-manifest? manifest)
-                 (= (:seon.fn.manifest/roots manifest)
-                    (mapv canonical-path (:seon.fn/roots roots)))
+                 (= (:seon.fn.manifest/relative-roots manifest)
+                    (mapv (partial fs/relative-path (:seon.fn/root roots))
+                          (:seon.fn/roots roots)))
                  expected-commit
                  (= expected-commit (:seon.source/commit-id cached))
-                 (map? (:seon.source/file-digests cached)))
+                 (map? (:seon.source/relative-file-digests cached)))
       (do (report-source-progress! "complete publication: missing or stale artifact")
           (full-source-refresh! root store roots))
       (let [snapshot-before (current-source-snapshot roots)
-            paths (changed-source-paths (:seon.source/file-digests cached)
-                                        (:seon.source/file-digests snapshot-before)
-                                        (map canonical-path changed-paths))
+            paths (changed-source-paths (:seon.source/relative-file-digests cached)
+                                        (:seon.source/relative-file-digests snapshot-before)
+                                        (map (partial fs/relative-path (:seon.fn/root roots)) changed-paths))
             known-functions (seon.fn/manifest-function-symbols manifest)
             changes
             (try
              (mapv
              (fn [path]
-               (let [file (io/file path)
+               (let [file (io/file (fs/absolute-path (:seon.fn/root roots) path))
                      current (seon.fn/artifact-by-path manifest path)
                      clojure-source? (and (.isFile file)
                                           (or (str/ends-with? path ".clj")
                                               (str/ends-with? path ".cljc")))
                      desired (when clojure-source?
                                (seon.fn/build-artifact
-                                {:seon.fn.file/path path
+                                {:seon.fn/source-path path
+                                 :seon.fn/root (:seon.fn/root roots)
+                                 :seon.fn/roots (:seon.fn/roots roots)
                                  :seon.fn.file/first-party-functions
                                  known-functions}))]
                  (assoc (seon.fn/plan-file-change
@@ -2022,9 +2031,17 @@
                 (refused! "Source changed while incremental publication was being analyzed."
                           {:seon.source/digest-before (:seon.source/digest snapshot-before)
                            :seon.source/digest-after digest-after}))]
-        (if (or (empty? paths) (seq structural))
+        (cond
+          (empty? paths)
+          (let [unchanged (current-publication store digest-after)]
+            (when (not= (:seon.fn.manifest/root (:seon.fn/manifest cached))
+                        (:seon.fn.manifest/root manifest))
+              (write-source-artifact! root (assoc cached :seon.fn/manifest manifest)))
+            (or unchanged (full-source-refresh! root store roots)))
+          (seq structural)
           (do (report-source-progress! (str "complete publication: " (pr-str (sort reasons))))
               (full-source-refresh! root store roots))
+          :else
           (let [desired-artifacts
                 ;; Persist complete file analysis for the next edit. Only
                 ;; `:seon.fn.change/rows` is the safe database delta.
@@ -2132,7 +2149,7 @@
 (def ^:private adoption-identity-attribute?
   "Declaration identity attributes the adoption record names.
 
-  A `:seon.fn.file/path` row is a file digest and a `:seon.lint/id` row is an
+  A `:seon.fn.file/relative-path` row is a file digest and a `:seon.lint/id` row is an
   analyzer finding; neither is a declaration a test can reach, and the file is
   already recorded as an adoption input. Excluding them here keeps
   `:seon.test/adoption-identities` a set of real declaration refs."

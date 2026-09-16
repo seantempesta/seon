@@ -121,3 +121,16 @@ input digest uses `seon.id/sha-256`, includes dependency source/archive bytes,
 and excludes the project source roots declared by `deps.edn`, which ordinary
 source analysis owns. Recorded cache contents must match exactly. Launcher
 integration remains outstanding in concurrently edited `bin/test`.
+
+
+## Dependency constructor observation — 2026-09-17
+
+The cloned-base lane's whole-tree native lint reports one remaining
+`unresolved-var`: `parser.type/->Variable` at `src/seon/db.clj:559`.
+It remains after `clj-kondo --lint "$(clojure -Spath)" --dependencies
+--skip-lint --copy-configs`. The fresh scratch application JVM compiled
+`seon.db` and `(boolean (ns-resolve (get (ns-aliases 'seon.db) 'parser.type)
+'->Variable))` returned true. Targeted lint of the changed owners and
+regressions reported zero errors. The precise cache/analysis cause is not
+established by this observation; the namespace's runtime behavior was not
+changed to satisfy lint.

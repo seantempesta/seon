@@ -588,7 +588,7 @@
                                   {:seon.issue/runs [:seon.test.run/id]}
                                   {:seon.issue/issues [:seon.issue/id]}
                                   {:seon.issue/files [:seon.issue.citation/row :seon.issue.citation/end-row
-                                                       {:seon.issue.citation/file [:seon.fn.file/path]}]}
+                                                       {:seon.issue.citation/file [:seon.fn.file/relative-path]}]}
                                   {:seon.issue/members [:seon.issue/id]}
                                   {:seon.issue/tests [:seon.test/sym :seon.test/pass-count :seon.test/fail-count :seon.test/error-count
                                                        {:seon.test/run [:seon.test.run/id :seon.test.run/basis-t]}]}
@@ -675,7 +675,7 @@
          {:seon.issue/members [:seon.issue/id]}
          {:seon.issue/files [:seon.issue.citation/id :seon.issue.citation/row
                              :seon.issue.citation/end-row
-                             {:seon.issue.citation/file [:seon.fn.file/path]}]}]
+                             {:seon.issue.citation/file [:seon.fn.file/relative-path]}]}]
         (for [[identity-attribute attribute] cites
               :when (not= :seon.issue/files attribute)]
           {attribute [identity-attribute]})))
@@ -703,8 +703,8 @@
                                     (-> (select-keys cited [:seon.issue.citation/id :seon.issue.citation/row
                                                             :seon.issue.citation/end-row])
                                         (assoc :seon.issue.citation/file
-                                               [:seon.fn.file/path (get-in cited [:seon.issue.citation/file
-                                                                                  :seon.fn.file/path])]))))
+                                               [:seon.fn.file/relative-path (get-in cited [:seon.issue.citation/file
+                                                                                  :seon.fn.file/relative-path])]))))
                          citations))
             row))]
     (into (mapv #(hash-map :seon.issue/id %) (sort ids))

@@ -1,6 +1,6 @@
 {:seon.program/identity-attribute
  [:enum :seon.ns/name :seon.fn/sym :seon.schema/key :seon.test/sym
-  :seon.fn.file/path :seon.lint/id]
+  :seon.fn.file/relative-path :seon.lint/id]
  :seon.program/source-attribute
  [:enum :seon.ns/source :seon.fn/source :seon.schema/form :seon.test/source
   :seon.fn.file/digest :seon.lint/message]

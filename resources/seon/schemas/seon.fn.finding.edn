@@ -1,0 +1,2 @@
+{:seon.fn.finding/relative-path
+ [:string {:min 1 :description "The finding file relative to its manifest root."}]}

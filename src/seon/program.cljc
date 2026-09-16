@@ -11,7 +11,7 @@
 (def identity-attributes
   "Program-row identity attributes in deterministic admission order."
   [:seon.ns/name :seon.fn/sym :seon.schema/key :seon.test/sym
-   :seon.fn.file/path :seon.lint/id])
+   :seon.fn.file/relative-path :seon.lint/id])
 
 #?(:clj
    (defn base-context-injected-symbols
@@ -940,7 +940,7 @@
   (let [event (assoc event :seon.schema.admission/source admission-source)
         candidate
         (cond
-          (:seon.fn.file/path event) event
+          (:seon.fn.file/relative-path event) event
           (:seon.lint/id event) event
           (:seon.ns/name event) event
           (and (:seon.fn/sym event)

@@ -854,9 +854,9 @@
 (defn- tests-reaching-rows
   [rows seeds]
   (set (selection/reaching-tests
-        [{:seon.fn.file/path "fixture-selection"
+        [{:seon.fn.file/relative-path "fixture-selection"
           :seon.fn.file/rows (filterv seeds rows)}
-         {:seon.fn.file/path "remaining-program"
+         {:seon.fn.file/relative-path "remaining-program"
           :seon.fn.file/rows (filterv (complement seeds) rows)}]
         ["fixture-selection"])))
 
@@ -2018,9 +2018,9 @@
         (mapv
           (fn [{test-symbol :seon.test/sym :as result}]
             (let [test-row (db/pull tested
-                                   '[{:seon.fn/file [:seon.fn.file/path]}]
+                                   '[{:seon.fn/file [:seon.fn.file/relative-path]}]
                                    [:seon.test/sym test-symbol])
-                  path (get-in test-row [:seon.fn/file :seon.fn.file/path])
+                  path (get-in test-row [:seon.fn/file :seon.fn.file/relative-path])
                   reports (or (seq (:seon.test.failure/reports result))
                               (when (pos? (+ (:seon.test/fail-count result 0)
                                              (:seon.test/error-count result 0)))
@@ -2044,7 +2044,7 @@
                                                 (dissoc :seon.test.failure/reported-file :seon.test.failure/line)
                                                 (assoc :seon.test.failure/id (id/id [test-symbol site ordinal])
                                                        :seon.test.failure/ordinal ordinal))
-                                      known-site? (assoc :seon.test.failure/file [:seon.fn.file/path path]
+                                      known-site? (assoc :seon.test.failure/file [:seon.fn.file/relative-path path]
                                                          :seon.test.failure/line line))
                             failure (-> failure
                                         (stage-field :seon.test.failure/expected :seon.test.failure/expected-size :seon.test.failure/expected-blob)
@@ -2182,7 +2182,7 @@
         (fn [refs]
           (into [] (keep (partial source/identity-ref absent-identities)) refs))
         file-present?
-        (memoize #(some? (db/pull database [:db/id] [:seon.fn.file/path %])))
+        (memoize #(some? (db/pull database [:db/id] [:seon.fn.file/relative-path %])))
         ;; A file identity cannot be minted honestly: `:seon.fn.file/file`
         ;; requires the digest of the file the indexer walked. An absent site
         ;; keeps its line and reports its path as the typed unknown, when the
@@ -2306,7 +2306,7 @@
    :seon.test/run-basis-t
    :seon.test/run-at
    :seon.test/run
-   {:seon.test/failures ['* {:seon.test.failure/file [:db/id :seon.fn.file/path]}]}
+   {:seon.test/failures ['* {:seon.test.failure/file [:db/id :seon.fn.file/relative-path]}]}
    :seon.test/failing-assertions
    :seon.test/failure-message])
 
@@ -2606,11 +2606,8 @@
 (defn- reaching-selection
   "Bulk-tier test symbols for one set of changed repository-relative paths."
   [manifest changed-paths]
-  (let [relative (requiring-resolve 'seon.test.selection/manifest-relative-artifacts)
-        artifacts (relative
-                   (str (.getParentFile (io/file (first (:seon.fn.manifest/roots manifest)))))
-                   manifest)
-          tests (selection/reaching-tests artifacts changed-paths)]
+  (let [artifacts (:seon.fn.manifest/artifacts manifest)
+        tests (selection/reaching-tests artifacts changed-paths)]
     {::symbols (set tests)
      ::reason (str (count tests) " test(s) reach "
                    (count changed-paths) " changed path(s)" )}))

@@ -29,7 +29,7 @@
                 (or (get failure inline)
                     (when-let [digest (get failure blob)]
                       (pr-str (list 'seon.blob/get digest)))))
-        path (get-in failure [:seon.test.failure/file :seon.fn.file/path])]
+        path (get-in failure [:seon.test.failure/file :seon.fn.file/relative-path])]
     (str/join "\n"
       (remove nil?
         [(str (name (:seon.test.failure/type failure))

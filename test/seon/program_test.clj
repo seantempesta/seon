@@ -1026,11 +1026,11 @@
   ;; a MISS BY CONSTRUCTION and no event has to remember to invalidate it.
   (let [owned (fn [shapes]
                 (set (:seon.program/owned-attributes
-                      (get shapes :seon.fn.file/path))))
+                      (get shapes :seon.fn.file/relative-path))))
         before (program/shapes)
         declared (update (schema.edn/packaged-forms) :seon.fn.file/file conj
                          [::declared-after {:optional true} :string])
-        row {:seon.fn.file/path "/probe/after-start.clj"
+        row {:seon.fn.file/relative-path "/probe/after-start.clj"
              ::declared-after "carried"}]
     (is (not (contains? (owned before) ::declared-after))
         "the attribute is genuinely absent from the authored declarations")

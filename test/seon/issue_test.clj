@@ -99,7 +99,7 @@
                                         {:seon.issue/namespaces [:seon.ns/name]}
                                         {:seon.issue/files [:seon.issue.citation/id :seon.issue.citation/row
                                                             :seon.issue.citation/end-row
-                                                            {:seon.issue.citation/file [:seon.fn.file/path]}]}]
+                                                            {:seon.issue.citation/file [:seon.fn.file/relative-path]}]}]
                                     [:seon.issue/id slug]))]
      (clojure.test/is (= (count converted-notes) (count selected)) (pr-str (map :seon.issue/path selected)))
      (clojure.test/is (empty? (:seon.issue/refusals report)) (pr-str (:seon.issue/refusals report)))
@@ -113,7 +113,7 @@
            spans (filter :seon.issue.citation/row (:seon.issue/files adoption))]
        (clojure.test/is (seq spans) (pr-str (:seon.issue/files adoption)))
        (clojure.test/is (some #(clojure.string/ends-with?
-                                (get-in % [:seon.issue.citation/file :seon.fn.file/path]) "src/seon/cluster.clj")
+                                (get-in % [:seon.issue.citation/file :seon.fn.file/relative-path]) "src/seon/cluster.clj")
                               spans)
                         (pr-str spans))
        (clojure.test/is (some :seon.issue.citation/end-row spans)))

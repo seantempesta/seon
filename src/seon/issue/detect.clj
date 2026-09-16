@@ -106,7 +106,7 @@
 
   The one-argument arity is the whole function population, test helpers
   included: an honest over-report, not a name-based exclusion. Given
-  `{:seon.fn.file/root \"src\"}` it instead yields the declarations the indexer
+  `{:seon.fn.file/relative-root \"src\"}` it instead yields the declarations the indexer
   walked under that source root, joining positively on the root the file entity
   carries — a declaration under no declared root is scoped out, never assumed
   to be production."
@@ -115,11 +115,11 @@
     [:=> [:cat :seon.db/database-value]
      [:or [:vector [:map [:seon.fn/sym :seon.fn/sym]]] :seon.error/value]]
     [:=> [:cat :seon.db/database-value
-          [:map [:seon.fn.file/root {:optional true} :seon.fn.file/root]]]
+          [:map [:seon.fn.file/relative-root {:optional true} :seon.fn.file/relative-root]]]
      [:or [:vector [:map [:seon.fn/sym :seon.fn/sym]]] :seon.error/value]]]}
   ([database] (public-without-doc database {}))
   ([database request]
-   (let [root (:seon.fn.file/root request)
+   (let [root (:seon.fn.file/relative-root request)
          spans (db/q '[:find ?sym ?file ?span :where
                        [?f :seon.fn/sym ?sym] [?f :seon.fn/file ?file] [?f :seon.fn/form-span ?span]]
                      database)
@@ -130,7 +130,7 @@
          subjects (if root
                     (db/q '[:find ?sym ?name :in $ ?root :where
                             [?f :seon.fn/sym ?sym] [?f :seon.fn/private? false] [?f :seon.fn/source _]
-                            [?f :seon.fn/file ?file] [?file :seon.fn.file/root ?root]
+                            [?f :seon.fn/file ?file] [?file :seon.fn.file/relative-root ?root]
                             [?f :seon.fn/ns ?ns] [?ns :seon.ns/name ?name]
                             (not [?f :seon.fn/doc _])]
                           database root)

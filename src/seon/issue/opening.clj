@@ -43,7 +43,7 @@
                        {:seon.issue/tests [:seon.test/sym]}
                        {:seon.issue/functions
                         [:seon.fn/sym {:seon.fn/ns [:seon.ns/name]}
-                         {:seon.fn/file [:seon.fn.file/path]}]}]
+                         {:seon.fn/file [:seon.fn.file/relative-path]}]}]
                      [:seon.issue/id issue-id])]
     (when (:seon.issue/title row)
       (cond-> {:seon.issue/id (:seon.issue/id row)
@@ -53,7 +53,7 @@
        :seon.fn/syms (vec (sort (map :seon.fn/sym (:seon.issue/functions row))))
        :seon.ns/names (vec (sort (distinct (keep #(get-in % [:seon.fn/ns :seon.ns/name])
                                                  (:seon.issue/functions row)))))
-       :seon.fn.file/paths (vec (sort (distinct (keep #(get-in % [:seon.fn/file :seon.fn.file/path])
+       :seon.fn.file/relative-paths (vec (sort (distinct (keep #(get-in % [:seon.fn/file :seon.fn.file/relative-path])
                                                       (:seon.issue/functions row)))))}
         (get-in row [:seon.issue/agent :seon.agent/id])
         (assoc :seon.agent/id (get-in row [:seon.issue/agent :seon.agent/id]))))))
@@ -88,7 +88,7 @@
 (defn- function-pull-form [function-symbol]
   (list 'seon.db/pull '(seon.db/db)
         (list 'quote [:seon.fn/sym :seon.fn/doc :seon.fn/source :seon.fn/form-span
-                      {:seon.fn/file [:seon.fn.file/path]}])
+                      {:seon.fn/file [:seon.fn.file/relative-path]}])
         [:seon.fn/sym function-symbol]))
 
 (defn- commented-form
@@ -129,7 +129,7 @@
          (repl/source-text (status-form id))))
 
 (defmethod render-candidate :plan-first
-  [_ {:seon.issue/keys [id] :seon.fn/keys [syms] :seon.fn.file/keys [paths]}]
+  [_ {:seon.issue/keys [id] :seon.fn/keys [syms] paths :seon.fn.file/relative-paths}]
   (block (comment-lines
           ["My plan's steps carry this issue; its tests decide done."
            "The one call that proves it finished:"])
@@ -150,7 +150,7 @@
 
 (defmethod render-candidate :walkthrough
   [_ {:seon.issue/keys [id] :seon.test/keys [syms] fn-syms :seon.fn/syms
-      :seon.fn.file/keys [paths]}]
+      paths :seon.fn.file/relative-paths}]
   (block (comment-lines ["One worked way through an issue like this one, in order."
                          "1. Read the test:"])
          (commented-form (test-pull-form (first syms)))
@@ -227,7 +227,7 @@
      :seon.issue/functions
      (mapv #(db/pull database
                      '[:seon.fn/sym :seon.fn/doc :seon.fn/source
-                       {:seon.fn/file [:seon.fn.file/path]}]
+                       {:seon.fn/file [:seon.fn.file/relative-path]}]
                      [:seon.fn/sym %])
            (:seon.fn/syms link-row))
      :seon.issue/tests

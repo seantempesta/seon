@@ -825,7 +825,7 @@
                    [?function :seon.fn/keywords ?keyword]
                    [?function :seon.fn/sym ?function-symbol]
                    [?function :seon.fn/file ?file]
-                   [?file :seon.fn.file/root "src"]]
+                   [?file :seon.fn.file/relative-root "src"]]
                  @connection
                  :seon.schema.projection/predicate-functions))]
        (is (= #{"seon.schema/predicate-functions-in"

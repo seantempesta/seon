@@ -18,7 +18,7 @@
              :namespaces [:set {:seon.issue/cites [:seon.ns/name]
                                :description "Namespaces the note cites by name, including notes that cite no symbol at all."} :seon.db/ref]
              :files     [:set {:seon.db/component true
-                              :seon.issue/cites [:seon.fn.file/path]
+                              :seon.issue/cites [:seon.fn.file/relative-path]
                               :description "One seon.issue.citation component per cited file and span; the path resolves to the seon.fn.file entity whose stored path ends with it."} :seon.db/ref]
              :runs      [:set {:seon.issue/cites [:seon.test.run/id]
                               :description "Test runs the note cites as the gate that proved a slice."} :seon.db/ref]

@@ -10,6 +10,7 @@
             [seon.cluster.store :as store]
             [seon.db :as db]
             [seon.fn :as fn]
+            [seon.fs :as fs]
             [seon.program :as program]
             [seon.schema]
             [sci.core :as sci]
@@ -303,7 +304,7 @@
                     (str/replace "SHA-256 of (pr-str data), truncated"
                                  "SHA-256 of (pr-str data), shortened"))
         artifact #(fn/build-artifact
-                   {:seon.fn.file/path (.getCanonicalPath file)
+                   {:seon.fn/source-path (.getCanonicalPath file)
                     :seon.fn.file/first-party-functions
                     (fn/manifest-function-symbols manifest)})]
     (.mkdirs root)
@@ -320,7 +321,7 @@
         (is (not= original revised))
         (is (= :incremental-upsert (:seon.fn.change/action plan)))
         (is (= #{[:seon.ns/name 'seon.id] [:seon.fn/sym "seon.id/id"]
-                 [:seon.fn.file/path (.getCanonicalPath file)]}
+                 [:seon.fn.file/relative-path (fs/relative-path (fs/source-directory) (.getCanonicalPath file))]}
                (set (map program/row-identity rows))))
         (is (every? #(= :core (:seon.schema.admission/source %)) rows))
         (test-support/with-database
@@ -559,7 +560,7 @@
                           :seon.test.failure/expected :seon.test.failure/actual
                           :seon.test.failure/line :seon.test.failure/seen-count
                           :seon.test.failure/last-seen-at
-                          {:seon.test.failure/file [:seon.fn.file/path]}
+                          {:seon.test.failure/file [:seon.fn.file/relative-path]}
                           {:seon.test.failure/first-run [:seon.test.run/id]}
                           {:seon.test.failure/last-run [:seon.test.run/id]}]}]
               before (db/pull (source/database opened recorded-commit) selector

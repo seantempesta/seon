@@ -7,6 +7,7 @@
             [seon.edit :as edit]
             [seon.effect :as effect]
             [seon.fn :as fn]
+            [seon.fs :as fs]
             [seon.id :as id]
             [seon.program :as program]
             [seon.test-support :as test-support])
@@ -257,7 +258,7 @@
         file (java.io.File. directory "fixture_subject.clj")
         _ (spit file source)
         artifact (fn/build-artifact
-                  {:seon.fn.file/path (.getCanonicalPath file)
+                  {:seon.fn/source-path (.getCanonicalPath file)
                    :seon.fn.file/first-party-functions []})
         _ (test-support/transacted! connection (:seon.fn.file/rows artifact))]
     {:file file :path (.getCanonicalPath file) :artifact artifact}))
@@ -303,7 +304,7 @@
 (defn- effect-of
   [connection ordinal]
   (db/pull (db/db connection)
-           '[* {:seon.effect/file [:seon.fn.file/path]}
+           '[* {:seon.effect/file [:seon.fn.file/relative-path]}
              {:seon.effect/program [:seon.fn/sym :seon.fn/form-span]}]
            [:seon.effect/id
             (id/digest 12 [:seon.effect/id "edit-run" ordinal 0])]))
@@ -326,7 +327,7 @@
                               (:seon.fn.file/digest
                                (db/pull (db/db connection)
                                         [:seon.fn.file/digest]
-                                        [:seon.fn.file/path path]))
+                                        [:seon.fn.file/relative-path (fs/relative-path (fs/source-directory) path)]))
                               :my.edit/form {:my.edit.form/head 'defn
                                              :my.edit.form/name 'subject}
                               :my.edit/operation :replace
@@ -337,7 +338,7 @@
           (is (nil? (:seon.effect/provenance edited))
               "write-back provenance is the writer's, not the agent's"))
         (testing "the effect refs the indexed file and the declaration it wrote"
-          (is (= path (get-in receipt [:seon.effect/file :seon.fn.file/path])))
+          (is (= (fs/relative-path (fs/source-directory) path) (get-in receipt [:seon.effect/file :seon.fn.file/relative-path])))
           (is (= "fixture-subject/subject"
                  (get-in receipt [:seon.effect/program :seon.fn/sym])))
           (is (= (:seon.effect/form-span receipt)
@@ -358,8 +359,8 @@
                                    :my.edit/new-string "heading note"}))
                 comment-receipt (effect-of connection 2)]
             (is (nil? (:seon.error/kind comment-edit)) (pr-str comment-edit))
-            (is (= path (get-in comment-receipt
-                                [:seon.effect/file :seon.fn.file/path])))
+            (is (= (fs/relative-path (fs/source-directory) path) (get-in comment-receipt
+                                [:seon.effect/file :seon.fn.file/relative-path])))
             (is (some? (:seon.effect/form-span comment-receipt)))
             (is (nil? (:seon.effect/program comment-receipt))
                 "no declaration contains a comment, and none is fabricated")))
@@ -368,9 +369,9 @@
                 (db/q '[:find [(pull ?declaration [:seon.fn/sym :seon.fn/form-span]) ...]
                         :in $ ?path
                         :where
-                        [?file :seon.fn.file/path ?path]
+                        [?file :seon.fn.file/relative-path ?path]
                         [?declaration :seon.fn/file ?file]]
-                      (db/db connection) path)
+                      (db/db connection) (fs/relative-path (fs/source-directory) path))
                 refusal (program/declaration-at declarations 0)]
             (is (= :seon.program/no-declaration-at (:seon.error/kind refusal)))
             (is (= 0 (get-in refusal
@@ -393,7 +394,7 @@
             digest-of (fn []
                         (:seon.fn.file/digest
                          (db/pull (db/db connection) [:seon.fn.file/digest]
-                                  [:seon.fn.file/path path])))
+                                  [:seon.fn.file/relative-path (fs/relative-path (fs/source-directory) path)])))
             first-digest (digest-of)]
         (loop [ordinal 1
                expected-digest first-digest

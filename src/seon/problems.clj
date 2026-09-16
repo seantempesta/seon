@@ -355,7 +355,7 @@
         (db/pull-many database
           '[:seon.test/sym :seon.test/pass-count :seon.test/fail-count :seon.test/error-count
             :seon.test/failure-message
-            {:seon.test/failures [* {:seon.test.failure/file [:db/id :seon.fn.file/path]}]}]
+            {:seon.test/failures [* {:seon.test.failure/file [:db/id :seon.fn.file/relative-path]}]}]
           ids))))
 
 ;;; ---------------------------------------------------------------------------

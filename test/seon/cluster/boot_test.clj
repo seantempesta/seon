@@ -953,7 +953,7 @@
           (is (uuid? (:seon.source/commit-id refreshed)))
           (is (= (:seon.source/commit-id refreshed)
                  (:seon.source/commit-id artifact)))
-          (is (seq (:seon.source/file-digests artifact)))
+          (is (seq (:seon.source/relative-file-digests artifact)))
           (is (= current-digest (:seon.source/digest artifact)))
           (is (seq (get-in artifact
                            [:seon.fn/manifest
@@ -988,9 +988,9 @@
         artifact-path (cluster/source-artifact-file root)
         artifact (edn/read-string (slurp artifact-path))
         stale (-> artifact
-                  (assoc-in [:seon.fn/manifest :seon.fn.manifest/roots]
+                  (assoc-in [:seon.fn/manifest :seon.fn.manifest/relative-roots]
                             ["/former-checkout/src" "/former-checkout/test"])
-                  (update :seon.source/file-digests
+                  (update :seon.source/relative-file-digests
                           #(into {} (map (fn [[path digest]]
                                           [(str "/former-checkout" path) digest])) %)))
         calls (atom [])
@@ -998,7 +998,9 @@
     (try
       (spit artifact-path (pr-str stale))
       (with-redefs-fn
-        {#'cluster/source-analysis-cache (atom nil)
+        {#'cluster/source-analysis-cache
+         (atom {:seon.source/snapshot (cluster/source-snapshot)
+                :seon.fn/manifest (:seon.fn/manifest stale)})
          #'analyzer/analyze
          (fn [request]
            (swap! calls conj (count (:seon.fn.analyzer/sources request)))
@@ -1133,8 +1135,9 @@
   (let [digest (apply str (repeat 64 "a"))
         commit-id (random-uuid)
         snapshot {:seon.source/digest digest
-                  :seon.source/file-digests {"src/example.clj" digest}}
-        manifest {:seon.fn.manifest/roots ["src"]
+                  :seon.source/relative-file-digests {"src/example.clj" digest}}
+        manifest {:seon.fn.manifest/root (fs/source-directory)
+                  :seon.fn.manifest/relative-roots ["src"]
                   :seon.fn.manifest/digest digest
                   :seon.fn.manifest/artifacts []
                   :seon.fn.manifest/identities []}
@@ -1167,7 +1170,7 @@
 (deftest invalid-cached-manifest-falls-back-before-incremental-analysis
   (let [commit-id (random-uuid)
         malformed {:seon.source/commit-id commit-id
-                   :seon.source/file-digests {"src/example.clj" "digest"}
+                   :seon.source/relative-file-digests {"src/example.clj" "digest"}
                    :seon.fn/manifest
                    #:seon.fn.manifest{:artifacts
                                       {0 #:seon.fn.file{:rows
@@ -1260,9 +1263,9 @@
                           ["/repo/src/a.clj"])))))
 
 (deftest current-source-digest-names-the-merged-schema-declarations
-  (let [schema-path (.getCanonicalPath (io/file "resources/seon/schemas"))]
+  (let [schema-path "resources/seon/schemas"]
     (is (= (schema.edn/declaration-digest)
-           (get (:seon.source/file-digests (cluster/source-snapshot))
+           (get (:seon.source/relative-file-digests (cluster/source-snapshot))
                 schema-path))
         "the ancestor hashes the merged schema declaration set"))
   (is (not-any? #{"resources/seon/bootstrap.edn"} cluster/source-roots)
@@ -1896,3 +1899,38 @@
 ;;; "a derivation disagrees with the facts it derives from", so the
 ;;; assertion is that equality, at the choke point, against a real store.
 ;;; ---------------------------------------------------------------------------
+
+(deftest ^{:seon.test/fixture-observation "Relocates the canonical published checkout and observes real analyzer calls on an unchanged clone and one edit."
+           :seon.test/long "Copies the canonical checkout and publishes one file edit."}
+  cloned-publication-analyzes-only-changed-files
+  (let [root (published-root)
+        checkout (bare-root)
+        directory (.getCanonicalPath (io/file checkout))
+        original-roots (#'cluster/publication-roots)
+        roots (assoc original-roots :seon.fn/root directory)
+        calls (atom [])
+        analyze analyzer/analyze
+        path (io/file checkout "src/seon/ai/tokens.cljc")]
+    (try
+      (doseq [relative (:seon.source/roots roots)]
+        (let [source (io/file (fs/source-directory) relative)
+              target (io/file checkout relative)]
+          (io/make-parents target)
+          (if (.isDirectory source)
+            (#'test-support/clone-directory! source target)
+            (io/copy source target))))
+      (with-redefs-fn
+        {#'cluster/publication-roots (constantly roots)
+         #'analyzer/analyze
+         (fn [request]
+           (swap! calls into (keys (:seon.fn.analyzer/sources request)))
+           (analyze request))}
+        (fn []
+          (let [unchanged (cluster/refresh-source! root [(.getCanonicalPath path)])]
+            (is (false? (:seon.source/built? unchanged)))
+            (is (= [] @calls) "relocation and an unchanged reported path analyze no file"))
+          (spit path (str (slurp path) "\n; Relocated checkout edit.\n"))
+          (cluster/refresh-source! root [(.getCanonicalPath path)])
+          (is (= [(.getCanonicalPath path)] @calls)
+              "the edit analyzes precisely one file through the production seam")))
+      (finally (delete-recursively! checkout)))))

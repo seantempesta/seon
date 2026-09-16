@@ -99,12 +99,12 @@
   (let [path (.getCanonicalPath (io/file "src/seon/cluster.clj"))
         rows (:seon.fn.file/rows
               (seon.fn/build-artifact
-               {:seon.fn.file/path path
+               {:seon.fn/source-path path
                 :seon.fn.file/first-party-functions []}))
         attributes (into #{} (map #(first (program/row-identity %))) rows)
         identities (#'cluster/adoption-identities
                     (into [] (keep program/row-identity) rows))]
-    (is (contains? attributes :seon.fn.file/path)
+    (is (contains? attributes :seon.fn.file/relative-path)
         "the file-digest row is part of a published file's rows")
     (is (every? some? identities))
     (is (not (contains? (set identities) nil))
