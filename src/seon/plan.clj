@@ -14,10 +14,22 @@
   Completion is the presence of `:my.plan.item/completed-tx`; ready, blocked,
   parent, depth, and state are queries over current facts, never stored."
   (:require [clojure.string :as str]
+            [sci.core :as sci]
             [seon.db :as db]
             [seon.id :as id]
+            [seon.issue :as issue]
             [seon.repl :as repl]
-            [seon.schema.edn :as schema.edn]))
+            [seon.schema.edn :as schema.edn]
+            [seon.sci.kernel :as sci.kernel]
+            [seon.test :as seon.test]
+            [seon.test.runner :as test.runner]))
+
+;;; LOAD-CYCLE BOUNDARY. `seon.turn` requires `seon.plan`, and
+;;; `seon.cluster.agent` requires `seon.turn`, so this namespace cannot
+;;; require it back. One resolution, realized at first use, instead of a
+;;; `requiring-resolve` on every call (AGENTS §2.1).
+(defonce ^:private cluster-agent-acquire-context!
+  (delay (requiring-resolve 'seon.cluster.agent/acquire-context!)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schemas — resources/seon/schemas/my.plan.edn
@@ -580,7 +592,7 @@
 
 (def issue-done-query
   "The issue owner's completion query, shared with issue assignment."
-  @(requiring-resolve 'seon.issue/done-query))
+  issue/done-query)
 
 (defn- stale-issue-tests
   "The agent's open-issue tests whose reach closure changed or that never ran.
@@ -599,7 +611,7 @@
                         [test-eid (:seon.test/sym
                                    (db/pull database [:seon.test/sym] test-eid))])
                       (sort tests))
-          stale ((requiring-resolve 'seon.test/stale)
+          stale (seon.test/stale
                  database (into [] (keep second) named))]
       (when (error-value? stale)
         (throw (ex-info (:seon.error/message stale) stale)))
@@ -621,8 +633,8 @@
         pending (stale-issue-tests database agent-id)]
     (when (seq pending)
       (let [deadline (query-deadline database agent-id)
-            provenance ((requiring-resolve 'seon.test.runner/provenance) database)
-            ctx ((requiring-resolve 'seon.cluster.agent/acquire-context!) cluster agent-id)]
+            provenance (test.runner/provenance database)
+            ctx (@cluster-agent-acquire-context! cluster agent-id)]
         (when (error-value? provenance)
           (throw (ex-info (:seon.error/message provenance) provenance)))
         (doseq [[test-eid test-symbol] pending]
@@ -630,15 +642,15 @@
                 result
                 (if (and test-symbol (pos? remaining-ms))
                   (let [qualified (symbol test-symbol)
-                        test-var ((requiring-resolve 'sci.core/resolve) ctx qualified)
+                        test-var (sci/resolve ctx qualified)
                         metadata (meta test-var)
                         runnable
-                        ((requiring-resolve 'sci.core/new-var)
+                        (sci/new-var
                          (symbol (name qualified)) nil
                          (assoc metadata
                            :name (symbol (name qualified))
                            :ns (or (:ns metadata)
-                                   ((requiring-resolve 'sci.core/create-ns)
+                                   (sci/create-ns
                                     (symbol (namespace qualified))))
                            :test
                            (fn []
@@ -651,10 +663,10 @@
                                                  {:seon.test/sym test-symbol})))
                                (if (var? test-var)
                                  ((:test metadata))
-                                 (let [armed ((requiring-resolve 'seon.sci.kernel/arm) ctx remaining)]
+                                 (let [armed (sci.kernel/arm ctx remaining)]
                                    (try ((:test metadata))
                                         (finally ((:seon.sci.kernel/stop! armed))))))))))]
-                    ((requiring-resolve 'seon.test/run)
+                    (seon.test/run
                      runnable connection
                      {:seon.db/db database
                       :seon.test.run/provenance provenance
@@ -663,7 +675,7 @@
                     (refuse! :seon.issue/not-a-test
                              "An issue success ref no longer identifies a test."
                              {:seon.agent/id agent-id :seon.db/ref test-eid})
-                    ((requiring-resolve 'seon.test.runner/commit-results!)
+                    (test.runner/commit-results!
                      connection
                      {:seon.db/db database :seon.test.run/provenance provenance
                       :seon.test/run-basis-t (:seon.test.run/basis-t provenance)
@@ -731,7 +743,7 @@
                           (when (query-satisfied? (done-query-result database step deadline))
                             (completion-tx database plan-entity eid)))))
               steps)
-              [:db.fn/call (requiring-resolve 'seon.issue/exhaust-tx) agent-id])))))
+              [:db.fn/call #'issue/exhaust-tx agent-id])))))
 
 (defn- complete-step-call
   [database request]
