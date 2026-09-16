@@ -643,3 +643,19 @@ the SHARED loaded dev JVM where `db/transact!` costs 227 ms/call (3–4 ms
 idle) — the cold gate decides. Exonerated red filed:
 `ordered-evaluation-preview-test-refuses-agent-already-running.md`.
 Batch 55.
+
+### 2026-09-17 01:30Z — remaining bookkeeping cost attributed (`9a4e873d2`); record-tx 6 s in-process
+
+Warm on pid 95853, six runs: 365–531 ms, never under 300. Inside the
+window: ONE settlement Datahike commit 219 ms (batch size: `turn.clj:3510`,
+tx-data `:3541-3550`), the defining form's install 120 ms (`analyze-forms`
+runs twice for one form), three other transacts 19 ms, request-profile 5 ms,
+gate-set 1 ms. Per-turn, not first-use; the cold gate's extra ~230 ms is a
+fresh worker's class loading / first analysis / first fork, inside the
+window by construction. Verdict: 300 ms is not achievable warm today; the
+assertion should bound settlement+writes and assert the install separately
+rather than be raised. Incidental and larger: `seon.test.runner/record-tx`
+costs 5.9–8.0 s per IN-PROCESS test run against default's file store —
+this dominates every lane's REPL-first loop; read-only research launched
+(`in-process-record-tx-cost-2026-09-17.md`). Settlement batch size and the
+double analyze-forms go to a turn.clj lane after ordered-evaluation lands.
