@@ -258,3 +258,20 @@ Opus fix lane launched: dissolve the pre-read (send is the authority), mint a
 readable fixture keyword, make the parse seam total, one regression.
 turn-test-reds lane still live (4 commits, latest `b3266e25b`); its gate runs
 when it stops.
+
+### 2026-09-16 05:40Z — the stall class: minute blob sweep under an exclusive permit
+
+Latency lane (commit `4764c233a`, no source edit): the recorder is fine
+(`commit-results!` 699 ms); `seon.blob.retention/reclaim!` runs every minute,
+takes the store's exclusive sweep permit and walks 380,285 konserve keys
+(64.6 s) to find 3,624 blobs; `datahike.api/branch!` waits unbounded, the
+reachability gate is closed 96.4% of the time, `registry/branch!`
+57–74 s. This explains the recording silence (batches 26A, 27A), the hook
+publication timeouts, slow forks/retires, and the fresh-operator-test hang in
+batch 27 B (declared-long test slowed 2.4× to the 270 s bound; `7c7395c8a`
+refuted as cause). Issue
+`blob-retention-sweep-starves-every-roster-writer.md` (blocker). Lanes:
+astra `retention-sweep` (spec `tmp/orchestrator/wave2/retention-sweep.spec`:
+candidates from blob-write facts, permit only around deletes, event-driven
+budget check); Opus research `store-footprint-2026-09-16.md` (why 72 GB /
+380k keys; reset vs `gc-storage!`).
