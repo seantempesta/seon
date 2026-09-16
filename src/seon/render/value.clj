@@ -13,6 +13,19 @@
 
 (schema.edn/load! {})
 
+;;; LOAD-CYCLE BOUNDARIES. `seon.render` and `seon.config` both require
+;;; `seon.render.value` transitively, so this namespace cannot require them
+;;; back. One resolution per var, realized at first use, instead of a
+;;; `requiring-resolve` on every call (AGENTS §2.1).
+
+(defonce ^:private render-agent-render-profile
+  (delay (requiring-resolve 'seon.render/agent-render-profile)))
+(defonce ^:private config-defaults
+  (delay (requiring-resolve 'seon.config/defaults)))
+(defonce ^:private render-project-node
+  (delay (requiring-resolve 'seon.render/project-node)))
+
+
 (defn transacted
   "Restore a pulled entity to its transaction shape.
 
@@ -158,8 +171,8 @@
 (defn- render-profile
   [unit]
   (let [profile (or (:seon.render/profile unit)
-                    ((requiring-resolve 'seon.render/agent-render-profile)
-                     ((requiring-resolve 'seon.config/defaults))))
+                    (@render-agent-render-profile
+                     (@config-defaults)))
         root (or (:seon.repl/handle unit) (:seon.render.value/root unit))
         root (when (and (qualified-symbol? root) (= "result" (namespace root))) root)]
     (cond
@@ -247,7 +260,7 @@
                                         (map first)
                                         (remove inert))
                                   (:schema database))
-        entity ((requiring-resolve 'seon.db/pull)
+        entity (db/pull
                 database (into [:db/id] identity-attributes) value)]
     (or (some (fn [attribute]
                 (when-let [entry (find entity attribute)]
@@ -322,7 +335,7 @@
                             (not (get-in unit [:seon.render.value/options
                                               :seon.render.value/structural?])))
                    (let [node {:seon.print/face :seon.print/map :seon.print/entries []}
-                         projected ((requiring-resolve 'seon.render/project-node)
+                         projected (@render-project-node
                                     unit value node output)]
                      (when (not= node projected) projected)))]
     (when ai? (vswap! remaining dec))
