@@ -1532,8 +1532,9 @@
                           (m/schema
                            (compilable-form
                             input-form
-                            (:seon.schema.projection/predicate-functions
-                             projection))
+                            (get projection
+                                 :seon.schema.projection/predicate-functions
+                                 {}))
                            (:seon.schema.projection/compile-options projection))]
                       (when (or (= input-form schema-key)
                                 (= input-form :seon.schema/value)
@@ -3042,7 +3043,8 @@
        (compiled-function-arities
         (m/function-schema
          (compilable-form
-          contract (:seon.schema.projection/predicate-functions projection))
+          contract (get projection
+                        :seon.schema.projection/predicate-functions {}))
          {:registry (:seon.schema.projection/registry projection)}))
        []))))
 

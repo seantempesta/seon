@@ -602,16 +602,24 @@
              "the face names the target and the key, never a dynamic var")
          (testing "and a refusing supplier short-circuits the whole call"
            (reset! entered 0)
-           (let [result
+           ;; the plan is COMPILED, not hand-rostered: a declared plan carries
+           ;; its contract-t, basis-t and arities, and a stand-in missing them
+           ;; is refused by `prepare`'s own contract before the subject is
+           ;; reached. Only the one thing under test — a slot whose supplier
+           ;; cannot produce — is substituted into a real plan.
+           (let [compiled (cp/plan-for
+                           @connection current
+                           "seon.call-preparation-test/probe-received-database?")
+                 _ (is (some? compiled))
+                 result
                  (cp/prepare
                   current environment
-                  {:seon.fn/sym
-                   "seon.call-preparation-test/probe-untouched"
-                   :seon.call-preparation/empty? false
-                   :seon.call-preparation/by-supplied-count
-                   {0 {:seon.call-preparation/ambiguous? false
-                       :seon.call-preparation/inserts [slot]
-                       :seon.call-preparation/entries []}}}
+                  (assoc compiled
+                         :seon.call-preparation/empty? false
+                         :seon.call-preparation/by-supplied-count
+                         {0 {:seon.call-preparation/ambiguous? false
+                             :seon.call-preparation/inserts [slot]
+                             :seon.call-preparation/entries []}})
                   [])]
              (is (= :seon.call-preparation/unavailable
                     (:seon.error/kind result)))
