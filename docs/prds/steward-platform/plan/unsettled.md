@@ -197,3 +197,5 @@
   list), R4 detectors and standards with live subject counts; R2 structured
   test failures, R3 effects and write-back provenance, R5 analyzer facets
   written and queued (tmp/orchestrator/wave3/research/).
+- 08:20Z batch 22 (write-validation-class, HEAD `01539d18a`): 18 tests /
+  181 assertions / 0 failures — closed green.
