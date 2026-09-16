@@ -122,7 +122,22 @@
                          :seon.cluster.wake/fault-channel faults
                          :seon.cluster.wake/key ::running-route})
            (try
-             (fixture/install-running! handle routing)
+             (do
+               (fixture/install-running! handle routing)
+               (let [database (db/db connection)
+                     inert (wake/inert-attributes database)
+                     entries (evaluation/of-agent database "juniper")]
+                 (is (seq entries) "The seeded system turn must store its opening.")
+                 (is (some #(= "(seon.plan/plan {})" (:seon.cluster.eval/source %)) entries))
+                 (doseq [entry entries
+                         read (:seon.cluster.eval/read-evidence entry)
+                         source (get-in read [:datahike.read/dependency-plan
+                                              :datahike.query.dependency/sources])
+                         :let [attributes (:datahike.query.source/attributes source)]
+                         :when (set? attributes)]
+                   (is (empty? (filter inert attributes))
+                       (pr-str {:seon.cluster.eval/source (:seon.cluster.eval/source entry)
+                                :seon.db/read-request (:seon.db/read-request read)})))))
              (await-settled!)
              (is (some? (agent/armed routing "juniper")))
              (is (= 29 (turn/turns-left @connection "juniper")))

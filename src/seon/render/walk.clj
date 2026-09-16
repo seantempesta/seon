@@ -33,6 +33,7 @@
   holds anything."
   (:require [clojure.string :as str]
             [seon.db :as db]
+            [seon.cluster.wake :as wake]
             [seon.eval :as evaluation]
             [seon.print :as print]
             [seon.render :as render]
@@ -128,9 +129,11 @@
     :seon.db/pull-selector]}
   [database _distance caps]
   (let [installed (installed-attributes database)
+        inert (wake/inert-attributes database)
         leaf (into [:db/id]
                    (keep (fn [[attribute properties]]
-                           (when (= :db.unique/identity (:db/unique properties))
+                           (when (and (= :db.unique/identity (:db/unique properties))
+                                      (not (inert attribute)))
                              attribute)))
                    installed)
         width (pull-width caps)]

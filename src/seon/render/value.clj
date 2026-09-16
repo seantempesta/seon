@@ -4,6 +4,7 @@
             [seon.id :as id]
             [clojure.edn :as edn]
             [seon.print :as print]
+            [seon.cluster.wake :as wake]
             [seon.schema.edn :as schema.edn]
             [seon.schema :as schema]
             [seon.env :as env]
@@ -206,10 +207,12 @@
   [database value]
   (if (map? value)
     value
-    (let [identity-attributes (into []
+    (let [inert (wake/inert-attributes database)
+          identity-attributes (into []
                                   (comp (filter (fn [[_ properties]]
                                                   (= :db.unique/identity (:db/unique properties))))
-                                        (map first))
+                                        (map first)
+                                        (remove inert))
                                   (:schema database))
         entity ((requiring-resolve 'seon.db/pull)
                 database (into [:db/id] identity-attributes) value)]

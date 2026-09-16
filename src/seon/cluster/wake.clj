@@ -118,6 +118,17 @@
                [?row :seon.schema/key ?key]]
              database)))
 
+(defn inert-attributes
+  "Attributes declared independent of context waking and generated reads."
+  {:malli/schema [:=> [:cat :seon.db/database-value]
+                  :seon.cluster.wake/attributes]}
+  [database]
+  (into #{}
+        (d/q '[:find [?attribute ...]
+               :where [?row :seon.wake/context-inert true]
+                      [?row :seon.schema/key ?attribute]]
+             database)))
+
 (defn turn-opening-attributes
   "The listened attributes whose unanswered wakes OPEN A TURN.
 

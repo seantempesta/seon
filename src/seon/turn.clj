@@ -2017,10 +2017,7 @@
                                           (vals latest))))))))
 
 (defn- generated-read-fault [database source evaluation]
-  (let [inert (set (db/q '[:find [?attribute ...]
-                          :where [?schema :seon.schema/key ?attribute]
-                          [?schema :seon.wake/context-inert true]]
-                        database))
+  (let [inert (wake/inert-attributes database)
         evidence (:seon.cluster.eval/read-evidence evaluation)
         offending (into (sorted-set)
                         (mapcat (fn [read]
