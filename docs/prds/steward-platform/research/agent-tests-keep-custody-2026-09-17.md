@@ -109,14 +109,39 @@ Also foreign at this moment: `test/seon/test_support.clj` carries another
 lane's 263 uncommitted insertions (it lints clean at the time of writing) and
 `src/seon/sci/eval.clj` is that lane's too. Neither was edited here.
 
+## The same hunk, landed second: an agent's accretion gate tests
+
+`seon.sci.eval/run-candidate-test!` (`src/seon/sci/eval.clj:2686`) ran an
+agent's GATE tests — the `deftest`s evaluated in a candidate ctx before a
+definition is installed — through the one-argument arity, so they had no
+custody either. That file was another lane's when the first slice landed; it
+was released at `a8ed776e0`, and the repair is the value the candidate request
+already carries (`:seon.db/connection` is REQUIRED on
+`:seon.test.accretion/candidate-request`,
+`resources/seon/schemas/seon.test.accretion.edn:207`):
+
+```clojure
+(test.runner/run-var! test-var (select-keys request [:seon.db/connection]))
+```
+
+Regression `seon.test.accretion-test/a-gate-test-runs-with-its-authors-cluster-custody`
+seeds an agent namespace and one gate test whose source is
+`(is (int? (seon.db/basis-t (seon.db/db))))`, then drives the real
+`evaluate-candidate`. This one needs NO new program row from the fixture's SCI
+base — every symbol in it predates the base — so unlike the `my.test-test`
+regression it is proven in process here:
+
+| test | result (pid 88182, canonical fixture) |
+|---|---|
+| `seon.test.accretion-test/a-gate-test-runs-with-its-authors-cluster-custody` | 3 passes, 0 failures, 0 errors (new) |
+| `seon.test.accretion-test/candidate-tests-run-on-a-copy-on-write-turn-fork` | 6 passes, 0 failures, 0 errors (unchanged neighbour) |
+
+Commit `57a77642b`.
+
 ## Named, not touched
 
-`src/seon/sci/eval.clj:2686` (`run-candidate-test!`) calls the one-argument
-`run-var!`, so an agent's ACCRETION GATE tests — the `deftest`s evaluated in a
-candidate ctx before a definition is installed — still run with no custody and
-will refuse an elided `seon.db` call exactly as `my.test/run` did. That
-request already carries `:seon.db/connection` (`evaluate-candidate`'s
-`connection` binding), so the repair is one hunk:
-`(test.runner/run-var! test-var {:seon.db/connection connection})` with
-`connection` threaded into `run-candidate-test!`. The file is another lane's
-this turn, so this lane named it instead of editing it.
+`test/seon/test_support.clj` and `test/seon/test_support_test.clj` remain
+another lane's uncommitted work throughout; neither was edited here. The one
+seam this lane deliberately left alone is the 1-arity `run-var!` itself: a
+`bin/test` worker and a host REPL are nobody's cluster work, and absence
+staying the default is the point of the change.

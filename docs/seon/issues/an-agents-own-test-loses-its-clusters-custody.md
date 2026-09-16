@@ -30,10 +30,11 @@ run seam: `seon.db/call-with-custody`, `seon.test.runner/run-var!`'s second
 arity, `:seon.db/connection` in `:seon.test/run-options`, and
 `seon.test/run-owned` behind `my.test/run`. Landing note:
 [agent-tests-keep-custody-2026-09-17](../../prds/steward-platform/research/agent-tests-keep-custody-2026-09-17.md).
-Still open in the same class, named there and not repaired here:
-`seon.sci.eval/run-candidate-test!` (`src/seon/sci/eval.clj:2686`) runs an
-agent's ACCRETION GATE tests through the one-argument arity, so those still
-get no custody.
+The same class in `seon.sci.eval/run-candidate-test!` — an agent's ACCRETION
+GATE tests — was closed the same way in `57a77642b`, once that file was
+released, with
+`seon.test.accretion-test/a-gate-test-runs-with-its-authors-cluster-custody`
+as its regression.
 
 ## Cause
 
