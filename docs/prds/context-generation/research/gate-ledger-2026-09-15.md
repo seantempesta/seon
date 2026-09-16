@@ -25,6 +25,7 @@ the same namespace twice for the same HEAD.
 | 33 | `7b3a9ecc8` | FRESH STORE (reset: 72 GB → 107 MB; default pid 27828): platform (recording) then seon.issue-test (indexer `75996a9e6`…`da0309344`) seon.test-runner-test seon.test.runner-test seon.test-support-test (reach-closure `bbbfafaf1`, `1086a7b80`) | A: PLATFORM RED 86/579, 13 F all in seon.cluster.source-test/latest-test-evidence-survives-rebuilding-from-an-older-base — `commit-results!` refused at the writer: `:seon.test.run/unavailable The completion lacks its tested database reach membership` (reach-closure's seam); gate recording also rejected; root run.5goq1Y. BLOCKER for the platform tier; fixed by reach-closure `8199364a2` (recording total: `:seon.test/reach-unknown`). B: 66/514, 3 F — seon.issue-test 2 tests (`:seon.issue/unresolved` vector vs set; steward's indexer); runner/support namespaces GREEN; root run.6P5SxE | steward |
 | 37 | `e25f0f360` | steward's issue-index-publication-cost `6ed16de1a` (delta-only index-tx; 1,276 → 358 ms): seon.issue-test seon.cluster.source-test | 21/221, 0 F 0 E — both GREEN (source-test's latest-test-evidence… passes under named selection); recording failed only because default was restarting; root run.sK2dTh swept | steward |
 | 39 | `3c446a558` | transcript second pass (`c19e826fa`…`583dab7c9`) + config-apply-cost `5e5aa6293`: seon.render.transcript-test seon.render.web-debug-test seon.config-test seon.reconcile-test | 56/568, 1 F: web-debug, config, reconcile GREEN; transcript-test 13 → 1 — every-generated-history-is-ordered-and-total (generative: two same-instant inbound messages order, seed 2026073104); root run.q75EGY | steward |
+| 46 | HEAD | RECORDER FIX `60516d27c` (completion staged as EDN under the run root; form 207,166 → 890 bytes) — platform (recording) then 15 ns: runner/support, fixture-write-helper (`477cb615c` `074fbceda`), reach-closure final (`fec3918dd` `9f0771cfc` `c6507facb`), effect-facts (`8f4561450`) | armed behind 44 B | orchestrator; steward |
 | 45 | HEAD | issue-generator fixture fixes (`e47d05dec` `7fe7777a1` `e40f52059`: unchecked fixture writes, fifth hit of the class) + reach-closure `5a9de3185` (structured test failures rendered): seon.issue-generate-test seon.issue-test seon.problems-test seon.test-failure-facts-test seon.render.entity-pairs-test | `8d5a7bcea`: 40/504, 8 F — issue-generate, issue, problems, failure-facts GREEN; entity-pairs-test 1 (test render pair source changed by `5a9de3185`: 4 forms, status sentence); recording `Method code too large!` (fix in flight); root run.fy1YSs | steward |
 | 44 | `b77c553e4` | recording wrapper carries the cluster's cause (`b77c553e4`): platform (recording — first gate that can NAME the rejection) then seon.dev.fresh-operator-test seon.test-runner-test | A: PLATFORM GREEN 87/591; recording notice NAMED THE CAUSE: `Method code too large!` — `persistent-results-form` inlines the whole completion as a code literal, exceeding the JVM 64 KB method limit for gate-sized completions (small ones record; grew past the limit with 8199364a2's structured failure facts). Opus fix lane: data travels as a file the cluster reads, form O(1). B running | orchestrator |
 | 43 | HEAD | steward's effect-facts (`0e15593aa` `774b4da39`) + issue-generator (`88b04b970` `8c01f7420` `e2117dd73`): seon.effect-test seon.edit-test seon.fn-test seon.issue-generate-test seon.issue-test | `e3bfa76d1`: 70/482, 17 F 4 E — fn-test, issue-test GREEN; effect-test 2 (detached limit fails instead of interrupting; my.fs refuses the fixture temp path in a cold worker), edit-test 4 (my.edit/form! now requires :my.edit/expected-digest; fixtures refused), issue-generate-test 2 (idempotence, reopen); root run.RRQXky | steward |
@@ -498,3 +499,15 @@ the per-result payload grew with `8199364a2`). Fix lane launched: the
 runner writes the completion to a file under its run root and sends a tiny
 form naming it; the cluster reads it with clojure.edn; regression = a
 2,000-result completion sends a form under 1 KB.
+
+### 2026-09-16 18:00Z — recorder fix landed (`60516d27c`)
+
+`persistent-results-form` inlined the completion as a quoted literal;
+live, a 2,000-result inlined form reproduces `Method code too large!` on
+demand. Now the completion is staged as EDN under the coordinator's run root
+and the sent form names only the path (207,166 → 890 bytes for 2,000
+results; 500-result live send 261 ms); the read side is total
+(`:seon.test.runner/staged-completion-unreadable` on a missing/truncated
+file). Finding to carry: `requiring-resolve` returns nil for
+`seon.cluster/running-instances` inside the cluster where `ns-resolve`
+resolves it — caught only by the live send. Batch 46 is the recording proof.
