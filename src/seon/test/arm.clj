@@ -4,7 +4,9 @@
             [clojure.set :as set]
             [clojure.string :as str]
             [seon.config :as config]
-            [seon.schema :as schema])
+            [seon.instrument :as instrument]
+            [seon.schema :as schema]
+            [seon.schema.edn :as schema.edn])
   (:import [java.lang ProcessHandle]))
 
 (defn- load-declared-predicate-owners!
@@ -33,7 +35,7 @@
 (defn- packaged-test-projection
   "Acquire the packaged projection once for one test-runner JVM."
   [role]
-  (let [forms ((requiring-resolve 'seon.schema.edn/packaged-forms))
+  (let [forms (schema.edn/packaged-forms)
         _ (load-declared-predicate-owners! forms)
         projection (schema/declaration-projection forms)]
     (binding [*out* *err*]
@@ -182,7 +184,7 @@
     ;; the cluster it claims to reproduce.
     (doseq [namespace-name program]
       (require namespace-name))
-    (let [applied ((requiring-resolve 'seon.instrument/apply!)
+    (let [applied (instrument/apply!
                    {:seon.config/on-core-error
                     (:seon.config/on-core-error decisions)
                     :seon.sci.admit/caps caps
@@ -204,8 +206,8 @@
       ;; reads the wrappers actually installed. `seon.artifact/-main`,
       ;; `seon.artifact/install-initialization-pages!` and `seon.test/run`
       ;; were live on every cluster and armed by nothing here.
-      (let [armable ((requiring-resolve 'seon.instrument/armable) program)
-            installed ((requiring-resolve 'seon.instrument/instrumented))
+      (let [armable (instrument/armable program)
+            installed (instrument/instrumented)
             unarmed (into (sorted-set)
                           (map #(str (symbol %)))
                           (set/difference armable installed))]
