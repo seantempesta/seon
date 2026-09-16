@@ -176,7 +176,11 @@ peer session (batches 30–57; ledger
   fourteen read sites, with a program-graph checker); `:seon.test/long` a
   program fact with `check` excluding long tests by name; recording made
   total on every absent identity; the platform tier and in-process runs both
-  refusing destructive drills.
+  refusing destructive drills; the shared fixture base keyed by the
+  publication it was built from (a converged adoption is a rebuild by
+  construction, ~1 min — the cheaper incremental-upsert design is an owner
+  option); an agent's own tests keep their cluster's custody while host
+  in-process runs have none.
 - **Issues/tasks:** `seon.issue/generate` with detectors D1 (unpaired entity
   maps, 32) and D2 (undocumented public functions, 2 src / 28 test) → 63
   generated issues on default, idempotent by identity; the generated
