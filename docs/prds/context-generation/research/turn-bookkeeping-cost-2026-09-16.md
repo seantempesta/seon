@@ -703,3 +703,143 @@ gap — two orders of magnitude on the one phase with the largest share — is t
 whole remainder, and it tracks the load on this shared JVM, not the turn
 algorithm. Profile derivation is no longer a term in it: 2.4 ms per six-form
 turn, one derivation. The 300 ms bound stands unchanged.
+
+## Remaining bookkeeping, phase by phase — 2026-09-16, lane `turn-bookkeeping-phases`
+
+Read-only research lane on branch `steward-platform`, live `default` **PID
+95853**, snapshot `e765058fe` plus this tree's uncommitted test edits
+(`test/seon/cluster/turn_test.clj` is at HEAD). Read end to end first: every
+earlier section of this page, `AGENTS.md`, and
+`tmp/orchestrator/wave2/repl-rule.txt`. No file under `src/ test/ bin/
+script/ resources/` was edited, no test JVM was launched, and `default` was
+never stopped, restarted or reforked. Every probe ran on a daemon thread
+outside the MCP bound; every wrapped Var was restored with `alter-var-root`
+in the same `finally`, and each report confirmed `:probe/restored true`.
+
+### (a) Warm, on the shared `default`
+
+Six in-process runs of
+`seon.cluster.turn-test/delimiter-repair-is-span-local-and-precedes-intent`
+(`test/seon/cluster/turn_test.clj:2704`), namespace reloaded through
+`seon.test`'s own loader, run via `seon.test/run` with
+`:seon.test/remaining-ms 270000`:
+
+| run | 1 | 2 | 3 | 4 | 5 | 6 |
+|---|---:|---:|---:|---:|---:|---:|
+| `bookkeeping-ms` | 531.0 | *voided* | 399.2 | 365.0 | 402.2 | 436.6 · 372.4 |
+
+Run 2 is voided, not slow: it failed on `(= 1700 (:seon.sci.eval/time-limit-ms
+request))` — another lane's `with-redefs` in this shared JVM, the
+process-global hazard this page has hit before. **No run came under 300 ms;
+the warm spread is 365–531 ms with no downward trend across six runs, so the
+remainder is not first-use cost in this JVM.** Concurrent live turns were
+observed on a second thread throughout (11 `turn` calls, 21 transactions
+averaging 11 ms) — this is the loaded shared JVM, not the idle PID 53378
+where this page measured ~100 ms.
+
+### (b) The window, sliced by timestamp
+
+Each phase owner was wrapped to log `[name thread start end]`, and the
+assertion's window was reconstructed from the event log: the deftest's own
+thread (6 `turn` calls; the other live thread had 11), its **second** `turn`
+call, from the end of `prompt` (where `reply/sources` arrives) to the end of
+the turn. That run reported 402.2 ms.
+
+| Phase | calls | ms | nesting |
+|---|---:|---:|---|
+| whole turn 2 | 1 | 701 | includes `prompt` before the clock |
+| `seon.cluster.prompt/prompt` | 1 | 231 | **before** the window |
+| **window (prompt end → turn end)** | | **464** | = 402 reported + 52 SCI + clock slack |
+| `seon.db/transact!` inside `settle-batch!` | **1** | **219** | the settlement commit |
+| `seon.turn/settle-batch!` inclusive | 1 | 224 | 219 of it is that one commit |
+| `seon.turn/gate-function-install` | 6 | **120** | **120 / 0 / 0 / 0 / 0 / 0** |
+| `seon.turn/evaluate-sources` inclusive | 1 | 195 | = 52 + 120 + 27 |
+| `seon.fn/analyze-forms` | 2 | 27 | inside `gate-function-install` |
+| `seon.db/transact!`, the other three | 3 | 19 | 5 / 4 / 10 |
+| `seon.sci.eval/evaluate` | 6 | 52 | **subtracted by the assertion** |
+| `seon.render/request-profile` | 57 | 5 | one derivation — dissolved |
+| `seon.ai/agent-overlay` | 6 | 5 | |
+| `seon.turn/evaluation-terminal-data` | 6 | 4 | |
+| `seon.fn/gate-set` | 1 | 1 | dissolved |
+| `seon.plan/settle-call` | 1 | 0–3 | exonerated, see below |
+
+Sum of the named phases is 365 of the 402 reported ms; the residue is the
+turn's own map building and the wrappers themselves.
+
+### What the remainder actually is
+
+1. **One Datahike commit is 54% of the window.** `settle-batch!`
+   (`src/seon/turn.clj:3510`) builds ONE transaction — namespace rows, the
+   batch receipt rows, every evaluation's tx-data, and one
+   `[:db.fn/call #'plan/settle-call agent-id]` per agent
+   (`src/seon/turn.clj:3541-3550`) — and committing it costs **219 / 208 /
+   226 ms** across runs. The writer-side `plan/settle-call` is **0–3 ms**
+   (16 measured calls, max 3), so the cost is the commit of the batch itself,
+   not the plan arm. In the same JVM, the turn's three other transactions are
+   **4, 5, 10 ms** and the live cluster's own concurrent transactions average
+   **11 ms**, so this is batch size, not contention.
+2. **Installing one definition costs 120 ms, and only the defining form pays
+   it.** `gate-function-install` measured 120 / 0 / 0 / 0 / 0 / 0 ms over the
+   six forms; `analyze-forms` (2 calls, 27 ms) is inside it, leaving ~90 ms
+   of candidate evaluation, contract arming and gate selection for the one
+   `defn`. `gate-set` is now 1 ms, confirming the gate-set lane's slice.
+3. **The already-dissolved phases stay dissolved.** 57 `request-profile`
+   calls cost 5 ms with one derivation; `gate-set` 1 ms; `settle-call` ~0.
+   Neither is a term any more.
+
+### (c) First-use versus per-turn, and what the cold 625 / 652 ms is made of
+
+Repeating the deftest in one session does **not** converge downward: 531,
+399, 365, 402, 437, 372. The two dominant phases recur at full cost in every
+run (settlement 208–226; `gate-function-install` 120). **So ~400 ms of the
+cold worker's 625–652 ms is ordinary per-turn work, not first-use.** The
+remaining ~225–250 ms is what a fresh worker pays once and this JVM has
+already paid: class loading on the turn path, the first clj-kondo analysis,
+the first candidate SCI fork and the first contract arming. The regression's
+window is unlucky by construction — it brackets the FIRST definition-installing
+turn a fresh worker ever runs, so every one-time initialization on that path
+lands inside the measured window. This lane could not run a cold worker JVM
+and does not attribute that residue further; it states only that the warm
+structure accounts for roughly two thirds of it.
+
+### Verdict
+
+**The 300 ms bound is not achievable warm today.** The best of six warm runs
+was 365 ms, and the window's own content is ~400 ms, of which ~220 ms is a
+single Datahike commit and ~120 ms is installing one contracted definition.
+The bound was correct against the ~100 ms measured on an idle JVM earlier on
+this page; it is not correct against this JVM, and the gap between those two
+measurements is itself the open question — small transactions here are 4–10 ms,
+so JVM load does not explain a 219 ms settlement commit.
+
+One line per remaining phase:
+
+- **Settlement commit, 219 ms — measure the batch before accepting it.**
+  Size `:seon.db/tx-data` at `src/seon/turn.clj:3541` for a six-form turn and
+  check whether unchanged namespace and program rows are re-asserted every
+  turn; a commit 20× the cost of the turn's other three is a datom-count
+  question, not a tuning one. Dissolve if it is re-assertion; accept and
+  state the number if it is genuinely new facts.
+- **`gate-function-install`, 120 ms for one `defn` — accept, but it does not
+  belong in a bookkeeping bound.** It is real per-definition work (analysis
+  27 ms, candidate evaluation and arming ~90 ms) and it scales with
+  definitions, not with forms.
+- **`analyze-forms`, 27 ms in two calls — probe why a single defining form
+  analyzes twice** (`src/seon/turn.clj` gate path); one call is expected.
+- **`request-profile` / `gate-set` / `settle-call` — dissolved or exonerated.
+  No further work.**
+- **The assertion itself.** It measures the most expensive turn shape there
+  is (a contracted definition installed into the program graph) and calls the
+  result "bookkeeping". The honest repair is to bound the phases the name
+  claims — settlement plus transcript writes — and to assert the definition
+  install separately with its own number, rather than to raise 300 to a
+  number nobody can defend. Not implemented here.
+
+### Incidental, worth its own owner
+
+Every in-process `seon.test/run` commits its results through
+`seon.test.runner/record-tx` against `default`'s `DefaultStore`: measured
+**5,943 / 5,789 / 8,054 ms** per run in this session. That is outside the
+assertion's window and outside this lane's question, but it is 6–8 s of
+writing per in-process regression and it dominates the wall time of the
+REPL-first loop every lane is told to use.
