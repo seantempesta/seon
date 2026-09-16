@@ -646,23 +646,30 @@
                                          [:seon.test/sym test-symbol])))))))))
 
 (defn- with-expiring-selection
-  "Two probes in one namespace under a small declared check allowance.
+  "Two probes selected together under a MEASURED allowance.
 
-  The symbols sort so the trivial one runs first, so the bound fires with
-  exactly one completed verdict already recorded. The second probe waits under
-  its own bound, so nothing parks forever."
-  [connection limit-ms assertion]
-  (support/seed-cluster! connection "default" {:seon.test/check-time-limit-ms limit-ms})
+  The allowance is not a guessed wall-clock number: 3000 ms fired before the
+  first run returned on the gate machine, so the check reported an empty
+  verdict set honestly and the regression proved nothing. A third probe, never
+  selected, is checked first to measure what one complete trivial check costs
+  here; the real allowance is a multiple of that, so the bound fires while the
+  second probe is waiting. That probe waits under its own backstop, so nothing
+  parks forever."
+  [connection assertion]
+  (support/seed-cluster! connection "default" {:seon.test/check-time-limit-ms 120000})
   (let [namespace-name (symbol (str "expiry.probe" (id/id)))
         namespace-object (create-ns namespace-name)
+        calibration (str namespace-name "/m-calibration")
         completed (str namespace-name "/a-completes")
         unreturned (str namespace-name "/z-never-returns")
-        sources {completed (list 'clojure.test/deftest 'a-completes
+        sources {calibration (list 'clojure.test/deftest 'm-calibration
+                                   (list 'clojure.test/is true))
+                 completed (list 'clojure.test/deftest 'a-completes
                                  (list 'clojure.test/is true))
                  unreturned (list 'clojure.test/deftest 'z-never-returns
                                   (list 'clojure.test/is
                                         (list '.await (list 'java.util.concurrent.CountDownLatch. 1)
-                                              30 'java.util.concurrent.TimeUnit/SECONDS)))}]
+                                              60 'java.util.concurrent.TimeUnit/SECONDS)))}]
     (binding [*ns* namespace-object]
       (clojure.core/refer 'clojure.core)
       (doseq [source (vals sources)] (eval source)))
@@ -675,14 +682,20 @@
                                          :seon.test/ns [:seon.ns/name namespace-name]
                                          :seon.test/source (pr-str source)}))
                                  sources))
-      (assertion completed unreturned)
+      (let [measured (sut/check {:seon.db/connection connection
+                                 :seon.test/changed [calibration]})
+            _ (is (= [calibration] (:seon.test/passed measured)) (pr-str measured))
+            allowance (long (max 5000 (* 4 (:seon.test/elapsed-ms measured))))]
+        (support/seed-cluster! connection "default"
+                               {:seon.test/check-time-limit-ms allowance})
+        (assertion completed unreturned allowance))
       (finally (remove-ns namespace-name)))))
 
 (deftest an-expired-check-reports-the-verdicts-it-already-recorded
   (support/with-database
     (fn [connection]
-      (with-expiring-selection connection 3000
-        (fn [completed unreturned]
+      (with-expiring-selection connection
+        (fn [completed unreturned allowance]
           (let [result (binding [t/report (constantly nil)]
                          (sut/check {:seon.db/connection connection
                                      :seon.test/changed [completed unreturned]}))
@@ -698,6 +711,7 @@
             (is (= unreturned (:seon.test/unknown expiry)) (pr-str expiry))
             (is (.contains (:seon.error/message expiry "") unreturned) (pr-str expiry))
             (is (double? (:seon.test/elapsed-ms result)) (pr-str result))
+            (is (.contains (:seon.error/message expiry "") (str allowance " ms")) (pr-str expiry))
             (is (.contains feedback "tests run 1") feedback)
             (is (.contains feedback "expired") feedback)
             (is (.contains feedback unreturned) feedback)

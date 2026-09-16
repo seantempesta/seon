@@ -85,10 +85,10 @@ is a separate one-function slice in the runner, which this lane does not own.
   probe's marker directory proves the body never ran.
 - `the-declared-opt-in-includes-the-long-test` — `:seon.test/include-long? true`
   runs it; the marker exists and the run facts are recorded.
-- `an-expired-check-reports-the-verdicts-it-already-recorded` — a 3000 ms declared
-  allowance over two probes (one trivial, one waiting) returns the completed
-  verdict, its recorded run facts, `:seon.test/pending`, and `:seon.test/expired`
-  naming the unreturned test — never a bare unknown.
+- `an-expired-check-reports-the-verdicts-it-already-recorded` — two probes (one
+  trivial, one waiting) under a MEASURED allowance return the completed verdict,
+  its recorded run facts, `:seon.test/pending`, and `:seon.test/expired` naming
+  the unreturned test — never a bare unknown.
 
 ## Verification boundary
 
@@ -107,3 +107,50 @@ is a separate one-function slice in the runner, which this lane does not own.
   before the probes could be exercised. The four regressions above are unrun; the
   batched gate (`tmp/orchestrator/gate-requests/check-long.txt`) is their first
   proof.
+
+## Batch 69 B2 red, and the root cause (2026-09-17, second pass)
+
+Cold, `an-expired-check-reports-the-verdicts-it-already-recorded` failed 9
+assertions: `:seon.test/tests []`, `:seon.test/passed []`, both probes pending,
+`:seon.test/expired` naming `a-completes`.
+
+Reproduced in process on `default` (pid 63433, hot-reloaded test namespace
+through `seon.test`'s own loader, daemon thread, `:seon.test/remaining-ms`
+100000): identical, `:seon.test/elapsed-ms 3004.75`, expiry message
+`bound of 3000 ms. Pending: …/a-completes`.
+
+**The production path was not at fault.** The check published exactly the state
+it held: progress `a-completes`, pending both probes, nothing recorded — because
+the bound fired BEFORE the first trivial run returned. The per-run publish
+already happens after the verdict is folded and before the loop recurs; the
+result was honest and the regression's claim was the wrong one.
+
+The defect was in the fixture: `3000` was a tuned wall-clock constant standing in
+for an observable event — "one complete trivial check finished" — and one
+complete in-process check (effective config, selection queries, run provenance,
+namespace loading and contract arming, the run itself, and
+`commit-results!`) costs more than that on the gate machine. `with-expiring-selection`
+now admits a third probe that the check never selects, measures one complete
+trivial check on it, and derives the allowance as
+`(max 5000 (* 4 measured-elapsed-ms))`, seeding it through
+`seon.test-support/seed-cluster!`'s manifest arity. The regression also asserts
+that the expiry message names that derived allowance, so a future drift in the
+derivation cannot pass silently.
+
+### In-process proof (pid 63433, loader-reloaded namespace, daemon thread)
+
+| test | pass | fail | error |
+|---|---|---|---|
+| `the-long-declaration-is-indexed-onto-the-test-row` | 1 | 0 | 0 |
+| `an-in-process-check-excludes-a-declared-long-test-and-names-it` | 8 | 0 | 0 |
+| `the-declared-opt-in-includes-the-long-test` | 4 | 0 | 0 |
+| `an-expired-check-reports-the-verdicts-it-already-recorded` | 15 | 0 | 0 |
+
+Verification boundary for this pass: the change is TEST-FILE ONLY, proven against
+the hot-reloaded test namespace; `src/seon/test.clj` is unchanged since
+`4e22d2256`. `bin/seon init --dev default` was not re-run by this lane — it was
+refusing tree-wide during this window (`seon.cluster.store/file-lock-object?` had
+no admitted callable, then the maintenance schema). While reading results,
+`default`'s effective config was missing `:seon.config.agent/write-refusal-bound`,
+so every MCP return value rendered as that refusal; results were read by spitting
+them to `tmp/` from inside the JVM. Both are foreign and reported.
