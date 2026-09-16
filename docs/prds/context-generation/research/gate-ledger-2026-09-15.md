@@ -659,3 +659,15 @@ costs 5.9–8.0 s per IN-PROCESS test run against default's file store —
 this dominates every lane's REPL-first loop; read-only research launched
 (`in-process-record-tx-cost-2026-09-17.md`). Settlement batch size and the
 double analyze-forms go to a turn.clj lane after ordered-evaluation lands.
+
+### 2026-09-17 02:00Z — render-coverage reds: no root address on the fixture's render request
+
+Steward's dir-elision landing proved the floor is not the cause (identical
+12/20/3 before and after seon.print): `seon.render.value/node-id`
+(`value.clj:82`) requires a caller-supplied root address and
+`render_coverage_test.clj:37` supplies none; it passed only while selection
+found a declared producer for effect receipts. Opus lane launched to decide
+at the owner (derive a stable root when none is supplied per §2.4 "renders
+never refuse an ordinary value", or prove production always supplies one
+and fix the fixture) and to make the typed-unknown contribution total.
+Queued: batch 57 = dir-elision r2 `90f7abec0` (+ render-coverage when fixed).
