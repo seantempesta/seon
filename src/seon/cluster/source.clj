@@ -232,62 +232,62 @@
              (= source-digest (:seon.source/digest prior)))
       []
       (let [{closure :seon.activation/closure
-         lookup-rows :seon.activation/lookup-rows
-         missing :seon.activation/missing}
-        (activation-fn
-         {:seon.db/connection connection
-          :seon.source/digest source-digest
-          :seon.activation/requested-symbols requested-symbols})
-        requirement-count
-        (+ (count (:seon.activation/schema-keys closure))
-           (count (:seon.activation/required-attributes closure))
-           (count (:seon.activation/config-defaults closure))
-           (count (:seon.activation/config-required closure))
-           (count (:seon.activation/executable-symbols closure))
-           (count (:seon.activation/lookup-refs closure)))
-        activation-tempid (or (:db/id prior-closure) (str "activation:" source-digest))
-        lookup-tempids
-        (into {}
-              (map (fn [{id :seon.activation.lookup/id}]
-                     [id (str "activation-lookup:" id)]))
-              lookup-rows)
-        closure
-        (assoc closure
-               :db/id activation-tempid
-               :seon.activation/lookup-refs
-               (mapv (fn [[_ id]] (get lookup-tempids id))
-                     (:seon.activation/lookup-refs closure)))
-        lookup-rows
-        (mapv (fn [{id :seon.activation.lookup/id :as row}]
-                (assoc row :db/id (get lookup-tempids id)))
-              lookup-rows)]
-    (when (seq missing)
-      (let [refusal (activation-refusal missing)]
-        (refuse! ::activation-incomplete
-                 (:seon.error/message refusal)
-                 (assoc refusal :seon.source/digest source-digest))))
-    (when-not (pos? requirement-count)
-      (refuse! ::activation-empty
-               "the source activation closure is empty"
-               {:seon.source/digest source-digest}))
-    (into
-     (into
-      (into []
-            (mapcat (fn [[attribute desired]]
-                      (when (set? desired)
-                        (for [value (get prior-closure attribute)
-                              :when (not (contains? desired value))]
-                          [:db/retract activation-tempid attribute value]))))
-            closure)
-      (map (fn [lookup] [:db/retractEntity (:db/id lookup)]))
-      (:seon.activation/lookup-refs prior-closure))
-     (concat
-      [(cond-> {:seon.source/digest source-digest
-                :seon.source/built-at (java.util.Date.)
-                :seon.source/activation-closure activation-tempid}
-         prior-id (assoc :db/id prior-id))
-       closure]
-      lookup-rows))))))
+             lookup-rows :seon.activation/lookup-rows
+             missing :seon.activation/missing}
+            (activation-fn
+             {:seon.db/connection connection
+              :seon.source/digest source-digest
+              :seon.activation/requested-symbols requested-symbols})
+            requirement-count
+            (+ (count (:seon.activation/schema-keys closure))
+               (count (:seon.activation/required-attributes closure))
+               (count (:seon.activation/config-defaults closure))
+               (count (:seon.activation/config-required closure))
+               (count (:seon.activation/executable-symbols closure))
+               (count (:seon.activation/lookup-refs closure)))
+            activation-tempid (or (:db/id prior-closure) (str "activation:" source-digest))
+            lookup-tempids
+            (into {}
+                  (map (fn [{id :seon.activation.lookup/id}]
+                         [id (str "activation-lookup:" id)]))
+                  lookup-rows)
+            closure
+            (assoc closure
+                   :db/id activation-tempid
+                   :seon.activation/lookup-refs
+                   (mapv (fn [[_ id]] (get lookup-tempids id))
+                         (:seon.activation/lookup-refs closure)))
+            lookup-rows
+            (mapv (fn [{id :seon.activation.lookup/id :as row}]
+                    (assoc row :db/id (get lookup-tempids id)))
+                  lookup-rows)]
+        (when (seq missing)
+          (let [refusal (activation-refusal missing)]
+            (refuse! ::activation-incomplete
+                     (:seon.error/message refusal)
+                     (assoc refusal :seon.source/digest source-digest))))
+        (when-not (pos? requirement-count)
+          (refuse! ::activation-empty
+                   "the source activation closure is empty"
+                   {:seon.source/digest source-digest}))
+        (into
+         (into
+          (into []
+                (mapcat (fn [[attribute desired]]
+                          (when (set? desired)
+                            (for [value (get prior-closure attribute)
+                                  :when (not (contains? desired value))]
+                              [:db/retract activation-tempid attribute value]))))
+                closure)
+          (map (fn [lookup] [:db/retractEntity (:db/id lookup)]))
+          (:seon.activation/lookup-refs prior-closure))
+         (concat
+          [(cond-> {:seon.source/digest source-digest
+                    :seon.source/built-at (java.util.Date.)
+                    :seon.source/activation-closure activation-tempid}
+             prior-id (assoc :db/id prior-id))
+           closure]
+          lookup-rows))))))
 
 (defn- retire-scratch!
   [store scratch]

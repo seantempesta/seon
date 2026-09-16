@@ -2223,6 +2223,9 @@
                                 (if (= :seon.cluster.source/source-absent
                                        (:seon.cluster.source/rule (ex-data failure)))
                                   (do
+                                    (log/warn "Development source basis unavailable; reconciling against the live cluster"
+                                              {:seon.source/commit-id prior-commit
+                                               :seon.cluster/name cluster-name})
                                     (report-source-progress!
                                      (str "development source basis unavailable: " prior-commit
                                           "; reconciling against the live cluster"))
