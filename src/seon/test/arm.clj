@@ -164,7 +164,7 @@
      :seon.test.runner/caps caps
      :seon.test.runner/program (declared-program-namespaces)}))
 
-(defn- arm-contracts!
+(defn arm-contracts!
   "Instrument this worker JVM's loaded contracts exactly as boot does.
 
   The gate must ask the question a live cluster asks. A contract
@@ -237,7 +237,7 @@
                    "program-armable=" (count armable))))
       applied)))
 
-(defn- initialize-contracts!
+(defn initialize-contracts!
   "Load selected tests and acquire the one arming value for workers and test-fast."
   ([role namespaces]
    (initialize-contracts! role namespaces (packaged-test-projection role)))
