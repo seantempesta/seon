@@ -102,7 +102,7 @@
         (test-support/transacted!
                      connection
                      [{:seon.agent/id "maintenance-schema-test/root"}
-                      {:seon.fn/sym handler}
+                      (test-support/program-fn-row handler)
                       {:seon.schedule/id schedule-id
                        :seon.schedule/expression "0 2 * * *"
                        :seon.schedule/zone-id "UTC"}
@@ -218,7 +218,7 @@
       (test-support/transacted!
                    connection
                    (into [{:seon.agent/id "root"}]
-                         (map (fn [row] {:seon.fn/sym (:seon.fn/sym row)}))
+                         (map (fn [row] (test-support/program-fn-row (:seon.fn/sym row))))
                          portfolio))
       (let [first-result
             (db/transact!

@@ -129,9 +129,10 @@
             :expected-value #{direct-key}}
            {:label "function dependency"
             :selected-forms {base-key :int}
-            :extra-row {:seon.fn/sym "seon.schema-usage-guard/accept"
-                        :seon.fn/spec
-                        (pr-str [:=> [:cat base-key] :int])}
+            :extra-row (assoc (test-support/program-fn-row
+                                "seon.schema-usage-guard/accept")
+                               :seon.fn/spec
+                               (pr-str [:=> [:cat base-key] :int]))
             :expected-key :seon.schema.blockers/function-symbols
             :expected-value #{'seon.schema-usage-guard/accept}}]]
     (testing label

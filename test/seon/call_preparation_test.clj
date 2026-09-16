@@ -175,6 +175,9 @@
         function-row
         (fn [function-symbol spec source arglists]
           (merge {:seon.fn/sym function-symbol
+                  ;; Every program row declares where its definition was
+                  ;; admitted from; the fn schema requires it.
+                  :seon.schema.admission/source :core
                   :seon.fn/ns [:seon.ns/name 'sample]
                   :seon.fn/source source
                   :seon.fn/arglists (pr-str arglists)
@@ -279,6 +282,7 @@
      (test-support/transacted! connection
                                [{:seon.ns/name 'sample :seon.ns/source "(ns sample)"}
                                 {:seon.fn/sym "sample/nowhere"
+                                 :seon.schema.admission/source :core
                                  :seon.fn/ns [:seon.ns/name 'sample]
                                  :seon.fn/source "(defn nowhere [] nil)"
                                  :seon.fn/private? false}
