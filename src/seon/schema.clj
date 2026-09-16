@@ -20,6 +20,7 @@
   (:require [malli.core :as m]
             [seon.id :as id]
             [malli.registry :as mr]
+            [clojure.core.reducers :as reducers]
             [clojure.set :as set]
             [clojure.walk :as walk]
             [datahike.api :as d]
@@ -28,6 +29,19 @@
             [seon.schema.internal :as internal]
             [clojure.edn :as edn]
             [clojure.java.io :as io]))
+
+;;; LOAD-CYCLE BOUNDARIES. `seon.schema.edn`, `seon.error` and
+;;; `seon.schema.datahike` all require `seon.schema`, so this namespace
+;;; cannot require them back. One resolution per var, realized at first use,
+;;; instead of a `requiring-resolve` on every call (AGENTS §2.1).
+(defonce ^:private schema-edn-packaged-forms
+  (delay (requiring-resolve 'seon.schema.edn/packaged-forms)))
+(defonce ^:private error-diagnostic
+  (delay (requiring-resolve 'seon.error/diagnostic)))
+(defonce ^:private schema-datahike-storable-properties-in
+  (delay (requiring-resolve 'seon.schema.datahike/storable-properties-in)))
+(defonce ^:private schema-datahike-database-attributes-in
+  (delay (requiring-resolve 'seon.schema.datahike/database-attributes-in)))
 
 (defn- direct-references*
   "Canonical registry keys directly referenced by one compiled schema.
@@ -904,7 +918,7 @@
 
 (defn- packaged-forms []
   (warn-classpath-fallback!)
-  ((requiring-resolve 'seon.schema.edn/packaged-forms)))
+  (@schema-edn-packaged-forms))
 
 (defn- candidate-forms []
   (if *candidate-forms-overlay*
@@ -1284,7 +1298,7 @@
         validate
         (fn [advisories request]
           (into advisories (assert-complete-contract! request)))]
-    ((requiring-resolve 'clojure.core.reducers/fold)
+    (reducers/fold
      *contract-validation-fold-size* combine validate requests)))
 
 (defn identity-attr?
@@ -1593,7 +1607,7 @@
     renderer :seon.render/function}
    {:seon.schema/keys [render-contract render-input render-contract-cause]}]
   (let [diagnostic
-        ((requiring-resolve 'seon.error/diagnostic)
+        (@error-diagnostic
          {:seon.error/kind :seon.schema/render-contract-incoherent
           :seon.error/message
           (str "Schema publication refused " schema-key ": " property
@@ -2951,8 +2965,7 @@
          (update-vals reference-graph
                       #(set/intersection materialized-keys %))
          storable-properties-in
-         (requiring-resolve
-          'seon.schema.datahike/storable-properties-in)]
+         @schema-datahike-storable-properties-in]
      (into
       []
       (map
@@ -2984,7 +2997,7 @@
   ([]
    (canonical-database-attributes (registered-schemas)))
   ([forms]
-   ((requiring-resolve 'seon.schema.datahike/database-attributes-in)
+   (@schema-datahike-database-attributes-in
     {:seon.schema.projection/forms forms})))
 
 (defn registered?
