@@ -607,7 +607,7 @@
         (m/schema
          (compilable-form
           form
-          (:seon.schema.projection/predicate-functions projection))
+          (get projection :seon.schema.projection/predicate-functions {}))
          compile-options)]
     (direct-references* compiled (set (keys forms)))))
 

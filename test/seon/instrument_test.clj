@@ -33,6 +33,7 @@
             [seon.instrument :as instrument]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
+            [seon.test.arm]
             [seon.test-support :as test-support])
   (:import [java.nio.file Files LinkOption]))
 
@@ -628,6 +629,31 @@
       (finally
         (ns-unmap 'seon.instrument-test candidate-name)
         (ns-unmap 'seon.instrument-test unrelated-name)))))
+
+(deftest cold-arming-derives-wrapper-identity-without-a-predicate-binding
+  (let [projection (#'seon.test.arm/packaged-test-projection "cold-arming-regression")
+        candidate-name (symbol (str "cold-contract-" (random-uuid)))
+        candidate (intern 'seon.instrument-test candidate-name identity)
+        contract [:=> [:cat :seon.agent/id] :seon.agent/id]
+        caps (config/result-caps (config/defaults))
+        arm (fn []
+              (#'instrument/arm-var! candidate contract projection projection caps)
+              {:seon.instrument/contract-digest
+               (:seon.instrument/contract-digest (meta @candidate))
+               :seon.instrument-test/value (candidate "juniper")})]
+    (try
+      (is (not (contains? projection :seon.schema.projection/predicate-functions)))
+      (let [bound (schema/call-with-projection projection arm)]
+        (alter-var-root candidate (constantly identity))
+        (let [cold (with-bindings {#'schema/*projection* nil
+                                  #'schema/*projection-state* nil}
+                     (arm))]
+          (is (= "juniper" (:seon.instrument-test/value cold)))
+          (is (= 64 (count (:seon.instrument/contract-digest cold))))
+          (is (= bound cold))
+          (is (thrown? Exception (candidate 42)))))
+      (finally
+        (ns-unmap 'seon.instrument-test candidate-name)))))
 
 (deftest prefix-related-sibling-vars-keep-their-own-contracts
   (instrumented!
