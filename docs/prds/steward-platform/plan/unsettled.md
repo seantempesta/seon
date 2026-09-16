@@ -82,3 +82,15 @@
   issue block links and never copies; vocabulary is entities/attributes/
   values; DeepSeek sessions may run freely; prerequisites P1–P11 in the
   issue-family spec §6 come first.
+- 03:55Z default reforked (pid 7595). Two blockers found on it: (1) every
+  system turn refused — generated reads depended on every identity
+  attribute incl. turn/eval/attempt ids; introduced by `563034709`
+  (value-renderer identity pulls); fixed `474234fb7` (inert identities
+  excluded via the shared `wake/inert-attributes`), Juniper install and
+  prompt live again, forbidden dependencies 14 → 0. (2) development
+  adoption rejected: `[:db/retract e :seon.fn/form-span]` without the tuple
+  value; program-provenance resumed to fix. entity-pairs landed
+  (`ac34ce5a3`). Trial design written:
+  [issue-context-trials-2026-09-16.md](issue-context-trials-2026-09-16.md)
+  (issue: doc/dir arglists EDN reader; seven renderings A–G; measures from
+  facts). Two stale issues archived.
