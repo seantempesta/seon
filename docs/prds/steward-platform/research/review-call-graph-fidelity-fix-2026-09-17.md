@@ -51,3 +51,26 @@ This is a slice on the same owner; it does not block the gate.
 
 **Gate requested:** batch 106 = platform, then `seon.fn-test
 seon.program-test seon.fn.analyzer-test seon.test-reaching-test`.
+
+## Addendum — `3f0be21ed` and `51d904a9b` reviewed (orchestrator, 2026-09-16 21:05Z)
+
+Read in full: both diffs to `src/seon/fn.clj`, `src/seon/fn/analyzer.clj`,
+`src/seon/test/selection.clj`, `src/seon/issue/detect.clj`, the test changes,
+and the landing note's follow-up sections.
+
+**Approved.** Macro usages are reference edges, never calls with arity; an
+unresolved file reference selects only that file's own tests instead of the
+whole suite; `gate-sets` acquires the declared and file relations once per
+operation and hands them to each walk; parser findings are preserved by
+binding the kondo reader's exception atom; `assert-clean-analysis!` now runs
+before the manifest is built (this is what caught my own missed caller in
+`8d48f1c51`). The first version's reference *fallback* (references consulted
+only at a target with no resolved caller) was refused in review as reading
+less than the writer admits; `51d904a9b` unions calls and references in the
+indexed walk, the Datalog rules, and manifest selection, and the mixed-caller
+regression requires the tests of both callers.
+
+Measured by the lane, one read-only evaluation on default: bulk selection
+8.877 s → 8.449 s with the union; default then held zero
+`:seon.fn/references` facts, so the populated cost is measured by batch 106
+on the converged base. The lane is stopped; gate 106 is next.
