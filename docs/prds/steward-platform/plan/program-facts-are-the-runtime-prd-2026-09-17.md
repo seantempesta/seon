@@ -155,6 +155,34 @@ C8. Vocabulary retired on the owner's word: "layer one / layer two" (say
     declaration form for a render pair" meant the `:seon.render/ai` /
     `:seon.render/html` properties on an entity schema — say that.
 
+## 1d. Rulings of 2026-09-17 11:20Z (owner)
+
+D1. **The database runner is the one test gate.** `bin/test` becomes a
+    launcher of isolated worker JVMs that run through the same runtime and
+    SCI contexts and record through the same functions; it is not a separate
+    test runner decoupled from the system. Default behaviour: name the
+    cluster, run only the minimum tests implied by what changed since the
+    last recorded run, and schedule them knowing globally how many tests are
+    running in which workers. Closer integration with the database and SCI
+    as necessary. (Slice S9.)
+
+D2. **Focus on the agent's runtime REPL.** Agents update their runtime and
+    pass the tests we give them. `my.edit` is not a focus now; it may later
+    be the mechanism that writes accepted work back to disk (S5). Shell
+    commands are not taught; a namespace's teaching is pulled into an agent's
+    session only when that namespace is required there, and what a session
+    requires is what teaches it.
+
+D3. **Issues are how work is farmed for now; the same machinery is,
+    eventually, an agent branching into its own world (database + SCI) and
+    merging back into the shared cluster.** The admittance bar (C1) is
+    enforced at the merge, not at evaluation: an agent may define an untested
+    function in its own session; the merge/write-back gate refuses an
+    identity no test reaches, by name; a detector opens the issue in the
+    meantime; the per-turn status (T3) shows the agent which of its
+    definitions still lack a test, so the bar is visible while it works
+    rather than a refusal mid-thought.
+
 ## 2. What exists today, with the seams named
 
 Verified on `steward-platform` at `a36d55c3b`/`849bbce0b` on 2026-09-17.
@@ -551,6 +579,64 @@ note.
 `seon.maintenance-test seon.maintenance-schema-test seon.cluster.registry-test`.
 The dry run on `default` is the only production-root action, on the owner's word.
 
+### S9 — The database runner is the one gate (D1)
+
+**What exists.** `seon.test/run` and `run-owned` run one test Var and commit
+result facts (pass/fail/error counts, failure components keyed by signature,
+the run ref) — data, delta-recorded. `seon.test/check` selects tests reaching
+changed symbols; `seon.fn/gate-set` (`src/seon/fn.clj:1157`) and
+`tests-reaching` (`:1214`) derive selection from `:seon.fn/calls`;
+`changed-since-green` (`src/seon/test.clj:54`) derives the set from the last
+recorded green basis. A run is a `:seon.test.run` entity with id,
+program digest, basis `:t` and destination branch
+(`resources/seon/schemas/seon.test.run.edn`). `bin/test` is a coordinator
+that snapshots HEAD plus named paths, publishes a base, launches pooled
+worker JVMs under a two-slot bound (`bin/_test-slot`), tallies, and records
+through `seon.test.runner/commit-results!` (`src/seon/test/runner.clj:2313`).
+
+**What is decoupled today, and therefore the work.**
+1. **Runs are keyed to the publication, not to a cluster.** Results land on
+   `:current-src`; an agent-authored test lives on its cluster branch. The
+   run request names a cluster; selection and recording read and write that
+   cluster's database; the run entity carries the cluster (branch) it ran
+   against, which the schema already has a field for.
+2. **Workers resolve tests from files.** A worker loads a test Var from the
+   snapshot's classpath. An agent-authored test has no file (until S5); the
+   worker acquires the cluster's program from its facts — the same base SCI
+   context acquisition agents get (S3) — and runs an evaluated test through
+   `run-owned` exactly as the agent would. One resolution: by test identity,
+   from facts; the file is where the analyzer found it, not how the test
+   loads.
+3. **Selection is per invocation, not global.** Two invocations select
+   independently and can both run the same test. The set of tests currently
+   running, per worker, is a fact (the run entity's in-flight tests with the
+   worker's process record), and a new invocation subtracts what another
+   worker is already running against the same program digest and basis.
+   The slot bound stays as the process-count bound; the fact is what makes
+   scheduling knowable.
+4. **The tally is the database.** The coordinator's printed tally is a render
+   of the run entity's results; nothing is counted twice. Logs remain logs.
+5. **In-process and cold are one path with two hosts.** The development JVM
+   and a worker JVM call the same functions with different custody; the
+   loader gap (`the-in-process-test-loader-cannot-load-a-namespace-needing-a-test-alias-dependency`)
+   is closed by deriving the worker's and the dev JVM's classpath from the
+   same alias.
+
+**Acceptance.** (1) `bin/test --cluster default` after one edit runs exactly
+the tests `changed-since-green` names for that cluster and records them on
+it; (2) an agent-authored deftest with no file runs in a worker and its
+result lands on the agent's cluster; (3) two concurrent invocations against
+the same digest and basis do not run the same test twice, and the second
+reports what it skipped and why; (4) the printed tally equals a query over
+the run entity; (5) a run's recording of an unchanged result writes zero
+datoms (already true, kept as the regression).
+
+**Boundary.** This slice rewrites the coordinator's spine; it runs on a
+scratch checkout and cluster, with the cold gate proving it on its own
+namespaces (`seon.test.runner-test`, `seon.test-runner-test`,
+`seon.test-support-test`, `my.test-test`) and the platform tier. Astra lane,
+design review at `high` effort before implementation.
+
 ### S6 — The identity list derives from the declarations (I6; open issue)
 
 `seon.program/identity-attributes` is a literal vector while
@@ -636,6 +722,7 @@ These are in addition to AGENTS.md §0–§10 and §7's launching rules.
 | 2b | S7 issue task loop | the first structured task (render pairs) needs it; independent of S1 | 1–2 days |
 | 2c | decision 9, no render fallback | the render-pair task needs every uncurated attribute visible | ½ day |
 | 3b | S8 root runs the collector | eight resets a day is not a substrate; dry run first | 1 day + dry run |
+| 4b | S9 database runner is the one gate | the admittance bar (C1) and the merge gate (C2) run on it | 3–4 days, design first |
 
 S1 goes to one astra lane (design-sensitive); S2, S6 to Opus; S3 to astra;
 S4a Opus; S5 and S4b astra with design review at `high` effort. No slice
