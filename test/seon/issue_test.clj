@@ -35,7 +35,11 @@
      (clojure.test/is (some #{"5deb40e4e"} (:seon.issue/commits member)))
      (clojure.test/is (some #(= "agent-form-calls-to-core-namespaces-are-not-indexed" (:seon.issue/id %))
                            (:seon.issue/members class-value)))
-     (clojure.test/is (some #(= 'my.run/complete (:seon.issue/value %)) (:seon.issue/refusals report))))
+     (clojure.test/is (empty? (:seon.issue/refusals report)) (pr-str (:seon.issue/refusals report)))
+     (clojure.test/is (contains? (:seon.issue/unresolved
+                                  (seon.db/pull d '[:seon.issue/unresolved]
+                                                [:seon.issue/id "agent-form-calls-to-core-namespaces-are-not-indexed"]))
+                                 "my.run/complete")))
    (let [real (first (filter #(clojure.string/includes? (:seon.issue/text %) "seon.fn")
                              (seon.issue/notes ".")))
          selected [{:seon.issue/path "docs/seon/issues/probe-class.md"
@@ -46,7 +50,11 @@
          report (seon.issue/index! {:seon.db/connection connection :seon.issue/notes selected})]
      (clojure.test/is (nil? (:seon.error/kind report)) (pr-str report))
      (clojure.test/is (= 3 (:seon.issue/count report)))
-     (clojure.test/is (some #(= 'seon.issue-missing/absent (:seon.issue/value %)) (:seon.issue/refusals report)))
+     (clojure.test/is (empty? (:seon.issue/refusals report)) (pr-str (:seon.issue/refusals report)))
+     (clojure.test/is (contains? (:seon.issue/unresolved
+                                  (seon.db/pull (seon.db/db connection) '[:seon.issue/unresolved]
+                                                [:seon.issue/id "probe-member"]))
+                                 "seon.issue-missing/absent"))
      (let [member (seon.db/pull (seon.db/db connection) '[*] [:seon.issue/id "probe-member"])
            class-row (seon.db/pull (seon.db/db connection) '[{:seon.issue/members [:seon.issue/id]}] [:seon.issue/id "probe-class"])]
        (clojure.test/is (= #{"abcdef123"} (set (:seon.issue/commits member))))
@@ -62,6 +70,108 @@
        (clojure.test/is (= {:db/id (:db/id member) :seon.issue/id "probe-member"}
                            (seon.db/pull (seon.db/db connection) '[*] [:seon.issue/id "probe-member"])))
        (clojure.test/is (empty? (seon.issue/issues {:seon.db/db (seon.db/db connection)}))))))))
+
+(def ^:private converted-notes
+  "The eight notes converted by hand in the R6 research page, with the citation
+  shape each one proves the derived resolver must reach."
+  {"anonymous-runtime-contracts-have-recurred" [:seon.issue/functions :seon.issue/keys :seon.issue/files]
+   "class-outward-values-bypass-total-render-contract" [:seon.issue/functions :seon.issue/files]
+   "complete-publication-takes-seventy-seconds" [:seon.issue/functions :seon.issue/keys :seon.issue/files]
+   "runtime-block-html-is-raw-ids-and-instants" [:seon.issue/functions :seon.issue/keys]
+   "a-platform-test-leaves-its-worker-stripped-of-every-contract" [:seon.issue/tests :seon.issue/files]
+   "development-adoption-can-mix-host-and-sci-generations" [:seon.issue/files :seon.issue/namespaces]
+   "fresh-cljc-files-are-jvm-only" [:seon.issue/files :seon.issue/namespaces]
+   "pre-rename-root-claims-are-unreadable-noise-on-every-status" [:seon.issue/keys]})
+
+(clojure.test/deftest cited-identities-resolve-through-one-derived-resolver
+ (seon.test-support/with-database
+  (fn [connection]
+   (let [wanted (set (map #(str % ".md") (keys converted-notes)))
+         selected (filterv #(contains? wanted (.getName (clojure.java.io/file (:seon.issue/path %))))
+                           (seon.issue/notes "."))
+         report (seon.issue/index! {:seon.db/connection connection :seon.issue/notes selected})
+         d (seon.db/db connection)
+         pull-issue (fn [slug]
+                      (seon.db/pull d '[:seon.issue/id :seon.issue/opened :seon.issue/unresolved
+                                        {:seon.issue/functions [:seon.fn/sym]}
+                                        {:seon.issue/tests [:seon.test/sym]}
+                                        {:seon.issue/keys [:seon.schema/key]}
+                                        {:seon.issue/namespaces [:seon.ns/name]}
+                                        {:seon.issue/files [:seon.issue.citation/id :seon.issue.citation/row
+                                                            :seon.issue.citation/end-row
+                                                            {:seon.issue.citation/file [:seon.fn.file/path]}]}]
+                                    [:seon.issue/id slug]))]
+     (clojure.test/is (= (count converted-notes) (count selected)) (pr-str (map :seon.issue/path selected)))
+     (clojure.test/is (empty? (:seon.issue/refusals report)) (pr-str (:seon.issue/refusals report)))
+     (doseq [[slug attributes] converted-notes
+             :let [row (pull-issue slug)]]
+       (doseq [attribute attributes]
+         (clojure.test/is (seq (get row attribute))
+                          (str slug " has no " attribute " — " (pr-str row))))
+       (clojure.test/is (inst? (:seon.issue/opened row)) (str slug " has no opened instant")))
+     (let [adoption (pull-issue "development-adoption-can-mix-host-and-sci-generations")
+           spans (filter :seon.issue.citation/row (:seon.issue/files adoption))]
+       (clojure.test/is (seq spans) (pr-str (:seon.issue/files adoption)))
+       (clojure.test/is (some #(clojure.string/ends-with?
+                                (get-in % [:seon.issue.citation/file :seon.fn.file/path]) "src/seon/cluster.clj")
+                              spans)
+                        (pr-str spans))
+       (clojure.test/is (some :seon.issue.citation/end-row spans)))
+     (let [before (pull-issue "anonymous-runtime-contracts-have-recurred")
+           citations (count (seon.db/q '[:find [?e ...] :where [?e :seon.issue.citation/id]] d))
+           again (seon.issue/index! {:seon.db/connection connection :seon.issue/notes selected})
+           after-db (seon.db/db connection)]
+       (clojure.test/is (nil? (:seon.error/kind again)) (pr-str again))
+       (clojure.test/is (= citations (count (seon.db/q '[:find [?e ...] :where [?e :seon.issue.citation/id]] after-db))))
+       (clojure.test/is (= before (pull-issue "anonymous-runtime-contracts-have-recurred"))))))))
+
+(clojure.test/deftest an-archived-note-reports-unresolved-tokens-without-a-refusal
+ (seon.test-support/with-database
+  (fn [connection]
+   (let [archived (filterv #(clojure.string/includes? (:seon.issue/path %) "docs/seon/issues/archive/")
+                           (seon.issue/notes "."))
+         selected (into [{:seon.issue/path "docs/seon/issues/probe-deleted.md"
+                          :seon.issue/text (str "---\ntype: issue\nstatus: open\nseverity: cleanup\ntags: [issue]\n---\n"
+                                                "# Deleted names\n## Problem\n"
+                                                "seon.cluster.loop/settle! com.cognitect/transit-clj "
+                                                "java.lang.Thread/sleep seon.db/pull")}]
+                        (take 20 archived))
+         report (seon.issue/index! {:seon.db/connection connection :seon.issue/notes selected})
+         row (seon.db/pull (seon.db/db connection) '[:seon.issue/unresolved {:seon.issue/functions [:seon.fn/sym]}]
+                           [:seon.issue/id "probe-deleted"])]
+     (clojure.test/is (nil? (:seon.error/kind report)) (pr-str report))
+     (clojure.test/is (empty? (:seon.issue/refusals report)) (pr-str (:seon.issue/refusals report)))
+     (clojure.test/is (= #{"com.cognitect/transit-clj" "java.lang.Thread/sleep" "seon.cluster.loop/settle!"}
+                        (:seon.issue/unresolved row)))
+     (clojure.test/is (some #(= "seon.db/pull" (:seon.fn/sym %)) (:seon.issue/functions row)))
+     (clojure.test/is (= (count selected) (:seon.issue/count report)))
+     (clojure.test/is (pos? (count (:seon.issue/unresolved report))))
+     (clojure.test/is (every? #(and (string? (key %)) (pos-int? (val %))) (:seon.issue/unresolved report)))))))
+
+(clojure.test/deftest a-token-naming-two-identities-is-reported-never-guessed
+ (seon.test-support/with-database
+  (fn [connection]
+   ;; One spelling, two identities: an issue slug that is also a function
+   ;; symbol. The resolver must refuse to pick, and say which token it refused.
+   (let [shared (first (sort (filter #(clojure.string/starts-with? % "seon.db/")
+                                     (seon.db/q '[:find [?sym ...] :where [_ :seon.fn/sym ?sym]]
+                                                (seon.db/db connection)))))
+         _ (seon.db/transact! connection [{:seon.issue/id shared :seon.issue/title "Shared spelling"
+                                           :seon.issue/status :open :seon.issue/severity :cleanup
+                                           :seon.issue/problem "Two identities, one spelling."}])
+         selected [{:seon.issue/path "docs/seon/issues/probe-ambiguous.md"
+                    :seon.issue/text (str "---\ntype: issue\nstatus: open\nseverity: cleanup\ntags: [issue]\n---\n"
+                                          "# Ambiguous\n## Problem\n" shared)}]
+         report (seon.issue/index! {:seon.db/connection connection :seon.issue/notes selected})
+         row (seon.db/pull (seon.db/db connection)
+                           '[{:seon.issue/functions [:seon.fn/sym]} {:seon.issue/issues [:seon.issue/id]}]
+                           [:seon.issue/id "probe-ambiguous"])]
+     (clojure.test/is (string? shared))
+     (clojure.test/is (empty? (:seon.issue/refusals report)) (pr-str (:seon.issue/refusals report)))
+     (clojure.test/is (some #(= shared (:seon.issue/value %)) (:seon.issue/ambiguous report))
+                      (pr-str (:seon.issue/ambiguous report)))
+     (clojure.test/is (empty? (:seon.issue/functions row)))
+     (clojure.test/is (empty? (:seon.issue/issues row)))))))
 
 (clojure.test/deftest issue-worker-opening-links-its-issue
  (seon.test-support/with-database

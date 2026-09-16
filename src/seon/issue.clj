@@ -1,11 +1,13 @@
 (ns seon.issue
   "Issues connect authored problem statements to program identities."
-  (:require [clojure.edn :as edn]
+  (:require [babashka.process :as process]
+            [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
             [seon.db :as db]
             [seon.id :as id]
-            [seon.repl :as repl]))
+            [seon.repl :as repl]
+            [seon.schema.form :as schema.form]))
 
 (defn- words [text]
   (into [] (comp
@@ -19,7 +21,37 @@
                                 (contains? #{\. \/ \: \- \_ \? \! \* \+ \< \> \= \$ \%} %))
                            text))))
 
-(defn- parse-note [{:seon.issue/keys [path text]}]
+(def ^:private record-separator
+  "The NUL byte git writes before each commit's authored seconds."
+  (str (char 0)))
+
+(def ^:private git-bound-seconds
+  "Declared bound for the one git read that dates the notes."
+  30)
+
+(defn- note-opened
+  "Earliest authored commit second per issue note file name, from one git read.
+  The file name follows the note through its move into `archive/`."
+  [root]
+  (let [child (process/process ["git" "log" "--format=%x00%at" "--name-only" "--" "docs/seon/issues"]
+                               {:dir (str root) :out :string :err :string})
+        result (deref child (* 1000 git-bound-seconds) ::expired)]
+    (if (= ::expired result)
+      (do (process/destroy-tree child)
+          (throw (ex-info "Git did not report issue note history within its declared bound."
+                          {:seon.error/kind :seon.issue/git-unbounded :seon.issue/path (str root)})))
+      (when (zero? (:exit result))
+        (second
+         (reduce (fn [[seconds dates] line]
+                   (cond
+                     (str/starts-with? line record-separator) [(parse-long (subs line 1)) dates]
+                     (or (str/blank? line) (nil? seconds)) [seconds dates]
+                     :else (let [file-name (.getName (io/file line))]
+                             [seconds (if (< seconds (get dates file-name Long/MAX_VALUE))
+                                        (assoc dates file-name seconds) dates)])))
+                 [nil {}] (str/split-lines (:out result))))))))
+
+(defn- parse-note [{:seon.issue/keys [path text opened]}]
   (let [lines (str/split-lines text)
         header (when (= "---" (first lines))
                  (take-while #(not= "---" %) (rest lines)))
@@ -39,6 +71,7 @@
         slug (subs filename 0 (- (count filename) 3))]
     {:seon.issue/id slug :seon.issue/path path
      :seon.issue/title title :seon.issue/problem problem
+     :seon.issue/opened opened
      :seon.issue/status (some-> (get fields "status") keyword)
      :seon.issue/severity (some-> (get fields "severity") keyword)
      :seon.issue.parse/type (get fields "type")
@@ -54,16 +87,20 @@
   (let [directory (io/file root "docs/seon/issues")]
     (when-not (.isDirectory directory)
       (throw (ex-info "Issue directory is absent." {:seon.error/kind :seon.issue/notes-absent :seon.issue/path (str directory)})))
-    (->> (concat (.listFiles directory) (.listFiles (io/file directory "archive")))
-         (filter #(and (.isFile ^java.io.File %)
-                       (str/ends-with? (.getName ^java.io.File %) ".md")
-                       (not (contains? #{"README.md" "index.md" "AGENTS.md"} (.getName ^java.io.File %)))))
-         (sort-by #(.getPath ^java.io.File %))
-         (mapv (fn [file]
-                 {:seon.issue/path (str "docs/seon/issues/"
-                                        (when (= "archive" (.getName (.getParentFile ^java.io.File file))) "archive/")
-                                        (.getName ^java.io.File file))
-                  :seon.issue/text (slurp file)})))))
+    (let [dates (note-opened root)]
+      (->> (concat (.listFiles directory) (.listFiles (io/file directory "archive")))
+           (filter #(and (.isFile ^java.io.File %)
+                         (str/ends-with? (.getName ^java.io.File %) ".md")
+                         (not (contains? #{"README.md" "index.md" "AGENTS.md"} (.getName ^java.io.File %)))))
+           (sort-by #(.getPath ^java.io.File %))
+           (mapv (fn [file]
+                   (let [file-name (.getName ^java.io.File file)
+                         seconds (get dates file-name)]
+                     (cond-> {:seon.issue/path (str "docs/seon/issues/"
+                                                    (when (= "archive" (.getName (.getParentFile ^java.io.File file))) "archive/")
+                                                    file-name)
+                              :seon.issue/text (slurp file)}
+                       seconds (assoc :seon.issue/opened (java.util.Date. (* 1000 (long seconds))))))))))))
 
 (defn- diagnostic [path reason value]
   {:seon.issue/path path :seon.issue/reason reason :seon.issue/value value})
@@ -83,6 +120,93 @@
       (try
         (let [value (edn/read-string token)] (when (qualified-symbol? value) value))
         (catch Exception _ nil)))))
+
+(defn- citation-attributes
+  "Issue attributes by the identity attribute each declares that it collects.
+  The whole target set is derived: a family becomes linkable by declaring
+  `:seon.issue/cites` on one issue attribute, never by a new recogniser."
+  [database]
+  (let [installed (set (db/identity-attributes database))
+        cites (into {}
+                    (for [[attribute form] (db/q '[:find ?key ?form :where
+                                                   [?e :seon.schema/key ?key]
+                                                   [?e :seon.schema/form ?form]]
+                                                 database)
+                          :let [properties (schema.form/attr-form-properties (edn/read-string form))]
+                          cited (:seon.issue/cites properties)
+                          :when (contains? installed cited)]
+                      [cited attribute]))]
+    (when (empty? cites)
+      (throw (ex-info "No issue attribute declares :seon.issue/cites in this database's schema rows."
+                      {:seon.error/kind :seon.issue/citations-undeclared})))
+    cites))
+
+(defn- citation-spellings
+  "Every spelling a note can cite one identity value by.
+  A stored absolute path is also cited by any of its repository-relative
+  tails, which is how notes name files."
+  [value]
+  (let [text (if (string? value) value (pr-str value))]
+    (if (str/starts-with? text "/")
+      (into [text]
+            (keep (fn [index]
+                    (let [tail (subs text (inc index))]
+                      (when (and (pos? index) (seq tail) (str/includes? tail "/")) tail))))
+            (keep-indexed (fn [index character] (when (= \/ character) index)) text))
+      [text])))
+
+(defn- citation-index
+  "Map every citable spelling to the set of [issue-attribute entity] it names."
+  [database cites]
+  (reduce (fn [index [identity-attribute attribute]]
+            (reduce (fn [index datom]
+                      (reduce (fn [index text]
+                                (update index text (fnil conj #{}) [attribute (:e datom)]))
+                              index (citation-spellings (:v datom))))
+                    index (db/datoms database :avet identity-attribute)))
+          {} cites))
+
+(defn- line-number [text]
+  (when (and (seq text) (every? #(Character/isDigit ^char %) text)) (parse-long text)))
+
+(defn- cited-span [text]
+  (let [index (.indexOf ^String text "-")
+        row (line-number (if (neg? index) text (subs text 0 index)))
+        end-row (when-not (neg? index) (line-number (subs text (inc index))))]
+    (when row
+      (cond-> {:seon.issue.citation/row row}
+        end-row (assoc :seon.issue.citation/end-row end-row)))))
+
+(defn- citation
+  "Resolve one token to the entity it cites, or report the ambiguity it names."
+  [index token]
+  (let [token (if (str/ends-with? token ".") (subs token 0 (dec (count token))) token)
+        colon (.indexOf ^String token ":")
+        head (when (pos? colon) (subs token 0 colon))
+        [text span] (cond
+                      (get index token) [token nil]
+                      (and head (get index head)) [head (cited-span (subs token (inc colon)))]
+                      :else [nil nil])]
+    (when text
+      (let [hits (get index text)]
+        (if (= 1 (count hits))
+          (let [[attribute entity] (first hits)]
+            (merge {:seon.issue/attribute attribute :seon.issue/entity entity :seon.issue/value text} span))
+          {:seon.issue/ambiguous (vec (sort (map first hits))) :seon.issue/value text})))))
+
+(defn- file-citations
+  "One citation component per cited file and span, on its stable identity."
+  [issue-id hits existing]
+  (into #{}
+        (map (fn [[[entity row end-row] group]]
+               (let [text (first (sort (map :seon.issue/value group)))
+                     citation-id (id/id [issue-id text row end-row])]
+                 (or (get existing citation-id)
+                     (cond-> {:seon.issue.citation/id citation-id
+                              :seon.issue.citation/file entity}
+                       row (assoc :seon.issue.citation/row row)
+                       end-row (assoc :seon.issue.citation/end-row end-row))))))
+        (group-by (juxt :seon.issue/entity :seon.issue.citation/row :seon.issue.citation/end-row) hits)))
 
 (defn- replacement-tx [current desired]
   (let [eid (:db/id current)
@@ -104,8 +228,11 @@
           [(assoc desired :db/id eid)])))
 
 (defn index-tx
-  "Derive exact indexed facts; metadata carries every refused citation or note.
-  Worker assignment and additive tests survive replacement of the prose."
+  "Derive exact indexed facts from the notes and the installed identities.
+  Metadata carries refused notes, ambiguous
+  citations and unresolved tokens. An unresolved token is evidence stored on
+  the issue, never a refusal. Worker assignment and additive tests survive
+  replacement of the prose."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        [:sequential [:map [:seon.issue/path :string] [:seon.issue/text :string]]]]
                   :seon.db/tx-data]}
@@ -113,9 +240,13 @@
   (let [parsed (mapv parse-note issue-notes)
         duplicates (->> parsed (map :seon.issue/id) frequencies
                         (keep (fn [[slug n]] (when (> n 1) slug))) set)
-        functions (into {} (db/q '[:find ?sym ?e :where [?e :seon.fn/sym ?sym]] database))
-        tests (into {} (db/q '[:find ?sym ?e :where [?e :seon.test/sym ?sym]] database))
-        errors (into {} (db/q '[:find ?sig ?e :where [?e :seon.error/signature ?sig]] database))
+        cites (citation-attributes database)
+        index (citation-index database cites)
+        citation-entities (into {} (map (juxt :v :e)) (db/datoms database :avet :seon.issue.citation/id))
+        replaced (into [:seon.issue/path :seon.issue/title :seon.issue/status :seon.issue/severity
+                        :seon.issue/problem :seon.issue/opened :seon.issue/commits :seon.issue/members
+                        :seon.issue/unresolved]
+                       (vals cites))
         existing (db/q '[:find [?e ...] :where [?e :seon.issue/path]] database)
         existing (mapv #(db/pull database '[*] %) existing)
         by-slug (into {} (map (juxt :seon.issue/id identity)) existing)
@@ -125,6 +256,7 @@
                                     (for [tag (:seon.issue.parse/tags note)
                                           :when (str/starts-with? tag "class/")]
                                       [tag (:seon.issue/id note)])))) parsed)
+        component-ids (fn [value] (into #{} (map #(if (map? %) (:db/id %) %)) value))
         results
         (mapv
          (fn [{:seon.issue/keys [id path title status severity problem] :as note}]
@@ -136,53 +268,83 @@
                            (str/blank? title) :missing-title
                            (str/blank? problem) :missing-problem)
                  tokens (:seon.issue.parse/words note)
-                 symbols (keep qualified-token tokens)
-                 missing (remove #(or (get functions (str %)) (get tests (str %))) symbols)
+                 resolutions (into [] (keep #(citation index %)) tokens)
+                 ambiguous (mapv #(diagnostic path :ambiguous-citation (:seon.issue/value %))
+                                 (sort-by :seon.issue/value (filter :seon.issue/ambiguous resolutions)))
+                 hits (remove :seon.issue/ambiguous resolutions)
+                 cited (set (map :seon.issue/value hits))
+                 unresolved (into (sorted-set)
+                                  (comp (keep qualified-token) (map str) (remove cited))
+                                  tokens)
                  created (:seon.issue.parse/created note)
-                 opened (when created
-                          (try (java.util.Date/from
-                                (.toInstant (.atStartOfDay (java.time.LocalDate/parse created)
-                                                          java.time.ZoneOffset/UTC)))
-                               (catch Exception _ nil)))
-                 diagnostics (cond-> (mapv #(diagnostic path :unresolved-symbol %) (sort missing))
-                               (and created (nil? opened))
+                 authored (when created
+                            (try (java.util.Date/from
+                                  (.toInstant (.atStartOfDay (java.time.LocalDate/parse created)
+                                                            java.time.ZoneOffset/UTC)))
+                                 (catch Exception _ nil)))
+                 opened (or authored (:seon.issue/opened note))
+                 diagnostics (cond-> []
+                               (and created (nil? authored))
                                (conj (diagnostic path :invalid-created created)))
                  current (get by-slug id)
-                 test-refs (into (set (map :db/id (:seon.issue/tests current)))
-                                 (keep #(get tests (str %))) symbols)
+                 grouped (group-by :seon.issue/attribute hits)
+                 citations (file-citations id (get grouped :seon.issue/files) citation-entities)
+                 test-refs (into (component-ids (:seon.issue/tests current))
+                                 (map :seon.issue/entity) (get grouped :seon.issue/tests))
                  row (cond-> (select-keys note [:seon.issue/id :seon.issue/path :seon.issue/title
                                                 :seon.issue/status :seon.issue/severity :seon.issue/problem])
                        opened (assoc :seon.issue/opened opened)
-                       (seq test-refs) (assoc :seon.issue/tests test-refs))
+                       (seq test-refs) (assoc :seon.issue/tests test-refs)
+                       (seq unresolved) (assoc :seon.issue/unresolved (set unresolved))
+                       (seq citations) (assoc :seon.issue/files citations))
+                 row (reduce (fn [row [attribute attribute-hits]]
+                               (let [entities (cond-> (into #{} (map :seon.issue/entity) attribute-hits)
+                                                (= :seon.issue/issues attribute)
+                                                (disj (:db/id current)))]
+                                 (if (or (contains? #{:seon.issue/files :seon.issue/tests} attribute)
+                                         (empty? entities))
+                                   row
+                                   (assoc row attribute entities))))
+                             row grouped)
                  row (reduce (fn [row [attribute values]]
                                (if (seq values) (assoc row attribute (set values)) row))
                              row
-                             [[:seon.issue/functions (keep #(get functions (str %)) symbols)]
-                              [:seon.issue/errors (keep errors (filter #(hex-token? 64 %) tokens))]
-                              [:seon.issue/commits (filter #(hex-token? 9 %) tokens)]
+                             [[:seon.issue/commits (filter #(hex-token? 9 %) tokens)]
                               [:seon.issue/members
                                (for [member parsed
                                      :when (and (not= id (:seon.issue/id member))
                                                 (some #(= id (get classes %)) (:seon.issue.parse/tags member)))]
-                                 [:seon.issue/id (:seon.issue/id member)])]])]
+                                 ;; An already indexed member is named by its entity, so an
+                                 ;; unchanged class note compares equal and re-indexing is a
+                                 ;; no-op; a member first seen in this transaction is named by
+                                 ;; the identity it asserts here.
+                                 (or (:db/id (get by-slug (:seon.issue/id member)))
+                                     [:seon.issue/id (:seon.issue/id member)]))]])
+                 stale (mapv (fn [entity] [:db/retractEntity entity])
+                             (sort (remove (into #{} (filter integer?) citations)
+                                           (component-ids (:seon.issue/files current)))))]
              (if invalid
                {:seon.issue/refusals [(diagnostic path invalid id)] :seon.issue/tx []}
                {:seon.issue/refusals diagnostics
+                :seon.issue/ambiguous ambiguous
+                :seon.issue/unresolved (when (seq unresolved) [path (count unresolved)])
                 :seon.issue/tx
-                (if current
-                  (replacement-tx current
-                    (merge (apply dissoc current
-                                  [:seon.issue/path :seon.issue/title :seon.issue/status :seon.issue/severity
-                                   :seon.issue/problem :seon.issue/opened :seon.issue/functions
-                                   :seon.issue/errors :seon.issue/commits :seon.issue/members])
-                           row))
-                  [row])})))
+                (into stale
+                      (if current
+                        (replacement-tx current (merge (apply dissoc current replaced) row))
+                        [row]))})))
          parsed)
         removed (remove #(contains? present (:seon.issue/id %)) existing)
         tx (into (mapv #(hash-map :seon.issue/id %) (sort present))
                  (concat (mapcat :seon.issue/tx results)
-                         (mapcat #(replacement-tx % {:seon.issue/id (:seon.issue/id %)}) removed)))]
-    (with-meta tx {:seon.issue/refusals (vec (mapcat :seon.issue/refusals results))})))
+                         (mapcat (fn [issue]
+                                   (into (mapv (fn [entity] [:db/retractEntity entity])
+                                               (sort (component-ids (:seon.issue/files issue))))
+                                         (replacement-tx issue {:seon.issue/id (:seon.issue/id issue)})))
+                                 removed)))]
+    (with-meta tx {:seon.issue/refusals (vec (mapcat :seon.issue/refusals results))
+                   :seon.issue/ambiguous (vec (mapcat :seon.issue/ambiguous results))
+                   :seon.issue/unresolved (into (sorted-map) (keep :seon.issue/unresolved) results)})))
 
 (defn index!
   "Index notes through the writer and return counts plus citation refusals.
@@ -195,8 +357,8 @@
     (if (:seon.error/kind result) result
       (let [database (:db-after result)
             tx (index-tx database issue-notes)]
-        {:seon.issue/count (count (db/q '[:find [?e ...] :where [?e :seon.issue/path]] database))
-         :seon.issue/refusals (:seon.issue/refusals (meta tx))}))))
+        (merge (select-keys (meta tx) [:seon.issue/refusals :seon.issue/ambiguous :seon.issue/unresolved])
+               {:seon.issue/count (count (db/q '[:find [?e ...] :where [?e :seon.issue/path]] database))})))))
 
 (defn issues
   "Query issues in identity order, optionally restricted by lifecycle."
@@ -218,6 +380,13 @@
   (let [row (db/pull database '[:db/id :seon.issue/id :seon.issue/title :seon.issue/status :seon.issue/severity
                                   :seon.issue/problem :seon.issue/path :seon.issue/opened :seon.issue/commits
                                   :seon.issue/agent :seon.issue/budget :seon.issue/resolved-tx
+                                  :seon.issue/unresolved
+                                  {:seon.issue/keys [:seon.schema/key]}
+                                  {:seon.issue/namespaces [:seon.ns/name]}
+                                  {:seon.issue/runs [:seon.test.run/id]}
+                                  {:seon.issue/issues [:seon.issue/id]}
+                                  {:seon.issue/files [:seon.issue.citation/row :seon.issue.citation/end-row
+                                                       {:seon.issue.citation/file [:seon.fn.file/path]}]}
                                   {:seon.issue/members [:seon.issue/id]}
                                   {:seon.issue/tests [:seon.test/sym :seon.test/pass-count :seon.test/fail-count :seon.test/error-count
                                                        {:seon.test/run [:seon.test.run/id :seon.test.run/basis-t]}]}
@@ -272,15 +441,22 @@
                                  (get test-value :seon.issue.test/state :unrun))])
                      (:seon.issue/tests view)))]))
 
+(defn- citation-pattern
+  "The pull pattern that names every citation by its identity, never by entity."
+  [cites]
+  (into [:seon.issue/id :seon.issue/path :seon.issue/title :seon.issue/status
+         :seon.issue/severity :seon.issue/problem :seon.issue/opened :seon.issue/commits
+         :seon.issue/unresolved
+         {:seon.issue/members [:seon.issue/id]}
+         {:seon.issue/files [:seon.issue.citation/id :seon.issue.citation/row
+                             :seon.issue.citation/end-row
+                             {:seon.issue.citation/file [:seon.fn.file/path]}]}]
+        (for [[identity-attribute attribute] cites
+              :when (not= :seon.issue/files attribute)]
+          {attribute [identity-attribute]})))
+
 (defn- identity-row [database issue]
-  (db/pull database
-           '[:seon.issue/id :seon.issue/path :seon.issue/title :seon.issue/status
-             :seon.issue/severity :seon.issue/problem :seon.issue/opened :seon.issue/commits
-             {:seon.issue/functions [:seon.fn/sym]}
-             {:seon.issue/tests [:seon.test/sym]}
-             {:seon.issue/errors [:seon.error/signature]}
-             {:seon.issue/members [:seon.issue/id]}]
-           issue))
+  (db/pull database (citation-pattern (citation-attributes database)) issue))
 
 (defn adopt-tx
   "Reconcile the published issue facts by identity into a development database."
@@ -290,10 +466,22 @@
                      (db/q '[:find [?e ...] :where [?e :seon.issue/path]] database))
         by-id (into {} (map (juxt :seon.issue/id identity)) current)
         ids (set (map :seon.issue/id rows))
-        ref-attributes {:seon.issue/functions :seon.fn/sym
-                        :seon.issue/tests :seon.test/sym
-                        :seon.issue/errors :seon.error/signature
-                        :seon.issue/members :seon.issue/id}]
+        ref-attributes (into {:seon.issue/members :seon.issue/id}
+                             (for [[identity-attribute attribute] (citation-attributes database)
+                                   :when (not= :seon.issue/files attribute)]
+                               [attribute identity-attribute]))
+        adopted-citations
+        (fn [row]
+          (if-let [citations (seq (:seon.issue/files row))]
+            (assoc row :seon.issue/files
+                   (into #{} (map (fn [cited]
+                                    (-> (select-keys cited [:seon.issue.citation/id :seon.issue.citation/row
+                                                            :seon.issue.citation/end-row])
+                                        (assoc :seon.issue.citation/file
+                                               [:seon.fn.file/path (get-in cited [:seon.issue.citation/file
+                                                                                  :seon.fn.file/path])]))))
+                         citations))
+            row))]
     (into (mapv #(hash-map :seon.issue/id %) (sort ids))
           (concat
            (mapcat
@@ -303,7 +491,7 @@
                            (if (get row attribute)
                              (assoc row attribute (set (map #(vector identity-attribute (get % identity-attribute))
                                                            (get row attribute)))) row))
-                         row ref-attributes)
+                         (adopted-citations row) ref-attributes)
                     prior (get by-id (:seon.issue/id row))
                     desired row]
                 (if prior (replacement-tx prior desired) [desired])))
@@ -519,7 +707,13 @@
                (issues {:seon.db/db database :seon.issue/status :open}))
         refusals (cond-> (:seon.issue/refusals (meta tx))
                    (and class-tag (nil? class-id))
-                   (conj (diagnostic "docs/seon/issues" :unknown-class class-tag)))]
+                   (conj (diagnostic "docs/seon/issues" :unknown-class class-tag)))
+        unresolved (:seon.issue/unresolved (meta tx))]
     {:seon.issue/count (count rows)
      :seon.issue/entities (vec (sort-by :seon.issue/id rows))
-     :seon.issue/refusals refusals}))
+     :seon.issue/refusals refusals
+     :seon.issue/ambiguous (:seon.issue/ambiguous (meta tx))
+     :seon.issue/unresolved unresolved
+     :seon.issue.unresolved/tokens (reduce + 0 (vals unresolved))
+     :seon.issue.unresolved/paths (count unresolved)
+     :seon.issue.parse/undated (count (remove :seon.issue/opened source-notes))}))
