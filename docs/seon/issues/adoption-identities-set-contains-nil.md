@@ -1,5 +1,5 @@
 ---
-type: defect
+type: issue
 status: resolved
 severity: blocker
 tags: [database, schema, test, adoption]

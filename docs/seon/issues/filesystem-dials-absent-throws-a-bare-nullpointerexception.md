@@ -1,5 +1,5 @@
 ---
-type: defect
+type: issue
 status: open
 severity: friction
 tags: [config, filesystem, error-model]

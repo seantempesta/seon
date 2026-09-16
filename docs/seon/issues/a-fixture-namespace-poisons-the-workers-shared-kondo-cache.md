@@ -1,5 +1,5 @@
 ---
-type: defect
+type: issue
 status: resolved
 severity: blocker
 tags: [test, analysis, fixture, runner]

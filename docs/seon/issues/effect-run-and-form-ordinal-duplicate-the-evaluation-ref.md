@@ -1,5 +1,5 @@
 ---
-type: defect
+type: issue
 status: open
 severity: cleanup
 tags: [schema, database, effect, turn]
