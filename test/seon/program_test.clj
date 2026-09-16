@@ -419,17 +419,21 @@
 (deftest function-contract-redefinition-replaces-component-facts-exactly
   (test-support/with-database
     (fn [connection]
-      (let [function-symbol "sample/redefined"
+      (let [function-symbol "seon.program/provenance-redefined"
             old-spec [:function
                       [:=> [:cat :int] :int]
                       [:=> [:cat :int :int] :int]]
             new-spec [:=> [:cat :string] :string]
             old-row
             (merge {:seon.fn/sym function-symbol
+                    :seon.schema.admission/source :core
+                    :seon.fn/ns [:seon.ns/name 'seon.program]
                     :seon.fn/spec (pr-str old-spec)}
                    (parsed-contract function-symbol old-spec {}))
             new-row
             (merge {:seon.fn/sym function-symbol
+                    :seon.schema.admission/source :core
+                    :seon.fn/ns [:seon.ns/name 'seon.program]
                     :seon.fn/spec (pr-str new-spec)}
                    (parsed-contract function-symbol new-spec {}))]
         (db/transact! connection [old-row])

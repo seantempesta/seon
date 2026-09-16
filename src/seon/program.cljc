@@ -843,11 +843,8 @@
        owned-attributes))
     []))
 
-(def ^:private component-owned-attributes
-  #{:seon.fn/arities :seon.fn/ast})
-
 (defn exact-replacement-tx
-  "Replace one declaration row, retracting owned component trees exactly."
+  "Replace one declaration row using current values and component-aware retraction."
   {:malli/schema
    [:=> [:cat [:map [:db/id :int]] :map]
     [:vector :seon.schema/value]]}
@@ -858,9 +855,9 @@
      []
      (concat
       (map (fn [attribute]
-             (if (contains? component-owned-attributes attribute)
-               [:db.fn/retractAttribute entity-id attribute]
-               [:db/retract entity-id attribute]))
+             ;; Datahike validates tuple values before dispatching retraction.
+             ;; The current row comes from the writer's transaction database.
+             [:db.fn/retractAttribute entity-id attribute (get current attribute)])
            (sort (filter #(contains? current %) changed)))
       [(assoc desired :db/id entity-id)]))))
 

@@ -234,3 +234,102 @@ lane's implementation commit remains `3402913f3`; documentation follow-up
 `7ee2c4c08` records the earlier evidence. The isolated namespace/platform gate
 remains requested, not run. The manual operator command exited and no owned
 background shell remains; the lane's candidate scratch directory was removed.
+
+## Tuple replacement follow-up — 2026-09-16
+
+The owner reforked default before this follow-up. The earlier RESET NEEDED
+boundary above is historical. Read `deletion-row`, `exact-replacement-tx`, and
+Datahike's transaction dispatch end to end at the relevant owning functions.
+The baseline lint replacement regression reproduced the reported failure:
+run **45255**, **6 passes, 1 failure, 0 errors**, with
+`[:db/retract 40877 :seon.fn/form-span]` refused because its tuple value was
+absent. This verifies the cause independently of the operator log.
+
+**Guarantee:** exact program replacement retracts owned attributes through
+Datahike's component-aware operation with their current values, so tuple
+validation and component cleanup both use the existing transaction mechanism.
+
+The span remains one ordered, half-open UTF-8 byte tuple. Splitting it into
+scalars would evade the replacement defect and weaken the atomic pair.
+`exact-replacement-tx` now emits
+`[:db.fn/retractAttribute entity-id attribute (get current attribute)]` for
+every changed, present owned attribute. The hand-maintained component attribute
+set is deleted. `reconcile-tx` supplies the row read from the writer's database;
+Datahike validates tuple arity before dispatch
+(`reference-code/datahike/src/datahike/db/transaction.cljc:1278`), then
+`retractAttribute` reads and retracts the actual datoms and their components
+from that transaction database (`:1072`). The fourth value is required by
+the former; the latter derives the datoms itself. Cardinality-many attributes
+remain exact attribute replacements. Function and test rows share this seam
+and the same `:seon.fn/form-span` attribute; no test-schema edit is needed.
+`deletion-row` continues producing identity tombstones, not another deletion
+implementation.
+
+The proposed function was evaluated in MCP JVM mode before its file edit.
+The representative call for entity 8036 returned exactly:
+
+```clojure
+[[:db.fn/retractAttribute 8036 :seon.fn/form-span [22108 23168]]
+ {:db/id 8036 :seon.fn/sym "seon.plan/settle-call"
+  :seon.fn/form-span [22108 23170]}]
+```
+
+The mandatory pre-edit single regression ran, but fixture acquisition failed
+before assertions (45257). Subsequent probes verified the failed cached delay
+held an `InterruptedException`; a retry without the runner's projection refused
+population, and a fresh source manifest was needed after concurrent renderer
+edits. One analysis observed changing file offsets; another fixture attempt
+hit the declared 20,000 ms bound (51124). The existing development classpath
+issue then reproduced: `clojure.tools.build.api` was missing. Used the existing
+CLI-resolved `:test` classpath in a scoped DynamicClassLoader, exactly as
+[the existing issue](../../../seon/issues/development-adoption-cannot-load-test-support.md)
+records, with a declared 55,000 ms bound for fixture construction. No test JVM
+was launched. Only the failed fixture delay and source-manifest delay were
+re-evaluated from their checked-in forms; default was never stopped or reforked.
+The first successful acquisition passed all 9 assertions but recorded wrapper
+installation drift (51139); the subsequent ordinary two-argument run was green.
+
+| In-process proof | Run | Pass / fail / error |
+|---|---|---|
+| Changed-file lint and span replacement, post-edit | 51141 | 9 / 0 / 0 |
+| Exact file bytes on source-bearing function and test rows | 51152 | 12 / 0 / 0 |
+| Component replacement, corrected fixture candidate before edit | 55117 | 4 / 0 / 0 |
+| Same component replacement after test edit | 55124 | 4 / 0 / 0 |
+
+The existing component regression initially failed before replacement (51143):
+its setup transaction omitted required admission provenance and namespace,
+then ignored the refusal and passed nil to `exact-replacement-tx`. A direct
+fixture probe verified `:seon.db/invalid-write` at
+`[0 :seon.schema.admission/source]`. Its fixture now uses a synthetic function
+in the already populated `seon.program` namespace and declares both facts.
+The original assertions still prove obsolete component trees disappear while
+shared content-addressed schema shapes survive. This is a fixture correction,
+not a second production replacement path.
+
+All single runs use the explicit default connection. The exact recurring
+forms above remain valid; the component proof additionally runs:
+
+```clojure
+(seon.test/run
+ #'seon.program-test/function-contract-redefinition-replaces-component-facts-exactly
+ (seon.operator/connection "default"))
+```
+
+The follow-up default pull, using its own carried database projection, returned
+`seon.plan/settle-call` with file
+`/Users/sean/src/seon/src/seon/plan.clj` and span **[22108 23168]**;
+its **1,060** UTF-8 bytes equal the stored source. Default has **535** active
+lint rows at this observation. Three actual referenced rows:
+
+| Finding id | Type | Row:col | Referenced program identity |
+|---|---|---|---|
+| `03182b9ae015` | `:shadowed-var` | 272:9 | `seon.render.value/value-node*` |
+| `03f836ffb790` | `:shadowed-var` | 1030:64 | `seon.error/notice-ai-prose` |
+| `0451c1a2fece` | `:shadowed-var` | 148:20 | `seon.cluster.wake-test/runtime-listens-route-and-refresh-with-entity-and-value-constraints` (test row) |
+
+The unrelated MCP runtime-health failure is independently recorded in
+[the zero-occurrence signature issue](../../../seon/issues/problems-rejects-signatures-with-no-occurrences.md).
+JVM evaluation remained available. Markdown hook feedback reports 12 existing
+gitlink citation mismatches in the AGENTS audit note; no foreign audit file was
+edited. The isolated namespace/platform gate remains the orchestrator's proof,
+not a claim made by these in-process runs.
