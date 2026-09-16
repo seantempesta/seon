@@ -16,6 +16,12 @@
             :long
             [:string {:min 1
                       :description "The declared reason this test is long: a real boot, a multi-minute fixture, or another cost an ordinary branch pays once. Indexed from the test Var's :seon.test/long metadata, so an in-process check can exclude it by query instead of by loading the Var."}],
+            :platform
+            [:string {:min 1
+                      :description "The declared reason this test is a platform regression: a moving part whose breakage poisons the bulk tier. Indexed from the test Var's or its namespace's :seon.test/platform metadata, so the tier partition reads the fact the coordinator already holds instead of re-reading Var metadata."}],
+            :fixture
+            [:string {:min 1
+                      :description "The declared reason this namespace's tests are fixture material another test asserts over, never gate members: a deliberate failure, an assertionless example, a usage sample. Declared once on the ns form and lifted onto every test row, so bare selection excludes it by fact instead of by a filename that does not end in _test."}],
             :long-ms
             [:int {:min 1
                    :description "The declared completion allowance in milliseconds for a :seon.test/long test. The cold runner widens that test's per-worker-exchange bound to it, so the bound derives from the declaration instead of standing in for it. Absent means the ordinary per-exchange bound applies."}],
@@ -108,6 +114,8 @@
               :seon.test/fixture-observation]
              [:seon.test/long {:optional true} :seon.test/long]
              [:seon.test/long-ms {:optional true} :seon.test/long-ms]
+             [:seon.test/platform {:optional true} :seon.test/platform]
+             [:seon.test/fixture {:optional true} :seon.test/fixture]
              [:seon.test/subject {:optional true} :seon.test/subject]
              [:seon.test/pending-subject
               {:optional true

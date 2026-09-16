@@ -102,10 +102,17 @@
 (def test-marker-attributes
   "The declared test markers a namespace form may carry for its deftests.
 
-  Both are costs of the WHOLE namespace when declared there — a namespace of
-  real-boot drills declares once — so a deftest inherits what it does not
-  declare itself."
-  [:seon.test/long :seon.test/long-ms])
+  Each is a property of the WHOLE namespace when declared there — a namespace
+  of real-boot drills declares `:seon.test/long` once, a namespace of fixture
+  material declares `:seon.test/fixture` once — so a deftest inherits what it
+  does not declare itself.
+
+  Lifting a marker here is sufficient for BOTH indexing seams. The runner then
+  reads the indexed fact instead of the Var: the tier partition asks the
+  published row whether a test is a platform regression, and bare namespace
+  selection asks whether a namespace is fixture material, in place of the
+  `_test` filename convention that answered it before."
+  [:seon.test/long :seon.test/long-ms :seon.test/platform :seon.test/fixture])
 
 (defn test-markers
   "The declared markers for one test: its own metadata, then its namespace's.
