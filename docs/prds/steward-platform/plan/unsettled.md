@@ -149,3 +149,10 @@
   edge owned by agent-call-edges. Opus triage of error-graph's batch 20 is
   running; program-provenance, generated-read-identities and
   attempt-and-eval-facts follow serially.
+- 06:35Z agent-call-edges landed (`76774d044`, evidence `d799e6ff4`): an
+  agent-admitted test now carries the call edge to the function it tests in
+  both admission orders; live on default the edge exists and the reach
+  digest changes when the function changes; armed regression 7/0/0. Residual:
+  rows admitted BEFORE the fix keep their old edges until reanalysed (the
+  next full publication/refork). With this, "skip if unchanged" is sound
+  for agent tests too.
