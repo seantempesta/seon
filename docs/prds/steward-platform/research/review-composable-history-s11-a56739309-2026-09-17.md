@@ -138,3 +138,139 @@ The original thinking regression and its additional ref cases passed through
 `render/render-call` with armed contracts. Default adoption and browser paint
 remain unverified; the publication-bound observation is recorded in
 `docs/seon/issues/concurrent-publications-serialize-past-the-hook-bound.md`.
+
+## Red (4) — prove concurrent evaluations and render their messages, 2026-09-16
+
+The batch-111 first scenario contains thirty committed evaluations with the
+canonical hashed identities. It does not show a refused fixture write or a
+failure to begin. The first assertion queried shown-text transaction times
+strictly before the first close, but evaluation results settle with the close.
+That query therefore cannot observe concurrent starts. The fixture now uses
+the existing `:seon.turn.loop/await-part` observation at real evaluation entry:
+all N agents must enter before any may finish its first form. The awaiting
+test consumes those evaluation-entry events as well as terminal reports,
+rather than putting a whole six-evaluation fold under one event backstop.
+Every wait is bounded by `test-support/await-event!`; all terminal reports
+are still required, and execution remains the real SCI path.
+
+The fixture's other stale assumptions were independent: evaluation identities
+are derived by `seon.id/evaluation`, and `seon.cluster.message/send` constructs
+a message rather than delivering it. Plans now call `my.message/send`, then
+query the delivered identities from their sender, recipient and content.
+Creation and planned-turn writes use `transacted!`, so a writer refusal is
+reported at its cause. Root's unrelated bootstrap is completed and its mailbox
+paused before measuring scenario provider calls.
+
+Actual delivery exposed two production history defects. The message render
+pair supplied a future read form without the already-held message content;
+history now retains that source and uses the existing message terminal
+formatter to show the content, without evaluating or clipping it. The
+bootstrap-message lookup passed an absent identity to a second query, which
+could select an unrelated message. One relational query now follows the
+selected agent's opening turn to an identified message. A canonical regression
+proves an agent with no opening trigger cannot see its peer's message; an
+existing supersession fixture also proves an unidentified trigger target is
+not a message.
+
+The transcript path was clean before the red-(3) edit and has been owned by
+this lane since. Dependency seams remain the existing Datahike query/writer
+(`reference-code/datahike/src/datahike/query.cljc`,
+`reference-code/datahike/src/datahike/writer.cljc`), core.async Flow pause/ping
+(`reference-code/core.async/src/main/clojure/clojure/core/async/flow.clj`),
+`seon.turn/turn`, `seon.cluster.agent/armed`, and `seon.test-support/await-event!`.
+No new runtime machinery or writer was introduced.
+
+Verification: the final isolated transcript run passed 18 tests / 212
+assertions, zero failures or errors (`tmp/s11-transcript-verified-fast.log`).
+It includes the previously failing supersession case and the new absent-trigger
+case. An intermediate concurrency run reached 2,185 assertions with no
+failures before its whole-fold await expired
+(`tmp/s11-concurrency-serial-fast.log`); this exposed the missing progress
+observation described above. An earlier attempt expired awaiting root's
+bootstrap and reached no scenario (`tmp/s11-concurrency-verified-fast.log`);
+the serial run passed that wait, which is not evidence of its earlier cause.
+The progress-aware run then hit the suite's 300-second reporter-silence
+watchdog (`tmp/s11-concurrency-progress-fast.log`), with its main thread
+awaiting concurrent-fold events, not bootstrap or teardown. Cluster fixture
+preparation consumed 229 seconds (22:27:30–22:31:19Z) before the scenario
+work. Its virtual-thread dump is retained at
+`tmp/s11-progress-watchdog-threads.json`. The subsequent verification uses
+the runner's declared `SEON_TEST_SILENCE_SECONDS=600` option; the canonical
+per-event backstop remains unchanged. Its result is recorded below after
+completion. Only fast iterations were run, as assigned; no cold gate,
+platform gate, or browser proof is claimed. The explicit default publication
+ended in a source-changed refusal, recorded in the publication issue above.
+
+Foreign boundary: verification used isolated HEAD `c74dc5c01` plus this lane's
+owned edits, with `reference-code` linked as prescribed. Shared in-flight
+changes to `bin/test`, `src/seon/test/runner.clj`, config/schema owners and
+`test/seon/test_support.clj` were excluded, not edited or treated as an S11
+failure. The final concurrency snapshot also includes the committed red-(2)
+evaluation schema and REPL owner edits. The detector red remains outside
+this assignment.
+
+Touched paths across these four fixes:
+
+- `src/seon/cluster/prompt.clj`, `test/seon/cluster/prompt_test.clj`;
+- `resources/seon/schemas/seon.eval.edn`, `src/seon/repl.clj`,
+  `test/seon/render/web_debug_test.clj`;
+- `src/seon/render/transcript.clj`, `test/seon/render/transcript_test.clj`,
+  `test/seon/concurrency_independence_test.clj`;
+- this review note and
+  `docs/seon/issues/concurrent-publications-serialize-past-the-hook-bound.md`.
+
+## Continuation — the four reds verified in one snapshot, 2026-09-16
+
+The killed session left reds (3) and (4) uncommitted and characterised its
+last two gate errors as infrastructure. That characterisation is now proven
+rather than asserted, and it was one cause, not two. Its own re-run
+`tmp/s11-resume-fast-b2.log` (23:13:02–23:19:42Z) ran both
+`seon.concurrency-independence-test` tests green — 2 tests, 2,871 assertions,
+zero failures or errors — with no tree change between the red and the green.
+Both earlier errors trace to `java.lang.Exception: Clj-kondo cache is locked
+by other thread or process.` thrown from
+`seon.fn.analyzer/discard-obsolete-cache-entries!`
+(`src/seon/fn/analyzer.clj:217`): the second test threw it directly, and the
+first — reported as a "refused canonical fixture setup" at
+`seon.test-support/checked-fixture-result` — was the SHARED BASE build taking
+the same lock through `seon.fn/build-manifest`. No fixture wrote an incomplete
+entity, so AGENTS.md 5.8 does not apply; the fixture's own writes already go
+through `transacted!`. The lock class is filed as
+[a fast gate JVM dies on the shared kondo cache lock](../../../seon/issues/a-fast-gate-jvm-dies-on-the-shared-kondo-cache-lock.md),
+which also records why the existing parallel-stress note does not cover it.
+
+Verification of this continuation, all six namespaces in ONE isolated
+snapshot (`tmp/test-runs/run.tsxdVc`, pid 69860, 23:28:12–23:34:33Z,
+`tmp/s11-continuation-verify.log`):
+
+```
+bin/test-fast --paths src/seon/render/transcript.clj \
+  test/seon/render/transcript_test.clj \
+  test/seon/concurrency_independence_test.clj -- \
+  seon.eval-test seon.cluster.prompt-test seon.render.transcript-run-test \
+  seon.render.transcript-test seon.render.web-debug-test \
+  seon.concurrency-independence-test
+```
+
+**48 tests, 3,394 assertions, 0 failures, 0 errors** (exit 0). This is the
+first run in which all four batch-111 reds were exercised together on one
+HEAD (`8e74014d6`) plus only this lane's three owned files. The concurrency
+fold's six scenarios ran 11.0–22.3 s each, N=5 and N=10; its live cluster
+rooted inside the snapshot rather than the shared checkout.
+
+Acceptance (d) re-checked by reading rather than by reach: `fit-text` appears
+nowhere in `src/seon/render/transcript.clj` (0 occurrences, at HEAD as well).
+`floor-text` survives on exactly one call, the small `extra` metadata map in
+`message-text` (`src/seon/render/transcript.clj:454`) — an ordinary
+un-rendered value crossing `seon.render.value/render-ai`, which IS the one
+clipping spot, not a re-fit of an already-rendered unit. `rendered-family`
+and its re-admission of a rendered AI string are deleted.
+
+Boundary: fast iterations only, as assigned. No cold `bin/test`, no
+`--platform` tier, no recorded result facts, no default adoption and no
+browser paint are claimed. `default` (pid 41413) was neither stopped,
+restarted nor reset, and no prepl evaluation was used in this continuation.
+Held foreign paths — `bin/test`, `src/seon/config.clj`, `src/seon/schedule.clj`,
+`src/seon/cluster.clj`, `src/seon/cluster/wake.clj`,
+`src/seon/test/runner.clj`, `test/seon/test_support.clj` and the rest of the
+dirty tree — were excluded from the overlay and left untouched.
