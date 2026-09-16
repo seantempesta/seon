@@ -39,6 +39,23 @@
 ;;; Ambient custody and optional read evidence
 ;;; ---------------------------------------------------------------------------
 
+;;; LOAD-CYCLE BOUNDARIES. `seon.error` and `seon.call-preparation` both
+;;; require `seon.db`, so this namespace cannot require them back. One
+;;; resolution per var, realized at first use, instead of a
+;;; `requiring-resolve` on every call (AGENTS §2.1).
+(defonce ^:private error-diagnostic
+  (delay (requiring-resolve 'seon.error/diagnostic)))
+(defonce ^:private error-explain-problem
+  (delay (requiring-resolve 'seon.error/explain-problem)))
+(defonce ^:private error-render-ai
+  (delay (requiring-resolve 'seon.error/render-ai)))
+(defonce ^:private error-render-html
+  (delay (requiring-resolve 'seon.error/render-html)))
+(defonce ^:private call-preparation-snapshot
+  (delay (requiring-resolve 'seon.call-preparation/snapshot)))
+(defonce ^:private call-preparation-plan-for
+  (delay (requiring-resolve 'seon.call-preparation/plan-for)))
+
 (defn connection?
   "True for a live (unreleased) Datahike connection."
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
@@ -118,7 +135,7 @@
 
 (defn- diagnostic
   [request]
-  ((requiring-resolve 'seon.error/diagnostic) request))
+  (@error-diagnostic request))
 
 (defn- dependency-error
   [operation error]
@@ -688,7 +705,7 @@
 (defn- append-pull-evidence!
   [database arguments operation-key response result]
   (let [selector
-        ((requiring-resolve 'datahike.pull-api/pull-plan-selector)
+        (pull-api/pull-plan-selector
          (:datahike.pull/plan response))
         replay-arguments
         (if (map? (first arguments))
@@ -839,13 +856,12 @@
 
 (defn- pull-plan-with-evidence
   [& arguments]
-  (apply (requiring-resolve 'datahike.pull-api/pull-plan-with-evidence)
+  (apply pull-api/pull-plan-with-evidence
          arguments))
 
 (defn- pull-many-plan-with-evidence
   [& arguments]
-  (apply (requiring-resolve
-         'datahike.pull-api/pull-many-plan-with-evidence)
+  (apply pull-api/pull-many-plan-with-evidence
          arguments))
 
 (defn- replay-read
@@ -1473,7 +1489,7 @@
 
 (defn- decode-pull-result
   [declarations plan result-key result]
-  (let [spec ((requiring-resolve 'datahike.pull-api/pull-plan-spec) plan)]
+  (let [spec (pull-api/pull-plan-spec plan)]
     (if (= :datahike.pull-many/result result-key)
       (mapv #(when % (decode-pull-entity declarations spec %)) result)
       (when result (decode-pull-entity declarations spec result)))))
@@ -2212,12 +2228,12 @@
 (defn- diff-plan
   [database projection function-symbol supplied-count]
   (let [snapshot
-        ((requiring-resolve 'seon.call-preparation/snapshot)
+        (@call-preparation-snapshot
          database projection)]
     (if (error-value? snapshot)
       snapshot
       (let [plan
-            ((requiring-resolve 'seon.call-preparation/plan-for)
+            (@call-preparation-plan-for
              database snapshot function-symbol)
             database-slots
             (when-not (error-value? plan)
@@ -2718,7 +2734,7 @@
            :seon.error/offending attribute
            :seon.error/actual-description "an undeclared attribute"
            :seon.error/fix "Use a declared attribute from the entity's schema."}
-          ((requiring-resolve 'seon.error/explain-problem)
+          (@error-explain-problem
            {:seon.error/argument "transaction data"
             :seon.error/path path
             :seon.error/problem
@@ -3305,14 +3321,14 @@
   {:malli/schema
    [:=> [:cat :seon.db/transaction-refused-error] [:string {:min 1}]]}
   [unit]
-  ((requiring-resolve 'seon.error/render-ai) unit))
+  (@error-render-ai unit))
 
 (defn render-rejection-html
   "Render a rejected database transaction as readable Hiccup."
   {:malli/schema
    [:=> [:cat :seon.db/transaction-refused-error] :seon.render/hiccup]}
   [unit]
-  ((requiring-resolve 'seon.error/render-html) unit))
+  (@error-render-html unit))
 
 (defn- transaction-result
   [report]
