@@ -31,6 +31,7 @@
             [seon.schema.edn :as schema.edn]
             [seon.schema.form :as schema.form]
             [seon.sci.admit :as admit]
+            [seon.sci.eval :as sci.eval]
             [seon.sci.reader :as reader]
             [seon.test.accretion :as accretion])
   (:import [java.util Date]
@@ -1967,7 +1968,7 @@
                         [?effect :seon.effect/form-ordinal ?ordinal]]
                       database run-id (:seon.cluster.eval/ordinal evaluation))))))
 
-(declare generated-read-fault)
+(declare generated-read-fault evaluate-sources preview-sources)
 
 (defn- system-plan [database declared latest]
   (into []
@@ -2088,7 +2089,7 @@
                        (fn [[ordinal previews] source]
                          (let [preview (if turn-id
                           {:seon.turn.loop/evaluated-sources
-                           ((requiring-resolve 'seon.turn/evaluate-sources)
+                           (evaluate-sources
                             {:seon.turn.loop/cluster handle
                              :seon.db/db database
                              :seon.sci.eval/ctx agent-ctx
@@ -2098,7 +2099,7 @@
                              :seon.cluster.eval/ordinal ordinal
                              :seon.ns/name (:seon.ns/name source)
                              :seon.cluster.reply/sources [source]})}
-                          ((requiring-resolve 'seon.turn/preview-sources)
+                          (preview-sources
                            {:seon.turn.loop/cluster handle
                             :seon.db/db database
                             :seon.sci.eval/ctx (:seon.sci.eval/ctx handle)
@@ -4396,7 +4397,7 @@
                    (if run-id (receipt-identity run-id ordinal)
                        (id/id [agent-id form]))
                    request
-                   ((requiring-resolve 'seon.sci.eval/evaluate-for-install) request))))
+                   (sci.eval/evaluate-for-install request))))
               evaluation (or (disposition-rule-error
                                (:seon.cluster.eval/source form) namespace-name
                                (nil? (next remaining)) evaluation)

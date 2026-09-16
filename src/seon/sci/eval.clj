@@ -111,7 +111,6 @@
             [sci.impl.vars :as sci.vars]
             [sci.impl.utils :as sci.utils]
             [sci.interrupt :as sci.interrupt]
-            [seon.bootstrap]
             [seon.call-preparation :as call-preparation]
             [seon.config :as config]
             [seon.db :as db]

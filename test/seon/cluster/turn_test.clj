@@ -254,8 +254,18 @@
                       :seon.config.eval.result/max-nodes 256)})
          (if evaluator
            (fn [cluster-handle]
-             (with-redefs [sci.eval/evaluate evaluator]
-               (body cluster-handle)))
+             (let [evaluate sci.eval/evaluate]
+               (with-redefs [sci.eval/evaluate
+                             (fn [request]
+                               (let [injected (evaluator request)
+                                     evaluated
+                                     (evaluate
+                                      (-> request
+                                          (dissoc :seon.sci.eval/event)
+                                          (assoc :seon.cluster.eval/source
+                                                 (pr-str (list 'quote (:seon.sci.admit/value injected))))))]
+                                 (merge evaluated injected)))]
+                 (body cluster-handle))))
            body))
       (finally
         (seon.flow/stop-work-launcher! launcher))))))))
@@ -2199,7 +2209,7 @@
     (fn [cluster]
       (with-redefs [ai/complete
                     (fn [_] {:seon.ai/text "(seon.run/wait \"need input\")"})]
-        (with-redefs [injected-evaluation {:seon.cluster.eval/result-edn
+        (with-redefs [injected-evaluation {:seon.eval/shown
                                (pr-str (seon.run/wait "need input"))
                                :seon.sci.admit/value (seon.run/wait "need input")}]
           (let [connection (:seon.db/connection cluster)
@@ -2220,7 +2230,7 @@
                 "the agent has no open turn, so another wake can open one")
             (is (str/includes?
                  (db/q '[:find ?edn . :where
-                        [_ :seon.cluster.eval/result-edn ?edn]] @connection)
+                        [_ :seon.eval/shown ?edn]] @connection)
                  "need input")
                 "and the note survives in the receipt, which is what the
                  next prompt reads it back out of")))))))
@@ -3255,7 +3265,7 @@
               (db/q '[:find ?result .
                       :where
                       [?evaluation :seon.cluster.eval/ordinal 6]
-                      [?evaluation :seon.cluster.eval/result-edn ?result]]
+                      [?evaluation :seon.eval/shown ?result]]
                     database)
               direct-contract-keys
               (db/q '[:find [?key ...]
@@ -3274,7 +3284,7 @@
                       [?schema :seon.schema/references ?child]
                       [?child :seon.schema/key ?child-key]]
                     database :my.agents.agent-a/item)]
-          (is (= 43 (semantic-result result))
+          (is (= "43" result)
               "every form of a batched turn settles its own result")
           (is (= [test-symbol]
                  (seon.fn/tests-reaching database function-symbol)))

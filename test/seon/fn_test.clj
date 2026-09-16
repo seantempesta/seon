@@ -1505,6 +1505,7 @@
               (pr-str evaluate)))
         (testing "no second function evaluates agent source"
           (is (= #{"seon.turn/resume-turn"
+                   "seon.turn/system-turn"
                    "seon.turn/preview-sources"}
                  sources)
               (pr-str sources)))
