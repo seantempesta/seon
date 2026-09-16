@@ -1269,6 +1269,23 @@ phrases and `publication-exception` deleted; defaults live once in
 slots (slots now 3, `afa82d092`). Gate `seon.dev.hook-test
 seon.dev.edit-feedback-test` in the next batch.
 
+**03:00Z status.** Reset plan landed (`4c547a3c3`, `plan/reset-batch-2026-09-17.md`:
+76 resource tables, publication groups 0–7, reset procedure, live proofs; Q1
+living-relation invariant (seam A = final-report validator recommended vs B =
+literal db.fn/call pair) and Q2 fn.ast (merge-then-delete recommended; the "no
+reader" claim was false by four backfill reads) — to the owner together with
+the high-effort astra design review (`design-review-eval-path-and-deletion-contract`,
+running). Stage 1–3 test-system design launched (astra, design-only) against
+the post-reset schema so it is built once. Concurrency rule: ≤4
+implementers; gates share the 3 slots with iteration — batch 114 (hook,
+platform-tier, detector, turn-loop namespaces) queued for the next free slot.
+Edges continuation: probe + baseline landed (`b1828921a`; ref walk median
+452 ms over 65,119 edges), schema seam blocked by the `declaration-required`
+hunks (told the environment agent to drop them: dissolved by G1), issue
+retraction already at `c703fa8da`. Owner asked "are you gating?" — yes, but
+five landed slices await batch 114; no landing is called proven before its
+cold gate.
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
