@@ -130,3 +130,11 @@
   evaluation and neither on a plain map; 94 assertions in-process. Lane
   resumed on its batch-19 file. Batch 20 (error-graph, 12 ns) running on
   `cecfaf428` by the gate session.
+- 05:55Z LOAD: with eight lanes running in-process regressions inside
+  default's JVM, hook publications time out (operator exit 124) and the
+  gate session's runtime_status reads time out. Paused the four
+  reds-triage lanes (generated-read-identities, program-provenance,
+  reach-digest, attempt-and-eval-facts; sessions preserved) to keep
+  issue-family (platform red), issue-settlement, agent-call-edges and the
+  peer's turn-test-reds. Rule going forward: at most four lanes probing
+  default at once; reds triage runs serially after the platform is green.
