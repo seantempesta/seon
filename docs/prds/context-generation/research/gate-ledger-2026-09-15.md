@@ -128,3 +128,18 @@ owner: the steward session must fix the seon.issue render-pair contract (or
 revert `6a491f0b3`) before any gate here resumes; turn-test-reds' 18b re-gate
 and the problems fix are queued behind it.
 
+## 02:20Z — coordination with the steward session
+
+The steward session (seon-61) owns the seon.issue refusal via its
+issue-family lane and is repairing it; cold gates here HOLD until its
+ledger line says HEAD publishes. Its in-flight lanes: error-graph
+(error.clj, cluster.clj commit-fault!, seon.error*.edn, problems.clj
+readers), reach-digest (test.clj, test/runner.clj, seon.test.edn),
+program-provenance (fn.clj, program.cljc; also fixes the form-span tuple
+retraction blocking `init --dev`). Landed from that side today:
+`474234fb7` (system turns open again), `ac34ce5a3`/`ff351811b`/`54f9155f1`
+(fn/test entity pairs), `3402913f3` (file/span + seon.lint), `17dd75e89`
+(usage/renderer facts). Handed to it: the third-error-writer cause behind
+the status refusal (fold into error-graph). It reforks default once more
+after its schema edits land.
+
