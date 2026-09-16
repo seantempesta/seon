@@ -2005,20 +2005,29 @@
                                                           (if (and current-run (= old-run current-run)) 0 1))
                            :seon.test.failure/last-seen-at at)]
             (concat
-              (for [attribute (keys (dissoc old :db/id :seon.test.failure/id))]
-                [:db.fn/retractAttribute (:db/id old) attribute
-                 (let [value (get old attribute)]
-                   (cond
-                     (or (set? value) (and (sequential? value) (sequential? (first value)))) (first value)
-                     (map? value) (:db/id value)
-                     :else value))])
+              ;; Retract ONLY what the new row does not assert. A
+              ;; cardinality-one add replaces its own value and an identical
+              ;; add emits no datom at all, so retracting every attribute
+              ;; first turned an unchanged re-record into pure churn.
+              (for [attribute (keys (dissoc old :db/id :seon.test.failure/id))
+                    :when (not (contains? row attribute))]
+                [:db.fn/retractAttribute (:db/id old) attribute])
+              ;; The one cardinality-many failure attribute changes member by
+              ;; member; only the members the new row drops are retracted.
+              (let [wanted (set (:seon.test.failure/contexts row))]
+                (for [context (:seon.test.failure/contexts old)
+                      :when (not (contains? wanted context))]
+                  [:db/retract (:db/id old) :seon.test.failure/contexts context]))
               [row]))) failures))))
 
 (defn record-tx
   "Transaction data replacing each test row's complete latest result.
 
-  The attribute retractions make the update total: a later green run removes
-  every stale failure identity and message in the same transaction. This
+  The replacement is a DELTA and still total: every attribute, reach member
+  and failure identity this result does not assert is retracted, and every
+  one it asserts unchanged writes nothing. Retracting first and re-asserting
+  identically cost 157,981 datoms for one unchanged 93-result completion
+  (measured 2026-09-17 on `default`), which is what filled the store. This
   runs as a `:db.fn/call` transaction function, so the presence decision
   reads the WRITER's own database value — a caller pre-read could strand
   a retract's lookup ref against a concurrently retracted row and reject
@@ -2061,10 +2070,40 @@
         ;; names. The absence decision is made here, against the value
         ;; actually written into, and an absent identity is minted as a
         ;; tombstone rather than rejecting the whole completion.
+        ;; One pull per result answers existence AND the row's current
+        ;; latest result, so the delta below never re-reads the database
+        ;; per member.
+        current-by-symbol
+        (into {}
+              (keep (fn [{test-symbol :seon.test/sym}]
+                      (when-let [row (db/pull database
+                                              [:db/id
+                                               :seon.test/reach-digest
+                                               :seon.test/reach-unknown
+                                               :seon.test/failure-message
+                                               :seon.test/failing-assertions
+                                               {:seon.test/reach
+                                                [:db/id :seon.fn/sym]}]
+                                              [:seon.test/sym test-symbol])]
+                        [test-symbol row])))
+              results)
+        ;; A member this database already holds is present BY CONSTRUCTION:
+        ;; it was pulled back from the value being written into. Only the
+        ;; members no recorded row names still need an existence read.
+        known-present
+        (into #{}
+              (comp (mapcat (comp :seon.test/reach val))
+                    (keep (fn [member]
+                            (when-let [member-symbol (:seon.fn/sym member)]
+                              [:seon.fn/sym member-symbol]))))
+              current-by-symbol)
         absent-identities
         (source/absent-program-identities
          database
-         (into [] (comp (filter (fn [[_ refs]] (vector? refs))) (mapcat val)) reaches))
+         (into [] (comp (filter (fn [[_ refs]] (vector? refs)))
+                        (mapcat val)
+                        (remove known-present))
+               reaches))
         portable-reach
         (fn [refs]
           (into [] (keep (partial source/identity-ref absent-identities)) refs))
@@ -2099,20 +2138,47 @@
       (fn [{test-symbol :seon.test/sym :as result}]
         (let [namespace-name (symbol (namespace (symbol test-symbol)))
               test-ref [:seon.test/sym test-symbol]
-              exists? (some? (db/pull database [:db/id] test-ref))
+              current (get current-by-symbol test-symbol)
+              exists? (some? current)
               test-row-id (if exists? test-ref (str "test-result:" test-symbol))
               failures (mapv portable-failure (:seon.test/failures result))
+              wanted-reach (when (vector? (get reaches test-symbol))
+                             (portable-reach (get reaches test-symbol)))
+              wanted-members (set wanted-reach)
+              ;; The reach is replaced member by member: an unchanged
+              ;; membership emits nothing, a dropped member emits its own
+              ;; retraction, a new member its own assertion. Retracting the
+              ;; whole attribute first cost 149,436 datoms for 93 identical
+              ;; results (measured 2026-09-17 on `default`).
+              held-members
+              (into {}
+                    (map (fn [member]
+                           [(:db/id member)
+                            (when-let [member-symbol (:seon.fn/sym member)]
+                              [:seon.fn/sym member-symbol])]))
+                    (:seon.test/reach current))
+              retracted-members
+              (into [] (comp (remove (fn [[_ member-ref]]
+                                       (contains? wanted-members member-ref)))
+                             (map (fn [[member-id _]]
+                                    [:db/retract test-ref :seon.test/reach
+                                     member-id])))
+                    held-members)
+              held-refs (into #{} (remove nil?) (vals held-members))
+              added-members (into [] (remove held-refs) wanted-reach)
+              wanted-digest (get digests test-symbol)
+              wanted-assertions (set (:seon.test/failing-assertions result))
               result-row
               (cond-> (assoc (dissoc result :seon.test/failures)
                              :db/id test-row-id
                              :seon.test/run "test-run"
                              :seon.test/run-basis-t basis-t
                              :seon.test/run-at at)
-                (string? (get digests test-symbol))
-                (assoc :seon.test/reach-digest (get digests test-symbol))
-                (vector? (get reaches test-symbol))
-                (assoc :seon.test/reach (portable-reach (get reaches test-symbol)))
-                (not (vector? (get reaches test-symbol)))
+                (string? wanted-digest)
+                (assoc :seon.test/reach-digest wanted-digest)
+                (seq added-members)
+                (assoc :seon.test/reach added-members)
+                (nil? wanted-reach)
                 (assoc :seon.test/reach-unknown
                        (or (:seon.error/message reaches)
                            reach-unknown
@@ -2127,15 +2193,31 @@
                 (not exists?)
                 (assoc :seon.test/ns (namespace-tempid namespace-name)))]
           (into (cond-> []
+            ;; An attribute is retracted ONLY when this result does not
+            ;; assert it: a cardinality-one add replaces its own value, and
+            ;; Datahike emits nothing for an identical add. The update stays
+            ;; total — a green run still clears the stale failure evidence —
+            ;; while an unchanged re-record writes no datom.
+            (and exists? (not (contains? result :seon.test/failure-message))
+                 (contains? current :seon.test/failure-message))
+            (conj [:db.fn/retractAttribute test-ref :seon.test/failure-message])
+
+            (and exists? (not (string? wanted-digest))
+                 (contains? current :seon.test/reach-digest))
+            (conj [:db.fn/retractAttribute test-ref :seon.test/reach-digest])
+
+            (and exists? (some? wanted-reach)
+                 (contains? current :seon.test/reach-unknown))
+            (conj [:db.fn/retractAttribute test-ref :seon.test/reach-unknown])
+
             exists?
-            (conj [:db.fn/retractAttribute test-ref
-                   :seon.test/failing-assertions]
-                  [:db.fn/retractAttribute test-ref
-                   :seon.test/failure-message])
-            exists?
-            (conj [:db.fn/retractAttribute test-ref :seon.test/reach]
-                  [:db.fn/retractAttribute test-ref :seon.test/reach-digest]
-                  [:db.fn/retractAttribute test-ref :seon.test/reach-unknown])
+            (into (comp (remove wanted-assertions)
+                        (map (fn [assertion]
+                               [:db/retract test-ref :seon.test/failing-assertions
+                                assertion])))
+                  (:seon.test/failing-assertions current))
+
+            exists? (into retracted-members)
             true (conj result-row))
             (failure-replacement-tx database test-row-id failures run-ref at))))
       results))))

@@ -445,3 +445,105 @@
               (is (nil? (:seon.test.failure/file failure)))
               (is (= 7 (:seon.test.failure/line failure))
                   "the site keeps its line without a dangling file ref"))))))))
+
+(defn- record-tx-data
+  "Commit one completion through the writer and return its emitted datoms."
+  [connection captured]
+  (let [report (db/transact! connection
+                             [[:db.fn/call #'runner/record-tx captured]])]
+    (is (:db-after report) (pr-str report))
+    (remove #(= :db/txInstant (:a %)) (:tx-data report))))
+
+(deftest an-unchanged-re-record-emits-no-datom
+  ;; Recording re-asserted every reach member, digest and failure attribute it
+  ;; had just retracted: one unchanged 93-result completion cost 157,981
+  ;; datoms on `default` (2026-09-17), and each cold batch grew the store by
+  ;; hundreds of megabytes. The replacement is a delta now; unchanged
+  ;; evidence must write nothing at all.
+  (support/with-database
+    (fn [connection]
+      (let [s "delta.facts/check" t "delta.facts/other"
+            a "delta.facts/a" b "delta.facts/b"
+            assertion-id (id/id [s "first claim" 0] 64)]
+        (is (:db-after (transact! connection
+                        [{:db/id "a" :seon.fn/sym a}
+                         {:db/id "b" :seon.fn/sym b}
+                         {:seon.test/sym s :seon.fn/calls ["a" "b"]}
+                         {:seon.test/sym t :seon.fn/calls ["a"]}])))
+        (let [tested (db/db connection)
+              run (runner/provenance tested)
+              ;; No :seon.db/db — `commit-results!` resolves the tested value
+              ;; into digests and memberships and dissocs it before the
+              ;; transaction function, because an embedded database value is
+              ;; not admissible transaction-function data.
+              captured {:seon.test.run/provenance run
+                        :seon.test/run-basis-t (:seon.test.run/basis-t run)
+                        :seon.test/run-at (:seon.test.run/at run)
+                        :seon.test/reach-digests (runner/reach-digests tested [s t])
+                        :seon.test/reaches (runner/reach-memberships tested [s t])
+                        :seon.test.runner/results
+                        [{:seon.test/sym s :seon.test/pass-count 0
+                          :seon.test/fail-count 1 :seon.test/error-count 0
+                          :seon.test/failing-assertions [assertion-id]
+                          :seon.test/failure-message "first claim"}
+                         {:seon.test/sym t :seon.test/pass-count 1
+                          :seon.test/fail-count 0 :seon.test/error-count 0}]}
+              first-pass (record-tx-data connection captured)]
+          (is (seq first-pass) "the first recording writes the result")
+          (is (seq (filter #(= :seon.test/reach (:a %)) first-pass))
+              "the first recording asserts the reach membership")
+          (is (= [] (vec (record-tx-data connection captured)))
+              "an identical re-record emits nothing beyond the run's provenance")
+          (testing "one changed result emits only that result's change"
+            (let [changed (assoc-in captured
+                                    [:seon.test.runner/results 1
+                                     :seon.test/pass-count] 2)
+                  datoms (record-tx-data connection changed)
+                  other (:db/id (db/pull (db/db connection) [:db/id]
+                                         [:seon.test/sym t]))]
+              (is (= #{other} (set (map :e datoms)))
+                  (str "only the changed result's row is touched: "
+                       (pr-str datoms)))
+              (is (= #{:seon.test/pass-count} (set (map :a datoms)))
+                  (pr-str datoms))
+              (is (= [2] (mapv :v (filter :added datoms)))
+                  (pr-str datoms)))))))))
+
+(deftest a-changed-reach-member-retracts-only-itself
+  ;; The membership is replaced member by member: a dropped member retracts
+  ;; itself and every retained member writes nothing. A whole-attribute
+  ;; retraction is what made an unchanged 1000-member closure cost 2000
+  ;; datoms per run.
+  (support/with-database
+    (fn [connection]
+      (let [s "member.facts/check" a "member.facts/a" b "member.facts/b"]
+        (is (:db-after (transact! connection
+                        [{:db/id "a" :seon.fn/sym a}
+                         {:db/id "b" :seon.fn/sym b}
+                         {:seon.test/sym s :seon.fn/calls ["a" "b"]}])))
+        (let [tested (db/db connection)
+              run (runner/provenance tested)
+              captured (fn [members]
+                         {:seon.test.run/provenance run
+                          :seon.test/run-basis-t (:seon.test.run/basis-t run)
+                          :seon.test/run-at (:seon.test.run/at run)
+                          :seon.test/reach-digests
+                          (runner/reach-digests tested [s])
+                          :seon.test/reaches
+                          {s (mapv #(vector :seon.fn/sym %) members)}
+                          :seon.test.runner/results
+                          [{:seon.test/sym s :seon.test/pass-count 1
+                            :seon.test/fail-count 0 :seon.test/error-count 0}]})]
+          (is (seq (record-tx-data connection (captured [s a b]))))
+          (let [datoms (record-tx-data connection (captured [s a]))
+                dropped (:db/id (db/pull (db/db connection) [:db/id]
+                                         [:seon.fn/sym b]))]
+            (is (= [:seon.test/reach] (distinct (map :a datoms))) (pr-str datoms))
+            (is (= 1 (count datoms)) (pr-str datoms))
+            (is (false? (:added (first datoms))) (pr-str datoms))
+            (is (= dropped (:v (first datoms))) (pr-str datoms)))
+          (is (= #{s a} (set (db/q '[:find [?s ...] :in $ ?test
+                                     :where [?t :seon.test/sym ?test]
+                                            [?t :seon.test/reach ?f]
+                                            [?f :seon.fn/sym ?s]]
+                                   (db/db connection) s)))))))))
