@@ -130,12 +130,14 @@
                 result (runner/run-var! v)
                 transported (#'runner/completion-reach-digests
                               (assoc provenance :seon.test/reach-digests {s digest}
+                                     :seon.test/reaches (runner/reach-memberships tested [s])
                                      :seon.test.runner/results [result]))]
             (is (:db-after (db/transact! connection
                              [[:db/add [:seon.test/sym s] :seon.test/source
                                "(clojure.test/deftest probe (clojure.test/is (= 1 1)))"]])))
             (let [completion {:seon.test.runner/results [result]
                               :seon.test/reach-digests (:seon.test/reach-digests transported)
+                              :seon.test/reaches (:seon.test/reaches transported)
                               :seon.test.run/provenance provenance
                               :seon.test/run-basis-t (:seon.test.run/basis-t provenance)
                               :seon.test/run-at (:seon.test.run/at provenance)}

@@ -1476,6 +1476,9 @@
        node-parts (sort-by first (map (fn [e] (let [r (get rows e)] [(or (::reach-symbol r) (str e)) (::reach-leaf r)])) (::reach-ids nodes)))
        schema-parts (sort-by first (map (fn [k] [k (get-in rows [(get schemas k) ::reach-leaf])]) schema-keys))]
   {::reach-digest (id/digest 64 [test-symbol (vec node-parts) (vec schema-parts)])
+   ::reach-refs (into [] (comp (keep #(get-in rows [% :seon.fn/sym]))
+                              (map #(vector :seon.fn/sym %)))
+                      (sort (::reach-ids nodes)))
    ::reach-dependencies (into (into (::reach-ids nodes) (::reach-missing nodes))
                              (concat [[::reach-symbol test-symbol]] (map #(vector ::reach-schema %) schema-keys)))
    ::reach-function-count (count (::reach-ids nodes))}))
@@ -1484,12 +1487,10 @@
      (when-let [projection (db/carried-projection database)]
       (schema/projection-cache-value projection
        [::reach-cache (:config database)] #(atom nil)))))
-(defn reach-digests
+(defn- reach-entries
  "Derive selected reach digests, incrementally on the database's carried cache.
  Result-only transactions invalidate nothing. A cache retains only one basis;
  older or different branch values derive independently and never replace it."
- {:malli/schema [:=> [:cat :seon.db/database-value [:vector :seon.test/sym]]
-                  [:or [:map-of :seon.test/sym :seon.source/digest] :seon.error/value]]}
  [database test-symbols]
  (try
  (let [holder (reach-cache database)
@@ -1498,7 +1499,7 @@
        derive-index (fn [previous]
                 (let [index (if (= (db/basis-t database) (::reach-basis previous))
                               previous (reach-refresh database previous))
-                      missing (remove #(get-in index [::reach-digests %]) test-symbols)
+                      missing (remove #(get-in index [::reach-digests % ::reach-refs]) test-symbols)
                       index (reduce (fn [i s] (assoc-in i [::reach-digests s] (reach-entry i s))) index missing)]
                  (assoc index ::reach-config configuration ::reach-value-identity value-identity ::reach-computed (count missing))))]
   (if holder
@@ -1510,12 +1511,30 @@
           index (derive-index (when usable previous))]
      (when (and value-identity (or usable (nil? previous)))
       (alter-meta! holder assoc ::reach-index index))
-     (into {} (map (fn [s] [s (get-in index [::reach-digests s ::reach-digest])])) test-symbols)))
+     (select-keys (::reach-digests index) test-symbols)))
    (let [index (derive-index nil)]
-    (into {} (map (fn [s] [s (get-in index [::reach-digests s ::reach-digest])])) test-symbols))))
+    (select-keys (::reach-digests index) test-symbols))))
  (catch Exception failure
   {:seon.error/kind :seon.test/unknown :seon.test/unknown "reach digest"
    :seon.error/message (str "Reach digest unavailable: " (ex-message failure))})))
+
+(defn reach-digests
+  "Derive equality keys from the tested database's incremental reach index."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:vector :seon.test/sym]]
+                  [:or :seon.test/reach-digests :seon.error/value]]}
+  [database test-symbols]
+  (let [entries (reach-entries database test-symbols)]
+    (if (:seon.error/kind entries) entries
+        (into {} (map (fn [[s entry]] [s (::reach-digest entry)])) entries))))
+
+(defn reach-memberships
+  "The tested closure's function identities as portable lookup refs."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:vector :seon.test/sym]]
+                  [:or :seon.test/reaches :seon.error/value]]}
+  [database test-symbols]
+  (let [entries (reach-entries database test-symbols)]
+    (if (:seon.error/kind entries) entries
+        (into {} (map (fn [[s entry]] [s (::reach-refs entry)])) entries))))
 
 (defn program-digest
   "Identify the tested program from its source seal and current program facts.
@@ -1595,12 +1614,20 @@
    {results :seon.test.runner/results
     run :seon.test.run/provenance
     tested-database :seon.db/db
-    carried-digests :seon.test/reach-digests}]
+    carried-digests :seon.test/reach-digests
+    carried-reaches :seon.test/reaches}]
   (let [tested (or tested-database
                    (when (= (:seon.test.run/branch run) (get-in database [:config :branch]))
                      (db/as-of database (:seon.test.run/basis-t run))))
         digests (or carried-digests
                     (when tested (reach-digests tested (mapv :seon.test/sym results))))
+        reaches (or carried-reaches
+                    (when tested (reach-memberships tested (mapv :seon.test/sym results))))
+        _ (when (or (:seon.error/kind reaches)
+                    (some #(not (vector? (get reaches (:seon.test/sym %)))) results))
+            (throw (ex-info "The completion lacks its tested database reach membership."
+                            {:seon.error/kind :seon.test.run/unavailable
+                             :seon.test.run/unavailable true})))
         _ (when (or (:seon.error/kind digests)
                     (some #(not (string? (get digests (:seon.test/sym %)))) results))
             (throw (ex-info "The completion lacks its tested database reach digests."
@@ -1635,6 +1662,7 @@
               (cond-> (assoc result
                              :seon.test/run "test-run"
                              :seon.test/reach-digest (get digests test-symbol)
+                             :seon.test/reach (get reaches test-symbol)
                              :seon.test/run-basis-t basis-t
                              :seon.test/run-at at)
                 (not exists?)
@@ -1645,6 +1673,8 @@
                    :seon.test/failing-assertions]
                   [:db.fn/retractAttribute test-ref
                    :seon.test/failure-message])
+            exists?
+            (conj [:db.fn/retractAttribute test-ref :seon.test/reach])
             true (conj result-row))))
       results))))
 
@@ -1671,7 +1701,9 @@
         completion (if tested
                      (assoc (dissoc completion :seon.db/db)
                             :seon.test/reach-digests
-                            (reach-digests tested (mapv :seon.test/sym results)))
+                            (reach-digests tested (mapv :seon.test/sym results))
+                            :seon.test/reaches
+                            (reach-memberships tested (mapv :seon.test/sym results)))
                      completion)
         transaction-report
         (if (:seon.error/kind database)
@@ -1703,7 +1735,7 @@
 (defn- completion-reach-digests
   "Carry reach evidence from the canonical fixture's tested program across a JVM boundary."
   [run-result]
-  (if (:seon.test/reach-digests run-result)
+  (if (and (:seon.test/reach-digests run-result) (:seon.test/reaches run-result))
     run-result
     ((requiring-resolve 'seon.test-support/with-database)
      (fn [connection]
@@ -1717,7 +1749,9 @@
                        (mapv :seon.test/sym (:seon.test.runner/results run-result)))]
          (when (:seon.error/kind digests)
            (throw (ex-info (:seon.error/message digests) digests)))
-         (assoc run-result :seon.test/reach-digests digests))))))
+         (assoc run-result :seon.test/reach-digests digests
+                :seon.test/reaches (reach-memberships database
+                                   (mapv :seon.test/sym (:seon.test.runner/results run-result)))))))))
 
 (defn record!
   "Commit one runner completion into an explicitly named, non-default cluster."
@@ -1739,6 +1773,7 @@
       (let [connection (:seon.boot/cluster-connection instance)
             completion
             {:seon.test/reach-digests (:seon.test/reach-digests run-result)
+             :seon.test/reaches (:seon.test/reaches run-result)
              :seon.test.runner/results
              (:seon.test.runner/results run-result)
              :seon.test/run-basis-t (:seon.test.run/basis-t run-result)
@@ -1758,6 +1793,7 @@
   ((requiring-resolve 'seon.cluster.source/record-results!)
    held-store
    {:seon.test/reach-digests (:seon.test/reach-digests run-result)
+    :seon.test/reaches (:seon.test/reaches run-result)
     :seon.test.runner/results (:seon.test.runner/results run-result)
     :seon.test/run-basis-t (:seon.test.run/basis-t run-result)
     :seon.test/run-at (:seon.test.run/at run-result)

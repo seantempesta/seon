@@ -288,13 +288,18 @@
                     :seon.test/failing-assertions :seon.test/failure-message
                     {:seon.test/run [:seon.test.run/id]}]
                      (get (:schema previous) :seon.test/reach-digest)
-                     (conj :seon.test/reach-digest))]
+                     (conj :seon.test/reach-digest)
+                     (get (:schema previous) :seon.test/reach)
+                     (conj {:seon.test/reach [:seon.fn/sym]}))]
       (into (mapv #(dissoc (db/pull previous '[*] %) :db/id) runs)
             (map (fn [test]
                    (let [row (dissoc (db/pull previous selector test) :db/id)]
-                     (assoc row :seon.test/run
+                     (cond-> (assoc row :seon.test/run
                             [:seon.test.run/id
-                             (get-in row [:seon.test/run :seon.test.run/id])]))))
+                             (get-in row [:seon.test/run :seon.test.run/id])])
+                       (:seon.test/reach row)
+                       (update :seon.test/reach
+                               #(mapv (fn [f] [:seon.fn/sym (:seon.fn/sym f)]) %))))))
             results))))
 
 (defn- record-results-at-head!

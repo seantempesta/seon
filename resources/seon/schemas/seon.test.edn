@@ -1,4 +1,6 @@
 #:seon.test{:ns :seon.db/ref,
+            :reach [:vector {:seon.db/cardinality :many} :seon.db/ref],
+            :reaches [:map-of :seon.test/sym :seon.test/reach],
             :reach-digest [:and {:seon.db/identity false} :seon.source/digest],
             :reach-digests [:map-of :seon.test/sym :seon.test/reach-digest],
             :skipped-count [:int {:min 0}],
@@ -46,6 +48,7 @@
              [:seon.test/fail-count :seon.test/fail-count]
              [:seon.test/error-count :seon.test/error-count]
              [:seon.test/reach-digest {:optional true} :seon.test/reach-digest]
+             [:seon.test/reach {:optional true} :seon.test/reach]
              [:seon.test/run-basis-t :seon.test/run-basis-t]
              [:seon.test/run-at :seon.test/run-at]
              [:seon.test/run {:optional true}
@@ -68,6 +71,7 @@
              [:seon.test/ns {:optional true} :seon.test/ns]
              [:seon.test/source {:optional true} :seon.test/source]
              [:seon.test/reach-digest {:optional true} :seon.test/reach-digest]
+             [:seon.test/reach {:optional true} :seon.test/reach]
              [:seon.fn/calls {:optional true} :seon.fn/calls]
              [:seon.fn/call-arities {:optional true} :seon.fn/call-arities]
              [:seon.fn/writes {:optional true} :seon.fn/writes]
