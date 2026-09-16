@@ -26,7 +26,7 @@
               (catch Throwable failure (deliver outcome failure))
               (finally (.countDown finished)))))
         (try
-          (let [database @connection
+          (let [database (db/db connection)
                 result (try
                          (sut/run test-var connection
                            {:seon.db/db database
