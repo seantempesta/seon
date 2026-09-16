@@ -1,0 +1,6 @@
+[
+#:seon.test{:fail-count 0, :pass-count 6, :run-at #inst "2026-09-16T02:59:25.273-00:00", :reach-digest "bba12d4a34d21ffc01cced6c83db9c0f87dd8fed34aa5ceae15dfea7d1a0c6ec", :run #:db{:id 48355}, :run-basis-t 536871143, :error-count 0, :sym "seon.cluster.turn-test/a-partial-stream-truncation-is-a-durable-nonfailure-attempt-fact"}
+#:seon.test{:fail-count 0, :pass-count 15, :run-at #inst "2026-09-16T02:59:34.418-00:00", :reach-digest "8faa771b9f024f4ff00e540f4a82f60a7aca3ac7adcc55eadd6d1a01639a2d10", :run #:db{:id 48357}, :run-basis-t 536871145, :error-count 0, :sym "seon.cluster.turn-test/an-unpaid-failure-with-a-backup-makes-exactly-two-calls"}
+#:seon.test{:fail-count 0, :pass-count 9, :run-at #inst "2026-09-16T02:59:30.127-00:00", :reach-digest "0b418eb5023e9a385145a2ca1a89d9110ae1d4d4245aab4e82cc5b141fca6ae8", :run #:db{:id 48356}, :run-basis-t 536871144, :error-count 0, :sym "seon.cluster.turn-test/reasoning-only-time-limit-persists-its-flat-diagnostic"}
+#:seon.test{:fail-count 0, :pass-count 6, :run-at #inst "2026-09-16T02:59:38.825-00:00", :reach-digest "9bf178ebf962111b4fe803c43323cb2e191bba7af7abd13f12019645a9f11a89", :run #:db{:id 48358}, :run-basis-t 536871146, :error-count 0, :sym "seon.sci.eval-test/one-unloadable-row-cannot-prevent-cold-acquisition"}
+]

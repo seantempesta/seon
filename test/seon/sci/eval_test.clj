@@ -25,6 +25,7 @@
             [seon.blob :as blob]
             [seon.db :as db]
             [seon.env :as env]
+            [seon.error :as error]
             [seon.fn :as seon.fn]
             [seon.instrument :as instrument]
             [seon.program :as program]
@@ -1279,13 +1280,14 @@
       (eval/acquire!
        {:seon.sci.eval/ctx ctx, :seon.db/db (db/db connection)})
       refusal
-      (first
+      (error/latest-fact
+       (first
        (db/q
         '[:find
-          [(pull ?error [*]) ...]
+          [(pull ?error [* {:seon.error/occurrences [*]}]) ...]
           :where
           [?error :seon.error/kind :seon.sci.eval/acquisition-refused]]
-        (db/db connection)))]
+        (db/db connection))))]
      (is
       (= 42 (sci/eval-string* ctx "(acquire.poison/good 41)"))
       "a later valid row installs and works")

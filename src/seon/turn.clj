@@ -3775,7 +3775,8 @@
 
 (defn- record-attempt!
   "Commit ONE model attempt and its error or truncation facts.
-  Returns the committed error fact, nil on success, or a typed transaction refusal.
+  Returns the error owner's prepared diagnostic after commit, nil on success,
+  or a typed transaction refusal.
 
   The error fact and the attempt row ride ONE transaction, with the
   attempt's `:seon.ai.attempt/error` pointing at the fact through the
@@ -3832,15 +3833,15 @@
         attribution {:seon.agent/id agent-id
                      :seon.turn/id run-id}
         failure-recording (when failure
-                            (error-tx cluster db failure now attribution))
+                            (error/recording cluster db failure now attribution))
         truncation-recording
         (cond
           (nil? truncation) nil
           (= truncation failure) failure-recording
-          :else (error-tx cluster db truncation now attribution))
-        recording (into (vec failure-recording)
+          :else (error/recording cluster db truncation now attribution))
+        recording (into (vec (:seon.db/tx-data failure-recording))
                         (when (not= truncation failure)
-                          truncation-recording))
+                          (:seon.db/tx-data truncation-recording)))
         row (cond-> (merge
                      {:db/id "attempt"
                       :seon.ai.attempt/id (attempt-id run-id ordinal)
@@ -3858,10 +3859,10 @@
               ;; no stored :success/:error label restating that.
               failure-recording
               (assoc :seon.ai.attempt/error
-                     (:db/id (first failure-recording)))
+                     (:db/id (first (:seon.db/tx-data failure-recording))))
               truncation-recording
               (assoc :seon.ai.attempt/truncation
-                     (:db/id (first truncation-recording)))
+                     (:db/id (first (:seon.db/tx-data truncation-recording))))
               settings-ref (assoc :seon.ai.attempt/settings settings-ref)
               model-ref (assoc :seon.ai.attempt/model model-ref)
               settings
@@ -3897,7 +3898,7 @@
                                      [:db/add [:seon.turn/id run-id] :seon.turn/attempts "attempt"]) observation-tx))))]
     (if (:seon.error/kind outcome)
       outcome
-      (some-> failure-recording first (dissoc :db/id)))))
+      (:seon.error/fact failure-recording))))
 
 (defn- fold-evaluations
   "One run's evaluation entities, ordinal order, in ONE query.

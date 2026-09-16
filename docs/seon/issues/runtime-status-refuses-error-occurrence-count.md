@@ -29,3 +29,8 @@ value and installed contract on a converged publication before attributing
 this to an implementation or adoption defect. The sanctioned status surface
 must either return its health data or retain an evidence-complete refusal.
 See [the lane record](../../prds/context-generation/research/turn-test-reds-2026-09-16.md).
+
+Batch-19 continuation, 2026-09-16 02:37 UTC: default PID 7595 remains alive,
+but MCP runtime status again refuses the occurrence count, now at signature
+index 4. Direct read-only JVM evaluation succeeds and confirms cluster custody
+and loaded test namespaces. The protected problem/error owners are unchanged.

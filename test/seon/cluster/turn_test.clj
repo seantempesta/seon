@@ -1964,13 +1964,31 @@
        (sort-by :seon.ai.attempt/ordinal)
        vec))
 
+(defn- durable-fact
+  "Acquire occurrence evidence and project the committed diagnostic."
+  [database error-ref]
+  (let [fact (error/latest-fact
+              (db/pull database
+                       '[* {:seon.error/fn [:seon.fn/sym]
+                            :seon.error/occurrences
+                            [* {:seon.error.occurrence/turn [:seon.turn/id]
+                                :seon.error.occurrence/agent [:seon.agent/id]}]}]
+                       error-ref))]
+    (cond-> (dissoc fact :db/id)
+      (:seon.error/run fact)
+      (assoc :seon.error/run
+             [:seon.turn/id (get-in fact [:seon.error/run :seon.turn/id])])
+      (:seon.error/agent fact)
+      (assoc :seon.error/agent
+             [:seon.agent/id (get-in fact [:seon.error/agent :seon.agent/id])]))))
+
 (defn- derived-disposition
   "Re-derive what the loop decided, from durable facts alone.
   The attempt's error fact carries the evidence, and the backup role is
   the `failover-from` connection — a stored disposition would only
   restate this derivation (owner ruling 2026-07-28)."
   [db row backup-configured?]
-  (let [fact (db/pull db '[*] (:db/id (:seon.ai.attempt/error row)))
+  (let [fact (durable-fact db (:db/id (:seon.ai.attempt/error row)))
         value (semantic-result (:seon.error/data-edn fact))]
     (ai/disposition
      {:seon.error/value value
@@ -1978,26 +1996,6 @@
                         (and backup-configured?
                              (not (contains? row
                                              :seon.ai.attempt/failover-from))))})))
-
-(defn- durable-fact
-  "The committed error fact, read BACK OUT of the database.
-  The two refs are restored to the lookup-ref shape `normalize` emitted,
-  because the projection reads them that way — this is deliberately the
-  DURABLE row rather than the value the loop happened to hold, so the
-  assertion proves the fact was committed before the prose was derived."
-  [db error-id]
-  (let [pulled (db/pull db '[* {:seon.error/run [:seon.turn/id]
-                               :seon.error/agent [:seon.agent/id]}]
-                       [:seon.error/id error-id])]
-    (cond-> (dissoc pulled :db/id)
-      (:seon.error/run pulled)
-      (assoc :seon.error/run
-             [:seon.turn/id
-              (:seon.turn/id (:seon.error/run pulled))])
-      (:seon.error/agent pulled)
-      (assoc :seon.error/agent
-             [:seon.agent/id
-              (:seon.agent/id (:seon.error/agent pulled))]))))
 
 (deftest one-successful-call-leaves-exactly-one-attempt-fact
   (with-cluster fake-evaluate
@@ -2114,8 +2112,7 @@
                     database attempt-id)
               row (db/pull database '[*]
                            [:seon.ai.attempt/id attempt-id])
-              fact (db/pull database '[*]
-                            [:seon.error/id truncation-id])]
+              fact (durable-fact database [:seon.error/id truncation-id])]
           (is (= 1 (count @requests)))
           (is (string? attempt-id)
               "the query finds the attempt by truncation-fact presence")
@@ -2201,8 +2198,7 @@
         (with-redefs [ai/complete (recording-completer requests [failure])]
           (drive! cluster 10))
         (let [[row :as rows] (attempt-rows @connection)
-              error-fact (db/pull @connection '[*]
-                                  (:db/id (:seon.ai.attempt/error row)))
+              error-fact (durable-fact @connection (:db/id (:seon.ai.attempt/error row)))
               recorded (semantic-result (:seon.error/data-edn error-fact))]
           (is (= 1 (count @requests)))
           (is (= 1 (count rows)))
@@ -2257,7 +2253,7 @@
                                     (db/q '[:find ?e . :where
                                            [?e :seon.error/id _]]
                                          @connection)))
-                  fact (durable-fact @connection error-id)]
+                  fact (durable-fact @connection [:seon.error/id error-id])]
               (is (= (error/ai-prose
                       (error/notice {:seon.error/fact fact
                                      :seon.error/reason :failover}))
