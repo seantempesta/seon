@@ -845,8 +845,14 @@
   derived from the same config the handler reads."
   [connection]
   (let [effective (config/effective (db/db connection) "default")
-        working (java.io.File. ^String (:seon.config.fs/working-root effective))
-        scratch (java.io.File. working "tmp")
+        working (:seon.config.fs/working-root effective)
+        _ (when-not (string? working)
+            (throw (ex-info
+                    (str "This fixture's cluster declares no "
+                         ":seon.config.fs/working-root; seed the compiled "
+                         "config row before asking for a path inside it.")
+                    {:seon.config.fs/working-root working})))
+        scratch (java.io.File. ^String working "tmp")
         _ (.mkdirs scratch)
         directory (.toFile (java.nio.file.Files/createTempDirectory
                             (.toPath scratch) "seon-effect-facts"

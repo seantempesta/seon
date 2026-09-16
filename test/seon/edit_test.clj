@@ -228,15 +228,27 @@
 
   `:seon.config.fs/roots` is what `my.fs` admits, so a fixture writing to the
   system temp directory is refused before any capability runs — the root is
-  derived here from the same config the handler reads, never assumed."
+  derived here from the same config the handler reads, never assumed. An
+  ABSENT root is a refusal naming the fixture's own omission: handing
+  `(java.io.File. nil)` a missing dial is the fixture reading absence as a
+  value, and its NullPointerException says nothing about the cluster the
+  fixture forgot to seed."
   [connection prefix]
   (let [effective (config/effective (db/db connection) "default")
-        working (java.io.File. ^String (:seon.config.fs/working-root effective))
-        scratch (java.io.File. working "tmp")]
-    (.mkdirs scratch)
-    (.toFile (Files/createTempDirectory
-              (.toPath scratch) prefix
-              (into-array java.nio.file.attribute.FileAttribute [])))))
+        working (:seon.config.fs/working-root effective)]
+    (when-not (string? working)
+      (throw (ex-info
+              (str "This fixture's cluster declares no "
+                   ":seon.config.fs/working-root, so no path it writes can be "
+                   "inside a declared filesystem root. Seed the compiled "
+                   "config row with `seed-write-back-cluster!`.")
+              {:seon.config.fs/working-root working
+               :seon.config.fs/roots (:seon.config.fs/roots effective)})))
+    (let [scratch (java.io.File. ^String working "tmp")]
+      (.mkdirs scratch)
+      (.toFile (Files/createTempDirectory
+                (.toPath scratch) prefix
+                (into-array java.nio.file.attribute.FileAttribute []))))))
 
 (defn- indexed-fixture-file!
   "Write one real Clojure file and index it with the production indexer."
@@ -268,11 +280,25 @@
    :seon.effect/counter (atom -1)})
 
 (defn- seed-write-back-cluster!
+  "Seed the whole world an edit needs: the compiled config row, the agent,
+  and the open turn its requests belong to.
+
+  THE CONFIG ROW IS NOT OPTIONAL. `seon.fs.jvm` reads
+  `:seon.config.fs/roots` and `:seon.config.fs/working-root` from the
+  cluster's own facts; a branch with no config row declares neither, so in a
+  cold worker every path is outside every root and the refusal that reaches
+  the agent is not the one under test. `compile-manifest` fills the declared
+  defaults, exactly as `bin/seon config apply` does in production."
   [connection]
   (let [report
         (db/transact!
          connection
-         [{:seon.agent/id "edit-agent"}
+         [(:seon.config/desired-row
+           (config/compile-manifest
+            {:seon.boot/cluster-name "default"
+             :seon.config/manifest
+             {:seon.config.effect.background/time-limit-ms 60000}}))
+          {:seon.agent/id "edit-agent"}
           {:seon.turn/id "edit-run"
            :seon.turn/agent [:seon.agent/id "edit-agent"]
            :seon.turn/opened-tx "datomic.tx"}])]
