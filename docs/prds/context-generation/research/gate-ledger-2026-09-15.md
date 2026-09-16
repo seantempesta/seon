@@ -452,3 +452,18 @@ rejected the prepl operation`, including batch 40 on an idle pid 45917; the
 wrapper drops the rejection value. Opus read-only lane launched to capture
 the exact rejection by sending the recorder's own form to default and to
 verify the stale-head race hypothesis (`gate-recording-rejection-2026-09-16.md`).
+
+### 2026-09-16 15:10Z — recording rejection: the wrapper hides the cause (`bfb578efb`)
+
+Research verdict: the operator replaces a prepl `:exception` reply with the
+fixed sentence "The cluster rejected the prepl operation."
+(`script/seon/fresh_operator.clj:1605`) and the runner keeps only the message
+(`runner.clj:2007`), so the cause is unnameable from any log by
+construction. The recorder's form itself is GREEN on idle default over the raw
+prepl socket (2,010 ms, committed refs); every in-cluster failure returns as a
+value, so the `:exception` must come from prepl's own read/emit path
+(`src/seon/cluster.clj:478-495`). Falsified: the stale-head race (retried,
+diagnostic value) and a concurrent publication. Opus fix lane launched: the
+wrapper carries the cluster's cause, the notice prints it, regression
+replaces the stale-sentence assertion at `fresh_operator_test.clj:1776`;
+then one reproduction through the operator path to name the real cause.
