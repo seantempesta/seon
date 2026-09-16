@@ -128,7 +128,10 @@
          (str
            "Test execution failed: "
            (or (some-> failure ex-cause ex-message) (ex-message failure)))})
-      (finally (when-not (.isDone task) (.cancel task true))))))
+      ;; Expiry bounds observation. Interrupting a fixture during Datahike's
+      ;; permit handoff can abandon an already-granted roster permit. The
+      ;; daemon virtual thread must finish its resource scopes normally.
+      (finally (when-not (.isDone task) (.cancel task false))))))
 
 (defn run
   "Run one declared test Var, commit its result facts, and return them.\n\n  The connection is ordinarily supplied by call preparation from the calling\n  agent's environment. The returned value is pulled from the transaction's\n  `:db-after`, so it cannot disagree with the facts that were committed."
@@ -433,7 +436,7 @@
   run provenance or compute a program digest; no program was tested.
   Selection, loading, and execution
   share the total :seon.test/check-time-limit-ms fact; each test receives
-  the remaining allowance. Timeout requests interruption and reports it."
+  the remaining allowance. Timeout reports expiry without interrupting resource acquisition."
   {:malli/schema [:=> [:cat :seon.test/check-request]
                   [:or :seon.test/check-result :seon.error/value]]}
   [{connection :seon.db/connection cluster :seon.boot/cluster-name :as request}]
@@ -471,7 +474,7 @@
               (unknown @progress (str "Check failed at " @progress ": "
                                       (or (some-> failure ex-cause ex-message)
                                           (ex-message failure)))))
-            (finally (when-not (.isDone task) (.cancel task true))))))))
+            (finally (when-not (.isDone task) (.cancel task false))))))))
 
 (defn check-adoption
   "Check the last converged development adoption in this calling JVM.

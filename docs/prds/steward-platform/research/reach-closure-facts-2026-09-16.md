@@ -96,3 +96,31 @@ in progress; slice 4's render/read conversions and full regressions follow.
 Capture keeps exact claims, normalized site/ordinal identity, staged blobs,
 and total component replacement. Ordered contexts are ordinal/text tuples:
 Datahike cardinality-many cannot preserve vector ordering by itself.
+
+## Batch 34 corrections
+
+Read the gate report `tmp/orchestrator/gate-results/batch-34/named.md` and
+the interrupted-fixture issue end to end. Default PID 37572 answers MCP;
+the source adoption comparison remains a required precondition for testing.
+
+- Expiry bounds the observation without interrupting daemon fixture work.
+  Both `run` and `check` leave resource acquisition/cleanup uninterrupted.
+  `seon.test-expiry-test` holds the canonical fixture store's roster permit,
+  expires a nested test, then verifies its completion and a later fixture.
+  This removes this caller's interrupt leak; it does not claim to repair
+  Datahike's interrupt handling for other callers.
+- Rebuilding must preserve the destination branch, tested branch, membership
+  diagnostic, and failure components. The prior run equality expected the
+  publication branch despite the schema's explicit destination rule. The
+  regression now compares portable component facts across rebuilding.
+- Failure upserts resolve existing component identities in the transaction
+  writer, including surviving components whose parent was retracted.
+- Raw captured reports and durable result projections are distinct stages.
+  The public result equals the committed selector, including `reach-unknown`
+  and nested failure facts. Gate report elisions are presentation evidence,
+  not evidence that elision objects were committed.
+- Source recording retries each stale head from the fresh publication within
+  the declared test allowance. Three successive real competing publications
+  replace the regression's former expectation of a second-conflict refusal.
+
+Verification is pending below; no green result is inferred from these edits.
