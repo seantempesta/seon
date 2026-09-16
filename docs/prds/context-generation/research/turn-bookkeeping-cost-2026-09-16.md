@@ -968,3 +968,97 @@ provider calls occurred. The hot-loaded and re-armed candidate, run **71561**,
 **10/0/0**: opening cost **zero**, exactly **one** provider turn, zero budget
 remaining. Both tests loaded through the production test loader and ran with
 `seon.test/run` on futures. Final adopted verification follows.
+
+### Final verification boundary and deliverables
+
+Budget code commit: `97d1f69e0`. Slice-2 correction: `60e0ba923` (supersedes
+the unsafe source shortcut in `3594331c8`). Slice-1 measurement: `9ea0f5cd1`.
+
+Final namespace reload through `seon.test/with-test-loader`, hot-loaded budget
+form, and `seon.instrument/apply!`, followed by serial `seon.test/run` calls:
+
+| Test | Run | Pass / fail / error |
+|---|---:|---:|
+| `generated-opening-preserves-one-provider-turn-budget` | 73386 | 10 / 0 / 0 |
+| `delimiter-repair-is-span-local-and-precedes-intent` | 73389 | 20 / 0 / 0 |
+| `a-batched-turn-commits-only-queryable-definition-facts` | 73390 | 7 / 0 / 0 |
+
+The latter two tests are in `seon.cluster.turn-test`, as is the budget test.
+The final source retains the original complete batch analysis: no lost
+same-turn call edges are accepted for a performance gain. The <50 ms commit
+target and single-analysis optimization remain unachieved with the exact
+owner changes stated above.
+
+Two explicit `bin/seon init --dev default --changed src/seon/turn.clj
+--changed test/seon/cluster/turn_test.clj` attempts exited 1. The second waited
+behind PID 12595's publication, then refused source changes during analysis.
+At final read, default still recorded `6aaa62a7-41e6-5707-b0a8-dfef8347fb56`,
+and its indexed `episode-runs` source did not contain the new query.
+**There is no adopted proof.** These are hot-loaded, re-armed live-JVM proofs.
+Neither publication failure justifies touching another lane's process/files.
+
+Focused clj-kondo: **0 errors / 49 warnings**; `git diff --check` passes.
+Markdown's global hook reported 29 existing unrelated citation findings.
+No `bin/test`, `bin/test-fast`, test JVM, default restart/refork, scratch
+cluster, new cache, protected-file edit, or delegated agent was used.
+Both owned publication shells exited; all probe futures completed. Temporary
+probe files were removed after recording the evidence here.
+
+The four-line gate request is
+`tmp/orchestrator/gate-requests/turn-settlement-cost.txt`:
+`seon.cluster.turn-test`, `seon.turn-test`, `seon.cluster.evaluate-sources-test`,
+`platform`. The orchestrator owns that integration proof. The budget issue
+is archived with commit and live evidence; its protected arming-test comment
+still describes the historical budget-3 workaround and is explicitly left
+for that test's owner.
+
+### Reproduce the settlement size and writer attribution
+
+After acquiring the canonical base on a daemon future, reload the test through
+`seon.test/with-test-loader` and evaluate this form on a future. Retain its
+return and inspect after completion; do not force it inside the MCP deadline.
+The committed test contains the separate installation/write clocks and the
+same-turn edge assertion. This delegate records transaction counts and writer
+projection cost without changing their implementations.
+
+```clojure
+(future
+  (let [events (atom [])
+        settle @#'seon.turn/settle-batch!
+        transact @#'seon.db/transact!
+        projection @#'seon.schema/projection-from-database]
+    (with-redefs-fn
+      {#'seon.turn/settle-batch!
+       (fn [cluster requests]
+         (let [thread (Thread/currentThread)]
+           (with-redefs-fn
+             {#'seon.db/transact!
+              (fn [& arguments]
+                (let [started (System/nanoTime)
+                      result (apply transact arguments)]
+                  (when (= thread (Thread/currentThread))
+                    (swap! events conj
+                           {:probe/commit-ms (/ (- (System/nanoTime) started) 1e6)
+                            :probe/input (second arguments)
+                            :probe/datoms (count (:tx-data result))}))
+                  result))
+              #'seon.schema/projection-from-database
+              (fn [& arguments]
+                (let [started (System/nanoTime)
+                      result (apply projection arguments)]
+                  (swap! events conj
+                         {:probe/projection-ms (/ (- (System/nanoTime) started) 1e6)})
+                  result))}
+             #(settle cluster requests))))}
+      (fn []
+        {:probe/result
+         (seon.test/run
+           (#'seon.test/resolve-test
+             'seon.cluster.turn-test/delimiter-repair-is-span-local-and-precedes-intent)
+           (seon.operator/connection "default"))
+         :probe/events @events}))))
+```
+
+Projection observations may include other threads during the settlement
+window; the original row-level attribution above separately isolated the
+defining row. Transaction observations are restricted to the calling thread.
