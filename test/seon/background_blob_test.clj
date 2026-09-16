@@ -125,39 +125,48 @@
         (try
           (doseq [[ordinal size] (map-indexed vector sizes)]
             (testing (str size " invalid UTF-8 bytes")
-              (let [expected-ref
-                    [:seon.effect/id
-                     (pr-str ["binary-run" 0 ordinal])]
-                    result-ref
+              (let [result-ref
                     (binding [effect/*request-context* context]
                       (effect/request!
                        #'binary-capability
                        {:seon.background-blob-test/size size}
-                       {:seon.effect/background? true}))]
-                (is (= expected-ref result-ref) (pr-str result-ref))
-                (when (= expected-ref result-ref)
-                  (let [effect-id (second expected-ref)]
-                    (support/await-event!
-                     events
-                     [::settled ordinal]
-                     #(:seon.effect/to
-                       (db/pull (:db-after %)
-                                [:seon.effect/to]
-                                [:seon.effect/id effect-id])))
-                    (let [receipt
-                          (db/pull @connection
-                                   [:seon.effect/result-blob
-                                    :seon.effect/result-size]
-                                   result-ref)
-                          expected (invalid-utf8 size)
-                          actual
-                          (exact-bytes connection
-                                       (:seon.effect/result-blob receipt)
-                                       (:seon.effect/result-size receipt)
-                                       7)]
-                      (is (= size (:seon.effect/result-size receipt)))
-                      (is (string? (:seon.effect/result-blob receipt)))
-                      (is (Arrays/equals expected actual))))))))
+                       {:seon.effect/background? true}))
+                    ;; The writer mints the id (seon.id/digest over the
+                    ;; request's parts); the test asks the writer's own
+                    ;; facts which request this ref names instead of
+                    ;; spelling the id by hand.
+                    effect-id (when (and (vector? result-ref)
+                                         (= :seon.effect/id (first result-ref)))
+                                (second result-ref))]
+                (is (string? effect-id) (pr-str result-ref))
+                (when effect-id
+                  (support/await-event!
+                   events
+                   [::settled ordinal]
+                   #(:seon.effect/to
+                     (db/pull (:db-after %)
+                              [:seon.effect/to]
+                              [:seon.effect/id effect-id])))
+                  (let [receipt
+                        (db/pull @connection
+                                 [:seon.effect/ordinal
+                                  {:seon.effect/run [:seon.turn/id]}
+                                  :seon.effect/result-blob
+                                  :seon.effect/result-size]
+                                 result-ref)
+                        expected (invalid-utf8 size)
+                        actual
+                        (exact-bytes connection
+                                     (:seon.effect/result-blob receipt)
+                                     (:seon.effect/result-size receipt)
+                                     7)]
+                    (is (= {:seon.effect/ordinal ordinal
+                            :seon.effect/run {:seon.turn/id "binary-run"}}
+                           (select-keys receipt [:seon.effect/ordinal :seon.effect/run]))
+                        "the ref names this ordinal's request on the fixture's turn")
+                    (is (= size (:seon.effect/result-size receipt)))
+                    (is (string? (:seon.effect/result-blob receipt)))
+                    (is (Arrays/equals expected actual)))))))
           (finally
             (datahike/unlisten! connection listener-key)
             (async/close! events)
