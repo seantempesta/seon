@@ -146,3 +146,74 @@ reported health/Flow unknown. This is recorded in the existing
 [MCP timeout issue](../../../seon/issues/default-component-probe-times-out-after-adoption.md).
 `git diff --check` passed. Markdown hook feedback still includes unrelated
 gitlink citations in the agents-md audit; this lane did not edit that audit.
+
+## Renderer regression follow-up — 2026-09-16
+
+**Fixed and verified for row 11.** The new canonical regression evaluates real
+SCI source, crosses `settlement-projection` and `evaluation-facts`, commits with
+the existing settlement transaction, and pulls both the renderer symbol and
+function ref. A plain map passes the same path and has neither attribute.
+The former regression supplied the renderer by hand and therefore could not
+detect loss before settlement. This follow-up replaces that incomplete proof.
+
+The root cause is `563034709`: `seon.render.value/value-node*` added `(not ai?)`
+to its existing pair-selection entrance. Thus `prepare` had no selected
+renderer to hand `shown-result`; settlement preserved that absence. The fix
+removes that guard and restores the one existing declared-pair mechanism.
+The original result remains in SCI; callers explicitly requesting structural
+printing still use the existing `:seon.render.value/structural?` option. The
+structural-results regression now requests that option and retains all its
+attribute, bound, live-object and requery assertions. No new rendering path
+or clipping spot was added. `474234fb7` only changes inert-reference reads;
+it does not remove the selected renderer from settlement.
+
+Read-only default baseline reproduced 78 evaluations with zero renderer
+symbols/refs; `seon.plan/format-plan-ai` existed as function entity 6298.
+An immutable Datahike `with` probe with an absent function lookup ref rejected
+the entire transaction with `:entity-id/missing`, disproving silent omission
+of the two attributes. A no-renderer `evaluation-facts` request emitted only
+turn identity and ordinal. `turn.clj` needed no edit, so the error-graph lane's
+protected hunks were untouched.
+
+The candidate `value-node*` form and new regression were evaluated in the
+default JVM before source edits. The canonical fixture initially exposed a
+missing test `user` namespace row; that setup was corrected. A later assertion
+incorrectly compared raw shown text with the REPL response envelope for a plain
+map; it was corrected to compare the stored shown text directly. Final runs:
+
+| In-process test | Before file edit | After disk reload | Result |
+|---|---:|---:|---|
+| `seon.data-shapes-test/evaluation-renderer-is-a-program-reference` | 61944 | 62271 | 11 pass, 0 fail/error |
+| `seon.render.value-test/explicit-structural-results-retain-attributes-through-real-evaluation` | 61970 | 65245 | 68 pass, 0 fail/error |
+| `seon.render.value-test/block-pairs-remain-explicit` | — | 62190 | 15 pass, 0 fail/error |
+
+Every run used `(seon.test/run #'namespace/test
+(seon.operator/connection "default"))`. Runs 61936 and 61943 were the test
+development failures described above; run 61945 demonstrated the obsolete
+implicit-structural expectation (34 pass, 11 fail, 2 errors). There was no test
+JVM, fixture-global replacement, or default lifecycle operation.
+
+**Live virtual-turn proof:** default PID 7595, agent `renderer-facts-proof`,
+turn `d0ec099ed5ec`, closed at transaction 536871544. `(dir seon.repl)` produced
+evaluation `49e907fc33b9` with symbol `seon.repl/render-directory-ai` and ref
+7183 to that exact function row. `{:example/plain 1}` produced evaluation
+`d0caeb852edb` with neither attribute. The
+[probe forms and exact pull](attempt-renderer-probes-2026-09-16.edn)
+preserve this evidence. A separate newly recorded system plan evaluation
+`f9a3e0a36a42` also carried `seon.plan/format-plan-ai` and ref 6298.
+
+The first probe submitted Juniper turn `404bfad994bc`, but its already armed
+proc raised `:malli.core/invalid-schema` for `:seon.error/recording` before
+evaluating either form. That turn remains open; neither evaluation has a
+terminal result. The fresh proof agent used the normal armer and completed
+without operating Juniper's graph or editing its protected owners. Payload-free
+wakes of Juniper did not resolve the stale-schema boundary. No claim of full
+cluster health follows from the completed fresh-agent proof.
+
+The loaded changed function's metadata was `seon/render/value.clj:265` after
+publication, and the live result proves that behavior. Full adoption remained
+unconverged: stamp `6aa9fe1b-203b-5ca1-bea2-9047ea996105` versus published
+`6aaa0146-1d06-5369-94b1-d953bd377525`. This is a hot-reloaded-function proof,
+not a claim of whole-cluster adoption. `git diff --check` passed; the hook
+reported only existing shadow/redundant-let warnings after missing test
+requires were fixed. The orchestrator's serial gate remains external.

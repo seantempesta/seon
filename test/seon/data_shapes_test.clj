@@ -7,7 +7,8 @@
             [seon.turn :as turn]
             [seon.config :as config]
             [seon.ai :as ai]
-            [seon.repl :as repl]
+            [seon.render]
+            [seon.sci.eval]
             [seon.db :as db]
             [seon.context-blocks-fixture :as fixture]
             [seon.test-support :as support]))
@@ -310,30 +311,50 @@
 (deftest evaluation-renderer-is-a-program-reference
   (support/with-database
    (fn [connection]
+     (support/seed-cluster! connection "renderer-facts")
      (db/transact! connection
-       [{:seon.agent/id "renderer-facts"}
+       [{:seon.ns/name 'user}
+        {:seon.agent/id "renderer-facts"}
         {:seon.turn/id "renderer-facts-turn"
          :seon.turn/agent [:seon.agent/id "renderer-facts"]
          :seon.turn/opened-tx "datomic.tx"}])
-     (db/transact! connection
-       (turn/receipt-start-tx
-        {:seon.turn/id "renderer-facts-turn"
-         :seon.cluster.eval/ordinal 0 :seon.cluster.eval/at (java.util.Date.)}))
-     (let [facts (turn/evaluation-facts
-                  {:seon.turn/id "renderer-facts-turn"
-                   :seon.cluster.eval/ordinal 0
-                   :seon.sci.eval/evaluation {}
-                   :seon.turn.loop/settlement-evaluation
-                   {:seon.eval/renderer 'seon.repl/render-directory-ai :seon.eval/shown "saved"}})
-           result (db/transact! connection (turn/receipt-settle-tx facts))
-           row (db/q '[:find (pull ?e [:seon.eval/shown
-                                      {:seon.eval/renderer-fn [:seon.fn/sym]}]) .
-                       :where [?e :seon.cluster.eval/ordinal 0]]
-                     (db/db connection))]
-       (is (:db-after result) (pr-str result))
-       (is (= "seon.repl/render-directory-ai"
-              (get-in row [:seon.eval/renderer-fn :seon.fn/sym])))
-       (is (= "saved" (repl/response (repl/entity-emission row))))))))
+     (let [ctx (support/fork-cluster-ctx connection "renderer-facts")
+           configuration (support/effective-config)]
+       (doseq [[ordinal source expected] [[0 "(dir seon.repl)" 'seon.repl/render-directory-ai]
+                                          [1 "{:example/plain 1}" nil]]]
+         (db/transact! connection
+           (turn/receipt-start-tx
+            {:seon.turn/id "renderer-facts-turn"
+             :seon.cluster.eval/ordinal ordinal :seon.cluster.eval/at (java.util.Date.)}))
+         (let [evaluation (seon.sci.eval/evaluate
+                            {:seon.cluster.eval/source source
+                             :seon.sci.eval/ctx ctx :seon.db/db (db/db connection)
+                             :seon.render/profile (seon.render/agent-render-profile configuration)
+                             :seon.sci.admit/caps (config/result-caps configuration)
+                             :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms configuration)
+                             :seon.config/on-core-error :panic})
+               [settled] (turn/settlement-projection {:seon.db/connection connection} evaluation)
+               facts (turn/evaluation-facts
+                      {:seon.turn/id "renderer-facts-turn"
+                       :seon.cluster.eval/ordinal ordinal
+                       :seon.sci.eval/evaluation evaluation
+                       :seon.turn.loop/settlement-evaluation settled})
+               result (db/transact! connection (turn/receipt-settle-tx facts))
+               row (db/q '[:find (pull ?e [:seon.eval/shown :seon.eval/renderer
+                                           {:seon.eval/renderer-fn [:db/id :seon.fn/sym]}]) .
+                           :in $ ?ordinal
+                           :where [?e :seon.cluster.eval/ordinal ?ordinal]]
+                         (db/db connection) ordinal)]
+           (is (nil? (:seon.cluster.eval/error evaluation)) (pr-str evaluation))
+           (is (:db-after result) (pr-str result))
+           (is (= expected (:seon.eval/renderer row)))
+           (if expected
+             (do
+               (is (= (str expected) (get-in row [:seon.eval/renderer-fn :seon.fn/sym])))
+               (is (pos-int? (get-in row [:seon.eval/renderer-fn :db/id]))))
+             (is (empty? (select-keys row [:seon.eval/renderer :seon.eval/renderer-fn]))))
+           (is (= (:seon.eval/shown evaluation)
+                  (:seon.eval/shown row)))))))))
 
 (deftest listen-patterns-retain-optional-entity-and-logical-value
   (support/with-database

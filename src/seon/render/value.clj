@@ -285,7 +285,7 @@
                  total (assoc :seon.render.data/total total)
                  prefix (assoc :seon.print/prefix prefix))))
         exhausted? (and ai? (not (pos? @remaining)))
-        selected (when (and (not ai?) (map? value) (:seon.sci.eval/ctx unit)
+        selected (when (and (map? value) (:seon.sci.eval/ctx unit)
                             (not (get-in unit [:seon.render.value/options
                                               :seon.render.value/structural?])))
                    (let [node {:seon.print/face :seon.print/map :seon.print/entries []}
@@ -294,7 +294,7 @@
                      (when (not= node projected) projected)))]
     (when ai? (vswap! remaining dec))
     (cond
-      ;; Block pairs shape HTML; AI results retain the map's attributes.
+      ;; A declared pair shapes a reached value before structural limits apply.
       selected selected
 
       (and (coll? value) (not= 0 total) ai?

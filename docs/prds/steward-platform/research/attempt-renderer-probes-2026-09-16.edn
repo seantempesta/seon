@@ -1,0 +1,37 @@
+{:seon.probe/surface :mcp-jvm-default
+ :seon.probe/baseline {:seon.probe/evaluations 78
+                       :seon.probe/renderer-symbols 0
+                       :seon.probe/renderer-refs 0}
+ :seon.probe/virtual-source "(dir seon.repl)\n{:example/plain 1}"
+ :seon.probe/virtual-request
+ (let [instance (get (deref seon.operator.runtime/running-instances) "default")]
+   (seon.turn/virtual-turn!
+    {:seon.turn.loop/cluster (:seon.turn.loop/cluster instance)
+     :seon.agent/routing (:seon.agent/routing instance)
+     :seon.agent/id "renderer-facts-proof"
+     :seon.cluster.reply/text "(dir seon.repl)\n{:example/plain 1}"}))
+ :seon.probe/read
+ (seon.db/pull
+  (seon.db/db (seon.operator/connection "default"))
+  [:seon.turn/id :seon.turn/closed-tx
+   {:seon.cluster.eval/_run
+    [:seon.cluster.eval/id :seon.cluster.eval/source :seon.eval/renderer
+     {:seon.eval/renderer-fn [:db/id :seon.fn/sym]} :seon.cluster.eval/error]}]
+  [:seon.turn/id "d0ec099ed5ec"])
+ :seon.probe/result
+ {:seon.turn/id "d0ec099ed5ec"
+  :seon.turn/closed-tx {:db/id 536871544}
+  :seon.cluster.eval/_run
+  [{:seon.cluster.eval/id "49e907fc33b9"
+    :seon.cluster.eval/source "(dir seon.repl)"
+    :seon.eval/renderer seon.repl/render-directory-ai
+    :seon.eval/renderer-fn {:db/id 7183 :seon.fn/sym "seon.repl/render-directory-ai"}}
+   {:seon.cluster.eval/id "d0caeb852edb"
+    :seon.cluster.eval/source "{:example/plain 1}"}]}
+ :seon.probe/in-process-tests
+ [(seon.test/run
+   (var seon.data-shapes-test/evaluation-renderer-is-a-program-reference)
+   (seon.operator/connection "default"))
+  (seon.test/run
+   (var seon.render.value-test/explicit-structural-results-retain-attributes-through-real-evaluation)
+   (seon.operator/connection "default"))]}

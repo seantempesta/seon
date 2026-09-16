@@ -98,7 +98,7 @@
          (is (= (render-pair raw)
                 (render/render-ai (assoc request :seon.render/value raw)))))))))
 
-(deftest result-maps-retain-attributes-through-real-evaluation
+(deftest explicit-structural-results-retain-attributes-through-real-evaluation
   (support/with-database
    (fn [connection]
      (support/seed-cluster! connection "render-results")
@@ -134,6 +134,7 @@
                         {:seon.cluster.eval/source (pr-str (list 'seon.db/pull (list 'quote '[*]) lookup))
                          :seon.sci.eval/ctx ctx :seon.db/db database
                          :seon.render/profile profile :seon.repl/handle handle
+                         :seon.render.value/options {:seon.render.value/structural? true}
                          :seon.sci.admit/caps (config/result-caps configuration)
                          :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms configuration)
                          :seon.config/on-core-error :panic})
@@ -159,6 +160,7 @@
                (is (= original (sci/eval-form ctx (:seon.print/requery-form cut))))))
            (let [prepared (value/prepare
                             (assoc (render-request connection raw)
+                                   :seon.render.value/options {:seon.render.value/structural? true}
                                    :seon.render/profile profile :seon.repl/handle handle))]
              (is (= (value/render-ai-data prepared)
                     (value/render-ai-data (assoc prepared :seon.render.value/truncated? true))))
