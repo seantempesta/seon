@@ -329,3 +329,33 @@
       (is (= (concat (map #(vector ::opened %) (range acquired-count))
                      (map #(vector ::closed %) (reverse (range acquired-count))))
              @events)))))
+
+(deftest the-canonical-base-populates-from-an-empty-store
+  ;; THE COLD-GATE PROOF: a test JVM with no published base realizes this path
+  ;; at its first `with-database`. The population owner now hands its own
+  ;; declaration projection to every transaction it makes, so nothing here
+  ;; depends on an ambient binding the caller happened to hold; before that,
+  ;; the declarations transaction refused :seon.schema/missing-projection and
+  ;; every cold gate died at fixture setup (2026-09-16 blocker).
+  (let [create-base (ns-resolve 'seon.test-support 'create-base)
+        close-base! (ns-resolve 'seon.test-support 'close-base!)
+        base (create-base nil)]
+    (try
+      (let [connection (:seon.test-support/connection base)
+            database (db/db connection)]
+        (is (some? (db/carried-projection database))
+            "the fresh base carries the projection its writes validate against")
+        (is (seq (db/q '[:find [?key ...]
+                         :where [_ :seon.schema/key ?key]]
+                       database))
+            "with the canonical schema rows populated")
+        (is (seq (db/q '[:find [?sym ...]
+                         :where [_ :seon.fn/sym ?sym]]
+                       database))
+            "and the program graph indexed")
+        (is (string?
+             (db/q '[:find ?digest . :where [_ :seon.source/digest ?digest]]
+                   database))
+            "and the population sealed, which is the write that needed the
+             projection the connection carries"))
+      (finally (close-base! base)))))

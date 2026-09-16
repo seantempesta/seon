@@ -873,7 +873,19 @@
          "`current-src`; use export/import instead to preserve its data.")))
 
 (defn- declaration-changes
-  "Missing declarations, refusing non-accretive storage changes."
+  "Missing declarations, refusing non-accretive storage changes.
+
+  The comparison is the UNION of both declarations' storage facets. Selecting
+  only the keys the CURRENT declaration carries read a DROPPED facet as
+  compatible — the branch kept an installed `:db/unique` the bridge no longer
+  derives, and the stale identity surfaced much later as a program-indexing
+  conflict naming the wrong cause (2026-09-16,
+  `docs/seon/issues/adoption-misses-a-dropped-uniqueness-on-an-installed-attribute.md`).
+  Absence of the facet IS the signal, so it is compared rather than skipped.
+  Datahike's `:schema` entry holds exactly the declaration datoms transacted
+  for that attribute plus its `:db/ident`
+  (`reference-code/datahike/src/datahike/db/transaction.cljc:90`), so the two
+  maps are comparable once `:db/ident` is dropped."
   [db forms cluster-name]
   (into
    []
@@ -882,7 +894,7 @@
       (if-let [installed (get (:schema db) attribute)]
         (when-not
           (= (dissoc declaration :db/ident)
-            (select-keys installed (keys (dissoc declaration :db/ident))))
+             (dissoc installed :db/ident))
           (refused!
            (incompatible-declaration-message cluster-name attribute)
            (cond->
@@ -1352,32 +1364,44 @@
   choke point before any domain transaction. Missing declarations and
   canonical rows accrete; an incompatible declaration refuses loudly and
   names refork or export/import as the resolutions. A converged reopen issues
-  no transaction."
+  no transaction.
+
+  The population HANDS its transactions the projection its declarations come
+  from — the same projection write admission validates against — so a caller
+  that opened a branch without one (the canonical fixture base, the artifact
+  initializer) populates through this seam instead of refusing
+  `:seon.schema/missing-projection`. A projection the caller already handed
+  (`refresh-source!`'s declaration projection, a cluster's advanceable
+  projection state) wins, so this derives one only when nothing supplied it."
   [connection cluster-name]
   (let [forms (schema.edn/packaged-forms)]
     (schema/call-with-forms
      forms
      (fn []
-       (let [declarations
-             (declaration-changes (db/db connection) forms cluster-name)]
-         (when (seq declarations)
-           (require-committed!
-            (db/transact! connection {:tx-data declarations})
-            {:seon.boot/population :seon.schema/declarations})))
-       (let [process-rows (missing-process-rows (db/db connection))]
-         (when (seq process-rows)
-           (require-committed!
-            (db/transact! connection {:tx-data process-rows})
-            {:seon.boot/population :seon.db/processes})))
-       (let [schema-rows (schema-row-changes (db/db connection) forms)]
-         (when (seq schema-rows)
-           (require-committed!
-            (db/transact! connection
-                          {:tx-data schema-rows
-                           :tx-meta
-                           {:seon.db/process
-                            [:seon.db.process/id boot-process-identity]}})
-            {:seon.boot/population :seon.schema/rows}))))))
+       (schema/call-with-projection
+        (or (schema/handed-projection)
+            (schema/declaration-projection forms))
+        (fn []
+          (let [declarations
+                (declaration-changes (db/db connection) forms cluster-name)]
+            (when (seq declarations)
+              (require-committed!
+               (db/transact! connection {:tx-data declarations})
+               {:seon.boot/population :seon.schema/declarations})))
+          (let [process-rows (missing-process-rows (db/db connection))]
+            (when (seq process-rows)
+              (require-committed!
+               (db/transact! connection {:tx-data process-rows})
+               {:seon.boot/population :seon.db/processes})))
+          (let [schema-rows (schema-row-changes (db/db connection) forms)]
+            (when (seq schema-rows)
+              (require-committed!
+               (db/transact! connection
+                             {:tx-data schema-rows
+                              :tx-meta
+                              {:seon.db/process
+                               [:seon.db.process/id boot-process-identity]}})
+               {:seon.boot/population :seon.schema/rows}))))))))
   nil)
 
 (defn populate-source!
@@ -1389,7 +1413,12 @@
   the Datahike declarations of every registered database attribute, the
   core process entities the provenance refs resolve to (genesis data —
   bootstrap content lives in the source branch), and the canonical schema rows
-  asserted with that process provenance."
+  asserted with that process provenance.
+
+  Every transaction here is HANDED the one projection this population's
+  declarations come from — the same projection write admission validates
+  against — so the population never depends on its caller having bound one.
+  A caller that already handed a projection (`refresh-source!`) wins."
   {:malli/schema
    [:=> [:cat [:map [:seon.db/connection
                      :seon.db/connection]]]
@@ -1400,41 +1429,45 @@
     (schema/call-with-forms
      forms
      (fn []
-       (report-source-progress! "schema population started")
-       (accrete-schema-population! connection nil)
-       (report-source-progress! "schema population complete")
-       (report-source-progress! "instruction rows")
-       (let [rows (instruction-row-changes
-                   (db/db connection)
-                   (instruction/seed-rows))]
-         (when (seq rows)
-           (require-committed!
-            (db/transact! connection
-                          {:tx-data rows
-                           :tx-meta
-                           {:seon.db/process
-                            [:seon.db.process/id boot-process-identity]}})
-            {:seon.boot/population :seon.cluster.instruction/rows})))
-       (report-source-progress! "program rows started")
-       (seon.fn/index!
-        (cond-> {:seon.db/connection connection
-                 :seon.db/process
-                 [:seon.db.process/id boot-process-identity]}
-          manifest (assoc :seon.fn/manifest manifest)
-          (nil? manifest) (assoc :seon.fn/roots seon.fn/source-roots))
-        report-source-progress!)
-       (report-source-progress! "program rows complete")
-       ;; Initialization rows come LAST because they may name a program row
-       ;; by lookup ref — the call-preparation suppliers do — and program
-       ;; rows are asserted by `index!` immediately above. Nothing earlier in
-       ;; this population reads a config fact (`seon.fn` and
-       ;; `seon.cluster.instruction` name no config attribute), so the move
-       ;; costs no dependency and removes an ordering hazard that would
-       ;; otherwise force every declared row to predate the program graph.
-       (report-source-progress! "initialization rows")
-       (let [rows (config/default-population)]
-         (when (seq rows)
-           (transact-initialization! connection rows))))))
+       (schema/call-with-projection
+        (or (schema/handed-projection)
+            (schema/declaration-projection forms))
+        (fn []
+          (report-source-progress! "schema population started")
+          (accrete-schema-population! connection nil)
+          (report-source-progress! "schema population complete")
+          (report-source-progress! "instruction rows")
+          (let [rows (instruction-row-changes
+                      (db/db connection)
+                      (instruction/seed-rows))]
+            (when (seq rows)
+              (require-committed!
+               (db/transact! connection
+                             {:tx-data rows
+                              :tx-meta
+                              {:seon.db/process
+                               [:seon.db.process/id boot-process-identity]}})
+               {:seon.boot/population :seon.cluster.instruction/rows})))
+          (report-source-progress! "program rows started")
+          (seon.fn/index!
+           (cond-> {:seon.db/connection connection
+                    :seon.db/process
+                    [:seon.db.process/id boot-process-identity]}
+             manifest (assoc :seon.fn/manifest manifest)
+             (nil? manifest) (assoc :seon.fn/roots seon.fn/source-roots))
+           report-source-progress!)
+          (report-source-progress! "program rows complete")
+          ;; Initialization rows come LAST because they may name a program row
+          ;; by lookup ref — the call-preparation suppliers do — and program
+          ;; rows are asserted by `index!` immediately above. Nothing earlier in
+          ;; this population reads a config fact (`seon.fn` and
+          ;; `seon.cluster.instruction` name no config attribute), so the move
+          ;; costs no dependency and removes an ordering hazard that would
+          ;; otherwise force every declared row to predate the program graph.
+          (report-source-progress! "initialization rows")
+          (let [rows (config/default-population)]
+            (when (seq rows)
+              (transact-initialization! connection rows))))))))
   nil)
 
 ;;; ---------------------------------------------------------------------------

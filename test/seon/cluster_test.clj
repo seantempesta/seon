@@ -7,6 +7,7 @@
             [seon.db :as db]
             [seon.error :as error]
             [seon.schema :as schema]
+            [seon.schema.edn :as schema.edn]
             [seon.test-support :as test-support]))
 
 (def ^:private ordered-marker ::ordered)
@@ -122,3 +123,42 @@
             "with a caller frame that is not malli's own wrapper")
         (is (empty? (committed-fault-ids @connection))
             "and the refused call committed nothing")))))
+
+(deftest a-dropped-storage-facet-refuses-reopening-the-branch-in-place
+  ;; The canonical population is the installed declaration set, so the
+  ;; converged case asserts what production reopening does: no declaration
+  ;; change at all. Dropping a facet the branch still carries is the class
+  ;; this regression kills — comparing only the current declaration's keys
+  ;; read that absence as health and kept the stale uniqueness installed
+  ;; (2026-09-16 blocker: every publication then refused with "multiple
+  ;; entity identities" instead of naming the incompatible declaration).
+  (test-support/with-database
+    (fn [connection]
+      (let [database @connection
+            forms (schema.edn/packaged-forms)
+            changes (ns-resolve 'seon.cluster 'declaration-changes)
+            attribute :seon.test/reach-digest
+            installed (get (:schema database) attribute)]
+        (is (some? installed)
+            "the canonical population installs the subject attribute")
+        (is (not (contains? installed :db/unique))
+            "which the bridge derives WITHOUT uniqueness")
+        (is (= [] (schema/call-with-forms
+                   forms
+                   #(changes database forms "converged-fixture")))
+            "a converged branch reopens with no declaration change")
+        (let [stale (assoc-in database [:schema attribute :db/unique]
+                              :db.unique/identity)
+              refusal (test-support/refusal-data
+                       #(schema/call-with-forms
+                         forms
+                         (fn [] (changes stale forms "stale-fixture"))))]
+          (is (= :seon.boot/refused (:seon.error/kind refusal))
+              "a facet the current declaration no longer carries refuses")
+          (is (= attribute (:seon.boot/attribute (:seon.boot/offense refusal))))
+          (is (= :db.unique/identity
+                 (:db/unique (:seon.boot/installed (:seon.boot/offense refusal))))
+              "and the refusal carries the installed facet as evidence")
+          (is (str/includes? (:seon.error/message refusal)
+                             "bin/seon init stale-fixture --force")
+              "naming the refork that resolves it"))))))

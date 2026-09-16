@@ -211,11 +211,19 @@
    (cluster/populate-source!
     {:seon.db/connection connection
      :seon.fn/manifest @source-manifest}))
-  ;; `populate-source!` is the contents step used by production
-  ;; `source/publish!`; production seals that completed population in the
-  ;; following transaction. Keep this canonical fixture on the same side of
-  ;; that provenance boundary so indexed core contracts are not misclassified
-  ;; as agent-authored rows.
+  nil)
+
+(defn- seal-population!
+  "Seal the completed population, through the connection's carried projection.
+
+  `populate-source!` is the contents step used by production
+  `source/publish!`; production seals that completed population in the
+  following transaction. Keep this canonical fixture on the same side of that
+  provenance boundary so indexed core contracts are not misclassified as
+  agent-authored rows. This write happens AFTER the base carries its
+  projection state, because the writer validates against the projection its
+  connection carries (law 2.1) rather than one bound around the call."
+  [connection]
   (checked-fixture-result
    (db/transact!
     connection
@@ -268,18 +276,20 @@
             connection (d/connect configuration)]
         (try
           (when-not base (populate-database! connection))
-          (cond-> {:seon.test-support/configuration configuration
-                   :seon.test-support/connection connection
-                   :seon.sci.eval/ctx
-                   (let [database @connection
-                         projection (schema/projection-from-database database)
-                         state (sci.eval/projection-state database projection)]
-                     ;; The worker's bootstrap projection has schema forms,
-                     ;; but no populated function contracts. Carry this base's
-                     ;; actual program before cold SCI acquisition.
-                     (db/carry-connection-projection-state! connection state)
-                     (sci.eval/cluster-ctx (db/db connection) connection state))}
-            private-root (assoc ::private-root private-root))
+          ;; The worker's bootstrap projection has schema forms, but no
+          ;; populated function contracts. Carry this base's actual program
+          ;; ONCE, before the sealing write and cold SCI acquisition: both the
+          ;; writer and the ctx then take the projection the connection carries.
+          (let [database @connection
+                projection (schema/projection-from-database database)
+                state (sci.eval/projection-state database projection)]
+            (db/carry-connection-projection-state! connection state)
+            (when-not base (seal-population! connection))
+            (cond-> {:seon.test-support/configuration configuration
+                     :seon.test-support/connection connection
+                     :seon.sci.eval/ctx
+                     (sci.eval/cluster-ctx (db/db connection) connection state)}
+              private-root (assoc ::private-root private-root)))
           (catch Throwable failure
             (close-base! {::configuration configuration ::connection connection})
             (throw failure))))
