@@ -1056,6 +1056,13 @@ the four fenced transaction functions composed in ONE commit for the system
 turn, `record-evaluated-*` deleted. Awaiting the owner's answer on
 `recover-call` = a settlement with `interrupted-at`.
 
+**Detector render fixed** (`65986edf7`, reviewed): `render-ai` was handed the
+raw pulled row while `render-html` got the derived status; one `status-view`
+now serves both. **Orchestrator-only marker REMOVED (23:00Z):** it blocked
+`bin/test-fast` for lanes too, so lanes were committing untested; the two
+slots stay as the load cap. Gate commands still pass
+`SEON_TEST_ORCHESTRATOR=1` harmlessly.
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test

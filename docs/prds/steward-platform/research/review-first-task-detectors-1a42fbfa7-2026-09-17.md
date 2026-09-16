@@ -125,3 +125,17 @@ That assertion also expects `"(my.issue/status"` in the AI text, a string
 should decide that expectation against T3 in the same pass.
 
 **Gate requested:** `seon.issue.detect-test seon.issue-generate-test seon.issue-test`.
+
+### Orchestrator review of `65986edf7` (2026-09-16 23:00Z)
+
+Read the diff. Approved: one private `status-view` derives the issue view at
+`status` from the unit's own database for BOTH renders, dissolving the
+asymmetry `3772e2f68` introduced rather than copying the HTML branch into the
+AI one; the detector and its exact form come from the ref. Gate: with the
+batch-110 rerun.
+
+Operational change made on this evidence: the lane could not run
+`bin/test-fast` because `tmp/test-slots/orchestrator-only` (set 2026-09-15
+21:05Z) refuses every non-orchestrator invocation, `test-fast` included. That
+left lanes committing without any run. The marker is removed; the two-slot
+bound in `bin/_test-slot` remains the load cap.
