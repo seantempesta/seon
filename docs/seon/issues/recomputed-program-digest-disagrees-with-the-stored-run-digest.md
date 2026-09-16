@@ -1,7 +1,7 @@
 ---
 type: issue
 status: open
-severity: blocker
+severity: friction
 tags: [issue, test, provenance, wave/publication-provenance]
 created: 2026-09-16
 ---
@@ -45,3 +45,10 @@ the "rows touched since the seal" selection; ordering). Regression on the
 canonical fixture: record a run, then recompute from `(as-of db basis)` and
 assert equality; then change one function and assert inequality. Candidate
 owner: the test-provenance slice (`src/seon/test/runner.clj:1358`).
+
+## 2026-09-16 00:45Z — severity
+
+Downgraded from blocker to friction: the owner ruled that success predicates
+key on a per-test REACH digest recorded with each result (lane
+`reach-digest`), not on the whole-program digest, so this discrepancy is off
+the success path. It remains a provenance defect on `seon.test.run` rows.
