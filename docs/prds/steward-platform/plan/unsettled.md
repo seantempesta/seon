@@ -1098,6 +1098,19 @@ ref is refused loudly, never minted; issues resolve (positive fact) or are
 retracted. Awaiting the owner; then either relaunch or delete the
 tombstone/minting machinery in the reset.
 
+**23:40Z landed + reviewed:** `5ae2337d1`+`eec636a97` (pulled-ref: one ref
+schema, patches deleted, 80-schema class regression, session panel renders
+contract refusals; live prompt 21,708 bytes answers 200 — the owner can
+inspect agent 2393cac275ae's context at /agent/2393cac275ae/debug?prompt=true);
+`bb6673af4` (worker primes the fixture base before readiness: first db task
+16 s → ~1 s). Test-prep resumed on step 2 option 1 (clone compatible base +
+incremental publisher) after a one-line `shutdown-agents` exit fix. Platform-
+tier implementation relaunched (files free). Datahike deletion research also
+carries the owner's empty-set question (store what we want to retrieve: "was
+analyzed" is a positive fact on the row; zero edges is ordinary absence under
+it; component trees validate with their parent). `workaround-inventory` and
+`recompute-from-scratch-inventory` research running.
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
