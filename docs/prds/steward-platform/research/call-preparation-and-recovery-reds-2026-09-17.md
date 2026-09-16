@@ -217,3 +217,38 @@ recorded. The test booted and cleaned up its own isolated root
 (`tmp/boot-test/caff60ab-…`); the developer store was never a target and
 `default` stayed healthy (`bin/seon status`: 1/1 alive, pid 38993). Filed as
 [in-process-check-selects-declared-long-tests](../../../seon/issues/in-process-check-selects-declared-long-tests.md).
+
+## One more ugly-output defect at the same seam, fixed (`3e41a5d22`)
+
+Met while probing: every arity refusal rendered
+
+```
+seon.cluster.source/current refused argument count at []: expected the declared
+arglists, got an argument count of. Fix: Call one of the declared arglists.
+```
+
+`:seon.error/actual-description` for the arity problem was the bare prefix
+`"an argument count of"` while the message template reads `"… got <description>."`,
+so the one number the refusal exists to report never reached the sentence.
+Not new: `docs/prds/context-generation/research/turn-test-reds-batch28-evidence-2026-09-16.edn`
+records the identical truncation for `seon.test/stale`. Fixed by putting the
+count in the description. After adoption: `"… got an argument count of 0."`.
+No test asserted the old string.
+
+In-process after that change: `seon.instrument-test/a-sci-only-arity-miss-names-its-program-graph-arglists`
+6/0/0, `seon.error-test/diagnostic-construction-is-evidence-complete` 4/0/0,
+`seon.error-test/exact-dispatch-producers-carry-their-class-markers` 11/0/0.
+
+## The fix observed in the wild
+
+A genuine refusal raised during this lane's own probing, after adoption:
+
+```clojure
+:seon.error/diagnostic-offending
+[nil #datahike/Connection[… :cluster-default] {:seon.test.run/provenance …}]
+:seon.error/problems [#:seon.error{:path [] :argument "test-var" :offending nil …}]
+```
+
+`seon.test/run` called with a nil Var: the diagnostic now names the whole call —
+the nil Var, the connection and the options — while the per-problem leaf still
+carries the exact `nil` and its path. The old shape would have said `[nil]`.
