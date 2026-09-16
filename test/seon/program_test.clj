@@ -10,6 +10,7 @@
             [seon.fn.schema-shape :as schema-shape]
             [seon.program :as program]
             [seon.schema :as schema]
+            [seon.schema.edn :as schema.edn]
             [seon.schema.form :as schema.form]
             [seon.sci.reader :as reader]
             [seon.test-support :as test-support]))
@@ -1008,7 +1009,41 @@
            (set (rest (get forms :seon.program/source-attribute))))
         "the source-attribute enum does not drift from the declarations")))
 
-(deftest process-resolved-shapes-match-the-current-declarations
+(deftest resolved-shapes-match-the-current-declarations
   (is (= (program/shapes-in (schema/registered-schemas))
          (program/shapes))
-      "the shapes resolved once per process still describe the live declarations"))
+      "the shapes answered with none in hand still describe the live declarations"))
+
+(deftest a-declaration-added-after-the-first-call-is-a-cache-miss
+  ;; THE CLASS. `shapes` cached the authored declarations in a process-level
+  ;; defonce, so an attribute declared AFTER this JVM started was stripped
+  ;; from every row the indexer built until a restart: the runner lane
+  ;; declared :seon.test/long-ms, the analyzer lifted it, canonical-row
+  ;; dropped it, and the regression read that as "the indexer does not lift
+  ;; it" (issue
+  ;; program-shapes-cache-strips-attributes-declared-after-the-jvm-started).
+  ;; The cache key is now the resources' own stamp, so a declaration edit is
+  ;; a MISS BY CONSTRUCTION and no event has to remember to invalidate it.
+  (let [owned (fn [shapes]
+                (set (:seon.program/owned-attributes
+                      (get shapes :seon.fn.file/path))))
+        before (program/shapes)
+        declared (update (schema.edn/packaged-forms) :seon.fn.file/file conj
+                         [::declared-after {:optional true} :string])
+        row {:seon.fn.file/path "/probe/after-start.clj"
+             ::declared-after "carried"}]
+    (is (not (contains? (owned before) ::declared-after))
+        "the attribute is genuinely absent from the authored declarations")
+    (is (nil? (::declared-after (program/canonical-row row)))
+        "so no indexed row carries it while it is undeclared")
+    (let [after (with-redefs [schema.edn/packaged-forms (constantly declared)
+                              schema.edn/declaration-stamp
+                              (constantly [["declared-after.edn" 1 1]])]
+                  (program/shapes))]
+      (is (contains? (owned after) ::declared-after)
+          "a changed resource stamp re-derives, without restarting the JVM")
+      (is (= row (program/canonical-row declared row))
+          "and the row built from that population carries the attribute"))
+    (is (= before (program/shapes))
+        "an unchanged stamp answers the same derivation, so the per-row
+         caller pays one stamp and never a resource merge")))

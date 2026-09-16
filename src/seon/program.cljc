@@ -1017,7 +1017,7 @@
   ([current desired] (changed-attributes-in (shapes) current desired))
   ([forms current desired] (changed-attributes-in (shapes-in forms) current desired)))
 
-(defn- exact-replacement-tx-in
+(defn- replacement-tx
   [row-shapes current desired]
   (let [entity-id (:db/id current)
         changed (changed-attributes-in row-shapes current desired)]
@@ -1037,21 +1037,26 @@
            (sort (filter #(contains? current %) changed)))
       [(assoc desired :db/id entity-id)]))))
 
-(defn exact-replacement-tx
-  "Replace one declaration row using current values and component retraction.
+(defn exact-replacement-tx-in
+  "Replace one declaration row, owning it by the population `forms` declares.
 
-  The three-argument arity carries the operation's own declaration population,
-  exactly as [[canonical-row]] and [[changed-attributes]] do, so a caller that
-  resolved it once never asks a process global what its own operation already
-  decided."
+  The population-carrying companion to [[exact-replacement-tx]], read like
+  [[shapes-in]]: a caller that resolved its population once hands it here and
+  never asks a process-wide answer what its own operation already decided
+  (AGENTS.md 2.1). It is a separate name rather than an arity because a
+  newly added arity of an existing callable root is refused until every
+  armed wrapper of it has been re-armed from a population that knows it."
   {:malli/schema
-   [:function
-    [:=> [:cat [:map [:db/id :int]] :map] [:vector :seon.schema/value]]
-    [:=> [:cat :map [:map [:db/id :int]] :map] [:vector :seon.schema/value]]]}
-  ([current desired]
-   (exact-replacement-tx-in (shapes) current desired))
-  ([forms current desired]
-   (exact-replacement-tx-in (shapes forms) current desired)))
+   [:=> [:cat :map [:map [:db/id :int]] :map] [:vector :seon.schema/value]]}
+  [forms current desired]
+  (replacement-tx (shapes forms) current desired))
+
+(defn exact-replacement-tx
+  "Replace one declaration row using current values and component retraction."
+  {:malli/schema
+   [:=> [:cat [:map [:db/id :int]] :map] [:vector :seon.schema/value]]}
+  [current desired]
+  (replacement-tx (shapes) current desired))
 
 (defn deletion-row
   "Typed identities removed by one explicit REPL deletion event.

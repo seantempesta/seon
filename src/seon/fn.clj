@@ -2321,7 +2321,7 @@
                       :seon.fn/retractions
                       (if-let [entity-id (:db/id current)]
                         (vec (butlast
-                              (program/exact-replacement-tx
+                              (program/exact-replacement-tx-in
                                forms
                                (assoc normalized-current :db/id entity-id)
                                normalized-desired)))

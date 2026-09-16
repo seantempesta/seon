@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 created: 2026-09-17
 tags: [program-graph, schema, adoption, dev-jvm, cache]
@@ -38,3 +38,22 @@ without a restart.
 
 Related: `program-shapes-mirror-the-schema-row-maps-by-hand` (resolved),
 `in-process-test-runs-poison-the-shared-fixture-base`.
+
+## Resolved — 2026-09-17
+
+`seon.program/shapes` no longer answers from a process-lifetime snapshot. The
+authored-resources fallback caches under `seon.schema.edn/declaration-stamp`
+(the sorted `[name, length, last-modified]` of the schema resources), so a
+declaration edit is a cache MISS BY CONSTRUCTION; and the indexer no longer
+asks a global at all — `seon.fn/build-artifact` and `build-manifest` take an
+optional `:seon.schema.projection/forms`, `index!` resolves ONE population per
+operation, and `artifact`, `normalized-index-row` and `reconcile-tx-in` carry
+it per row.
+
+Live on `default` (pid 88182, never restarted): after adoption
+`6aaaa62d-c08e-571f-ace2-ca01f86d1e27`, an artifact of
+`test/seon/cluster/boot_test.clj` carries `:seon.test/long-ms 600000`.
+Regressions: `seon.program-test/a-declaration-added-after-the-first-call-is-a-cache-miss`
+and `seon.fn-test/an-attribute-declared-after-this-jvm-started-is-indexed-without-a-restart`.
+Landing note:
+[program-shapes-follow-adoption-2026-09-17](../../prds/steward-platform/research/program-shapes-follow-adoption-2026-09-17.md).

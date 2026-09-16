@@ -43,3 +43,33 @@ program row declares both `seon.test/stale` arities. The new base was installed
 only after construction succeeded. No retry, process restart, or refork was
 performed. The immediate verification boundary is cleared; this issue remains
 open for automatic fixture/source coherence.
+
+## Recurrence — 2026-09-17, default PID 88182
+
+Same class, same JVM boundary, measured by the program-shapes-adoption lane.
+Two accreted arities were adopted (`bin/seon init --dev default` converged,
+cluster `:seon.source/commit-id` matched, and both arities answered from the
+prepl) and BOTH were refused inside `seon.test/run` on the shared canonical
+base: `seon.fn/reconcile-tx refused argument count ... of 4` and
+`seon.program/exact-replacement-tx refused argument count ... of 3`. Three
+existing regressions (`seon.fn-test/indexed-declarations-carry-exact-file-bytes`,
+`static-findings-are-replaced-with-their-program-rows`, and the lane's own new
+one) reported errors that were entirely this staleness.
+
+The lane worked around it WITHOUT rebuilding the base, by not adding an arity:
+`seon.fn/reconcile-tx` keeps its single arity and delegates to a private
+`reconcile-tx-in`, and `seon.program/exact-replacement-tx-in` is a new NAME
+rather than a new arity. A private function is not a callable root and a new
+name has no stale row, so both are provable in process today. After that
+restructure all three regressions are green (12/0/0, 9/0/0, 7/0/0).
+
+That is a workaround, not the fix: the acceptance this issue already states —
+a fresh canonical fixture carrying contracts coherent with the code it
+executes — is unchanged, and until it lands **no lane can prove an accreted
+arity in process**.
+
+Second, separate trap measured the same day: `seon.test/run` reloads the test
+namespace INSIDE the run, so a `test-var` resolved before the call runs the
+PREVIOUS definition. Two runs reported an error from test code the file no
+longer contained. Reload through `seon.test`'s loader and resolve the Var
+AFTER the reload, in the same evaluation.

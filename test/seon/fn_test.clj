@@ -11,6 +11,7 @@
             [seon.id :as id]
             [seon.program :as program]
             [seon.schema :as schema]
+            [seon.schema.edn :as schema.edn]
             [seon.sci.eval :as sci.eval]
             [seon.test-support :as test-support]))
 
@@ -1809,6 +1810,89 @@
                                       [{:seon.fn/file [:seon.fn.file/path]}]
                                       (program/row-identity row))
                              [:seon.fn/file :seon.fn.file/path]))))))))))
+
+(def ^:private reconcile-in
+  "`seon.fn/reconcile-tx` with the operation's declaration population in hand.
+
+  The public arity resolves the authored resources, exactly as `index!` does
+  for a caller that supplied none; this is the same seam `index!` itself calls
+  with the population it resolved once."
+  @#'seon.fn/reconcile-tx-in)
+
+(deftest an-attribute-declared-after-this-jvm-started-is-indexed-without-a-restart
+  ;; THE CLASS, at the indexer. `seon.program/shapes` cached the declarations
+  ;; in a process-level defonce, so an attribute declared AFTER this JVM
+  ;; started was stripped from every row `seon.fn/artifact` built until a
+  ;; restart: the runner lane declared :seon.test/long-ms, the analyzer lifted
+  ;; it, and canonical-row dropped it (issue
+  ;; program-shapes-cache-strips-attributes-declared-after-the-jvm-started).
+  ;; Ownership now follows the population the operation is HANDED. The
+  ;; synthetic attribute is installed through the fixture's extra schema, so
+  ;; the write below is the real admission path, not a bypass.
+  (let [root (fixture-root)]
+    (try
+      (let [file (write-source! root "sample/late.clj"
+                                "(ns sample.late)\n(defn chosen [x] x)\n")
+            path (.getCanonicalPath file)]
+        (test-support/with-database
+         {:seon.test-support/extra-schema
+          [{:db/ident ::declared-after
+            :db/valueType :db.type/string
+            :db/cardinality :db.cardinality/one}]}
+         (fn [connection]
+           (let [packaged (schema.edn/packaged-forms)
+                 declared (update packaged :seon.fn.file/file conj
+                                  [::declared-after {:optional true} :string])
+                 request {:seon.fn.file/path path
+                          :seon.fn.file/first-party-functions []
+                          :seon.fn/roots [(.getPath root)]}
+                 undeclared-root
+                 (update packaged :seon.fn.file/file
+                         (fn [definition]
+                           (into []
+                                 (remove #(and (vector? %)
+                                               (= :seon.fn.file/root (first %))))
+                                 definition)))
+                 rows (:seon.fn.file/rows (seon.fn/build-artifact request))
+                 file-row (first (filter :seon.fn.file/path rows))]
+             (testing "the population in hand decides what the artifact owns"
+               (is (some? file-row) "the file genuinely indexed")
+               (is (= (.getPath root) (:seon.fn.file/root file-row))
+                   "the authored declarations keep the emitted source root")
+               (is (not-any?
+                    :seon.fn.file/root
+                    (:seon.fn.file/rows
+                     (seon.fn/build-artifact
+                      (assoc request :seon.schema.projection/forms
+                             undeclared-root))))
+                   "a supplied population that stops declaring it drops it, so
+                    nothing here answers from a process-lifetime cache"))
+             (testing "a declaration added after this JVM started is kept"
+               (let [emitted (assoc file-row ::declared-after "carried")]
+                 (is (nil? (::declared-after
+                            (program/canonical-row packaged emitted)))
+                     "an undeclared attribute is not a program row attribute")
+                 (is (= "carried" (::declared-after
+                                   (program/canonical-row declared emitted)))
+                     "declaring it on :seon.fn.file/file is the whole
+                      requirement — no restart, no second list")
+                 (testing "and the next index of the same file writes it"
+                   (let [report (db/transact!
+                                 connection
+                                 (reconcile-in
+                                  declared (db/db connection)
+                                  [(program/canonical-row declared emitted)]
+                                  []))]
+                     (is (:db-after report)
+                         (pr-str (select-keys report [:seon.error/kind
+                                                      :seon.error/message])))
+                     (is (= "carried"
+                            (::declared-after
+                             (db/pull (:db-after report) '[*]
+                                      [:seon.fn.file/path path])))
+                         "the attribute reaches the database through the
+                          ordinary admission path")))))))))
+      (finally (test-support/delete-recursively! root)))))
 
 (deftest static-findings-are-replaced-with-their-program-rows
   (with-provenance-file
