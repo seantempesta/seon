@@ -2683,7 +2683,13 @@
             armed (kernel/arm ctx (:seon.sci.eval/time-limit-ms request))]
         (try
           (binding [clojure.test/report (constantly nil)]
-            (test.runner/run-var! test-var))
+            ;; A gate test is THIS AGENT'S work, exactly like the definition
+            ;; it gates: the candidate request already carries the connection
+            ;; its evaluation runs on, so hand that value down and the test's
+            ;; elided `seon.db` arities reach the agent's own cluster rather
+            ;; than refusing. Same seam, same value, as `seon.test/run-owned`.
+            (test.runner/run-var!
+             test-var (select-keys request [:seon.db/connection])))
           (finally
             ((::kernel/stop! armed))))))))
 

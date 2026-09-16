@@ -263,6 +263,58 @@
                  (sci/eval-string*
                   parent "(fixture.candidate/target 1)"))))))))
 
+(deftest a-gate-test-runs-with-its-authors-cluster-custody
+  ;; A GATE TEST IS THE AUTHOR'S OWN WORK. It is evaluated in the candidate
+  ;; ctx of the agent's own evaluation, so an elided `seon.db` arity inside it
+  ;; is the same documented affordance as everywhere else in that evaluation
+  ;; (AGENTS §3). `run-candidate-test!` therefore hands `run-var!` the
+  ;; connection its request already carries, instead of leaving the body with
+  ;; whatever the thread happened to inherit — the class this and
+  ;; `my.test/run` share.
+  (test-support/with-database
+    (fn [connection]
+      (admit!
+       connection
+       [{:seon.agent/id "custody-author"
+         :seon.agent/namespace
+         {:seon.ns/name 'fixture.custody
+          :seon.schema.admission/source :agent
+          :seon.ns/source
+          (str "(ns fixture.custody "
+               "(:require [clojure.test :refer [deftest is]]))")}}
+        {:seon.test/sym "fixture.custody/reads-its-own-cluster"
+         :seon.schema.admission/source :agent
+         :seon.test/ns [:seon.ns/name 'fixture.custody]
+         :seon.test/source
+         (str "(clojure.test/deftest reads-its-own-cluster "
+              "(clojure.test/is (int? (seon.db/basis-t (seon.db/db)))))")}])
+      (let [parent (test-support/fork-cluster-ctx connection)
+            result
+            (sci.eval/evaluate-candidate
+             {:seon.sci.eval/ctx parent
+              :seon.db/db @connection
+              :seon.db/connection connection
+              :seon.agent/id "custody-author"
+              :seon.cluster.eval/source
+              (str "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
+                   "target [x] x)")
+              :seon.test.accretion/gate-set
+              ["fixture.custody/reads-its-own-cluster"]
+              :seon.sci.eval/time-limit-ms 2000
+              :seon.sci.admit/caps (config/result-caps (config/defaults))
+              :seon.config/on-core-error :panic})
+            gate (first (:seon.test.accretion/results result))]
+        (is (= "fixture.custody/reads-its-own-cluster"
+               (:seon.test/sym gate))
+            (pr-str result))
+        (is (= 1 (:seon.test/pass-count gate))
+            (str "the gate test's elided read reaches its author's cluster "
+                 "instead of refusing with no connection bound: "
+                 (pr-str gate)))
+        (is (= 0 (+ (:seon.test/fail-count gate)
+                    (:seon.test/error-count gate)))
+            (pr-str gate))))))
+
 (deftest auto-check-is-seeded-shrunk-and-derived-pure
   (test-support/with-database
     (fn [connection]
