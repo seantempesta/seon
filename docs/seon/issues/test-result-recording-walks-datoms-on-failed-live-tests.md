@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, test, database, wave/test-fixture]
 ---
@@ -46,3 +46,20 @@ do not introduce a second test-result path.
 A canonical failing in-process test with dependency Datoms in its failure
 evidence records its original failure and returns the stored result; result
 recording does not throw a secondary host-layout error.
+
+## Resolution — 2026-09-16
+
+Resolved by `f2d537187` at the existing `commit-results!` transport seam.
+The reach-digest prototype carried its native database value into transaction
+normalization. The final implementation derives the digest map from that
+value, then removes the database from the transported completion. It does
+not add a native-Datom codec or change database normalization.
+
+`seon.test-reaching-test/failed-results-with-native-datoms-remain-recordable`
+uses an actual canonical fixture Datom as the failing assertion's actual
+value. It records the original diagnostic and digest: 4/0/0 before editing
+(run 43601) and after hot loading (run 59930, basis 536871399), through
+`(seon.test/run #'seon.test-reaching-test/failed-results-with-native-datoms-remain-recordable
+(seon.operator/connection "default") options)`. An intervening run reported
+worker-global wrapper drift; that failure was retained, not suppressed.
+Complete adoption remains bounded by the reach-digest landing note.

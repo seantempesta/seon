@@ -190,3 +190,34 @@ that edge nor masks it with a subject. The direct-call namespace query returned
 22 tests for `seon.plan`, 114 for `seon.turn`, and 35 for
 `seon.cluster.message`. Exact query and scope:
 [program provenance](../../prds/steward-platform/research/program-provenance-2026-09-16.md).
+
+## Fresh declaration-test analysis probe — 2026-09-16
+
+The reach-digest lane verified a fresh equivalent through real SCI evaluation,
+`seon.fn/analyze-forms`, and persistence of its analyzed program row in the
+canonical database fixture. The in-process regression
+`seon.test-reaching-test/agent-admitted-tests-reach-their-tested-function`
+recorded **5 passes, 2 failures, 0 errors**, run **45227**, on default JVM
+**7595**, outer basis **536871187**. This is a fresh declaration-analysis
+residual; it does not contradict the ordinary-evaluation settlement proof.
+
+Exact admitted bytes, namespace `my.agents.reach-digest`:
+
+```clojure
+(defn largest-customer {:malli/schema [:=> [:cat [:vector {:min 1} [:map [:seon.test/pass-count :seon.test/pass-count]]]] [:map [:seon.test/pass-count :seon.test/pass-count]]]} [rows] (apply max-key :seon.test/pass-count rows))
+(clojure.test/deftest largest-customer-test (clojure.test/is (= {:seon.test/pass-count 9} (largest-customer [{:seon.test/pass-count 2} {:seon.test/pass-count 9}]))))
+```
+
+The persisted test had exactly `clojure.core/=` and `clojure.test/is` call
+refs, with no subject or pending subject. Its tested function, entity **40879**,
+was absent from the closure. Appending a newline to that function's source
+left the reach digest equal on both sides:
+`8aae56c01668c6853a09877504aba1739ec48c1aa18eb25b0372984ec5c04b2a`.
+The regression asserts the wanted inclusion and changed digest; neither
+expectation was weakened and no synthetic edge was inserted.
+
+The first exploratory version omitted `analyze-forms` and is **not evidence**
+about production admission. The corrected regression above includes the
+same analysis phase used by `src/seon/turn.clj` before settlement. The
+historical Juniper row disappeared when default changed JVMs during this
+lane; absence of that fixture is not evidence of a repaired edge.

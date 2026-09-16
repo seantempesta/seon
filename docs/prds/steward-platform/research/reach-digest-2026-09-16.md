@@ -6,7 +6,7 @@ tags: [research, test, database, performance]
 
 # Reach digest — beat 1, 2026-09-16
 
-**Beat 1 complete; STOP for orchestrator review. No beat 2 implementation.**
+**Beat 1 was reviewed; beat 2 implementation is committed as `f2d537187`. Integration boundaries remain below.**
 The proposed guarantee is: a recorded green is reusable only when the test's
 current declared dependency closure has exactly the same source, contracts,
 and named schema forms as the closure that was tested.
@@ -361,3 +361,202 @@ Dated frequencies, derived from the captured database (size → test count):
 ```edn
 {0 1, 2 1, 3 7, 4 1, 5 6, 6 8, 7 11, 8 10, 9 5, 10 11, 11 6, 12 17, 13 8, 14 8, 15 9, 16 7, 17 7, 18 3, 19 8, 20 7, 21 3, 22 6, 23 5, 24 4, 25 4, 26 6, 27 6, 28 4, 29 4, 30 3, 31 3, 32 3, 33 1, 34 1, 35 4, 36 5, 37 3, 38 2, 39 3, 40 3, 41 2, 42 1, 43 2, 44 2, 45 2, 46 4, 47 2, 48 1, 49 2, 50 2, 51 4, 52 2, 53 9, 54 2, 55 4, 56 1, 57 5, 58 5, 59 4, 60 2, 61 5, 62 5, 63 6, 64 4, 65 5, 66 1, 67 5, 68 2, 69 2, 70 1, 71 6, 72 3, 75 1, 76 5, 78 8, 79 5, 80 3, 81 3, 82 6, 83 5, 84 6, 85 7, 86 8, 87 5, 88 7, 89 4, 90 3, 91 1, 92 7, 93 3, 94 6, 95 5, 96 5, 97 1, 98 3, 99 3, 100 2, 101 4, 103 1, 104 2, 106 2, 107 1, 110 1, 112 1, 113 2, 115 1, 116 1, 117 3, 118 2, 119 1, 120 2, 122 2, 123 1, 124 2, 125 1, 129 1, 130 1, 132 3, 134 2, 136 1, 141 1, 144 1, 145 5, 146 3, 147 1, 148 2, 149 5, 150 2, 151 2, 152 3, 153 3, 154 1, 155 4, 156 6, 157 5, 158 8, 159 5, 160 4, 161 2, 162 1, 163 2, 164 1, 171 1, 173 4, 176 2, 177 4, 178 2, 179 1, 180 3, 181 4, 182 1, 183 2, 184 4, 185 2, 186 1, 187 2, 188 2, 189 1, 190 5, 191 5, 192 3, 195 4, 196 2, 197 1, 200 2, 201 2, 203 2, 204 1, 205 5, 206 4, 207 4, 208 3, 209 1, 210 3, 211 2, 212 3, 213 6, 214 5, 217 2, 218 3, 219 1, 220 2, 222 2, 224 1, 225 2, 226 1, 228 1, 229 1, 233 1, 236 1, 239 1, 243 1, 244 2, 246 1, 247 2, 248 1, 249 3, 250 2, 251 4, 252 2, 253 1, 254 1, 256 1, 258 1, 259 3, 263 1, 265 1, 266 1, 269 1, 270 1, 272 3, 273 2, 274 4, 275 1, 276 1, 277 3, 278 2, 279 2, 280 2, 282 1, 291 1, 292 1, 296 1, 297 3, 299 8, 300 2, 301 1, 303 1, 304 1, 306 1, 307 1, 308 1, 310 2, 311 1, 313 1, 316 1, 323 1, 324 1, 325 1, 326 4, 327 3, 328 2, 329 1, 330 2, 337 1, 338 1, 343 1, 344 1, 347 1, 354 1, 359 1, 360 2, 364 1, 365 1, 376 3, 377 1, 378 1, 380 1, 382 1, 383 3, 385 2, 386 1, 387 1, 389 1, 390 2, 391 1, 393 1, 395 1, 398 1, 399 1, 400 2, 406 1, 408 1, 410 2, 412 4, 413 2, 415 1, 422 1, 426 1, 465 1, 488 1, 532 1, 563 1, 564 2, 565 1, 650 1, 667 22, 668 20, 669 17, 670 17, 671 15, 672 13, 673 10, 674 7, 675 4, 676 4, 677 6, 678 8, 679 10, 680 6, 681 6, 682 8, 683 6, 684 10, 685 6, 686 2, 687 9, 688 5, 689 6, 690 3, 691 3, 692 5, 693 7, 694 18, 695 8, 696 8, 697 4, 698 7, 699 6, 700 3, 701 5, 702 8, 703 3, 704 1, 705 2, 706 4, 707 1, 708 5, 709 5, 710 3, 711 4, 712 4, 713 4, 714 4, 715 3, 716 4, 717 6, 719 1, 720 1, 721 3, 722 3, 726 2, 729 2, 730 2, 731 3, 732 6, 733 5, 734 6, 735 5, 736 3, 737 1, 738 1, 739 4, 740 3, 741 1, 742 3, 743 4, 744 1, 745 1, 747 3, 748 1, 750 1, 751 5, 752 1, 754 1, 755 1, 758 1, 759 1, 762 4, 763 2, 765 3, 766 1, 769 1, 770 2, 773 2, 778 1, 779 2, 780 2, 781 1, 787 1, 789 1, 790 1, 791 1, 792 1, 794 3, 795 2, 796 1, 798 1, 801 4, 802 1, 804 5, 805 1, 806 1, 807 1, 808 1, 809 1, 810 1, 814 1, 816 3, 817 3, 818 3, 820 2, 821 2, 822 2, 823 1, 824 1, 827 1, 828 1, 832 1, 834 1, 839 1, 841 1, 842 1, 844 1, 846 1, 847 1, 848 1, 849 1, 851 1, 853 1, 854 1, 861 1, 870 1, 871 1, 874 1, 875 1, 876 1, 881 1, 882 1, 887 1, 892 2, 894 1, 895 2, 898 1, 900 1, 907 1, 909 1, 910 1, 911 1, 912 1, 915 1, 919 2, 920 2, 921 4, 922 1, 923 1, 927 1, 929 1, 931 11, 934 1, 936 1, 937 1, 941 2, 946 1, 952 1, 957 1, 958 1, 963 1, 965 2, 966 2, 967 1, 969 1, 970 7, 971 5, 972 1, 973 1, 974 1, 975 1, 976 2, 981 1, 982 2, 983 1, 991 1, 993 4, 995 2, 998 2, 999 1, 1000 2, 1001 1, 1002 1, 1003 1, 1005 2, 1006 3, 1007 1, 1008 4, 1009 1, 1010 1, 1012 1, 1018 1, 1019 1, 1021 1, 1022 1, 1027 1, 1028 2, 1030 2, 1031 1, 1035 2, 1037 1, 1038 1, 1039 1, 1046 2, 1048 1, 1049 1, 1050 2, 1052 1, 1057 1, 1061 6, 1062 1, 1063 1, 1064 1, 1065 1, 1066 2, 1067 1, 1069 1, 1070 2, 1074 1, 1077 3, 1078 1, 1080 2, 1081 1, 1084 1, 1090 1, 1091 1, 1096 1, 1097 2, 1098 1, 1099 1, 1100 1, 1103 1, 1104 3, 1109 1, 1114 2, 1115 1, 1127 1, 1128 1, 1136 1, 1138 5, 1139 2, 1140 1, 1141 1, 1145 2, 1149 2, 1150 1, 1215 1, 1221 1, 1229 1, 1250 1, 1309 1, 1324 1, 1344 1, 1352 1, 1353 1, 1355 1, 1388 1, 1403 1, 1406 1, 1427 1, 1429 1, 1447 1, 1452 1, 1471 1, 1473 1, 1475 2, 1476 2, 1491 1, 1495 1, 1496 4, 1498 11, 1499 11, 1500 7, 1501 7, 1502 1, 1506 1, 1508 1, 1511 1, 1514 2, 1518 1, 1520 1, 1521 1, 1535 8, 1536 5, 1537 4, 1540 1, 1541 3, 1542 4, 1543 1, 1544 1, 1545 2, 1546 4, 1547 2, 1549 1, 1555 1, 1556 3, 1558 2, 1720 1, 1722 1, 1727 1, 1733 1, 1740 1, 1742 1, 1743 1, 1873 1, 1874 1, 1878 1, 1879 2, 1880 6, 1881 1, 1882 2, 1883 4, 1884 3, 1885 3, 1886 1, 1887 2, 1890 1, 1902 1, 2045 1}
 ```
+
+## Beat 2 — implementation and live probes
+
+Beat 2 is authorized. The owning guarantee is: **a source-bearing test's
+recorded result is reusable when its recorded digest equals the current
+source, contract, and named-schema closure; declared fixture observations
+remain selected every time.** This guarantee requires complete analysis
+edges. The fresh declaration regression below falsifies that prerequisite
+for an unqualified agent-local call, so this is not closure of N7.
+
+The implementation accretes `seon.test/verified?` with its two-argument
+arity and retains the three-argument program-digest arity. `stale` selects
+missing or changed results; `check` without `:seon.test/changed` uses that
+selection and prints the skipped count and reason. Red unchanged results
+are not automatically rerun; `verified?` still requires positive passing
+assertions and zero failures/errors. A fixture-observation result can
+describe a green latest execution while remaining always stale for selection.
+
+### Incremental derivation
+
+`src/seon/test/runner.clj` captures function/test rows and schema rows once,
+hashes each source/spec tuple once, and derives each schema's transitive
+closure once. Each cached test retains its reached identities, including
+unresolved named schema/subject identities. A later database value reads
+only relevant datoms since the cached basis, replaces changed rows, and
+invalidates only intersecting test closures. Result-only writes invalidate
+none. Selection does not derive digests for tests which have no digest-bearing
+result: those are already known to require execution.
+
+The cache rides the database's carried projection-state metadata, with the
+existing projection-owned compiled cache as fallback. There is no global
+registry. It retains one latest committed basis; historical or speculative
+values derive independently without replacing that basis. The dependency
+owner `seon.db/committed-value-identity` distinguishes speculative values.
+Historical schema forms come from historical rows, not a current physical
+schema projection. Digests hash sorted symbol/leaf-digest and schema/leaf-digest
+pairs through `seon.id/digest`; leaf hashes avoid repeatedly printing large
+shared sources. Equality has the same declared membership as beat 1, but
+the digest encoding is new and is not compared to a stored beat-1 digest.
+
+The writer `record-tx` adds the result digest beside counts and run provenance.
+In-process execution captures its database before running. A live database
+cannot itself cross transaction normalization: the first prototype caused
+`empty is not supported on Datom`. `commit-results!` now derives ordinary
+digest data from that captured value before transaction transport. The
+prepared gate base supplies the corresponding evidence across JVM boundaries;
+its program digest must match the run before transport. No test JVM was
+launched to exercise that external transport.
+
+### Measured costs
+
+Measured through MCP JVM mode on default, PID **7595**, using the checked-in
+functions hot-loaded into that JVM. These are not claims of completed
+development adoption.
+
+| Probe | Result |
+|---|---:|
+| Cold initialization, one immutable default value at basis 536871202 | 1,670 tests; 9,136 rows; 2,658 schema closures; **6,032.810 ms** |
+| Same value, all 1,670 cached digests | **1.503 ms**, zero recomputed |
+| Stale census after a result-only transaction, basis 536871203 | **49.278 ms**, 1,661 stale; zero rows updated, closures invalidated, or digests recomputed |
+| Canonical fixture: change only `seon.id/valid?` source, compare all 1,672 test digests | **56.226 ms**, one row updated, exactly three digests invalidated and recomputed |
+| Default explicit execution of two `seon.id-test` tests | **8,315.808 ms**, 13 passing assertions; run 45256 |
+| Consecutive no-change default check | **33.315 ms**, zero executed, two skipped |
+| Next no-change default check | **2.648 ms**, zero executed, two skipped |
+
+The three changed digests in the canonical fixture were exactly:
+
+- `seon.id-test/an-evaluation-id-is-stable-short-and-a-symbol`
+- `seon.id-test/data-shape-and-explicit-length-determine-identity`
+- `seon.schedule-test/returned-and-thrown-handler-errors-use-the-existing-root-wake`
+
+The fixture census differs from default because the values contain different
+source populations. No historical digest has been invented. Full cold
+initialization is a census probe, not the unchanged-check path.
+
+Both live no-change checks printed
+`Skipped 2 tests: recorded result has an unchanged reach digest`.
+They used the real default connection, with a scoped canonical fixture base
+replacement because the process's existing fixture delay retained an
+`InterruptedException`. The replacement was acquired by the existing
+`seon.test-support/create-base` owner, not hand-rostered. No fixture source
+or default process was reset by this lane.
+
+### In-process regression evidence
+
+The recurring invocation is
+`(seon.test/run #'<test> (seon.operator/connection "default") options)`,
+where options carry the captured database, its `runner/provenance`, and
+a 120,000 ms bound. The earlier default 20,000 ms bound fired on the first
+reuse probe. The research probe records the full scoped arming/base setup.
+Each changed function was evaluated before its source edit; returned values
+and full failure messages were inspected.
+
+| Test in `seon.test-reaching-test` | Before source edit | After source edit / loaded definitions |
+|---|---|---|
+| `reach-digests-follow-only-changed-closures` | 19/0/0, runs 68208, 68281, 68286 | 19/0/0, final run 57600, basis 536871355 |
+| `unchanged-closures-reuse-green-results` | 11/0/0, runs 68279 and 68289 | 11/0/0, final run 59924, basis 536871385; earlier run 43560 detected four removed wrappers |
+| `transported-results-retain-the-tested-database-digest` | 6/0/0, runs 68284 and 68296 | 6/0/0, run 57601, basis 536871357 |
+| `fixture-observations-remain-stale` | 4/0/0, runs 43562 and 51128; final semantics preserve green verification while always selecting the fixture | 4/0/0, run 57602, basis 536871358 |
+| `in-process-results-detect-worker-global-drift` | 3/0/0, run 43564; deliberately removes the real digest wrapper inside the preserving fixture | 3/0/0, run 57603, basis 536871359 |
+| `failed-results-with-native-datoms-remain-recordable` | 4/0/0, run 43601 | 4/0/0, run 59930, basis 536871399 |
+| `agent-admitted-tests-reach-their-tested-function` | **5/2/0**, run 45227, using real SCI evaluation plus production `analyze-forms` | Expected analysis-owner residual |
+
+Counts are pass/fail/error. Failed exploratory probes are not omitted:
+the first closure fixture lacked the required function namespace and failed;
+a malformed candidate did not compile; the initial reuse probe hit its
+20-second bound; an older fixture contract refused the new verified arity;
+and drift detection reported concurrently added/removed wrappers. The first
+agent probe omitted `analyze-forms` and is not production-admission evidence.
+The corrected probe still lacks the tested function edge.
+
+### Per-member verdict and exact boundaries
+
+- **Repeated complete reach work:** incremental derivation verified by the
+  one-row/three-digest measurement and the class regression.
+- **Missing fresh or historical declaration edges:** open. The corrected
+  agent regression persists only `clojure.core/=` and `clojure.test/is`
+  calls. Changing the tested function leaves digest
+  `8aae56c01668c6853a09877504aba1739ec48c1aa18eb25b0372984ec5c04b2a`
+  equal. Exact bytes and run evidence are in
+  [the existing call-edge issue](../../../seon/issues/agent-form-calls-to-core-namespaces-are-not-indexed.md).
+  No synthetic edge, inferred subject, or protected analyzer/turn edit exists.
+- **Native Datom recording failure:** the live database in the preliminary
+  completion map was the measured normalization trigger. The corrected
+  transport and the real-Datom failing-test regression record the original
+  test diagnostic. Committed in `f2d537187`; final hot-loaded regression run 59930 passed 4/0/0. No complete adoption claim.
+- **Full-publication result preservation:** required change remains outside
+  this slice while `src/seon/cluster/source.clj` has concurrent edits.
+  Its `result-preservation-tx` selector must conditionally include
+  `:seon.test/reach-digest` when installed. A prototype passed 3/0/0,
+  run 43599. Its file hunk and temporary Var were withdrawn after discovering
+  the concurrent edits. Without it, a complete publication conservatively
+  makes prior results stale; it does not falsely reuse them.
+- **Schema identity:** direct aliasing of identity-bearing
+  `:seon.source/digest` was corrected to
+  `[:and {:seon.db/identity false} :seon.source/digest]`.
+  A fresh canonical base has a plain scalar string attribute. Default had
+  already installed the earlier unique declaration; the final 02:20Z probe still reports `:db/unique :db.unique/identity`.
+  **RESET NEEDED for `f2d537187`** in the orchestrator's next authorized batch; this lane never resets default.
+- **Adoption and fixture availability:** the default JVM changed from 69622
+  to 7595 while this lane was active; no lane stop/refork/restart command
+  occurred. Before that change, publication hit the concurrent native-tuple
+  and program-identity contract work. Later publication reported unresolved
+  namespaces in `test/seon/issue_test.clj`. The manual adoption request exited 1 after **900,066 ms**,
+  without acquiring the operator lifecycle lock; no convergence is claimed.
+  The new default initially had no historical Juniper row.
+
+### Gate request
+
+The orchestrator owns the batched isolated gate. This lane ran no
+`bin/test`, `bin/test-fast`, or test JVM. Request
+`seon.test-reaching-test`, `seon.test-runner-test`, then the platform tier,
+with the owned paths in `tmp/orchestrator/gate-requests/reach-digest.txt`.
+The fresh agent-edge regression is deliberately an unresolved dependency,
+not a green gate claim. The result-publication selector change must be
+integrated by its current owner before complete-publication reuse is proven.
+
+### Final slice evidence and remaining live proof
+
+Implementation commit: `f2d537187`. The final post-edit observer regression
+`seon.test-reaching-test/fixture-state-observation-is-total` passed **7/0/0**,
+run **57596**, basis **536871350**; its pre-edit run **55954** also passed
+7/0/0. The existing result replacement regression
+`seon.test-runner-test/result-facts-live-on-the-test-row-and-reruns-replace-them`
+passed **8/0/0**, run **59926**, basis **536871393**. The native-Datom
+repeat first reported 3/1/1, run 59925, because the detector observed 708
+removed wrappers; its next run 59930 passed 4/0/0. This is observed drift,
+not an attributed cause or a suppressed failure.
+
+The existing observer now takes an explicit base delay, does not force an
+unrealized delay, and returns an explicit unavailable observation for a
+memoized acquisition failure. The shared failed delay is not reset. This
+fix and the Datom transport fix each have their own observable regression.
+
+The proof is **hot-loaded definitions in default**, with contracts armed
+against the real canonical fixture projection. The final default source fact
+was `6aa9fc8a-9227-50a6-a4e3-cc7d3e673fb3`; it was not verified equal to the
+publication head. A zero-argument `source/current` exploratory probe was
+correctly refused by its contract (it requires a store), and a subsequent
+ambient-snapshot probe reached its 20,000 ms MCP bound. Neither is adoption
+evidence. The two consecutive zero-test checks are live-default evidence;
+the one-function change measurement is a canonical database source edit,
+**not a completed file-edit/adoption/check proof on default**. That exact
+live proof remains in the orchestrator gate request with the schema reset
+and protected publication selector boundary. No test JVM was launched.
+
+All owned implementation paths are in the implementation commit. The foreign
+entity-render metadata in the shared schema was committed by its owner before
+this commit; it is not part of this lane's diff. No protected analyzer,
+program schema, turn, source-publication, or fixture-owner change is included.
+The class remains open while the recorded agent edge is absent.
+
+Final static checks: `git diff --check` passed for the owned changes.
+`clj-kondo --lint` over the five implementation/test paths and replay capsule
+reported zero errors, four warnings (two pre-existing shadowed bindings, one
+pre-existing unused private function, and one unused test binding), plus one
+qualified `t/is` informational finding; exit 2 reflects those warnings.
+The owned canonical base was closed through `close-base!`; retained probe
+values were unmapped. No owned background shell or scratch cluster remains.

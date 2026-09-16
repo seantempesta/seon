@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, test, wave/test-fixture]
 ---
@@ -46,3 +46,15 @@ A failed fixture acquisition remains visible as evidence, while an unrelated
 test using a fresh canonical fixture can execute and record its own result.
 Exercise a failed delay, an unrealized delay, and an acquired base without
 changing shared worker globals.
+
+## Resolution — 2026-09-16
+
+Resolved by `f2d537187`, at `src/seon/test/runner.clj:869`. The existing
+observer accepts the delay explicitly, leaves unrealized acquisition alone,
+and reports a failed acquisition as an explicit unavailable observation.
+It no longer rethrows a memoized failure before unrelated test bodies.
+The canonical in-process regression
+`seon.test-reaching-test/fixture-state-observation-is-total` passed 7/0/0
+before editing (run 55954) and after hot loading (run 57596, basis 536871350)
+on `(seon.operator/connection "default")`. The shared delay was not reset.
+Complete adoption remains bounded by the reach-digest landing note.
