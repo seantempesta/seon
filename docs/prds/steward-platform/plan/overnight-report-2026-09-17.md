@@ -31,7 +31,10 @@ peer session (batches 30–57; ledger
    the store size checked around each run. Also landed: the platform tier
    carries no destructive drill — the runner refuses a platform set in which
    any test reaches one of the three declared destructive owners (checked
-   before the first platform task; three tests moved to the bulk tier). Issue:
+   before the first platform task; three tests moved to the bulk tier), and
+   `seon.test/run`/`check` refuse such a test in process under a development
+   root with a typed refusal naming the owner (the seam that actually wiped
+   the store). Both halves await cold proof in batches 66–67. Issue:
    `a-platform-tier-test-wiped-the-checkouts-store`.
 
 1. **The store grows without collection.** `data/store` went 107 MB → 12 GB in
