@@ -168,3 +168,16 @@
   schema change; refork once issue-family lands. Stale tests (bounded-result,
   open-for-agent fixture, closed-tx ref) and `kill_child.clj` readiness
   written despite a refused transact → Opus fix agents after the triages.
+- 07:15Z issue-family landed: platform fix `fe9aeb336` (source-test 21/0/0,
+  17/0/0 in-process; platform re-run requested), slices through `16e472d62`
+  (schema, indexer at publication replacing the CLI, start!/status/pair,
+  my.issue add!/tests!), virtual-turn proof, and the FIRST paid session:
+  agent 856c73b784fb on issue d1f11894d81f, deepseek-flash, prompt 10,993
+  bytes, 3,355 in / 142 out, 3 successful evaluations + 1 reader error
+  (inline form in prose became an evaluation — issue filed); the model
+  called my.issue/status and done; an inspection session, not a repair.
+  Explain probe: identified issue, test, forms and red evidence correctly;
+  flagged redundant instructions across the two messages and the
+  issue/plan problem text. P5 landed by issue-settlement (`d132df212`:
+  issue tests run before plan settlement, resolution derived); P6 guard in
+  progress. Opus triage of program-provenance's reds running.
