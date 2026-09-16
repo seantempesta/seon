@@ -858,7 +858,10 @@
   every assertion — so an agent created while the cluster runs is armed
   by this same pass, never by its creator and never at the next boot.
   The listener also offers here when it sees a `to`-ref with no routing
-  entry (the created-and-messaged-in-one-commit belt).
+  entry (the created-and-messaged-in-one-commit belt). AND THIS PROC
+  PRIMES ITSELF AT `::flow/resume`, so an agent committed before it was
+  reading is armed by its own first pass rather than by a wake that was
+  never sent — see the transition arity.
   Coalescing on its sliding-1 in-port is safe by the standard argument.
   L8 holds by construction: arming writes nothing, and the prime is an
   `offer!`. A quiescence request acknowledges that every earlier arm wake
@@ -879,6 +882,28 @@
           ::flow/in-ports {:seon.agent/arm (:seon.cluster.wake/channel
                                   (:seon.turn.loop/cluster args))}))
   ([state transition]
+   ;; THE ARMER PRIMES ITSELF, because a missed wake must never decide
+   ;; whether an agent has a graph. Agents committed BEFORE this proc was
+   ;; reading — boot recovery, a fixture that seeds before it starts a
+   ;; cluster, `seon.issue/start!` racing the listener's registration — left
+   ;; no wake to receive, and the derive-all pass reads facts, so the only
+   ;; safe prime is an unconditional one at the transition that makes this
+   ;; proc live. `::flow/resume` is that transition: a proc starts paused
+   ;; and `flow/resume` moves it to running
+   ;; (`reference-code/core.async/.../flow/impl.clj:209-217`), and a
+   ;; pause/resume cycle re-primes for exactly the same reason. The prime is
+   ;; an `offer!` into this proc's own sliding-1 in-port, so it neither
+   ;; parks nor accumulates, and a repeated pass is ordinary.
+   ;;
+   ;; Boot ALSO calls this transform directly and synchronously
+   ;; (`src/seon/cluster.clj:2965`). That is not a second arming path: it is
+   ;; how boot PUBLISHES READINESS — a returned cluster instance is already
+   ;; armed, which an asynchronous prime cannot promise. This one covers
+   ;; every other way a graph starts.
+   (when (= ::flow/resume transition)
+     (async/offer! (:seon.cluster.wake/channel
+                    (:seon.turn.loop/cluster state))
+                   :seon.agent/arm-prime))
    (when (= ::flow/stop transition)
      (async/put! (:seon.turn.loop/completion
                   (:seon.turn.loop/cluster state))

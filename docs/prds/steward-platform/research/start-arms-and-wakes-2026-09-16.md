@@ -157,14 +157,61 @@ real `wake/route!`, every await bounded by
    unanswered wake carried by the issue entity, still one after the opening
    closes, and none after the first accepted reply.
 
-**Verification boundary.** These two have NOT run green in a JVM. The shared
-default JVM's fixture base was realized before these schema edits, so no
-in-process run there can see `:seon.wake/arms` or the `:seon.issue/agent`
-index; rebuilding that delay would break every other lane's in-process runs.
-What ran in-process is the peer regression above (green) and the two
-`error.clj` consumers. Everything else is the live scratch-cluster evidence
-and the cold gate, requested at
-`tmp/orchestrator/gate-requests/start-arms.txt`.
+### Batch 54 B round: one red, and the third missing half
+
+`an-agent-created-while-the-cluster-runs-is-armed-by-its-own-creation` was
+GREEN on the cold gate — half (a) holds. The second regression ERRORed: its
+`:armed` await fired. The cause was real and mine.
+
+**An agent committed before the armer is reading was never armed.** The
+fixture creates the worker (`start!`) and only then stands up the cluster, so
+there was no wake to receive. Boot survived this only because
+`src/seon/cluster.clj:2965` calls `armer-step` directly and synchronously
+after the graph starts — a prime living OUTSIDE the proc, which every other
+constructor of an armer graph has to remember.
+
+Root fix: the armer primes ITSELF at `::flow/resume`, the transition that
+makes it live (a proc starts paused and `flow/resume` moves it to running —
+`reference-code/core.async/.../flow/impl.clj:209-217`). The prime is an
+`offer!` into its own sliding-1 in-port and the pass derives from facts, so
+it is unconditional and idempotent, and a pause/resume cycle re-primes for
+the same reason. Boot's direct call stays: it is not a second arming path
+but how boot PUBLISHES READINESS — a returned instance is already armed,
+which an asynchronous prime cannot promise.
+
+Two fixture defects fell out of the same round:
+
+- The regression awaited the opening's closure and then the answer, giving
+  the second await its own clock and racing an assertion between them. It
+  now makes ONE bounded await on the one terminal fact — the assignment
+  answered — and asserts the opening's inability to answer as a property of
+  the entity (no provider attempt), not of when it reads.
+- It started the worker with `:seon.issue/budget 1`. Measured: the generated
+  opening CONSUMES the episode bound, so budget 1 leaves zero ordinary turns
+  and the worker can never answer its own assignment. That contradicts
+  `seon.turn/episode-runs`' own docstring and is filed as
+  [`a-workers-generated-opening-spends-its-issue-budget`](../../../seon/issues/a-workers-generated-opening-spends-its-issue-budget.md);
+  the regression uses budget 3 and says why. Nothing was submitted to the
+  worker: with budget 3 its own loop reaches an accepted reply on the
+  no-provider path and answers the assignment.
+
+In-process on default (fresh base carrying `:seon.wake/arms` and the
+`:seon.issue/agent` index, converged adoption), `remaining-ms 120000`:
+
+```
+an-agent-created-while-the-cluster-runs-is-armed-by-its-own-creation
+  7 pass / 0 fail / 0 error   (11.8 s, 19.9 s)
+starting-an-issue-leaves-one-unanswered-wake-its-first-reply-answers
+  14 pass / 0 fail / 0 error  (15.2 s)
+```
+
+**Verification boundary.** Both now run green in process on default against
+a fresh base carrying this change (figures above), and half (a) is green on
+the cold gate (batch 54 B). The self-prime and the two fixture corrections
+have NOT yet been through a cold gate. Timing is the residual risk: test 1
+took 11.8 s and 19.9 s on two runs of a loaded shared JVM, against a 20 s
+`event-backstop-seconds` — but that bound is per await, and no single await
+in either test is near it.
 
 ## Files touched
 
@@ -174,4 +221,5 @@ and the cold gate, requested at
 - `src/seon/cluster/wake.clj` — `arming-attributes`, `arming-refusal`, `route!` dispatch and its docstring
 - `src/seon/cluster/agent.clj` — armer docstrings name the declaration
 - `src/seon/error.clj` — `faults-form` guards an absent fault entity
+- `src/seon/cluster/agent.clj` — the armer primes itself at `::flow/resume`
 - `test/seon/cluster/agent_arming_test.clj` — new

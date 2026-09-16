@@ -180,9 +180,14 @@
            (is (not (contains? (wake/unindexed-listened-attributes database)
                                :seon.issue/agent))
                "and it is in :avet, or every seek would read as absent")))
+       ;; BUDGET 3, NOT 1. Measured 2026-09-16: the generated opening
+       ;; consumes the episode bound, so a worker started with budget 1 has
+       ;; no ordinary turn left and can never answer its own assignment —
+       ;; filed as `a-workers-generated-opening-spends-its-issue-budget`.
+       ;; This regression is about the wake, so it does not stand on that.
        (let [started (issue/start! {:seon.db/connection connection
                                     :seon.issue/id issue-id
-                                    :seon.issue/budget 1
+                                    :seon.issue/budget 3
                                     :seon.ns/name 'my.agents.issue-wake
                                     :seon.config.ai/no-provider true})]
          (is (nil? (:seon.error/kind started)) (pr-str started))
@@ -194,35 +199,38 @@
                                    [:seon.issue/id issue-id]))
                   (:db/id (first wakes)))
                "carried by the issue entity itself"))
+         ;; NOTHING IS SUBMITTED HERE. The worker is armed by its own
+         ;; creation and the assignment is its only wake, so its loop must
+         ;; reach an accepted reply on the no-provider path by itself —
+         ;; that is the whole claim.
          (running-cluster
           connection "issue-wake"
-          (fn [{handle :seon.turn.loop/cluster routing :seon.agent/routing}]
+          (fn [{routing :seon.agent/routing}]
             (await-armed! routing agent-id)
-            (let [request {:seon.turn.loop/cluster handle
-                           :seon.agent/routing routing
-                           :seon.agent/id agent-id}
-                  opening-id (id/id [:seon.issue/opening issue-id])]
-              (support/await-event!
-               connection ::issue-opening-closed
-               (fn [database]
-                 (some? (:seon.turn/closed-tx
-                         (db/pull database [:seon.turn/closed-tx]
-                                  [:seon.turn/id opening-id])))))
-              (is (= 1 (count (turn/unanswered-wakes (db/db connection)
-                                                     agent-id {})))
-                  "system turn 0 stores the opening and answers nothing")
-              (let [reply (turn/virtual-turn!
-                           (assoc request :seon.cluster.reply/text
-                                  (str "(my.issue/status {:seon.issue/id \""
-                                       issue-id "\"})")))
-                    reply-id (:seon.turn/id reply)]
-                (is (string? reply-id) (pr-str reply))
-                (support/await-event!
-                 connection ::issue-reply-closed
-                 (fn [database]
-                   (some? (:seon.turn/closed-tx
-                           (db/pull database [:seon.turn/closed-tx]
-                                    [:seon.turn/id reply-id])))))
-                (is (empty? (turn/unanswered-wakes (db/db connection)
-                                                   agent-id {}))
-                    "the worker's first accepted reply answers the assignment"))))))))))
+            ;; ONE await, on the ONE terminal fact. Awaiting the opening's
+            ;; closure first and the answer second gave the second await its
+            ;; own clock and made the assertion between them race the loop's
+            ;; next turn; measured, the whole sequence settles well inside
+            ;; one backstop.
+            (support/await-event!
+             connection ::issue-assignment-answered
+             (fn [database]
+               (empty? (turn/unanswered-wakes database agent-id {}))))
+            (let [database (db/db connection)
+                  opening (db/pull database
+                                   '[:seon.turn/closed-tx :seon.turn/attempts]
+                                   [:seon.turn/id (id/id [:seon.issue/opening
+                                                          issue-id])])]
+              (is (empty? (turn/unanswered-wakes database agent-id {}))
+                  "the worker's first accepted reply answers the assignment")
+              (is (some? (:seon.turn/closed-tx opening))
+                  "system turn 0 stored the opening and closed")
+              (is (nil? (:seon.turn/attempts opening))
+                  "and attempted no provider, so it answered nothing itself")
+              (is (seq (evaluation/of-agent database agent-id))
+                  "the worker got there by turning, not by being handed a reply")
+              (is (< 1 (count (db/q '[:find [?t ...] :in $ ?a :where
+                                      [?agent :seon.agent/id ?a]
+                                      [?t :seon.turn/agent ?agent]]
+                                    database agent-id)))
+                  "a second, ordinary turn is what answered the assignment")))))))))
