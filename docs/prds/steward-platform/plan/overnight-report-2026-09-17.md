@@ -224,7 +224,14 @@ peer session (batches 30–57; ledger
    raise the value budget for the history path; (c) keep as is and relax
    the tests (hides the defect). Issue:
    `the-agents-history-is-cut-as-one-string-by-the-value-budget`.
-8. Earlier parked: R1 identity strings→symbols; call-arities tuple vs
+8. **Two small rulings surfaced by honest fixtures:** (a) `seon.ai/agent-overlay`
+   is read five times per turn where the ruling says three (the failover
+   re-reads it at call time) — a lane is making the overlay ride the turn's
+   request value; confirm the ruling stands. (b) The "ended without
+   `my.turn/complete` or `my.turn/wait`" notice: where is it written — the
+   turn-loop owner's call before two remaining turn-loop expectations are
+   settled.
+9. Earlier parked: R1 identity strings→symbols; call-arities tuple vs
    interned family; `seon.commit` entity; retention removal; cold page slice 2.
 
 ## Still open
