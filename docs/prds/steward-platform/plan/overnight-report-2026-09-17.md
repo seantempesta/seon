@@ -15,6 +15,19 @@ peer session (batches 30–57; ledger
 
 ## Broken first
 
+00. **A write storm filled the store at a gigabyte a minute (12:20–12:40Z).**
+   An in-process test run inside default's JVM registered a synthetic schema
+   key into the shared registry and never restored it; every turn write then
+   refused (`invalid-schema` inside the turn loop's `:db.fn/call`) and the
+   turn proc re-fired without bound, each failed attempt flushing dirty
+   index leaves: 2.5 → 21 GB with near-zero commits. Fifth reset. Two
+   classes, fix lane running: a repeated write refusal must park the agent
+   with ONE fault (bounded execution), and in-process tests must leave the
+   schema registry byte-identical (own nothing global). Issue:
+   `a-failing-turn-write-refires-without-bound-and-fills-the-store`. This
+   also explains part of the day's "store growth": the earlier 1.4 GB/h was
+   ordinary churn; today's spike was this storm.
+
 0. **The checkout's store was deleted and re-created from genesis (10:17Z).**
    Actual cause (peer, `ccccea806`): `seon.cluster/operator-root` answered
    the JVM property `-Dseon.operator.root` — default's own root, the
