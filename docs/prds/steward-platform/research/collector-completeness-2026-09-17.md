@@ -261,6 +261,37 @@ doing its job, not a defect in the change):
 is REFUSED in process as `:seon.test/destructive-in-process` (it reaches
 `seon.test-support/populate-published-root!`). It compiles; it must run cold.
 
+## Batch 101 rerun (0f23d6fb6): three errors, one mine
+
+73 tests / 431 assertions, 0 F, 3 E.
+
+**Mine, latent, now fixed.**
+`seon.operator-test/parked-datahike-collection-yields-lock-and-retains-store-custody`
+wedged on `await-event! collection-entered`. Its request declares
+`:seon.config.operator/event-silence-backstop-ms 100`, which is the lifecycle
+lock's acquisition AND HOLD window, and the work that window wraps is one
+store creation — measured 54, 56 and 57 ms on an idle JVM (default, pid
+53320). A 1.8x margin that three parallel gate workers erase: the hold
+timeout fires inside the future, `collect!` never reaches the redefined
+`registry/collect!`, and the latch can never count down. The bound is now
+2,000 ms, with the measurement in the comment, and the wait NAMES what never
+arrived — it reports the collection future's own value (or `:still-running`)
+instead of "no latch event" about a collection that died twenty seconds
+earlier. The test still proves exactly what it proved: a parked collection
+retains store custody and yields lifecycle custody.
+
+**Not mine, routed.** Both
+`seon.cluster.fault-storage-test` errors are `seon.blob/get refused
+content-digest … got nil`, because the tests pull `:seon.error/data-blob` off
+the FAULT entity and `2066b8c20` moved the evidence to the occurrence
+(`src/seon/error.clj:1345` `error-row`). Verified on `default` that the
+producing side is healthy: `seon.error/prepare` on the tests' own payload
+answers `data-size` 372,256 against a 4,096-byte threshold with
+`data-content` ≠ `data-edn`, so the blob IS staged; only the read looks in the
+old place. Neither test calls either `collect!`. Filed as
+[fault-evidence tests pull a fault entity that no longer carries its
+evidence](../../../seon/issues/fault-evidence-tests-pull-a-fault-entity-that-no-longer-carries-its-evidence.md).
+
 ## Boundary
 
 - In-process/live proofs on the scratch root `tmp/collector-fix-root`

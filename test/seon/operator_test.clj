@@ -1168,9 +1168,27 @@
                 (operator/collect!
                  {:seon.operator/repository-root repository-root
                   :seon.operator/managed-root managed-root
-                  :seon.config.operator/event-silence-backstop-ms 100}))]
-          (test-support/await-event! collection-entered
-                                     :store-collection-entered)
+                  ;; This bound is the lifecycle lock's ACQUISITION AND HOLD
+                  ;; window, and the work it wraps is one store creation:
+                  ;; measured 54, 56 and 57 ms on an idle JVM (default, pid
+                  ;; 53320, 2026-09-17). At 100 ms that was a 1.8x margin,
+                  ;; which three parallel gate workers erase — the hold
+                  ;; timeout then fired inside the future and the latch below
+                  ;; could never count down. The test proves that a parked
+                  ;; collection yields lifecycle custody; it never depended on
+                  ;; how tight this number is.
+                  :seon.config.operator/event-silence-backstop-ms 2000}))]
+          ;; AND THE WAIT NAMES WHAT NEVER ARRIVED. Awaiting only the latch
+          ;; wedges silently whenever the collection has already settled, so
+          ;; the failure said "no latch event" about a collection that had
+          ;; thrown twenty seconds earlier. The refusal now carries whatever
+          ;; the future holds, or `:still-running` when it is genuinely stuck.
+          (when-not (.await collection-entered
+                            (long test-support/event-backstop-seconds)
+                            TimeUnit/SECONDS)
+            (throw
+             (ex-info "The collection never entered its collect! seam."
+                      {::settled (deref collection 0 :still-running)})))
           (is (thrown? Exception
                        (store/open-store!
                         {:seon.store/dir
