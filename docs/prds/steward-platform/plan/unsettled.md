@@ -986,7 +986,25 @@ expected once. Gates 106 (call-graph) and 107 (write-admission) launched at
 The recorder's missing `:seon.schema.admission/source` on test entities
 (batch 105) is proven or refuted by these gates' recording step.
 
-**Codex lanes:** none running. `call-graph-fidelity-fix` landed `3f0be21ed`
+**Gates 106/107 on `f42af6261` (21:10Z): both red, two classes.** 107: 104
+tests, 2F/4E — fixtures writing bare/incomplete entities (`[:db/add …
+:seon.cluster/name]`, a turn without agent, an eval without run) now refused
+by whole-entity validation, plus one PRODUCTION path
+(`a-terminal-refusal-settles-when-its-run-has-vanished`: the terminal writer
+records an eval whose run vanished; schema requires the run ref — design
+question, options requested before any schema change), plus the ugly
+"satisfying unknown error" description. 106: 120 tests, 3F/1E — two
+program-test reds are deletion paths other than `reconcile-tx` leaving a
+`:seon.fn` identity without admission source (tombstone validator must cover
+them); one fn-test red still widens `tests-reaching` to the world for the
+declared-value fixture target. Both codex lanes resumed with the raw log
+lines (`write-admission-validates-all` for the validation class and the
+diagnostic text; `call-graph-fidelity-fix` for the widening). Retained roots
+`tmp/test-runs/run.MRHwLt`, `run.KIayk7`. Also: two gates launched in the
+same second hit the tools.deps classpath race again (issue updated).
+
+**Codex lanes:** `write-admission-validates-all` and `call-graph-fidelity-fix`
+running on the above. `call-graph-fidelity-fix` landed `3f0be21ed`
 + `51d904a9b` (reviewed, approved; addendum in its review note).
 `write-admission-validates-all` stopped after `b1508dc8a`. Both resumable.
 A running codex lane cannot take `resume`; `bin/codex-agent stop <name>` first
