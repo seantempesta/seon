@@ -46,6 +46,7 @@
    :seon.cluster.eval/read-basis-transaction
    :seon.eval/shown
    :seon.eval/renderer
+   {:seon.eval/renderer-fn [:seon.fn/sym]}
    :seon.cluster.eval/error
    :seon.cluster.eval/triage-edn
    :seon.cluster.eval/interrupted-at
@@ -321,7 +322,8 @@
          'user)
      ::read-basis (:seon.cluster.eval/read-basis-transaction receipt)
      ::result (:seon.eval/shown receipt)
-     ::renderer (:seon.eval/renderer receipt)
+     ::renderer (or (some-> (get-in receipt [:seon.eval/renderer-fn :seon.fn/sym]) symbol)
+                    (:seon.eval/renderer receipt))
      ::error (:seon.cluster.eval/error receipt)
      ::triage-edn (:seon.cluster.eval/triage-edn receipt)
      ::error-kind (:seon.error/kind receipt)
@@ -1174,7 +1176,10 @@
    {:seon.turn/trigger runtime-message-selector}
    {:seon.turn/attempts [:seon.ai.attempt/id :seon.ai.attempt/ordinal
                          :seon.ai/model :seon.ai.attempt/finish-reason
-                         :seon.ai.attempt/usage-edn
+                         :seon.ai.usage/prompt-tokens
+                         :seon.ai.usage/completion-tokens
+                         :seon.ai.usage/total-tokens
+                         :seon.ai.usage/cached-tokens
                          {:seon.ai.attempt/error [:seon.error/kind]}]}])
 
 (defn- turn-rows [database agent-id]
@@ -1223,13 +1228,12 @@
     (catch Exception _ nil)))
 
 (defn- attempt-usage [attempt]
-  (let [usage (some-> (:seon.ai.attempt/usage-edn attempt) readable-shown ::value)
-        prompt (get usage "prompt_tokens")
-        hit (or (get usage "prompt_cache_hit_tokens") (get-in usage ["prompt_tokens_details" "cached_tokens"]))
-        miss (or (get usage "prompt_cache_miss_tokens")
-                 (when (and (number? prompt) (number? hit)) (- prompt hit)))
-        out (get usage "completion_tokens")]
-    (into {} (filter (comp number? val)) {::prompt prompt ::hit hit ::miss miss ::out out})))
+  (let [prompt (:seon.ai.usage/prompt-tokens attempt)
+        hit (:seon.ai.usage/cached-tokens attempt)
+        miss (when (and (number? prompt) (number? hit)) (- prompt hit))
+        out (:seon.ai.usage/completion-tokens attempt)]
+    (into {} (filter (comp number? val))
+          {::prompt prompt ::hit hit ::miss miss ::out out})))
 
 (defn- attempt-html [attempt]
   (let [usage (attempt-usage attempt)]
@@ -1501,7 +1505,8 @@
                            entry (first (get-in evidence [:seon.db/read-request :seon.db/pull-arguments]))
                            attribute (if (map? entry) (keys entry) [entry])
                            :when (keyword? attribute)] attribute))
-        matches (when-let [renderer (:seon.eval/renderer saved)]
+        matches (when-let [renderer (or (some-> (get-in saved [:seon.eval/renderer-fn :seon.fn/sym]) symbol)
+                                        (:seon.eval/renderer saved))]
                   (filter #(= renderer (:seon.render/ai %))
                           (vals (:seon.schema.projection/shape-rows projection))))
         schema-key (or (when (= 1 (count attributes)) (first attributes))
@@ -1513,7 +1518,8 @@
 
 (defn- ledger-acquisition [request]
   (let [selector '[:seon.cluster.eval/source :seon.cluster.eval/comment
-                 :seon.eval/shown :seon.eval/renderer :seon.cluster.eval/error
+                 :seon.eval/shown :seon.eval/renderer
+                 {:seon.eval/renderer-fn [:seon.fn/sym]} :seon.cluster.eval/error
                  :seon.cluster.eval/output :seon.error/kind
                  :seon.cluster.eval/read-basis-transaction
                  :seon.cluster.eval/interrupted-at :seon.cluster.eval/triage-edn

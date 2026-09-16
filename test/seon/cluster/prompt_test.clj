@@ -238,6 +238,9 @@
       :seon.ai.attempt/at (Date. (+ 1700000100000 (* 1000 ordinal)))
       :seon.ai/endpoint "https://example.invalid/v1/chat/completions"
       :seon.ai/model model
+      :seon.ai.usage/prompt-tokens provider-tokens
+      :seon.ai.usage/completion-tokens 1
+      :seon.ai.usage/total-tokens (inc provider-tokens)
       :seon.ai.attempt/usage-edn
       (pr-str {"prompt_tokens" provider-tokens
                "completion_tokens" 1

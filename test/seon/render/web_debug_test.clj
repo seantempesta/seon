@@ -96,6 +96,9 @@
                                              :seon.ai/endpoint "http://fixture.invalid"
                                              :seon.ai.attempt/settings-edn "{}"
                                              :seon.ai/model "fixture-model" :seon.ai.attempt/finish-reason "stop"
+                                             :seon.ai.usage/prompt-tokens 100
+                                             :seon.ai.usage/completion-tokens 12
+                                             :seon.ai.usage/cached-tokens 80
                                              :seon.ai.attempt/usage-edn
                                              "{\"prompt_tokens\" 100, \"completion_tokens\" 12, \"prompt_cache_hit_tokens\" 80}"}
                                           [:db/add [:seon.turn/id provider-id] :seon.turn/attempts "debug-attempt"]])
@@ -228,6 +231,9 @@
                                 :seon.ai.attempt/at (java.util.Date.)
                                 :seon.ai/endpoint "http://fixture.invalid" :seon.ai/model "fixture-model"
                                 :seon.ai.attempt/settings-edn "{}" :seon.ai.attempt/finish-reason "stop"
+                                :seon.ai.usage/prompt-tokens prompt
+                                :seon.ai.usage/completion-tokens 0
+                                :seon.ai.usage/cached-tokens hit
                                 :seon.ai.attempt/usage-edn
                                 (pr-str {"prompt_tokens" prompt "prompt_cache_hit_tokens" hit
                                          "prompt_cache_miss_tokens" miss "completion_tokens" 0})})
@@ -700,6 +706,9 @@
                                        :seon.ai.attempt/ordinal 0 :seon.ai.attempt/at (java.util.Date.)
                                        :seon.ai/model "fixture-model" :seon.ai/endpoint "http://fixture.invalid"
                                        :seon.ai.attempt/settings-edn "{}" :seon.ai.attempt/finish-reason "stop"
+                                       :seon.ai.usage/prompt-tokens 100
+                                       :seon.ai.usage/completion-tokens 12
+                                       :seon.ai.usage/cached-tokens 80
                                        :seon.ai.attempt/usage-edn
                                        "{\"prompt_tokens\" 100, \"completion_tokens\" 12, \"prompt_cache_hit_tokens\" 80}"}]}
                  {:seon.agent/id "root"

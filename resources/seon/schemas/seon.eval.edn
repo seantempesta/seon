@@ -1,4 +1,5 @@
 #:seon.eval{:renderer [:qualified-symbol {:description "The declared AI renderer that produced the saved shown text. History emits it directly without selecting or invoking a renderer again." :seon.wake/context-inert true}],
+            :renderer-fn [:and {:description "The stable program identity of the renderer that produced the saved shown text." :seon.wake/context-inert true} :seon.db/ref],
             :host-interop-count [:int {:min 0 :seon.wake/context-inert true}],
             :entity
             [:map
@@ -23,6 +24,7 @@
               {:optional true}
               :seon.db/basis-t]
              [:seon.eval/renderer {:optional true} :seon.eval/renderer]
+             [:seon.eval/renderer-fn {:optional true} :seon.eval/renderer-fn]
              [:seon.eval/shown {:optional true} :string]
              [:seon.cluster.eval/output {:optional true} :string]
              [:seon.cluster.eval/error {:optional true} :string]

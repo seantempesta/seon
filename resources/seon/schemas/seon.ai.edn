@@ -361,6 +361,12 @@
            [:seon.ai/model :seon.ai/model]
            [:seon.ai.attempt/settings-edn
             :seon.ai.attempt/settings-edn]
+           [:seon.ai.attempt/model {:optional true} :seon.ai.attempt/model]
+           [:seon.ai.attempt/settings {:optional true} :seon.ai.attempt/settings]
+           [:seon.ai.usage/prompt-tokens {:optional true} :seon.ai.usage/prompt-tokens]
+           [:seon.ai.usage/completion-tokens {:optional true} :seon.ai.usage/completion-tokens]
+           [:seon.ai.usage/total-tokens {:optional true} :seon.ai.usage/total-tokens]
+           [:seon.ai.usage/cached-tokens {:optional true} :seon.ai.usage/cached-tokens]
            [:seon.ai.attempt/usage-edn
             {:optional true}
             :seon.ai.attempt/usage-edn]

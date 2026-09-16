@@ -140,7 +140,7 @@
                           :seon.cluster.status/evaluations (count session)
                           :seon.cluster.status/evaluation-ms (reduce + 0 (map #(get % :seon.eval/duration-ms 0) session))
                           :seon.cluster.status/provider-tokens
-                          (sum-known (map #(get % "total_tokens") usages) "An attempt has no total token usage.")
+                          (sum-known (map :seon.ai.usage/total-tokens attempts) "An attempt has no total token usage.")
                           :seon.cluster.status/provider-cost-usd
                           (sum-known (map #(get % "cost") usages) "An attempt has no reported USD cost.")
                           :seon.cluster.status/storage-bytes storage)

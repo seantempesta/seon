@@ -7,6 +7,15 @@ tags: [issue, mcp, runtime]
 
 # Default component probe timed out after development adoption
 
+Attempt/evaluation facts, 2026-09-16: default changed from PID 69622 to 7595
+(start 01:36:02Z, PREPL 51919). After loading the canonical test namespace,
+the MCP JVM call to `seon.test/run` for
+`seon.data-shapes-test/attempt-usage-is-queryable` timed out at 20,000 ms.
+Its completion is unknown and it was not repeated. Runtime status then
+reported health/Flow unknown with `Read timed out`; operator status reported
+the process alive. No default lifecycle operation or fallback transport was
+used. See the [lane landing](../../prds/steward-platform/research/attempt-and-eval-facts-2026-09-16.md).
+
 P1, 2026-09-15: a later repeat of the empty-domain-transaction report probe
 in JVM session `p1-ambient-state` timed out at 20,000 ms on default PID 69622 /
 PREPL 55914. Its outcome is unknown and it was not retried. The earlier

@@ -62,6 +62,7 @@
                       {:optional true}
                       :seon.sci.eval/ending-ns]
                      [:seon.eval/renderer {:optional true} :seon.eval/renderer]
+                     [:seon.eval/renderer-fn {:optional true} :seon.eval/renderer-fn]
              [:seon.eval/shown
                       {:optional true}
                       :seon.eval/shown]
@@ -125,6 +126,7 @@
                      [:seon.cluster.eval/ordinal
                       :seon.cluster.eval/ordinal]
                      [:seon.eval/renderer {:optional true} :seon.eval/renderer]
+                     [:seon.eval/renderer-fn {:optional true} :seon.eval/renderer-fn]
              [:seon.eval/shown
                       {:optional true}
                       :seon.eval/shown]

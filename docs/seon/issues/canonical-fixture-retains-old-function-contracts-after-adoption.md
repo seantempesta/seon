@@ -74,3 +74,16 @@ assertions; the lint replacement test met the same boundary. No fixture global
 was replaced. See the
 [program-provenance landing](../../prds/steward-platform/research/program-provenance-2026-09-16.md)
 for the exact forms and publication boundary.
+
+## Attempt/evaluation facts observation — 2026-09-16
+
+The attempt-and-eval-facts lane observed the same population boundary for new
+stored attributes. Native default schema eventually contained the four usage
+counts and renderer/settings/model refs, while retained canonical fixtures
+still rejected `:seon.ai.usage/completion-tokens` (runs 68180, 68206, 68264) and
+`:seon.eval/renderer-fn` (68266). No fixture global was reset. One intervening
+settings run (68256) did persist both refs; after correcting its pull-depth
+assertion, run 68259 again encountered the old usage schema. Successful
+development adoption was not established. See the
+[lane landing](../../prds/steward-platform/research/attempt-and-eval-facts-2026-09-16.md)
+for the distinction between direct probes, recorded failures, and pending gates.

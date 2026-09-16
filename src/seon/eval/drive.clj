@@ -194,8 +194,12 @@
                   :seon.ai.attempt/at
                   :seon.ai/endpoint
                   :seon.ai/model
-                  :seon.ai.attempt/settings-edn
-                  :seon.ai.attempt/usage-edn
+                  {:seon.ai.attempt/settings [:db/id :seon.config/agent :seon.config/cluster]}
+                  {:seon.ai.attempt/model [:seon.ai.model/id]}
+                  :seon.ai.usage/prompt-tokens
+                  :seon.ai.usage/completion-tokens
+                  :seon.ai.usage/total-tokens
+                  :seon.ai.usage/cached-tokens
                   :seon.ai.attempt/finish-reason
                   :seon.ai/http-status
                   :seon.ai/request-transmitted?

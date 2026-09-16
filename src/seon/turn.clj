@@ -80,7 +80,8 @@
     (cond-> {:seon.turn/id id
              :seon.cluster.eval/ordinal ordinal}
       (:seon.eval/renderer settlement-evaluation)
-      (assoc :seon.eval/renderer (:seon.eval/renderer settlement-evaluation))
+      (assoc :seon.eval/renderer (:seon.eval/renderer settlement-evaluation)
+             :seon.eval/renderer-fn [:seon.fn/sym (str (:seon.eval/renderer settlement-evaluation))])
       (:seon.eval/shown settlement-evaluation)
       (assoc :seon.eval/shown
              (:seon.eval/shown settlement-evaluation))
@@ -1360,6 +1361,7 @@
 (def ^:private receipt-terminal-attributes
   [:seon.eval/shown
    :seon.eval/renderer
+   :seon.eval/renderer-fn
 
 
    :seon.cluster.eval/error
@@ -1440,7 +1442,8 @@
   (let [run (current-run database id)
         evaluations
         (db/q '[:find [(pull ?evaluation
-                            [* {:seon.cluster.eval/ns [:seon.ns/name]}
+                            [* {:seon.eval/renderer-fn [:seon.fn/sym]}
+                             {:seon.cluster.eval/ns [:seon.ns/name]}
                              {:seon.cluster.eval/read-evidence [*]}]) ...]
                 :in $ ?run
                 :where [?evaluation :seon.cluster.eval/run ?run]]
@@ -1453,6 +1456,9 @@
      ::evaluations
      (mapv (fn [evaluation]
              (cond-> (recorded-evaluation evaluation)
+               (get-in evaluation [:seon.eval/renderer-fn :seon.fn/sym])
+               (assoc :seon.eval/renderer-fn
+                      [:seon.fn/sym (get-in evaluation [:seon.eval/renderer-fn :seon.fn/sym])])
                (:seon.cluster.eval/ns evaluation)
                (assoc :seon.cluster.eval/ns
                       [:seon.ns/name (get-in evaluation [:seon.cluster.eval/ns :seon.ns/name])])))
@@ -3779,6 +3785,14 @@
                          (update :seon.error/data dissoc :seon.ai/reasoning-content)))
         connection (:seon.db/connection cluster)
         db (db/db connection)
+        settings-ref (or (db/q '[:find ?settings . :in $ ?agent-id
+                                 :where [?agent :seon.agent/id ?agent-id]
+                                        [?agent :seon.agent/settings ?settings]]
+                               db agent-id)
+                         (db/q '[:find ?config .
+                                 :where [?config :seon.config/cluster]] db))
+        model-ref (:db/id (db/pull db [:db/id]
+                                   [:seon.ai.model/id (:seon.ai/model target)]))
         reasoning-size (when (seq reasoning-content)
                          (long (count reasoning-content)))
         threshold (db/q '[:find ?threshold .
@@ -3822,9 +3836,12 @@
               truncation-recording
               (assoc :seon.ai.attempt/truncation
                      (:db/id (first truncation-recording)))
+              settings-ref (assoc :seon.ai.attempt/settings settings-ref)
+              model-ref (assoc :seon.ai.attempt/model model-ref)
               settings
               (assoc :seon.ai.attempt/settings-edn (pr-str settings))
-              usage (assoc :seon.ai.attempt/usage-edn (pr-str usage))
+              usage (merge (ai/normalize-usage usage)
+                           {:seon.ai.attempt/usage-edn (pr-str usage)})
               (and reasoning-size (nil? reasoning-blob))
               (assoc :seon.ai.attempt/reasoning reasoning-content)
               reasoning-blob

@@ -26,6 +26,11 @@ verified baseline and source inventory are in
 - Keep retries and failover in Seon's attempt/disposition mechanism. The HTTP
   leaf performs one call (`src/seon/ai.clj:952-1008,1051-1086,1168-1209`); do not add an SDK retry,
   circuit breaker, or second model registry.
+- Normalize provider token counts with `seon.ai/normalize-usage`
+  (`src/seon/ai.clj:972`). The attempt writer stores its namespaced count
+  attributes; readers query those facts rather than decoding usage EDN again.
+  The retained provider document also contains fields without declared count
+  equivalents, such as reported cost.
 - Capture and reuse the exact rendered prompt. The loop commits the capture
   before calling the provider and passes only that string as `:seon.ai/prompt`
   (`src/seon/turn.clj:4050-4096`;

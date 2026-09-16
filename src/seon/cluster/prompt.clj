@@ -4,8 +4,7 @@
   It returns the exact text, ordered contribution measurements, and database
   value supplied to the provider boundary. The token budget is informative;
   prompt acquisition never clips or compacts history."
-  (:require [clojure.edn :as edn]
-            [seon.ai :as ai]
+  (:require [seon.ai :as ai]
             [seon.ai.tokens :as tokens]
             [seon.config :as config]
             [seon.context :as context]
@@ -59,11 +58,11 @@
 (defn- calibration-for
   [database model fallback-calibration agent-id]
   (let [query (cond->
-               '{:find [?attempt ?at ?characters ?usage-edn]
+               '{:find [?attempt ?at ?characters ?provider-tokens]
                  :in [$ ?model]
                  :where [[?attempt :seon.ai/model ?model]
                          [?attempt :seon.ai.attempt/at ?at]
-                         [?attempt :seon.ai.attempt/usage-edn ?usage-edn]
+                         [?attempt :seon.ai.usage/prompt-tokens ?provider-tokens]
                          [?run :seon.turn/attempts ?attempt]
                          [?capture :seon.context.capture/run ?run]
                          [?capture :seon.ai.tokens/characters ?characters]]}
@@ -74,11 +73,10 @@
         rows (if agent-id (db/q query database model agent-id)
                  (db/q query database model))]
     (tokens/recent-calibration
-     (keep (fn [[_attempt _at characters usage-edn]]
-             (let [provider-tokens (get (edn/read-string usage-edn) "prompt_tokens")]
-               (when (and (int? provider-tokens) (pos? provider-tokens))
+     (keep (fn [[_attempt _at characters provider-tokens]]
+             (when (and (int? provider-tokens) (pos? provider-tokens))
                  {:seon.ai.tokens/characters characters
-                  :seon.ai.usage/prompt-tokens provider-tokens})))
+                  :seon.ai.usage/prompt-tokens provider-tokens}))
            (sort-by (juxt second first) (if (:seon.error/kind rows) [] rows)))
      10 fallback-calibration)))
 
@@ -87,7 +85,7 @@
 
   THE MEASUREMENT THE BUDGET TRUSTS, derived rather than assumed. Every
   settled attempt records what the provider counted
-  (`:seon.ai.attempt/usage-edn` → `prompt_tokens`) and the capture for
+  (`:seon.ai.usage/prompt-tokens`) and the capture for
   the same run records the exact characters that produced it
   (`:seon.ai.tokens/characters`), so the ratio is a join over facts we
   already commit — no new writing, no tokenizer, and per model because

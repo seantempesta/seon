@@ -1,4 +1,4 @@
-#:seon.ai.usage{:cached-tokens :seon.ai/tokens,
-                :completion-tokens :seon.ai/tokens,
-                :prompt-tokens :seon.ai/tokens,
-                :total-tokens :seon.ai/tokens}
+#:seon.ai.usage{:cached-tokens [:and {:seon.wake/context-inert true} :seon.ai/tokens],
+                :completion-tokens [:and {:seon.wake/context-inert true} :seon.ai/tokens],
+                :prompt-tokens [:and {:seon.wake/context-inert true} :seon.ai/tokens],
+                :total-tokens [:and {:seon.wake/context-inert true} :seon.ai/tokens]}

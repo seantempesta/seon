@@ -1,11 +1,13 @@
 (ns seon.data-shapes-test
   (:require [clojure.test :refer [deftest is]]
+            [clojure.edn :as edn]
             [datahike.api :as d]
             [seon.cluster.agent :as agent]
             [seon.cluster.message :as message]
             [seon.turn :as turn]
             [seon.config :as config]
             [seon.ai :as ai]
+            [seon.repl :as repl]
             [seon.db :as db]
             [seon.context-blocks-fixture :as fixture]
             [seon.test-support :as support]))
@@ -224,6 +226,114 @@
                       :seon.ai.attempt/reasoning-size]))
        (is (= "A bounded provider trace." (:seon.ai.attempt/reasoning (by-ordinal 1))))
        (is (every? #(not (get % :seon.ai.attempt/sent-body)) rows))))))
+
+(deftest attempt-usage-is-queryable
+  (support/with-database
+   (fn [connection]
+     (config/apply! {:seon.db/connection connection})
+     (db/transact!
+      connection
+      (into (agent/creation-tx
+             {:seon.agent/id "usage-facts"
+              :seon.ns/name 'my.agents.usage-facts
+              :seon.cluster/name "default"})
+            (turn/open-tx
+             {:seon.turn/id "usage-facts-turn"
+              :seon.turn/agent [:seon.agent/id "usage-facts"]
+              :seon.turn/opened-tx "datomic.tx"})))
+     (let [usage {"prompt_tokens" 22134 "completion_tokens" 184
+                  "total_tokens" 22318
+                  "prompt_tokens_details" {"cached_tokens" 21504}
+                  "prompt_cache_hit_tokens" 21504
+                  "prompt_cache_miss_tokens" 630}
+           result (#'turn/record-attempt!
+                   {:seon.db/connection connection}
+                   {:seon.turn/id "usage-facts-turn"
+                    :seon.agent/id "usage-facts"
+                    :seon.ai.attempt/ordinal 0
+                    :seon.ai/target
+                    {:seon.ai/endpoint "https://api.deepseek.com/chat/completions"
+                     :seon.ai/model "deepseek-flash"}
+                    :seon.ai/settings (support/effective-config)
+                    :seon.ai/usage usage}
+                   (java.util.Date.))
+           row (db/q '[:find (pull ?a [*]) .
+                        :where [?a :seon.ai.attempt/ordinal 0]]
+                     (db/db connection))]
+       (is (nil? result) (pr-str result))
+       (is (= (ai/normalize-usage usage)
+              (select-keys row (keys (ai/normalize-usage usage)))))
+       (is (= usage
+              (edn/read-string (:seon.ai.attempt/usage-edn row))))))))
+
+(deftest attempt-settings-and-model-are-related-entities
+  (support/with-database
+   (fn [connection]
+     (config/apply! {:seon.db/connection connection})
+     (db/transact!
+      connection
+      (into (agent/creation-tx
+             {:seon.agent/id "usage-facts"
+              :seon.ns/name 'my.agents.usage-facts
+              :seon.cluster/name "default"})
+            (turn/open-tx
+             {:seon.turn/id "usage-facts-turn"
+              :seon.turn/agent [:seon.agent/id "usage-facts"]
+              :seon.turn/opened-tx "datomic.tx"})))
+     (let [usage {"prompt_tokens" 22134 "completion_tokens" 184
+                  "total_tokens" 22318
+                  "prompt_tokens_details" {"cached_tokens" 21504}
+                  "prompt_cache_hit_tokens" 21504
+                  "prompt_cache_miss_tokens" 630}
+           result (#'turn/record-attempt!
+                   {:seon.db/connection connection}
+                   {:seon.turn/id "usage-facts-turn"
+                    :seon.agent/id "usage-facts"
+                    :seon.ai.attempt/ordinal 0
+                    :seon.ai/target
+                    {:seon.ai/endpoint "https://api.deepseek.com/chat/completions"
+                     :seon.ai/model "deepseek-flash"}
+                    :seon.ai/settings (support/effective-config)
+                    :seon.ai/usage usage}
+                   (java.util.Date.))
+           row (db/q '[:find (pull ?a [* {:seon.ai.attempt/model [:seon.ai.model/id]}]) .
+                        :where [?a :seon.ai.attempt/ordinal 0]]
+                     (db/db connection))]
+       (is (nil? result) (pr-str result))
+       (is (= "deepseek-flash" (get-in row [:seon.ai.attempt/model :seon.ai.model/id])))
+       (is (= (get-in row [:seon.ai.attempt/settings :db/id])
+              (get-in (db/pull (db/db connection) [:seon.agent/settings]
+                               [:seon.agent/id "usage-facts"])
+                      [:seon.agent/settings :db/id])))
+       (is (some? (:seon.ai.attempt/settings row)))))))
+
+(deftest evaluation-renderer-is-a-program-reference
+  (support/with-database
+   (fn [connection]
+     (db/transact! connection
+       [{:seon.agent/id "renderer-facts"}
+        {:seon.turn/id "renderer-facts-turn"
+         :seon.turn/agent [:seon.agent/id "renderer-facts"]
+         :seon.turn/opened-tx "datomic.tx"}])
+     (db/transact! connection
+       (turn/receipt-start-tx
+        {:seon.turn/id "renderer-facts-turn"
+         :seon.cluster.eval/ordinal 0 :seon.cluster.eval/at (java.util.Date.)}))
+     (let [facts (turn/evaluation-facts
+                  {:seon.turn/id "renderer-facts-turn"
+                   :seon.cluster.eval/ordinal 0
+                   :seon.sci.eval/evaluation {}
+                   :seon.turn.loop/settlement-evaluation
+                   {:seon.eval/renderer 'seon.repl/render-directory-ai :seon.eval/shown "saved"}})
+           result (db/transact! connection (turn/receipt-settle-tx facts))
+           row (db/q '[:find (pull ?e [:seon.eval/shown
+                                      {:seon.eval/renderer-fn [:seon.fn/sym]}]) .
+                       :where [?e :seon.cluster.eval/ordinal 0]]
+                     (db/db connection))]
+       (is (:db-after result) (pr-str result))
+       (is (= "seon.repl/render-directory-ai"
+              (get-in row [:seon.eval/renderer-fn :seon.fn/sym])))
+       (is (= "saved" (repl/response (repl/entity-emission row))))))))
 
 (deftest listen-patterns-retain-optional-entity-and-logical-value
   (support/with-database

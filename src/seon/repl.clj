@@ -332,6 +332,14 @@
         unit (if (map? (:seon.render/value unit))
                (:seon.render/value unit)
                unit)
+        renderer-ref (:seon.eval/renderer-fn unit)
+        renderer-symbol
+        (or (get-in unit [:seon.eval/renderer-fn :seon.fn/sym])
+            (when (and database renderer-ref)
+              (:seon.fn/sym
+               ((requiring-resolve 'seon.db/pull)
+                database [:seon.fn/sym]
+                (if (map? renderer-ref) (:db/id renderer-ref) renderer-ref)))))
         evaluation-id (:seon.cluster.eval/id unit)
         changed? (or (:seon.repl/changed-since? unit)
                      (when (and database evaluation-id)
@@ -368,6 +376,8 @@
                              :seon.print/length
                              :seon.print/level
                              :seon.print/options])
+    renderer-symbol
+    (assoc :seon.eval/renderer (symbol renderer-symbol))
     changed? (assoc :seon.repl/changed-since? true)
     ;; ONE ENTITY PER (run, ordinal), ONE SPELLING. The frozen form family
     ;; is gone; the source, the ordinal and the namespace are this
