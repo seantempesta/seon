@@ -126,3 +126,28 @@ Only `seon.cluster-test` was run in process. The batched gate request is
 `tmp/orchestrator/gate-requests/monotonic-index.txt`
 (`bin/test --paths src/seon/cluster.clj test/seon/cluster_test.clj -- seon.cluster-test`
 plus `bin/test --platform`). No test JVM was launched by this lane.
+
+## Bonus: the refusal path, observed live
+
+Reverting the temporary schema edit while the adoption was still running made
+the operator take its documented single retry (`src/seon/cluster.clj:2042`).
+The retry then declared `:seon.issue/title` WITHOUT the index against a branch
+that now carries it — a DROP — and the new rule refused with exactly the
+evidence it should:
+
+```
+Cluster `monotonic` cannot reopen in place: `:seon.issue/title` changed
+:db/index from true to nil, which Datahike does not apply to an installed
+attribute. `bin/seon init monotonic --force` destroys and reforks it from
+`current-src`; use export/import instead to preserve its data.
+
+:seon.boot/changes [{:seon.boot/property :db/index
+                     :seon.boot/installed-value true
+                     :seon.boot/declared-value nil}]
+```
+
+`ADOPT EXIT 1` on that retry is caused by the mid-run revert, not by the
+change: the first adoption — the one carrying the added index — completed its
+declarations, program reconciliation and definition reloads, and left the index
+installed on the branch. Datahike refuses index REMOVAL for the same reason
+(`reference-code/datahike/src/datahike/schema.cljc:280`).
