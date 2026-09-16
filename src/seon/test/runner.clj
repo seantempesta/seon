@@ -1619,7 +1619,13 @@
 
 (defn- prepare-failures!
   [connection database completion]
-  (let [threshold (db/q '[:find ?n . :where [_ :seon.config.eval.result/blob-threshold ?n]] database)
+  (let [run (:seon.test.run/provenance completion)
+        tested-branch (or (:seon.test.run/tested-branch run) (:seon.test.run/branch run))
+        tested (or (:seon.db/db completion)
+                   (when (= tested-branch (get-in database [:config :branch]))
+                     (db/as-of database (:seon.test.run/basis-t run)))
+                   database)
+        threshold (db/q '[:find ?n . :where [_ :seon.config.eval.result/blob-threshold ?n]] database)
         _ (when (:seon.error/kind threshold)
             (throw (ex-info "Cannot read the assertion blob threshold." threshold)))
         staged (volatile! [])
@@ -1637,7 +1643,7 @@
         results
         (mapv
           (fn [{test-symbol :seon.test/sym :as result}]
-            (let [test-row (db/pull (or (:seon.db/db completion) database)
+            (let [test-row (db/pull tested
                                    '[{:seon.fn/file [:seon.fn.file/path]}]
                                    [:seon.test/sym test-symbol])
                   path (get-in test-row [:seon.fn/file :seon.fn.file/path])
