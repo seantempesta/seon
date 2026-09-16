@@ -344,3 +344,20 @@ Queue, in order:
   query over 117k call sites), interop census (3 h), dispatch graph (2 h),
   macro-calls + destructured keywords (3 h). Lane `analyzer-facets` (Opus,
   items 1–2 first) queued for the next slot.
+- 10:55Z R3 effects-and-write-back landed (`ad065c47d`): all 16 seon.effect
+  attributes have ZERO holders on the reforked default, so the schema
+  accretes with no migration; 10/10 capabilities already declare request
+  schemas and 7/7 handlers have program entities — the writer needs no
+  per-capability mapping: walk the admitted request, transact the storable
+  keys (`storable-attribute-in?`), components for declared nested maps,
+  bulk to the blob. Refs: `:seon.effect/eval` (replacing the hand-rolled
+  run+form-ordinal join; zero holders, readers in effect.clj/background.clj
+  only — DECIDED yes), `:seon.effect/capability-fn`. LOAD-BEARING DEFECT:
+  `seon.edit/actual-edit` computes the exact replaced span and
+  `edit/jvm.clj:51-64` drops it — the system knows which bytes it replaced
+  and keeps nothing a merge can use; new facts `:seon.effect/file` (ref),
+  `/form-span` (UTF-8 BYTES — seon.edit's indices are Java chars: convert,
+  or non-ASCII files join wrong), `/program` (containing declaration). This
+  turns roadmap E2 into a query since the fork basis and F3 into a digest
+  equality. Recommendation C (~1.5 d) accepted; lane `effect-facts` (Opus)
+  queued after test-infra and indexing lanes. ALL SIX research pages are in.
