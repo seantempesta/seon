@@ -53,8 +53,9 @@
   committed `message/to` datom carries) — a disposable artifact rebuilt
   by arming at boot, never a fact. The cluster's one `wake/route!`
   listener delivers through it; `:seon.agent/armer` (hosted in the cluster's own
-  graph, R7) closes the created-and-messaged-in-one-commit window by
-  deriving (agents in facts) − (armed set) under a payload-free wake.
+  graph, R7) closes the agent-created-while-the-cluster-runs window by
+  deriving (agents in facts) − (armed set) under a payload-free wake,
+  woken by the arming attribute the creation itself asserts.
 
   Crash walk: everything on any channel is losable by the transport
   law. Buffered wakes → boot re-stamps every graph and primes each
@@ -850,10 +851,14 @@
 (defn armer-step
   "The armer transform, in Flow's four arities.
   Derive-all under a payload-free wake: (agents in facts) − (armed
-  set), arm each, sorted for determinism. The wake set grows by
-  `:seon.agent/id` — a committed agent creation IS an arm wake
-  — and the listener also offers here when it sees a `to`-ref with no
-  routing entry (the created-and-messaged-in-one-commit belt).
+  set), arm each, sorted for determinism. A COMMITTED AGENT CREATION IS
+  AN ARM WAKE, and that is a declaration rather than a claim:
+  `:seon.agent/id` carries `:seon.wake/arms true`, which
+  `wake/arming-attributes` derives and `wake/route!` offers here on
+  every assertion — so an agent created while the cluster runs is armed
+  by this same pass, never by its creator and never at the next boot.
+  The listener also offers here when it sees a `to`-ref with no routing
+  entry (the created-and-messaged-in-one-commit belt).
   Coalescing on its sliding-1 in-port is safe by the standard argument.
   L8 holds by construction: arming writes nothing, and the prime is an
   `offer!`. A quiescence request acknowledges that every earlier arm wake

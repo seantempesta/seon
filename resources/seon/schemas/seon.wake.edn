@@ -2,6 +2,10 @@
             [:boolean
              {:description
               "An attribute recording the agent's own turn-taking. Generated context reads must never depend on it: changing it cannot constitute new context for that agent."}]
+            :arms
+            [:boolean
+             {:description
+              "On the attribute that IDENTIFIES an agent: asserting it means a new agent exists, so the cluster's armer takes one derive-all pass and the agent created while the cluster runs is armed by the same mechanism that arms boot-time agents. Nothing is routed and nothing is carried — the armer derives (agents in facts) minus (armed set) — so an arming attribute needs no `:avet` index and its value need not be a reference."}]
             :listen
             [:boolean
              {:description

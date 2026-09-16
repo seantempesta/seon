@@ -118,6 +118,34 @@
                [?row :seon.schema/key ?key]]
              database)))
 
+(defn arming-attributes
+  "The attributes whose assertion means a new agent exists for the armer.
+
+  ONE DECLARATION, never a name and never a list. An agent's flow graph
+  is process-local derived state, so the only durable evidence that an
+  agent exists is its identity datom. `:seon.wake/arms true` on that
+  attribute is how the cluster's armer learns of an agent created WHILE
+  THE CLUSTER RUNS, rather than at the next boot — the belt that used to
+  depend on the new agent also being addressed in the same commit
+  (issue `a-worker-started-while-the-cluster-runs-is-never-armed`:
+  `seon.issue/start!` created a worker, `seon.turn/next-agent-work`
+  answered `:generate`, and nothing ran because no wake-matching datom
+  named it).
+
+  Unlike `:seon.wake/listen`, the datom's VALUE is not an agent
+  reference and nothing is routed to a mailbox: the armer derives
+  (agents in facts) - (armed set), so its wake carries nothing at all
+  and an arming attribute needs no `:avet` index."
+  {:malli/schema [:=> [:cat :seon.db/database-value]
+                  :seon.cluster.wake/attributes]}
+  [database]
+  (into #{}
+        (d/q '[:find [?key ...]
+               :where
+               [?row :seon.wake/arms true]
+               [?row :seon.schema/key ?key]]
+             database)))
+
 (defn inert-attributes
   "Attributes declared independent of context waking and generated reads."
   {:malli/schema [:=> [:cat :seon.db/database-value]
@@ -230,6 +258,32 @@
        (str "A listened attribute is not in the :avet index, so its wakes "
             "read as absent: " (pr-str (vec (sort unindexed))))
        :seon.cluster.wake/attributes unindexed})))
+
+(defn arming-refusal
+  "The refusal that says no declaration can ever arm a created agent, or nil.
+
+  DELIBERATELY NOT PART OF `declarations-refusal`. That one answers
+  whether this population can carry a TURN BOUND, and `seon.turn/opening-deferred?`
+  consumes it by deferring every opening — so folding arming into it turns a
+  missing arming declaration into an agent that never turns at all, which is
+  the absence-as-health class in a new costume (measured 2026-09-16: the
+  cluster-turn fixture stopped deriving work the moment the branch was added
+  there). Arming is a REGISTRATION-time property of the listener, so it
+  refuses at `route!` and nowhere else.
+
+  With nothing declaring `:seon.wake/arms`, an agent created while the
+  cluster runs is armed by nothing: `next-agent-work` answers, the work is
+  real, and no graph exists to execute it until the next boot."
+  {:malli/schema [:=> [:cat :seon.db/database-value]
+                  [:maybe :seon.error/value]]}
+  [database]
+  (when (empty? (arming-attributes database))
+    {:seon.error/kind ::no-arming-attributes
+     :seon.error/message
+     (str "No attribute declares :seon.wake/arms, so an agent created while "
+          "this cluster runs would never be armed and its derivable work "
+          "would read as an idle cluster until the next boot.")
+     :seon.cluster.wake/attributes #{}}))
 
 (defn agent-wake-datoms
   "Every wake datom addressed to one agent, newest index entry first.
@@ -392,7 +446,10 @@
 
   REGISTRATION REFUSES AN UNUSABLE DECLARATION POPULATION
   (`declarations-refusal`): no listened attribute, no inside attribute,
-  or a listened attribute Datahike's `:avet` index does not hold. Each
+  or a listened attribute Datahike's `:avet` index does not hold. It
+  also refuses a population that can never ARM (`arming-refusal`), which
+  is a separate derivation on purpose: the turn bound consumes the
+  first, and only registration consumes the second. Each
   of those reads as health at four separate derivations, and one of them
   refills the turn bound on a paid loop.
 
@@ -402,7 +459,14 @@
   a payload-free wake into that agent's mailbox. No query, no
   derivation, no commit. A recipient with NO routing entry offers to the
   ARMER instead — the belt that arms an agent created and addressed in
-  one commit, and the reason no separate agent-creation wake is needed.
+  one commit.
+
+  AN AGENT CREATED AND NOT ADDRESSED IS ARMED BY ITS OWN CREATION.
+  `arming-attributes` derives the attributes declared `:seon.wake/arms
+  true`; asserting one offers the armer a payload-free wake. The belt
+  above only ever covered an agent some other datom happened to name,
+  and every other case waited for the next boot with `next-agent-work`
+  reporting work nobody could execute.
 
   THE SECOND DELIVERY (W2) is decided per REPORT, not delivered per
   datom. `:seon.render.web/interest` is one process-local projection
@@ -430,9 +494,11 @@
            :seon.render.web/interest
            :seon.cluster.wake/search-channel
            :seon.cluster.wake/fault-channel :seon.cluster.wake/key]}]
-  (when-let [refusal (declarations-refusal (d/db connection))]
+  (when-let [refusal (or (declarations-refusal (d/db connection))
+                         (arming-refusal (d/db connection)))]
     (throw (ex-info (:seon.error/message refusal) refusal)))
-  (let [matchers (volatile! (wake-matchers (d/db connection)))]
+  (let [matchers (volatile! (wake-matchers (d/db connection)))
+        arming (volatile! (arming-attributes (d/db connection)))]
     (d/listen
      connection
      key
@@ -461,12 +527,20 @@
                                   :seon.agent/runtime :seon.schema/key :seon.schema/form}
                                 attribute))))
                        (:tx-data report))
-             (vreset! matchers (wake-matchers (:db-after report))))
+             (vreset! matchers (wake-matchers (:db-after report)))
+             (vreset! arming (arming-attributes (:db-after report))))
            (doseq [datom (:tx-data report)]
              (let [attribute (nth datom 1)]
                (when (and (not @render?)
                           (contains? published-interest attribute))
                  (vreset! render? true))
+               ;; AN AGENT CREATED WHILE THE CLUSTER RUNS IS ARMED BY THE
+               ;; SAME ARMER THAT ARMS BOOT-TIME AGENTS. Its creation
+               ;; asserts a declared arming attribute, so the armer takes
+               ;; one derive-all pass; there is no second arming path and
+               ;; no caller that arms its own agent.
+               (when (and (contains? @arming attribute) (nth datom 4))
+                 (async/offer! armer-channel ::wake))
                (when-let [matcher (get @matchers attribute)]
                  (doseq [agent-eid (into (if (::schema? matcher) #{(nth datom 2)} #{})
                                         (keep #(% datom)) (::matches matcher))]

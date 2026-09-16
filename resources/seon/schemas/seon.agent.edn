@@ -72,8 +72,9 @@
                      [:string
                       {:min 1,
                        :seon.db/identity true,
+                       :seon.wake/arms true,
                        :description
-                       "The agent's identity: the name every message, run, and namespace assignment resolves it by."}],
+                       "The agent's identity: the name every message, run, and namespace assignment resolves it by. AN ARMING ATTRIBUTE: asserting it is the one durable evidence that an agent exists, so its commit wakes the cluster's armer and an agent created while the cluster runs is armed without waiting for the next boot."}],
                      :identity-request
                      [:map
                       [:seon.db/db :seon.db/database-value]
