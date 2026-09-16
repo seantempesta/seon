@@ -1,0 +1,69 @@
+#:seon.test.failure
+{:id [:string {:min 12 :max 12 :seon.db/identity true}]
+ :test :seon.db/ref
+ :type [:enum {:description "The reporter's two failing assertion outcomes."} :fail :error]
+ :ordinal [:int {:min 0}]
+ :message :string
+ :contexts [:vector [:tuple [:int {:min 0}] :string]]
+ :expected :string
+ :expected-blob :seon.blob/digest
+ :expected-size [:int {:min 0}]
+ :actual :string
+ :actual-blob :seon.blob/digest
+ :actual-size [:int {:min 0}]
+ :file :seon.db/ref
+ :line [:int {:min 1}]
+ :signature [:and {:seon.db/identity false} :seon.error/signature]
+ :throwable :symbol
+ :first-run :seon.db/ref
+ :last-run :seon.db/ref
+ :seen-count [:int {:min 1}]
+ :last-seen-at :inst
+ :reported-file :string
+ :report
+ [:map
+  [:seon.test.failure/type :seon.test.failure/type]
+  [:seon.test.failure/expected {:optional true} :seon.test.failure/expected]
+  [:seon.test.failure/actual {:optional true} :seon.test.failure/actual]
+  [:seon.test.failure/message {:optional true} :seon.test.failure/message]
+  [:seon.test.failure/contexts {:optional true} :seon.test.failure/contexts]
+  [:seon.test.failure/reported-file {:optional true} :seon.test.failure/reported-file]
+  [:seon.test.failure/line {:optional true} :seon.test.failure/line]
+  [:seon.test.failure/signature {:optional true} :seon.test.failure/signature]
+  [:seon.test.failure/throwable {:optional true} :seon.test.failure/throwable]]
+ :reports [:vector :seon.test.failure/report]
+ :failure
+ [:map {:seon.db/attributes true}
+  [:seon.test.failure/id :seon.test.failure/id]
+  [:seon.test.failure/test :seon.test.failure/test]
+  [:seon.test.failure/type :seon.test.failure/type]
+  [:seon.test.failure/ordinal :seon.test.failure/ordinal]
+  [:seon.test.failure/message {:optional true} :seon.test.failure/message]
+  [:seon.test.failure/contexts {:optional true} :seon.test.failure/contexts]
+  [:seon.test.failure/expected {:optional true} :seon.test.failure/expected]
+  [:seon.test.failure/expected-blob {:optional true} :seon.test.failure/expected-blob]
+  [:seon.test.failure/expected-size {:optional true} :seon.test.failure/expected-size]
+  [:seon.test.failure/actual {:optional true} :seon.test.failure/actual]
+  [:seon.test.failure/actual-blob {:optional true} :seon.test.failure/actual-blob]
+  [:seon.test.failure/actual-size {:optional true} :seon.test.failure/actual-size]
+  [:seon.test.failure/file {:optional true} :seon.test.failure/file]
+  [:seon.test.failure/line {:optional true} :seon.test.failure/line]
+  [:seon.test.failure/signature {:optional true} :seon.test.failure/signature]
+  [:seon.test.failure/throwable {:optional true} :seon.test.failure/throwable]
+  [:seon.test.failure/first-run :seon.test.failure/first-run]
+  [:seon.test.failure/last-run :seon.test.failure/last-run]
+  [:seon.test.failure/seen-count :seon.test.failure/seen-count]
+  [:seon.test.failure/last-seen-at :seon.test.failure/last-seen-at]]
+ :value
+ [:map
+  [:seon.test.failure/id :seon.test.failure/id]
+  [:seon.test.failure/type :seon.test.failure/type]
+  [:seon.test.failure/ordinal :seon.test.failure/ordinal]
+  [:seon.test.failure/message {:optional true} :seon.test.failure/message]
+  [:seon.test.failure/contexts {:optional true} :seon.test.failure/contexts]
+  [:seon.test.failure/expected {:optional true} :seon.test.failure/expected]
+  [:seon.test.failure/expected-blob {:optional true} :seon.test.failure/expected-blob]
+  [:seon.test.failure/actual {:optional true} :seon.test.failure/actual]
+  [:seon.test.failure/actual-blob {:optional true} :seon.test.failure/actual-blob]
+  [:seon.test.failure/file {:optional true} [:map [:db/id :int] [:seon.fn.file/path :seon.fn.file/path]]]
+  [:seon.test.failure/line {:optional true} :seon.test.failure/line]]}

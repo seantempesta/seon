@@ -290,7 +290,14 @@
                      (get (:schema previous) :seon.test/reach-digest)
                      (conj :seon.test/reach-digest)
                      (get (:schema previous) :seon.test/reach)
-                     (conj {:seon.test/reach [:seon.fn/sym]}))]
+                     (conj {:seon.test/reach [:seon.fn/sym]})
+                     (get (:schema previous) :seon.test/reach-unknown)
+                     (conj :seon.test/reach-unknown)
+                     (get (:schema previous) :seon.test/failures)
+                     (conj {:seon.test/failures
+                            ['* {:seon.test.failure/file [:seon.fn.file/path]}
+                             {:seon.test.failure/first-run [:seon.test.run/id]}
+                             {:seon.test.failure/last-run [:seon.test.run/id]}]}))]
       (into (mapv #(dissoc (db/pull previous '[*] %) :db/id) runs)
             (map (fn [test]
                    (let [row (dissoc (db/pull previous selector test) :db/id)]
@@ -299,7 +306,19 @@
                              (get-in row [:seon.test/run :seon.test.run/id])])
                        (:seon.test/reach row)
                        (update :seon.test/reach
-                               #(mapv (fn [f] [:seon.fn/sym (:seon.fn/sym f)]) %))))))
+                               #(mapv (fn [f] [:seon.fn/sym (:seon.fn/sym f)]) %))
+                       (:seon.test/failures row)
+                       (update :seon.test/failures
+                         (fn [failures]
+                           (mapv
+                             (fn [failure]
+                               (cond-> (assoc (dissoc failure :db/id)
+                                         :seon.test.failure/test [:seon.test/sym (:seon.test/sym row)]
+                                         :seon.test.failure/first-run [:seon.test.run/id (get-in failure [:seon.test.failure/first-run :seon.test.run/id])]
+                                         :seon.test.failure/last-run [:seon.test.run/id (get-in failure [:seon.test.failure/last-run :seon.test.run/id])])
+                                 (:seon.test.failure/file failure)
+                                 (assoc :seon.test.failure/file [:seon.fn.file/path (get-in failure [:seon.test.failure/file :seon.fn.file/path])])))
+                             failures)))))))
             results))))
 
 (defn- record-results-at-head!

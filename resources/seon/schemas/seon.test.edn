@@ -1,6 +1,7 @@
 #:seon.test{:ns :seon.db/ref,
             :reach [:vector {:seon.db/cardinality :many} :seon.db/ref],
             :reaches [:map-of :seon.test/sym :seon.test/reach],
+            :reach-unknown [:string {:min 1 :description "Typed unknown for a result whose tested closure could not be retained. Replaced on every run; absence of both membership and this marker is legacy unknown, never proof of an empty closure."}],
             :reach-digest [:and {:seon.db/identity false} :seon.source/digest],
             :reach-digests [:map-of :seon.test/sym :seon.test/reach-digest],
             :skipped-count [:int {:min 0}],
@@ -24,6 +25,7 @@
             [:vector {:seon.db/cardinality :many}
              :seon.test/failure-identity],
             :failure-message :string,
+            :failures [:vector {:seon.db/component true} :seon.db/ref],
             :var
             [:fn
              {:error/message "must be a host or SCI Var"
@@ -43,12 +45,14 @@
              {:min 1, :seon.db/identity true, :seon.search/index :symbol}],
             :result
             [:map
+             [:seon.test/failures {:optional true} [:vector :seon.test.failure/value]]
              [:seon.test/sym :seon.test/sym]
              [:seon.test/pass-count :seon.test/pass-count]
              [:seon.test/fail-count :seon.test/fail-count]
              [:seon.test/error-count :seon.test/error-count]
              [:seon.test/reach-digest {:optional true} :seon.test/reach-digest]
              [:seon.test/reach {:optional true} :seon.test/reach]
+             [:seon.test/reach-unknown {:optional true} :seon.test/reach-unknown]
              [:seon.test/run-basis-t :seon.test/run-basis-t]
              [:seon.test/run-at :seon.test/run-at]
              [:seon.test/run {:optional true}
@@ -69,9 +73,11 @@
              [:seon.schema.admission/source
               :seon.schema.admission/source]
              [:seon.test/ns {:optional true} :seon.test/ns]
+             [:seon.test/failures {:optional true} :seon.test/failures]
              [:seon.test/source {:optional true} :seon.test/source]
              [:seon.test/reach-digest {:optional true} :seon.test/reach-digest]
              [:seon.test/reach {:optional true} :seon.test/reach]
+             [:seon.test/reach-unknown {:optional true} :seon.test/reach-unknown]
              [:seon.fn/calls {:optional true} :seon.fn/calls]
              [:seon.fn/call-arities {:optional true} :seon.fn/call-arities]
              [:seon.fn/writes {:optional true} :seon.fn/writes]

@@ -4,6 +4,7 @@
                    :pass-count [:int {:min 0}],
                    :captured-result
                    [:map
+                    [:seon.test.failure/reports {:optional true} :seon.test.failure/reports]
                     [:seon.test/sym :seon.test/sym]
                     [:seon.test/pass-count :seon.test/pass-count]
                     [:seon.test/fail-count :seon.test/fail-count]

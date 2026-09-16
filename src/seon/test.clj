@@ -27,11 +27,12 @@
                   [:or [:vector [:map [:db/id :int] [:seon.fn/sym :seon.fn/sym]]]
                    :seon.error/value]]}
   [database test-symbol]
-  (let [row (db/pull database [:db/id {:seon.test/reach [:db/id]}]
+  (let [row (db/pull database [:db/id :seon.test/reach-unknown {:seon.test/reach [:db/id]}]
                      [:seon.test/sym test-symbol])]
     (cond
       (:seon.error/kind row) row
       (not (:db/id row)) (unknown test-symbol "The test has no recorded identity.")
+      (:seon.test/reach-unknown row) (unknown test-symbol (:seon.test/reach-unknown row))
       (not (seq (:seon.test/reach row)))
       (unknown test-symbol "The test has no retained function closure evidence.")
       :else

@@ -12,6 +12,7 @@
             [sci.impl.utils :as sci.utils]
             [seon.cluster.source :as source]
             [seon.cluster.store :as store]
+            [seon.blob :as blob]
             [seon.config :as config]
             [seon.db :as db]
             [seon.id :as id]
@@ -171,6 +172,20 @@
                    ::failure-messages []
                    ::failure-identities #{}}))))
 
+(defn- failure-report [event]
+  (cond-> {:seon.test.failure/type (:type event)}
+    (find event :expected) (assoc :seon.test.failure/expected (printable {} (:expected event)))
+    (find event :actual) (assoc :seon.test.failure/actual (printable {} (:actual event)))
+    (:message event) (assoc :seon.test.failure/message (str (:message event)))
+    (seq test/*testing-contexts*)
+    (assoc :seon.test.failure/contexts (mapv vector (range) (reverse test/*testing-contexts*)))
+    (:file event) (assoc :seon.test.failure/reported-file (str (:file event)))
+    (and (integer? (:line event)) (pos? (:line event)))
+    (assoc :seon.test.failure/line (:line event))
+    (event-signature event) (assoc :seon.test.failure/signature (event-signature event))
+    (instance? Throwable (:actual event))
+    (assoc :seon.test.failure/throwable (symbol (.getName (class (:actual event)))))))
+
 (defn- capture-event!
   [options capture selected-namespaces event]
   (when-let [test-symbol (event-symbol event)]
@@ -191,12 +206,15 @@
                                 (get-in current [::results test-symbol
                                                  ::failure-identities])
                                 failure-id)]
-                     (cond-> (update-in current
+                     (cond-> (-> current
+                                 (update-in [::results test-symbol :seon.test.failure/reports]
+                                            (fnil conj []) (failure-report event))
+                                 (update-in
                                         [::results test-symbol
                                          (if (= :fail event-type)
                                            :seon.test/fail-count
                                            :seon.test/error-count)]
-                                        inc)
+                                        inc))
                        (not seen?)
                        (update-in [::results test-symbol
                                    ::failure-identities] conj failure-id)
@@ -1476,9 +1494,9 @@
        node-parts (sort-by first (map (fn [e] (let [r (get rows e)] [(or (::reach-symbol r) (str e)) (::reach-leaf r)])) (::reach-ids nodes)))
        schema-parts (sort-by first (map (fn [k] [k (get-in rows [(get schemas k) ::reach-leaf])]) schema-keys))]
   {::reach-digest (id/digest 64 [test-symbol (vec node-parts) (vec schema-parts)])
-   ::reach-refs (into [] (comp (keep #(get-in rows [% :seon.fn/sym]))
+   ::reach-refs (when start (into [] (comp (keep #(get-in rows [% :seon.fn/sym]))
                               (map #(vector :seon.fn/sym %)))
-                      (sort (::reach-ids nodes)))
+                      (sort (::reach-ids nodes))))
    ::reach-dependencies (into (into (::reach-ids nodes) (::reach-missing nodes))
                              (concat [[::reach-symbol test-symbol]] (map #(vector ::reach-schema %) schema-keys)))
    ::reach-function-count (count (::reach-ids nodes))}))
@@ -1534,7 +1552,8 @@
   [database test-symbols]
   (let [entries (reach-entries database test-symbols)]
     (if (:seon.error/kind entries) entries
-        (into {} (map (fn [[s entry]] [s (::reach-refs entry)])) entries))))
+        (into {} (keep (fn [[s entry]] (when (vector? (::reach-refs entry))
+                                       [s (::reach-refs entry)]))) entries))))
 
 (defn program-digest
   "Identify the tested program from its source seal and current program facts.
@@ -1598,6 +1617,92 @@
    :seon.test.run/basis-t (db/basis-t database)
    :seon.test.run/branch (get-in database [:config :branch])})))
 
+(defn- prepare-failures!
+  [connection database completion]
+  (let [threshold (db/q '[:find ?n . :where [_ :seon.config.eval.result/blob-threshold ?n]] database)
+        _ (when (:seon.error/kind threshold)
+            (throw (ex-info "Cannot read the assertion blob threshold." threshold)))
+        staged (volatile! [])
+        stage-field
+        (fn [failure field size-key blob-key]
+          (if-let [text (get failure field)]
+            (let [size (alength (.getBytes ^String text StandardCharsets/UTF_8))]
+              (if (and threshold (> size threshold))
+                (let [write (blob/stage! connection text)]
+                  (vswap! staged conj write)
+                  (-> failure (dissoc field)
+                      (assoc size-key size blob-key (:seon.blob/digest write))))
+                (assoc failure size-key size)))
+            failure))
+        results
+        (mapv
+          (fn [{test-symbol :seon.test/sym :as result}]
+            (let [test-row (db/pull (or (:seon.db/db completion) database)
+                                   '[{:seon.fn/file [:seon.fn.file/path]}]
+                                   [:seon.test/sym test-symbol])
+                  path (get-in test-row [:seon.fn/file :seon.fn.file/path])
+                  reports (or (seq (:seon.test.failure/reports result))
+                              (when (pos? (+ (:seon.test/fail-count result 0)
+                                             (:seon.test/error-count result 0)))
+                                [{:seon.test.failure/type (if (pos? (:seon.test/error-count result 0)) :error :fail)
+                                  :seon.test.failure/message
+                                  (or (:seon.test/failure-message result)
+                                      "The runner reported a failure without an assertion event.")}]))
+                  [_ failures]
+                  (reduce
+                    (fn [[ordinals failures] report]
+                      (let [reported (:seon.test.failure/reported-file report)
+                            line (:seon.test.failure/line report)
+                            known-site? (and path reported line
+                                             (= (.getName (io/file path)) (.getName (io/file reported))))
+                            site (if known-site? [path line]
+                                     (mapv report [:seon.test.failure/type :seon.test.failure/message
+                                                   :seon.test.failure/expected :seon.test.failure/actual
+                                                   :seon.test.failure/signature]))
+                            ordinal (get ordinals site 0)
+                            failure (cond-> (-> report
+                                                (dissoc :seon.test.failure/reported-file :seon.test.failure/line)
+                                                (assoc :seon.test.failure/id (id/id [test-symbol site ordinal])
+                                                       :seon.test.failure/ordinal ordinal))
+                                      known-site? (assoc :seon.test.failure/file [:seon.fn.file/path path]
+                                                         :seon.test.failure/line line))
+                            failure (-> failure
+                                        (stage-field :seon.test.failure/expected :seon.test.failure/expected-size :seon.test.failure/expected-blob)
+                                        (stage-field :seon.test.failure/actual :seon.test.failure/actual-size :seon.test.failure/actual-blob))]
+                        [(assoc ordinals site (inc ordinal)) (conj failures failure)]))
+                    [{} []] reports)]
+              (-> result (dissoc :seon.test.failure/reports)
+                  (assoc :seon.test/failures failures))))
+          (:seon.test.runner/results completion))]
+    (assoc completion :seon.test.runner/results results :seon.blob/staged-writes @staged)))
+
+(defn- failure-replacement-tx [database test-row-id failures run-ref at]
+  (let [previous (when-not (string? test-row-id)
+                   (db/pull database '[{:seon.test/failures [*]}] test-row-id))
+        previous-by-id (into {} (map (juxt :seon.test.failure/id identity)) (:seon.test/failures previous))
+        retained (set (map :seon.test.failure/id failures))]
+    (into
+      (mapv (fn [old] [:db.fn/retractEntity (:db/id old)])
+            (remove #(retained (:seon.test.failure/id %)) (:seon.test/failures previous)))
+      (mapcat
+        (fn [{failure-id :seon.test.failure/id :as failure}]
+          (let [old (get previous-by-id failure-id)
+                old-run (get-in old [:seon.test.failure/last-run :db/id])
+                current-run (:db/id (db/pull database [:db/id] run-ref))
+                row (assoc failure
+                           :db/id (str "test-failure:" failure-id)
+                           :seon.test.failure/test test-row-id
+                           :seon.test.failure/first-run (or (get-in old [:seon.test.failure/first-run :db/id]) run-ref)
+                           :seon.test.failure/last-run run-ref
+                           :seon.test.failure/seen-count (+ (get old :seon.test.failure/seen-count 0)
+                                                          (if (and current-run (= old-run current-run)) 0 1))
+                           :seon.test.failure/last-seen-at at)]
+            (concat
+              (for [attribute (keys (dissoc old :db/id :seon.test.failure/id))]
+                [:db.fn/retractAttribute (:db/id old) attribute
+                 (let [value (get old attribute)] (if (set? value) (first value) value))])
+              [row]))) failures))))
+
 (defn record-tx
   "Transaction data replacing each test row's complete latest result.
 
@@ -1615,6 +1720,7 @@
     run :seon.test.run/provenance
     tested-database :seon.db/db
     destination :seon.test.run/branch
+    reach-unknown :seon.test/reach-unknown
     carried-digests :seon.test/reach-digests
     carried-reaches :seon.test/reaches}]
   (let [tested-branch (or (:seon.test.run/tested-branch run) (:seon.test.run/branch run))
@@ -1626,18 +1732,10 @@
               (not= tested-branch destination) (assoc :seon.test.run/tested-branch tested-branch))
         digests (or carried-digests
                     (when tested (reach-digests tested (mapv :seon.test/sym results))))
-        reaches (or carried-reaches
-                    (when tested (reach-memberships tested (mapv :seon.test/sym results))))
-        _ (when (or (:seon.error/kind reaches)
-                    (some #(not (vector? (get reaches (:seon.test/sym %)))) results))
-            (throw (ex-info "The completion lacks its tested database reach membership."
-                            {:seon.error/kind :seon.test.run/unavailable
-                             :seon.test.run/unavailable true})))
-        _ (when (or (:seon.error/kind digests)
-                    (some #(not (string? (get digests (:seon.test/sym %)))) results))
-            (throw (ex-info "The completion lacks its tested database reach digests."
-                            {:seon.error/kind :seon.test.run/unavailable
-                             :seon.test.run/unavailable true})))
+        derived-reaches (when tested (reach-memberships tested (mapv :seon.test/sym results)))
+        reaches (if (:seon.error/kind derived-reaches)
+                  (or carried-reaches derived-reaches)
+                  (merge derived-reaches carried-reaches))
         namespace-names
         (distinct
          (map #(symbol (namespace (symbol (:seon.test/sym %)))) results))
@@ -1663,28 +1761,44 @@
         (let [namespace-name (symbol (namespace (symbol test-symbol)))
               test-ref [:seon.test/sym test-symbol]
               exists? (some? (db/pull database [:db/id] test-ref))
+              test-row-id (if exists? test-ref (str "test-result:" test-symbol))
+              failures (:seon.test/failures result)
               result-row
-              (cond-> (assoc result
+              (cond-> (assoc (dissoc result :seon.test/failures)
+                             :db/id test-row-id
                              :seon.test/run "test-run"
-                             :seon.test/reach-digest (get digests test-symbol)
-                             :seon.test/reach (get reaches test-symbol)
                              :seon.test/run-basis-t basis-t
                              :seon.test/run-at at)
+                (string? (get digests test-symbol))
+                (assoc :seon.test/reach-digest (get digests test-symbol))
+                (vector? (get reaches test-symbol))
+                (assoc :seon.test/reach (get reaches test-symbol))
+                (not (vector? (get reaches test-symbol)))
+                (assoc :seon.test/reach-unknown
+                       (or (:seon.error/message reaches)
+                           reach-unknown
+                           "The completion did not retain its tested database closure membership."))
+                (seq failures) (assoc :seon.test/failures
+                                      (mapv #(str "test-failure:" (:seon.test.failure/id %)) failures))
                 (not exists?)
                 (assoc :seon.test/ns (namespace-tempid namespace-name)))]
-          (cond-> []
+          (into (cond-> []
             exists?
             (conj [:db.fn/retractAttribute test-ref
                    :seon.test/failing-assertions]
                   [:db.fn/retractAttribute test-ref
                    :seon.test/failure-message])
             exists?
-            (conj [:db.fn/retractAttribute test-ref :seon.test/reach])
-            true (conj result-row))))
+            (conj [:db.fn/retractAttribute test-ref :seon.test/reach]
+                  [:db.fn/retractAttribute test-ref :seon.test/reach-digest]
+                  [:db.fn/retractAttribute test-ref :seon.test/reach-unknown])
+            true (conj result-row))
+            (failure-replacement-tx database test-row-id failures run-ref at))))
       results))))
 
 (def ^:private result-selector
   [:seon.test/reach-digest
+   :seon.test/reach-unknown
    :seon.test/sym
    :seon.test/pass-count
    :seon.test/fail-count
@@ -1692,6 +1806,7 @@
    :seon.test/run-basis-t
    :seon.test/run-at
    :seon.test/run
+   {:seon.test/failures ['* {:seon.test.failure/file [:db/id :seon.fn.file/path]}]}
    :seon.test/failing-assertions
    :seon.test/failure-message])
 
@@ -1702,6 +1817,7 @@
     [:or :seon.test/results :seon.error/value]]}
   [connection {results :seon.test.runner/results :as completion}]
   (let [database (db/db connection)
+        completion (prepare-failures! connection database completion)
         tested (:seon.db/db completion)
         completion (if tested
                      (assoc (dissoc completion :seon.db/db)
@@ -1713,8 +1829,9 @@
         transaction-report
         (if (:seon.error/kind database)
           database
-          (db/transact! connection
-                        [[:db.fn/call #'record-tx completion]]))]
+          (blob/with-publication! connection (:seon.blob/staged-writes completion)
+            #(db/transact! connection
+                           [[:db.fn/call #'record-tx (dissoc completion :seon.blob/staged-writes)]]))) ]
     (if (:seon.error/kind transaction-report)
       transaction-report
       (mapv (fn [{test-symbol :seon.test/sym}]
@@ -1742,21 +1859,20 @@
   [run-result]
   (if (and (:seon.test/reach-digests run-result) (:seon.test/reaches run-result))
     run-result
-    ((requiring-resolve 'seon.test-support/with-database)
+    (try
+     ((requiring-resolve 'seon.test-support/with-database)
      (fn [connection]
        (let [database (db/db connection)
              digest (program-digest database)
-             _ (when-not (= digest (:seon.test.run/program-digest run-result))
-                 (throw (ex-info "The canonical fixture no longer identifies the tested program."
-                                 {:seon.error/kind :seon.test.run/unavailable
-                                  :seon.test.run/unavailable true})))
-             digests (reach-digests database
-                       (mapv :seon.test/sym (:seon.test.runner/results run-result)))]
-         (when (:seon.error/kind digests)
-           (throw (ex-info (:seon.error/message digests) digests)))
-         (assoc run-result :seon.test/reach-digests digests
-                :seon.test/reaches (reach-memberships database
-                                   (mapv :seon.test/sym (:seon.test.runner/results run-result)))))))))
+             symbols (mapv :seon.test/sym (:seon.test.runner/results run-result))]
+         (if (= digest (:seon.test.run/program-digest run-result))
+           (assoc run-result :seon.test/reach-digests (reach-digests database symbols)
+                  :seon.test/reaches (reach-memberships database symbols))
+           (assoc run-result :seon.test/reach-unknown
+                  "The canonical fixture no longer identifies the tested program.")))))
+     (catch Exception failure
+       (assoc run-result :seon.test/reach-unknown
+              (str "Tested closure unavailable: " (ex-message failure)))))))
 
 (defn record!
   "Commit one runner completion into an explicitly named, non-default cluster."
@@ -1779,6 +1895,7 @@
             completion
             {:seon.test/reach-digests (:seon.test/reach-digests run-result)
              :seon.test/reaches (:seon.test/reaches run-result)
+             :seon.test/reach-unknown (:seon.test/reach-unknown run-result)
              :seon.test.runner/results
              (:seon.test.runner/results run-result)
              :seon.test/run-basis-t (:seon.test.run/basis-t run-result)
@@ -1799,6 +1916,7 @@
    held-store
    {:seon.test/reach-digests (:seon.test/reach-digests run-result)
     :seon.test/reaches (:seon.test/reaches run-result)
+    :seon.test/reach-unknown (:seon.test/reach-unknown run-result)
     :seon.test.runner/results (:seon.test.runner/results run-result)
     :seon.test/run-basis-t (:seon.test.run/basis-t run-result)
     :seon.test/run-at (:seon.test.run/at run-result)

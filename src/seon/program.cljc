@@ -863,7 +863,9 @@
              ;; The current row comes from the writer's transaction database.
              (let [value (get current attribute)]
                [:db.fn/retractAttribute entity-id attribute
-                (if (set? value) (first value) value)]))
+                (if (or (set? value)
+                        (and (sequential? value) (sequential? (first value))))
+                  (first value) value)]))
            (sort (filter #(contains? current %) changed)))
       [(assoc desired :db/id entity-id)]))))
 

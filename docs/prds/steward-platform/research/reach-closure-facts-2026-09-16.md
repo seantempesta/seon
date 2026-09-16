@@ -66,3 +66,33 @@ value. The source publisher explicitly hands the durable `:current-src`
 destination while it commits on a disposable branch. Direct cluster writes
 derive their destination from the writer's database. The schema states this
 rule, and retries compare normalized immutable provenance.
+
+## Priority correction — named completion recording
+
+The gate session reported `run.HwsG9I` rejected solely because membership was
+unavailable. That root was already absent when this lane tried to read it;
+the reported log bytes cannot be independently quoted here. The recorder's
+all-or-nothing refusal was wrong. A completion now commits its available
+digest and a declared `:seon.test/reach-unknown` diagnostic, clearing previous
+membership. A later known closure clears that marker. The canonical completion
+path derives both digests and memberships from its tested fixture database in
+every selection mode; an unavailable or mismatching fixture cannot replace
+the completion's original digest with today's graph.
+
+Regression: `explicit-namespace-completion-commits-with-membership-unknown`.
+Default was down during the orchestrator's reset; no in-process test was
+started after the reset warning.
+
+On the new default PID 27828 the direct named-namespace completion committed
+in 502 ms, preserving digest
+`0d054f795a82eda25f40fd8e3055f922ca67d0f86feb401d343155d8b1ae376f`
+and the membership-unknown diagnostic. The recorded outcome remains an error,
+not a fabricated green: fixture acquisition hit the 100000 ms test bound.
+The fixture boundary is recorded in
+[canonical-fixture-roster-permit-remains-held.md](../../../seon/issues/canonical-fixture-roster-permit-remains-held.md).
+
+The priority correction lands with the assertion capture/writer work already
+in progress; slice 4's render/read conversions and full regressions follow.
+Capture keeps exact claims, normalized site/ordinal identity, staged blobs,
+and total component replacement. Ordered contexts are ordinal/text tuples:
+Datahike cardinality-many cannot preserve vector ordering by itself.
