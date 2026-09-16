@@ -82,6 +82,15 @@ peer session (batches 30–57; ledger
    candidate hands a bare symbol where the contract wants an entity lookup
    (`91f536c36`), fix lane running.
 
+0c. **The cluster's live projection drops committed storable declarations.**
+   When an agent admits a schema through a turn (Juniper's own scenario does
+   this on every reseed), the identity attribute and entity map are
+   committed as facts but dropped from the in-memory projection at install;
+   they re-derive later and read as drift. A stale mirror of the declaration
+   facts — the write storm's disease one layer up. Fix lane running at the
+   projection-advance seam. Issue:
+   `a-committed-storable-declaration-is-dropped-from-the-clusters-live-projection`.
+
 1. **The store grows without collection.** `data/store` went 107 MB → 12 GB in
    eight hours with no periodic writer. The peer's measurement
    ([write-latency-vs-store-size](../../context-generation/research/write-latency-vs-store-size-2026-09-17.md))
