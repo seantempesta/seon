@@ -1,0 +1,9 @@
+{:probe/surface :jvm
+ :probe/cluster "default"
+ :probe/namespace "user"
+ :probe/instructions "Evaluate each string as a separate MCP form. Observe the future in later short calls; never force the fixture base directly. Record the complete result before cleanup."
+ :probe/forms [
+  "(do (require 'seon.test) (def arming-final-runs (future (#'seon.test/with-test-loader (fn [] (require 'seon.instrument-test :reload) (require 'seon.render.web-debug-test :reload) (require 'seon.data-shapes-test :reload) (mapv #(seon.test/run (#'seon.test/resolve-test %) (seon.operator/connection \"default\")) '[seon.instrument-test/referenced-contract-changes-rearm-only-dependent-wrappers seon.instrument-test/authored-contract-changes-rearm-without-reloading seon.render.web-debug-test/turn-details-use-the-loop-opening-and-exact-segments seon.data-shapes-test/attempt-settings-and-model-are-related-entities seon.data-shapes-test/evaluation-renderer-is-a-program-reference]))))) :started)"
+  "(if (realized? arming-final-runs) (do (prn @arming-final-runs) :printed) :pending)"
+  "(let [d (seon.db/db (seon.operator/connection \"default\")) rows (seon.eval/of-agent d \"juniper\")] (prn {:probe/count (count rows) :probe/renderer-refs (vec (keep :seon.eval/renderer-fn rows)) :probe/wrapped (identical? #'seon.eval/of-agent (:seon.instrument/var (meta @#'seon.eval/of-agent)))}) :printed)"
+  "(when (realized? arming-final-runs) (ns-unmap *ns* 'arming-final-runs))"]}

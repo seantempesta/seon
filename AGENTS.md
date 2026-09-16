@@ -193,8 +193,11 @@ the publication on an explicitly selected development cluster in its
 hosting JVM; the edit hook's `:current-source` root and cluster select that target.
 Its adoption commit is recorded only after schema and program reconciliation,
 loaded definitions, SCI acquisition, and JVM instrumentation succeed. Publication
-re-arms wrappers when their authored contract changes; unchanged wrappers retain
-identity (`src/seon/instrument.clj:588`). A source-change refusal retries adoption
+re-arms wrappers when their contract or a transitively referenced declaration
+changes; unrelated wrappers retain identity (`src/seon/instrument.clj:593`).
+The wrapper captures the canonical dependency definitions and their contract
+digest; selection compares those definitions with the supplied projection.
+A source-change refusal retries adoption
 once (`src/seon/cluster.clj:2042`);
 individual Var replacement during reload is not atomic. A live proof after file
 edits must name whether it exercised a hot-reloaded Var, a new fork, or this

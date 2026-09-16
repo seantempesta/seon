@@ -1,9 +1,9 @@
 (ns seon.instrument
   "JVM-owned host wrappers with contracts compiled in the caller's projection.
 
-  A loaded Var has one wrapper for its authored contract. Repeated arming
-  preserves unchanged wrappers; teardown cannot remove them. Changed roots
-  or authored contracts are armed on the next apply!.
+  A loaded Var has one wrapper for its contract and referenced declarations.
+  Repeated arming preserves unchanged wrappers; teardown cannot remove them. Changed roots
+  or contract declarations are armed on the next apply!.
   Compiled validators belong to the immutable projection that defines them.
   Host calls without cluster custody use the packaged JVM program captured at
   arming; they never consult Malli's global registry."
@@ -18,6 +18,7 @@
             [seon.effect :as effect]
             [seon.env :as env]
             [seon.error :as error]
+            [seon.id]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]))
 
@@ -566,21 +567,56 @@
                     (:seon.schema.projection/registry projection)
                     (mr/var-registry))})))))
 
+(defn- contract-definitions
+  "Canonical declarations closed over by a function contract, following Malli refs."
+  [projection contract]
+  (let [projection (assoc projection :seon.schema.projection/compile-options
+                          {:registry (mr/composite-registry
+                                      (:seon.schema.projection/registry projection)
+                                      (mr/var-registry))})
+        forms (:seon.schema.projection/forms projection)
+        dependencies (:seon.schema.projection/schema-dependencies projection)]
+    (loop [pending ((mi/-f->original schema/direct-references) projection contract)
+           definitions (sorted-map)]
+      (if-let [schema-key (first pending)]
+        (if (find definitions schema-key)
+          (recur (disj pending schema-key) definitions)
+          (let [definition (get forms schema-key)
+                references (or (get dependencies schema-key)
+                               ((mi/-f->original schema/direct-references)
+                                projection definition))]
+            (recur (into (disj pending schema-key) references)
+                   (assoc definitions schema-key definition))))
+        definitions))))
+
 (defn- current-wrapper?
-  [candidate authored current]
-  (let [metadata (meta current)]
-    (and (identical? candidate (::var metadata))
-         (= authored (::authored metadata)))))
+  [candidate authored projection current]
+  (let [metadata (meta current)
+        contract (get (:seon.schema.projection/function-contracts projection)
+                      (var-symbol candidate) authored)
+        definitions (:seon.instrument/definitions metadata)]
+    (and (identical? candidate (:seon.instrument/var metadata))
+         (= authored (:seon.instrument/authored metadata))
+         (= contract (:seon.instrument/contract metadata))
+         (map? definitions)
+         (= definitions
+            (select-keys (:seon.schema.projection/forms projection)
+                         (keys definitions))))))
 
 (defn- arm-var!
-  [candidate authored bootstrap caps]
+  [candidate authored projection bootstrap caps]
   (alter-var-root
    candidate
    (fn [current]
-     (if (current-wrapper? candidate authored current)
+     (if (current-wrapper? candidate authored projection current)
        current
        (let [original (mi/-f->original current)
              function-symbol (var-symbol candidate)
+             contract (get (:seon.schema.projection/function-contracts projection)
+                           function-symbol authored)
+             definitions (contract-definitions projection contract)
+             contract-digest ((mi/-f->original seon.id/digest)
+                              64 [contract (schema/canonical-data-string definitions)])
              boot-wrapper (delay
                             (binding [*compiling-contract* true]
                               (compiled-wrapper bootstrap function-symbol
@@ -596,7 +632,12 @@
                                            authored original caps)
                          @boot-wrapper))]
                  (apply wrapped arguments))))
-           {::mi/original original ::var candidate ::authored authored}))))))
+           {:malli.instrument/original original
+            :seon.instrument/var candidate
+            :seon.instrument/authored authored
+            :seon.instrument/contract contract
+            :seon.instrument/definitions definitions
+            :seon.instrument/contract-digest contract-digest}))))))
 
 (defn- collect-contracts!
   "Read declarations from the program loaded into this JVM, without Malli's registry."
@@ -610,8 +651,9 @@
         (mapcat (comp vals ns-interns) (all-ns))))
 
 (defn apply!
-  "Arm loaded Vars whose wrapper does not enforce their current authored schema.
-  Unchanged wrappers remain identical; metadata-only contract edits re-arm.
+  "Arm loaded Vars whose contract or referenced declarations changed.
+  Compare each wrapper's captured definitions with the supplied projection.
+  Unrelated declaration changes preserve wrapper identity.
 
   Cluster :record requests cannot disable shared host contracts. Interpreted
   function policy remains local to wrap-interpreted. New host calls validate
@@ -654,7 +696,7 @@
           :seon.error/diagnostic-evidence nil})
         (let [contracts (collect-contracts! caps)
               pending (remove (fn [[candidate authored]]
-                                (current-wrapper? candidate authored @candidate))
+                                (current-wrapper? candidate authored projection @candidate))
                               contracts)
               bootstrap (when (seq pending)
                           ((mi/-f->original schema/declaration-projection)
@@ -682,7 +724,7 @@
                         :seon.error/diagnostic-evidence nil})]
                   (throw (ex-info (:seon.error/message diagnostic)
                                   diagnostic failure)))))
-            (arm-var! candidate authored bootstrap caps))
+            (arm-var! candidate authored projection bootstrap caps))
           {:seon.instrument/registered (count contracts)
            :seon.instrument/instrumented (count (instrumented))})))))
 

@@ -582,6 +582,53 @@
              (is (identical? current @candidate))))))
       (finally (ns-unmap 'seon.instrument-test var-name)))))
 
+(deftest referenced-contract-changes-rearm-only-dependent-wrappers
+  (let [candidate-name (symbol (str "referenced-contract-" (random-uuid)))
+        unrelated-name (symbol (str "unrelated-contract-" (random-uuid)))
+        candidate (intern 'seon.instrument-test candidate-name identity)
+        unrelated (intern 'seon.instrument-test unrelated-name identity)
+        entity-key :seon.instrument-test/referenced-entity
+        alias-key :seon.instrument-test/referenced-alias
+        forms (assoc (schema/snapshot)
+                     entity-key [:map [:seon.instrument-test/value :int]]
+                     alias-key entity-key)
+        before-projection (schema/build-projection forms)
+        after-projection (schema/build-projection
+                          (assoc forms entity-key
+                                 [:map [:seon.instrument-test/value [:or :int :string]]]))
+        arm (fn [projection]
+              (schema/call-with-projection
+               projection
+               #(instrument/apply! {:seon.config/on-core-error :panic
+                                    :seon.schema/projection projection})))]
+    (try
+      (alter-meta! candidate assoc :malli/schema [:=> [:cat alias-key] :map])
+      (alter-meta! unrelated assoc :malli/schema [:=> [:cat :int] :int])
+      (arm before-projection)
+      (let [before @candidate
+            other-before @unrelated]
+        (is (thrown? Exception
+                     (schema/call-with-projection
+                      before-projection #(candidate {:seon.instrument-test/value "new"}))))
+        (arm after-projection)
+        (is (not (identical? before @candidate)))
+        (is (identical? other-before @unrelated))
+        (is (not= (:seon.instrument/contract-digest (meta before))
+                  (:seon.instrument/contract-digest (meta @candidate))))
+        (is (= {:seon.instrument-test/value "new"}
+               (schema/call-with-projection
+                after-projection #(candidate {:seon.instrument-test/value "new"}))))
+        (is (thrown? Exception
+                     (schema/call-with-projection
+                      after-projection #(candidate {:seon.instrument-test/value false}))))
+        (let [current @candidate]
+          (arm after-projection)
+          (is (identical? current @candidate))
+          (is (identical? other-before @unrelated))))
+      (finally
+        (ns-unmap 'seon.instrument-test candidate-name)
+        (ns-unmap 'seon.instrument-test unrelated-name)))))
+
 (deftest prefix-related-sibling-vars-keep-their-own-contracts
   (instrumented!
    (fn [_]
