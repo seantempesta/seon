@@ -765,3 +765,18 @@ platform (recording) + render-simplification, html-views, error, render.web
 lands. Steward's two Opus lanes: the three remaining 58b reds + the
 `invocation-unknown` nil issue; a sweep of raw `db/transact!` fixture writes
 onto `transacted!`.
+
+### 2026-09-17 05:50Z — gate-set return contract fixed (`5ffa964cb`)
+
+`gate-set` concatenated its three selection queries without reading them, so
+a flat `seon.db` refusal spliced in as map entries (element 0 = the MapEntry
+`[:seon.db/invalid-read true]`) — surfaced only when a read refused, which is
+why healthy runs never reproduced it. Every read is now checked and its
+refusal returned whole; `gate-set`/`tests-reaching` declare
+`[:or [:vector :seon.test/sym] :seon.error/value]` (the shape
+`seon.test/reaching` already declares). Live: clean call → 96 sorted strings;
+injected refusal returned whole; sweep of every indexed `:seon.fn/sym` clean.
+Boundary: default was reforked mid-lane; the final in-process run sat in
+`seon.await` 40 min on the fresh JVM (unverified end to end) and the last
+publication ended "source changed during adoption" — the orchestrator is
+re-adopting fn.clj now; batch 60 gates `seon.fn-test` cold.
