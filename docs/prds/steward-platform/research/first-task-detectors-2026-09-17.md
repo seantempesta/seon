@@ -193,22 +193,34 @@ of the tree.
 
 - The counts and the problem texts above are **live probes on `default`**
   against the new definitions, loaded into that JVM by `require :reload`.
-- **The edit is NOT adopted.** `bin/seon init --dev default --changed
-  src/seon/issue/detect.clj` was attempted eight times over roughly forty
-  minutes and every attempt ended `Source changed while incremental
-  publication was being analyzed` / `…while current-src was being analyzed;
-  retry.` — nine concurrent `seon init` processes were observed in the
-  process table. This is shared-tree churn, not a defect in this slice.
-- **No in-process `seon.test/run` was possible.** Every run is refused with
-  `:seon.error/kind :seon.test/unknown`: *"No function in this program
-  declares :seon.fn/destroys, so an in-process run cannot tell whether a test
-  deletes a filesystem path it did not create. Republish the program (bin/seon
-  init --dev default)…"*. The attribute is installed in `default`'s schema but
-  **0** declarations carry it, because no complete publication has converged
-  since the destructive-owner lane landed. That refusal is correct and was NOT
-  worked around; it blocks every lane's in-process run on `default` until one
-  publication converges. The regressions are therefore **unverified in
-  process**; the orchestrator's cold gate is the proof of record.
+- **The edit IS adopted.** Eight direct `bin/seon init --dev default --changed
+  src/seon/issue/detect.clj` attempts each ended `Source changed while
+  incremental publication was being analyzed` (nine concurrent `seon init`
+  processes were in the process table), but a neighbouring lane's complete
+  publication then carried the file: `default` holds
+  `seon.issue.detect/public-without-contract`,
+  `…/public-without-reaching-test` and the three new private helpers, and
+  pulling `[:seon.fn/spec :seon.fn/doc]` for `public-without-reaching-test`
+  returns this commit's exact contract and docstring. The measured counts above
+  were taken through `require :reload` before that; the adopted rows are the
+  same bytes.
+- **No in-process `seon.test/run` was possible, and this is a platform blocker
+  for every lane on `default`.** Every run is refused with
+  `:seon.error/kind :seon.test/unknown`: *"No function in this program declares
+  :seon.fn/destroys, so an in-process run cannot tell whether a test deletes a
+  filesystem path it did not create. Republish the program (bin/seon init --dev
+  default)…"*. Tried twice, forty minutes apart, across two publications. The
+  attribute is installed in `default`'s schema and the SOURCE carries the
+  declaration — `src/seon/operator.clj:311` declares `:seon.fn/destroys` and
+  the indexed `:seon.fn/source` of `seon.operator/cleanup-root-under-lock!`
+  contains it — but the published ROW carries neither `:seon.fn/destroys` nor
+  `:seon.fn/spec`, so the whole-program query answers zero and the check
+  refuses. The declared metadata is not becoming an attribute at the
+  publication seam. That is the destructive-owner lane's in-flight work, not
+  this slice's; it was NOT worked around (the repl rule forbids it), and it
+  blocks in-process verification for everyone until it lands. The four
+  regressions here are therefore **unverified in process**; the orchestrator's
+  cold gate is the proof of record.
 - `clj-kondo` is clean on both changed files (0 errors, 0 warnings).
 
 ## Findings out of scope (issues filed separately)
