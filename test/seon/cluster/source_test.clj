@@ -5,6 +5,7 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
+            [seon.cluster :as cluster]
             [seon.cluster.registry :as registry]
             [seon.cluster.source :as source]
             [seon.cluster.store :as store]
@@ -646,3 +647,24 @@
                 (is (number? (db/q '[:find ?run . :in $ ?id :where [?run :seon.test.run/id ?id]]
                                    final-db (:seon.test.run/id next-run))))
                 (is (empty? (scratch-branches opened)))))))))))
+
+(deftest incremental-source-refresh-includes-unreported-changes
+  (let [changed (deref #'cluster/changed-source-paths)
+        published {"/repo/src/a.clj" "a1"
+                   "/repo/src/b.clj" "b1"
+                   "/repo/resources/schema.edn" "s1"}]
+    (is (= ["/repo/src/a.clj"] (changed published
+                  (assoc published "/repo/src/a.clj" "a2")
+                  ["/repo/src/a.clj"])))
+    (is (= ["/repo/src/a.clj" "/repo/src/b.clj"] (changed published
+                          (assoc published "/repo/src/b.clj" "b2")
+                          ["/repo/src/a.clj"])))
+    (is (= ["/repo/resources/schema.edn" "/repo/src/a.clj"] (changed published
+                          (dissoc published "/repo/resources/schema.edn")
+                          ["/repo/src/a.clj"])))
+    (is (= ["/repo/src/a.clj" "/repo/src/new.clj"] (changed published
+                          (assoc published "/repo/src/new.clj" "n1")
+                          ["/repo/src/a.clj"])))
+    (is (= ["/outside/reported.clj"]
+           (changed published published ["/outside/reported.clj"]))
+        "reported paths absent from both digest maps remain analysis inputs")))

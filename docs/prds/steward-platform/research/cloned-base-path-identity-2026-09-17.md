@@ -376,3 +376,71 @@ no default MCP session was altered. No passing test is claimed here.
 Both scratch application JVMs were downed through the operator, which reported
 `flock free`; the scratch root and temporary probe files were deleted. No
 worktree was created, all shells completed, and no default restart occurred.
+
+## Batch 96 corrections after release of cluster.clj
+
+The owner released the file after 849bbce0b. The follow-up changes one production
+owner: `changed-source-paths` unions reported paths with independently filtered
+digest differences. Equal or absent digests cannot discard an explicit report.
+The pure regression moved from destructive `seon.cluster.boot-test` fixtures
+to `seon.cluster.source-test`, retaining its four assertions and adding a fifth
+for a reported path absent from both maps. The cold clone regression also
+removes the reported file from both snapshots and observes the REAL analyzer:
+exactly that file must be analyzed. Its ordinary unchanged-relocation case now
+supplies no reported paths; explicit reports are requests to analyze, so the
+previous zero-analysis claim for an explicitly reported path is superseded.
+The reusable clone probe was adjusted to that same distinction.
+
+The publication-isolation regression calls `cluster/disarm-agents!` after
+bootstrap closure and BEFORE recording the old connection's basis. This owner
+removes routing, quiesces the armer, joins each agent's stop acknowledgement,
+and joins the cluster graph. The connection stays open. The assertion remains
+EXACT basis equality, with no tolerated extra transaction. Its final ordinary
+`cluster/stop!` still owns connection/store cleanup.
+
+Read-only default MCP attribution of the preserved listener datoms returned:
+536870949 opens an agent turn; all three captured transactions have no
+`:seon.db/process` datom. The first transaction's attributes are
+`:db/txInstant`, `:seon.turn/id`, `:seon.turn/agent`,
+`:seon.turn.work/situation`, `:seon.turn/opened-tx`, `:seon.turn/trigger`,
+`:seon.runtime/turns`. No default graph was stopped for this probe. The stopped
+fixture's complete publication proof remains the destructive cold gate.
+
+Follow-up owned paths: `src/seon/cluster.clj`,
+`test/seon/cluster/boot_test.clj`, `test/seon/cluster/source_test.clj`,
+`docs/prds/steward-platform/research/cloned_base_path_identity_probe_2026_09_17.clj`,
+and this note. Targeted clj-kondo: 0 errors, 15 existing warnings.
+
+Default adoption converged at source commit
+`6aaacff8-f5bb-5e26-ba96-5bd48ba02640`, digest
+`c45a5537e4219d4dc85eb41e72cb08ed2842a5f09d46c8e818748ffffe9bbc84`.
+The operator retried once because the final cold-regression edit arrived while
+its first publication was being adopted. The second pass completed schema,
+program, loaded-definition, SCI, and instrumentation steps. Default remained
+PID 53320 throughout. The test namespace alone was reloaded through
+`#'seon.test/with-test-loader`; test-support was not reloaded.
+
+Exact in-process run, launched in a future and polled by later MCP evaluations:
+
+```clojure
+(let [connection (seon.operator/connection "default")
+      database (seon.db/db connection)]
+  (seon.test/run
+   (#'seon.test/resolve-test
+    'seon.cluster.source-test/incremental-source-refresh-includes-unreported-changes)
+   connection
+   {:seon.db/db database
+    :seon.test.run/provenance (seon.test.runner/provenance database)
+    :seon.test/remaining-ms 180000}))
+```
+
+Before convergence, the REPL-installed definition passed 5 assertions with
+0 failures and 0 errors (run entity 51499, basis 536871136). The separate
+post-adoption result below is the adopted-definition proof.
+
+Post-adoption result: **5 passing assertions, 0 failures, 0 errors**, run
+entity 51500, basis 536871140, at `2026-09-16T17:22:29Z`. No test JVM was
+launched and no destructive boot fixture was run in default. No new schema
+meaning changed in this follow-up, so it adds no reset requirement. All
+launched shells completed; this follow-up created no scratch root/worktree.
+The cold request includes boot-test and the relocated source-test namespace.

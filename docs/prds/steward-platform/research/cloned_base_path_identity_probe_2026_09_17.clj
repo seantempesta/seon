@@ -38,7 +38,7 @@
          (swap! calls into (keys (:seon.fn.analyzer/sources request)))
          (analyze request))}
       (fn []
-        (let [unchanged (cluster/refresh-source! root [(.getCanonicalPath path)])
+        (let [unchanged (cluster/refresh-source! root [])
               initial @calls]
           (spit path (str (slurp path) "\n; Relocated checkout edit.\n"))
           (let [changed (cluster/refresh-source! root [(.getCanonicalPath path)])]

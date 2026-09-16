@@ -1989,12 +1989,11 @@
 (defn- changed-source-paths
   [published-file-digests current-file-digests reported-paths]
   (->> (concat reported-paths
-               (keys published-file-digests)
-               (keys current-file-digests))
-       distinct
-       (filter #(not= (get published-file-digests %)
-                      (get current-file-digests %)))
-       sort vec))
+               (filter #(not= (get published-file-digests %)
+                              (get current-file-digests %))
+                       (distinct (concat (keys published-file-digests)
+                                         (keys current-file-digests)))))
+       distinct sort vec))
 
 (defn- incremental-source-refresh!
   [root store changed-paths roots]

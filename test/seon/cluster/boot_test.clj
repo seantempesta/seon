@@ -938,6 +938,9 @@
     (try
       (let [old-connection (:seon.boot/cluster-connection old-world)
             _ (await-bootstrap! old-connection "root")
+            ;; Bootstrap closure leaves the task message ready for a turn.
+            ;; Join the producers before attributing any write to publication.
+            _ (#'cluster/disarm-agents! old-world)
             old-basis (:max-tx @old-connection)
             refreshed (cluster/refresh-source!
                        root ["src/seon/ai/tokens.cljc"])
@@ -1244,23 +1247,6 @@
       (finally
         (delete-recursively! root)))))
 
-(deftest incremental-source-refresh-includes-unreported-changes
-  (let [changed (deref #'cluster/changed-source-paths)
-        published {"/repo/src/a.clj" "a1"
-                   "/repo/src/b.clj" "b1"
-                   "/repo/resources/schema.edn" "s1"}]
-    (is (= ["/repo/src/a.clj"] (changed published
-                  (assoc published "/repo/src/a.clj" "a2")
-                  ["/repo/src/a.clj"])))
-    (is (= ["/repo/src/a.clj" "/repo/src/b.clj"] (changed published
-                          (assoc published "/repo/src/b.clj" "b2")
-                          ["/repo/src/a.clj"])))
-    (is (= ["/repo/resources/schema.edn" "/repo/src/a.clj"] (changed published
-                          (dissoc published "/repo/resources/schema.edn")
-                          ["/repo/src/a.clj"])))
-    (is (= ["/repo/src/a.clj" "/repo/src/new.clj"] (changed published
-                          (assoc published "/repo/src/new.clj" "n1")
-                          ["/repo/src/a.clj"])))))
 
 (deftest current-source-digest-names-the-merged-schema-declarations
   (let [schema-path "resources/seon/schemas"]
@@ -1954,9 +1940,25 @@
            (swap! calls into (keys (:seon.fn.analyzer/sources request)))
            (analyze request))}
         (fn []
-          (let [unchanged (cluster/refresh-source! root [(.getCanonicalPath path)])]
+          (let [unchanged (cluster/refresh-source! root [])]
             (is (false? (:seon.source/built? unchanged)))
-            (is (= [] @calls) "relocation and an unchanged reported path analyze no file"))
+            (is (= [] @calls) "relocation alone analyzes no file"))
+          (let [artifact-file (cluster/source-artifact-file root)
+                artifact (edn/read-string (slurp artifact-file))]
+            (spit artifact-file
+                  (pr-str (update artifact :seon.source/relative-file-digests
+                                  dissoc "src/seon/ai/tokens.cljc")))
+            (let [snapshot #'cluster/current-source-snapshot
+                  capture @snapshot]
+              (with-redefs-fn
+                {snapshot (fn [publication-roots]
+                            (update (capture publication-roots)
+                                    :seon.source/relative-file-digests
+                                    dissoc "src/seon/ai/tokens.cljc"))}
+                #(cluster/refresh-source! root [(.getCanonicalPath path)])))
+            (is (= [(.getCanonicalPath path)] @calls)
+                "a reported file absent from both digest sets is analyzed")
+            (reset! calls []))
           (spit path (str (slurp path) "\n; Relocated checkout edit.\n"))
           (cluster/refresh-source! root [(.getCanonicalPath path)])
           (is (= [(.getCanonicalPath path)] @calls)
