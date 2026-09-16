@@ -490,3 +490,18 @@ function in its reach, and an unresolvable file site in one evidence row, and
 checks that the renamed identity resolves afterwards carrying no fabricated
 source, that the function tombstone asserts nothing but its name, and that
 the site keeps line 7 while reporting its path.
+
+#### Live proof on the fresh store
+
+`bin/seon init --dev default --changed src/seon/cluster/source.clj --changed
+src/seon/test/runner.clj` **exits 0** on PID 17352, publishing and adopting
+`:current-src` commit `6aaa6f8a-0cb0-5f3e-8aa9-85685a64ddae`, digest
+`3bd6599eb2afdf2a7050f890a9e9d8b55aea1e81f838074519cf7581e7781f03`, with
+**zero** `Nothing found for entity id` lines.
+
+The attempt immediately before it also cleared the seal — `branch publication
+complete` twice, zero identity refusals — but exited 1 at a foreign boundary,
+`:seon.cluster/source-changed-during-adoption`, because a peer lane committed
+`src/seon/cluster.clj` and `test/seon/cluster_test.clj` during both its pass
+and its single declared retry. That is contention on a protected file, not
+this seam; the following quiet run is the proof.
