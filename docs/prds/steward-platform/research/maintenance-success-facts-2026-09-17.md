@@ -179,20 +179,50 @@ per-run facts instead of being remembered in a mutable mirror.
 - The defect and its cause were reproduced live on `default` (pid 38993) with
   the forms above, before any edit.
 - `clj-kondo` clean on the three Clojure files; both edited EDN resources parse.
-- **No in-process regression run, and no adoption.** `bin/seon init --dev
-  default --changed …` reloaded `seon.maintenance` but then refused with
-  `:seon.cluster/source-changed-during-adoption` (a concurrent lane's edit
-  landed inside the window), so the adoption commit was never recorded. The
-  retry was not attempted: the coordinator had paused in-process runs and
-  transacting probes on `default` for the store-growth incident (~1 GB/min,
-  writer under measurement), and `default`'s advertisement went missing
-  shortly after — the cluster is down and a lane never starts or reforks it.
-  Under the adoption-before-a-new-arity rule `last-collection`'s contract
-  wrapper cannot admit calls until an adoption lands, so no in-process proof of
-  the new function was possible in this window. Every claim above about the NEW code is
-  therefore proven by reading and by the pre-edit live reproduction, not by
-  execution; the gate request
-  `tmp/orchestrator/gate-requests/maintenance-success.txt` is the first
-  execution of these regressions.
+- **Batch 69 B2 cold on `54d3ee20f`** ran the regressions for the first time:
+  three green, three red. All three reds were fixture or expectation defects in
+  the tests, none in the projection, the schema or the query:
+  1. `last-collection-…` asserted `(:seon.error/diagnostic-offending answer)`.
+     `seon.error/diagnostic` moves every `diagnostic-*` field INTO
+     `:seon.error/data` and dissocs it from the top level
+     (`src/seon/error.clj:337`), so the top-level read was nil. The expectation
+     now reads the real path and also asserts the member.
+  2. `receipt-request-and-operation-result-attributes-are-queryable` seeded
+     `(test-support/program-fn-row "maintenance-schema-test/handler")`, and a
+     program fn row refs `[:seon.ns/name …]`, which the fixture never minted —
+     "Nothing found for entity id [:seon.ns/name maintenance-schema-test]". The
+     handler is now `seon.operator/observe-footprint!`, a namespace the
+     canonical population holds. (`seon.schedule-test` solves the same problem
+     by minting `{:seon.ns/name handler-ns}` itself; either is admissible, and
+     using the canonical population avoids a synthetic namespace row.)
+  3. `root-owned-portfolio-initializes-as-queryable-schedule-facts` — the red
+     the batch report attributed to `seon.schedule-test` is in
+     `seon.maintenance-schema-test`; `seon.schedule-test`'s own schedule rows
+     already carry `:seon.schedule/zone-id`. The test's closing "a later
+     ordinary cadence transaction remains authoritative" row updated
+     `:seon.schedule/expression` alone, and write admission reads an
+     identity-keyed map against the WHOLE schedule schema, so the partial
+     update was refused for the missing required `:seon.schedule/zone-id`. The
+     row now carries it.
+- **In process on `default` (pid 63433, fresh store), after the fixes**, base
+  realized first on a daemon thread, then one run at a time through
+  `seon.test/run` with the namespace reloaded through `seon.test`'s own loader:
+
+  | test | pass / fail / error |
+  |---|---|
+  | `seon.maintenance-test/last-collection-answers-when-a-root-was-collected-and-what-it-reclaimed` | 8 / 0 / 0 |
+  | `seon.maintenance-schema-test/receipt-request-and-operation-result-attributes-are-queryable` | 1 / 0 / 0 |
+  | `seon.maintenance-schema-test/root-owned-portfolio-initializes-as-queryable-schedule-facts` | 5 / 0 / 0 |
+  | `seon.maintenance-schema-test/the-cleanup-collection-slot-declares-both-arms-it-can-carry` | 4 / 0 / 0 |
+
+  The three regressions batch 69 already ran green
+  (`a-successful-cleanup-persists-its-verified-collection-result`,
+  `a-refused-collection-keeps-its-typed-error-on-the-same-slot`,
+  `re-recording-one-maintenance-run-replaces-its-attributes`) were not re-run
+  in process; batch 69 B2 is their proof.
+- `seon.maintenance` in pid 63433 is the definition **loaded at boot from
+  HEAD**, not a hot-reloaded Var and not a fresh adoption: `bin/seon init --dev
+  default` is refusing for every lane on an unrelated uncommitted predicate
+  (`seon.cluster.store/file-lock-object?`), and this lane did not retry it.
 - No test JVM was launched, `default` was never restarted, and no probe in this
-  lane transacted into `default`'s store.
+  lane transacted into `default`'s store outside `seon.test/run`'s own fixture.
