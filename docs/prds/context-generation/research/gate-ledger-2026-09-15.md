@@ -302,3 +302,15 @@ window. Plan: retention-sweep removes the per-minute writer; the steward
 session resets default's store at the next refork (disposable-data rule);
 GC cadence appended to the existing issue
 `storage-gc-runs-without-a-cutoff-so-it-reclaims-almost-nothing.md`.
+
+### 2026-09-16 07:20Z — retention-sweep landed (`5a10f5dfa`, evidence `af0359703`)
+
+Automatic byte-budget blob retention removed (dial, schemas, test, schedule
+seed); default's seeded per-minute row retired by transaction; weekly
+reachability GC (`registry/collect!`) remains. Live on default: reachability
+gate open 3.36% → 100% over 90 s, zero scheduler key walks, in-process 4 tests
+/ 21 assertions green, adoption converged. Issue
+`blob-retention-sweep-starves-every-roster-writer.md` resolved and archived.
+Gate (seon.schedule-test seon.blob-test seon.cluster.registry-test
+seon.dev.fresh-operator-test + platform) waits on the cold-arming blocker
+(batch 29) and runs on the fresh store after the reset.
