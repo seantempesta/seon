@@ -136,7 +136,8 @@ One test at a time on a daemon thread, `seon.test/run` with
 ## Verification boundary
 
 - The isolated gate is the orchestrator's:
-  [tmp/orchestrator/gate-requests/opening-subject.txt](../../../../tmp/orchestrator/gate-requests/opening-subject.txt).
+  `tmp/orchestrator/gate-requests/opening-subject.txt` (untracked; `tmp/`
+  is gitignored).
   Everything above is in-process iteration on the shared `default` JVM.
 - **The generated opening does not drive on `default`.** `pull-result` and
   `next-entry` have no caller in `src/` — only tests call them — and
