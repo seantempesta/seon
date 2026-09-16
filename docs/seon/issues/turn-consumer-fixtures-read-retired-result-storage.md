@@ -314,3 +314,10 @@ successful-call regression was 8/1/0 before, 9/0/0 on the evaluated candidate,
 and 9/0/0 after isolated development adoption (run 48557). The batch-19
 landing records exact values and adoption. The generated-scenario partial-map
 seed remains blocked by write-validation-class, as directed by the owner.
+
+The prompt-refusal member now opens through the real transition and injects
+the typed failure at the prompt acquisition seam. Its old triggerless fixture
+described a now-legal state and reached the provider. The four original behavior
+assertions pass before editing and after isolated adoption (48558 and 48588):
+error outcome, no provider request, no attempt row, and durable refusal kind.
+This resolves that stale fixture without changing production prompt policy.

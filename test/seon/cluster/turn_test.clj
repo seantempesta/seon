@@ -3152,38 +3152,34 @@
               "and never more messages than there are distinct signatures"))))))
 
 (deftest a-prompt-refusal-is-a-recorded-error-value-never-a-throw
-  ;; `seon.cluster.prompt/prompt` refuses by THROWING (`::no-trigger`,
-  ;; `::missing-input`). \"Nothing throws into the agent loop\" is law:
-  ;; the loop's one `:call` site catches it and records the flat error
-  ;; value, the turn ends `:error`, and no provider call is made.
-  (with-cluster fake-evaluate
+  (with-cluster
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
-            requests (atom [])]
-        ;; a held run whose creating transaction names NO trigger — the
-        ;; caller-bug state `::no-trigger` seals
-        (db/transact! connection
-                    [{:seon.turn/id "run-untriggered" :seon.turn/agent [:seon.agent/id "agent-a"] :seon.turn/opened-tx "datomic.tx"}
-                     {:seon.agent/id "agent-a"
-                      }])
-        (with-redefs [ai/complete
+            requests (atom [])
+            refusal {:seon.error/kind :seon.cluster.prompt/refused
+                     :seon.error/message "The retained prompt could not be acquired."
+                     :seon.error/data {}}]
+        (turn/turn {:seon.turn.loop/cluster cluster
+                    :seon.turn.work/next
+                    (turn/next-agent-work @connection (request connection))}
+                   now)
+        (with-redefs [prompt/prompt (fn [_ _] refusal)
+                      ai/complete
                       (recording-completer requests [{:seon.ai/text "unused"}])]
           (let [report (turn/turn
                         {:seon.turn.loop/cluster cluster
                          :seon.turn.work/next
-                         {:seon.turn.work/situation :call
-                          :seon.turn/id "run-untriggered"
-                          :seon.agent/id "agent-a"}}
-                        (Date.))]
+                         (turn/next-agent-work @connection (request connection))}
+                        now)]
             (is (= :error (:seon.turn.loop/outcome report))
-                "the turn ends as a value — the throw never escapes")))
+                "the refused prompt settles as an error value")))
         (is (empty? @requests) "no provider call without a prompt")
         (is (empty? (attempt-rows @connection)) "and no attempt row")
-        (testing "the refusal is a durable error fact naming its rule"
-          (is (contains? (set (db/q '[:find [?kind ...] :where
-                                     [?e :seon.error/kind ?kind]]
-                                   @connection))
-                         :seon.cluster.prompt/refused)))))))
+        (is (contains? (set (db/q '[:find [?kind ...] :where
+                                   [?e :seon.error/kind ?kind]]
+                                 @connection))
+                       :seon.cluster.prompt/refused)
+            "the actual acquisition refusal is durable")))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The prompt's cause is the run's recorded trigger

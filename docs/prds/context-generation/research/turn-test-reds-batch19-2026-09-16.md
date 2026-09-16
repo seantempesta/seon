@@ -42,7 +42,7 @@ failure after successful setup. The namespace remains red.
 | Partial config entity maps refused before test work | `refused-terminal-program-transactions-settle-and-do-not-refire`, `generated-model-attempt-traces-preserve-presence-and-episode-laws` | **Blocked by write-validation-class**; downstream assertions skipped after capturing the complete refused seed | Existing tests retained; no config-map workaround applied to these members |
 | Retired generated settlement fixture | `generated-fixed-point-closes-the-run`, `generated-membership-failure-never-advances-the-run-to-call` | Setup reaches `receipt-settle-call`, which returns `no-terminal-fact`; not attributed to raw write validation | Retained until current system-turn coverage verifies green |
 | Retired phase/private-state/recovery observations | Generated phase property, private-definition refusal, crash-intent test | Seeds commit; unresolved fixture/observation work | Original assertions retained |
-| Prompt fixture uses a now-legal triggerless turn as its failure | Prompt-refusal test | Candidate injects the actual prompt acquisition refusal on a real opened turn | Same no-provider, no-attempt and durable-error assertions |
+| Prompt fixture uses a now-legal triggerless turn as its failure | Prompt-refusal test | Resolved fixture: inject the actual prompt acquisition refusal on a real opened turn; 4/0/0 before and after adoption | Same no-provider, no-attempt and durable-error assertions |
 | Fake evaluation and retired result observations | Opening-database prompt, streaming pair, lost-call diagnostic, delimiter repair, schema refinement/unregister | Seeds commit; distinct current-observation candidates and boundaries recorded below | No failing candidate is retained |
 
 ## Seed verification after the owner's batch-20 finding
@@ -145,3 +145,60 @@ test passed **9/0/0**, run 48557. Complete values are in
 The partial config seed maps in the two blocked members were left unchanged.
 This repair is about expressing absence through the existing reconciler,
 not accommodating the raw-write validation defect.
+
+## Slice 3 — current prompt-refusal fixture
+
+The fixture now opens through the ordinary turn transition and injects a typed
+refusal at `prompt/prompt`. It no longer fabricates a triggerless turn and
+assumes that legal state will throw. Real SCI acquisition/evaluation remains
+in the fixture. All four existing behavioral obligations remain: an error
+outcome, no provider request, no attempt row, and the exact durable refusal kind.
+
+`seon.cluster.turn-test/a-prompt-refusal-is-a-recorded-error-value-never-a-throw`
+passed **4/0/0** before editing (48558), then **4/0/0** after isolated
+adoption `6aaa0f00-65d7-5536-88e3-d5e483baafc6` (48588). The
+[complete values](turn-test-reds-batch19-prompt-2026-09-16.edn) record both.
+The seed observer had verified this member's setup writes succeed; its former
+refusal was the later `plan-call` transition, not write-map validation.
+
+## Schema-deletion boundary and three priced options
+
+The direct writer regression composes declaration and deletion in one real
+transaction. Baseline run 48440, evaluated candidate 48462, observed candidate
+48480 and cache-comparison run 48567 each return **4/3/0**. No production edit
+was retained. The comparison proves that a mid-transaction database still
+claims committed cache identity: its ordinary projection query omits the new
+schema, its uncached query returns the exact declared form, and its direct
+pull returns the stored form. The resulting schema diff is empty. Dependency
+revision: `cdcb5792db8bd599487f099437265d18a31164a5`.
+
+This is a separate
+[transaction-cache defect](../../../seon/issues/transaction-functions-retain-committed-query-cache-identity.md),
+not a refused seed. It blocks the otherwise small `row-tx` projection repair.
+The dependency is outside the granted owners, so this class stops before
+production changes. The independent dependency-deletion branch's Malli failure
+remains an additional observable; the cache comparison does not prove its cause.
+
+Estimates below include a canonical regression and replays, not a cold gate:
+
+1. **Constrain cache eligibility at transaction entry (recommended), 1–2 hours
+   across the dependency owner and this caller.** Clear committed cache identity
+   before executing transaction functions, using the existing dependency
+   mechanism; then derive deletion's projection at the writer. Guarantee:
+   speculative values cannot reuse committed query results. We give up query
+   result caching inside speculative transactions and immediate closure in this
+   bounded lane; committed-read caching remains available.
+2. **Give each intermediate transaction value its own cache lifecycle,
+   3–5 hours.** Advance identity after every transaction operation at the
+   dependency owner. Guarantee: cached results identify the exact intermediate
+   value. We give up the simpler committed-only cache contract and take on
+   intermediate-entry reclamation and lifecycle proofs.
+3. **Remove query-result caching, 1–2 hours plus performance measurement.**
+   Keep the dependency's query engine and delete the result-cache path in place.
+   Guarantee: no query can receive stale cached results. We give up acceleration
+   for repeated committed reads; latency gates may require further work.
+
+Default publication of the config fixture was independently refused at the
+foreign `:seon.issue/agent` scratch-schema boundary (hook requests
+`6121a3dc-6237-4c3d-a162-5b7235d24e76` and
+`7649a713-b8d3-4a77-bb54-c25e39c5f27a`). No default restart/refork was attempted.
