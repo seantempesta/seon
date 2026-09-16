@@ -86,3 +86,25 @@ and falls back to a complete rebuild. So a changing file is now a named
 refusal plus one full rebuild; making it retry adoption needs
 `::source-changed-during-analysis` added to that retry predicate in
 `seon.cluster`, which this lane did not own.
+
+## Update 2026-09-17 — the retry boundary is closed
+
+`seon.cluster` now derives the publication phase from the failure's declared
+source-change cause (`source-change-phases` / `source-change-phase`, next to
+`refused!`), and `retrying-source-change` is the one retry both seams take:
+an analysis-time `:seon.fn/source-changed-during-analysis` and the
+adoption-time `:seon.cluster/source-changed-during-adoption` retry exactly once
+and converge when the second read is stable. A refusal that survives the retry
+names `:seon.source/change-phase`. The incremental catch falls back to a
+complete rebuild only for an `:seon.fn/index-refused` that is NOT a source
+change, so a moving tree is no longer a rebuild reason.
+
+Regression: `seon.cluster-test/a-source-change-during-analysis-takes-the-one-publication-retry`
+(drives the real `seon.fn` span read for the refusal it asserts on).
+Landing note: [adoption-retry-on-analysis-refusal-2026-09-17.md](../../prds/steward-platform/research/adoption-retry-on-analysis-refusal-2026-09-17.md).
+
+Follow-up, not in that slice: the two snapshot-before/after compares
+(`src/seon/cluster.clj:1860`, `:1953`) say "retry" in their messages but carry
+no `:seon.error/diagnostic-cause`, so they still hard-fail the publication.
+Giving them the declared cause would fold them into the same single retry and
+changes the full-refresh path's behaviour; it needs its own slice.

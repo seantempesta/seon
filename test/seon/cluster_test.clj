@@ -258,3 +258,81 @@
             "the message states the change rather than `predates`")
         (is (not (str/includes? (:seon.error/message refusal) "predates"))
             "so the reader is never told a whole-map inequality")))))
+
+(defn- analysis-source-change-failure
+  "The refusal `seon.fn`'s span read raises when the file grew under it.
+
+  Captured once from the real file, sliced against a span the analyzer could
+  only have produced from the LARGER text: exactly the publication failure in
+  `docs/seon/issues/source-analysis-throws-when-a-file-changes-between-snapshot-and-span-read.md`."
+  []
+  (let [file (java.io.File/createTempFile "cluster-span-change" ".clj")]
+    (try
+      (spit file "(ns probe.span)\n(defn a [] 1)\n")
+      (let [contexts ((ns-resolve 'seon.fn 'source-contexts) [file])
+            path (.getCanonicalPath file)]
+        (spit file "(ns probe.span)\n(defn a [] 1)\n(defn b [] 2)\n")
+        (try
+          ((ns-resolve 'seon.fn 'exact-source)
+           contexts
+           {:seon.fn.analyzer/filename path
+            :seon.fn.analyzer/row 3 :seon.fn.analyzer/col 1
+            :seon.fn.analyzer/end-row 3 :seon.fn.analyzer/end-col 13})
+          nil
+          (catch clojure.lang.ExceptionInfo failure failure)))
+      (finally (.delete file)))))
+
+(deftest a-source-change-during-analysis-takes-the-one-publication-retry
+  ;; The analysis-time refusal and the adoption-time digest compare are the
+  ;; same event at two seams; both take the single retry, and neither is a
+  ;; rebuild reason (`docs/prds/steward-platform/research/
+  ;; adoption-retry-on-analysis-refusal-2026-09-17.md`).
+  (let [retrying (ns-resolve 'seon.cluster 'retrying-source-change)
+        phase-of (ns-resolve 'seon.cluster 'source-change-phase)
+        progress (ns-resolve 'seon.cluster '*source-progress!*)
+        analysis-failure (analysis-source-change-failure)
+        adoption-failure (ex-info "Source changed during development adoption."
+                                  {:seon.error/kind :seon.boot/refused
+                                   :seon.boot/offense
+                                   {:seon.source/commit-id "c0"
+                                    :seon.error/diagnostic-cause
+                                    :seon.cluster/source-changed-during-adoption}})
+        reported (atom [])
+        attempts (atom 0)
+        converging (fn [failure]
+                     (fn []
+                       (if (= 1 (swap! attempts inc))
+                         (throw failure)
+                         {:seon.source/commit-id "converged"})))]
+    (is (some? analysis-failure)
+        "the captured span read genuinely refuses instead of returning source")
+    (is (= [:seon.fn/index-refused :seon.fn/source-changed-during-analysis]
+           [(:seon.error/kind (ex-data analysis-failure))
+            (:seon.error/diagnostic-cause (ex-data analysis-failure))])
+        "carrying the declared analysis-time source-change cause")
+    (is (= [:analysis :adoption nil]
+           [(phase-of analysis-failure)
+            (phase-of adoption-failure)
+            (phase-of (ex-info "unrelated" {:seon.error/kind :seon.fn/index-refused}))])
+        "one predicate names the phase for both seams and refuses to widen")
+    (with-bindings {progress (fn [phase] (swap! reported conj phase))}
+      (is (= {:seon.source/commit-id "converged"}
+             (retrying (converging analysis-failure)))
+          "an analysis refusal retries and converges on the stable second read")
+      (is (= 2 @attempts) "exactly once, never twice")
+      (is (= ["source changed during analysis; retrying publication once"]
+             @reported)
+          "and the operator is told which phase changed")
+      (reset! attempts 0)
+      (is (= {:seon.source/commit-id "converged"}
+             (retrying (converging adoption-failure)))
+          "the adoption compare keeps its own single retry")
+      (let [surviving (test-support/refusal-data
+                       #(retrying (fn [] (throw analysis-failure))))]
+        (is (= :seon.boot/refused (:seon.error/kind surviving))
+            "a second change refuses rather than rebuilding")
+        (is (= :analysis (get-in surviving [:seon.boot/offense :seon.source/change-phase]))
+            "naming the phase that changed under the retry")
+        (is (= :seon.fn/source-changed-during-analysis
+               (get-in surviving [:seon.boot/offense :seon.error/diagnostic-cause]))
+            "and retaining the typed cause as evidence")))))

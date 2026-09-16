@@ -600,6 +600,55 @@
                      (dissoc offense :seon.schema/projection)
                      offense)})))
 
+;; ONE declaration of what "the source changed under this publication" means.
+;; Both phases are the same event seen at different seams: the analyzer's span
+;; read against text captured earlier (`seon.fn/span-refused!`), and the
+;; post-publication digest compare below. They take the same single retry, so
+;; the retry keys on this map rather than on either seam's own spelling.
+(def ^:private source-change-phases
+  {::source-changed-during-adoption :adoption
+   :seon.fn/source-changed-during-analysis :analysis})
+
+(defn- source-change-phase
+  "The publication phase a failure's declared source-change cause names, or nil.
+
+  The adoption compare raises through `refused!`, so its cause rides
+  `:seon.boot/offense`; the analysis refusal is the analyzer's own ex-info and
+  carries the cause at the top of its data."
+  [failure]
+  (let [data (ex-data failure)]
+    (get source-change-phases
+         (or (get-in data [:seon.boot/offense :seon.error/diagnostic-cause])
+             (:seon.error/diagnostic-cause data)))))
+
+(defn- retrying-source-change
+  "Run one publication attempt, retrying ONCE when the source changed under it.
+
+  A file edited between the analysis snapshot and the span read, and a file
+  edited between publication and the adoption compare, are one event: the next
+  read converges. A refusal that survives the retry names which phase changed,
+  so the operator reports the seam instead of a bare kind."
+  [attempt]
+  (loop [retry? true]
+    (let [outcome
+          (try
+            {::published (attempt)}
+            (catch clojure.lang.ExceptionInfo failure
+              (if-let [phase (source-change-phase failure)]
+                (if retry?
+                  {::retry-phase phase}
+                  (refused! (str "Source changed during " (name phase)
+                                 " through the one retry; the next edit must converge it.")
+                            (assoc (or (:seon.boot/offense (ex-data failure))
+                                       (ex-data failure))
+                                   :seon.source/change-phase phase)))
+                (throw failure))))]
+      (if-let [phase (::retry-phase outcome)]
+        (do (report-source-progress!
+             (str "source changed during " (name phase) "; retrying publication once"))
+            (recur false))
+        (::published outcome)))))
+
 ;; REQUIRES the population: `resolve-bootstrap` asks two questions and each
 ;; refusal arm asks a third, so the ambient arity made one bootstrap
 ;; resolution two or three complete classpath re-reads (2026-08-07).
@@ -1901,7 +1950,10 @@
                         :seon.fn.change/artifact desired)))
               paths)
              (catch clojure.lang.ExceptionInfo failure
-               (if (= :seon.fn/index-refused (:seon.error/kind (ex-data failure)))
+               ;; A SOURCE CHANGE IS NOT A REBUILD REASON: rebuilding analyzes
+               ;; the same moving tree again. It rides out to the one retry.
+               (if (and (= :seon.fn/index-refused (:seon.error/kind (ex-data failure)))
+                        (not (source-change-phase failure)))
                  ;; A new callee in another edited file is absent from the
                  ;; old manifest. The complete analyzer is authoritative;
                  ;; it either resolves the new population or refuses it.
@@ -2223,34 +2275,21 @@
            _ (report-source-progress! "store acquisition")
            held-store (acquire-root-store! store-dir)]
        (try
-         (loop [retry? true]
-           (let [result
-                 (try
-                   (report-source-progress! "source build")
-                   (schema/call-with-projection
-                    (schema/declaration-projection (schema.edn/packaged-forms))
-                    (fn []
-                      (let [before-publication (source/current held-store)
-                            published (if (seq changed-paths)
-                                        (incremental-source-refresh! root held-store changed-paths)
-                                        (full-source-refresh! root held-store))]
-                        (when instance
-                          (development-source-refresh! held-store instance
-                                                       before-publication published
-                                                       changed-paths))
-                        (dissoc published :seon.source/upsert-rows))))
-                   (catch clojure.lang.ExceptionInfo failure
-                     (if (and retry?
-                              (= ::source-changed-during-adoption
-                                 (get-in (ex-data failure)
-                                         [:seon.boot/offense :seon.error/diagnostic-cause])))
-                       ::retry-development-source
-                       (throw failure))))]
-             (if (= ::retry-development-source result)
-               (do
-                 (report-source-progress! "development source changed; retrying adoption once")
-                 (recur false))
-               result)))
+         (retrying-source-change
+          (fn []
+            (report-source-progress! "source build")
+            (schema/call-with-projection
+             (schema/declaration-projection (schema.edn/packaged-forms))
+             (fn []
+               (let [before-publication (source/current held-store)
+                     published (if (seq changed-paths)
+                                 (incremental-source-refresh! root held-store changed-paths)
+                                 (full-source-refresh! root held-store))]
+                 (when instance
+                   (development-source-refresh! held-store instance
+                                                before-publication published
+                                                changed-paths))
+                 (dissoc published :seon.source/upsert-rows))))))
          (finally
            (release-root-store! store-dir)))))))
 
