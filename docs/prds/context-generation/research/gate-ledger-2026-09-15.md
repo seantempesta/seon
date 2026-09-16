@@ -239,3 +239,20 @@ test wrote `workers/` into the repository root when no test root property was
 set; `worker-parent` now refuses that state and `/build/` is ignored.
 Machine load at the time was Spotlight (`corespotlightd` 123%) and Backblaze
 (`bztransmit` 99%), not our JVMs.
+
+### 2026-09-16 05:00Z — recording refusals: cause found (dc5c7d57f)
+
+Three gates in a row could not record results on a cluster that answered
+evaluations in ms. Research verdict
+(`gate-recording-refusals-2026-09-16.md`): the recorder never sent its form;
+`live-root-value!` gates on a census pre-read whose reply is parsed with
+`clojure.edn/read-string`, and the dev JVM's in-process fixture branch
+keyword `:seon.test-support.fixture/0` is unreadable EDN → `reachable? false`
+→ `live-prepl-unavailable` (batches 25, 26B); the same probe timed out under
+the 30 s silence backstop during the platform gate (26A). Refusal reproduces
+in 268 ms; the recorder's form answers over the same socket in 13 ms. This is
+the pre-read-vs-authority class (AGENTS.md §"No seam may act on a pre-read").
+Opus fix lane launched: dissolve the pre-read (send is the authority), mint a
+readable fixture keyword, make the parse seam total, one regression.
+turn-test-reds lane still live (4 commits, latest `b3266e25b`); its gate runs
+when it stops.
