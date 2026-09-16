@@ -268,3 +268,116 @@ was preserved.
 No class note was supplied to close; §9's implementation is landed with the
 above explicit residual and unverified integration boundaries. No lane-owned
 background shell, running scratch cluster or scratch worktree remains.
+
+## Batch 20 triage — 2026-09-16
+
+Independent reds triage of the batch-20 named-namespace gate
+(`tmp/orchestrator/gate-results/batch-20/error-graph.md`, run at
+`cecfaf428`). Read that report, the peer's
+[batch-19 turn-test reds](../../context-generation/research/turn-test-reds-batch19-2026-09-16.md)
+and this landing note end to end. No test JVM was launched: every verdict below
+is `(seon.test/run #'<var> (seon.operator/connection "default"))` in default's
+own JVM (pid 7595, adopted source `6aa9fe1b-203b-5ca1-bea2-9047ea996105`),
+one test at a time, complete returned value read. Default was never stopped,
+restarted or reforked. Counts are pass/fail/error assertions.
+
+`seon.test/run`'s recording arity intermittently threw
+`:seon.cluster.source/refused "Issue indexing was refused."` from a concurrent
+lane's uncommitted `src/seon/issue.clj`; the two-argument arity (used in this
+lane's earlier committer replay) is unaffected and was used throughout.
+
+### Verdict table
+
+| Namespace | Test | In-process at HEAD | Attribution | Fix / reason left |
+|---|---|---|---|---|
+| seon.render.faults-test | the-opening-derives-repair-reads-through-function-refs | 2/0/1 | `17dd75e89` (attempt-and-eval-facts) declared `:seon.eval/renderer-fn` as `:seon.db/ref` on `:seon.eval/entity`; `seon.eval/of-agent`'s default `[*]` pull returns `{:db/id n}`, so its own output contract refuses | LEFT. Fix is in flight in the concurrently edited `resources/seon/schemas/seon.eval.edn` (uncommitted, foreign lane) — `[:or :seon.eval/renderer-fn [:map [:db/id :int]]]`. Issue: [evaluation-reader-refuses-pulled-renderer-ref](../../../seon/issues/evaluation-reader-refuses-pulled-renderer-ref.md) |
+| seon.flow-test | forced-child-jvm-death-preserves-committed-facts | not run (spawns a child JVM); root cause probed directly | `b80f78a7c` (2026-09-15, projection carriage) made `seon.db/transact!` refuse `:seon.schema/missing-projection` on a bare `datahike.api/connect` connection. Probed live: both of `seon.flow.kill-child`'s transactions return that flat error, and `-main` writes its readiness file regardless, so the parent kills a child that installed nothing and then reads `:seon.flow.kill/id` as uninstalled | LEFT — not error-graph, not attempt-and-eval-facts. `test/seon/flow/kill_child.clj` also reads absence of signal as health (publishes readiness without checking either transaction result); recommended owner fix is there |
+| seon.render.transcript-test | admitted-top-level-string-is-terminal-text | 0/0/3 | `ff9507c1b` (2026-09-08) removed `seon.render.transcript/bounded-result`; verified live `(ns-resolve 'seon.render.transcript 'bounded-result)` → nil, `bounded-scalar` remains. The test's `ns-resolve` yields nil and every call NPEs | LEFT — stale test, pre-existing, neither candidate parent |
+| seon.render.transcript-test | about-identity-resolution-pulls-one-deterministic-ordered-id-vector | 2/7/1 | `26ec13420` (2026-09-09, authored-transaction write validation). `seon.db/write-map-error` applies EVERY `{:seon.db/attributes true}` entity schema that lists a row's unique-identity attribute, so the fixture's `{:seon.problems/id "about-first"}` is validated as a `:seon.cluster.eval` entity: *"refused transaction data at [1 :seon.cluster.eval/id] … got a map missing :seon.cluster.eval/id"*. The whole seed transaction is refused, so the transcript renders `""` | LEFT — pre-existing; existing issue [raw-write-validation-refuses-reverse-refs-and-partial-entity-maps](../../../seon/issues/raw-write-validation-refuses-reverse-refs-and-partial-entity-maps.md), updated with this evidence |
+| seon.render.transcript-test | populated-history-restores-the-repl-fidelity-checklist | 10/11/0 | Same class; captured through a `seon.db/transact!` wrapper: the only refusal is *"at [3 :seon.cluster.eval/id]"* for `seed-populated-history!`'s `{:seon.problems/id "problem-transcript"}` | LEFT — same pre-existing class |
+| seon.turn-loop-test | attempt-settlement-updates-the-registered-model-gauges | 0/4/0 | Same class. `(db/transact! connection [{:seon.turn/id "gauge-run"}])` refuses *"at [0 :seon.turn/agent] … got a map missing :seon.turn/agent"*, so Datahike then rejects the lookup ref `[:seon.turn/id "gauge-run"]` and no attempt or gauge is written | LEFT — same pre-existing class |
+| seon.turn-loop-test | a-refused-terminal-commit-still-closes-the-run | 1/1/0 | `ae0e54841` (2026-09-09) made `:seon.turn/closed-tx` a `:seon.db/ref`; the test helper `closed-at` still asserts `inst?` and receives `#:db{:id 536870928}` | LEFT — stale test, pre-existing |
+| seon.turn-loop-test | kill-positions-per-agent-test | 1/5/0 | `ae0e54841` also moved open-turn derivation onto the runtime component: `seon.turn/open-for-agent` requires `:seon.runtime/agent` → `:seon.runtime/turns`. Probed live: `commit-run!` writes only `:seon.turn/agent`, so `open-for-agent` is nil and `next-agent-work` derives `:open` for every row | LEFT — stale fixture, pre-existing |
+| seon.turn-test | settlement-mints-rows-for-unindexed-call-targets | 9/1/0 | `171c0c193` (agent-call-edges lane, in the gate tree) began settling `:seon.fn/calls` on evaluations; `76774d044` at current HEAD widens it. The test asserts `(empty? (:seon.fn/calls form))` and gets `[#:seon.fn{:sym "seon.bootstrap/help"}]` | LEFT — `src/seon/fn.clj` / `fn/analyzer.clj` are held by that lane |
+| seon.turn-test | virtual-turns-use-the-proc-and-compaction-is-agent-scoped | 86/4/1 | Two causes: the datom-count deltas (16→6 and 30→16, `:seon.fn/calls` present in the settlement transaction's attribute set) are `171c0c193`; the uncaught error is the `:seon.eval/renderer-fn` class above (`17dd75e89`) | LEFT — one cause is a held lane's, the other's fix is in flight in the dirty schema file |
+| seon.cluster.turn-test | a-refused-delivery-becomes-a-durable-error-fact | 1/3/2 | NEW vs batch-19. Whole-turn failure: zero evaluations stored, so the refusal kind and shown text are absent. Not isolated to error-graph's readers | LEFT — namespace owned by the concurrent turn-test-reds lane, which has since committed `2209387e2`/`cda42c461` |
+| seon.cluster.turn-test | successful-call-persists-the-providers-open-usage-document | 2/7/2 | NEW vs batch-19. Zero `:seon.ai.attempt` rows, so `:seon.ai.attempt/usage-edn` is nil and `seon.ai/normalize-usage` refuses nil. Same whole-turn failure surface; `17dd75e89` owns `:seon.ai.usage` facts | LEFT — same owner boundary |
+
+### seon.cluster.turn-test — what is NEW since batch-19
+
+Batch-19 listed 18 distinct failing tests; batch-20 lists 48 and drops none.
+The 30 new ones are:
+
+```
+a-batched-turn-commits-only-queryable-definition-facts
+a-combined-evaluation-projects-every-terminal-receipt-datom
+a-prose-prefixed-contracted-defn-settles-and-doc-answers
+a-real-evaluation-that-runs-away-is-stopped-and-recorded
+a-refused-contract-commits-a-receipt-and-no-row
+a-refused-delivery-becomes-a-durable-error-fact
+a-turn-delivers-what-a-form-asks-to-send-and-still-finishes
+a-whole-turn-runs-a-REAL-sci-evaluation-end-to-end
+a-whole-turn-runs-from-trigger-to-closed-run
+absent-foreign-ns-unmap-commits-and-mutates-the-run-sci-ctx
+agent-code-with-defn-and-println-folds-green-without-in-ns
+an-unreadable-reply-is-a-settled-form-with-paid-attempt-evidence
+another-agent-calls-the-live-cluster-definition-without-reinstall
+another-agent-sees-a-flat-contract-violation-after-live-install
+contracted-redefinition-exactly-replaces-the-row
+evaluation-follows-the-readers-parse-time-namespace
+function-install-reads-the-case-count-from-cluster-facts
+import-addition-is-ordinary-data-and-reacquires-exactly
+import-only-ns-unmap-installs-exactly-after-its-context-commit
+incompatible-clusters-alternate-runtime-schema-validation-without-bleed
+mixed-plan-publishes-only-the-contracted-function
+ns-unmap-retracts-the-owned-function-after-the-terminal-commit
+qualified-dynamic-ns-unmap-is-durable-in-a-fresh-context
+reasoning-starvation-persists-usage-finish-and-the-named-error
+refused-import-only-ns-unmap-leaves-the-run-sci-ctx-unchanged
+refused-runtime-schema-registration-mutates-neither-row-nor-projection
+reply-reading-follows-evaluated-alias-and-dynamic-require-state
+runtime-schema-registration-commits-the-evaluated-form-and-attribute
+runtime-tests-install-run-redefine-and-delete-exactly
+successful-call-persists-the-providers-open-usage-document
+```
+
+The two sampled above both fail as whole turns that store no evaluation and no
+attempt, not as error-reader assertions. The batch-19 gate selected 355 tests
+and batch-20 selected 230, so the two runs are not the same selection; the
+growth is a real widening at the turn surface, and its owner is the concurrent
+turn-test-reds lane (`2209387e2`, `cda42c461`), not this one.
+
+### Live observation
+
+While a `seon.db/transact!` wrapper was installed in default's JVM to capture
+fixture refusals, background default traffic was captured too. The live fault
+committer's own error transaction is refused there:
+
+```
+seon.db/transact! refused transaction data at [0 :seon.error/at]:
+expected the required key :seon.error/at ... got a map missing :seon.error/at
+```
+
+for `{:db/id "seon.error/fact-<uuid>" :seon.error/id <64> :seon.error/signature <64>
+:seon.error/kind :seon.error/unclassified}`. The identical map is ACCEPTED against
+the canonical fixture projection, so this is default's own installed projection,
+consistent with the RESET NEEDED already recorded above for legacy error rows.
+The wrapper was `with-redefs`-scoped and is restored.
+
+### Fixes committed
+
+None. Every red reproduced in-process attributes either to a commit predating
+both candidate parents (`ff9507c1b`, `ae0e54841`, `26ec13420`, `b80f78a7c`), to
+the agent-call-edges lane (`171c0c193`/`76774d044`, whose files are held), or to
+the `:seon.eval/renderer-fn` class whose fix is already in flight in the
+concurrently edited `resources/seon/schemas/seon.eval.edn`. Nothing in this
+lane's own files (`src/seon/error.clj`, `src/seon/problems.clj`,
+`src/seon/render/transcript.clj`) was found to cause a batch-20 red.
+
+### Ugly output
+
+`seon.db/transact!` renders an unresolved contract as prose in its refusal
+message: *"expected the required key :seon.turn/agent with a value satisfying
+unknown error"* and *"a value satisfying invalid type"*. A refusal that cannot
+name what it expected should say so as a typed unknown, not as the words
+"unknown error" spliced into a sentence.
