@@ -1,0 +1,7 @@
+(ns sample.cross-implementation
+  (:require [clojure.test :refer [deftest is]]
+            [sample.cross-dispatch :as dispatch]))
+(defn target [x] x)
+(defmethod dispatch/operation :x [x] (target x))
+(deftest reaches-operation (is (= :x (dispatch/operation :x))))
+(deftest unrelated (is (= 1 1)))

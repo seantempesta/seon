@@ -1,0 +1,2 @@
+(ns sample.cross-dispatch)
+(defmulti operation identity)

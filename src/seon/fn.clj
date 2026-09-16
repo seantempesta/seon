@@ -350,19 +350,21 @@
 (defn- references-by-caller
   "Resolved target identities without a resolved call shape.
   Quoted symbols are references, never invented arities. A nil caller is
-  retained for file-level widening rather than discarded as no coverage."
-  [analysis first-party-functions]
-  (reduce
-   (fn [references usage]
-     (let [caller (usage-caller usage)
-           target (usage-symbol usage)]
-       (if (and target (first-party-functions target)
-                (or (not (contains? usage ::analyzer/arity))
-                    (not (first-party-functions caller))))
-         (update references (when (first-party-functions caller) caller)
-                 (fnil conj #{}) target)
-         references)))
-   {} (::analyzer/var-usages analysis)))
+  retained when this analysis has no declaration to own the reference."
+  ([analysis first-party-functions]
+   (references-by-caller analysis first-party-functions first-party-functions))
+  ([analysis first-party-functions declared-callers]
+   (reduce
+    (fn [references usage]
+      (let [caller (usage-caller usage)
+            target (usage-symbol usage)]
+        (if (and target (first-party-functions target)
+                 (or (not (contains? usage ::analyzer/arity))
+                     (not (declared-callers caller))))
+          (update references (when (declared-callers caller) caller)
+                  (fnil conj #{}) target)
+          references)))
+    {} (::analyzer/var-usages analysis))))
 
 (defn- external-target?
   [first-party-functions target]
@@ -1094,7 +1096,8 @@
         (into {} (map (fn [[filename usages]]
                         [filename (get (references-by-caller
                                         {::analyzer/var-usages usages}
-                                        first-party-functions) nil)]))
+                                        first-party-functions
+                                        (first-party-function-symbols analysis)) nil)]))
               (group-by ::analyzer/filename (::analyzer/var-usages analysis)))
         edges {:calls-by-caller calls-by-caller
                :references references
@@ -1264,31 +1267,30 @@
      [?holder ?attribute ?target]
      [?target :seon.fn/sym]
      [?function :seon.fn/keywords ?attribute]]
-    [(function-reaches ?function ?target)
-     (call-edge ?function ?target)]
-    [(function-reaches ?function ?target)
-     (call-edge ?function ?called)
-     (function-reaches ?called ?target)]
-    [(test-reaches ?test ?target)
+    [(tested ?target)
      [?test :seon.test/sym]
      (call-edge ?test ?target)]
-    [(test-reaches ?test ?target)
-     [?test :seon.test/sym]
-     (call-edge ?test ?called)
-     (function-reaches ?called ?target)]
-    [(test-reaches ?test ?target)
+    [(tested ?target)
      [?test :seon.test/sym]
      [?test :seon.test/subject ?target]]
-    [(test-reaches ?test ?target)
-     [?test :seon.test/sym]
-     [?test :seon.test/subject ?subject]
-     (function-reaches ?subject ?target)]
+    [(tested ?target)
+     (tested ?caller)
+     (call-edge ?caller ?target)]
     [(test-currently-failing ?test)
      [?test :seon.test/fail-count ?count]
      [(pos? ?count)]]
     [(test-currently-failing ?test)
      [?test :seon.test/error-count ?count]
-     [(pos? ?count)]]])
+     [(pos? ?count)]]
+    [(failing-function ?target)
+     (test-currently-failing ?test)
+     (call-edge ?test ?target)]
+    [(failing-function ?target)
+     (test-currently-failing ?test)
+     [?test :seon.test/subject ?target]]
+    [(failing-function ?target)
+     (failing-function ?caller)
+     (call-edge ?caller ?target)]])
 
 (defn- declared-reference-edges
   "Attribute consumers reach function identities named by stored declarations.
@@ -1319,9 +1321,6 @@
     (if (:seon.error/kind row)
       row
       (let [target (:db/id row)
-            unresolved (db/q '[:find [?file ...] :in $ ?symbol
-                               :where [?file :seon.fn/unresolved-references ?symbol]]
-                             database function-symbol)
             declared (declared-reference-edges database)
             incoming-declared (group-by second (when-not (:seon.error/kind declared) declared))
             walked
@@ -1346,6 +1345,13 @@
         (if (or (:seon.error/kind declared) (:seon.error/kind walked))
           (if (:seon.error/kind declared) declared walked)
           (let [subjects (cond-> walked target (conj target))
+                unresolved (when (seq subjects)
+                             (db/q '[:find [?file ...]
+                                     :in $ [?function ...]
+                                     :where
+                                     [?function :seon.fn/sym ?symbol]
+                                     [?file :seon.fn/unresolved-references ?symbol]]
+                                   database subjects))
                 by-edge (when (seq walked)
                           (db/q '[:find [?symbol ...]
                                   :in $ [?test ...]
@@ -1392,8 +1398,7 @@
   (->> (db/q '[:find [?function-symbol ...]
                :in $ %
                :where
-               (test-currently-failing ?test)
-               (test-reaches ?test ?function)
+               (failing-function ?function)
                [?function :seon.fn/sym ?function-symbol]]
              database test-reach-rules)
        sort
@@ -1402,8 +1407,8 @@
 (defn functions-without-tests
   "Indexed public functions reached by no indexed test.
 
-  Coverage is the `test-reaches` graph derivation used by `tests-reaching`;
-  this is set difference over query results, never a maintained roster."
+  Coverage follows the same call and reference relation as `tests-reaching`.
+  Derive the union reached from tests directly, without all function pairs."
   {:malli/schema [:=> [:cat :seon.db/database-value]
                   [:vector :seon.fn/sym]]}
   [database]
@@ -1417,7 +1422,7 @@
         (set (db/q '[:find [?function-symbol ...]
                     :in $ %
                     :where
-                    (test-reaches ?test ?function)
+                    (tested ?function)
                     [?function :seon.fn/sym ?function-symbol]
                     [?function :seon.fn/private? false]]
                   database test-reach-rules))]

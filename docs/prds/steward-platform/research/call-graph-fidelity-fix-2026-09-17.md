@@ -117,3 +117,97 @@ whose consumers see them. Full-manifest and single-file indexing now share
 that rule; schema declarations remain supplied operation-wide. This prevents
 full builds acquiring unrelated source-file literals that incremental builds
 cannot see. The same existing row owner implements both paths.
+
+## Publication and live verification boundary (follow-up)
+
+Commits: `15a35c2a7` (implementation spans), `af800d1a0` (declared
+function values), `7eeed900d` (reference facts and selection), `7907afc7a`
+(file-local literal targets). All carry the requested co-author trailer.
+
+Publication attempts were refused for a stale `current-src` head and then
+for source changes during analysis. Default remains PID 53320. A later
+in-place adoption made `:seon.fn/references` and analyzer `:symbols true`
+visible, but the cluster's recorded source commit was still
+`6aaaeabe-d99a-5eec-9e3e-9d254e71c9c6`; visibility alone is not completed
+adoption evidence.
+
+The three fixture regressions and S1 parity were each submitted through
+`seon.test/run` with `:seon.test/remaining-ms 180000`. All four returned
+`:seon.test/unknown` before execution: the loaded test owner requires
+`:seon.fn/destroys` declarations, but none were present in its program
+facts. No protected owner was changed to evade that refusal. These are
+**four refused runs, not four passing tests**.
+
+A current `gate-set` probe for `seon.fs.jvm/read` selected 1,016 tests in
+472.446375 ms (baseline: zero / 0.650458 ms). Its schema-declared dynamic
+edge relation alone returned 69 edges in 0.318 ms. These numbers are from
+the partially adopted live program and do not replace the requested final
+before/after table.
+
+The whole-graph coverage measurement exposed an all-pairs recursive-query
+cost and non-terminating cancellation observation, recorded in
+[the coverage query issue](../../../seon/issues/recursive-call-coverage-outlives-its-cancelled-future.md).
+A test-rooted unary closure returned 1,032 covered public functions in
+5,093.7085 ms. The measurement future was cancelled; its thread was still
+observed computing afterwards. No after-count is fabricated from absence
+of a completed result.
+
+## Coverage correction and cross-file completeness
+
+The coverage report now computes unary `tested` and `failing-function`
+closures from test roots in the existing Datalog owner, rather than every
+function-to-function pair. The proposed forms were evaluated in default;
+the existing `tests-reaching-follows-calls-and-explicit-subjects` regression
+was submitted and refused with the same missing `:seon.fn/destroys` facts.
+No green is claimed. The original cancelled measurement thread eventually
+exited, confirmed by a subsequent stack observation.
+
+While `src/seon/fn.clj` held another lane's uncommitted changes, the query
+correction was prepared in a detached snapshot with linked reference-code.
+After that lane committed `4e6004789`, the same targeted change was applied
+in the main tree, preserving its destructiveness declarations. The scratch
+worktree was removed without running any test JVM.
+
+A cross-file defmethod probe with a required dispatch namespace showed the
+body target correctly attributed to `fidelity.dispatch/operation`. A partial
+analysis lacking that dispatch definition previously had no artifact row on
+which to retain the edge. `references-by-caller` now takes the operation's
+actual declarations for file-level uncertainty: the full analysis has no
+unresolved reference, while the partial analysis retains both dispatch and
+body target. This causes conservative widening and a full publication when
+incremental ownership is insufficient. A two-file fixture regression asserts
+the full edge/reach and partial-artifact widening. `gate-set` checks unresolved
+references on every reached caller, matching manifest selection's closure.
+
+## Measured interim comparison — not final adoption proof
+
+These are observed values on default's partially adopted program, with the
+unary coverage correction hot-reloaded. They are **not** the requested
+post-adoption acceptance measurements. Concurrent work also increased the
+function population from 5,019 to 5,070.
+
+| Measurement | Before | Interim |
+|---|---:|---:|
+| No incoming call edge | 409 | 301 |
+| Public functions without reaching tests | 312 | 170 |
+| Capability handlers with zero reach | 8 | 0 |
+| seon.print functions with zero reach | 28 | 14 |
+| Public coverage query, ms | 286.34575 | 4,239.94975 |
+| gate-set id/digest: tests / ms | 495 / 9.026042 | 1,184 / 88.740875 |
+| gate-set print/emit: tests / ms | 460 / 5.80875 | 1,207 / 76.671917 |
+| gate-set fs.jvm/read: tests / ms | 0 / 0.650458 | 1,016 / 51.775458 |
+| gate-set db/q: tests / ms | 1,058 / 19.311625 | 1,220 / 120.5375 |
+
+The wider graph costs more to query. These single-call timings are not a
+benchmark distribution. Scripts, exact selected symbols and raw results are
+in [the evidence directory](call-graph-fidelity-evidence-2026-09-17/).
+The database-derived verification selection contained 32 changed functions
+and 1,203 tests, including both required namespaces. Refused smoke runs mean
+that batch has not yet been executed.
+
+The latest completed publication compiled 39,430 entities / 19,476 identities /
+35,692 keyword facts, then its writer refused `my.agent/identity` at
+`[4499 :seon.fn/keywords #{:seon.agent/id :seon.db/db}]`, with
+`:seon.db/invalid-write`, expected set / offending `:seon.error/unknown`.
+A direct `build-artifact` probe returned the correct two-keyword set. This
+names the measured writer boundary without guessing its internal cause.

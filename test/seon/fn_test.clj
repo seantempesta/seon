@@ -2544,3 +2544,40 @@
           (is (not-any? #(= target (first %)) (:seon.fn/call-arities row)))
           (is (= ["sample.call-references/reaches-references"]
                  (seon.fn/tests-reaching @connection target))))))))
+
+(deftest cross-file-implementations-keep-edges-or-widen
+  (let [root (fixture-root)]
+    (try
+      (write-source! root "src/sample/cross_dispatch.clj"
+                     (slurp (io/resource "test/fixtures/call_graph_fidelity/dispatch.txt")))
+      (let [implementation
+            (write-source! root "src/sample/cross_implementation.clj"
+                           (slurp (io/resource "test/fixtures/call_graph_fidelity/implementation.txt")))
+            directory (.getCanonicalPath root)
+            manifest (seon.fn/build-manifest {:seon.fn/root directory :seon.fn/roots ["src"]})
+            partial (seon.fn/build-artifact
+                     {:seon.fn/root directory :seon.fn/roots ["src"]
+                      :seon.fn/source-path (.getCanonicalPath implementation)
+                      :seon.fn.file/first-party-functions
+                      (seon.fn/manifest-function-symbols manifest)})
+            target "sample.cross-implementation/target"]
+        (test-support/with-database
+          (fn [connection]
+            (test-support/transacted!
+             connection
+             (seon.fn/reconcile-tx @connection
+                                  (vec (mapcat :seon.fn.file/rows (:seon.fn.manifest/artifacts manifest))) []))
+            (is (contains?
+                 (set (map :seon.fn/sym
+                           (:seon.fn/calls
+                            (db/pull @connection '[{:seon.fn/calls [:seon.fn/sym]}]
+                                     [:seon.fn/sym "sample.cross-dispatch/operation"])))) target))
+            (is (= ["sample.cross-implementation/reaches-operation"]
+                   (seon.fn/tests-reaching @connection target)))
+            (is (some #(contains? (set (:seon.fn/unresolved-references %)) target)
+                      (:seon.fn.file/rows partial)))
+            (test-support/transacted! connection
+                                      (seon.fn/reconcile-tx @connection (:seon.fn.file/rows partial) []))
+            (is (contains? (set (seon.fn/tests-reaching @connection target))
+                           "sample.cross-implementation/unrelated")))))
+      (finally (test-support/delete-recursively! root)))))

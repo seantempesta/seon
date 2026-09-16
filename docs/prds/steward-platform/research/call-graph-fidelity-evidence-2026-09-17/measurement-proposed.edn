@@ -1,0 +1,1 @@
+#:seon.fn{:total 5070, :no-incoming 301, :public-without-tests 170, :public-query-ms 4239.94975, :capability-zero 0, :print-zero 14, :gate-costs [["seon.id/digest" 1184 88.740875] ["seon.print/emit" 1207 76.671917] ["seon.fs.jvm/read" 1016 51.775458] ["seon.db/q" 1220 120.5375]]}
