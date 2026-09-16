@@ -303,3 +303,37 @@ Cleanup completed: the Juniper query returned four order entities and the
 deleted. No worktree was created. Every launched shell completed. Final
 `bin/seon status` reports default PID 30138 alive; this lane never stopped,
 reforked, or restarted it. The cold boot gate remains pending.
+
+## Batch 96 follow-up: reported paths and concurrent owner boundary
+
+Read the replacement AGENTS.md instructions and the two named failure blocks
+in `tmp/orchestrator/gate-results/batch-96/named.log`. The reported-path failure
+is a production defect, not missing fixture roots: `changed-source-paths`
+filters the concatenation of reported paths and digest keys, discarding any
+reported path whose digest compares equal (including two absent digests).
+The helper does not consult roots.
+
+Exact read-only MCP JVM probe on default PID 53320:
+
+```clojure
+(#'seon.cluster/changed-source-paths
+ {"src/a.clj" "a1" "src/b.clj" "b1"}
+ {"src/a.clj" "a1" "src/b.clj" "b2"}
+ ["src/a.clj" "../outside.clj"])
+;; => ["src/b.clj"]
+```
+
+Both reported paths were silently dropped. The fix must preserve the union
+of reported paths and independently derived digest changes, with a regression
+for a reported path absent from both digest maps. The unchanged-clone proof
+must distinguish an unreported no-op refresh from an explicit analysis request.
+
+Stopped under the assignment's explicit protected-file rule: `git status`
+shows concurrent uncommitted changes in `src/seon/cluster.clj`; its diff includes
+`require-reopenable-declarations!`, its startup call, and `declaration-forms`
+inside `incremental-source-refresh!` passed to `build-artifact`. Required owned
+hunks are `changed-source-paths` and its incremental caller (around lines
+1977–2027 at observation). No foreign hunk was changed or staged. The second
+failure's one transaction has NOT yet been captured or attributed. No test
+JVM, scratch root, or worktree was started; default remains alive and untouched.
+This documentation checkpoint is not a fix and requests no cold rerun.
