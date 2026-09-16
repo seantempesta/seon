@@ -1214,6 +1214,29 @@ and the lane's output for a quota message), switch NEW launches to Opus
 subagents with neutral wording ("remove", "delete", never "rip out") until
 the owner says the account is fixed. Codex is preferred again after that.
 
+**01:40Z CODEX CREDITS EXHAUSTED** ("usage limit … try again Sep 22"). Every
+codex lane died mid-work leaving 59 dirty files. All stopped; each relaunched
+as an Opus continuation with its exact file list and instruction to finish
+the orphaned hunks coherently (agents cannot be resumed after compaction —
+relaunch from the notes if needed): incremental-publication (cluster.clj,
+cluster/source.clj, seon.source.edn, incremental_publication_test, edn.clj R4),
+edges-are-symbols (plan §7 order), no-default-cluster (config.clj, schedule.clj,
+sci/eval.clj incl. the orphaned doc/dir hunk, seon.config.edn, caller tests),
+test-preparation step 2 (bin/test, runner.clj, cache.clj, dev_cache.clj, arm.clj),
+hook-progress (bin/seon-hook, .claude/seon-hook.edn, fresh_operator.clj, hook
+tests), environment-carries-it (search.clj, seon.search.edn, seon.env.edn,
+bin/test-check), composable-history (transcript.clj, prompt.clj, repl.clj,
+their tests + eval_test fixture), tier-0 remaining (bootstrap_drive.clj,
+instrument.clj, selection.clj read-basis). `one-classpath-derivation` never
+started (its launch was queued behind hook-progress in one shell) — relaunch
+as Opus when runner.clj/test.clj/dev_cache.clj free. Still running from
+before: schema design review, requiring-resolve census (committing
+namespace by namespace), wake-matchers fix. Platform-tier LANDED
+(`f54771e84`, `8d4b3689f`, `7b779d81a`: `:seon.test/platform`+`/fixture` facts,
+bare set from `:seon.ns/name` rows, `find` deleted; first cold gate proves the
+12 deftest-free namespaces load). Machine: load avg 24–43; only 3 JVMs
+(default at 10 GB RSS + two test-fast slots) — the load is agents, not JVMs.
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
