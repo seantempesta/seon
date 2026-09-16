@@ -138,3 +138,31 @@ The lane obeyed the base-poison stop rule; it did not repair the classpath,
 replace the delay, or restart default. Its implementation and measurement
 boundary are in
 [the config landing](../../prds/context-generation/research/turn-bookkeeping-cost-2026-09-16.md).
+
+## 2026-09-16, post-refork JVM (pid 95853): construction fails from an MCP thread
+
+The `dir-elision-floor` lane followed the base construction rule exactly —
+`(future @seon.test-support/database-base)` on a daemon thread, from a plain
+MCP `jvm` evaluation, with no bound and no `seon.test/run` around it. Note
+that `test/` is not on `default`'s classpath, so the delay has to be reached
+through `seon.test`'s own loader:
+
+```clojure
+(#'seon.test/with-test-loader #(requiring-resolve 'seon.test-support/database-base))
+```
+
+The future completed with a flat error value and the delay stayed unrealized:
+
+```clojure
+#:seon.error{:kind :seon.test-support/database-base-unavailable
+             :message "Canonical fixture base construction failed: Schema
+                       declaration resolution requires the projection handed
+                       to the operation."}
+```
+
+So it is not only interruption that leaves lanes without an in-process run:
+construction itself refuses here, on a §2.1 grounds — the declaration
+resolution wants a handed projection that the loader thread does not carry.
+No in-process regression was possible in that JVM; the lane relied on the
+cold gate. Not investigated further (out of that lane's scope), filed so the
+next lane does not spend its budget rediscovering it.
