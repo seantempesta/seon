@@ -205,6 +205,37 @@ starting-an-issue-leaves-one-unanswered-wake-its-first-reply-answers
   14 pass / 0 fail / 0 error  (15.2 s)
 ```
 
+### Batch 74 round: the wake oracles still held the older sets
+
+Three `seon.cluster.wake-test` failures, one cause: this lane made
+`:seon.issue/agent` listened and turn-opening and made agent creation wake
+the armer, while `the-listened-set-is-declared-not-listed`,
+`an-unrouted-recipient-reaches-the-armer` and
+`route-render-wake-and-disjointness-property` still asserted the sets and
+the behaviour from before.
+
+**The ruling (orchestrator, 2026-09-16): an issue assignment IS an opening
+wake.** It is a one-time explicit ask, unlike a schedule firing, which
+surfaces in the next context and never pays for a model call by itself.
+
+The listened-set oracle no longer writes the sets down. A new `declaring`
+helper reads them from the canonical schema rows on the classpath and
+compares them against the four derivations over the installed database —
+resources against database, which fails when a declaration does not reach
+its row, when a row is not installed, and when a family is added or removed
+without a decision in that test. Measured before writing it: both sides
+already agree exactly for `listen`, `opens-turn?`, `inside` and `arms`. The
+literal it replaces was the hand list those derivations exist to abolish,
+and it went stale the first time a family was declared. The rulings stay
+visible as per-family membership claims, never as a second copy of the set.
+
+The belt test now states both ways to the armer — creation itself, and the
+created-and-addressed-in-one-commit belt — and says that neither is a second
+arming path. The property admits one armer wake per `:agent` commit and
+nothing else, so a turn's own commits still reach neither.
+
+In process on default, `remaining-ms 120000`: 8/0/0, 3/0/0, 3/0/0.
+
 **Verification boundary.** Both now run green in process on default against
 a fresh base carrying this change (figures above), and half (a) is green on
 the cold gate (batch 54 B). The self-prime and the two fixture corrections
@@ -222,4 +253,5 @@ in either test is near it.
 - `src/seon/cluster/agent.clj` — armer docstrings name the declaration
 - `src/seon/error.clj` — `faults-form` guards an absent fault entity
 - `src/seon/cluster/agent.clj` — the armer primes itself at `::flow/resume`
+- `test/seon/cluster/wake_test.clj` — the wake-set oracles derive from the declarations
 - `test/seon/cluster/agent_arming_test.clj` — new
