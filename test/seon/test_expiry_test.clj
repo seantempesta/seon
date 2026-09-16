@@ -22,7 +22,9 @@
             (try
               (support/with-database
                 (fn [child]
-                  (deliver outcome (number? (db/basis-t @child)))))
+                  (let [observed (number? (db/basis-t @child))]
+                    (is observed)
+                    (deliver outcome observed))))
               (catch Throwable failure (deliver outcome failure))
               (finally (.countDown finished)))))
         (try
