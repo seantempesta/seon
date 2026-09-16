@@ -1368,6 +1368,22 @@ bin/test preparation bounds. Default pid 41413 alive throughout. Still
 awaiting the owner's three rulings (living-ref rule; fn.ast merge-then-
 delete; the revised one-evaluation-path design).
 
+**Owner, on the living-ref rule (2026-09-16 ~23:45Z): "Doesn't it depend?
+Sometimes you want the associated entity to be retracted and sometimes you
+don't. ... WE OWN THE SCHEMAS. WE ARE ADAPTABLE. DO NOT LOCK US INTO BAD
+PRIOR DECISIONS."** The blanket "every non-component ref is living" is
+withdrawn as a ruling request. The real decision space per ref is the menu
+Datahike plus our writer offer when a target is retracted: cascade
+(component), sweep (plain ref, Datahike's default), refuse (fork validator),
+value (store the identity). Three read-only research passes launched, each
+told that ruling 47, G1–G6 and the review's rule are inputs to revise:
+deletion semantics per ref for the program-graph families; the same for the
+agent/turn/issue/listen families; and the rest of the reset's schema edits
+(symbols, required keys, duplicates, kind stamps, edn strings, fn.ast,
+pulled shape) re-derived from the Datahike source. Their notes are the input
+to one owner-decisions page with background and real examples, per the
+standing rule. The integrator keeps to released, non-deletion groups until then.
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
