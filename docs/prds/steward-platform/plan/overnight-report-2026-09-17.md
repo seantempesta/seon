@@ -37,7 +37,16 @@ peer session (batches 30–57; ledger
    `a-missing-required-dial-kills-every-io-prepl-connection` (blocker: the
    connection seam must serve a typed refusal in the value, never refuse the
    socket; a new required dial must ship with its decision in the same
-   publication).
+   publication). Both classes landed: a refused turn write is bounded by a
+   declared dial and becomes one fault (`f86ec57ed`, `f0cb3f692`), and the
+   storm's real root turned out to be CUSTODY, not a registry cache — an
+   in-process test body inherited the agent evaluation's connection through
+   `bound-fn`, so elided-arity fixture writes landed on the live cluster;
+   every test Var now runs without custody, the drift detector snapshots
+   schema keys, and `seon.test/run` restores the projection (`f3b61b975`).
+   One more finding from it, queued: a changed contract stayed armed with
+   its PREVIOUS shape across three converged adoptions
+   (`adoption-can-leave-a-changed-contract-armed-with-its-previous-shape`).
 
 0. **The checkout's store was deleted and re-created from genesis (10:17Z).**
    Actual cause (peer, `ccccea806`): `seon.cluster/operator-root` answered
