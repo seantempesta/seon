@@ -95,3 +95,15 @@ are not this class. Measurements, the classification rules the detector needs
 (a textual rule reports 310 false positives), and the in-process tally are in
 [fixture-write-sweep-2026-09-17.md](../../prds/steward-platform/research/fixture-write-sweep-2026-09-17.md).
 
+
+## Batch 107 followup
+
+The four `seon.db-test` fixture sightings in batch 107 now use complete cluster,
+turn and evaluation creation through the canonical helpers/production transaction
+constructors, with checked writes. The collection-bound attribute regression no
+longer reads a refused bare cluster-identity creation as unchanged read evidence.
+The diagnostic grammar's intentionally incomplete creation now uses a new
+identity instead of expecting a valid partial update to an existing function to
+fail. Details and the remaining lifecycle distinction are in the
+[write-admission landing note](../../prds/steward-platform/research/write-admission-2026-09-17.md).
+This closes those sightings, not the broader detector/fixture class.

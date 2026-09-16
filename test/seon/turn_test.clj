@@ -275,8 +275,11 @@
              ;; The turn entity disappears under the running loop — measured
              ;; on `default` 2026-09-16T15:33:01Z, where the live fixture's
              ;; history wipe retracted a turn one transaction after it opened.
+             ;; Match clear-history!: evaluation rows and their turn disappear
+             ;; together; retaining an evaluation without its run is invalid.
              _ (checked-transact! connection
-                                  [[:db.fn/retractEntity [:seon.turn/id run-id]]])
+                                  [[:db.fn/retractEntity [:seon.cluster.eval/id evaluation-id]]
+                                   [:db.fn/retractEntity [:seon.turn/id run-id]]])
              refusal {:seon.error/kind :seon.turn/refused
                       :seon.turn/transition `turn/close-call
                       :seon.turn/rule :seon.turn/no-such-run
@@ -301,6 +304,10 @@
              (pr-str settlement))
          (is (contains? kinds :seon.turn/refused)
              "the refusal the loop actually met is the durable fact")
+         (is (nil? (db/pull database [:db/id] [:seon.turn/id run-id]))
+             "late settlement does not recreate the vanished turn")
+         (is (nil? (db/pull database [:db/id] [:seon.cluster.eval/id evaluation-id]))
+             "late settlement records the error without recreating an orphan evaluation")
          (is (not (contains? kinds
                              :seon.turn.loop/terminal-refusal-settlement-refused))
              "no core fault about the recording replaces the outcome")

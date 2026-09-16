@@ -526,7 +526,7 @@
         (is (seq (:seon.fn/form-span before)))
         (is (seq (:seon.fn/call-arities before)))
         (is (some? (:db-after result)) (pr-str result))
-        (is (= (select-keys before [:db/id :seon.fn/sym :seon.fn/ns])
+        (is (= (select-keys before [:db/id :seon.fn/sym])
                (db/pull (db/db connection) '[*] identity)))))))
 
 (deftest identical-runtime-redeclaration-builds-no-datoms
@@ -875,14 +875,12 @@
                deletion))
         (test-support/transacted! connection (turn/receipt-settle-tx settlement))
         ;; Ruling 47 makes program identities permanent: ns-unmap retracts
-        ;; definition facts, not the identity row (nor a retained ns ref).
-        (doseq [[identity-attribute namespace-attribute]
-                [[:seon.fn/sym :seon.fn/ns]
-                 [:seon.test/sym :seon.test/ns]]
+        ;; definition facts, including namespace membership, not the identity row.
+        (doseq [identity-attribute [:seon.fn/sym :seon.test/sym]
                 :let [row (db/pull @connection '[*]
                                    [identity-attribute function-sym])]]
           (is (= function-sym (get row identity-attribute)))
-          (is (every? #{:db/id identity-attribute namespace-attribute}
+          (is (every? #{:db/id identity-attribute}
                       (keys row))
               (pr-str row)))))))
 

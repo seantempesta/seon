@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, schema, error]
 ---
@@ -30,7 +30,7 @@ seon.db/transact! refused transaction data at [0 :seon.cluster.eval/run]: expect
 
 The batch-20 triage also recorded the exact fragment “a value satisfying
 invalid type”. That second fragment was not independently reproduced here.
-The earlier [predicate-only fix](archive/predicate-schema-violations-humanize-to-unknown-error.md)
+The earlier [predicate-only fix](predicate-schema-violations-humanize-to-unknown-error.md)
 does not cover this composite-schema path.
 
 ## Owner
@@ -53,3 +53,21 @@ A regression exercises this exact missing :seon.turn/agent case.
 required key :seon.fn/ns with a value satisfying unknown error, got a map
 missing :seon.fn/ns.` — the same face on a registry-referenced key, seen by
 seon.background-blob-test/background-binary-results-remain-exact-across-the-inline-threshold.
+
+## Resolution — batch 107 followup
+
+`seon.error/schema-expectation` (`src/seon/error.clj:732`) derives expectations
+from the resolved schema's children and asks Malli for messages with
+`:unknown false`. Failure categories are excluded from the expected-shape
+description; they remain failure evidence. `explain-problem` (`:754`) uses that
+one description for the diagnostic and fix. No string replacement or second
+database formatter is involved.
+
+`seon.db-test/missing-reference-diagnostics-describe-the-declared-value` checks
+missing cluster/config, turn/agent and evaluation/run refs through the actual
+writer, including unchanged basis.
+`seon.refusal-grammar-test/reference-expectations-describe-the-schema-not-the-failure-category`
+checks both missing-key and invalid-type categories. The final grammar fast run
+passes **2 tests / 21 assertions**; the database/grammar rerun passes **49 tests /
+372 assertions**, with no failures or errors. The expected ref value is now
+“an integer or a string or a tuple with 2 entries”.

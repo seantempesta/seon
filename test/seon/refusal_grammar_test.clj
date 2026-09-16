@@ -10,6 +10,22 @@
             [seon.schema :as schema]
             [seon.test-support :as support]))
 
+(deftest reference-expectations-describe-the-schema-not-the-failure-category
+  (let [check (m/schema :seon.cluster.eval/run
+                        {:registry (:seon.schema.projection/registry
+                                    (schema/handed-projection))})]
+    (doseq [category [:malli.core/missing-key :malli.core/invalid-type]]
+      (let [description (error/explain-problem
+                         {:seon.error/problem {:schema check :type category :value false}
+                          :seon.error/path [:seon.cluster.eval/run]
+                          :seon.error/argument "transaction data"})]
+        (is (str/includes? (:seon.error/expected-description description)
+                           "an integer or a string or a tuple with 2 entries"))
+        (is (not (str/includes? (:seon.error/expected-description description)
+                                "invalid type")))
+        (is (not (str/includes? (:seon.error/expected-description description)
+                                "unknown error")))))))
+
 (deftest structured-refusals-share-one-actionable-rendering
   (support/with-database
     (fn [connection]
@@ -37,7 +53,7 @@
           (is (str/includes? shown fragment) shown))
         (is (not (str/includes? shown "diagnostic-evidence")) shown)
         (let [refusal (db/transact! connection
-                                    [{:seon.fn/sym "seon.id/id"
+                                    [{:seon.fn/sym "seon.refusal-grammar-test/incomplete"
                                       :seon.fn/doc "incomplete"}])]
           (is (= :seon.db/invalid-write (:seon.error/kind refusal))
               (pr-str refusal))

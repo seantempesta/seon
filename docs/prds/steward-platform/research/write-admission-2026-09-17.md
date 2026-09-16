@@ -683,9 +683,77 @@ evaluation/close transaction at the writer. These are the options for review:
    complete turn retention must satisfy all required attributes. Give up complete
    deletion of that turn's identity. No second error/evaluation fact family.
 
-No evaluation schema or vanished-turn regression is changed pending this ruling.
-Fixture repairs, diagnostic structure, and runtime program retirement proceed
-independently. Runtime deletion currently preserves `:seon.fn/ns`/`:seon.test/ns`
+At this decision checkpoint the evaluation schema and vanished-turn regression
+were unchanged. Further producer evidence below settles the fixture correction
+without a schema change. Other fixture repairs, diagnostic structure, and
+runtime program retirement proceeded independently. Runtime deletion currently preserves `:seon.fn/ns`/`:seon.test/ns`
 while removing admission source (`turn.clj:1322`), unlike reconciliation's
 identity-only desired row; it will use the same exact replacement shape so the
 one existing tombstone validator handles both writers.
+
+### Batch followup implementation
+
+- `seon.turn/row-tx` now gives `program/exact-replacement-tx` the identity-only
+  desired row, exactly like reconciliation. It no longer keeps an owned namespace
+  field while removing required admission provenance. The existing validator is
+  unchanged. Both `runtime-deletion-preserves-identity-through-tuple-retractions`
+  and `typed-cross-namespace-deletion-retracts-function-and-test` pass in the first
+  five-namespace fast run; their assertions require only the retained identity.
+- `seon.db-test` seeds clusters through `seed-cluster!`; a depended-name change
+  updates that complete cluster. The turn fixtures use `agent/creation-tx` and
+  `turn/open-tx`; the unique-ref fixture starts actual evaluations through
+  `turn/receipt-start-tx` and uses their canonical `id/evaluation` identities.
+  Every successful fixture write is checked by `transacted!`. Deliberately
+  incomplete maps remain only in refusal tests.
+- `seon.error/schema-expectation` follows Malli's resolved schema children for
+  `:and`/`:or` and describes tuple structure. `me/error-message` is called with
+  `:unknown false`; error categories are not treated as schema expectations.
+  This uses `malli.error/error-message`'s documented source seam
+  (`reference-code/malli/src/malli/error.cljc:288–305`), not message matching or
+  replacement. The database-level regression exercises three missing ref keys;
+  the grammar regression also exercises `:malli.core/invalid-type`.
+- The existing grammar test used a partial update to the already complete
+  `seon.id/id` row as its invalid input. It now deliberately creates a new
+  incomplete identity, preserving F2's valid-update behavior.
+
+The cold fast trace proves the vanished-turn diagnosis: the exception stack
+names **`turn_test.clj:278`**, before terminal settlement. Datahike's
+`retract-entity` (`transaction.cljc:998–1014`) retracts both the turn's own datoms
+and incoming reference datoms, leaving that evaluation without its required
+run. The improved actual diagnostic is:
+
+> expected the required key :seon.cluster.eval/run with an integer or a string or a tuple with 2 entries, got a map missing :seon.cluster.eval/run.
+
+The first fast iteration ran the five requested namespaces against HEAD
+`cd6495f49` plus only this lane's four source/test paths: **132 tests, 1249
+assertions, 0 failures, 2 errors**. One was the pending vanished-turn decision.
+The other was an intermediate fixture error: calling `seed-cluster!` twice in
+one branch made config reconciliation refuse. The fixture now changes the name
+of its already complete cluster, which is the attribute revision under test.
+A focused rerun covers that correction and the stale grammar assertion; a final
+focused grammar run covers the failure-category distinction.
+
+The shared `orchestrator-only` slot flag initially refused fast runs (exit 75).
+The followup explicitly authorized `bin/test-fast`; the invocation therefore
+used its existing `SEON_TEST_ORCHESTRATOR=1` per-command override while retaining
+normal slot admission. No shared policy file was changed and no gate ran.
+
+### Further producer evidence closes the schema question
+
+`test/seon/context_blocks_fixture.clj:288–302` already implements recommendation
+1: its one `:db.fn/call` returns retractions for `(concat evaluations turns)`.
+The vanished-turn regression deletes only the turn and therefore does not
+reproduce the production fixture it cites. Its setup is corrected to retract
+the evaluation and turn together, matching that existing producer. Two new
+assertions verify terminal refusal settlement recreates neither entity.
+This is authorized fixture repair, not a new model decision: no production
+terminal writer or evaluation schema changes. The independent live-fixture
+race (wiping while the loop runs) remains the open issue; it is not claimed
+fixed by this regression. The earlier recommendation's proposed producer work
+is unnecessary because the producer already has the correct atomic shape.
+
+The db/grammar rerun is green: **49 tests, 372 assertions, 0 failures, 0 errors**.
+The final grammar snapshot (including the invalid-type distinction) is green:
+**2 tests, 21 assertions, 0 failures, 0 errors**. The final `seon.turn-test`
+snapshot is running at this implementation checkpoint. All fast runs use
+`--paths` to exclude protected `src/seon/fn.clj` and other lanes' edits.

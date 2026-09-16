@@ -729,6 +729,28 @@
     (number? value) "a number"
     :else (str "an instance of " (.getName (class value)))))
 
+(defn- schema-expectation
+  "Describe composed schemas from their children, not Malli's unknown fallback."
+  [problem]
+  (let [check (m/deref-all (:schema problem))
+        problem (-> problem (assoc :schema check) (dissoc :type))
+        declared-message (me/error-message problem {:unknown false})
+        children #(map (fn [child]
+                         (schema-expectation (assoc problem :schema child)))
+                       (m/children check))]
+    (case (m/type check)
+      :vector "a vector" :sequential "a sequence" :map "a map"
+      :set "a set" :string "a string" :int "an integer"
+      :double "a double" :boolean "a boolean" :keyword "a keyword"
+      :qualified-keyword "a namespaced keyword" :symbol "a symbol"
+      :qualified-symbol "a namespaced symbol" :nil "nil"
+      :tuple (str "a tuple with " (count (m/children check)) " entries")
+      :enum (str "either " (str/join " or " (map pr-str (m/children check))))
+      :and (or declared-message (str/join " and " (children)))
+      :or (or declared-message (str/join " or " (children)))
+      :fn (or declared-message "the declared predicate")
+      (str "a value satisfying " (or declared-message "the declared schema")))))
+
 (defn explain-problem
   "Translate Malli's structured problem into semantic refusal evidence.
    No message parsing or value printing occurs at this seam."
@@ -750,21 +772,10 @@
                              (m/children (m/deref-all (:schema problem)))))
         problem (cond-> problem entry-schema (assoc :schema entry-schema))
         schema-type (m/type (m/deref-all (:schema problem)))
-        message (or (me/error-message (cond-> problem missing? (dissoc :type)))
+        described-problem (cond-> problem missing? (dissoc :type))
+        message (or (me/error-message described-problem {:unknown false})
                     "the declared schema")
-        expected (case schema-type
-                   :vector "a vector" :sequential "a sequence" :map "a map"
-                   :set "a set" :string "a string" :int "an integer"
-                   :double "a double" :boolean "a boolean" :keyword "a keyword"
-                   :qualified-keyword "a namespaced keyword" :symbol "a symbol"
-                   :qualified-symbol "a namespaced symbol" :nil "nil"
-                   :enum (str "either "
-                              (str/join " or "
-                                        (map pr-str (m/children (m/deref-all (:schema problem))))))
-                   :fn message
-                   :or (or (:error/message (m/properties (:schema problem)))
-                           (str "a value satisfying " message))
-                   (str "a value satisfying " message))]
+        expected (schema-expectation described-problem)]
     (cond-> {:seon.error/path (vec path)
      :seon.error/argument argument
      :seon.error/expected (m/form (:schema problem))

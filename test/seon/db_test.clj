@@ -3,11 +3,13 @@
             [clojure.test :refer [deftest is testing use-fixtures]]
             [datahike.api :as d]
             [datahike.pull-api :as pull-api]
+            [seon.cluster.agent :as agent]
             [seon.cluster.message :as message]
             [seon.config :as config]
             [seon.turn :as turn]
             [seon.db :as db]
             [seon.env :as env]
+            [seon.id :as id]
             [seon.instrument :as instrument]
             [seon.render :as render]
             [seon.render.value :as render.value]
@@ -596,7 +598,7 @@
 (deftest retained-read-evidence-invalidates-only-on-a-depended-attribute
   (test-support/with-database
    (fn [connection]
-     (test-support/transacted! connection [[:db/add "evidence-a" :seon.cluster/name "evidence-a"]])
+     (test-support/seed-cluster! connection "evidence-a")
      (let [captured (atom [])]
        (binding [db/*read-evidence-sink* captured]
          (db/q '[:find [?name ...]
@@ -610,7 +612,9 @@
                                    [{:seon.agent/id "unrelated-agent"}])
          (is (db/read-evidence-current? @connection evidence)
              "an unrelated attribute revision retains the renderer read")
-         (test-support/transacted! connection [[:db/add "evidence-b" :seon.cluster/name "evidence-b"]])
+         (test-support/transacted!
+          connection
+          [[:db/add [:seon.cluster/name "evidence-a"] :seon.cluster/name "evidence-b"]])
          (is (not (db/read-evidence-current? @connection evidence))
              "a depended attribute revision makes the retained read stale"))))))
 
@@ -634,15 +638,16 @@
        (is (= (set attributes) (set (map :seon.db/pattern-attribute patterns))))
        (is (every? :seon.db/pattern-attribute patterns)
            "no unbound all-attribute pattern survives a collection input")
-       (is (:db-after (db/transact! connection
-                                   [[:db/add "unrelated-evidence-note" :my.note/content
-                                     "An unrelated attribute changed."]])))
+       (test-support/transacted! connection
+                                 [[:db/add "unrelated-evidence-note" :my.note/content
+                                   "An unrelated attribute changed."]])
        (is (db/read-evidence-current? @connection evidence))
        (doseq [attribute attributes]
          (let [before (capture)]
-           (is (:db-after (db/transact! connection
-                                       [[:db/add (str "bound-" (namespace attribute))
-                                         attribute (str "bound-" (namespace attribute))]])))
+           (case attribute
+             :seon.agent/id (test-support/transacted!
+                            connection [{:seon.agent/id "bound-agent"}])
+             :seon.cluster/name (test-support/seed-cluster! connection "bound-cluster"))
            (is (false? (db/read-evidence-current? @connection before))
                (str "the bound attribute must invalidate its evidence: " attribute))))))))
 
@@ -1009,49 +1014,71 @@
                          @connection 'my.agents.db-shared)))
            "and both agents are found by the namespace they share")))))
 
+(defn- seed-open-turn! [connection turn-id]
+  (test-support/seed-cluster! connection turn-id)
+  (test-support/transacted!
+   connection
+   (agent/creation-tx {:seon.agent/id turn-id
+                       :seon.ns/name (symbol (str "my.agents." turn-id))
+                       :seon.cluster/name turn-id}))
+  (test-support/transacted!
+   connection
+   (turn/open-tx {:seon.turn/id turn-id
+                  :seon.turn/agent [:seon.agent/id turn-id]
+                  :seon.turn/opened-tx "datomic.tx"})))
+
 (deftest unique-rejection-names-the-existing-owner-as-data
   (test-support/with-database
    (fn [connection]
-     (test-support/transacted!
-                  connection
-                  [{:seon.ns/name 'my.agents.db-conflict}
-                   [:db/add "db-conflict-owner" :seon.cluster.eval/id "db-conflict-owner"]
-                   [:db/add "db-conflict-owner" :seon.cluster.eval/refreshes
-                    [:seon.ns/name 'my.agents.db-conflict]]])
-     (let [rejected
-           (binding [db/*conn* connection]
-             (db/transact!
-              [[:db/add "db-conflict-contender" :seon.cluster.eval/id "db-conflict-contender"]
-               [:db/add "db-conflict-contender" :seon.cluster.eval/refreshes
-                [:seon.ns/name 'my.agents.db-conflict]]]))
-           conflict (:seon.error/data rejected)]
-       (is (= :seon.db/rejected (:seon.error/kind rejected)))
-       (is (true? (:seon.db/transaction-refused rejected)))
-       (is (= {:error :transact/unique
-               :attribute :seon.cluster.eval/refreshes}
-              (select-keys conflict [:error :attribute])))
-       (is (instance? datahike.datom.Datom (:datom conflict)))
-       (is (= {:seon.db/conflict-attribute
-               :seon.cluster.eval/refreshes
-               :seon.db/conflict-owner
-               [:seon.cluster.eval/id "db-conflict-owner"]}
-              (select-keys conflict
-                           [:seon.db/conflict-attribute
-                            :seon.db/conflict-owner])))
-       (is (str/includes? (:seon.error/message rejected)
-                          "db-conflict-owner"))
-       (is (not (str/includes? (:seon.error/message rejected)
-                               "ExceptionInfo")))
-       (is (str/includes? (db/render-rejection-ai rejected)
-                          "seon.db/transact! refused transaction data"))
-       (is (str/includes? (db/render-rejection-ai rejected) "db-conflict-owner"))
-       (is (str/includes? (pr-str (db/render-rejection-html rejected))
-                          "db-conflict-owner"))
-       (is (= 'seon.db/render-rejection-ai
-              (->> (schema/matching-shapes rejected)
-                   (some #(when (= :seon.db/transaction-refused-error
-                                   (:seon.schema/key %))
-                            (:seon.render/ai %))))))))))
+     (seed-open-turn! connection "db-conflict-turn")
+     (let [owner-id (id/evaluation "db-conflict-turn" 0)
+           contender-id (id/evaluation "db-conflict-turn" 1)
+           request {:seon.turn/id "db-conflict-turn"
+                    :seon.cluster.eval/at (java.util.Date.)}]
+       (test-support/transacted!
+        connection
+        (into [{:seon.ns/name 'my.agents.db-conflict}]
+              (concat (turn/receipt-start-tx
+                       (assoc request :seon.cluster.eval/ordinal 0))
+                      [[:db/add [:seon.cluster.eval/id owner-id]
+                        :seon.cluster.eval/refreshes
+                        [:seon.ns/name 'my.agents.db-conflict]]])))
+       (let [rejected
+             (binding [db/*conn* connection]
+               (db/transact!
+                (into (turn/receipt-start-tx
+                       (assoc request :seon.cluster.eval/ordinal 1))
+                      [[:db/add [:seon.cluster.eval/id contender-id]
+                        :seon.cluster.eval/refreshes
+                        [:seon.ns/name 'my.agents.db-conflict]]])))
+             conflict (:seon.error/data rejected)]
+         (is (= :seon.db/rejected (:seon.error/kind rejected)))
+         (is (true? (:seon.db/transaction-refused rejected)))
+         (is (= {:error :transact/unique
+                 :attribute :seon.cluster.eval/refreshes}
+                (select-keys conflict [:error :attribute])))
+         (is (instance? datahike.datom.Datom (:datom conflict)))
+         (is (= {:seon.db/conflict-attribute
+                 :seon.cluster.eval/refreshes
+                 :seon.db/conflict-owner
+                 [:seon.cluster.eval/id owner-id]}
+                (select-keys conflict
+                             [:seon.db/conflict-attribute
+                              :seon.db/conflict-owner])))
+         (is (str/includes? (:seon.error/message rejected)
+                            owner-id))
+         (is (not (str/includes? (:seon.error/message rejected)
+                                 "ExceptionInfo")))
+         (is (str/includes? (db/render-rejection-ai rejected)
+                            "seon.db/transact! refused transaction data"))
+         (is (str/includes? (db/render-rejection-ai rejected) owner-id))
+         (is (str/includes? (pr-str (db/render-rejection-html rejected))
+                            owner-id))
+         (is (= 'seon.db/render-rejection-ai
+                (->> (schema/matching-shapes rejected)
+                     (some #(when (= :seon.db/transaction-refused-error
+                                     (:seon.schema/key %))
+                              (:seon.render/ai %)))))))))))
 
 (deftest non-unique-writer-rejections-retain-their-datahike-data
   (test-support/with-database
@@ -1315,11 +1342,28 @@
                          "identity-admission-missing"]]
                       @connection))))))))
 
+(deftest missing-reference-diagnostics-describe-the-declared-value
+  (test-support/with-database
+   (fn [connection]
+     (doseq [[row attribute]
+             [[{:seon.cluster/name "missing-reference-cluster"} :seon.cluster/config]
+              [{:seon.turn/id "missing-reference-turn"} :seon.turn/agent]
+              [{:seon.cluster.eval/id "missing-reference-evaluation"}
+               :seon.cluster.eval/run]]]
+       (let [before (db/basis-t (db/db connection))
+             refusal (db/transact! connection [row])
+             problem (first (get-in refusal [:seon.error/data :seon.error/problems]))]
+         (is (= :seon.db/invalid-write (:seon.error/kind refusal)))
+         (is (= attribute (:seon.db/attribute refusal)))
+         (is (= (str "the required key " attribute
+                     " with an integer or a string or a tuple with 2 entries")
+                (:seon.error/expected-description problem)))
+         (is (= before (db/basis-t (db/db connection)))))))))
+
 (deftest uninstalled-pull-attributes-refuse-without-writing
   (test-support/with-database
    (fn [connection]
-     (test-support/transacted! connection
-                               [[:db/add "diagnostic-pull-run" :seon.turn/id "diagnostic-pull-run"]])
+     (seed-open-turn! connection "diagnostic-pull-run")
      (let [database @connection
            basis-before (db/basis-t database)
            uninstalled [:seon.turn/generated-at

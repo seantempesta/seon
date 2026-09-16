@@ -1316,8 +1316,7 @@
              (fn [[identity-attribute identity-value declaration]]
                (program/exact-replacement-tx
                 declaration
-                (merge {identity-attribute identity-value}
-                       (select-keys declaration [:seon.fn/ns :seon.test/ns])))))
+                {identity-attribute identity-value})))
             declarations))
     (let [row (or (program/declaration-row row :all :agent)
                   (refuse! `receipt-settle-call
