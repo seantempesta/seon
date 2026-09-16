@@ -69,6 +69,13 @@ branch (`src/seon/cluster.clj:1968`).
 
 ## Not caused by 19874b71b
 
+Implementation boundary, 2026-09-17: the assigned lane stopped before edits
+because replacing the absolute file identity also requires the explicitly
+protected consumers `seon.effect/write-back-adds` and
+`seon.test/failure-text`. The issue remains open; neither fix nor regression
+has landed. Exact hunks and live artifact evidence are recorded in
+[the landing note](../../prds/steward-platform/research/cloned-base-path-identity-2026-09-17.md).
+
 `19874b71b` touches no path identity and adds no per-row work; the failure
 predates it (batches 68–79). Full triage, with the measured per-call costs
 that grew the operation past the bound, is in
