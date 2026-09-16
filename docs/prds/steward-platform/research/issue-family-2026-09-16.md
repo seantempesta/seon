@@ -206,6 +206,13 @@ remain as durable proof facts on default; no default lifecycle operation ran.
 The documentation hook still reports the pre-existing dependency-pin errors
 in agents-md-audit-2026-09-15.md; they are outside this lane's edits.
 
+Final read-only publication probe: current-src was
+`6aaa0c28-fb31-5521-9bd8-c9c64e5f123f`, while default's recorded adopted
+commit was `6aaa0609-cbb4-522a-a7c4-f53e06ce04b2`. They differed during
+concurrent publication. Therefore the proofs above establish the named
+hot-loaded definitions and ordinary worker behavior, not complete default
+adoption convergence at handoff. The paid worker's next-agent-work was nil.
+
 ## Historical pre-approval decision
 
 The remainder is the dated initial scope decision, retained as history. Its
