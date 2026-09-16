@@ -1,5 +1,6 @@
 (ns seon.transact-feedback-test
   (:require [clojure.string :as str]
+            [datahike.api :as d]
             [clojure.test :refer [deftest is testing]]
             [seon.db :as db]
             [seon.schema :as schema]
@@ -165,3 +166,38 @@
        (is (= :transact/unique (get-in rejected [:seon.error/data :error])))
        (is (= [:seon.cluster.eval/id "feedback/owner"]
               (get-in rejected [:seon.error/data :seon.db/conflict-owner])))))))
+
+(deftest non-temporal-stores-admit-writes-while-a-retention-rule-is-in-force
+  ;; Retention snapshotting asked Datahike for `history` unconditionally,
+  ;; and a `:keep-history? false` store answers "history is only allowed on
+  ;; temporal indexed databases" — inside the writer, after admission, so
+  ;; the refusal arrived as a failed transaction rather than a value. One
+  ;; declared `:seon.db/append-only-after` rule was therefore enough to
+  ;; break EVERY write to EVERY non-temporal store: the two platform stores
+  ;; (seon.cluster.store-test, seon.cluster.registry-test) silently lost
+  ;; their schema installation and then reported the attributes they had
+  ;; just declared as uninstalled.
+  (test-support/with-database
+   (fn [_]
+     (let [configuration {:store {:backend :memory :id (random-uuid)}
+                          :keep-history? false
+                          :schema-flexibility :write}]
+       (d/create-database configuration)
+       (let [connection (d/connect configuration)]
+         (try
+           (let [installed
+                 (db/transact! connection
+                               [{:db/ident :seon.problems/id
+                                 :db/valueType :db.type/string
+                                 :db/cardinality :db.cardinality/one
+                                 :db/unique :db.unique/identity}])
+                 written (db/transact! connection
+                                       [{:seon.problems/id "non-temporal"}])]
+             (is (some? (:db-after installed)) (pr-str installed))
+             (is (some? (:db-after written)) (pr-str written))
+             (is (= "non-temporal"
+                    (db/q '[:find ?id . :where [_ :seon.problems/id ?id]]
+                          @connection))))
+           (finally
+             (d/release connection)
+             (d/delete-database configuration))))))))

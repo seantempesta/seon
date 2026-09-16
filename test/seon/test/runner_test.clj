@@ -9,6 +9,7 @@
             [seon.instrument :as instrument]
             [seon.test.arm :as arm]
             [seon.test.cache :as cache]
+            [seon.schema :as schema]
             [seon.test.runner :as runner]
             [seon.test-runner-failure-fixture]
             [seon.test-support :as test-support]))
@@ -243,3 +244,26 @@
          (is (seq armable) "An absent program cannot prove complete arming.")
          (is (empty? (set/difference armable installed))
              "Every armable program Var carries its real contract wrapper."))))))
+
+(deftest executor-submissions-carry-the-callers-handed-projection
+  ;; `on-caller-loader` pinned the submitting thread's CLASSLOADER and
+  ;; conveyed nothing else, so any runner work that hopped to an executor
+  ;; thread ran with no handed projection at all: seon.db then reported
+  ;; Datahike's base attributes as the only registered candidates. The
+  ;; class this kills is "a wrapper that conveys one part of the caller's
+  ;; frame" — the pinned loader without the bindings that came with it.
+  (test-support/with-database
+   (fn [_]
+     (let [handed (schema/handed-projection)
+           executor (java.util.concurrent.Executors/newSingleThreadExecutor)
+           observed (promise)]
+       (is (some? handed) "The fixture hands its projection to this thread.")
+       (try
+         (.execute executor
+                   ^Runnable (#'runner/on-caller-loader
+                              (fn [] (deliver observed (schema/handed-projection)))))
+         (is (identical? handed
+                         (deref observed
+                                (long (* 1000 test-support/event-backstop-seconds))
+                                ::never-arrived)))
+         (finally (.shutdownNow executor)))))))

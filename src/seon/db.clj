@@ -2841,7 +2841,12 @@
 
 (defn- retention-snapshot [database rules]
   (let [identities (vec (identity-attributes database))
-        history (d/history database)]
+        ;; A non-temporal database keeps no history, and Datahike throws
+        ;; rather than answering `history` for one. Its current datoms ARE
+        ;; its complete record, so activation and authority derive from the
+        ;; database itself; asking for history there refused every write to
+        ;; every non-temporal store the moment one retention rule existed.
+        history (if (dbi/-temporal-index? database) (d/history database) database)]
     (into {}
       (mapcat
        (fn [{attribute :seon.db/attribute activation :seon.db/activation authority :seon.db/authority}]

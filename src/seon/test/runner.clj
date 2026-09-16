@@ -51,7 +51,8 @@
         (symbol (str ns) (str name))))))
 
 (defn- on-caller-loader
-  "Wrap `task` so it runs under the submitting thread's classloader.
+  "Wrap `task` so it runs under the submitting thread's classloader and
+  dynamic frame.
 
   A virtual thread's context classloader is not Clojure's dynamic
   loader, so a lazy require on an executor task compiles record classes
@@ -59,12 +60,19 @@
   fail with ClassNotFoundException or 'namespace not found' for
   whichever source-compiled dependency loses the race (observed live:
   sci one run, clj-kondo's inlined tools.reader the next). Every
-  executor submission in this runner pins the caller's loader first."
+  executor submission in this runner pins the caller's loader first.
+
+  A plain `fn` conveyed the loader and NOTHING ELSE, so everything the
+  caller handed the work — the armed schema projection above all — was
+  absent on the executor thread, and reads there fell back to Datahike's
+  base attributes. `bound-fn*` captures the submitting thread's frame at
+  wrap time, which is the caller's."
   ^java.util.concurrent.Callable [task]
-  (let [loader (.getContextClassLoader (Thread/currentThread))]
+  (let [loader (.getContextClassLoader (Thread/currentThread))
+        conveyed (bound-fn* task)]
     (fn []
       (.setContextClassLoader (Thread/currentThread) loader)
-      (task))))
+      (conveyed))))
 
 (defn- event-symbol
   [event]
