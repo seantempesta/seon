@@ -1978,6 +1978,7 @@
   ;; question there than in the pool. `parallel-only` then meant "green in a
   ;; smaller world", which is no evidence about scheduling at all.
   (let [initialized (atom nil)
+        parent (doto (io/file project-root "tmp" (str "confirm-world-" (random-uuid))) .mkdirs)
         namespaces '[seon.a-test seon.b-test seon.c-test]
         task-result {::runner/task-id "confirm-world"
                      ::runner/task-summary {::runner/fail-count 1}
@@ -1994,13 +1995,21 @@
        (fn [_ _ _] {::runner/task-summary {::runner/fail-count 0
                                            ::runner/error-count 0}})}
       (fn []
-        (let [confirmed
-              (#'runner/confirm-parallel-failure!
-               namespaces
-               (atom {::runner/description "confirmation world"
-                      ::runner/at-nanos (System/nanoTime)
-                      ::runner/at (java.time.Instant/now)})
-               task-result)]
+        (let [previous (System/getProperty "seon.test.worker-parent")
+              confirmed
+              (try
+                (System/setProperty "seon.test.worker-parent" (str parent))
+                (#'runner/confirm-parallel-failure!
+                 namespaces
+                 (atom {::runner/description "confirmation world"
+                        ::runner/at-nanos (System/nanoTime)
+                        ::runner/at (java.time.Instant/now)})
+                 task-result)
+                (finally
+                  (if previous
+                    (System/setProperty "seon.test.worker-parent" previous)
+                    (System/clearProperty "seon.test.worker-parent"))
+                  (test-support/delete-recursively! parent)))]
           (is (= namespaces @initialized)
               "the confirmation worker loads exactly the namespaces the pool
                worker loaded, so the only remaining difference is that the

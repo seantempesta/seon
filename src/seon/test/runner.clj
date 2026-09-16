@@ -1946,9 +1946,17 @@
 
 (defn- worker-parent
   []
-  (io/file (or (System/getProperty "seon.test.worker-parent")
-               (str (io/file (System/getProperty "seon.test.root")
-                             "workers")))))
+  (let [parent (System/getProperty "seon.test.worker-parent")
+        root (System/getProperty "seon.test.root")]
+    (cond
+      parent (io/file parent)
+      root (io/file root "workers")
+      ;; Neither property set: `(io/file nil "workers")` would silently
+      ;; resolve to the JVM's working directory and write worker exhaust
+      ;; into the source checkout, which is how a bare `workers/` tree
+      ;; appeared at the repository root.
+      :else (throw (ex-info "Worker parent needs seon.test.root or seon.test.worker-parent."
+                            {::worker-parent nil})))))
 
 (defn- worker-checkout
   [worker-id]

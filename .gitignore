@@ -102,3 +102,6 @@ evals/runs/*/transcripts/
 # local tool caches
 .clojure/
 .deps.clj/
+
+# Main-root publication artifact written by bin/seon init (src/seon/cluster.clj source-artifact-file)
+/build/
