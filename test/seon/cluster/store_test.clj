@@ -144,17 +144,20 @@
         (test-support/transacted! (:seon.store/connection-object opened)
                                 [{:seon.store.test/marker "survives"}])
         (is (nil? (store/release-store! opened)))
-        ;; A SECOND RELEASE IS REFUSED, not quietly repeated: the declared
-        ;; contract requires a live unreleased store held by this process
-        ;; root, and under the contracts every cluster arms that refusal is
-        ;; the typed value naming the member. Release remains total for the
-        ;; store it holds; releasing what it no longer holds is a caller bug
-        ;; the boundary now names.
-        (let [refusal (test-support/refusal-data
-                       #(store/release-store! opened))]
-          (is (= :seon.instrument/contract-violated
-                 (:seon.error/kind refusal))
-              "the second release names the contract it violated"))
+        ;; A SECOND RELEASE IS A NO-OP RETURNING NIL, which is what
+        ;; `release-store!` has always documented and what its body does:
+        ;; the flock's own validity IS the released? fact, derived inside
+        ;; the function. The previous expectation here asserted a contract
+        ;; ACCIDENT — a shape member demanding a live connection and a valid
+        ;; lock — which contradicted the docstring two lines above it and
+        ;; made every RETAINED store value (the one a stopped
+        ;; `:seon.boot/instance` still holds) unrepresentable. The store
+        ;; value records what this process opened; liveness is decided at
+        ;; the release and at Datahike, never pre-read in a shape.
+        (is (nil? (store/release-store! opened))
+            "releasing a released store is a no-op, as its docstring rules")
+        (is (seon.schema/valid-candidate-value? :seon.store/store opened)
+            "a released store value is still a store value")
         (let [reopened (store/open-store! {:seon.store/dir dir})]
           (try
             (is (false? (:seon.store/created? reopened))

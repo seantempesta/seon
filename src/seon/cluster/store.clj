@@ -57,6 +57,19 @@
   [value]
   (instance? datahike.connector.Connection value))
 
+(defn file-lock-object?
+  "True for a java.nio.channels.FileLock, HELD or released.
+  The companion of `connection-object?`, and for the same reason: the
+  store value records the flock this process opened, and `release-store!`
+  derives released-ness from the lock's own validity inside its body —
+  \"the flock's own validity IS the released? fact\". A shape contract that
+  also demanded validity made a released store value unrepresentable, so
+  the retained store inside a stopped `:seon.boot/instance` refused its
+  own owner. Validity stays where it is decided: at the release itself."
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
+  [value]
+  (instance? java.nio.channels.FileLock value))
+
 (defn file-lock?
   "True for a held java.nio.channels.FileLock."
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
@@ -77,6 +90,8 @@
                                  connection?)
 (schema/register-core-predicate! 'seon.cluster.store/file-lock?
                                  file-lock?)
+(schema/register-core-predicate! 'seon.cluster.store/file-lock-object?
+                                 file-lock-object?)
 (schema/register-core-predicate! 'seon.cluster.store/database-value?
                                  database-value?)
 

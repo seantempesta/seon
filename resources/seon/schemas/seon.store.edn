@@ -10,21 +10,26 @@
               seon.cluster.store/connection-object?],
              :dir [:string {:min 1}],
              :lock-file [:string {:min 1}],
+             :lock-object
+             [:fn
+              {:error/message
+               "must be a java.nio FileLock object, held or released"
+               :gen/gen seon.cluster.store/file-lock-generator}
+              seon.cluster.store/file-lock-object?],
+             ; THE STORE VALUE IS A RECORD OF WHAT THIS PROCESS OPENED, not an
+             ; assertion that it is still open. Liveness is temporal state the
+             ; authority re-decides: `release-store!` derives released-ness from
+             ; the flock's own validity, and Datahike refuses a released
+             ; connection at the transaction. Demanding liveness HERE made the
+             ; retained value unrepresentable the moment it was released, which
+             ; is why an armed `seon.cluster/stop!` refused its own stopped
+             ; instance and lost its documented idempotence.
              :store
              [:map
               [:seon.store/dir :seon.store/dir]
               [:seon.store/lock-file :seon.store/lock-file]
-              [:seon.store/connection-object
-               [:fn
-                {:error/message
-                 "must be a live unreleased Datahike connection held by this process root"
-                 :gen/gen seon.cluster.store/connection-generator}
-                seon.cluster.store/connection?]]
-              [:seon.store/lock
-               [:fn
-                {:error/message "must be a held valid java.nio FileLock"
-                 :gen/gen seon.cluster.store/file-lock-generator}
-                seon.cluster.store/file-lock?]]
+              [:seon.store/connection-object :seon.store/connection-object]
+              [:seon.store/lock :seon.store/lock-object]
               [:seon.store/created? :boolean]],
              :transaction
              [:or
