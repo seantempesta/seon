@@ -1,0 +1,13 @@
+{:seon.issue.citation/id
+ [:string {:min 1 :seon.db/identity true
+           :description "seon.id/id of [issue-id path row end-row]: one issue's citation of one file at one span. Stable, so re-indexing the same note reuses the entity."}]
+ :seon.issue.citation/file
+ [:and {:description "The cited seon.fn.file entity, resolved from the note's repository-relative path."} :seon.db/ref]
+ :seon.issue.citation/row [:int {:min 1 :description "First cited line."}]
+ :seon.issue.citation/end-row [:int {:min 1 :description "Last cited line of a span; absent for a single line or a bare path."}]
+ :seon.issue.citation/citation
+ [:map {:seon.db/attributes true}
+  [:seon.issue.citation/id :seon.issue.citation/id]
+  [:seon.issue.citation/file :seon.issue.citation/file]
+  [:seon.issue.citation/row {:optional true} :seon.issue.citation/row]
+  [:seon.issue.citation/end-row {:optional true} :seon.issue.citation/end-row]]}
