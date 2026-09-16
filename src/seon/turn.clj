@@ -997,7 +997,19 @@
    [:=> [:cat [:vector :seon.cluster.eval/settle-request]] :seon.store/transaction-data]}
   [requests]
   (if (some :seon.program/row requests)
-    (into [] (mapcat receipt-settle-tx) requests)
+    ;; Mark every request that a declaration PRECEDES in this one transaction:
+    ;; its writer database holds facts the entering projection cannot carry,
+    ;; and `declaration-projection` derives only for those.
+    (into []
+          (mapcat receipt-settle-tx)
+          (first
+           (reduce
+            (fn [[marked declared?] request]
+              [(conj marked (cond-> request
+                              declared? (assoc ::declarations-preceding? true)))
+               (or declared? (some? (:seon.program/row request)))])
+            [[] false]
+            requests)))
     [[:db.fn/call #'receipt-settle-batch-call requests]]))
 
 (defn- affected-schema-attributes
@@ -1206,6 +1218,31 @@
                            :where [?caller :seon.fn/pending-calls ?symbol]]
                          db identity-value))]))))
 
+(defn- declaration-projection
+  "The projection ONE declaration validates against, derived at the writer.
+
+  Law 2.1: the database value already carries its projection, and for a
+  transaction whose earlier entries declared nothing that carried value IS
+  the writer's current value. Deriving it again from datoms rebuilt an
+  IDENTICAL projection -- measured 209.4 ms of the 253.0 ms the delimiter
+  regression bounds as settlement and writes, three `d/q` scans over every
+  schema, contract and source row to discover that nothing had changed.
+  That is the absence-of-signal shape this project keeps paying for.
+
+  The one case the carried value genuinely cannot answer is an earlier
+  declaration in THIS transaction: already a fact in `db`, never in the
+  projection the value entered with. `receipt-settle-batch-tx` is what
+  orders those calls, so it -- and only it -- marks the requests that follow
+  a declaration, and those derive from the writer's current datoms. A
+  database value carrying no projection at all is still refused loudly."
+  [db request]
+  (let [carried (or (db/carried-projection db)
+                    (throw (ex-info "Declaration database has no carried projection"
+                                    (db/projection-fallback 'seon.turn/row-tx))))]
+    (if (::declarations-preceding? request)
+      (schema/projection-from-database db carried)
+      carried)))
+
 (defn- row-tx
   "Validate and exact-upsert one reader-produced durable declaration."
   [db request row]
@@ -1218,11 +1255,7 @@
                 deleted-identities)
           current-projection
           (when (seq schema-keys)
-            (schema/projection-from-database
-             db
-             (or (db/carried-projection db)
-                 (throw (ex-info "Declaration database has no carried projection"
-                                 (db/projection-fallback 'seon.turn/row-tx))))))
+            (declaration-projection db request))
           candidate-projection
           (reduce schema/projection-without-schema
                   current-projection
@@ -1280,15 +1313,7 @@
             (when (or (= :seon.schema/key identity)
                       (and (= :seon.fn/sym identity)
                            (:seon.fn/spec row)))
-              ;; Earlier declarations in this same transaction are already
-              ;; facts in db, but are absent from its entering projection.
-              ;; Validate against the writer's current value, reusing compiled
-              ;; declarations through the schema owner's existing derivation.
-              (schema/projection-from-database
-               db
-               (or (db/carried-projection db)
-                   (throw (ex-info "Declaration database has no carried projection"
-                                   (db/projection-fallback 'seon.turn/row-tx))))))
+              (declaration-projection db request))
             schema-redefinition?
             (and (= identity :seon.schema/key)
                  existing

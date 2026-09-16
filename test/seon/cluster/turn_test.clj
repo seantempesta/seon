@@ -2701,6 +2701,52 @@
             (is (= prefix-count @evaluations)
                 "recovery never re-executes the in-memory prefix")))))))
 
+(deftest a-settling-declaration-uses-the-projection-its-database-carries
+  ;; THE CLASS: a check that recomputes what its input already carries.
+  ;; Settlement derived the complete projection from datoms on every
+  ;; defining turn -- three scans over every schema, contract and source
+  ;; row, returning the identical projection the database value carried
+  ;; (209.4 ms of the 253.0 ms this namespace bounds as settlement and
+  ;; writes). The carried value is the writer's current value for every
+  ;; transaction whose earlier entries declared nothing.
+  (testing "only a declaration earlier in the SAME transaction forces a derivation"
+    (let [row {:seon.fn/sym "my.agents.agent-a/declared"
+               :seon.ns/name 'my.agents.agent-a
+               :seon.fn/ns [:seon.ns/name 'my.agents.agent-a]}
+          requests (mapv (fn [ordinal declaration?]
+                           (cond-> {:seon.turn/id "marking"
+                                    :seon.cluster.eval/ordinal ordinal}
+                             declaration? (assoc :seon.program/row row)))
+                         (range 4) [false true false true])]
+      (is (= [false false true true]
+             (mapv (fn [call]
+                     (boolean (:seon.turn/declarations-preceding? (last call))))
+                   (turn/receipt-settle-batch-tx requests)))
+          "a request is marked exactly when a declaration precedes it")))
+  (testing "an unpreceded declaration validates against the carried projection"
+    (test-support/with-database
+      (fn [connection]
+        (let [database (db/db connection)
+              carried (db/carried-projection database)
+              declaration-projection (deref (ns-resolve 'seon.turn
+                                                        'declaration-projection))
+              derivations (atom 0)
+              from-database schema/projection-from-database]
+          (is (some? carried) "the canonical database value carries its projection")
+          (with-redefs [schema/projection-from-database
+                        (fn [& arguments]
+                          (swap! derivations inc)
+                          (apply from-database arguments))]
+            (is (identical? carried (declaration-projection database {}))
+                "the value's own projection is used as it is")
+            (is (zero? @derivations)
+                "nothing rebuilt a projection the database value already carried")
+            (is (some? (declaration-projection
+                        database {:seon.turn/declarations-preceding? true}))
+                "a preceded declaration still derives at the writer")
+            (is (= 1 @derivations)
+                "exactly the preceded declaration derives")))))))
+
 (deftest delimiter-repair-is-span-local-and-precedes-intent
   (testing "repair is one bounded, honest, idempotent pass"
     (let [repair (deref (ns-resolve 'seon.turn 'repair-source))
