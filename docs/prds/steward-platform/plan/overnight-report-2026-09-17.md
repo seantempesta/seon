@@ -113,7 +113,7 @@ peer session (batches 30–57; ledger
    unchanged 93-result completion, 94.6% of it reach; index-node rewrite
    amplification made that 5–18 MB of store per recorded test). Recording
    now emits only the delta — 0 datoms for an unchanged re-record
-   (`f272b9e6e`; cold proof in batch 79 with recording on). Six resets
+   (`f272b9e6e`; proven cold in batch 79: a second platform run on the same HEAD left the store at 1.1 GB). Six resets
    today in total; the reclamation-signal decision still stands for the
    ordinary churn.
 2. **Live agents cannot yet close a code issue.** The trials
