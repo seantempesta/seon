@@ -8,21 +8,34 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.id :as id]
+            [seon.schema :as schema]
             [seon.turn :as turn]))
 
 ; The live installer and loop regression share these ordinary declarations.
+; The scenario's orders are DURABLE datoms on every cluster that seeds it, so
+; these shapes are not a synthetic registry mutation: the agent declares them
+; in an ordinary turn, the writer commits one `:seon.schema/key` row each, and
+; the cluster's projection derives from those rows like every other
+; declaration (`seon.schema/projection-from-database`). Declared here as data
+; so the key set is DERIVED by everything that needs it.
+(def schema-declarations
+  [[:example/order '[:string {:seon.db/identity true}]]
+   [:example/amount :int]
+   [:example/customer :string]
+   [:example/order-row '[:map {:seon.db/attributes true}
+                         [:example/order :example/order]
+                         [:example/amount :example/amount]
+                         [:example/customer :example/customer]]]])
+
+(def schema-keys
+  "Exactly the declaration keys this scenario adds to a cluster's population."
+  (into #{} (map first) schema-declarations))
+
 (def schema-source
   (str/join "\n"
-            (map pr-str
-                 '[(seon.schema/register! :example/order
-                                         [:string {:seon.db/identity true}])
-                   (seon.schema/register! :example/amount :int)
-                   (seon.schema/register! :example/customer :string)
-                   (seon.schema/register! :example/order-row
-                                         [:map {:seon.db/attributes true}
-                                          [:example/order :example/order]
-                                          [:example/amount :example/amount]
-                                          [:example/customer :example/customer]])])))
+            (map (fn [[schema-key form]]
+                   (pr-str (list 'seon.schema/register! schema-key form)))
+                 schema-declarations)))
 
 (def orders
   [{:example/order "a1" :example/customer "Ada" :example/amount 60}
@@ -216,6 +229,36 @@
 
 (declare clear-history!)
 
+(defn declared!
+  "Refuse unless every scenario key is a FACT of the cluster this installed in.
+
+  The scenario's orders are durable datoms, so its shapes are not a synthetic
+  registry mutation: the agent declares them in an ordinary turn, the writer
+  commits one `:seon.schema/key` row each, and a cluster's projection DERIVES
+  from those rows (`seon.schema/projection-from-database`). This checks the
+  authority — the rows, and the projection derived at the cluster's own basis
+  — rather than the in-memory mirror a later adoption re-decides. A missing
+  key is named; absence is never read as health."
+  [handle]
+  (let [database (db/db (:seon.db/connection handle))
+        derived (get-in (schema/projection-from-database database)
+                        [:seon.schema.projection/forms])
+        row-form (fn [schema-key]
+                   (:seon.schema/form
+                    (db/pull database [:seon.schema/form]
+                             [:seon.schema/key schema-key])))
+        missing-rows (into (sorted-set)
+                           (remove (comp string? row-form)) schema-keys)
+        missing-forms (into (sorted-set)
+                            (remove #(contains? derived %)) schema-keys)]
+    (when (or (seq missing-rows) (seq missing-forms))
+      (let [evidence {:seon.schema/missing-rows missing-rows
+                      :seon.schema/missing-projection-keys missing-forms}]
+        (throw (ex-info (str "Juniper scenario declarations are not facts: "
+                             (pr-str evidence))
+                        evidence))))
+    {:seon.schema/keys (vec (sort schema-keys))}))
+
 (defn install!
   "Admit schema through the actual agent graph, then replace the scenario."
   ([handle routing] (install! handle routing (fn [] nil)))
@@ -239,7 +282,8 @@
     (before-clear)
     (agent/disarm! request)
     (clear-history! connection)
-    {:seon.test/orders (count orders) :seon.test/plan-items (count (:my.plan/steps authored-plan))})))
+    {:seon.test/orders (count orders)
+     :seon.test/plan-items (count (:my.plan/steps authored-plan))})))
 
 (defn clear-history!
   "Erase setup history after the fixture agent and earlier arm wakes are idle."
@@ -294,4 +338,6 @@
                                               :seon.turn/write? true}))]
       (agent/arm! {:seon.turn.loop/cluster handle :seon.agent/routing routing
                    :seon.agent/id "juniper"})
-      (select-keys opening [:seon.turn/id :seon.error/kind :seon.error/message])))))
+      (merge (declared! handle)
+             (select-keys opening
+                          [:seon.turn/id :seon.error/kind :seon.error/message]))))))

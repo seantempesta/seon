@@ -2,6 +2,7 @@
   (:require [clojure.core.async :as async]
             [clojure.core.async.flow :as async.flow]
             [clojure.edn :as edn]
+            [clojure.set :as set]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
@@ -123,7 +124,34 @@
                          :seon.cluster.wake/key ::running-route})
            (try
              (do
-               (fixture/install-running! handle routing)
+               (let [population
+                     (fn [] (set (keys (get-in (schema/projection-from-database
+                                                (db/db connection))
+                                               [:seon.schema.projection/forms]))))
+                     declared-population (population)
+                     installed (fixture/install-running! handle routing)
+                     database (db/db connection)]
+                 ;; The scenario's shapes are FACTS, not a registry leak: the
+                 ;; agent declares them in an ordinary turn, the writer commits
+                 ;; one :seon.schema/key row each, and the cluster's population
+                 ;; DERIVED AT ITS AUTHORITY is its declared population plus
+                 ;; EXACTLY those keys — asserted by key, because a count
+                 ;; answers "fine" for a swap.
+                 (is (empty? (set/intersection declared-population
+                                               fixture/schema-keys))
+                     "The scenario's keys must not already be declared.")
+                 (is (= (set/union declared-population fixture/schema-keys)
+                        (population)))
+                 (is (= (vec (sort fixture/schema-keys))
+                        (:seon.schema/keys installed)))
+                 (is (= fixture/schema-keys
+                        (into #{}
+                              (filter #(string?
+                                        (:seon.schema/form
+                                         (db/pull database [:seon.schema/form]
+                                                  [:seon.schema/key %]))))
+                              fixture/schema-keys))
+                     "Every scenario key is backed by its own durable declaration row."))
                (let [database (db/db connection)
                      inert (wake/inert-attributes database)
                      entries (evaluation/of-agent database "juniper")]
