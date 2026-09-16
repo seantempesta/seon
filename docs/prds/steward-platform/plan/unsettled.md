@@ -477,3 +477,19 @@ Queue, in order:
   the peer's recorder-latency lane. Batch 28 (turn-test-reds' four
   namespaces) in the slot. Running: arming lane (astra), analyzer-facets and
   opening-evaluation fixer (Opus); heartbeat load 10.9.
+- 14:50Z opening-evaluation fix landed (`3596cfb96`): the issue block's
+  status form WAS evaluated and then refused — `generated-read-fault`
+  answered an `:all` evidence set (a whole-database identity scan inside the
+  reach-digest refresh, attribute as a query variable) with the entire
+  68-attribute inert roster, and `resume-turn` settled the failure without
+  the evaluation's ordinal, so the refusal vanished (absence as health).
+  Now: faults only on NAMED attributes; refusals recorded on the evaluation.
+  issue-test 8/0/0 on assertions; new regression
+  `a-refused-generated-form-records-its-refusal`. NEXT DEFECT measured:
+  `seon.plan/run-issue-tests!` runs the agent's issue tests on EVERY
+  settlement (once per opening form), 2,290 ms per pass; the opening no
+  longer fits the 20 s event backstop (issue
+  `opening-turn-pass-costs-seconds-per-form`). Fix (Opus, launching): run
+  only the STALE tests (reach-digest's `stale`) and only at the settlement
+  that closes an ordinary turn, never per generated form — the efficiency
+  rule applied to P5.
