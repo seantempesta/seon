@@ -547,3 +547,160 @@
                                (.getCanonicalPath (clojure.java.io/file (System/getProperty "user.dir")))
                                "seon.id-test/does-not-matter"))
             "an unanswerable reach refuses the run instead of admitting it")))))
+
+;;; ---------------------------------------------------------------------------
+;;; An in-process check excludes a declared-long test and reports what expired
+;;; ---------------------------------------------------------------------------
+
+;; A declared-long test is a real boot or a multi-minute fixture. Selecting one
+;; into the in-process check spends the whole shared
+;; :seon.test/check-time-limit-ms allowance and used to return one bare
+;; :seon.test/unknown, discarding every verdict already recorded
+;; (docs/seon/issues/in-process-check-selects-declared-long-tests.md). The cold
+;; runner excludes the same declaration from every tier but --full; these
+;; regressions own the in-process half and the honest expiry.
+
+(def ^:private long-declaration
+  "Real source publication and two cohosted clusters cost most of one allowance.")
+
+(defn- with-long-test
+  "A probe declared :seon.test/long whose body is trivial.
+
+  Its body creates a marker directory, so an excluded test that ran anyway
+  leaves evidence on disk instead of passing silently."
+  [connection manifest assertion]
+  (support/seed-cluster! connection "default" manifest)
+  (let [namespace-name (symbol (str "long.probe" (id/id)))
+        namespace-object (create-ns namespace-name)
+        test-symbol (str namespace-name "/probe")
+        marker (clojure.java.io/file "tmp" (str "long-probe-" (id/id)))
+        source (list 'clojure.test/deftest
+                     (with-meta 'probe {:seon.test/long long-declaration})
+                     (list 'clojure.test/is
+                           (list '.mkdirs (list 'clojure.java.io/file (.getPath marker)))))
+        test-var (binding [*ns* namespace-object]
+                   (clojure.core/refer 'clojure.core)
+                   (eval source))]
+    (try
+      (support/transacted! connection
+                           [{:seon.ns/name namespace-name}
+                            {:seon.test/sym test-symbol
+                             :seon.schema.admission/source :core
+                             :seon.test/ns [:seon.ns/name namespace-name]
+                             :seon.test/source (pr-str source)
+                             :seon.test/long long-declaration}])
+      (assertion test-symbol test-var marker)
+      (finally
+        (support/delete-recursively! marker)
+        (remove-ns namespace-name)))))
+
+(deftest the-long-declaration-is-indexed-onto-the-test-row
+  (let [root (doto (clojure.java.io/file "tmp" (str "long-index-" (id/id))) .mkdirs)]
+    (try
+      (spit (clojure.java.io/file root "probe.clj")
+            (str "(ns long.index" (id/id) " (:require [clojure.test :refer [deftest is]]))\n"
+                 "(deftest ^{:seon.test/long " (pr-str long-declaration) "} probe (is true))\n"))
+      (let [rows (functions/rows {:seon.fn/roots [(.getPath root)]})
+            row (first (filter :seon.test/sym rows))]
+        (is (= long-declaration (:seon.test/long row))
+            (str "the indexer lifts the declaration onto the row a check queries: " (pr-str row))))
+      (finally (support/delete-recursively! root)))))
+
+(deftest an-in-process-check-excludes-a-declared-long-test-and-names-it
+  (support/with-database
+    (fn [connection]
+      (with-long-test connection {}
+        (fn [test-symbol _ marker]
+          (with-test connection '(clojure.test/is true)
+            (fn [cheap-symbol _]
+              (let [result (sut/check {:seon.db/connection connection
+                                       :seon.test/changed [test-symbol cheap-symbol]})
+                    excluded (:seon.test/long-excluded result)
+                    feedback (sut/feedback result)]
+                (is (= [cheap-symbol] (:seon.test/tests result)) (pr-str result))
+                (is (= [cheap-symbol] (:seon.test/passed result)) (pr-str result))
+                (is (= [{:seon.test/sym test-symbol
+                         :seon.test/long long-declaration
+                         :seon.test/command ["bin/test" "--" (namespace (symbol test-symbol))]}]
+                       excluded)
+                    (pr-str result))
+                (is (.contains feedback "long-excluded 1") feedback)
+                (is (.contains feedback test-symbol) feedback)
+                (is (.contains feedback long-declaration) feedback)
+                (is (not (.exists marker)) "the excluded test executed nothing")
+                (is (nil? (:seon.test/run (db/pull (db/db connection) [:seon.test/run]
+                                                   [:seon.test/sym test-symbol]))))))))))))
+
+(deftest the-declared-opt-in-includes-the-long-test
+  (support/with-database
+    (fn [connection]
+      (with-long-test connection {}
+        (fn [test-symbol _ marker]
+          (let [result (sut/check {:seon.db/connection connection
+                                   :seon.test/changed [test-symbol]
+                                   :seon.test/include-long? true})]
+            (is (= [test-symbol] (:seon.test/passed result)) (pr-str result))
+            (is (nil? (:seon.test/long-excluded result)) (pr-str result))
+            (is (.exists marker) "the opted-in test executed its body")
+            (is (:seon.test/run (db/pull (db/db connection) [:seon.test/run]
+                                         [:seon.test/sym test-symbol])))))))))
+
+(defn- with-expiring-selection
+  "Two probes in one namespace under a small declared check allowance.
+
+  The symbols sort so the trivial one runs first, so the bound fires with
+  exactly one completed verdict already recorded. The second probe waits under
+  its own bound, so nothing parks forever."
+  [connection limit-ms assertion]
+  (support/seed-cluster! connection "default" {:seon.test/check-time-limit-ms limit-ms})
+  (let [namespace-name (symbol (str "expiry.probe" (id/id)))
+        namespace-object (create-ns namespace-name)
+        completed (str namespace-name "/a-completes")
+        unreturned (str namespace-name "/z-never-returns")
+        sources {completed (list 'clojure.test/deftest 'a-completes
+                                 (list 'clojure.test/is true))
+                 unreturned (list 'clojure.test/deftest 'z-never-returns
+                                  (list 'clojure.test/is
+                                        (list '.await (list 'java.util.concurrent.CountDownLatch. 1)
+                                              30 'java.util.concurrent.TimeUnit/SECONDS)))}]
+    (binding [*ns* namespace-object]
+      (clojure.core/refer 'clojure.core)
+      (doseq [source (vals sources)] (eval source)))
+    (try
+      (support/transacted! connection
+                           (into [{:seon.ns/name namespace-name}]
+                                 (map (fn [[test-symbol source]]
+                                        {:seon.test/sym test-symbol
+                                         :seon.schema.admission/source :core
+                                         :seon.test/ns [:seon.ns/name namespace-name]
+                                         :seon.test/source (pr-str source)}))
+                                 sources))
+      (assertion completed unreturned)
+      (finally (remove-ns namespace-name)))))
+
+(deftest an-expired-check-reports-the-verdicts-it-already-recorded
+  (support/with-database
+    (fn [connection]
+      (with-expiring-selection connection 3000
+        (fn [completed unreturned]
+          (let [result (binding [t/report (constantly nil)]
+                         (sut/check {:seon.db/connection connection
+                                     :seon.test/changed [completed unreturned]}))
+                expiry (:seon.test/expired result)
+                feedback (sut/feedback result)]
+            (is (nil? (:seon.error/kind result))
+                (str "the expiry never discards the runs it holds: " (pr-str result)))
+            (is (= [completed] (:seon.test/tests result)) (pr-str result))
+            (is (= [completed] (:seon.test/passed result)) (pr-str result))
+            (is (= 1 (count (:seon.test/results result))) (pr-str result))
+            (is (= :none (:seon.test/next-tier result)))
+            (is (= [unreturned] (:seon.test/pending result)) (pr-str result))
+            (is (= unreturned (:seon.test/unknown expiry)) (pr-str expiry))
+            (is (.contains (:seon.error/message expiry "") unreturned) (pr-str expiry))
+            (is (double? (:seon.test/elapsed-ms result)) (pr-str result))
+            (is (.contains feedback "tests run 1") feedback)
+            (is (.contains feedback "expired") feedback)
+            (is (.contains feedback unreturned) feedback)
+            (is (:seon.test/run (db/pull (db/db connection) [:seon.test/run]
+                                         [:seon.test/sym completed]))
+                "the completed run's facts were recorded before the bound fired")))))))

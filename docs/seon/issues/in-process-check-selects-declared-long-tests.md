@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: open  # fix landed 2026-09-17; unrun pending the batched gate
 severity: friction
 created: 2026-09-16
 tags: [issue, test, runtime, in-process, bounds, wave/steward-platform]
@@ -69,3 +69,30 @@ reported (with the cold command that runs them), or return the per-test results
 already recorded alongside the expiry. A regression asserts that a check whose
 selection includes a declared-long test still reports the tests it completed and
 names the long ones as not-run, never a bare unknown.
+
+## Fix (2026-09-17, unrun)
+
+Both defects are fixed at the one selection seam and reported, never silent:
+
+- `:seon.test/long` is now a program-row fact, declared at the two seams that
+  lift a test marker from Var metadata (`src/seon/fn.clj:553`,
+  `src/seon/sci/eval.clj:410`) and on the `:seon.test/test` row schema. The
+  check queries it instead of loading a Var it deliberately has not loaded.
+- `check-in-process` excludes the declared-long selection and reports it as
+  `:seon.test/long-excluded` — the count and the names, with each declared
+  reason and the cold `bin/test -- <ns>` that runs it — mirroring
+  `:seon.test/destructive-excluded`. `:seon.test/include-long? true` on the
+  check request is the explicit opt-in.
+- On expiry, `check` no longer discards what it holds: `expired-result` returns
+  the completed runs with their verdicts, `:seon.test/pending` naming the
+  remaining selection, and `:seon.test/expired` carrying the typed unknown that
+  names the test which did not return.
+
+Four regressions in `test/seon/test_reaching_test.clj`. Landing note:
+[check-excludes-long-tests-2026-09-17](../../prds/steward-platform/research/check-excludes-long-tests-2026-09-17.md).
+The regressions are UNRUN — in-process runs on `default` were paused before they
+could be exercised; the batched gate is their first proof, so this note stays
+open until it is green.
+
+Remaining mirror: `seon.test.runner/long-reason` (`src/seon/test/runner.clj:622`)
+still reads the marker off Var metadata rather than the row it now indexes.

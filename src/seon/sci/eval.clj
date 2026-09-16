@@ -408,7 +408,9 @@
                         :seon.test/ns namespace-ref
                         :seon.test/source source}
                  (find metadata :seon.test/fixture-observation)
-                 (assoc :seon.test/fixture-observation (:seon.test/fixture-observation metadata)))
+                 (assoc :seon.test/fixture-observation (:seon.test/fixture-observation metadata))
+                 (find metadata :seon.test/long)
+                 (assoc :seon.test/long (:seon.test/long metadata)))
 
                function?
                (cond-> {:seon.fn/sym (str qualified)

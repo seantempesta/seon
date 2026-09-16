@@ -483,6 +483,7 @@
   [{connection :seon.db/connection changed :seon.test/changed
     paths :seon.test/paths namespaces :seon.test/namespaces
     cluster :seon.boot/cluster-name defer? :seon.test/defer-widened?
+    include-long? :seon.test/include-long?
     :as request}
    progress]
   (let [started (System/nanoTime)
@@ -522,6 +523,24 @@
                                     :seon.test/command ["bin/test-check" (or cluster "default")
                                                         "--test" test-symbol]})))
                          selected))
+        ;; A declared-long test is a real boot or a multi-minute fixture: one of
+        ;; them spends the whole :seon.test/check-time-limit-ms allowance the
+        ;; whole selection shares, so the cold gate excludes it from every tier
+        ;; but --full, and so does this. The declaration is a program-row fact
+        ;; (`seon.fn/var-row`), queried here rather than read off a Var the
+        ;; check has deliberately not loaded yet. :seon.test/include-long? is
+        ;; the caller's explicit opt-in.
+        long-excluded (when (and (not (:seon.error/kind selected)) (not include-long?))
+                        (into []
+                              (keep (fn [test-symbol]
+                                      (when-let [reason (:seon.test/long
+                                                         (db/pull database [:seon.test/long]
+                                                                  [:seon.test/sym test-symbol]))]
+                                        {:seon.test/sym test-symbol
+                                         :seon.test/long reason
+                                         :seon.test/command
+                                         ["bin/test" "--" (namespace (symbol test-symbol))]})))
+                              selected))
         ;; A test reaching a declared destructive owner never runs in the
         ;; development JVM: the same rule seon.test/run enforces per Var, applied
         ;; to the whole selection so the exclusion is reported, never silent.
@@ -543,7 +562,9 @@
                    #{})
         runnable (if (or (:seon.error/kind selected) (:seon.error/kind destructive)
                          (and widened defer?)) []
-                     (filterv (complement (into excluded (map :seon.test/sym) deferred))
+                     (filterv (complement (-> excluded
+                                              (into (map :seon.test/sym) deferred)
+                                              (into (map :seon.test/sym) long-excluded)))
                               selected))
         provenance (when (and (not (:seon.error/kind selected)) (seq runnable))
                      (runner/provenance database))]
@@ -565,27 +586,30 @@
                                            :seon.test/skip-reason "recorded result has an unchanged reach digest")
                       (seq deferred) (assoc :seon.test/deferred deferred)
                       (seq destructive) (assoc :seon.test/destructive-excluded destructive)
+                      (seq long-excluded) (assoc :seon.test/long-excluded long-excluded)
                       provenance (assoc :seon.test.run/program-digest
                                         (:seon.test.run/program-digest provenance))
                       widened (assoc :seon.test/widened
                                      (str "the reaching set cannot bound this change: "
                                           (str/join ", " widened))))
+            _ (swap! progress assoc :seon.test/recorded initial :seon.test/pending (vec runnable))
             _ (when (and (seq runnable)
                          (some (set (functions/tests-reaching database "seon.test-support/with-database")) runnable))
-                (reset! progress "canonical fixture preparation")
+                (swap! progress assoc :seon.test/progress "canonical fixture preparation")
                 ;; Realize the fixture owner's one base before starting a Var's
                 ;; event backstop. The total check deadline still applies.
                 (with-test-loader
                   #(deref @(requiring-resolve 'seon.test-support/database-base))))
             prepared (when (seq runnable)
-                       (reset! progress "test namespace loading and contract arming")
+                       (swap! progress assoc :seon.test/progress "test namespace loading and contract arming")
                        (prepare-tests! database runnable effective))
             result
             (if (:seon.error/kind prepared)
               (assoc prepared :seon.test/next-tier :none)
             (loop [remaining runnable result initial]
               (if-let [test-symbol (first remaining)]
-                (let [_ (reset! progress test-symbol)
+                (let [_ (swap! progress assoc :seon.test/progress test-symbol
+                               :seon.test/pending (vec remaining))
                       remaining-ms (quot (- deadline (System/nanoTime)) 1000000)]
                   (if-not (pos? remaining-ms)
                     (-> result
@@ -624,9 +648,37 @@
                                          (failure-message outcome))
                                      :seon.test/failures (vec (:seon.test/failures outcome))})
                             (not green?) (assoc :seon.test/next-tier :none))]
+                      ;; The verdicts recorded so far travel with the check, so
+                      ;; the total bound firing reports them instead of
+                      ;; discarding them for one bare unknown.
+                      (swap! progress assoc :seon.test/recorded next-result
+                             :seon.test/pending (vec (next remaining)))
                       (recur (next remaining) next-result))))
                 result)))]
         (assoc result :seon.test/elapsed-ms (/ (double (- (System/nanoTime) started)) 1000000.0))))))
+
+(defn- expired-result
+  "Report the verdicts a check already recorded when its total bound fired.
+
+  The bound firing is honest about the test that never returned; discarding the
+  runs that DID complete is not — a caller reading one bare unknown cannot tell
+  a slow selection from a red one. `check-in-process` publishes its accumulating
+  result and its remaining selection as it goes, so the expiry is derived from
+  what the check genuinely holds: the completed runs with their verdicts, plus
+  the typed expiry naming what was pending."
+  [snapshot started message]
+  (let [phase (:seon.test/progress snapshot)
+        recorded (:seon.test/recorded snapshot)
+        pending (vec (:seon.test/pending snapshot))
+        expiry (unknown phase (str message " Pending: " phase))]
+    (if (map? recorded)
+      (cond-> (assoc recorded
+                     :seon.test/next-tier :none
+                     :seon.test/expired expiry
+                     :seon.test/elapsed-ms
+                     (/ (double (- (System/nanoTime) started)) 1000000.0))
+        (seq pending) (assoc :seon.test/pending pending))
+      expiry)))
 
 (defn check
   "Run tests observing this change in the calling JVM and record their facts.
@@ -639,6 +691,11 @@
   A selected test reaching a declared destructive owner is EXCLUDED, never run,
   when this JVM operates the development checkout; the exclusions are reported
   with their owner, call path, and cold command in :seon.test/destructive-excluded.
+  A selected test declared :seon.test/long is EXCLUDED the same way and reported
+  by name with its declared reason and cold command in :seon.test/long-excluded;
+  :seon.test/include-long? true runs them, spending the same one allowance.
+  When that allowance fires, the completed runs are returned WITH their verdicts
+  and the typed expiry naming what was pending in :seon.test/expired.
   Red results return :seon.test/next-tier :none. Every failure names its test
   and the changed identities it reaches. Empty or deferred checks do not mint
   run provenance or compute a program digest; no program was tested.
@@ -654,7 +711,8 @@
       (not (:seon.test/check-time-limit-ms effective))
       (unknown :seon.test/check-time-limit-ms "Apply cluster configuration to supply the declared test check time limit.")
       :else
-        (let [progress (atom "reaching selection")
+        (let [started (System/nanoTime)
+              progress (atom {:seon.test/progress "reaching selection"})
               task (FutureTask. ^java.util.concurrent.Callable
                                 (bound-fn [] (check-in-process request progress)))
               thread (.unstarted (Thread/ofVirtual) ^Runnable task)]
@@ -673,15 +731,16 @@
                             :seon.error/diagnostic-offending :pending
                             :seon.error/diagnostic-evidence {:seon.test/changed (:seon.test/changed request)}}})]
               (if (:seon.error/kind result)
-                (unknown @progress (str (:seon.error/message result) " Pending: " @progress))
+                (expired-result @progress started (:seon.error/message result))
                 (do
                   (when-let [n (:seon.test/skipped-count result)]
                     (println "Skipped" n "tests:" (:seon.test/skip-reason result)))
                   result)))
             (catch Exception failure
-              (unknown @progress (str "Check failed at " @progress ": "
-                                      (or (some-> failure ex-cause ex-message)
-                                          (ex-message failure)))))
+              (let [phase (:seon.test/progress @progress)]
+                (unknown phase (str "Check failed at " phase ": "
+                                    (or (some-> failure ex-cause ex-message)
+                                        (ex-message failure))))))
             (finally (when-not (.isDone task) (.cancel task false))))))))
 
 (defn check-adoption
@@ -733,6 +792,10 @@
              (str " / skipped " n ": " (:seon.test/skip-reason result)))
            (when-let [excluded (seq (:seon.test/destructive-excluded result))]
              (str " / destructive-excluded " (count excluded)))
+           (when-let [excluded (seq (:seon.test/long-excluded result))]
+             (str " / long-excluded " (count excluded)))
+           (when-let [expiry (:seon.test/expired result)]
+             (str " / expired: " (:seon.error/message expiry)))
            (apply str (for [failure (:seon.test/failed result)]
                         (str "\n" (:seon.test/sym failure) " reaches "
                              (pr-str (:seon.test/changed failure)) ": "
@@ -745,6 +808,11 @@
                         (str "\ndestructive " (:seon.test/sym excluded) " reaches "
                              (:seon.fn/sym excluded)
                              "; never in process on a development root — run "
+                             (str/join " " (map quote-arg (:seon.test/command excluded))))))
+           (apply str (for [excluded (:seon.test/long-excluded result)]
+                        (str "\nlong " (:seon.test/sym excluded) ": "
+                             (:seon.test/long excluded)
+                             "; one declared-long test spends the whole check allowance — run "
                              (str/join " " (map quote-arg (:seon.test/command excluded))))))
            (if (seq invocations) (str "\nrun " (str/join " then " invocations))
                "\nnext-tier: none; fix failures first")))))

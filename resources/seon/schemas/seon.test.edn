@@ -13,6 +13,9 @@
             :fixture-observation
             [:string {:min 1
                       :description "Nonblank explanation of the observation an ordinary database branch cannot prove; checked at selection and expensive fixture acquisition."}],
+            :long
+            [:string {:min 1
+                      :description "The declared reason this test is long: a real boot, a multi-minute fixture, or another cost an ordinary branch pays once. Indexed from the test Var's :seon.test/long metadata, so an in-process check can exclude it by query instead of by loading the Var."}],
             :pass-count [:int {:min 0}],
             :fail-count [:int {:min 0}],
             :error-count [:int {:min 0}],
@@ -100,6 +103,7 @@
              [:seon.test/usage {:optional true} :seon.test/usage]
              [:seon.test/fixture-observation {:optional true}
               :seon.test/fixture-observation]
+             [:seon.test/long {:optional true} :seon.test/long]
              [:seon.test/subject {:optional true} :seon.test/subject]
              [:seon.test/pending-subject
               {:optional true
@@ -147,7 +151,8 @@
   [:seon.test/namespaces {:optional true} :seon.test/namespaces]
   [:seon.boot/cluster-name {:optional true} :seon.boot/cluster-name]
   [:seon.test/declared-root {:optional true} :seon.test/declared-root]
-  [:seon.test/defer-widened? {:optional true} :boolean]]
+  [:seon.test/defer-widened? {:optional true} :boolean]
+  [:seon.test/include-long? {:optional true} :boolean]]
  :seon.test/run-options
  [:map [:seon.test.run/provenance :seon.test.run/provenance]
   [:seon.db/db {:optional true} :seon.db/database-value]
@@ -178,6 +183,13 @@
  [:vector [:map [:seon.test/sym :seon.test/sym]
            [:seon.test/fixture-observation :seon.test/fixture-observation]
            [:seon.test/command :seon.test/command]]]
+ :seon.test/long-excluded
+ [:vector [:map [:seon.test/sym :seon.test/sym]
+           [:seon.test/long :seon.test/long]
+           [:seon.test/command :seon.test/command]]]
+ :seon.test/expired
+ [:and {:description "The declared check bound fired with runs already recorded. It names what never returned; the verdicts it accompanies are the tests that did complete."}
+  :seon.test/unknown-error]
  :seon.test/check-result
  [:map
   [:seon.test/skipped-count {:optional true} :seon.test/skipped-count]
@@ -197,7 +209,9 @@
   [:seon.test/widened {:optional true} :string]
   [:seon.test/pending {:optional true} [:vector :seon.test/sym]]
   [:seon.test/deferred {:optional true} :seon.test/deferred]
-  [:seon.test/destructive-excluded {:optional true} :seon.test/destructive-excluded]]
+  [:seon.test/destructive-excluded {:optional true} :seon.test/destructive-excluded]
+  [:seon.test/long-excluded {:optional true} :seon.test/long-excluded]
+  [:seon.test/expired {:optional true} :seon.test/expired]]
  :seon.test/adoption-identities [:set :seon.db/ref]
  :seon.test/adoption-inputs [:set :string]
  :seon.test/adoption-cluster :seon.db/ref

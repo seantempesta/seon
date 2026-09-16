@@ -550,6 +550,8 @@
                :seon.fn/form-span span}
         (find metadata :seon.test/fixture-observation)
         (assoc :seon.test/fixture-observation (:seon.test/fixture-observation metadata))
+        (find metadata :seon.test/long)
+        (assoc :seon.test/long (:seon.test/long metadata))
         (true? (:seon.test/usage metadata))
         (assoc :seon.test/usage true)
         (seq (get calls-by-caller (str qualified)))
