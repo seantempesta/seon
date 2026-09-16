@@ -3008,7 +3008,7 @@
                  (-> run-state :seon.error.occurrence/_turn first :seon.error.occurrence/message))))))))
 
 (deftest generated-phase-failures-converge-through-one-terminal-exit
-  (with-cluster fake-evaluate
+  (with-cluster
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
             sequence-number (atom 0)
@@ -3040,7 +3040,10 @@
                  (turn/receipt-start-tx
                   {:seon.turn/id run-id
                    :seon.cluster.eval/ordinal 0
-                   :seon.cluster.eval/at now})))
+                   :seon.cluster.eval/at now
+                   :seon.cluster.eval/source "(identity :phase-probe)"
+                   :seon.cluster.eval/ns [:seon.ns/name 'my.agents.agent-a]
+                   :seon.cluster.eval/author :agent})))
               (let [settled
                     (turn/settle!
                      (cond-> {:seon.turn.loop/cluster cluster
@@ -3074,7 +3077,7 @@
                             :in $ ?run-id
                             :where
                             [?run :seon.turn/id ?run-id]
-                            [?error :seon.error.occurrences ?occurrence]
+                            [?error :seon.error/occurrences ?occurrence]
                             [?occurrence :seon.error.occurrence/turn ?run]]
                           @connection run-id))))))
           :seed 2026080601)

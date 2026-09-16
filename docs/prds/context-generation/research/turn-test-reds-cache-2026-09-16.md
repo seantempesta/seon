@@ -213,3 +213,19 @@ completion from calling that same object on the next turn. Program identity
 may survive as a tombstone; it is not mistaken for an installed definition.
 Candidate **44719 4/0/0**; source-reloaded fresh-base **44739 4/0/0**.
 No private serialization, restoration path, or production context owner changed.
+
+## Phase-property fixture slice
+
+The original property queried `:seon.error.occurrences` instead of the installed
+`:seon.error/occurrences`. A direct read returns `:seon.db/invalid-read`, not a
+count. The observed transactions already closed their turns and recorded one
+occurrence. Its evaluation case also seeded no source, causing the settlement
+analyzer to refuse nil. The fixture now supplies source, namespace and author,
+uses the installed occurrence ref, and removes the unnecessary fake evaluator.
+
+All **24 trials**, seed **2026080601**, and the original five assertions remain.
+Candidate **44755 5/0/0**; source-reloaded fresh-base **44764 5/0/0**. The
+per-turn closure/evaluation/error counts and bounded supervisor escalation all
+pass. The early failed property never accumulated enough recurring failures
+to exercise escalation; its empty notification table was downstream evidence,
+not a production notification defect.
