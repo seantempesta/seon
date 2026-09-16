@@ -229,3 +229,57 @@ after its requesting thread is interrupted, and later requests reuse it.
 Its 11 assertions include actual program rows and the SCI context.
 The gate request adds the two test-support paths and namespace. The
 protected operator files and runner recording-notice path remain untouched.
+
+### Final live evidence and gate handoff
+
+Reader slice: `5a9de3185`; h: `fec3918dd`; g: `9f0771cfc`.
+The explicit background `bin/seon init --dev default --changed
+src/seon/problems.clj` completed **exit 0**, publishing and adopting
+`6aaa467f-f15d-5bc6-a123-c0092a6d8c3c`, digest
+`c91f9025c0727997051dd95d730c38fb1057f85bbdbc14e997766caf5a46ed1c`.
+Subsequent source publications can advance that head; this records the
+observed successful adoption, not a claim that the moving head stopped.
+
+After adoption the two original h tests were clean: **7/0/0, 20997 ms**
+(`ns-unmap-retracts-the-owned-function-after-the-terminal-commit`) and
+**2/0/0, 19959 ms** (`qualified-dynamic-ns-unmap-is-durable-in-a-fresh-context`).
+Together with the three rows above, the final priority/readers proof is
+**five tests, 30 assertions, zero failures/errors**. Exact counts are in
+[regression evidence](reach-closure-regression-evidence-2026-09-16.edn);
+[the serial probe](reach-closure-regression-probe-2026-09-16.clj) repeats
+these tests through the runner's loader and the canonical harness.
+
+The [live proof](reach-closure-live-proof-2026-09-16.clj) ran on default
+PID 45917 using hot-reloaded, armed definitions. Its
+[exact evidence](reach-closure-live-evidence-2026-09-16.edn) records:
+
+- Baseline green, then one red assertion with a failure entity and a file
+  **ref** to the proof file, line 21; expected `(= 1 (value))`, actual
+  `(not (= 1 2))`.
+- `changed-since-green` returned exactly `reach-closure.live-proof/value`
+  in **3.414583 ms**.
+- The final green run retracted the failure entity. Reach membership
+  replaced `old-dependency` with `new-dependency`, retaining `value`.
+- A subsequent live pull after the latest fixes still read **1/0/0**, no
+  failures, and those exact two reach members.
+
+All seven requested failure classes are covered in
+`test/seon/test_failure_facts_test.clj`; its twelve tests also cover explicit
+namespace completion, addressable result branches, closure replacement,
+structured readers, and cardinality-many tuple replacement. The oversized
+blob regression additionally read its committed blob through real SCI and
+passed **6/0/0**. The earlier eleven-test proof was **74 assertions green**;
+the new reader regression passed **6/0/0** above.
+
+No test JVM was launched and default was never restarted. The gate request
+is `tmp/orchestrator/gate-requests/reach-closure-facts.txt`; the orchestrator's
+path-limited named and platform gate remains the final integration proof.
+Items a–f remain closed by batch 41, and withdrawn i's operator/recording
+files were not edited. Markdown lint reports existing stale gitlink citations
+in `docs/prds/context-generation/research/agents-md-audit-2026-09-15.md`;
+those foreign audit findings were not changed by this lane.
+
+The two retained proof scripts pass clj-kondo with **0 errors, 0 warnings**.
+All lane probe threads have completed, and both explicit publication shells
+have exited. Disposable lane logs, classpath file, thread dump, and HTML
+preview were removed after their evidence was retained here.

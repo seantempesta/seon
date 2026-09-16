@@ -36,7 +36,7 @@ reporting. These are §10 operational rules, not runner implementation claims.
 `seon.test-support/with-database` ordinarily opens an isolated branch
 of the canonical in-memory base. It does not rebuild the whole source
 population per call. Each branch has its own connection, datoms, schema
-evolution, and history (`test/seon/test_support.clj:616`, `:649`).
+evolution, and history (`test/seon/test_support.clj:751`, `:784`).
 
 Shared base construction runs on its own daemon thread using the system
 classloader and the caller's explicitly carried projection. Failed attempts
@@ -49,20 +49,20 @@ never replace it merely to rerun a test.
 
 When the runner supplies a published base, `create-base` clones and
 reidentifies its file store before connecting the private tiered backend
-(`test/seon/test_support.clj:220`). Frontend-only writes do not make a
+(`test/seon/test_support.clj:292`). Frontend-only writes do not make a
 shared backend immutable: Konserve's connect-time enumeration may migrate
 and delete old-format files. The simultaneous-acquisition regression in
-`test/seon/test_support_test.clj:31` verifies distinct stores, isolated
+`test/seon/test_support_test.clj:146` verifies distinct stores, isolated
 writes, cleanup, and unchanged published bytes.
 
 Use `:seon.test-support/extra-schema` only for synthetic declarations
 whose installation is part of the subject. Store-global tests may request
 `:seon.test-support/fresh-store?`; the separate physical-store path
-lives at `test/seon/test_support.clj:595`.
+lives at `test/seon/test_support.clj:731`.
 
 Hand the projection and environment explicitly as production does.
 `run-database-body` supplies the fixture's projection state
-(`test/seon/test_support.clj:572`). Never create a small schema roster
+(`test/seon/test_support.clj:707`). Never create a small schema roster
 or mocked SCI context that misrepresents the production boundary.
 
 Tests own no process-global mutation. Use an isolated database per
@@ -74,7 +74,7 @@ adoption, or browser behavior.
 
 Use `seon.test-support/await-event!` for a channel, latch, future, or watched reference.
 It uses the declared event backstop and throws evidence naming a missing
-event (`test/seon/test_support.clj:405`). Wait for the actual required
+event (`test/seon/test_support.clj:540`). Wait for the actual required
 terminal fact or completion, never quiescence or a tuned sleep.
 For a reference, it installs the watch before deriving the current value and
 removes it on every exit. Future failures preserve the publisher's original
@@ -83,7 +83,7 @@ The future branch cancels timed-out work before reporting the missing event.
 
 `seon.test-support/refusal-data` returns flat errors or deepest
 exception data, distinguishing committed and unknown results
-(`test/seon/test_support.clj:525`). Assert the specific refusal and
+(`test/seon/test_support.clj:660`). Assert the specific refusal and
 independently verify the database did not change. Checking only a throw
 does not establish atomic refusal.
 
@@ -105,7 +105,7 @@ written facts independently of the operation's return.
 
 Use `seon.test-support/assert-check!` to retain full shrink evidence
 and require both an actual true result and a positive trial count
-(`test/seon/test_support.clj:541`). Its regression retains a failing
+(`test/seon/test_support.clj:676`). Its regression retains a failing
 counterexample and rejects a successful zero-trial check.
 Generator construction, generated-value validity, and meaningful domain
 coverage are separate proofs. Malli overrides do not validate their own
