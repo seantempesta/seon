@@ -252,3 +252,85 @@ A genuine refusal raised during this lane's own probing, after adoption:
 `seon.test/run` called with a nil Var: the diagnostic now names the whole call —
 the nil Var, the connection and the options — while the per-problem leaf still
 carries the exact `nil` and its path. The old shape would have said `[nil]`.
+
+## Batch 68: the two remaining call-preparation errors (`ed2eb3423`)
+
+Batch 68 (`d090c9934`) confirmed the first red closed —
+`a-compiled-first-party-call-is-prepared` no longer appears — and
+`seon.instrument-test` and `seon.error-test` are green. Two errors remained in
+`seon.call-preparation-test`.
+
+### Attribution: both predate this lane
+
+Batch 65 B, at `ccccea806` and therefore BEFORE `6cbe2017c` and `3e41a5d22`,
+already recorded the identical pair with the identical messages:
+
+```
+ERROR in (a-two-slot-arity-prepares-only-unique-partial-placements)
+  seon.schema/compilable-form refused predicate-functions at []: expected a map,
+  got nil.   caller "seon.call-preparation (call_preparation.clj:580)"
+ERROR in (an-unavailable-supplier-refuses-before-the-body)
+  seon.call-preparation/prepare refused plan-value at
+  [:seon.call-preparation/contract-t] …   caller "call_preparation_test.clj:602"
+```
+
+They were invisible as "the" reds in 65 B only because the rest of that
+namespace was drowning in fixture-admission errors that the fixture-sweep lane
+has since fixed. `violation` is the REPORTER — it runs only after a contract has
+already failed — so it cannot change what the arm hands `compilable-form`.
+
+### 1. The cold-arming class, at three more call sites
+
+A projection carrying no bound predicates has NO KEY (`schema.clj:2150` already
+says so in prose); `compilable-form` declares a map. Reading the key bare hands
+it nil. `eeafb9dba` fixed exactly this in `direct-references` yesterday, and
+`instrument.clj:568`, `schema.clj:608` and `schema.clj:2156` already default.
+Three feeders still read it bare and refuse in a cold worker, where nothing
+binds a projection before the arm:
+
+- `call_preparation.clj:583` — `argument-validators`, reached by every arity
+  with more than one slot (the batch-68 error);
+- `schema.clj:1535` — the render-input arity match;
+- `schema.clj:3045` — the function-output arity compile.
+
+All three now use the same `get`-with-`{}`, so no caller of `compilable-form`
+can hand it nil. Verified live on default against a projection with the key
+`dissoc`'d:
+
+```clojure
+{:key-present-in-cold? false
+ :bare-read "seon.schema/compilable-form refused predicate-functions at []:
+             expected a map, got nil. Fix: Supply a map at []."
+ :defaulted-read :compiled}
+```
+
+### 2. A hand-rostered plan value
+
+`an-unavailable-supplier-refuses-before-the-body` built a plan of three keys,
+and `:seon.call-preparation/plan` requires `contract-t`, `basis-t` and
+`arities`, so `prepare`'s own contract refused before the subject was reached —
+the same class as `d934f4355`. The plan is now compiled by `plan-for`, with
+only the thing under test (a slot whose supplier cannot produce) substituted.
+Live on default:
+
+```clojure
+{:hand-rostered-valid? false
+ :compiled-substituted-valid? true
+ :missing-from-hand (:seon.call-preparation/contract-t
+                     :seon.call-preparation/basis-t
+                     :seon.call-preparation/arities)}
+;; and through the armed prepare, with the substituted plan:
+{:kind :seon.call-preparation/unavailable :key :seon.db/db :index 1}
+```
+
+### Verification boundary
+
+NOT adopted into default. `bin/seon init --dev default` refused during source
+build with "Predicate `seon.cluster.store/file-lock-object?` has no admitted
+callable in the corpus projection" — that predicate and its
+`register-core-predicate!` are UNCOMMITTED working-tree edits belonging to
+another lane (`src/seon/cluster/store.clj`, `resources/seon/schemas/seon.store.edn`),
+and publication takes the whole tree. The adoption threw before adopting, so
+default kept its prior commit and stayed healthy (pid 63433, 2 agents). Every
+proof above is therefore a direct evaluation of the new forms against the live
+cluster, never an adopted definition; the cold gate is the proof.
