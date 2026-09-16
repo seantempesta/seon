@@ -470,3 +470,10 @@ Queue, in order:
   projection change re-arms exactly the affected wrappers). Waiting on the
   opening-evaluation fixer before the two issue.clj lanes (indexer
   resolver, generator) launch. Probes resumed lightly.
+- 14:35Z batch 27 B (`b033e0860`): 155 tests / 1,001 assertions / 0 failures
+  / 1 error — registry, store, transact-feedback, test.runner, test-runner,
+  test-support, cluster, cluster.source all GREEN cold: `6d4705498` proven;
+  the one error (fresh-operator-test hanging to the worker bound) is with
+  the peer's recorder-latency lane. Batch 28 (turn-test-reds' four
+  namespaces) in the slot. Running: arming lane (astra), analyzer-facets and
+  opening-evaluation fixer (Opus); heartbeat load 10.9.
