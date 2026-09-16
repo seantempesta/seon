@@ -421,3 +421,14 @@ Queue, in order:
   connections inheriting the root's projection). Opus fixer launched for
   both + the note's refutation. Batch 27 (platform cold, with recording)
   queued by the gate session behind batch 26 phase B.
+- 13:05Z The two platform reds re-diagnosed by the fixer's measurement
+  (`0c1fcd473`): both PASS under the worker's handed projection and fail
+  without it → not fixtures. Real owners: `runner.clj:53 on-caller-loader`
+  pins the classloader with a plain fn and drops dynamic bindings on
+  executor threads (the handed projection is lost when a test hops
+  threads); `db.clj:2844 retention-snapshot` calls `history` on a
+  `:keep-history? false` store and fails the write inside Datahike's
+  writer. Fixer redirected to those two owners (issue
+  `two-platform-tests-lose-the-workers-handed-projection`). If the
+  in-process `seon.test/run` path also lacks the handed projection, it is
+  the third instance of the same class.
