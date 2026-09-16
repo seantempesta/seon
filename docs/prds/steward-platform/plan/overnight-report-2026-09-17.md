@@ -64,7 +64,12 @@ peer session (batches 30–57; ledger
    derivation refusing past ~400 items). The remaining one is a decision
    (below): agent-facing adoption.
 3. **Recurring classes named and partly killed today:** fixtures ignoring a
-   refused `transact!` (7 sightings; one helper landed, detector pending); a
+   refused `transact!` — after the one write helper was swept across 588
+   sites in 96 files, the cold gate showed **142 tests in 47 namespaces had
+   been passing over refused writes** (a shared fixture seeding the same
+   receipt twice dominates); they are being made honest namespace by
+   namespace, two of them may be real defects (call preparation, boot
+   recovery) and are under separate triage; a
    `delay`/`defonce` caching a throwable (3 sightings); an open map keyed only
    by universal attributes shadowing a family (3 sightings; checker issue
    filed); one lane's intermediate edit refusing adoption for every lane (2).
