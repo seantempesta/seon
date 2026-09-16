@@ -333,3 +333,45 @@ JVM evaluation remained available. Markdown hook feedback reports 12 existing
 gitlink citation mismatches in the AGENTS audit note; no foreign audit file was
 edited. The isolated namespace/platform gate remains the orchestrator's proof,
 not a claim made by these in-process runs.
+
+### Final convergence and adopted proof
+
+Implementation commit: **f9a46b0bd**. The initial full adoption and later
+attempts encountered source changes during analysis or adoption. Their
+reconciliation phases no longer reproduced the tuple refusal. After the
+operator lifecycle queue drained, this exact command finished with exit **0**:
+
+```sh
+bin/seon init --dev default --changed src/seon/program.cljc test/seon/program_test.clj
+```
+
+Terminal lines, from `tmp/orchestrator/program-provenance-adoption-stable.log`:
+
+```text
+● current-src: development cluster converged
+● :current-src commit 6aa9fc8a-9227-50a6-a4e3-cc7d3e673fb3 digest f53a8de435eeddf98f7b4762996a54ed21ed2904918315747c565100010ec275
+```
+
+A subsequent default pull of its cluster row returned that same
+`:seon.source/commit-id`. The final live `settle-call` pull still has the
+same file, span **[22108 23168]**, and exact source-byte equality. At this
+adopted commit the active lint census is **542** and subject holders remain
+**0**. The preceding 535 census was an earlier point-in-time observation.
+The one source-bearing function lacking file/span is agent-admitted
+`my.agents.root/largest`, where absence is required; no placeholder was added.
+
+All three regressions ran again against the adopted definitions, serially,
+with the ordinary two-argument `seon.test/run` and default connection:
+
+| Test | Recorded run | Pass / fail / error | MCP elapsed |
+|---|---|---|---|
+| `seon.fn-test/static-findings-are-replaced-with-their-program-rows` | 59927 | 9 / 0 / 0 | 2,538 ms |
+| `seon.program-test/function-contract-redefinition-replaces-component-facts-exactly` | 59928 | 4 / 0 / 0 | 1,709 ms |
+| `seon.fn-test/indexed-declarations-carry-exact-file-bytes` | 59929 | 12 / 0 / 0 | 2,124 ms |
+
+The gate request now includes `test/seon/program_test.clj`, the implementation
+commit, convergence commit, and these recorded results. No test JVM was
+launched. Every owned operator shell exited; no owned background shell,
+scratch cluster, or worktree remains. Foreign source/schema/runner edits were
+preserved. This closes the tuple-retraction blocker; the batched isolated
+namespace/platform gate remains assigned to the orchestrator.
