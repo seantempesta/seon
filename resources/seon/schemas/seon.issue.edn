@@ -29,6 +29,7 @@
              :members   [:set {:description "A class note's member issues."} :seon.db/ref]
              :agent     [:and {:description "The agent working it; asserted by start! in the transaction that creates the agent and opens its first turn."} :seon.db/ref]
              :created-by [:and {:description "The author agent. Its first assertion is the enduring retraction authority, including after unassignment."} :seon.db/ref]
+             :detector  [:and {:description "The detector function's program entity for a generated issue. With the subject's own identity value it is the issue's identity, so a detector run upserts its issues instead of duplicating them. Absent on an authored issue."} :seon.db/ref]
              :budget    [:int {:min 1 :description "Provider turns for the worker; copied to its settings overlay at start."}]
              :resolved-tx [:and {:description "The transaction recording that every test verified; absence means open. Written by settlement, never asserted by a model."} :seon.db/ref]
              :issue [:map {:seon.db/attributes true
@@ -52,5 +53,6 @@
                      [:seon.issue/members {:optional true} :seon.issue/members]
                      [:seon.issue/agent {:optional true} :seon.issue/agent]
                      [:seon.issue/created-by {:optional true} :seon.issue/created-by]
+                     [:seon.issue/detector {:optional true} :seon.issue/detector]
                      [:seon.issue/budget {:optional true} :seon.issue/budget]
                      [:seon.issue/resolved-tx {:optional true} :seon.issue/resolved-tx]]}

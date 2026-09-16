@@ -225,29 +225,39 @@
   "The delta between one issue's stored facts and its desired facts.
   An issue whose every attribute already holds its desired value contributes
   NOTHING, so an unchanged note set is an empty transaction rather than a
-  re-assertion of every fact the database already holds."
-  [current desired]
-  (let [eid (:db/id current)
-        desired (merge (select-keys current [:seon.issue/agent :seon.issue/budget
-                                            :seon.issue/resolved-tx :seon.issue/created-by])
-                       desired)
-        retained (into (set (:seon.issue/tests desired))
-                       (map #(if (map? %) (:db/id %) %)) (:seon.issue/tests current))
-        desired (cond-> desired (seq retained) (assoc :seon.issue/tests retained))
-        normalized (fn [value]
-                     (if (coll? value)
-                       (set (map #(if (map? %) (get % :db/id %) %) value))
-                       value))
-        changed (into (sorted-set)
-                      (for [attribute (into (set (keys current)) (keys desired))
-                            :when (and (not (contains? #{:db/id :seon.issue/id} attribute))
-                                       (not= (normalized (get current attribute))
-                                             (normalized (get desired attribute))))]
-                        attribute))
-        asserted (select-keys desired changed)]
-    (cond-> (mapv (fn [attribute] [:db/retract eid attribute])
-                  (filter #(contains? current %) changed))
-      (seq asserted) (conj (assoc asserted :db/id eid)))))
+  re-assertion of every fact the database already holds.
+  `owned` names the attributes the caller replaces; the two-argument arity
+  replaces every attribute, which is what indexing a note means. A caller that
+  decides only part of an issue — a generator writing its own facts beside a
+  worker's prose — supplies the set it decides, and every other attribute is
+  left exactly as the database holds it."
+  ([current desired] (replacement-tx current desired nil))
+  ([current desired owned]
+   (let [eid (:db/id current)
+         desired (if owned
+                   desired
+                   (merge (select-keys current [:seon.issue/agent :seon.issue/budget
+                                                :seon.issue/resolved-tx :seon.issue/created-by])
+                          desired))
+         retained (into (set (:seon.issue/tests desired))
+                        (map #(if (map? %) (:db/id %) %)) (:seon.issue/tests current))
+         desired (cond-> desired (and (nil? owned) (seq retained)) (assoc :seon.issue/tests retained))
+         normalized (fn [value]
+                      (cond
+                        (and (map? value) (= #{:db/id} (set (keys value)))) (:db/id value)
+                        (coll? value) (set (map #(if (map? %) (get % :db/id %) %) value))
+                        :else value))
+         changed (into (sorted-set)
+                       (for [attribute (into (set (keys current)) (keys desired))
+                             :when (and (not (contains? #{:db/id :seon.issue/id} attribute))
+                                        (or (nil? owned) (contains? owned attribute))
+                                        (not= (normalized (get current attribute))
+                                              (normalized (get desired attribute))))]
+                         attribute))
+         asserted (select-keys desired changed)]
+     (cond-> (mapv (fn [attribute] [:db/retract eid attribute])
+                   (filter #(contains? current %) changed))
+       (seq asserted) (conj (assoc asserted :db/id eid))))))
 
 (defn index-tx
   "Derive exact indexed facts from the notes and the installed identities.
@@ -405,6 +415,134 @@
       (merge (select-keys (meta delta) [:seon.issue/refusals :seon.issue/ambiguous :seon.issue/unresolved])
              {:seon.issue/count (count (db/q '[:find [?e ...] :where [?e :seon.issue/path]]
                                              (or (:db-after result) database)))}))))
+
+(def ^:private generated-prose
+  "Attributes a detector proposes once. A human's or a worker's edit survives
+  every later run: the generator writes them only when the issue holds none."
+  #{:seon.issue/title :seon.issue/problem})
+
+(defn- refuse!
+  "Refuse inside the writer with a flat error value naming what was wrong."
+  [reason message]
+  (throw (ex-info message {:seon.error/kind reason :seon.error/message message})))
+
+(defn- subject-row
+  "The facts one detector subject asserts, on the identity the detector gives it.
+  The identity is the detector plus the subject's own identity value, so two
+  runs upsert one entity; an entity id would change under a refork and is
+  refused."
+  [database context subject]
+  (let [{:keys [detector program severity identities cites namespaces]} context
+        identifying (filterv (fn [[attribute _]] (contains? identities attribute)) subject)
+        _ (when-not (= 1 (count identifying))
+            (refuse! :seon.issue/subject-without-identity
+                     (str "A subject of " detector " carries exactly one installed identity attribute;"
+                          " this one carried " (pr-str (mapv first identifying)) ".")))
+        [attribute value] (first identifying)
+        issue-attribute (or (get cites attribute)
+                            (refuse! :seon.issue/subject-unlinkable
+                                     (str "No issue attribute declares :seon.issue/cites " attribute
+                                          ", so a subject of " detector " cannot be linked.")))
+        entity (or (:db/id (db/pull database [:db/id] [attribute value]))
+                   (refuse! :seon.issue/subject-absent
+                            (str "No entity holds " attribute " " (pr-str value) ".")))
+        cited (into #{} (keep namespaces) (:seon.issue/namespaces subject))]
+    (cond-> {:seon.issue/id (id/id (into (sorted-map)
+                                         {:seon.issue/detector (symbol detector) attribute value}))
+             :seon.issue/detector program
+             :seon.issue/severity severity
+             :seon.issue/status :open
+             issue-attribute #{entity}}
+      (:seon.issue/title subject) (assoc :seon.issue/title (:seon.issue/title subject))
+      (:seon.issue/problem subject) (assoc :seon.issue/problem (:seon.issue/problem subject))
+      (seq cited) (assoc :seon.issue/namespaces cited))))
+
+(defn generate
+  "Derive issue facts for one detector's current subjects.
+  The detector is an ordinary read resolved from its program entity; its
+  subjects each carry one installed identity attribute, which with the detector
+  is the issue identity. Status, severity, the detector and the subject ref are
+  decided every run; the prose only when the issue holds none. A subject the
+  detector no longer yields is resolved, and one it yields again is reopened —
+  the entity and its identity survive both."
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       [:map [:seon.issue/detector :seon.fn/sym]
+                        [:seon.issue/severity :seon.issue/severity]]]
+                  :seon.db/tx-data]}
+  [database request]
+  (let [detector (:seon.issue/detector request)
+        program (or (:db/id (db/pull database [:db/id] [:seon.fn/sym detector]))
+                    (refuse! :seon.issue/detector-unknown
+                             (str "No program entity names the detector " detector ".")))
+        detect (or (requiring-resolve (symbol detector))
+                   (refuse! :seon.issue/detector-unresolved
+                            (str "The detector " detector " resolves to no var.")))
+        subjects (detect database)
+        _ (when (:seon.error/kind subjects)
+            (refuse! :seon.issue/detector-refused
+                     (str "The detector " detector " refused: " (:seon.error/message subjects))))
+        context {:detector detector :program program
+                 :severity (:seon.issue/severity request)
+                 :identities (set (db/identity-attributes database))
+                 :cites (citation-attributes database)
+                 :namespaces (into {} (db/q '[:find ?name ?e :where [?e :seon.ns/name ?name]] database))}
+        rows (mapv #(subject-row database context %) subjects)
+        yielded (into #{} (map :seon.issue/id) rows)
+        stored (into {}
+                     (map (fn [entity]
+                            (let [row (db/pull database '[*] entity)] [(:seon.issue/id row) row])))
+                     (db/q '[:find [?e ...] :in $ ?detector :where [?e :seon.issue/detector ?detector]]
+                           database program))]
+    (into (vec (mapcat
+                (fn [row]
+                  (if-let [held (get stored (:seon.issue/id row))]
+                    (let [desired (apply dissoc row (filter #(contains? held %) generated-prose))]
+                      ;; The generator owns exactly what it decides plus the
+                      ;; resolution fact, so a worker's tests, agent and edited
+                      ;; prose are never touched by a run.
+                      (replacement-tx held desired
+                                      (conj (set (keys desired)) :seon.issue/resolved-tx)))
+                    [(assoc row :seon.issue/opened (java.util.Date.))]))
+                rows))
+          (mapcat (fn [held]
+                    (when-not (contains? yielded (:seon.issue/id held))
+                      (let [desired (cond-> {:seon.issue/id (:seon.issue/id held)
+                                             :seon.issue/status :resolved}
+                                      (not (:seon.issue/resolved-tx held))
+                                      (assoc :seon.issue/resolved-tx "datomic.tx"))]
+                        (replacement-tx held desired (set (keys desired))))))
+                  (vals stored)))))
+
+(defn- generated-report [database request]
+  (let [program (:db/id (db/pull database [:db/id] [:seon.fn/sym (:seon.issue/detector request)]))
+        rows (mapv #(db/pull database [:seon.issue/id :seon.issue/status] %)
+                   (db/q '[:find [?e ...] :in $ ?detector :where [?e :seon.issue/detector ?detector]]
+                         database program))]
+    {:seon.issue/detector (:seon.issue/detector request)
+     :seon.issue/count (count rows)
+     :seon.issue/open (count (filterv #(= :open (:seon.issue/status %)) rows))
+     :seon.issue/resolved (count (filterv #(= :resolved (:seon.issue/status %)) rows))}))
+
+(defn generate!
+  "Run one detector through the writer and report its issues.
+  A run whose facts the database already holds writes nothing at all."
+  {:malli/schema [:=> [:cat [:map [:seon.db/connection :seon.db/connection]
+                             [:seon.issue/detector :seon.fn/sym]
+                             [:seon.issue/severity :seon.issue/severity]]]
+                  [:or :map :seon.error/value]]}
+  [{connection :seon.db/connection :as call}]
+  (let [request (dissoc call :seon.db/connection)
+        database (db/db connection)
+        delta (try (generate database request)
+                   (catch clojure.lang.ExceptionInfo error (ex-data error)))]
+    (cond
+      (:seon.error/kind delta) delta
+      (empty? delta) (assoc (generated-report database request) :seon.issue/forms 0)
+      :else (let [report (db/transact! connection [[:db.fn/call #'generate request]])]
+              (if (:seon.error/kind report)
+                report
+                (assoc (generated-report (:db-after report) request)
+                       :seon.issue/forms (count delta)))))))
 
 (defn issues
   "Query issues in identity order, optionally restricted by lifecycle."
@@ -571,9 +709,6 @@
         [?test :seon.test/sym ?symbol]
         [(seon.test/verified? $ ?symbol) ?verified]
         [(true? ?verified)]))])
-
-(defn- refuse! [reason message]
-  (throw (ex-info message {:seon.error/kind reason :seon.error/message message})))
 
 (defn- require-test-refs! [database references]
   (doseq [reference references]
