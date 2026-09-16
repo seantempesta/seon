@@ -200,3 +200,16 @@ typed kind `:seon.message/unknown-recipient` and the exact shown diagnostic
 kind token to be repeated in the human-facing text. All other delivery,
 evaluation-count and idle obligations remain. Candidate **44681 6/0/0**;
 source-reloaded fresh-base run **44729 6/0/0**.
+
+## Private-context fixture slice
+
+`a-refused-definition-stays-in-its-agents-defs` previously omitted the persistent
+agent context, then queried retired `:seon.def/*` storage and tried to restore
+the definition on another turn. It now acquires the real context once through
+`fork-for-turn` and supplies `:seon.sci.eval/agent-ctx`, as the agent owner does.
+Each explicit drive covers one turn. The assertions require no shared source
+definition, a callable private object, absence from the shared base, and exact
+completion from calling that same object on the next turn. Program identity
+may survive as a tombstone; it is not mistaken for an installed definition.
+Candidate **44719 4/0/0**; source-reloaded fresh-base **44739 4/0/0**.
+No private serialization, restoration path, or production context owner changed.

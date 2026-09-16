@@ -1402,6 +1402,12 @@
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
             function-sym "my.agents.agent-a/refused-live"
+            agent-ctx (:seon.sci.eval/ctx
+                       (sci.eval/fork-for-turn
+                        {:seon.sci.eval/ctx (:seon.sci.eval/ctx cluster)
+                         :seon.db/db @connection
+                         :seon.agent/id "agent-a"}))
+            cluster (assoc cluster :seon.sci.eval/agent-ctx agent-ctx)
             replies (atom
                      [(str
                        "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
@@ -1438,31 +1444,23 @@
                   :seon.error/message "injected definition refusal"
                   :seon.error/data {:error :transact/program}}
                  (transact! target transaction))))]
-          (drive! cluster 10)
-          (is (nil? (db/pull @connection [:db/id]
-                            [:seon.fn/sym function-sym]))
-              "the refused terminal transaction persists no function row")
-          (is (contains?
-               (set
-                (db/q '[:find [?definition ...]
-                        :in $ ?agent
-                        :where
-                        [?agent-eid :seon.agent/id ?agent]
-                        [?def-eid :seon.def/agent ?agent-eid]
-                        [?def-eid :seon.def/id ?definition]]
-                      @connection "agent-a"))
-               (str function-sym "#root"))
-              "the refused shared definition's executable root stays in the agent's defs")
+          (drive-agent! cluster "agent-a" 2)
+          (is (nil? (:seon.fn/source
+                     (db/pull @connection [:seon.fn/source]
+                              [:seon.fn/sym function-sym])))
+              "the refused transaction persists no shared definition")
+          (is (= 42 ((deref (sci.core/resolve agent-ctx (symbol function-sym))) 41))
+              "the actual executable definition remains in the agent context")
+          (is (nil? (sci.core/resolve (:seon.sci.eval/ctx cluster)
+                                     (symbol function-sym)))
+              "the refused definition never enters the shared base")
           (db/transact!
            connection
            [{:seon.message/id "m-agent-a-after-refusal" :seon.message/to [:seon.agent/id "agent-a"] :seon.message/content "call the refused definition" :seon.message/inbox [:seon.agent/id "agent-a"]}])
-          (drive! cluster 10)
-          (is (some #(str/includes? % "42")
-                    (db/q '[:find [?result ...]
-                           :where
-                           [_ :seon.cluster.eval/result-edn ?result]]
-                         @connection))
-              "the refusal is in the agent's defs; the agent restores it"))))))
+          (drive-agent! cluster "agent-a" 2)
+          (is (= (pr-str (seon.run/complete "42"))
+                 (:seon.eval/shown (last (agent-evaluations @connection))))
+              "the next turn calls the same private definition"))))))
 
 (deftest acquisition-orders-agent-authored-refer-targets-and-ignores-alias-cycles
   (test-support/with-database
