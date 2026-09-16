@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 created: 2026-09-17
 tags: [test, custody, agent, class]
@@ -24,6 +24,16 @@ actual:   (not (= 155 {:seon.db/missing-connection-binding true
 
 and the stored result row is `[0 1 0]` where the regression expects
 `[1 0 0]`.
+
+Resolved 2026-09-17 by making the custody a value the caller hands the one
+run seam: `seon.db/call-with-custody`, `seon.test.runner/run-var!`'s second
+arity, `:seon.db/connection` in `:seon.test/run-options`, and
+`seon.test/run-owned` behind `my.test/run`. Landing note:
+[agent-tests-keep-custody-2026-09-17](../../prds/steward-platform/research/agent-tests-keep-custody-2026-09-17.md).
+Still open in the same class, named there and not repaired here:
+`seon.sci.eval/run-candidate-test!` (`src/seon/sci/eval.clj:2686`) runs an
+agent's ACCRETION GATE tests through the one-argument arity, so those still
+get no custody.
 
 ## Cause
 
