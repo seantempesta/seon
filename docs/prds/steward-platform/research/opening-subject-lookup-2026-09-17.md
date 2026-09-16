@@ -167,3 +167,45 @@ One test at a time on a daemon thread, `seon.test/run` with
   `test/seon/loop_proof_test.clj` and `test/seon/sci/eval_test.clj` carried
   other lanes' uncommitted edits throughout; none was read into, touched or
   committed by this lane.
+
+## Batch 83's remaining red is not this lane's
+
+`seon.render.history-test/form-is-the-third-output-of-the-existing-selection-chain`
+is 3 / 9 / 0, reproduced in process on pid 88182 with the namespace reloaded
+through `seon.test`'s own loader. It is stale since `ae0e54841` (2026-09-09)
+and surfaced only because this lane's gate request is the first to name
+`seon.render.history-test`.
+
+The coordinator's hypothesis — that the lookup subject made a message lose
+its declared pair — is refuted. `9107232d7` and `58bd7f4f3` touch this file
+only at lines 135-156 and 220-228; the deftest body (lines 28-103) is
+byte-identical to `484e05bdb`, and `seon.bootstrap` is not on the path from
+`seon.render/producer` to a pulled message. The message kept its pair:
+`seon.render.transcript/inbox-form` is declared on `:seon.message/inbox`
+(`resources/seon/schemas/seon.message.edn:151`), the attribute that carries
+the recipient edge since `ae0e54841`, while the test asks about
+`:seon.message/to` (`:73`), which has no form pair — so the generic pull is
+the declared answer there.
+
+Four of the nine assertions are expectation drift with a named ruling
+(`105acca21`, one namespaced map in/out for `my.*` APIs, and `ae0e54841`'s
+reverse inbox edge). The other five turn on whether an attribute- or
+entity-scoped request may resolve to the nearest declared pair, which is the
+render owner's decision, not a stale byte. Nothing here was rewritten:
+updating all nine to match current behaviour would erase the only check that
+pins this chain. Filed as
+[the-selection-chain-regression-still-asserts-the-pre-inbox-edge-message-shapes](../../../seon/issues/the-selection-chain-regression-still-asserts-the-pre-inbox-edge-message-shapes.md).
+
+## One self-inflicted hazard, named
+
+Chasing that red I reloaded `seon.test-support` through the test loader in
+the shared `default` JVM. That re-armed two of its Vars and the next
+in-process run failed the runner's drift detector with
+`drift-added ["seon.test-support/effective-config" "seon.test-support/transacted!"]`,
+and one run raised `No implementation of method :acquire-base! of protocol
+seon.test-support/Held` because the reloaded protocol and the reified base
+landed in different classloaders. The detector's automatic re-arm healed it —
+the following run of the same test was 269 / 0 / 0 clean — but the rule is
+worth stating: **reload only the test namespace under investigation, never
+`seon.test-support`**, which owns worker-global protocol and fixture state
+for every lane in the JVM.
