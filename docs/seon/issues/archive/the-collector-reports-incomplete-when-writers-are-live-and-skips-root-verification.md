@@ -1,9 +1,10 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [seon.operator, collect, gc-storage, datahike, maintenance, class/absence-as-health]
 opened: 2026-09-17
+resolved: 2026-09-17
 ---
 
 # The collector reports "incomplete" when writers are live, and then skips root verification
@@ -50,3 +51,18 @@ entities, history readable, Juniper's evaluations present).
   that failed.
 
 Owned by S8 of `docs/prds/steward-platform/plan/program-facts-are-the-runtime-prd-2026-09-17.md`.
+
+## Resolution (2026-09-17)
+
+Completeness is now exactly root verification, evaluated unconditionally and
+reported as `:seon.operator.collect/roots-verified?`; a failure names the
+branch or the digest in the result and in the refusal's message. The second
+pass's count stays `:seon.operator.collect/verification-pass-swept`, decides
+nothing, and `seon.operator/collect!`'s docstring says why it is non-zero
+under live writers. The real collection path also answers the dry run's
+inventory (retained and candidate files, candidate bytes, mark duration), and
+an option key carrying a documented key's name in another namespace — the
+`{:dry-run? true}` that once performed a real collection — is refused by name.
+
+Evidence and the diff summary:
+[collector-completeness-2026-09-17.md](../../../prds/steward-platform/research/collector-completeness-2026-09-17.md).

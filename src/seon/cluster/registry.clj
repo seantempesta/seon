@@ -405,6 +405,15 @@
   (quot (- (System/nanoTime) started-ns) 1000000))
 
 (defn- physical-filestore-inventory
+  "Count this FileStore's files and the marked candidates among them.
+
+  A candidate the mark named and the directory does not hold is REPORTED,
+  never decided here: the dry run deletes nothing, so for it that is a defect
+  in its own enumeration and it refuses by name; the real collection takes
+  this inventory from inside the sweep's admitted batch, where konserve's
+  delete is deliberately miss-safe (`:ignore-existence?` in
+  `konserve.gc/sweep!`), so a candidate with no file is nothing to delete, it
+  contributes no bytes, and it is not counted against the files that remain."
   [store candidate-store-keys]
   (let [base (Paths/get (:seon.store/dir store) (make-array String 0))
         no-follow (into-array LinkOption [LinkOption/NOFOLLOW_LINKS])
@@ -437,6 +446,19 @@
             :candidate-names #{}}
            (iterator-seq (.iterator entries))))
         missing (remove (:candidate-names inventory) candidates)]
+    {:seon.cluster.registry/missing-candidate-files (vec missing)
+     :seon.cluster.registry/retained-files
+     (- (:files inventory) (:candidate-files inventory))
+     :seon.cluster.registry/file-bytes (:bytes inventory)
+     :seon.cluster.registry/candidate-files
+     (:candidate-files inventory)
+     :seon.cluster.registry/candidate-bytes
+     (:candidate-bytes inventory)}))
+
+(defn- refuse-missing-candidates!
+  "Refuse a dry-run enumeration that named a candidate with no file."
+  [inventory]
+  (let [missing (:seon.cluster.registry/missing-candidate-files inventory)]
     (when (seq missing)
       (throw
        (ex-info "A dry-run candidate has no physical FileStore file."
@@ -444,13 +466,7 @@
                  :seon.cluster.registry/candidate-file-absent
                  :seon.cluster.registry/missing-candidate-files
                  (vec missing) :seon.cluster.registry/candidate-file-absent true})))
-    {:seon.cluster.registry/retained-files
-     (- (:files inventory) (:candidate-files inventory))
-     :seon.cluster.registry/file-bytes (:bytes inventory)
-     :seon.cluster.registry/candidate-files
-     (:candidate-files inventory)
-     :seon.cluster.registry/candidate-bytes
-     (:candidate-bytes inventory)}))
+    inventory))
 
 (defn- dry-run-complete?
   [failure token]
@@ -485,8 +501,9 @@
                  (fn [candidate-store-keys]
                    (reset! inventory
                            (assoc
-                            (physical-filestore-inventory
-                             store candidate-store-keys)
+                            (refuse-missing-candidates!
+                             (physical-filestore-inventory
+                              store candidate-store-keys))
                             :seon.cluster.registry/mark-duration-ms
                             (elapsed-ms started-ns)))
                    (throw
@@ -516,32 +533,96 @@
                 {:seon.error/kind
                  :seon.cluster.registry/dry-run-barrier-absent :seon.cluster.registry/dry-run-barrier-absent true})))))
 
+(defn- collect-and-inventory!
+  "Sweep this store and take the dry run's inventory from the same sweep.
+
+  The inventory is the collection's own denominator — how many files remain,
+  how many the mark condemned, their bytes, and how long the mark took — and
+  discarding it was why a collection could report bytes reclaimed and nothing
+  to compare them against.
+
+  It is taken in konserve's `:konserve.gc/batch-issued` callback, which runs
+  after a batch is fixed and BEFORE the backing store's first delete of it
+  (`konserve/gc.cljc`, `konserve/impl/defaults.cljc:704`), so the directory it
+  walks is the pre-sweep one. `:datahike.gc/batch-size` is the whole sweep for
+  the same reason the dry run uses it: the FileStore's multi-delete is a
+  serial per-key loop either way (`konserve/filestore.clj:336`), so one batch
+  is the same work and is the only way the callback sees the COMPLETE
+  candidate set — a partial batch would count the rest as retained.
+
+  A sweep with no candidates issues no batch at all (`sweep!` partitions an
+  empty sequence), which is not an absent inventory: it is the directory with
+  no candidates, and it is measured after a sweep that deleted nothing."
+  [store remove-before options]
+  (let [started-ns (System/nanoTime)
+        inventory (atom nil)
+        supplied-batch-issued
+        (get-in options
+                [:datahike.gc/sweep-opts :konserve.gc/batch-issued])
+        swept
+        (count
+         @(d/gc-storage
+           (:seon.store/connection-object store)
+           remove-before
+           (-> options
+               (assoc
+                :datahike.gc/batch-size Long/MAX_VALUE
+                :datahike.gc/reachable-extension
+                (fn [{:datahike.gc/keys [branches]}]
+                  (referenced-blobs
+                   (:seon.store/connection-object store) branches true)))
+               (assoc-in
+                [:datahike.gc/sweep-opts :konserve.gc/batch-issued]
+                ;; The inventory is taken first and the caller's own callback
+                ;; still runs: a caller observing the batch (a test holding the
+                ;; sweep at its barrier) is composed with, never replaced.
+                (fn [candidate-store-keys]
+                  (compare-and-set!
+                   inventory nil
+                   (assoc (physical-filestore-inventory
+                           store candidate-store-keys)
+                          :seon.cluster.registry/mark-duration-ms
+                          (elapsed-ms started-ns)))
+                  (when supplied-batch-issued
+                    (supplied-batch-issued candidate-store-keys)))))))]
+    (assoc (or @inventory
+               (assoc (physical-filestore-inventory store [])
+                      :seon.cluster.registry/mark-duration-ms
+                      (elapsed-ms started-ns)))
+           :seon.cluster.registry/swept swept)))
+
 (defn collect!
   "Collect or inventory this store's unreachable objects.
   One owner per store — the process, never a cluster (§0.6 condition
   3) — and it runs where the writers are, which is this JVM
   (`gc.cljc:105-115`). Whole-store by nature: the mark is a union over
   every roster branch, so the cost scales with total data and the
-  isolation is structural. Idempotent: a second pass over the same
-  state sweeps zero (proven, b2-plan §0.7)."
+  isolation is structural.
+
+  The one-and two-argument arities answer the swept count. The
+  three-argument arity answers the whole inventory — the swept count with
+  the retained and candidate files, candidate bytes and mark duration — for
+  the real collection as well as for `:seon.operator.collect/dry-run? true`,
+  because both need the same denominator.
+
+  A SECOND PASS OVER A LIVE STORE DOES NOT SWEEP ZERO. Every write that lands
+  while the first pass runs is older than the second pass's `remove-before`,
+  so it is judged on its own reachability, and a fixed point exists only on a
+  quiet store. Idempotence on a quiet store (b2-plan §0.7) is a property of
+  this function; it is NOT a completeness criterion for a collection, whose
+  correctness comes from Datahike's safe point (`datahike/gc_guard.cljc`) and
+  is verified by reopening every recorded root (`seon.operator/collect!`)."
   {:malli/schema
    [:function
     [:=> [:cat :seon.store/store] :seon.cluster.registry/swept]
     [:=> [:cat :seon.store/store :inst] :seon.cluster.registry/swept]
     [:=> [:cat :seon.store/store :inst [:map]]
-     [:or :seon.cluster.registry/swept :map]]]}
+     :seon.cluster.registry/inventory]]}
   ([store]
    (collect! store (java.util.Date. 0)))
   ([store remove-before]
-   (collect! store remove-before {}))
+   (:seon.cluster.registry/swept (collect! store remove-before {})))
   ([store remove-before options]
    (if (true? (:seon.operator.collect/dry-run? options))
      (dry-run! store remove-before options)
-     (count
-      @(d/gc-storage
-        (:seon.store/connection-object store)
-        remove-before
-        (assoc options
-               :datahike.gc/reachable-extension
-               (fn [{:datahike.gc/keys [branches]}]
-                 (referenced-blobs (:seon.store/connection-object store) branches true))))))))
+     (collect-and-inventory! store remove-before options))))

@@ -31,6 +31,36 @@
     (.mkdirs (io/file root))
     (.getCanonicalPath (io/file root))))
 
+(def ^:private staged-inventory
+  "The non-count half of one `registry/collect!` inventory, for stand-ins."
+  {:seon.cluster.registry/retained-files 4
+   :seon.cluster.registry/candidate-files 2
+   :seon.cluster.registry/candidate-bytes 128
+   :seon.cluster.registry/file-bytes 512
+   :seon.cluster.registry/mark-duration-ms 7})
+
+(defn- staged-collect
+  "A `registry/collect!` stand-in answering `counts` pass by pass.
+
+  It keeps the owner's arities apart exactly as production does: the
+  three-argument arity answers the whole inventory the real collection path
+  now returns, and the two-argument arity answers only its swept count."
+  ([counts] (staged-collect counts (fn [_store])))
+  ([counts observe]
+   (let [remaining (atom counts)
+         next-count (fn []
+                      (let [swept (first @remaining)]
+                        (swap! remaining next)
+                        swept))]
+     (fn
+       ([store _remove-before]
+        (observe store)
+        (next-count))
+       ([store _remove-before _options]
+        (observe store)
+        (assoc staged-inventory
+               :seon.cluster.registry/swept (next-count)))))))
+
 (defn- custody-instance
   [cluster-name connection]
   {:seon.turn.loop/cluster
@@ -729,8 +759,7 @@
             (store/open-store!
              {:seon.store/dir (str (io/file managed-root "data" "store"))})
             instance {:seon.boot/config
-                      {:seon.boot/cluster-name cluster-name}}
-            sweeps (atom [3 0])]
+                      {:seon.boot/cluster-name cluster-name}}]
         (try
           (with-redefs [runtime/running-instances (atom {cluster-name instance})
                         cluster/stop!
@@ -738,11 +767,9 @@
                         registry/retire-branch!
                         (fn [request] (swap! calls conj [:retire request]))
                         registry/collect!
-                        (fn [store _]
-                          (swap! calls conj [:collect store])
-                          (let [swept (first @sweeps)]
-                            (swap! sweeps next)
-                            swept))
+                        (staged-collect
+                         [3 0]
+                         (fn [store] (swap! calls conj [:collect store])))
                         registry/roster (fn [_] #{})]
             (let [result
                   (operator/cleanup-cluster!
@@ -1073,13 +1100,17 @@
     (try
       (with-redefs
        [registry/collect!
-        (fn [_ _]
-          (when (= 1 (swap! collect-calls inc))
-            (.countDown collection-entered)
-            (test-support/await-event!
-             release-collection
-             :release-held-collection))
-          0)]
+        (let [enter! (fn []
+                       (when (= 1 (swap! collect-calls inc))
+                         (.countDown collection-entered)
+                         (test-support/await-event!
+                          release-collection
+                          :release-held-collection)))]
+          (fn
+            ([_ _] (enter!) 0)
+            ([_ _ _]
+             (enter!)
+             (assoc staged-inventory :seon.cluster.registry/swept 0))))]
         (let [collection
               (future
                 (operator/collect!
@@ -1121,12 +1152,17 @@
     (try
       (with-redefs
        [registry/collect!
-        (fn [_ _]
-          (when (= 1 (swap! collect-calls inc))
-            (.countDown collection-entered)
-            (test-support/await-event! release-collection
-                                       :release-parked-collection))
-          0)]
+        (let [enter! (fn []
+                       (when (= 1 (swap! collect-calls inc))
+                         (.countDown collection-entered)
+                         (test-support/await-event!
+                          release-collection
+                          :release-parked-collection)))]
+          (fn
+            ([_ _] (enter!) 0)
+            ([_ _ _]
+             (enter!)
+             (assoc staged-inventory :seon.cluster.registry/swept 0))))]
         (let [collection
               (future
                 (operator/collect!
@@ -1209,6 +1245,8 @@
           (is (zero? (:seon.operator.collect/swept-objects result)))
           (is (zero? (:seon.operator.collect/reclaimed-bytes result)))
           (is (true? (:seon.operator.collect/complete? result)))
+          (is (true? (:seon.operator.collect/roots-verified? result))
+              "a dry run reads every recorded root even though it deletes none")
           (is (= 1 (count @calls)))
           (is (instance? java.util.Date (ffirst @calls)))
           (is (true?
@@ -1216,33 +1254,120 @@
       (finally
         (test-support/delete-recursively! repository-root)))))
 
-(deftest collection-refuses-a-nonzero-verification-pass-with-partial-evidence
+(deftest a-nonzero-verification-pass-is-reported-and-decides-nothing
+  ;; THE SUBJECT IS THE COMPLETENESS CRITERION. A live store is written while
+  ;; the first pass runs, so the second pass sweeps what landed during it and
+  ;; a zero fixed point is unreachable by construction. Completeness is that
+  ;; every recorded root reopens; the second pass's count is evidence.
+  (let [repository-root (owned-root)
+        managed-root (.getCanonicalPath
+                      (io/file repository-root "managed"))]
+    (try
+      (with-redefs [registry/collect! (staged-collect [2 1])]
+        (let [result
+              (operator/collect!
+               {:seon.operator/repository-root repository-root
+                :seon.operator/managed-root managed-root})]
+          (is (nil? (:seon.error/kind result))
+              "a live second pass is not a refusal")
+          (is (= 2 (:seon.operator.collect/swept-objects result)))
+          (is (= 1 (:seon.operator.collect/verification-pass-swept result)))
+          (is (true? (:seon.operator.collect/roots-verified? result)))
+          (is (true? (:seon.operator.collect/complete? result)))
+          (is (= [4 2 128 7]
+                 [(:seon.operator.collect/retained-files result)
+                  (:seon.operator.collect/candidate-files result)
+                  (:seon.operator.collect/candidate-bytes result)
+                  (:seon.operator.collect/mark-duration-ms result)])
+              "the real path carries the inventory the dry run returns")))
+      (finally
+        (test-support/delete-recursively! repository-root)))))
+
+(deftest collection-refuses-and-names-a-root-that-does-not-reopen
   (let [repository-root (owned-root)
         managed-root (.getCanonicalPath
                       (io/file repository-root "managed"))
-        sweeps (atom [2 1])]
+        digest (apply str (repeat 64 "a"))]
     (try
-      (with-redefs [registry/collect!
-                    (fn [_ _]
-                      (let [swept (first @sweeps)]
-                        (swap! sweeps next)
-                        swept))]
+      ;; The store HELD this digest before the collection and cannot read it
+      ;; after: exactly the root a collection must never lose.
+      (with-redefs [registry/collect! (staged-collect [2 0])
+                    #'operator/branch-digests (fn [_ _] #{digest})
+                    #'operator/konserve-key-set (fn [_] #{digest})]
         (let [result
               (operator/collect!
                {:seon.operator/repository-root repository-root
                 :seon.operator/managed-root managed-root})
               partial-result
               (get-in result
-                      [:seon.error/data
-                       :seon.operator.collect/result])]
+                      [:seon.error/data :seon.operator.collect/result])]
           (is (= :seon.operator/collection-incomplete
                  (:seon.error/kind result)))
-          (is (= 2 (:seon.operator.collect/swept-objects partial-result)))
-          (is (= 1
-                 (:seon.operator.collect/verification-pass-swept
-                  partial-result)))
+          (is (= digest
+                 (:seon.operator.collect/unverified-digest partial-result))
+              "the refusal names the digest that did not read")
+          (is (str/includes? (:seon.error/message result) digest))
           (is (false?
-               (:seon.operator.collect/complete? partial-result)))))
+               (:seon.operator.collect/roots-verified? partial-result)))
+          (is (false? (:seon.operator.collect/complete? partial-result)))))
+      (testing "a referenced digest the store never held is counted, not a refusal"
+        ;; `:seon.db/read-result-digest` is digest-SHAPED and is not a
+        ;; konserve key, so a shape test refuses a collection that lost
+        ;; nothing (measured on a freshly forked cluster, 2026-09-17).
+        (with-redefs [registry/collect! (staged-collect [2 0])
+                      #'operator/branch-digests (fn [_ _] #{digest})
+                      #'operator/konserve-key-set (fn [_] #{})]
+          (let [result
+                (operator/collect!
+                 {:seon.operator/repository-root repository-root
+                  :seon.operator/managed-root managed-root})]
+            (is (nil? (:seon.error/kind result)))
+            (is (true? (:seon.operator.collect/roots-verified? result)))
+            (is (= 1 (:seon.operator.collect/unstored-digests result))))))
+      (finally
+        (test-support/delete-recursively! repository-root)))))
+
+(deftest collection-refuses-an-undocumented-option-key-by-name
+  ;; Datahike's `gc-storage!` ignores option keys it does not know, so the
+  ;; unqualified `:dry-run?` once performed a REAL collection. The one Seon
+  ;; entry point names it, and sweeps nothing.
+  (let [repository-root (owned-root)
+        managed-root (.getCanonicalPath
+                      (io/file repository-root "managed"))
+        calls (atom 0)]
+    (try
+      (with-redefs [registry/collect!
+                    (staged-collect [0 0] (fn [_] (swap! calls inc)))]
+        (let [result
+              (operator/collect!
+               {:seon.operator/repository-root repository-root
+                :seon.operator/managed-root managed-root
+                :dry-run? true})]
+          (is (= :seon.operator.collect/unrecognized-option
+                 (:seon.error/kind result)))
+          (is (= :dry-run? (:seon.operator.collect/option-key result)))
+          (is (str/includes?
+               (:seon.error/message result)
+               ":seon.operator.collect/dry-run?"))
+          (is (zero? @calls) "a refused request sweeps nothing")))
+      (finally
+        (test-support/delete-recursively! repository-root)))))
+
+(deftest collection-ignores-an-unrelated-request-key
+  ;; Maps are open: the scheduler merges its own declared maintenance values
+  ;; into this request and none of them mean to be a collection option.
+  (let [repository-root (owned-root)
+        managed-root (.getCanonicalPath
+                      (io/file repository-root "managed"))]
+    (try
+      (with-redefs [registry/collect! (staged-collect [0 0])]
+        (let [result
+              (operator/collect!
+               {:seon.operator/repository-root repository-root
+                :seon.operator/managed-root managed-root
+                :seon.config.maintenance/log-retained-files 1})]
+          (is (nil? (:seon.error/kind result)))
+          (is (true? (:seon.operator.collect/complete? result)))))
       (finally
         (test-support/delete-recursively! repository-root)))))
 

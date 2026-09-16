@@ -131,6 +131,7 @@
           :seon.operator.collect/bytes-after 1024
           :seon.operator.collect/reclaimed-bytes 1024
           :seon.operator.collect/verification-pass-swept 0
+          :seon.operator.collect/roots-verified? true
           :seon.operator.collect/complete? true})]
     (is (= [{:seon.store/branch :cluster-default
              :seon.source/commit-id commit-id}]
@@ -374,6 +375,7 @@
    :seon.operator.collect/bytes-after (- 8192 reclaimed)
    :seon.operator.collect/reclaimed-bytes reclaimed
    :seon.operator.collect/verification-pass-swept 0
+   :seon.operator.collect/roots-verified? true
    :seon.operator.collect/complete? true})
 
 (defn- cleanup-result

@@ -3,7 +3,17 @@
                          [:seon.operator/repository-root
                           :seon.operator/repository-root]
                          [:seon.operator/managed-root
-                          :seon.operator/managed-root]]
+                          :seon.operator/managed-root]
+                         [:seon.operator.collect/dry-run?
+                          {:optional true}
+                          :seon.operator.collect/dry-run?]]
+                        :dry-run? :boolean
+                        :option-key :keyword
+                        :request-schema :keyword
+                        :unrecognized-option [:= true]
+                        :unrecognized-option-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must name the unrecognized collection option key"} [:seon.operator.collect/unrecognized-option :seon.operator.collect/unrecognized-option] [:seon.operator.collect/option-key :seon.operator.collect/option-key] [:seon.error/message :seon.error/message]]
+                        :request-schema-absent [:= true]
+                        :request-schema-absent-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must name the request schema whose declaration is absent"} [:seon.operator.collect/request-schema-absent :seon.operator.collect/request-schema-absent] [:seon.operator.collect/request-schema :seon.operator.collect/request-schema] [:seon.error/message :seon.error/message]]
                         :store-id :seon.store/id
                         :managed-root :seon.operator/managed-root
                         :branch
@@ -18,6 +28,15 @@
                         :bytes-after [:int {:min 0}]
                         :reclaimed-bytes [:int {:min 0}]
                         :verification-pass-swept [:int {:min 0}]
+                        :roots-verified? :boolean
+                        :unstored-digests [:int {:min 0}]
+                        :unverified-branch :seon.store/branch
+                        :unverified-digest :seon.blob/digest
+                        :retained-files [:int {:min 0}]
+                        :candidate-files [:int {:min 0}]
+                        :candidate-bytes [:int {:min 0}]
+                        :mark-duration-ms [:int {:min 0}]
+                        :projected-duration-ms [:int {:min 0}]
                         :complete? :boolean
                         :result
                         [:map
@@ -43,5 +62,34 @@
                           :seon.operator.collect/reclaimed-bytes]
                          [:seon.operator.collect/verification-pass-swept
                           :seon.operator.collect/verification-pass-swept]
+                         [:seon.operator.collect/roots-verified?
+                          :seon.operator.collect/roots-verified?]
+                         [:seon.operator.collect/unstored-digests
+                          {:optional true}
+                          :seon.operator.collect/unstored-digests]
+                         [:seon.operator.collect/unverified-branch
+                          {:optional true}
+                          :seon.operator.collect/unverified-branch]
+                         [:seon.operator.collect/unverified-digest
+                          {:optional true}
+                          :seon.operator.collect/unverified-digest]
+                         [:seon.operator.collect/retained-files
+                          {:optional true}
+                          :seon.operator.collect/retained-files]
+                         [:seon.operator.collect/candidate-files
+                          {:optional true}
+                          :seon.operator.collect/candidate-files]
+                         [:seon.operator.collect/candidate-bytes
+                          {:optional true}
+                          :seon.operator.collect/candidate-bytes]
+                         [:seon.operator.collect/mark-duration-ms
+                          {:optional true}
+                          :seon.operator.collect/mark-duration-ms]
+                         [:seon.operator.collect/projected-duration-ms
+                          {:optional true}
+                          :seon.operator.collect/projected-duration-ms]
+                         [:seon.operator.collect/dry-run?
+                          {:optional true}
+                          :seon.operator.collect/dry-run?]
                          [:seon.operator.collect/complete?
                           :seon.operator.collect/complete?]]}

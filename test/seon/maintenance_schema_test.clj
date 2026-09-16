@@ -189,6 +189,7 @@
              :seon.operator.collect/bytes-after 4096
              :seon.operator.collect/reclaimed-bytes 4096
              :seon.operator.collect/verification-pass-swept 0
+             :seon.operator.collect/roots-verified? true
              :seon.operator.collect/complete? true}]
         (test-support/transacted!
                      connection
@@ -291,6 +292,7 @@
           :seon.operator.collect/bytes-after 4096
           :seon.operator.collect/reclaimed-bytes 4096
           :seon.operator.collect/verification-pass-swept 0
+          :seon.operator.collect/roots-verified? true
           :seon.operator.collect/complete? true})
         error-component
         {:seon.error/kind :seon.operator/collection-incomplete

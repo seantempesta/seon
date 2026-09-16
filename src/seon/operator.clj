@@ -787,42 +787,122 @@
      :seon.operator.collect/digests
      (into #{} (mapcat #(branch-digests operation-store %)) branches)}))
 
-(defn- evidence-reopens?
-  [operation-store evidence]
-  (and
-   (every?
-    (fn [{branch :seon.store/branch
-          expected :seon.source/commit-id}]
-      (when expected
-        (let [database
-              (d/branch-as-db
-               (:seon.store/connection-object operation-store) branch)]
-          (try
-            (= expected (d/commit-id database))
-            (finally
-              (d/release-materialized-db database))))))
-    (:seon.operator.collect/branches evidence))
-   (every?
-    (fn [digest]
-      (true?
-       (k/bget (operation-konserve operation-store)
-               digest
-               (fn [{input :input-stream}]
-                 ;; Force one physical read. EOF is a valid empty blob, so
-                 ;; successful callback entry—not a positive byte—is proof.
-                 (.read ^java.io.InputStream input)
-                 true)
-               {:sync? true})))
-    (:seon.operator.collect/digests evidence))))
+(defn- branch-reopens?
+  [operation-store branch expected]
+  (boolean
+   (when expected
+     (let [database
+           (d/branch-as-db
+            (:seon.store/connection-object operation-store) branch)]
+       (try
+         (= expected (d/commit-id database))
+         (finally
+           (d/release-materialized-db database)))))))
+
+(defn- digest-reads?
+  [operation-store digest]
+  (true?
+   (k/bget (operation-konserve operation-store)
+           digest
+           (fn [{input :input-stream}]
+             ;; Force one physical read. EOF is a valid empty blob, so
+             ;; successful callback entry—not a positive byte—is proof.
+             (.read ^java.io.InputStream input)
+             true)
+           {:sync? true})))
+
+(defn- konserve-key-set
+  [operation-store]
+  (into #{} (map :key) (k/keys (operation-konserve operation-store)
+                               {:sync? true})))
+
+(defn- root-verification
+  "Verify every recorded root and NAME the first one that fails.
+
+  This is the collection's completeness criterion, and the only one: a
+  collection is complete when every roster branch reopens at its recorded
+  commit ID and every referenced blob this store HELD BEFORE the sweep still
+  reads physically. It answers a value rather than a bare boolean so the
+  refusal can say WHICH root — the branch, or the digest — was not preserved.
+
+  It is evaluated unconditionally. Conjoined behind a second-pass fixed
+  point, `and` short-circuited and this check never ran, while the refusal's
+  message still told the caller that root preservation had been checked and
+  had failed.
+
+  `held-before` is what keeps the criterion a DIFFERENTIAL rather than a
+  shape test. Referenced digests are derived from every attribute whose
+  schema resolves to `:seon.blob/digest`, and some of those attributes carry
+  content digests that were never konserve keys at all —
+  `:seon.db/read-result-digest` is one, measured on a freshly forked cluster
+  on 2026-09-17, where it made this check refuse a collection that had lost
+  nothing. A digest this store did not hold before the collection is not a
+  root the collection lost: it is counted as
+  `:seon.operator.collect/unstored-digests`, never silently dropped and never
+  a refusal here."
+  [operation-store evidence held-before]
+  (let [digests (:seon.operator.collect/digests evidence)
+        stored (filterv held-before digests)
+        unverified-branch
+        (some (fn [{branch :seon.store/branch
+                    expected :seon.source/commit-id}]
+                (when-not (branch-reopens? operation-store branch expected)
+                  branch))
+              (:seon.operator.collect/branches evidence))
+        unverified-digest
+        (when-not unverified-branch
+          (some (fn [digest]
+                  (when-not (digest-reads? operation-store digest) digest))
+                stored))]
+    (cond-> {:seon.operator.collect/roots-verified?
+             (not (or unverified-branch unverified-digest))
+             :seon.operator.collect/unstored-digests
+             (- (count digests) (count stored))}
+      unverified-branch
+      (assoc :seon.operator.collect/unverified-branch unverified-branch)
+
+      unverified-digest
+      (assoc :seon.operator.collect/unverified-digest unverified-digest))))
+
+(defn- unverified-root-clause
+  [result]
+  (let [branch (:seon.operator.collect/unverified-branch result)
+        digest (:seon.operator.collect/unverified-digest result)]
+    (cond
+      branch (str " Branch " branch
+                  " did not reopen at its recorded commit ID.")
+      digest (str " Referenced blob digest " digest " did not read.")
+      :else "")))
 
 (defn- incomplete-collection!
   [result failure]
   (throw
    (ex-info
-    "Collection did not preserve and verify every recorded root."
+    (if failure
+      (str "Collection failed before it could verify every recorded root: "
+           (ex-message failure))
+      (str "Collection did not preserve and verify every recorded root."
+           (unverified-root-clause result)))
     {:seon.error/kind :seon.operator/collection-incomplete
      :seon.operator.collect/result result :seon.operator/collection-incomplete true}
     failure)))
+
+(defn- inventory-facts
+  "Project one registry inventory into the collection result's own keys.
+
+  A number the inventory does not carry is ABSENT here, never a stored nil."
+  [inventory]
+  (into {}
+        (keep (fn [[from to]]
+                (when-let [value (get inventory from)] [to value])))
+        {:seon.cluster.registry/retained-files
+         :seon.operator.collect/retained-files
+         :seon.cluster.registry/candidate-files
+         :seon.operator.collect/candidate-files
+         :seon.cluster.registry/candidate-bytes
+         :seon.operator.collect/candidate-bytes
+         :seon.cluster.registry/mark-duration-ms
+         :seon.operator.collect/mark-duration-ms}))
 
 (def ^:private projected-delete-ms-per-file
   ;; The sealed runbook's middle projection: one existence check, delete, and
@@ -840,29 +920,40 @@
         candidates (:seon.cluster.registry/candidate-files inventory)
         files (+ retained candidates)
         file-bytes (:seon.cluster.registry/file-bytes inventory)
-        mark-duration (:seon.cluster.registry/mark-duration-ms inventory)]
-    {:seon.operator.collect/store-id
-     (get-in @(:seon.store/connection-object operation-store)
-             [:config :store :id])
-     :seon.operator.collect/managed-root managed-root
-     :seon.operator.collect/branches
-     (:seon.cluster.registry/branches inventory)
-     :seon.operator.collect/objects-before files
-     :seon.operator.collect/objects-after files
-     :seon.operator.collect/swept-objects 0
-     :seon.operator.collect/bytes-before file-bytes
-     :seon.operator.collect/bytes-after file-bytes
-     :seon.operator.collect/reclaimed-bytes 0
-     :seon.operator.collect/verification-pass-swept 0
-     :seon.operator.collect/complete? true
-     :seon.operator.collect/dry-run? true
-     :seon.operator.collect/retained-files retained
-     :seon.operator.collect/candidate-files candidates
-     :seon.operator.collect/candidate-bytes
-     (:seon.cluster.registry/candidate-bytes inventory)
-     :seon.operator.collect/mark-duration-ms mark-duration
-     :seon.operator.collect/projected-duration-ms
-     (+ mark-duration (* projected-delete-ms-per-file candidates))}))
+        mark-duration (:seon.cluster.registry/mark-duration-ms inventory)
+        verification
+        (root-verification
+         operation-store (collection-evidence operation-store)
+         (konserve-key-set operation-store))
+        result
+        (merge
+         (inventory-facts inventory)
+         verification
+         {:seon.operator.collect/store-id
+          (get-in @(:seon.store/connection-object operation-store)
+                  [:config :store :id])
+          :seon.operator.collect/managed-root managed-root
+          :seon.operator.collect/branches
+          (:seon.cluster.registry/branches inventory)
+          :seon.operator.collect/objects-before files
+          :seon.operator.collect/objects-after files
+          :seon.operator.collect/swept-objects 0
+          :seon.operator.collect/bytes-before file-bytes
+          :seon.operator.collect/bytes-after file-bytes
+          :seon.operator.collect/reclaimed-bytes 0
+          :seon.operator.collect/verification-pass-swept 0
+          :seon.operator.collect/complete?
+          (:seon.operator.collect/roots-verified? verification)
+          :seon.operator.collect/dry-run? true
+          :seon.operator.collect/projected-duration-ms
+          (+ mark-duration (* projected-delete-ms-per-file candidates))})]
+    ;; A dry run deletes nothing, so it cannot damage a root — but it reads
+    ;; every one, and a root that does not reopen is already lost. Reporting
+    ;; the candidate inventory of a store that cannot answer for its own roots
+    ;; would be the same absence-as-health the real path just stopped doing.
+    (if (:seon.operator.collect/roots-verified? verification)
+      result
+      (incomplete-collection! result nil))))
 
 (defn- collect-store!
   [managed-root operation-store]
@@ -870,6 +961,10 @@
         (get-in @(:seon.store/connection-object operation-store)
                 [:config :store :id])
         before (collection-observation operation-store)
+        ;; The roots this store HELD before anything was swept. Verification
+        ;; is a differential against this set, never a shape test over
+        ;; whatever the schema says looks like a digest.
+        held-before (konserve-key-set operation-store)
         base-result
         {:seon.operator.collect/store-id store-id
          :seon.operator.collect/managed-root managed-root
@@ -885,41 +980,50 @@
          (:seon.operator.collect/bytes before)
          :seon.operator.collect/reclaimed-bytes 0
          :seon.operator.collect/verification-pass-swept 0
+         :seon.operator.collect/roots-verified? false
          :seon.operator.collect/complete? false}]
     (try
-      (let [swept (registry/collect! operation-store (java.util.Date.))
+      (let [inventory
+            (registry/collect! operation-store (java.util.Date.) {})
+            swept (:seon.cluster.registry/swept inventory)
             after-first (collection-observation operation-store)
             first-result
-            (assoc base-result
-                   :seon.operator.collect/objects-after
-                   (:seon.operator.collect/objects after-first)
-                   :seon.operator.collect/swept-objects swept
-                   :seon.operator.collect/bytes-after
-                   (:seon.operator.collect/bytes after-first)
-                   :seon.operator.collect/reclaimed-bytes
-                   (max 0 (- (:seon.operator.collect/bytes before)
-                             (:seon.operator.collect/bytes after-first))))]
+            (merge
+             (inventory-facts inventory)
+             (assoc base-result
+                    :seon.operator.collect/objects-after
+                    (:seon.operator.collect/objects after-first)
+                    :seon.operator.collect/swept-objects swept
+                    :seon.operator.collect/bytes-after
+                    (:seon.operator.collect/bytes after-first)
+                    :seon.operator.collect/reclaimed-bytes
+                    (max 0 (- (:seon.operator.collect/bytes before)
+                              (:seon.operator.collect/bytes after-first)))))]
         (try
           (let [verification-swept
                 (registry/collect! operation-store (java.util.Date.))
                 after (collection-observation operation-store)
                 evidence (collection-evidence operation-store)
-                complete? (and (zero? verification-swept)
-                               (evidence-reopens? operation-store evidence))
+                verification
+                (root-verification operation-store evidence held-before)
+                complete?
+                (:seon.operator.collect/roots-verified? verification)
                 result
-                (assoc first-result
-                       :seon.operator.collect/branches
-                       (:seon.operator.collect/branches evidence)
-                       :seon.operator.collect/objects-after
-                       (:seon.operator.collect/objects after)
-                       :seon.operator.collect/bytes-after
-                       (:seon.operator.collect/bytes after)
-                       :seon.operator.collect/reclaimed-bytes
-                       (max 0 (- (:seon.operator.collect/bytes before)
-                                 (:seon.operator.collect/bytes after)))
-                       :seon.operator.collect/verification-pass-swept
-                       verification-swept
-                       :seon.operator.collect/complete? complete?)]
+                (merge
+                 (assoc first-result
+                        :seon.operator.collect/branches
+                        (:seon.operator.collect/branches evidence)
+                        :seon.operator.collect/objects-after
+                        (:seon.operator.collect/objects after)
+                        :seon.operator.collect/bytes-after
+                        (:seon.operator.collect/bytes after)
+                        :seon.operator.collect/reclaimed-bytes
+                        (max 0 (- (:seon.operator.collect/bytes before)
+                                  (:seon.operator.collect/bytes after)))
+                        :seon.operator.collect/verification-pass-swept
+                        verification-swept
+                        :seon.operator.collect/complete? complete?)
+                 verification)]
             (if complete?
               result
               (incomplete-collection! result nil)))
@@ -934,12 +1038,85 @@
           (throw failure)
           (incomplete-collection! base-result failure))))))
 
+(defn- documented-request-keys
+  "The keys the declared request schema documents, read from the declaration.
+
+  Derived, never mirrored: the authored form under `resources/seon/schemas/`
+  IS the list, so a key added there is documented here in the same edit. An
+  absent declaration refuses by name — an empty set would make the misspelling
+  check below silently pass everything, which is the class it exists to end."
+  [schema-key]
+  (let [form (get (schema.edn/packaged-forms) schema-key)]
+    (when-not (and (vector? form) (= :map (first form)))
+      (throw
+       (ex-info "The request schema declaration is absent or not a map."
+                {:seon.error/kind
+                 :seon.operator.collect/request-schema-absent
+                 :seon.operator.collect/request-schema schema-key
+                 :seon.operator.collect/request-schema-absent true})))
+    (into #{}
+          (keep (fn [child] (when (vector? child) (first child))))
+          (rest form))))
+
+(defn- refuse-misspelled-options!
+  "Refuse a request key carrying a documented key's name in another namespace.
+
+  Datahike's `gc-storage!` IGNORES option keys it does not know
+  (`datahike/gc.cljc`), so `{:dry-run? true}` — the unqualified spelling of
+  `:seon.operator.collect/dry-run?` — reached this entry point, was consulted
+  by nobody, and performed a REAL collection on `default` once. A silently
+  ignored option is the absence-as-health class with the widest possible blast
+  radius, so the one Seon entry point names it.
+
+  Maps stay OPEN (§2.5): a key with an unrelated name is ordinary extra data
+  and is ignored, which is what the scheduler's merged maintenance request
+  needs. What is refused is only a key that means to be a documented one."
+  [request]
+  (let [documented (documented-request-keys :seon.operator.collect/request)
+        by-name (into {} (map (juxt name identity)) documented)]
+    (doseq [supplied (keys request)
+            :when (and (keyword? supplied)
+                       (not (contains? documented supplied)))
+            :let [declared (get by-name (name supplied))]
+            :when declared]
+      (throw
+       (ex-info
+        (str "Collection option " supplied " is not a request key. "
+             "Did you mean " declared "?")
+        {:seon.error/kind :seon.operator.collect/unrecognized-option
+         :seon.operator.collect/option-key supplied
+         :seon.operator.collect/unrecognized-option true}))))
+  request)
+
 (defn collect!
   "Collect or dry-run one managed store.
 
   The root lifecycle lock protects operation-store acquisition only. The
   store's flock then preserves operation ownership while writer-side GC waits
-  outside lifecycle custody, so a parked collection yields to lifecycle work."
+  outside lifecycle custody, so a parked collection yields to lifecycle work.
+
+  A COLLECTION IS COMPLETE WHEN EVERY RECORDED ROOT REOPENS — every roster
+  branch at its recorded commit ID, every referenced blob digest by a physical
+  read — and that check is evaluated unconditionally and reported as
+  `:seon.operator.collect/roots-verified?`. When it fails, the refusal names
+  the branch or the digest.
+
+  `:seon.operator.collect/verification-pass-swept` is a REPORTED NUMBER, never
+  a criterion. It counts a second pass over a store that keeps being written:
+  every write that lands during the first pass is older than the second pass's
+  cutoff, so under live writers it is expected to be non-zero and a zero fixed
+  point is unreachable by construction. A collection's correctness comes from
+  Datahike's safe point (`datahike/gc_guard.cljc`), which spares everything an
+  in-flight values-then-pointer sequence wrote; it never came from a quiet
+  store. Requiring zero there refused a collection that swept 23,449 objects
+  and had preserved every root (2026-09-17, `default`).
+
+  Both paths answer the same inventory — retained and candidate files,
+  candidate bytes and the mark's duration — because a collection's reclaimed
+  bytes mean nothing without the denominator they came from.
+
+  A request key carrying a documented key's name in another namespace is
+  refused by name; other keys are ignored, because maps are open."
   {:malli/schema
    [:=> [:cat :seon.operator.collect/request]
     [:or :seon.operator.collect/result :seon.error/value]]}
@@ -947,7 +1124,8 @@
     dry-run? :seon.operator.collect/dry-run?
     :as request}]
   (attempt
-   #(let [managed-root (state/canonical-path managed-root)
+   #(let [_ (refuse-misspelled-options! request)
+          managed-root (state/canonical-path managed-root)
           bound-ms (lifecycle-lock-bound-ms request)
           [operation-store release?]
           (state/with-lifecycle-lock!

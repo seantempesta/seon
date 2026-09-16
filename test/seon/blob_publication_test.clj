@@ -111,8 +111,9 @@
                     (is (not (contains? (rooted-digests connection)
                                         first-digest)))
                     (.countDown release-batch)
-                    (is (pos? (support/await-event!
-                               collection :batch-contained-collection)))
+                    (is (pos? (:seon.cluster.registry/swept
+                               (support/await-event!
+                                collection :batch-contained-collection))))
                     (support/await-event! publication :queued-publication)
                     (is (contains? (rooted-digests connection) first-digest)))))))
 

@@ -435,9 +435,23 @@
                                             :seon.store/branch doomed})))
         (is (not (contains? (registry/roster opened) doomed))
             "the roster is the fact — the branch is gone before any sweep")
-        (let [swept (registry/collect! opened)]
+        (let [collected (registry/collect! opened (java.util.Date. 0) {})
+              swept (:seon.cluster.registry/swept collected)]
           (is (pos? swept) "the doomed tail was reclaimed")
-          (is (< (store-bytes dir) grown) "and the bytes actually shrank"))
+          (is (< (store-bytes dir) grown) "and the bytes actually shrank")
+          (testing "the real path answers the dry run's own inventory"
+            ;; The denominator the reclaimed bytes are measured against, taken
+            ;; from inside this same sweep rather than discarded.
+            (is (<= (:seon.cluster.registry/candidate-files collected) swept)
+                "every condemned file was one of the swept objects")
+            (is (pos? (:seon.cluster.registry/candidate-files collected)))
+            (is (pos? (:seon.cluster.registry/candidate-bytes collected)))
+            (is (pos? (:seon.cluster.registry/retained-files collected)))
+            (is (> (:seon.cluster.registry/file-bytes collected)
+                   (store-bytes dir))
+                "the inventory walked the directory BEFORE the delete")
+            (is (not (neg? (:seon.cluster.registry/mark-duration-ms
+                            collected))))))
         (testing "the survivor and the source branch are whole"
           (let [connection (store/open-branch!
                             opened (registry/cluster-branch "keep"))]
@@ -452,8 +466,17 @@
               (is (= #{"ancestral"} (markers connection)))
               (finally
                 (d/release connection)))))
-        (testing "collection is idempotent"
+        (testing "collection is idempotent on a quiet store"
           (is (zero? (registry/collect! opened))))
+        (testing "a sweep with no candidates still answers its inventory"
+          ;; No candidates means konserve issues NO batch, which is not an
+          ;; absent inventory: it is the directory with nothing condemned.
+          (let [collected (registry/collect! opened (java.util.Date. 0) {})]
+            (is (zero? (:seon.cluster.registry/swept collected)))
+            (is (zero? (:seon.cluster.registry/candidate-files collected)))
+            (is (zero? (:seon.cluster.registry/candidate-bytes collected)))
+            (is (pos? (:seon.cluster.registry/retained-files collected)))
+            (is (pos? (:seon.cluster.registry/file-bytes collected)))))
         (testing "retiring an absent branch is already done, never an error"
           (is (nil? (registry/retire-branch! {:seon.store/store opened
                                               :seon.store/branch doomed}))))))))
