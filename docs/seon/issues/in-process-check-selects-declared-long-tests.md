@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open  # fix landed 2026-09-17; unrun pending the batched gate
+status: open
 severity: friction
 created: 2026-09-16
 tags: [issue, test, runtime, in-process, bounds, wave/steward-platform]
