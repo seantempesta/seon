@@ -86,6 +86,12 @@
 
 (defn- replacement-tx [current desired]
   (let [eid (:db/id current)
+        desired (merge (select-keys current [:seon.issue/agent :seon.issue/budget
+                                            :seon.issue/resolved-tx :seon.issue/created-by])
+                       desired)
+        retained (into (set (:seon.issue/tests desired))
+                       (map #(if (map? %) (:db/id %) %)) (:seon.issue/tests current))
+        desired (cond-> desired (seq retained) (assoc :seon.issue/tests retained))
         normalized (fn [value]
                      (if (coll? value)
                        (set (map #(if (map? %) (get % :db/id %) %) value))
@@ -299,12 +305,7 @@
                                                            (get row attribute)))) row))
                          row ref-attributes)
                     prior (get by-id (:seon.issue/id row))
-                    preserved (select-keys prior [:seon.issue/agent :seon.issue/budget :seon.issue/resolved-tx])
-                    desired (merge preserved row)
-                    desired (if (:seon.issue/agent prior)
-                              (update desired :seon.issue/tests
-                                      #(into (set %) (map :db/id (:seon.issue/tests prior))))
-                              desired)]
+                    desired row]
                 (if prior (replacement-tx prior desired) [desired])))
             rows)
            (mapcat #(replacement-tx % {:seon.issue/id (:seon.issue/id %)})
@@ -438,7 +439,9 @@
     (require-test-refs! database (:seon.issue/tests request))
     [(assoc (select-keys request [:seon.issue/title :seon.issue/problem :seon.issue/severity
                                  :seon.issue/functions :seon.issue/tests])
-            :seon.issue/id issue-id :seon.issue/status :open :seon.issue/opened (java.util.Date.))]))
+            :seon.issue/id issue-id :seon.issue/status :open
+            :seon.issue/created-by [:seon.agent/id (:seon.agent/id request)]
+            :seon.issue/opened (java.util.Date.))]))
 
 (defn add!
   "Author an issue using title and function refs as its stable identity."
@@ -456,8 +459,8 @@
       (status {:seon.db/db (:db-after report)
                :seon.issue/id (id/id [(:seon.issue/title request) (sort-by pr-str (:seon.issue/functions request))])}))))
 
-(defn tests-tx
-  "Add success tests without retracting existing refs, at the serial writer."
+(defn guard-call
+  "Validate an additive issue-test request inside the serial writer."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        [:map [:seon.issue/id :seon.issue/id]
                         [:seon.issue/tests :seon.issue/tests]
@@ -468,6 +471,16 @@
     (when-not (:seon.issue/title row) (refuse! :seon.issue/not-found "The issue does not exist."))
     (require-test-refs! database (:seon.issue/tests request))
     [{:seon.issue/id (:seon.issue/id request) :seon.issue/tests (:seon.issue/tests request)}]))
+
+(defn tests-tx
+  "Add success tests through the issue writer guard."
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       [:map [:seon.issue/id :seon.issue/id]
+                        [:seon.issue/tests :seon.issue/tests]
+                        [:seon.agent/id :seon.agent/id]]]
+                  :seon.db/tx-data]}
+  [_database request]
+  [[:db.fn/call #'guard-call request]])
 
 (defn tests!
   "Add tests and return the changed issue. Direct database guards are separate."

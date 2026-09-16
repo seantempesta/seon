@@ -1,4 +1,6 @@
 #:seon.db{:attributes [:boolean {:description "On a map schema, :seon.db/attributes true declares its entries as database attributes; the map stays open to extra keys and gains no identity constraint."}],
+          :append-only-after [:qualified-keyword {:description "Schema property naming the assignment attribute whose history activates nonempty membership retention at database admission."}],
+          :retraction-authority [:qualified-keyword {:description "Schema property naming the creator ref whose first historical assertion authorizes membership retraction."}],
           :lookup-ref-value
           [:or :string :uuid :keyword :symbol :int
            [:schema {:registry

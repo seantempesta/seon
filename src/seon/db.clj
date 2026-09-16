@@ -2826,6 +2826,105 @@
                                   (nth entry 3 nil) [index 3] nil true))))
    (map-indexed vector (if (map? transaction) (:tx-data transaction) transaction))))
 
+(defn- retention-rules [projection]
+  (schema/projection-cache-value
+   projection ::retention-rules
+   #(into []
+          (keep (fn [[attribute form]]
+                  (let [properties (schema.form/attr-form-properties
+                                    (schema.datahike/resolve-malli-form-in projection form))]
+                    (when-let [activation (:seon.db/append-only-after properties)]
+                      {:seon.db/attribute attribute
+                       :seon.db/activation activation
+                       :seon.db/authority (:seon.db/retraction-authority properties)}))))
+          (:seon.schema.projection/forms projection))))
+
+(defn- retention-snapshot [database rules]
+  (let [identities (vec (identity-attributes database))
+        history (d/history database)]
+    (into {}
+      (mapcat
+       (fn [{attribute :seon.db/attribute activation :seon.db/activation authority :seon.db/authority}]
+         (let [activated (into #{} (comp (filter :added) (map :e))
+                               (d/datoms history :aevt activation))
+               creators (when (and authority (db.utils/entid database authority))
+                          (reduce (fn [result datom]
+                                    (if (and (:added datom) (not (get result (:e datom))))
+                                      (assoc result (:e datom) (:v datom)) result))
+                                  {} (sort-by :tx (d/datoms history :aevt authority))))
+               entities (into activated (map :e) (d/datoms database :aevt attribute))]
+           (mapv
+            (fn [entity]
+              (let [values (into #{} (map :v) (d/datoms database :eavt entity attribute))]
+                [[attribute entity]
+                 {:seon.db/entity (d/pull database identities entity)
+                  :seon.db/values values
+                  :seon.db/value-identities
+                  (into {} (map (fn [value] [value (d/pull database identities value)])) values)
+                  :seon.db/active? (boolean (activated entity))
+                  :seon.db/assignment (into #{} (map :v) (d/datoms database :eavt entity activation))
+                  :seon.db/creator (get creators entity)
+                  :seon.db/current-creator
+                  (when (and authority (db.utils/entid database authority))
+                    (:v (first (d/datoms database :eavt entity authority))))}]))
+            entities)))
+       (filter #(and (get (dbi/-schema database) (:seon.db/attribute %))
+                     (get (dbi/-schema database) (:seon.db/activation %)))
+               rules)))))
+
+(defn- retention-check [before after actor]
+  (doseq [key (set/union (set (keys before)) (set (keys after)))]
+    (let [prior (get before key) current (get after key)
+          creator (or (:seon.db/creator prior) (:seon.db/creator current))
+          authorized? (and actor creator (= actor creator))
+          active? (or (:seon.db/active? prior) (:seon.db/active? current))
+          removed (set/difference (:seon.db/values prior #{}) (:seon.db/values current #{}))
+          erased (into #{} (keep (fn [[value identity]]
+                                  (when (and ((:seon.db/values current #{}) value)
+                                             (not (set/subset? (set (keys identity))
+                                                               (set (keys (get-in current [:seon.db/value-identities value]))))))
+                                    value)))
+                       (:seon.db/value-identities prior))
+          changed-authority? (and (or creator (:seon.db/active? prior))
+                                  (not= (:seon.db/creator prior)
+                                        (:seon.db/current-creator current)))
+          changed-assignment? (and (:seon.db/active? prior)
+                                   (not= (:seon.db/assignment prior)
+                                         (:seon.db/assignment current)))]
+      (when (or (and active? (empty? (:seon.db/values current)))
+                (and active? (not authorized?) (or (seq removed) (seq erased) changed-assignment?))
+                (and (:seon.db/creator prior) changed-authority?)
+                (and (:seon.db/active? prior) (not authorized?) changed-authority?))
+        (throw (ex-info
+                "Started issue tests and their authority must be preserved; only the creator may remove tests."
+                {:seon.error/kind :seon.db/retention-refused
+                 :seon.error/message
+                 (str "Cannot retract " (pr-str (first key)) " of "
+                      (pr-str (or (:seon.db/entity prior) (:seon.db/entity current)))
+                      "; tests " (pr-str (mapv #(get-in prior [:seon.db/value-identities %])
+                                               (set/union removed erased))) ".")
+                 :seon.error/data
+                 {:seon.db/attribute (first key)
+                  :seon.db/entity (or (:seon.db/entity prior) (:seon.db/entity current))
+                  :seon.db/removed-values (set/union removed erased)
+                  :seon.db/user actor :seon.db/creator creator}})))))
+  [])
+
+(defn- retain-transaction [projection transaction]
+  (let [rules (retention-rules projection)]
+    (if (empty? rules) transaction
+      (let [request (if (map? transaction) transaction {:tx-data transaction})
+            user (get-in request [:tx-meta :seon.db/user])]
+        (assoc request :tx-data
+          [[:db.fn/call
+            (fn [database]
+              (let [before (retention-snapshot database rules)
+                    actor (when user (db.utils/entid database user))]
+                (conj (vec (:tx-data request))
+                      [:db.fn/call
+                       (fn [after]
+                         (retention-check before (retention-snapshot after rules) actor))])))] ])))))
+
 (defn- transact-call
   [connection transaction]
   (if (error-value? connection)
@@ -2841,9 +2940,10 @@
                   (throw (ex-info (:seon.error/message failure) failure))))]
         (or (write-error database projection transaction)
             (let [report (d/transact connection
-                    (schema.datahike/encode-transaction-in
-                     projection
-                     (jdk-integers->long (stamp-receipt transaction))))
+                    (retain-transaction projection
+                     (schema.datahike/encode-transaction-in
+                      projection
+                      (jdk-integers->long (stamp-receipt transaction)))))
                   state (or (when (identical? projection
                                                (:seon.schema/projection
                                                 (some-> carried-state deref)))

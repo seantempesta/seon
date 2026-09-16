@@ -20,5 +20,22 @@
   :namespace "user"
   :timeout_ms 60000
   :code "(seon.test/run (requiring-resolve 'seon.issue-test/issue-worker-creation-is-atomic) (seon.operator/connection \"default\"))"}
+{:root "/Users/sean/src/seon"
+  :cluster "default"
+  :mode "jvm"
+  :namespace "user"
+  :timeout_ms 60000
+  :code "(let [c (seon.operator/connection \"default\") db (seon.db/db c) p (seon.schema/build-projection (merge (:seon.schema.projection/forms (seon.db/carried-projection db)) (seon.schema.edn/packaged-forms))) start (System/nanoTime) r (seon.schema/call-with-projection p #(seon.db/transact! c {:tx-data [[:db.fn/call (fn [_] [[:db/retract 43695 :seon.issue/tests [:seon.test/sym \"seon.test-reaching-test/agent-admitted-tests-reach-their-tested-function\"]]])]] :tx-meta {:seon.db/user [:seon.agent/id \"12254041a057\"]}}))] {:elapsed-ms (/ (- (System/nanoTime) start) 1000000.0) :result r :basis-unchanged? (= (:max-tx db) (:max-tx (seon.db/db c)))})"}
+ {:root "/Users/sean/src/seon"
+  :cluster "default"
+  :mode "jvm"
+  :namespace "user"
+  :timeout_ms 60000
+  :code "(seon.test/run #'seon.issue-settlement-test/started-issue-tests-retain-historical-authority (seon.operator/connection \"default\"))"}
+ {:root "/Users/sean/src/seon"
+  :cluster "default"
+  :mode "jvm"
+  :namespace "user"
+  :timeout_ms 60000
+  :code "(seon.test/run #'seon.issue-settlement-test/issue-settlement-runs-tests-and-derives-completion (seon.operator/connection \"default\"))"}
 ]
-

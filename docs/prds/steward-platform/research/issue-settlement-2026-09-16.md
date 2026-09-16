@@ -292,3 +292,84 @@ Gate request for slice 1: affected namespaces `seon.issue-settlement-test`,
 `seon.plan-test`, `seon.turn-test`, with paths `src/seon/plan.clj`,
 `src/seon/turn.clj`, `test/seon/issue_settlement_test.clj`, followed serially
 by `--platform` at the orchestrator. No lane test JVM was launched.
+
+## Slice 2 — P6
+
+The writer guarantee is: after an issue has ever been assigned, every expanded
+transaction preserves a nonempty test set, assignment and original creator
+authority, and only that creator may retract test members or change assignment.
+The declared `:seon.db/append-only-after` and `:seon.db/retraction-authority`
+properties select the rule from the handed schema projection. Database admission
+wraps encoded transaction data with a writer-side snapshot and a final guard.
+Snapshots contain realized maps and sets, never the mutable transaction database.
+Assignment history activates retention permanently; the first creator assertion
+owns the exception. Removing the creator or substituting another is refused.
+The final check sees nested calls, attribute retractions and entity retractions.
+Identity erasure of a still-referenced test is also refused.
+
+The issue writer's `guard-call` validates additive domain requests. Creation
+records `:seon.issue/created-by`; source reconciliation preserves worker facts
+and tests in `replacement-tx`. The superseded preservation branch in `adopt-tx`
+is removed. Missing physical attributes during initial schema installation do
+not activate a rule before its owning schema exists; the same transaction's
+final snapshot observes any installed rule and new assignment.
+
+Exact P6 regression invocation:
+`(seon.test/run #'seon.issue-settlement-test/started-issue-tests-retain-historical-authority (seon.operator/connection "default"))`.
+It uses the canonical database population, its current packaged declarations,
+and two tests admitted through real SCI. It verifies direct member/attribute/
+entity retraction, test identity erasure, nested calls, assignment removal,
+creator substitution, named refusal evidence, creator-authorized removal,
+nonempty retention, two-transaction unassign then worker retract, source
+reconciliation, creator recording, and additive domain requests.
+
+Recorded in-process iterations (pass/fail/error, elapsed MCP milliseconds):
+
+| Run entity | Result | ms | Observation |
+|---|---|---:|---|
+| 71513 | 1/21/0 | 2283 | Synthetic identity-only test rows refused by admission; replaced with SCI admission. |
+| 71662 | 4/18/0 | 2368 | Fixture lacked the assumed source test identities. |
+| 71670 | 4/18/0 | 4516 | Publication replaced the unpersisted transaction definition. |
+| 71689 | 22/0/0 | 6012 | Writer guard re-evaluated and verified before edits. |
+| 71849 | 5/24/0 | 4441 | MCP lost the session before accepting the guard re-evaluation. |
+| 71860 | 29/0/0 | 5748 | Re-evaluated guard and issue owner, before issue/schema edits. |
+| 71872 | 33/0/0 | 5641 | Complete regression before test-file edit. |
+| 71877 | 33/0/0 | 8027 | After test-file edit. |
+| 71888 | 33/0/0 | 9891 | Cold-schema correction before source edit. |
+| 72856 | 33/0/0 | 6306 | Removing the redundant adoption branch, before source edit. |
+| 72862 | 33/0/0 | 6048 | After adoption-branch source edit. |
+
+P5 also remained 19/0/0 after P6's edits: run 71878 at 03:31:41Z,
+10901 ms. P6 run 72862 at 03:36:39Z recorded digest
+`b7017b1565312c55a87b48d66eec98e2bbe5fd35601da58d522dbf21fc23081f`.
+Every changed function was evaluated and exercised in-process before its edit.
+These are hot-definition evidence until the source adoption convergence below
+is verified; they are not an isolated platform gate.
+
+Live P6 probe: a nested transaction from worker 55159 attempted to retract test
+45221 from the issue-family issue 43695. With the candidate canonical projection,
+the writer returned `:seon.db/retention-refused`, named the issue and the full
+test symbol, and left the basis unchanged. Elapsed transaction time was
+84.6435 ms. A realized snapshot over default's 144 test-bearing/historically
+assigned issues (2 historically assigned) took 41.533833 ms. This implementation
+scans that declared population twice per guarded transaction; no performance
+claim beyond this measured population is made.
+
+Publication first exposed an actual cold-schema defect in the new guard:
+`:seon.issue/agent` was queried before installation. The corrected snapshot
+checks installed schema before reading that population. Subsequent publication
+2648ac28-7423-42f7-9336-f10d43a8d721 exceeded the operator bound (exit 124).
+The explicit lane publication shell exited after reporting source changes
+during adoption. No lane-owned shell remains from that command.
+
+MCP repeatedly reported session loss with restart wording; PID 7595 and the
+live basis remained readable. This is the existing
+[MCP session diagnostic issue](../../../seon/issues/mcp-session-loss-claims-unobserved-restart.md),
+not evidence that this lane restarted default.
+
+P6 gate request: `src/seon/db.clj`, `src/seon/issue.clj`,
+`resources/seon/schemas/seon.db.edn`, `resources/seon/schemas/seon.issue.edn`,
+and `test/seon/issue_settlement_test.clj`; affected namespaces
+`seon.issue-settlement-test`, `seon.issue-test`, `seon.db-test`,
+`seon.cluster.source-test`. Run the path-limited gate and then `--platform`
+serially at the orchestrator, including the P5 paths in integration.
