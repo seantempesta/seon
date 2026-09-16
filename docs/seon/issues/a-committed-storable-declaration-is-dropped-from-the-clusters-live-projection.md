@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 created: 2026-09-17
 tags: [schema, sci, projection, own-nothing-global, class]
@@ -51,6 +51,29 @@ It also explains the `:example/*` "leak"
 the keys were never leaked. They were dropped at install and re-derived later
 from the database, and the runner's drift detector saw that re-derivation
 mid-run as keys "added" by the test — then restored them away again.
+
+## Resolved 2026-09-17 — the cause was neither seam named below
+
+`seon.turn/row-tx` canonicalizes every reader row through
+`seon.program/declaration-row`, which RE-PRINTS a schema row's
+`:seon.schema/form` (`src/seon/program.cljc:956`), so a storable declaration is
+committed as `[:string #:seon.db{:identity true}]` while the request row still
+holds `[:string {:seon.db/identity true}]`. `seon.sci.eval/committed-row?`
+compared those two PRINTINGS as bytes and answered `false` for the cluster's own
+committed declaration, so `src/seon/turn.clj:4767` skipped it and
+`install-evaluated-rows!` never saw it. Plain shapes print identically and
+survived — which is exactly why only the storable declarations vanished.
+
+`seon.sci.eval/same-declaration-source?` now compares the VALUE (byte-equal, or
+EDN-equal when both sides read as data); `committed-row?` and `install-row!`'s
+source-mismatch throw share it. The accumulation and the basis advance the
+sections below suspected were both measured correct and are unchanged.
+
+Regressions: `seon.sci.eval-test/a-storable-declarations-committed-row-is-recognised-by-its-value`
+(the seam) and the projection-equality pair inside
+`seon.loop-proof-test/running-fixture-settles-its-seeded-wake` (the class, on the
+canonical harness). Evidence and live proof:
+[live-projection-follows-declarations-2026-09-17](../../prds/steward-platform/research/live-projection-follows-declarations-2026-09-17.md).
 
 ## Where to look
 

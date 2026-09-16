@@ -2155,3 +2155,29 @@
                 (run-in ctx "(vec (range 40))" 5000)
                 [:seon.print/options :seon.print/length]))
             "clearing the bound carries forward exactly as setting one does"))))))
+
+(deftest a-storable-declarations-committed-row-is-recognised-by-its-value
+  ;; THE WRITER CANONICALIZES BEFORE IT COMMITS. `seon.turn/row-tx` runs every
+  ;; reader row through `seon.program/declaration-row`, which rebuilds a schema
+  ;; row and RE-PRINTS its `:seon.schema/form`; a namespaced property map —
+  ;; carried by exactly the STORABLE declarations — prints there as
+  ;; `#:seon.db{:identity true}` and in the reader's row as
+  ;; `{:seon.db/identity true}`. Comparing those BYTES answered "not ours" for
+  ;; the cluster's own committed declaration, so `install-evaluated-rows!`
+  ;; skipped it and the live projection lost every storable declaration while
+  ;; its facts were intact (2026-09-17). A declaration is a VALUE.
+  (test-support/with-database
+    (fn [connection]
+      (let [reader-row {:seon.schema/key :example.storable/order
+                        :seon.schema/form "[:string {:seon.db/identity true}]"
+                        :seon.schema.admission/source :agent}
+            canonical (program/declaration-row reader-row :all :agent)]
+        (test-support/transacted! connection [canonical])
+        (is (not= (:seon.schema/form reader-row) (:seon.schema/form canonical))
+            "the writer's canonical printing genuinely differs from the reader's")
+        (is (true? (eval/committed-row? (db/db connection) reader-row))
+            "the committed declaration IS this reader row's declaration")
+        (is (false? (eval/committed-row?
+                     (db/db connection)
+                     (assoc reader-row :seon.schema/form "[:int {:seon.db/identity true}]")))
+            "a genuinely different declaration is still not the committed one")))))

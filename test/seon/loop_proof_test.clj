@@ -151,7 +151,23 @@
                                          (db/pull database [:seon.schema/form]
                                                   [:seon.schema/key %]))))
                               fixture/schema-keys))
-                     "Every scenario key is backed by its own durable declaration row."))
+                     "Every scenario key is backed by its own durable declaration row.")
+                 ;; THE LIVE PROJECTION IS NOT A SEPARATE OPINION. After a
+                 ;; declaration commit the context carries exactly the
+                 ;; population derived at that basis. Comparing the WRITER's
+                 ;; canonical printing of a storable form with the reader's
+                 ;; printing dropped `:example/order` and `:example/order-row`
+                 ;; here while their rows were committed facts, and the
+                 ;; runner's drift detector then read their later re-derivation
+                 ;; as keys a test had added (2026-09-17). By key, both
+                 ;; directions: a count answers "fine" for a swap.
+                 (let [carried (set (keys (get-in (env/of ctx)
+                                                  [:seon.schema/projection
+                                                   :seon.schema.projection/forms])))]
+                   (is (empty? (set/difference (population) carried))
+                       "every declaration the transaction committed is carried")
+                   (is (empty? (set/difference carried (population)))
+                       "the carried projection declares nothing the database does not")))
                (let [database (db/db connection)
                      inert (wake/inert-attributes database)
                      entries (evaluation/of-agent database "juniper")]

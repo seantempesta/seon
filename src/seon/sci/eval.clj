@@ -737,6 +737,39 @@
         {:seon.program/identity program-identity
          :seon.program/definition-attributes attributes}))))
 
+(defn- declaration-source-value
+  "The VALUE a declaration's source attribute names, or the source itself.
+
+  A source this reader cannot read as data is its own value, so the
+  comparison below falls back to exactly the bytes it compared before."
+  [source]
+  (if (string? source)
+    (try (edn/read-string source)
+         (catch Exception _ source))
+    source))
+
+(defn- same-declaration-source?
+  "Whether a request row's source names the declaration the database holds.
+
+  THE WRITER CANONICALIZES BEFORE IT COMMITS. `seon.turn/row-tx` runs every
+  reader row through `seon.program/declaration-row`, which rebuilds a schema
+  row from `seon.schema/canonical-schema-rows` and RE-PRINTS its
+  `:seon.schema/form`. A form carrying a namespaced property map is stored as
+  `[:string #:seon.db{:identity true}]` while the request row still holds the
+  reader's `[:string {:seon.db/identity true}]` — two printings of ONE value.
+  Comparing those BYTES answered `false` for the cluster's own committed
+  declaration, and since exactly the STORABLE declarations carry such a map
+  (`:seon.db/identity`, `:seon.db/attributes`), every storable declaration was
+  skipped by `install-evaluated-rows!` and dropped from the live projection
+  while its facts were intact (2026-09-17, measured on `default`). A
+  declaration IS a value, so the value decides."
+  [requested committed]
+  (or (= requested committed)
+      (and (some? requested)
+           (some? committed)
+           (= (declaration-source-value requested)
+              (declaration-source-value committed)))))
+
 (defn committed-row?
   "True when `row` is the effective declaration in the terminal database.
 
@@ -751,9 +784,9 @@
       (let [committed (db/pull db '[*] [identity-attribute value])
             source-attribute
             (:seon.program/source-attribute (program/shape identity-attribute))]
-        (and (:db/id committed)
-             (= (get row source-attribute)
-                (get committed source-attribute)))))))
+        (and (some? (:db/id committed))
+             (same-declaration-source? (get row source-attribute)
+                                       (get committed source-attribute)))))))
 
 (defn install-row!
   "Install one declaration from the terminal transaction's db-after.
@@ -783,8 +816,9 @@
                (let [source-attribute
                      (:seon.program/source-attribute
                       (program/shape identity-attribute))]
-                 (not= (get row source-attribute)
-                       (get committed source-attribute))))
+                 (not (same-declaration-source?
+                       (get row source-attribute)
+                       (get committed source-attribute)))))
       (throw (ex-info "Committed declaration source does not match install request."
                       {:seon.error/kind ::install-source-mismatch
                        :seon.program/identity [identity-attribute value] :seon.sci.eval/install-mismatch true})))
