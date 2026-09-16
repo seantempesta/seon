@@ -1041,7 +1041,10 @@
                   :seon.error/diagnostic-operation ::check-request
                   :seon.error/diagnostic-member :check-completion
                   :seon.error/diagnostic-expected :seon.test.check/result
-                  :seon.error/diagnostic-offending :pending}})
+                  :seon.error/diagnostic-offending :pending
+                  :seon.error/diagnostic-evidence
+                  (cond-> {:seon.boot/cluster-name cluster}
+                    test-symbol (assoc :seon.test/sym test-symbol))}})
                (catch Exception failure
                  (unknown (or test-symbol cluster) (ex-message failure)))
                (finally (when-not (.isDone task) (.cancel task false)))))))))))

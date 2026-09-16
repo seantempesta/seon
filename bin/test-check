@@ -12,11 +12,16 @@
       advertisement (#'operator/advertisement root cluster)
       eval! (fn [form timeout-ms]
               (#'operator/prepl-value! advertisement (pr-str form) timeout-ms))
-      scoped (fn [body]
-               (list 'let ['connection (list 'seon.operator/connection cluster)
-                           'projection '(seon.schema/projection-from-database @connection)]
-                     (list 'seon.schema/call-with-projection 'projection
-                           (list 'fn [] body))))]
+      transport-bound (#'operator/operator-silence-backstop-ms {})
+      ;; The prepl socket read timeout is a SILENCE backstop, and one check
+      ;; emits nothing until it returns: the transport must outlast the work
+      ;; the cluster will do. Without an explicit --time-limit-ms the shipped
+      ;; decision for the cluster's own check allowance is the only bound this
+      ;; script can know without a second round trip; the cluster re-reads its
+      ;; effective dial and remains the authority over the work itself.
+      ;; (The var holds a delay; the decisions are its forced value.)
+      shipped-check-bound (get @@#'operator/shipped-default-decisions
+                               :seon.test/check-time-limit-ms)]
   (try
     (when (and selection
                (not (and (= "--test" selection) test-symbol
@@ -28,34 +33,19 @@
       (throw (ex-info "Usage: bin/test-check [--root PATH] [CLUSTER [--test NS/TEST [--time-limit-ms N]]]" {})))
     (when-not advertisement
       (throw (ex-info "No live cluster advertisement; test-check starts no JVM." {})))
-    (let [bound (or (some-> bound-value parse-long)
-                    (eval! (scoped (list :seon.test/check-time-limit-ms
-                                        (list 'seon.config/effective
-                                              '(seon.db/db connection) cluster)))
-                           (#'operator/operator-silence-backstop-ms {})))
-          _ (when-not (pos-int? bound)
-              (throw (ex-info "Apply cluster configuration to supply :seon.test/check-time-limit-ms." {})))
-          work (if test-symbol
-                 (list 'let ['database '(seon.db/db connection)
-                             'effective (list 'seon.config/effective 'database cluster)
-                             'prepared (list '(var seon.test/prepare-tests!) 'database [test-symbol] 'effective)]
-                       (list 'if '(:seon.error/kind prepared) 'prepared
-                             (list 'if-let ['test-var (list '(var seon.test/resolve-test) test-symbol)]
-                                   (list 'seon.test/run 'test-var 'connection
-                                         {:seon.test.run/provenance '(seon.test.runner/provenance database)
-                                          :seon.test/remaining-ms bound})
-                                   {:seon.error/kind :seon.test/unknown
-                                    :seon.test/unknown test-symbol
-                                    :seon.error/message "The indexed test Var is unavailable."})))
-                 (list 'seon.test/feedback (list 'seon.test/check-adoption 'connection cluster)))
-          result (eval! (scoped work)
-                        (+ bound (#'operator/operator-silence-backstop-ms {})))]
-      (println (if test-symbol (pr-str result) result))
-      (when (and test-symbol
-                 (or (:seon.error/kind result)
-                     (not (pos? (or (:seon.test/pass-count result) 0)))
-                     (pos? (or (:seon.test/fail-count result) 0))
-                     (pos? (or (:seon.test/error-count result) 0))))
+    (when-not (pos-int? shipped-check-bound)
+      (throw (ex-info "config/default.edn declares no :seon.test/check-time-limit-ms; the transport has no backstop to derive." {})))
+    (let [bound (some-> bound-value parse-long)
+          request (cond-> {:seon.boot/cluster-name cluster
+                           :seon.db/connection (list 'seon.operator/connection cluster)}
+                    test-symbol (assoc :seon.test/sym test-symbol)
+                    bound (assoc :seon.test/check-time-limit-ms bound))
+          result (eval! (list 'seon.test/check-request request)
+                        (+ (or bound shipped-check-bound) transport-bound))]
+      (println (or (:seon.test.check/text result)
+                   (:seon.error/message result)
+                   (pr-str result)))
+      (when-not (true? (:seon.test.check/passed? result))
         (System/exit 1)))
     (catch Exception failure
       (binding [*out* *err*]
