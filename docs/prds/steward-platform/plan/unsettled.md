@@ -1350,6 +1350,24 @@ the AI render shows the form to run; small render fix, launch when the
 implementer count drops). requiring-resolve census+fix landed (27 commits,
 `7bdd299a2`…`f3fd5b973`; `seon.plan/issue-done-query` mirror filed).
 
+**2026-09-16 23:17Z SESSION CUT (weekly rate limit on the old account);
+RESUMED 2026-09-16 ~23:35Z in a new session on a new account.** Every Opus
+agent died mid-work at the cut: no-default-cluster (gate 1F/2E, proving a
+HEAD baseline), incremental-publication (waiting on its gate), composable-
+history (gate A green, gate B re-running), runner-test errors (fixing the
+source-roots deref), wake-matchers (waiting on a --paths run), tier-0
+remaining (adding the class regression), environment-carries-it (landing
+note + issue left), bin/test preparation bounds (fixing a BASHPID bash-3.2
+defect). The codex integrator `reset-batch-integration` died with the
+session while writing `test/seon/context_capture_history_test.clj`. Their
+hunks are all in the tree (47 modified, 7 untracked). Relaunched under the
+four-editor cap: the codex integrator (resume), no-default-cluster,
+incremental-publication, composable-history, runner-test errors; queued
+behind them: wake-matchers, tier-0 remaining, environment-carries-it,
+bin/test preparation bounds. Default pid 41413 alive throughout. Still
+awaiting the owner's three rulings (living-ref rule; fn.ast merge-then-
+delete; the revised one-evaluation-path design).
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
