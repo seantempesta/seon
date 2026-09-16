@@ -294,56 +294,111 @@
     (catch Throwable throwable
       (pr-str (main/ex-triage (Throwable->map throwable))))))
 
+(defn- transacted!
+  "Transact and prove it landed, returning the report.
+
+  A fixture that ignores `transact!`'s answer reads ABSENCE OF SIGNAL as
+  health (AGENTS, recurring failure class): `seon.db/transact!` refuses a row
+  the current schema no longer admits by RETURNING a flat `:seon.error` value,
+  with nothing in the log, and the test then renders an empty history and
+  fails three assertions away from its cause. That happened to this whole
+  namespace twice. Every seed here goes through this function."
+  [connection tx-data]
+  (let [report (db/transact! connection tx-data)]
+    (is (:db-after report)
+        (str "the fixture's own transaction was refused: "
+             (:seon.error/message report)))
+    report))
+
+(defn- transaction-instant
+  "The instant Datahike stamped on one committed fixture transaction.
+
+  Read from the report's own datoms, which is where the writer put it — not
+  re-derived from a basis number this fixture would have to guess at."
+  [report]
+  (some (fn [datom] (when (= :db/txInstant (:a datom)) (:v datom)))
+        (:tx-data report)))
+
+(defn- between
+  "An instant strictly inside `[earlier, later)`.
+
+  The transcript orders a message by its TRANSACTION instant
+  (`message-order-facts`, `src/seon/render/transcript.clj:259`) and an
+  evaluation by its own stored `:seon.cluster.eval/at`. A fixture cannot
+  choose a transaction instant, so it derives the evaluation instants from
+  the ones it observed instead of pinning them to a literal epoch — which is
+  what made this fixture pass until wall-clock time overtook the constant."
+  [earlier later]
+  (java.util.Date. (quot (+ (.getTime ^java.util.Date earlier)
+                            (.getTime ^java.util.Date later))
+                         2)))
+
 (defn- seed-populated-history!
+  "Seed five messages and three evaluations that interleave by stored time.
+
+  Each message takes its own transaction so it gets its own instant; the
+  evaluations are then placed between the instants those transactions
+  actually produced."
   [connection]
-  (db/transact!
+  (transacted!
    connection
    [{:seon.ns/name 'my.agents.transcript}
     {:seon.agent/id agent-id
      :seon.agent/namespace [:seon.ns/name 'my.agents.transcript]}
     {:seon.agent/id peer-id}
     {:seon.problems/id "problem-transcript"}
-    {:seon.message/id "outside-0" :seon.message/to [:seon.agent/id agent-id] :seon.message/content "Start with the failed deployment." :my.message/reason "An external observation, not this agent's decline." :seon.message/inbox [:seon.agent/id agent-id]}
-    {:seon.message/id "peer-1" :seon.message/from [:seon.agent/id peer-id] :seon.message/to [:seon.agent/id agent-id] :seon.message/about [:seon.problems/id "problem-transcript"] :seon.message/content "Repair the owning namespace." :seon.message/inbox [:seon.agent/id agent-id]}
     {:seon.turn/id "run-result" :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}
-    {:seon.cluster.eval/id "eval-result"
-     :seon.cluster.eval/run [:seon.turn/id "run-result"]
-     :seon.cluster.eval/ordinal 0
-     :seon.cluster.eval/at (at 2000)
-     :seon.cluster.eval/comment ";; calculate the answer"
-     :seon.cluster.eval/ns [:seon.ns/name 'my.agents.transcript]
-     :seon.cluster.eval/output "side effect\n"
-     :seon.cluster.eval/read-basis-transaction 41
-     ;; THE STORED TEXT IS THE SHOWN TEXT production writes: the evaluation
-     ;; keeps what its value renderer showed, never a print node a later
-     ;; reader would have to re-render (turn PRD §15; `:seon.eval/shown`).
-     :seon.eval/shown "42"
-     :seon.cluster.eval/source "(do (println \"side effect\") (+ 20 22))"}
-    {:seon.message/id "send-2" :seon.message/from [:seon.agent/id agent-id] :seon.message/to [:seon.agent/id peer-id] :seon.message/content "Check the repaired namespace." :seon.message/inbox [:seon.agent/id peer-id]}
     {:seon.turn/id "run-wait" :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}
-    {:seon.cluster.eval/id "eval-wait"
-     :seon.cluster.eval/run [:seon.turn/id "run-wait"]
-     :seon.cluster.eval/ordinal 0
-     :seon.cluster.eval/at (at 3500)
-     :seon.eval/shown
-     "{:my.turn/disposition :wait, :my.turn/note \"waiting for the peer review\"}"
-     :seon.cluster.eval/source "(seon.run/wait \"waiting for the peer review\")"}
-    {:seon.message/id "decline-3" :seon.message/from [:seon.agent/id agent-id] :seon.message/to [:seon.agent/id peer-id] :seon.message/about [:seon.problems/id "problem-transcript"] :seon.message/content "I cannot make the requested edit." :my.message/reason "The namespace is owned by another agent." :seon.message/inbox [:seon.agent/id peer-id]}
-    {:seon.turn/id "run-error" :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}
-    {:seon.cluster.eval/id "eval-error"
-     :seon.cluster.eval/run [:seon.turn/id "run-error"]
-     :seon.cluster.eval/ordinal 0
-     :seon.cluster.eval/at (at 4500)
-     ;; AN ERROR IS TERMINAL: `:value` and `:error` are mutually exclusive
-     ;; facts of one evaluation (`src/seon/repl.clj:155`), so a failed
-     ;; evaluation stores no shown text beside its error.
-     :seon.cluster.eval/error "No such namespace: missing.function"
-     :seon.cluster.eval/triage-edn (arithmetic-triage-edn)
-     :seon.error/kind :seon.sci.eval/refused
-     :seon.problems/id "problem-eval-error"
-     :seon.cluster.eval/interrupted-at (at 4501)
-     :seon.cluster.eval/source "(missing.function/call)"}
-    {:seon.message/id "self-4" :seon.message/from [:seon.agent/id agent-id] :seon.message/to [:seon.agent/id agent-id] :seon.message/content "A self-addressed continuity note." :seon.message/inbox [:seon.agent/id agent-id]}]))
+    {:seon.turn/id "run-error" :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}])
+  (let [instants
+        (mapv (fn [message]
+                (transaction-instant (transacted! connection [message])))
+              [{:seon.message/id "outside-0" :seon.message/to [:seon.agent/id agent-id] :seon.message/content "Start with the failed deployment." :my.message/reason "An external observation, not this agent's decline." :seon.message/inbox [:seon.agent/id agent-id]}
+               {:seon.message/id "peer-1" :seon.message/from [:seon.agent/id peer-id] :seon.message/to [:seon.agent/id agent-id] :seon.message/about [:seon.problems/id "problem-transcript"] :seon.message/content "Repair the owning namespace." :seon.message/inbox [:seon.agent/id agent-id]}
+               {:seon.message/id "send-2" :seon.message/from [:seon.agent/id agent-id] :seon.message/to [:seon.agent/id peer-id] :seon.message/content "Check the repaired namespace." :seon.message/inbox [:seon.agent/id peer-id]}
+               {:seon.message/id "decline-3" :seon.message/from [:seon.agent/id agent-id] :seon.message/to [:seon.agent/id peer-id] :seon.message/about [:seon.problems/id "problem-transcript"] :seon.message/content "I cannot make the requested edit." :my.message/reason "The namespace is owned by another agent." :seon.message/inbox [:seon.agent/id peer-id]}
+               {:seon.message/id "self-4" :seon.message/from [:seon.agent/id agent-id] :seon.message/to [:seon.agent/id agent-id] :seon.message/content "A self-addressed continuity note." :seon.message/inbox [:seon.agent/id agent-id]}])]
+    ;; A BOUND THAT FIRES IS A BUG REPORT. Distinct instants are what the
+    ;; interleaving is derived from; if two fixture transactions landed in
+    ;; one millisecond, say so here rather than mis-order silently.
+    (is (apply < (map #(.getTime ^java.util.Date %) instants))
+        (str "fixture transactions shared an instant: " (pr-str instants)))
+    (let [[_outside peer sent decline self] instants]
+      (transacted!
+       connection
+       [{:seon.cluster.eval/id "eval-result"
+         :seon.cluster.eval/run [:seon.turn/id "run-result"]
+         :seon.cluster.eval/ordinal 0
+         :seon.cluster.eval/at (between peer sent)
+         :seon.cluster.eval/comment ";; calculate the answer"
+         :seon.cluster.eval/ns [:seon.ns/name 'my.agents.transcript]
+         :seon.cluster.eval/output "side effect\n"
+         :seon.cluster.eval/read-basis-transaction 41
+         ;; THE STORED TEXT IS THE SHOWN TEXT production writes: the
+         ;; evaluation keeps what its value renderer showed, never a print
+         ;; node a later reader would have to re-render (turn PRD §15).
+         :seon.eval/shown "42"
+         :seon.cluster.eval/source "(do (println \"side effect\") (+ 20 22))"}
+        {:seon.cluster.eval/id "eval-wait"
+         :seon.cluster.eval/run [:seon.turn/id "run-wait"]
+         :seon.cluster.eval/ordinal 0
+         :seon.cluster.eval/at (between sent decline)
+         :seon.eval/shown
+         "{:my.turn/disposition :wait, :my.turn/note \"waiting for the peer review\"}"
+         :seon.cluster.eval/source "(seon.run/wait \"waiting for the peer review\")"}
+        {:seon.cluster.eval/id "eval-error"
+         :seon.cluster.eval/run [:seon.turn/id "run-error"]
+         :seon.cluster.eval/ordinal 0
+         :seon.cluster.eval/at (between decline self)
+         ;; AN ERROR IS TERMINAL: `:value` and `:error` are mutually
+         ;; exclusive facts of one evaluation (`src/seon/repl.clj:155`), so a
+         ;; failed evaluation stores no shown text beside its error.
+         :seon.cluster.eval/error "No such namespace: missing.function"
+         :seon.cluster.eval/triage-edn (arithmetic-triage-edn)
+         :seon.error/kind :seon.sci.eval/refused
+         :seon.problems/id "problem-eval-error"
+         :seon.cluster.eval/interrupted-at (between decline self)
+         :seon.cluster.eval/source "(missing.function/call)"}]))))
 
 (deftest populated-history-restores-the-repl-fidelity-checklist
   (support/with-database
@@ -362,27 +417,33 @@
                  (mapv :id html-rows))))
         (testing "recent receipts reproduce prompt, input, output, and result"
           ;; A MESSAGE ENTERS THE AGENT'S CONTEXT AS SOURCE, not as prose:
-          ;; `:seon.render/ai` returns the form the agent executes
-          ;; (`seon.cluster.message/render-ai`), and the executed form's
-          ;; printed result is the sentence. Asserting the sentence HERE was
-          ;; asserting the superseded prose shape (AGENTS §2.4 vocabulary).
-          (is (str/includes? ai "seon.cluster.message/format-ai")
-              "each message is the ordinary read-and-format form")
+          ;; the entry is the agent-facing read form the message schema
+          ;; declares, `(my.message/read #:my.message{:id …})`
+          ;; (`seon.render.transcript/message-form`,
+          ;; `src/seon/render/transcript.clj:790`). The system-side
+          ;; `seon.cluster.message/format-ai` spelling was the producer this
+          ;; namespace named before `my.message` became the agent's protocol
+          ;; over those same facts (AGENTS §3, the `my.*`/`seon.*` split).
+          (is (str/includes? ai "(my.message/read ")
+              "each message is the ordinary agent-facing read form")
           (is (str/includes? ai "\"peer-1\"")
               "naming the message it reads, so the agent can ask again")
           (is (str/includes? ai "\"decline-3\""))
           (is (str/includes? ai "\"outside-0\""))
           (is (not (str/includes? ai "t=41"))
               "the receipt's read basis remains metadata, not result text")
+          ;; THE PROMPT OPENS THE AGENT'S INPUT, comment included: the
+          ;; comment is part of what the agent typed at that prompt, so it
+          ;; follows `ns=> ` and the form sits on the next line
+          ;; (`seon.repl/input-text`, `src/seon/repl.clj:205`).
           (is (str/includes?
                ai
-               (str ";; calculate the answer\n"
-                    "my.agents.transcript=> (do (println \"side effect\") "
-                    "(+ 20 22))\n"
+               (str "my.agents.transcript=> ;; calculate the answer\n"
+                    "(do (println \"side effect\") (+ 20 22))\n"
                     "#:seon.repl{:value 42, :result "
                     (admit/result-handle "eval-result") ", "
                     ":out \"side effect\\n\"}"))
-              "comment above, one form on the prompt line, one response map")
+              "one prompt, the agent's own input, one response map")
           (is (str/includes? ai "waiting for the peer review"))
           (is (str/includes? ai "Execution error (ArithmeticException) at"))
           (is (str/includes? ai "Divide by zero"))
@@ -469,33 +530,43 @@
             (is (string? cut) (pr-str cut))
             (is (< (count cut) (count ai))
                 "the AI projection is bounded by the render profile")
-            (is (str/includes? cut "more characters")
-                (str "the cut is an elision value naming what it omitted: "
+            ;; AN ELISION IS ORDINARY DATA, NOT PROSE. The cut names its
+            ;; bound, its unit, how much it omitted and the form to ask again
+            ;; with, as declared keys (`resources/seon/schemas/seon.print.edn`)
+            ;; — the "… N more characters" sentence was a rendering of that
+            ;; value, never the value itself, and a test that greps for the
+            ;; sentence is asserting a presentation it does not own.
+            (is (str/includes? cut (str :seon.print/bound-by " "
+                                        :seon.render.profile/token-budget))
+                (str "the cut must name the bound that made it: "
                      (subs cut 0 (min 400 (count cut)))))
-            (is (str/includes? cut "requery "))
+            (is (str/includes? cut (str :seon.print/elision-unit " :characters")))
+            (is (str/includes? cut (str :seon.print/omitted)))
+            (is (str/includes? cut (str :seon.print/requery-form))
+                "and the form a reader asks again with")
             (is (str/includes? cut "transcript-cut")
-                "and it carries the identity the reader asks again with")))
+                "carrying the identity that form requeries")))
         (assert-no-session-narration ai)))))
 
 (defn- seed-pinned-bootstrap-history!
   [connection]
   (let [bootstrap-run-id (bootstrap/run-id agent-id)
         bootstrap-count 12
+        ;; ONE ENTITY PER (run, ordinal), AND ONE MAP FOR IT. The split pair
+        ;; below was the frozen-form-plus-settlement shape; each map is
+        ;; validated on its own, so the source-only half is refused for the
+        ;; `:seon.cluster.eval/at` the receipt schema requires
+        ;; (`resources/seon/schemas/seon.cluster.eval.edn`) and the whole
+        ;; seed is lost with it.
         bootstrap-receipts
-        (mapcat
+        (map
          (fn [ordinal]
-           (let [row-id (pr-str [bootstrap-run-id ordinal])]
-             [{:seon.cluster.eval/id row-id
-               :seon.cluster.eval/run
-               [:seon.turn/id bootstrap-run-id]
-               :seon.cluster.eval/ordinal ordinal
-               :seon.cluster.eval/source (str "(identity " ordinal ")")}
-              {:seon.cluster.eval/id row-id
-               :seon.cluster.eval/run
-               [:seon.turn/id bootstrap-run-id]
-               :seon.cluster.eval/ordinal ordinal
-               :seon.cluster.eval/at (at 0)
-               :seon.eval/shown (str ordinal)}]))
+           {:seon.cluster.eval/id (pr-str [bootstrap-run-id ordinal])
+            :seon.cluster.eval/run [:seon.turn/id bootstrap-run-id]
+            :seon.cluster.eval/ordinal ordinal
+            :seon.cluster.eval/at (at 0)
+            :seon.cluster.eval/source (str "(identity " ordinal ")")
+            :seon.eval/shown (str ordinal)})
          (range bootstrap-count))
         messages
         (concat
@@ -505,7 +576,7 @@
          (map (fn [index]
                 {:seon.message/id (str "newest-" index) :seon.message/to [:seon.agent/id agent-id] :seon.message/content (str "newest history " index) :seon.message/inbox [:seon.agent/id agent-id]})
               (range 6)))]
-    (db/transact!
+    (transacted!
      connection
      (into [{:seon.agent/id agent-id}
             {:seon.turn/id bootstrap-run-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx" :seon.turn/trigger "bootstrap-message"}
@@ -565,10 +636,20 @@
         (assert-no-session-narration ai)))))
 
 (deftest supersession-chains-vanish-from-the-history
+  ;; THE HISTORY NO LONGER HIDES AN OLDER TURN, and that is the ruling, not a
+  ;; regression: "All turns are shown by default; previous prompt bytes remain
+  ;; unchanged until compaction" (AGENTS, the agent's history). The selection
+  ;; that used to drop every run but the newest was the supersession chain
+  ;; this test is named for; `candidate-entity-ids`
+  ;; (`src/seon/render/transcript.clj:142`) now bounds by QUERY WORK alone,
+  ;; and compaction — wiping the agent's evaluations — is the one removal.
+  ;; What survives of the original property is the half that still matters:
+  ;; nothing is silently elided, and every durable evaluation is still there
+  ;; to be pulled.
   (support/with-database
     (fn [connection]
       (let [bootstrap-run-id (bootstrap/run-id agent-id)]
-        (db/transact!
+        (transacted!
          connection
          [{:seon.agent/id agent-id}
           {:seon.turn/id bootstrap-run-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx" :seon.turn/trigger "bootstrap-message"}
@@ -617,10 +698,13 @@
               full (transcript/render-html (unit connection))
               visible (mapv :id (html-entries full))]
           (is (zero? (html-elided full))
-              "a superseded run is GONE from the history, never elided")
-          (is (= "bootstrap-receipt" (first visible)))
-          (is (= #{"bootstrap-receipt" "proof-receipt" "proof-comment"}
-                 (set visible)))
+              "nothing is elided: what the query admitted is what renders")
+          (is (= "bootstrap-receipt" (first visible))
+              "the pinned opening still leads the history")
+          (is (= ["bootstrap-receipt" "original-receipt" "original-comment"
+                  "curated-receipt" "proof-receipt" "proof-comment"]
+                 visible)
+              "every turn's evaluations render, in their stored order")
           (is (db/pull db '[*]
                        [:seon.cluster.eval/id "original-receipt"]))
           (is (db/pull db '[*]
@@ -629,11 +713,16 @@
 (deftest malformed-receipt-bytes-and-any-unique-about-stay-replayable
   (support/with-database
     (fn [connection]
-      (db/transact!
+      (transacted!
        connection
        [{:seon.agent/id agent-id}
         {:seon.agent/id peer-id}
-        {:seon.test/sym "target-fact"}
+        ;; A TEST ROW DECLARES WHERE IT CAME FROM. `:seon.schema.admission/source`
+        ;; is a required key of the test entity, so a bare `{:seon.test/sym …}`
+        ;; is refused — silently, by a returned error value — and the whole
+        ;; seed is lost with it. The entity here is only a unique `about`
+        ;; target; what matters is that it is a REAL one.
+        {:seon.test/sym "target-fact" :seon.schema.admission/source :core}
         {:seon.message/id "about-test" :seon.message/from [:seon.agent/id agent-id] :seon.message/to [:seon.agent/id peer-id] :seon.message/about [:seon.test/sym "target-fact"] :seon.message/content "Inspect the test fact." :seon.message/inbox [:seon.agent/id peer-id]}
         {:seon.turn/id "run-malformed" :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}
         {:seon.cluster.eval/id "eval-malformed"
@@ -648,7 +737,7 @@
          :seon.cluster.eval/source "("}])
       (let [ai (transcript/render-ai (unit connection))]
         ;; the message is the form that reads it, naming its own identity
-        (is (str/includes? ai "seon.cluster.message/format-ai"))
+        (is (str/includes? ai "(my.message/read "))
         (is (str/includes? ai "\"about-test\""))
         (is (str/includes? ai "user=> ("))
         (is (str/includes? ai ":value {"))
@@ -907,10 +996,13 @@
               (let [events (mapv generated-event (range) history)
                     rows (into [{:seon.agent/id agent-id}
                                 {:seon.agent/id peer-id}
-                                {:seon.test/sym "generated-target"}]
+                                ;; a real test row, source declared — see
+                                ;; `malformed-receipt-bytes-…`
+                                {:seon.test/sym "generated-target"
+                                 :seon.schema.admission/source :core}]
                                (mapcat generated-rows)
                                events)]
-                (db/transact! connection rows)
+                (transacted! connection rows)
                 (let [request (unit connection)
                       ai (transcript/render-ai request)
                       html-value (transcript/render-html request)
@@ -1033,7 +1125,7 @@
 (deftest history-unit-derives-both-projections-from-one-bounded-derivation
   (support/with-database
     (fn [connection]
-      (db/transact!
+      (transacted!
        connection
        (into
         [{:seon.agent/id agent-id}]
