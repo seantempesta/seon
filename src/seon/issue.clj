@@ -555,6 +555,22 @@
        (filter #(or (nil? lifecycle) (= lifecycle (:seon.issue/status %))))
        (sort-by :seon.issue/id) vec))
 
+(defn- detector-symbol
+  "The detector's symbol when the issue names one and the pull resolved it."
+  [row]
+  (some-> (get-in row [:seon.issue/detector :seon.fn/sym]) symbol))
+
+(defn- check-form
+  "The form that decides this issue's completion, or nothing when none does.
+  Tests win when the issue has any; otherwise a generated issue's detector is
+  the check, because the run that stops naming the subject resolves it. An
+  issue with neither carries NO form: `(my.test/check {:seon.test/changed []})`
+  promised a verification that would pass by being empty."
+  [row test-rows]
+  (cond
+    (seq test-rows) (list 'my.test/check {:seon.test/changed (mapv :seon.test/sym test-rows)})
+    (detector-symbol row) (list (detector-symbol row) '(seon.db/db))))
+
 (defn status
   "Read the issue and test outcomes; verification uses the current test reach digest."
   {:malli/schema [:=> [:cat [:map [:seon.db/db :seon.db/database-value]
@@ -565,6 +581,7 @@
                                   :seon.issue/problem :seon.issue/path :seon.issue/opened :seon.issue/commits
                                   :seon.issue/agent :seon.issue/budget :seon.issue/resolved-tx
                                   :seon.issue/unresolved
+                                  {:seon.issue/detector [:seon.fn/sym]}
                                   {:seon.issue/keys [:seon.schema/key]}
                                   {:seon.issue/namespaces [:seon.ns/name]}
                                   {:seon.issue/runs [:seon.test.run/id]}
@@ -590,23 +607,29 @@
                                        :else :unverified)]
                            (assoc test-value :seon.issue.test/state state)))
                        (sort-by :seon.test/sym (:seon.issue/tests row)))]
-        (assoc row :seon.issue/tests test-rows
-                   :seon.issue/functions (mapv #(vector :seon.fn/sym (:seon.fn/sym %)) (:seon.issue/functions row))
-                   :seon.issue/errors (mapv (fn [error]
-                                              (cond-> (dissoc error :seon.error/occurrences)
-                                                (seq (:seon.error/occurrences error))
-                                                (assoc :seon.error/occurrence-count
-                                                       (reduce + (map :seon.error.occurrence/count (:seon.error/occurrences error))))))
-                                            (:seon.issue/errors row))
-                   :seon.issue/check-form
-                   (list 'my.test/check {:seon.test/changed (mapv :seon.test/sym test-rows)}))))))
+        (cond-> (assoc row :seon.issue/tests test-rows
+                           :seon.issue/functions (mapv #(vector :seon.fn/sym (:seon.fn/sym %)) (:seon.issue/functions row))
+                           :seon.issue/errors (mapv (fn [error]
+                                                      (cond-> (dissoc error :seon.error/occurrences)
+                                                        (seq (:seon.error/occurrences error))
+                                                        (assoc :seon.error/occurrence-count
+                                                               (reduce + (map :seon.error.occurrence/count (:seon.error/occurrences error))))))
+                                                    (:seon.issue/errors row)))
+          (check-form row test-rows)
+          (assoc :seon.issue/check-form (check-form row test-rows)))))))
 
 (defn render-ai
-  "Emit the ordinary read for this issue; its tests define completion."
+  "Emit the ordinary read for this issue; what decides done is named."
   {:malli/schema [:=> [:cat [:or :seon.issue/issue :seon.render/unit]] :seon.render/source]}
   [unit]
-  (let [row (or (:seon.render/value unit) unit)]
-    (str ";; My issue. Its tests define done; (my.test/check ...) runs them.\n"
+  (let [row (or (:seon.render/value unit) unit)
+        named (detector-symbol row)]
+    (str (if (and (empty? (:seon.issue/tests row)) (:seon.issue/detector row))
+           (if named
+             (str ";; My issue. Its detector decides done: it resolves on the run after\n"
+                  ";; (" named " (seon.db/db)) stops naming this subject.\n")
+             ";; My issue. Its detector decides done: it resolves when the detector stops naming this subject.\n")
+           ";; My issue. Its tests define done; (my.test/check ...) runs them.\n")
          (repl/source-text (list 'my.issue/status {:seon.issue/id (:seon.issue/id row)})))))
 
 (defn render-html
@@ -620,6 +643,8 @@
      [:h3 (:seon.issue/title view)]
      [:p (:seon.issue/problem view)]
      [:p (str "Status: " (:seon.issue/status view))]
+     (when-let [form (:seon.issue/check-form view)]
+       [:p (str "Done when: " (pr-str form))])
      (into [:ul] (map (fn [test-value]
                        [:li (str (:seon.test/sym test-value) " — "
                                  (get test-value :seon.issue.test/state :unrun))])
