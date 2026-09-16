@@ -8,8 +8,8 @@ tags: [research, instrumentation, schema, class/n3]
 
 ## Result and boundary
 
-Arming implementation commit: 98b5f2afe. The selector and residual evidence
-are a separate coherent follow-up slice.
+Arming implementation commit: 98b5f2afe. Selector and residual evidence
+commit: 1c98259ba.
 
 The host arming owner now retains the canonical contract's transitive
 declaration definitions and a 64-character contract digest. It compares the
@@ -199,3 +199,20 @@ are recorded by the hook. git diff --check passed for owned code.
 No scratch cluster or worktree was created. All lane shell commands exited.
 The probe futures completed; only the recorded database test facts remain
 after removing the lane's temporary probe Vars.
+
+Cleanup returned 15 removed probe Vars after verifying every retained future
+had completed. PID 72819 was absent from the final process check. The remaining
+working-tree changes belonged to other lanes and were preserved.
+
+## Exact touched paths
+
+- AGENTS.md
+- src/seon/instrument.clj
+- test/seon/instrument_test.clj
+- src/seon/render/transcript.clj
+- docs/prds/steward-platform/research/arming-includes-referenced-schemas-2026-09-16.md
+- docs/prds/steward-platform/research/arming-includes-referenced-schemas-2026-09-16.edn
+- docs/seon/issues/archive/armed-contract-identity-omits-referenced-schemas.md
+- docs/seon/issues/archive/evaluation-reader-refuses-pulled-renderer-ref.md
+- docs/seon/issues/web-debug-fixture-transactions-and-budget-expectations-fail.md
+- docs/seon/issues/mcp-jvm-small-result-projection-fails-during-live-adoption.md
