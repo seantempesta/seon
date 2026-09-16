@@ -14,6 +14,7 @@
             [seon.fs :as fs]
             [seon.program :as program]
             [seon.schema]
+            [seon.schema.datahike]
             [sci.core :as sci]
             [seon.sci.eval :as sci.eval]
             [seon.test.runner :as runner]
@@ -660,6 +661,9 @@
 (deftest activation-seal-preserves-unchanged-facts
   (test-support/with-database
     (fn [connection]
+      (test-support/transacted!
+       connection
+       (seon.schema.datahike/malli->datahike-schema @#'source/source-attributes))
       (let [seal #'source/activation-seal-tx
             requested #{'seon.cluster/derive-activation}
             initial (seal connection digest-a requested cluster/derive-activation)]

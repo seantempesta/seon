@@ -1916,15 +1916,19 @@
       (try
         (let [digest (db/q '[:find ?digest .
                                 :where [_ :seon.source/digest ?digest]] database)]
+          (when (:seon.error/kind digest)
+            (refused! "Published source digest could not be read." digest))
           (when (and digest (or (nil? expected-digest) (= expected-digest digest)))
-          {:seon.source/branch branch
-           :seon.source/commit-id commit-id
-           :seon.source/digest digest
-           :seon.source/relative-file-digests
-           (into {} (db/q '[:find ?path ?digest
-                            :where [?file :seon.fn.file/relative-path ?path]
-                                   [?file :seon.fn.file/digest ?digest]] database))
-           :seon.source/built? false}))
+            (let [files (db/q '[:find ?path ?digest
+                                :where [?file :seon.fn.file/relative-path ?path]
+                                       [?file :seon.fn.file/digest ?digest]] database)]
+              (when (:seon.error/kind files)
+                (refused! "Published source file digests could not be read." files))
+              {:seon.source/branch branch
+               :seon.source/commit-id commit-id
+               :seon.source/digest digest
+               :seon.source/relative-file-digests (into {} files)
+               :seon.source/built? false})))
         (finally
           (d/release-materialized-db database))))))
 
@@ -2412,7 +2416,8 @@
                    (development-source-refresh! held-store instance
                                                 before-publication published
                                                 changed-paths roots))
-                 (dissoc published :seon.source/upsert-rows))))))
+                 (dissoc published :seon.source/upsert-rows
+                         :seon.source/relative-file-digests))))))
          (finally
            (release-root-store! store-dir)))))))
 
