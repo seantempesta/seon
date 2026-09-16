@@ -14,6 +14,7 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.env :as env]
+            [seon.error :as error]
             [seon.fs :as fs]
             [seon.fn :as seon.fn]
             [seon.instrument :as instrument]
@@ -345,15 +346,67 @@
         (when private-root (delete-recursively! private-root))
         (throw failure)))))
 
-(def ^:private database-base
-  ;; One new test JVM gets one newly populated base. Nothing survives process
-  ;; exit, and bin/test never reuses this delay across invocations.
-  (delay
-    (let [base (create-base (System/getProperty "seon.test.published-base"))]
-      (.addShutdownHook
-       (Runtime/getRuntime)
-       (Thread. ^Runnable #(close-base! base) "seon-test-database-base-cleanup"))
-      base)))
+(defn- retrying-base
+  "Share one daemon construction; retain successful values, never failures."
+  [construct]
+  (let [attempt (atom nil)]
+    (reify
+      clojure.lang.IPending
+      (isRealized [_]
+        (boolean (when-let [completion @attempt] (realized? completion))))
+      clojure.lang.IDeref
+      (deref [_]
+        (let [completion
+              (locking attempt
+                (or @attempt
+                    (let [completion (promise)
+                          projection (schema/handed-projection)
+                          loader (ClassLoader/getSystemClassLoader)
+                          work
+                          (fn []
+                            (let [result
+                                  (try
+                                    (with-bindings {clojure.lang.Compiler/LOADER loader}
+                                      (if projection
+                                        (schema/call-with-projection projection construct)
+                                        (construct)))
+                                    (catch Throwable failure
+                                      (error/diagnostic
+                                       {:seon.error/kind ::database-base-unavailable
+                                        :seon.error/message
+                                        (str "Canonical fixture base construction failed: "
+                                             (ex-message failure))
+                                        :seon.error/diagnostic-layer :test-fixture
+                                        :seon.error/diagnostic-operation ::create-base
+                                        :seon.error/diagnostic-member ::database-base
+                                        :seon.error/diagnostic-expected :constructed-base
+                                        :seon.error/diagnostic-offending
+                                        (symbol (.getName (class failure)))
+                                        :seon.error/diagnostic-cause
+                                        (or (ex-message failure) :seon.error/unknown)
+                                        :seon.error/diagnostic-evidence
+                                        (or (ex-data failure) :seon.error/unknown)})))]
+                              (when (:seon.error/kind result)
+                                (compare-and-set! attempt completion nil))
+                              (deliver completion result)))]
+                      (reset! attempt completion)
+                      (doto (Thread. ^Runnable work "seon-test-database-base")
+                        (.setDaemon true)
+                        (.setContextClassLoader loader)
+                        (.start))
+                      completion)))]
+          @completion)))))
+
+(defonce ^:private database-base
+  ;; One successful base per JVM. A caller can stop waiting without interrupting
+  ;; construction; failed attempts report a typed value and the next call retries.
+  (retrying-base
+   (fn []
+     (let [base (create-base (System/getProperty "seon.test.published-base"))]
+       (.addShutdownHook
+        (Runtime/getRuntime)
+        (Thread. ^Runnable #(close-base! base) "seon-test-database-base-cleanup"))
+       base))))
 
 (defn- seeded-cluster-name
   "The one cluster this fixture stood up, DERIVED, or nil when it seeded none."
@@ -382,7 +435,7 @@
   ([connection]
    (fork-cluster-ctx connection (seeded-cluster-name (db/db connection))))
   ([connection cluster-name]
-   (let [base-ctx (:seon.sci.eval/ctx @database-base)
+   (let [base-ctx (:seon.sci.eval/ctx (checked-fixture-result @database-base))
          database (db/db connection)
          projection (db/carried-projection database)
          projection-state (:seon.sci.eval/projection-state (meta database))]
@@ -699,7 +752,7 @@
   [extra-schema body]
   (let [{configuration :seon.test-support/configuration
          base-connection :seon.test-support/connection
-         base-ctx :seon.sci.eval/ctx} @database-base
+         base-ctx :seon.sci.eval/ctx} (checked-fixture-result @database-base)
         base-projection (:seon.schema/projection base-ctx)
         branch (acquire-branch!)]
     (try

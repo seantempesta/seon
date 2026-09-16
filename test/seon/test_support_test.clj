@@ -19,6 +19,61 @@
             [seon.schema.edn :as schema.edn]
             [seon.test-support :as test-support]))
 
+(deftest failed-base-construction-retries-without-caller-interruption
+  (test-support/with-database
+    (fn [connection]
+      (let [attempts (atom 0)
+            construction-started (atom nil)
+            continue-construction (atom nil)
+            caller-finished (atom nil)
+            builder-thread (atom nil)
+            base (#'test-support/retrying-base
+                   (fn []
+                     (if (= 1 (swap! attempts inc))
+                       (throw (ex-info "first construction failed" {::attempt 1}))
+                       (do
+                         (reset! builder-thread (Thread/currentThread))
+                         (reset! construction-started true)
+                         (test-support/await-event! continue-construction ::continue-construction some?)
+                         (#'test-support/create-base nil)))))
+            projection (db/carried-projection (db/db connection))]
+        (is (= :seon.test-support/database-base-unavailable (:seon.error/kind @base)))
+        (is (false? (realized? base)))
+        (let [caller (doto
+                       (Thread.
+                        ^Runnable
+                        (fn []
+                          (try
+                            (schema/call-with-projection projection #(deref base))
+                            (reset! caller-finished :returned)
+                            (catch InterruptedException _
+                              (reset! caller-finished :interrupted)))))
+                       (.setDaemon true)
+                       (.start))]
+          (try
+            (test-support/await-event! construction-started ::construction-started some?)
+            (.interrupt caller)
+            (is (= :interrupted
+                   (test-support/await-event! caller-finished ::caller-finished some?)))
+            (is (.isDaemon ^Thread @builder-thread))
+            (is (identical? (ClassLoader/getSystemClassLoader)
+                            (.getContextClassLoader ^Thread @builder-thread)))
+            (finally (reset! continue-construction true))))
+        (let [constructed @base]
+          (try
+            (is (nil? (:seon.error/kind constructed))
+                (pr-str (select-keys constructed [:seon.error/kind :seon.error/message])))
+            (when-let [base-connection (::test-support/connection constructed)]
+              (is (pos? (db/q '[:find (count ?e) . :where [?e :seon.fn/sym]]
+                              (db/db base-connection))))
+              (is (some? (:seon.sci.eval/ctx constructed))))
+            (is (= 2 @attempts))
+            (is (identical? constructed @base))
+            (is (realized? base))
+            (finally
+              (when (::test-support/connection constructed)
+                (#'test-support/close-base! constructed)))))))))
+
 (deftest fixture-setup-refusals-stop-before-the-body
   (let [body-ran (atom false)
         failure (try

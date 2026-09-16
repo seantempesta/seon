@@ -195,3 +195,37 @@ adoption, not because of arity analysis. A background retry is queued behind
 other publications; no foreign session was operated. The gate request adds
 `src/seon/turn.clj`, `test/seon/program_test.clj`, `seon.program-test`, and
 `seon.cluster.turn-test`.
+
+### g: failed fixture construction cannot poison the JVM
+
+Dependency ledger: Clojure `reference-code/clojure/src/jvm/clojure/lang/Delay.java`
+retains its caught throwable; ordinary promises report completion without
+cancelling their producer. The existing canonical constructor and cleanup
+remain `test/seon/test_support.clj/create-base` and `close-base!`.
+
+`retrying-base` now shares a daemon construction, carrying the supplied
+schema projection and selecting the system classloader. Failure returns a
+typed diagnostic and clears that attempt; success stays shared. Callers
+retain their own bounds without interrupting construction. Both fixture
+consumers check the result before destructuring it. `defonce` preserves an
+already successful base on reload; verified identical before/after reload
+on default, with no shared-base reconstruction or restart.
+
+After evaluating the proposed function and exercising failure/retry in the
+JVM, the real canonical regression passed all eleven assertions. The first
+run reported instrumentation drift during concurrent adoption; after source
+reload and explicit re-arming, the final serial run was fully green:
+
+| Regression | Pass/fail/error | Elapsed ms |
+| --- | --- | --- |
+| runtime-deletion-preserves-identity-through-tuple-retractions | 4/0/0 | 9845 |
+| failure-readers-use-the-structured-claims | 6/0/0 | 12304 |
+| failed-base-construction-retries-without-caller-interruption | 11/0/0 | 39435 |
+
+All ran via `seon.test/run`, daemon thread, one at a time, remaining-ms
+100000, PID 45917. The g regression constructs a separate real canonical
+base and closes it; its first constructor throws, the second continues
+after its requesting thread is interrupted, and later requests reuse it.
+Its 11 assertions include actual program rows and the SCI context.
+The gate request adds the two test-support paths and namespace. The
+protected operator files and runner recording-notice path remain untouched.

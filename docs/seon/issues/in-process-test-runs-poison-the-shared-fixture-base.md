@@ -1,11 +1,29 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, test-fixture, bounded-execution, dev-mcp, repl]
 ---
 
 # One interrupted in-process test run poisons the shared fixture base for the whole JVM
+
+## Resolution — 2026-09-16
+
+`test/seon/test_support.clj` now shares one daemon construction through a
+completion, caching only a successfully constructed base. A failed attempt
+returns `:seon.test-support/database-base-unavailable` to its callers and
+the next request retries. The constructor uses the system classloader and
+an explicitly carried schema projection; it inherits neither a caller's
+test loader nor its interrupt or evaluation bound. `defonce` preserves an
+existing healthy base across test namespace reloads.
+
+`failed-base-construction-retries-without-caller-interruption` exercises the
+real canonical constructor: first failure, interrupted waiter, successful
+second construction, actual program population and SCI context, and reuse.
+On default PID 45917 it passed **11/0/0 in 39435 ms**, through `seon.test/run`
+with armed contracts on a daemon thread and `remaining-ms 100000`.
+The classpath acquisition defect was independently fixed by `653d4d4ef`.
+No default restart or shared-base reconstruction was performed for this fix.
 
 ## Problem
 

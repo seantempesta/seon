@@ -38,6 +38,15 @@ of the canonical in-memory base. It does not rebuild the whole source
 population per call. Each branch has its own connection, datoms, schema
 evolution, and history (`test/seon/test_support.clj:616`, `:649`).
 
+Shared base construction runs on its own daemon thread using the system
+classloader and the caller's explicitly carried projection. Failed attempts
+return a typed diagnostic and retry on the next request; caller interruption
+does not interrupt construction. `retrying-base` and `database-base` own
+this lifecycle (`test/seon/test_support.clj:349`, `:400`). The canonical
+regression is `failed-base-construction-retries-without-caller-interruption`
+in `test/seon/test_support_test.clj:22`. Reload preserves the successful base;
+never replace it merely to rerun a test.
+
 When the runner supplies a published base, `create-base` clones and
 reidentifies its file store before connecting the private tiered backend
 (`test/seon/test_support.clj:220`). Frontend-only writes do not make a
