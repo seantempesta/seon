@@ -27,16 +27,32 @@ Publication is on the edit hook's path; a 13 s transaction per complete
 build is the class the ten-second-start rule names, and it holds the store's
 writer while agents wait.
 
-## Candidates (not decided)
+## Landed for the changed-path publication (2026-09-16)
 
-1. Index issues once per note-set digest: `seon.issue/index!` records the
-   digest of the note bytes it indexed; publication skips the index when the
-   digest is unchanged and the existing issue facts are already in the
-   forked source (a fork keeps them).
-2. Move issue indexing out of publication to its own bounded maintenance
-   step keyed on `docs/seon/issues` changes (the root maintenance portfolio
-   target), leaving publication program-only.
-3. Keep it in publication but as the changed-notes delta only.
+Candidate 3 (the changed-notes delta), derived rather than remembered — no
+digest attribute and no bookkeeping entity. `seon.issue/index-tx` now emits only
+the difference between the notes and the facts the database already holds, and
+`seon.issue/index!` writes NOTHING when that difference is empty, deriving the
+transaction once instead of twice. Measured on `default` over the live 1,649
+notes: `index-tx` 1,276 → 358 ms, tx forms 3,333 → 185, an already-indexed note
+set 1,174 ms + a transaction → 303 ms + **no transaction**, and one changed note
+→ 2 forms / 3 datoms on that issue's entity alone. Two hot spots found on the
+way: the character-sequence `words` split (484 ms) and a pairwise class
+membership scan (691 ms).
+
+Numbers and the verification boundary:
+[issue-index-publication-cost-2026-09-16](../../prds/steward-platform/research/issue-index-publication-cost-2026-09-16.md).
+
+## Still open: the complete build
+
+`publish!` (`src/seon/cluster/source.clj:408`) branches its scratch from `:db`,
+so a complete build holds no issue facts and its delta IS the whole graph: the
+13 s / 89,000-datom transaction stands. Making it cheap means forking the issue
+facts from the previous `current-src` commit into that scratch — a new mechanism
+at a seam that deliberately builds from `:db`, so it is an owner decision, not a
+lane's. The remaining candidate, moving issue indexing out of publication into
+the [TARGET] root maintenance portfolio keyed on `docs/seon/issues` changes,
+would close it from the other side.
 
 Related: `render/request-profile` was observed derived 64 times per turn by
 the same research (fetch-at-call-time, §2.1); see

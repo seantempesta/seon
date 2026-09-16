@@ -9,17 +9,30 @@
             [seon.repl :as repl]
             [seon.schema.form :as schema.form]))
 
-(defn- words [text]
-  (into [] (comp
-            (filter #(first %))
-            (map #(apply str (second %))))
-        (map (fn [characters]
-               [(or (Character/isLetterOrDigit ^char (first characters))
-                    (contains? #{\. \/ \: \- \_ \? \! \* \+ \< \> \= \$ \%} (first characters)))
-                characters])
-             (partition-by #(or (Character/isLetterOrDigit ^char %)
-                                (contains? #{\. \/ \: \- \_ \? \! \* \+ \< \> \= \$ \%} %))
-                           text))))
+(def ^:private citable-character
+  "ASCII characters that join letters and digits into one citable token."
+  (let [flags (boolean-array 128)]
+    (doseq [character ".:/-_?!*+<>=$%"] (aset flags (int character) true))
+    flags))
+
+(defn- words
+  "Maximal runs of citation characters in note text, in order.
+  One index scan: the note corpus is ~7 MB per index and the character-sequence
+  version of this split was 484 ms of every publication."
+  [^String text]
+  (let [^booleans citable citable-character
+        length (.length text)]
+    (loop [index 0 start -1 tokens (transient [])]
+      (if (== index length)
+        (persistent! (if (neg? start) tokens (conj! tokens (.substring text start index))))
+        (let [character (.charAt text index)
+              citation-character? (or (Character/isLetterOrDigit character)
+                                      (and (< (int character) 128) (aget citable (int character))))]
+          (cond
+            (and citation-character? (neg? start)) (recur (unchecked-inc index) index tokens)
+            (and (not citation-character?) (not (neg? start)))
+            (recur (unchecked-inc index) -1 (conj! tokens (.substring text start index)))
+            :else (recur (unchecked-inc index) start tokens)))))))
 
 (def ^:private record-separator
   "The NUL byte git writes before each commit's authored seconds."
@@ -208,7 +221,12 @@
                        end-row (assoc :seon.issue.citation/end-row end-row))))))
         (group-by (juxt :seon.issue/entity :seon.issue.citation/row :seon.issue.citation/end-row) hits)))
 
-(defn- replacement-tx [current desired]
+(defn- replacement-tx
+  "The delta between one issue's stored facts and its desired facts.
+  An issue whose every attribute already holds its desired value contributes
+  NOTHING, so an unchanged note set is an empty transaction rather than a
+  re-assertion of every fact the database already holds."
+  [current desired]
   (let [eid (:db/id current)
         desired (merge (select-keys current [:seon.issue/agent :seon.issue/budget
                                             :seon.issue/resolved-tx :seon.issue/created-by])
@@ -219,13 +237,17 @@
         normalized (fn [value]
                      (if (coll? value)
                        (set (map #(if (map? %) (get % :db/id %) %) value))
-                       value))]
-    (into (mapv (fn [attribute] [:db/retract eid attribute])
-                (for [attribute (keys current)
-                      :when (and (not (contains? #{:db/id :seon.issue/id} attribute))
-                                 (not= (normalized (get current attribute)) (normalized (get desired attribute))))]
-                  attribute))
-          [(assoc desired :db/id eid)])))
+                       value))
+        changed (into (sorted-set)
+                      (for [attribute (into (set (keys current)) (keys desired))
+                            :when (and (not (contains? #{:db/id :seon.issue/id} attribute))
+                                       (not= (normalized (get current attribute))
+                                             (normalized (get desired attribute))))]
+                        attribute))
+        asserted (select-keys desired changed)]
+    (cond-> (mapv (fn [attribute] [:db/retract eid attribute])
+                  (filter #(contains? current %) changed))
+      (seq asserted) (conj (assoc asserted :db/id eid)))))
 
 (defn index-tx
   "Derive exact indexed facts from the notes and the installed identities.
@@ -256,6 +278,16 @@
                                     (for [tag (:seon.issue.parse/tags note)
                                           :when (str/starts-with? tag "class/")]
                                       [tag (:seon.issue/id note)])))) parsed)
+        ;; Membership in one pass over the notes, not one scan of every note per
+        ;; note: the pairwise scan was 691 ms of every index for 115 members.
+        members-by-class (reduce (fn [membership member]
+                                   (reduce (fn [membership tag]
+                                             (let [class-id (get classes tag)]
+                                               (if (and class-id (not= class-id (:seon.issue/id member)))
+                                                 (update membership class-id (fnil conj []) member)
+                                                 membership)))
+                                           membership (:seon.issue.parse/tags member)))
+                                 {} parsed)
         component-ids (fn [value] (into #{} (map #(if (map? %) (:db/id %) %)) value))
         results
         (mapv
@@ -311,9 +343,7 @@
                              row
                              [[:seon.issue/commits (filter #(hex-token? 9 %) tokens)]
                               [:seon.issue/members
-                               (for [member parsed
-                                     :when (and (not= id (:seon.issue/id member))
-                                                (some #(= id (get classes %)) (:seon.issue.parse/tags member)))]
+                               (for [member (get members-by-class id)]
                                  ;; An already indexed member is named by its entity, so an
                                  ;; unchanged class note compares equal and re-indexing is a
                                  ;; no-op; a member first seen in this transaction is named by
@@ -335,7 +365,12 @@
                         [row]))})))
          parsed)
         removed (remove #(contains? present (:seon.issue/id %)) existing)
-        tx (into (mapv #(hash-map :seon.issue/id %) (sort present))
+        ;; A slug the database does not hold yet is minted here, so a class note
+        ;; may name a member first seen in this same transaction by lookup ref.
+        ;; An already stored slug needs no upsert: it re-asserts one identity
+        ;; fact per note the database already holds (1,649 of them today).
+        tx (into (mapv #(hash-map :seon.issue/id %)
+                       (remove by-slug (sort present)))
                  (concat (mapcat :seon.issue/tx results)
                          (mapcat (fn [issue]
                                    (into (mapv (fn [entity] [:db/retractEntity entity])
@@ -348,17 +383,28 @@
 
 (defn index!
   "Index notes through the writer and return counts plus citation refusals.
-  The request supplies the notes, keeping filesystem reads outside the writer."
+  The request supplies the notes, keeping filesystem reads outside the writer.
+  The delta decides: an unchanged note set writes nothing at all, and the
+  diagnostics come from the one derivation that produced it."
   {:malli/schema [:=> [:cat [:map [:seon.db/connection :seon.db/connection]
                              [:seon.issue/notes [:sequential [:map [:seon.issue/path :string] [:seon.issue/text :string]]]]]]
                   :map]}
   [{connection :seon.db/connection issue-notes :seon.issue/notes}]
-  (let [result (db/transact! connection [[:db.fn/call #'index-tx issue-notes]])]
-    (if (:seon.error/kind result) result
-      (let [database (:db-after result)
-            tx (index-tx database issue-notes)]
-        (merge (select-keys (meta tx) [:seon.issue/refusals :seon.issue/ambiguous :seon.issue/unresolved])
-               {:seon.issue/count (count (db/q '[:find [?e ...] :where [?e :seon.issue/path]] database))})))))
+  (let [database (db/db connection)
+        delta (index-tx database issue-notes)
+        ;; An empty delta is the whole answer: the database already holds every
+        ;; fact these notes assert, so there is nothing for the writer to
+        ;; serialize. The writer still derives the transaction it commits, so a
+        ;; database that moved between this derivation and the write is
+        ;; re-decided at the authority; only the decision to write nothing at
+        ;; all is taken here, on a connection its publication holds privately.
+        result (when (seq delta)
+                 (db/transact! connection [[:db.fn/call #'index-tx issue-notes]]))]
+    (if (:seon.error/kind result)
+      result
+      (merge (select-keys (meta delta) [:seon.issue/refusals :seon.issue/ambiguous :seon.issue/unresolved])
+             {:seon.issue/count (count (db/q '[:find [?e ...] :where [?e :seon.issue/path]]
+                                             (or (:db-after result) database)))}))))
 
 (defn issues
   "Query issues in identity order, optionally restricted by lifecycle."

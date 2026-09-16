@@ -173,6 +173,45 @@
      (clojure.test/is (empty? (:seon.issue/functions row)))
      (clojure.test/is (empty? (:seon.issue/issues row)))))))
 
+(clojure.test/deftest an-unchanged-note-set-indexes-without-a-transaction
+ (seon.test-support/with-database
+  (fn [connection]
+   ;; Publication calls index! on every complete build and every changed-path
+   ;; upsert. An unchanged note set must cost no transaction at all, and one
+   ;; changed note must cost only its own entity's datoms.
+   (let [selected [{:seon.issue/path "docs/seon/issues/probe-unchanged-a.md"
+                    :seon.issue/text (str "---\ntype: issue\nstatus: open\nseverity: cleanup\ntags: [issue]\n---\n"
+                                          "# Unchanged A\n## Problem\nseon.db/pull holds the answer.")}
+                   {:seon.issue/path "docs/seon/issues/probe-unchanged-b.md"
+                    :seon.issue/text (str "---\ntype: issue\nstatus: open\nseverity: friction\ntags: [issue]\n---\n"
+                                          "# Unchanged B\n## Problem\nseon.db/transact! writes it.")}]
+         report (seon.issue/index! {:seon.db/connection connection :seon.issue/notes selected})
+         indexed (seon.db/db connection)
+         basis (seon.db/basis-t indexed)
+         entity (:db/id (seon.db/pull indexed '[:db/id] [:seon.issue/id "probe-unchanged-b"]))]
+     (clojure.test/is (nil? (:seon.error/kind report)) (pr-str report))
+     (clojure.test/is (= [] (seon.issue/index-tx indexed selected))
+                      (pr-str (seon.issue/index-tx indexed selected)))
+     (let [again (seon.issue/index! {:seon.db/connection connection :seon.issue/notes selected})]
+       (clojure.test/is (nil? (:seon.error/kind again)) (pr-str again))
+       (clojure.test/is (= 2 (:seon.issue/count again)))
+       (clojure.test/is (= basis (seon.db/basis-t (seon.db/db connection)))
+                        "re-indexing an unchanged note set moved the database basis"))
+     (let [changed (assoc-in selected [1 :seon.issue/text]
+                             (str "---\ntype: issue\nstatus: resolved\nseverity: friction\ntags: [issue]\n---\n"
+                                  "# Unchanged B\n## Problem\nseon.db/transact! writes it."))
+           delta (seon.issue/index-tx indexed changed)
+           touched (into #{} (map #(if (map? %) (:db/id %) (second %))) delta)]
+       (clojure.test/is (seq delta))
+       (clojure.test/is (= #{entity} touched) (pr-str delta))
+       (seon.issue/index! {:seon.db/connection connection :seon.issue/notes changed})
+       (clojure.test/is (= :resolved (:seon.issue/status
+                                      (seon.db/pull (seon.db/db connection) '[:seon.issue/status]
+                                                    [:seon.issue/id "probe-unchanged-b"]))))
+       (clojure.test/is (= :open (:seon.issue/status
+                                  (seon.db/pull (seon.db/db connection) '[:seon.issue/status]
+                                                [:seon.issue/id "probe-unchanged-a"])))))))))
+
 (clojure.test/deftest issue-worker-opening-links-its-issue
  (seon.test-support/with-database
   (fn [c]
