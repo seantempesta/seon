@@ -110,18 +110,24 @@
                                     {:seon.agent/id agent-id})
                                    "\n)"))
               value (:seon.sci.admit/value result)]
-          (is (= agent-id (:my.agent/id value)))
-          (is (= namespace-name (:my.agent/namespace value)))
-          (is (= agent-id (:my.agent/steward value)))
+          ;; `identity-form` emits the raw identity pull (d6377ac39), so the
+          ;; value carries the stored attributes, not the :my.agent projection.
+          (is (= agent-id (:seon.agent/id value)))
+          (is (= namespace-name (get-in value [:seon.agent/namespace :seon.ns/name])))
+          (is (= agent-id (get-in value [:seon.agent/namespace :seon.ns/steward
+                                         :seon.agent/id])))
           (is (empty? (:seon.cluster.eval/output result))))
         (is (= {:seon.config.eval/time-limit-ms 1234}
                (:seon.sci.admit/value
                 (evaluate "(my.agent/settings! {:seon.config.eval/time-limit-ms 1234})"))))
-        (is (= {:seon.config.eval/time-limit-ms 1234 :my.agent/turns-left 0}
+        ;; Turn accounting left the opening reads with 0dca8534e: settings are
+        ;; the overrides, and remaining turns are read on demand.
+        (is (= {:seon.config.eval/time-limit-ms 1234}
                (:seon.sci.admit/value (evaluate "(my.agent/settings)"))))
         (let [dials (:seon.sci.admit/value (evaluate (str "(do\n" (seon.agent/render-settings-ai {}) "\n)")))]
           (is (map? dials))
-          (is (= 0 (:my.agent/turns-left dials))))
+          (is (= 1234 (:seon.config.eval/time-limit-ms dials)))
+          (is (not (contains? dials :my.agent/turns-left))))
         (is (= [] (:seon.sci.admit/value (evaluate "(my.test/run)"))))
         (is (= {:my.turn/disposition :wait :my.turn/note "Session complete."}
                (:seon.sci.admit/value (evaluate "(my.agent/done)"))))
