@@ -1003,8 +1003,27 @@ diagnostic text; `call-graph-fidelity-fix` for the widening). Retained roots
 `tmp/test-runs/run.MRHwLt`, `run.KIayk7`. Also: two gates launched in the
 same second hit the tools.deps classpath race again (issue updated).
 
-**Codex lanes:** `write-admission-validates-all` and `call-graph-fidelity-fix`
-running on the above. `call-graph-fidelity-fix` landed `3f0be21ed`
+**Batch 108 GREEN (21:36Z, HEAD `16408995e`):** `seon.db-test seon.schema-test
+seon.maintenance-schema-test seon.turn-test` — 105 tests, 1,028 assertions,
+0 failures, 0 errors, exit 0, results recorded. First green gate since the
+validator landed. Batch 109 (call-graph namespaces, same HEAD) running.
+
+**Research landed (2026-09-16 evening), both read in full by the orchestrator:**
+`evaluation-write-path-and-retired-identities-2026-09-16.md` (six eval
+writers, two families; the vanished turn is a fixture artefact; retirement
+should be a positive `:seon.fn/retired-tx` fact, two-arm schema) and
+`test-execution-model-2026-09-16.md` (tests are not IO-bound; workers at
+83–91% busy; cold gate = 42% base publication, 27% test bodies; flow buys
+nothing; `:seon.test/platform` is metadata not a fact; bare selection uses a
+filename find). Four owner questions put in chat 21:45Z: retired-tx fact;
+accept workers + preparation-cost cuts over in-process flow; one evaluation
+path (route the system turn through the fenced family); one batched reset
+after a schema-key audit table. Pending: `entity-schema-vs-pulled-shape`
+research (the four per-attribute `[:map [:db/id :int]]` patches — owner: fix
+the root) and the `pulled-ref-is-a-ref` lane implementing the ref-schema fix.
+
+**Codex lanes:** `pulled-ref-is-a-ref` running; `write-admission-validates-all`
+and `call-graph-fidelity-fix` stopped after their reviewed commits. `call-graph-fidelity-fix` landed `3f0be21ed`
 + `51d904a9b` (reviewed, approved; addendum in its review note).
 `write-admission-validates-all` stopped after `b1508dc8a`. Both resumable.
 A running codex lane cannot take `resume`; `bin/codex-agent stop <name>` first
