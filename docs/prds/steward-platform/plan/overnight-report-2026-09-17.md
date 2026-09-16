@@ -26,7 +26,18 @@ peer session (batches 30–57; ledger
    schema registry byte-identical (own nothing global). Issue:
    `a-failing-turn-write-refires-without-bound-and-fills-the-store`. This
    also explains part of the day's "store growth": the earlier 1.4 GB/h was
-   ordinary churn; today's spike was this storm.
+   ordinary churn; today's spike was this storm. Class 2 landed
+   (`f86ec57ed`: a refused turn write is bounded by a declared dial and
+   becomes one fault); class 1 (registry preservation) is in flight.
+   Landing that dial exposed one more class: a REQUIRED config dial whose
+   decision is not yet in the effective config makes `mcp-io-prepl` refuse
+   every connection at connect time — MCP, `config apply` (the repair
+   itself), gate recording and every in-process run all read as
+   "Connection reset" for ~45 minutes until a restart reconciled it. Issue:
+   `a-missing-required-dial-kills-every-io-prepl-connection` (blocker: the
+   connection seam must serve a typed refusal in the value, never refuse the
+   socket; a new required dial must ship with its decision in the same
+   publication).
 
 0. **The checkout's store was deleted and re-created from genesis (10:17Z).**
    Actual cause (peer, `ccccea806`): `seon.cluster/operator-root` answered
