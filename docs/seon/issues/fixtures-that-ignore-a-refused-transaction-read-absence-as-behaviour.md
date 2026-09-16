@@ -60,5 +60,14 @@ generated issue under the issue generator's detector contract
 ([issue-generator-2026-09-16.md](../../prds/steward-platform/research/issue-generator-2026-09-16.md)).
 Until that lands, the class can still return in a namespace nobody triages.
 
+The choke point earned its place on the first run: two
+`seon.render.web-debug-test` fixtures were writing a bare
+`{:seon.cluster/name …}` row that write admission refuses (it requires
+`:seon.cluster/config`), had been seeding nothing since the admission change,
+and passed anyway. They now seed through `seon.test-support/seed-cluster!`
+(`test/seon/render/web_debug_test.clj:508`, `:556`). Measurements and the
+complete in-process tally are in
+[fixture-write-helper-2026-09-16.md](../../prds/steward-platform/research/fixture-write-helper-2026-09-16.md).
+
 Related: `write-admission-validated-partial-maps-against-every-schema`
 (the admission change), the transcript second-pass landing note.

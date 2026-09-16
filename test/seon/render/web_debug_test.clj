@@ -502,7 +502,10 @@
 (deftest reverse-declarations-receive-the-actual-relationship-value
   (support/with-database
    (fn [connection]
-     (support/transacted! connection [{:seon.cluster/name "reverse-render-fixture"}])
+     ;; The cluster is seeded through its production path: a bare
+     ;; {:seon.cluster/name …} row is refused by write admission, and
+     ;; discarding that refusal is what left this fixture inert.
+     (support/seed-cluster! connection "reverse-render-fixture")
      (let [effective (config/defaults)
            caps (config/result-caps effective)
            ctx (support/fork-cluster-ctx connection)
@@ -550,8 +553,8 @@
 (deftest agent-identity-groups-scalars-and-keeps-declared-components
   (support/with-database
    (fn [connection]
-     (support/transacted! connection [{:seon.cluster/name "identity-blocks"}
-                                      {:seon.agent/id "identity-blocks"}])
+     (support/seed-cluster! connection "identity-blocks")
+     (support/transacted! connection [{:seon.agent/id "identity-blocks"}])
      (let [database @connection
            ctx (support/fork-cluster-ctx connection)
            projection (schema/projection-from-database database)
