@@ -28,6 +28,17 @@ No pre-read can safely decide whether an incomplete map updates an existing
 entity. Identity-free maps using :db/id lookup refs already admit partial
 attribute changes; explicit :db/add remains available.
 
+Turn-test-reds recheck at `c1d7d4695`, after `20d30a0bd`: both test-local
+config seeds still return `:seon.db/invalid-write`, naming the missing
+`:seon.config/applied-manifest-digest`. The affected tests are
+`refused-terminal-program-transactions-settle-and-do-not-refire` and
+`generated-model-attempt-traces-preserve-presence-and-episode-laws`.
+The fresh canonical-base probe recorded run 44594, with both complete returned
+refusals retained in the [lane evidence](../../prds/context-generation/research/turn-test-reds-cache-2026-09-16.md).
+This is the deliberately retained complete-entity constraint, not recurrence
+of optional-identity misclassification. The lane skips their downstream
+assertions under the owner's seed-refusal boundary.
+
 ## Owner
 
 seon.db/write-map-error. Any broader partial-upsert policy must reconcile

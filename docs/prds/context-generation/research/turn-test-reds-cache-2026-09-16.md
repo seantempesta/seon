@@ -124,3 +124,22 @@ foreign instrumentation changes (`seon.cluster/populate-source!` and
 Its source publication was `6aaa1645-156e-5b57-aefc-a6c14d4b814e`. These are
 explicit file-reloaded Var proofs, not a claim that default's queued adoption
 completed. Main-tree publication reported a bounded timeout.
+
+## Seed recheck after write-validation-class
+
+Run 44594 executes both original partial config seeds on a fresh canonical
+base. Both return complete `:seon.db/invalid-write` diagnostics for missing
+`:seon.config/applied-manifest-digest`, at paths `[1 ...]` and `[0 ...]`.
+Thus the assumption that these two members were unblocked is falsified.
+`20d30a0bd` fixes optional identity classification and reverse refs; its own
+settlement explicitly preserves the
+[incomplete identity-upsert residual](../../../seon/issues/identity-upserts-still-require-complete-entity-maps.md).
+The terminal-program and generated-attempt property remain seed-blocked;
+their downstream assertions are not used to attribute a production defect.
+
+The default generated-property attempt before isolation returned 0/1/1
+(run 75350), including instrumentation drift during foreign publication.
+It was **not a test timeout**. Closing its temporary base briefly found an
+active fixture connection; after that connection released, this lane deleted
+only its own memory store `8eee9698-2a32-4db0-bb5a-77617907a1a4`.
+No default or foreign connection was stopped or released by this lane.
