@@ -1,6 +1,6 @@
 ---
 type: defect
-status: open
+status: resolved
 severity: blocker
 tags: [test, analysis, fixture, runner]
 ---
@@ -76,9 +76,44 @@ is a separate elision-path difference, not this.
   then analyze a real `src/` file that calls that namespace's vars, and assert
   the analysis is clean.
 
-## Not fixed here
+## Resolved
 
-Found by the adoption-rows red lane (owned paths:
-`test/seon/adoption_rows_test.clj` and the adoption-refusal region of
-`src/seon/cluster.clj`). The fix belongs to `test/seon/fn_test.clj` or the
-analyzer's fixture-cache policy.
+Fixed at the analyzer seam, not per test
+(`src/seon/fn/analyzer.clj`). ONE cache rule now decides every analysis:
+only the checkout's OWN declared source may read or write the checkout's
+shared dependency cache — `(not (every? checkout-source? paths))` sets
+`:cache false`. The declared roots are derived from `deps.edn` (`:paths`
+plus every alias's `:extra-paths`, discarding the test alias's `.` entry
+and anything else not strictly inside the checkout), never a list
+maintained in the analyzer; the previous stdin special case (2026-08-29)
+dissolves into the same rule, since `-` is not declared source either.
+A fixture root under `tmp/` is therefore isolated by construction.
+
+`discard-obsolete-cache-entries!` stays: with cache writes owned, it is
+the repair for entries an older build, another tool, or a pre-fix fixture
+left behind — a stub whose recorded file is gone once the fixture root is
+swept is deleted by its existing "file no longer exists" clause.
+
+Live proof (development JVM, forms evaluated and namespaces reloaded
+directly — default's adoption was refused by a foreign lane's in-flight
+edit, so this is NOT an adopted-source proof):
+
+- old rule (`invoke-kondo` with the cache on for the fixture root):
+  `seon.error.transit.json` 13,570 bytes → 194 bytes, and the next analysis
+  of `src/seon/await.clj` reported `Unresolved var: error/diagnostic` —
+  the class reproduced exactly;
+- new rule: the same decoy analysis leaves the entry byte-identical and
+  `src/seon/await.clj` reports no unresolved var.
+
+Regression: `seon.fn-test/fixture-analysis-never-writes-the-checkouts-dependency-cache`
+(`test/seon/fn_test.clj`), in-process 3 assertions, 0 failures, 0 errors.
+The existing `keyword-usage-is-indexed-per-declaration` keeps its decoy.
+
+In-process runs of the cache-touching namespaces
+(`seon.fn.analyzer-test`, `seon.public-contract-test`) are green except two
+reds that fail IDENTICALLY with the old rule forced back on, so neither is
+attributable here: `seon.fn.analyzer-test/ordered-forms-use-existing-context-and-original-row-numbers`
+(expects `seon.run/complete` to resolve; `analyze-forms` passed `:cache
+false` before and after this change) and
+`seon.fn-test/keyword-usage-is-indexed-per-declaration` (its two database
+assertions read empty `:seon.fn/keywords`).

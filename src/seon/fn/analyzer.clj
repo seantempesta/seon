@@ -124,7 +124,55 @@
 (defn- finding [entry]
   (present-values entry finding-keys))
 
+(defn- manifest-source-roots
+  "The canonical source-root directories this checkout's own manifest declares.
+  clj-kondo keys its dependency cache by NAMESPACE NAME, so only source the
+  checkout owns may write the checkout's cache. `deps.edn` is the ecosystem's
+  own declaration of that ownership — `:paths` plus every alias's
+  `:extra-paths` — never a list maintained here. The `.` entry of the test
+  alias is discarded with every other candidate that is not strictly inside
+  the checkout: a root containing the cache itself would admit every scratch
+  file under `tmp/` (`deps.edn:137`)."
+  [^java.io.File checkout]
+  (let [checkout (.getCanonicalFile checkout)
+        manifest (io/file checkout "deps.edn")
+        declarations (when (.isFile manifest)
+                       (try
+                         (edn/read-string (slurp manifest))
+                         (catch Throwable _ nil)))
+        prefix (str (.getPath checkout) java.io.File/separator)]
+    (into #{}
+          (comp (filter string?)
+                (map #(.getCanonicalFile (io/file checkout ^String %)))
+                (filter #(.isDirectory ^java.io.File %))
+                (filter #(str/starts-with? (.getPath ^java.io.File %) prefix))
+                (map #(.getPath ^java.io.File %)))
+          (concat (:paths declarations)
+                  (mapcat :extra-paths (vals (:aliases declarations)))))))
+
+(def ^:private source-roots-of
+  (memoize (fn [checkout-path] (manifest-source-roots (io/file checkout-path)))))
+
+(defn- checkout-source?
+  "True when this analyzed path is the checkout's own declared source.
+  A fixture root, a scratch file, or the synthesized `-` stdin buffer is not:
+  its analysis is isolated by construction, so it can never leave a stub
+  under a first-party namespace name in the shared dependency cache."
+  [path]
+  (let [checkout (.getCanonicalFile (io/file "."))
+        roots (source-roots-of (.getPath checkout))
+        candidate (.getCanonicalPath (io/file path))]
+    (boolean
+     (some (fn [root]
+             (or (= root candidate)
+                 (str/starts-with? candidate (str root java.io.File/separator))))
+           roots))))
+
 (defn- discard-obsolete-cache-entries!
+  "Drop cache entries the checkout's source no longer answers for.
+  Still required with the ownership rule above: it repairs a cache an older
+  build or another tool left behind — including a fixture stub written before
+  that rule, whose recorded file is gone once the fixture root is swept."
   [canonical-sources]
   (let [root (kondo.core/resolve-cache-dir config-directory true cache-directory)]
     (when (.isDirectory root)
@@ -197,11 +245,15 @@
   ;; arity with an inner call's resolved var, then emitted the corruption
   ;; twice. Its sequential path retains the same linters and dependency cache.
   (let [result (invoke-kondo
-                ;; a synthesized stdin buffer must never write the shared
-                ;; cache: only complete canonical-source analysis may
-                ;; (cache-poisoning root cause, 2026-08-29)
+                ;; ONE cache rule, decided here: only the checkout's own
+                ;; declared source may read or write the shared dependency
+                ;; cache. A synthesized stdin buffer (2026-08-29) and a
+                ;; fixture root under `tmp/` (2026-09-16) are the same
+                ;; defect — kondo keys the cache by namespace name, so a
+                ;; decoy `seon.error` would answer for the real one in every
+                ;; later analysis in this JVM.
                 (cond-> {:lint paths}
-                  (some #{"-"} paths) (assoc :cache false)))
+                  (not (every? checkout-source? paths)) (assoc :cache false)))
         analysis (:analysis result)]
     {::namespace-definitions
      (filterv jvm-entry?

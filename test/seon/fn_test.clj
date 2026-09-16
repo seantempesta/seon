@@ -1240,6 +1240,35 @@
             (is (= [] (seon.fn/functions-using @connection
                                                :sample.keys/never-written)))))))))
 
+(deftest fixture-analysis-never-writes-the-checkouts-dependency-cache
+  ;; The class: clj-kondo keys its dependency cache by NAMESPACE NAME, so a
+  ;; fixture file declaring a first-party namespace used to overwrite that
+  ;; namespace's entry with a stub, and every later analysis in the same
+  ;; worker JVM refused the real vars as unresolved (batch 47's
+  ;; adoption-rows red). The analyzer now decides by ownership: only the
+  ;; checkout's own declared source reads or writes the checkout's cache.
+  (let [root (fixture-root)
+        entry (io/file ".clj-kondo/.cache/v1/clj/seon.error.transit.json")
+        unresolved (fn [findings]
+                     (filterv #(= :unresolved-var
+                                  (:seon.fn.analyzer/type %))
+                              findings))]
+    ;; The real entry is written by real source, exactly as a build writes it.
+    (analyzer/analyze {::analyzer/paths ["src/seon/error.clj"
+                                         "src/seon/schema.clj"
+                                         "src/seon/await.clj"]})
+    (is (.isFile entry) "analyzing the checkout's own source populates the cache")
+    (let [before (slurp entry)]
+      (write-source! root "seon/error.clj" "(ns seon.error)\n(def message :m)\n")
+      (analyzer/analyze {::analyzer/paths [(.getPath root)]})
+      (is (= before (slurp entry))
+          "a fixture namespace outside the declared source roots leaves the
+           checkout's cache entry byte-identical")
+      (is (empty? (unresolved (::analyzer/findings
+                               (analyzer/analyze
+                                {::analyzer/paths ["src/seon/await.clj"]}))))
+          "a real file calling seon.error's vars still resolves them"))))
+
 (deftest tests-reaching-follows-calls-and-explicit-subjects
   (test-support/with-database
     (fn [connection]
