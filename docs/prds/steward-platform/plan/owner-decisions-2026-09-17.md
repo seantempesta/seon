@@ -591,8 +591,14 @@ names no turn, so it fails on its own terms. §2.3 puts the bound at the seam
 that admits the work: the prompt's assembly is what admits history into a
 paid provider call, and its declared dial currently enforces nothing.
 
-**Question 7.** Confirm option 1: whole evaluations, oldest first, under the
-prompt budget?
+**Ruled in part (owner, 2026-09-17 09:45Z):** the numbers were too low to be
+useful; the result budget is now **15,000** tokens per evaluation and the prompt
+budget **1,000,000** tokens for now (`config/default.edn:91`, `:387`, applied
+live and read back). Still open: whether the prompt budget should *select* whole
+evaluations (option 1) rather than remain a verdict.
+
+**Question 7.** Confirm option 1's shape: whole evaluations, oldest dropped
+first, under the prompt budget, with the value profile bounding each result?
 
 ---
 
