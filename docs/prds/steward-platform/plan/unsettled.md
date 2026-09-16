@@ -361,3 +361,12 @@ Queue, in order:
   turns roadmap E2 into a query since the fork basis and F3 into a digest
   equality. Recommendation C (~1.5 d) accepted; lane `effect-facts` (Opus)
   queued after test-infra and indexing lanes. ALL SIX research pages are in.
+- 11:10Z batch 25 (issue-settlement, HEAD `a14a3101c`): issue-settlement-test,
+  my.plan-test, contracts-plan-test, db-test, cluster.source-test GREEN;
+  residuals: issue-test opening (in triage), seon.turn-test 2 (handed by the
+  peer to turn-test-reds; batch-20 triage attributed them to
+  agent-call-edges' settlement of :seon.fn/calls and the renderer-fn class).
+  Load: default at 18 GB RSS / 98 % CPU, machine load 13.7 — the
+  fixture-base fixer's fresh canonical base builds; the peer's own init --dev
+  exceeded its bound. No new launches until the fixer lands; the refork
+  clears the JVM.
