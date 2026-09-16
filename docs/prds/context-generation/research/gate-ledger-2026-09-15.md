@@ -626,3 +626,18 @@ their fix at `cluster.clj:888`). Opus lane launched on
 `request-profile-is-derived-64-times-per-turn` (derive once per render
 request, carry it; §2.1) — the residual behind the 300 ms bookkeeping bound.
 Batch 54 waits for adoption to converge on the new pid.
+
+### 2026-09-17 00:40Z — request-profile landed (`15a15e9c1`)
+
+Premise refined: `request-profile` already returned a carried profile first
+and the render proc derived once (146 calls / 1 derivation on a cold prompt);
+the real per-form deriver was `seon.turn/evaluate-sources` (six forms = 6
+derivations / 14.7 ms). Now derived once before the loop and carried on
+every evaluation request (7 calls / 1 derivation / 2.4 ms;
+`evaluate-sources` 48.8 → 29.4 ms). Regression
+`seon.cluster.evaluate-sources-test/one-turn-derives-the-render-profile-exactly-once`
+3/0/0. The 300 ms bookkeeping assertion measured 393–954 ms in-process on
+the SHARED loaded dev JVM where `db/transact!` costs 227 ms/call (3–4 ms
+idle) — the cold gate decides. Exonerated red filed:
+`ordered-evaluation-preview-test-refuses-agent-already-running.md`.
+Batch 55.
