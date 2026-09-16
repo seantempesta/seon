@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, plan, datahike, query]
 ---
@@ -54,3 +54,37 @@ Acceptance: the plan derivation answers for a nested plan on a freshly forked
 cluster, with a regression covering a plan whose steps have children and no
 `completed-tx`; and a refused generated read renders as a typed REPL error
 response rather than a raw message.
+
+## Resolution (2026-09-16, lane `plan-derivation`)
+
+Reproduced and fixed. The refusal was neither cluster- nor plan-shape
+specific: it is a SIZE threshold. Datahike's IR planner orders ops by
+estimated cost and credits no bindings for a `:recursive-rule` op, so once
+`:my.plan.item/id` grows past the recursive `descendant` rule's estimate,
+`(not-join [?leaf] …)` is ordered before its binder and rejected. Measured
+in one JVM: answers at 7 plan steps, refuses at 405, refuses everywhere at
+1005. Reformulating the rule only moves the threshold.
+
+Both defects are closed at the owner:
+
+1. `seon.plan` derives readiness, blockage and open work in Clojure from the
+   component tree `plan` already pulls (`tree-nodes`, `open-work?`,
+   `derived-frontier`); the `leaf` / `open-work` / `blocked` / `ready` rules
+   are deleted and `rules` keeps only `descendant` and `owned`. Two Datalog
+   reads per plan became zero, and the derivation cannot refuse for this
+   cause in any data state.
+2. A refusal is now said, not handed on: `refusal-line` gives every plan AI
+   formatter one typed sentence naming the plan, its agent, the refusal kind
+   and its message, and `render-plan-ai` emits
+   `(seon.plan/format-plan-ai (seon.plan/plan {}))` under an explaining
+   comment when the derivation refuses — never a bare exception line where
+   the agent's instructions belong.
+
+Regressions: `my.plan-test/the-derivation-answers-for-a-plan-with-no-steps-and-for-parents`,
+`.../a-refused-derivation-renders-a-typed-line-where-instructions-belong`,
+`.../terminal-formatters-say-a-refusal-in-their-own-words`.
+
+The dependency defect underneath it is filed separately:
+[the-query-planner-rejects-a-negation-bound-by-a-recursive-rule](the-query-planner-rejects-a-negation-bound-by-a-recursive-rule.md).
+Evidence:
+[plan-derivation-refusal-2026-09-16](../../prds/steward-platform/research/plan-derivation-refusal-2026-09-16.md).

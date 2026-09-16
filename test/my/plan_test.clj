@@ -62,12 +62,53 @@
     (coll? value) (into [] (mapcat numbers-in) value)
     :else []))
 
-(deftest terminal-formatters-preserve-database-errors
-  (let [failure {:seon.error/kind ::read-failed
-                 :seon.error/message "plan read failed"}]
-    (is (= failure (plan/format-item-ai failure)))
-    (is (= failure (plan/format-ready-items-ai failure)))
-    (is (= failure (plan/format-plan-ai failure)))))
+(deftest terminal-formatters-say-a-refusal-in-their-own-words
+  (let [failure {:seon.error/kind :seon.db/invalid-read
+                 :seon.error/message "plan read failed"
+                 :seon.error/data {:seon.agent/id "alice"}}]
+    (doseq [[subject line] [["Plan step" (plan/format-item-ai failure)]
+                            ["Ready work" (plan/format-ready-items-ai failure)]
+                            ["Plan" (plan/format-plan-ai failure)]]]
+      (is (string? line)
+          "a refusal reaching a projection is said, never handed on raw")
+      (is (str/starts-with? line (str subject " unavailable for \"alice\"")))
+      (is (str/includes? line ":seon.db/invalid-read"))
+      (is (str/includes? line "plan read failed")))))
+
+(deftest a-refused-derivation-renders-a-typed-line-where-instructions-belong
+  (with-plan
+    (fn [connection]
+      (let [refusal (plan/plan {:seon.db/db @connection
+                                :seon.agent/id "nobody"})
+            source (plan/render-plan-ai {:seon.db/db @connection
+                                         :seon.agent/id "nobody"})]
+        (is (= :my.plan/agent-not-found (:seon.error/kind refusal))
+            "the derivation refuses as a flat value, never by throwing")
+        (is (str/includes? source "(seon.plan/format-plan-ai (seon.plan/plan {}))")
+            "the refusal renders through this plan's own AI pair")
+        (is (str/starts-with? (plan/format-plan-ai refusal)
+                              "Plan unavailable for \"nobody\""))))))
+
+(deftest the-derivation-answers-for-a-plan-with-no-steps-and-for-parents
+  (with-plan
+    (fn [connection]
+      (let [empty-plan (plan-of connection)]
+        (is (= [] (:my.plan/steps empty-plan)))
+        (is (= [] (:my.plan/ready empty-plan)))
+        (is (= [] (:my.plan/blocked empty-plan)))
+        (is (not (contains? empty-plan :seon.error/kind))))
+      (add connection "root" "Improve the plan")
+      (add connection "child" "The only child"
+           {:my.plan/parent-step [:my.plan.item/id "root"]})
+      (let [nested (plan-of connection)]
+        (is (= ["child"] (ids (:my.plan/ready nested)))
+            "a parent carrying open work below it is not ready")
+        (is (= :open (:my.plan/state (first (:my.plan/steps nested))))))
+      (plan/complete! "child" connection "alice")
+      (let [settled (plan-of connection)]
+        (is (= ["root"] (ids (:my.plan/ready settled)))
+            "a parent whose steps are all complete becomes ready itself")
+        (is (= [] (:my.plan/blocked settled)))))))
 
 (deftest an-empty-plan-renders-in-both-projections
   (with-plan

@@ -30,7 +30,17 @@
 ;;; ---------------------------------------------------------------------------
 
 (def rules
-  "Datalog rules deriving ownership, readiness, and blockage from current facts."
+  "Datalog rules deriving plan ownership from the component edges.
+
+  Readiness, blockage, and open work are NOT rules: they are derived in
+  Clojure from the same pulled component tree the renderers consume (see
+  `open-work?`). A rule body that negates a variable bound only by the
+  recursive `descendant` call is at the mercy of the query planner's
+  cost-based ordering — once a database holds enough plan steps, the planner
+  orders that negation before its binder and the whole derivation refuses
+  with `Insufficient bindings`
+  ([validation](reference-code/datahike/src/datahike/query/lower.cljc:1092),
+  [ordering](reference-code/datahike/src/datahike/query/plan.cljc:1524))."
   '[[(descendant ?ancestor ?node)
      [?ancestor :my.plan.item/steps ?node]]
     [(descendant ?ancestor ?node)
@@ -42,33 +52,7 @@
     [(owned ?agent ?step)
      [?agent :seon.agent/plan ?plan]
      [?plan :my.plan/steps ?root]
-     (descendant ?root ?step)]
-    [(leaf ?step)
-     [?step :my.plan.item/id]
-     (not-join [?step] [?step :my.plan.item/steps _])]
-    [(open-work ?step)
-     [?step :my.plan.item/id]
-     (not-join [?step] [?step :my.plan.item/completed-tx _])
-     (leaf ?step)]
-    [(open-work ?step)
-     (descendant ?step ?leaf)
-     [?leaf :my.plan.item/id]
-     (not-join [?leaf] [?leaf :my.plan.item/completed-tx _])
-     (leaf ?leaf)]
-    [(blocked ?step)
-     [?step :my.plan.item/needs ?dependency]
-     (open-work ?dependency)]
-    [(ready ?step)
-     [?step :my.plan.item/id]
-     (not-join [?step] [?step :my.plan.item/completed-tx _])
-     (leaf ?step)
-     (not (blocked ?step))]
-    [(ready ?step)
-     [?step :my.plan.item/id]
-     (not-join [?step] [?step :my.plan.item/completed-tx _])
-     (not (leaf ?step))
-     (not (open-work ?step))
-     (not (blocked ?step))]])
+     (descendant ?root ?step)]])
 
 (def ^:private step-selector
   ;; The renderers consume this pull. Every reference in it is a stable
@@ -165,25 +149,6 @@
     (owned ?agent ?step)
     [?step :my.plan.item/id ?id]])
 
-(def ^:private ready-ids-query
-  '[:find [?id ...]
-    :in $ % ?agent-id
-    :where
-    [?agent :seon.agent/id ?agent-id]
-    (owned ?agent ?step)
-    [?step :my.plan.item/id ?id]
-    (ready ?step)])
-
-(def ^:private blocked-ids-query
-  '[:find [?id ...]
-    :in $ % ?agent-id
-    :where
-    [?agent :seon.agent/id ?agent-id]
-    (owned ?agent ?step)
-    [?step :my.plan.item/id ?id]
-    (not-join [?step] [?step :my.plan.item/completed-tx _])
-    (blocked ?step)])
-
 (defn- owned-ids
   [database agent-id]
   (let [ids (db/q owned-ids-query database rules agent-id)]
@@ -192,6 +157,82 @@
 ;;; ---------------------------------------------------------------------------
 ;;; Pulled tree to derived render steps
 ;;; ---------------------------------------------------------------------------
+
+(defn- tree-nodes
+  "Every node of a pulled component tree, parents before their own children."
+  [nodes]
+  (into []
+        (mapcat (fn [node]
+                  (into [node] (tree-nodes (:my.plan.item/steps node)))))
+        nodes))
+
+(defn- open-work?
+  "Does this pulled step still carry work?
+
+  A leaf carries work while it has no `:my.plan.item/completed-tx`; a parent
+  carries whatever its own steps carry. Completion is a fact; openness is
+  this walk over the component tree the caller already pulled."
+  [node]
+  (let [children (:my.plan.item/steps node)]
+    (if (seq children)
+      (boolean (some open-work? children))
+      (not (:my.plan.item/completed-tx node)))))
+
+(defn- foreign-open-work
+  "Open work by identity for dependencies outside this agent's pulled tree.
+
+  `:my.plan.item/needs` is an ordinary ref, so a dependency may live in
+  another agent's plan; its subtree is pulled with the same selector."
+  [database item-ids]
+  (reduce (fn [result item-id]
+            (let [entity (step-eid database item-id)]
+              (cond
+                (error-value? entity) (reduced entity)
+                (nil? entity) (assoc result item-id false)
+                :else (let [row (db/pull database step-selector entity)]
+                        (if (error-value? row)
+                          (reduced row)
+                          (assoc result item-id (open-work? row)))))))
+          {}
+          item-ids))
+
+(defn- derived-frontier
+  "Ready and blocked identities for one pulled component tree.
+
+  A step is blocked while any dependency it needs still carries open work,
+  and ready while it is incomplete, unblocked, and either a leaf or a parent
+  whose own steps are all complete."
+  [database nodes]
+  (let [open-by-id (into {} (map (juxt :my.plan.item/id open-work?)) nodes)
+        foreign-ids (into #{}
+                          (comp (mapcat :my.plan.item/needs)
+                                (map :my.plan.item/id)
+                                (remove #(contains? open-by-id %)))
+                          nodes)
+        foreign (if (seq foreign-ids)
+                  (foreign-open-work database foreign-ids)
+                  {})]
+    (if (error-value? foreign)
+      foreign
+      (let [open? (fn [item-id]
+                    (if (contains? open-by-id item-id)
+                      (get open-by-id item-id)
+                      (get foreign item-id false)))
+            incomplete (into [] (remove :my.plan.item/completed-tx) nodes)
+            blocked-ids (into #{}
+                              (comp (filter (fn [node]
+                                              (some (comp open? :my.plan.item/id)
+                                                    (:my.plan.item/needs node))))
+                                    (map :my.plan.item/id))
+                              incomplete)
+            ready-ids (into #{}
+                            (comp (remove #(contains? blocked-ids
+                                                      (:my.plan.item/id %)))
+                                  (filter #(or (empty? (:my.plan.item/steps %))
+                                               (not (open-work? %))))
+                                  (map :my.plan.item/id))
+                            incomplete)]
+        {:my.plan/ready ready-ids :my.plan/blocked blocked-ids}))))
 
 (defn- sibling-order
   [step]
@@ -286,15 +327,19 @@
 
       :else
       (let [pulled (agent-plan-pull database agent-id)
-            ready-ids (db/q ready-ids-query database rules agent-id)
-            blocked-ids (db/q blocked-ids-query database rules agent-id)
-            values [pulled ready-ids blocked-ids]]
+            frontier (when-not (error-value? pulled)
+                       (derived-frontier database
+                                         (tree-nodes (:my.plan/steps pulled))))
+            ready-ids (:my.plan/ready frontier)
+            blocked-ids (:my.plan/blocked frontier)
+            values [pulled frontier]]
         (if-let [error (some #(when (error-value? %) %) values)]
-          error
+          (update error :seon.error/data
+                  #(assoc (or % {}) :seon.agent/id agent-id))
           (let [current-id (get-in pulled [:my.plan/current-step
                                            :my.plan.item/id])
                 steps (derived-steps (:my.plan/steps pulled) current-id
-                                     (set ready-ids) (set blocked-ids))
+                                     ready-ids blocked-ids)
                 by-id (into {} (map (juxt :my.plan.item/id identity)) steps)
                 completions (completion-view database agent-id steps)]
             (cond-> {:seon.agent/id agent-id
@@ -1211,13 +1256,26 @@
                 (when-let [subject (:my.plan.item/subject step)]
                   (str "\n   subject: " (pr-str subject))))))))
 
+(defn- refusal-line
+  "One typed line for a refusal that reached a plan projection.
+
+  A refusal is data, so it is READ here and said plainly: what was asked
+  for, whose it is, which refusal, and its message. A projection never
+  hands an agent a bare exception message where its instructions belong."
+  [subject value]
+  (str subject " unavailable"
+       (when-let [agent-id (get-in value [:seon.error/data :seon.agent/id])]
+         (str " for " (pr-str agent-id)))
+       " — " (pr-str (:seon.error/kind value)) ": "
+       (:seon.error/message value)))
+
 (defn format-item-ai
   "Format one plan step as terminal text."
   {:malli/schema [:=> [:cat [:or :my.plan/render-step :seon.error/value]]
                   [:or :string :seon.error/value]]}
   [step]
   (if (error-value? step)
-    step
+    (refusal-line "Plan step" step)
     (str "Plan step [" (:my.plan.item/id step) "] "
          (step-line (str (inc (get step :my.plan.item/position 0))) step))))
 
@@ -1269,7 +1327,7 @@
                   [:or :string :seon.error/value]]}
   [steps]
   (if (error-value? steps)
-    steps
+    (refusal-line "Ready work" steps)
     (if (seq steps)
       (str "Ready work (" (count steps) "):\n"
            (str/join "\n" (map #(str "- " (:my.plan.item/title %)
@@ -1326,7 +1384,7 @@
                   [:or :string :seon.error/value]]}
   [view]
   (if (error-value? view)
-    view
+    (refusal-line "Plan" view)
     (let [steps (:my.plan/steps view)
           current-id (get-in view [:my.plan/current-step :my.plan.item/id])
           lines (mapv (fn [number step]
@@ -1352,21 +1410,31 @@
   (let [database (:seon.db/db unit)
         component (or (:seon.render/value unit) unit)
         selected (:my.plan/current-step component)
+        agent-id (:seon.agent/id unit)
+        derivation (when (and database agent-id)
+                     (plan {:seon.db/db database :seon.agent/id agent-id}))
         current-id (or (when (map? selected) (:my.plan.item/id selected))
                        (when (and database selected)
                          (:my.plan.item/id
                           (db/pull database [:my.plan.item/id]
-                                   (if (map? selected) (:db/id selected) selected)))))
-        current-id (or current-id
-                       (when (and database (:seon.agent/id unit))
-                         (:my.plan.item/id (current database (:seon.agent/id unit)))))]
-    (str ";; My plan is my instructions. "
-         (if current-id
-           (str "After seeing the result and verifying the criterion, complete this step with "
-                "(my.plan/complete! {:my.plan.item/id " (pr-str current-id) "}). ")
-           "No step is selected. ")
-         "my.plan/current! selects; completing clears the selection.\n"
-         (repl/source-text (list 'seon.plan/plan {})))))
+                                   (if (map? selected) (:db/id selected) selected))))
+                       (get-in derivation [:my.plan/current-step
+                                           :my.plan.item/id]))]
+    (if (error-value? derivation)
+      ;; The derivation refused. The agent still reads a typed line through
+      ;; this plan's own AI pair — never a bare exception message where its
+      ;; instructions belong — and the refusal stays a `:seon.error` value.
+      (str ";; My plan could not be derived from current facts, so it is not"
+           " shown; the refusal below names it.\n"
+           (repl/source-text (list 'seon.plan/format-plan-ai
+                                   (list 'seon.plan/plan {}))))
+      (str ";; My plan is my instructions. "
+           (if current-id
+             (str "After seeing the result and verifying the criterion, complete this step with "
+                  "(my.plan/complete! {:my.plan.item/id " (pr-str current-id) "}). ")
+             "No step is selected. ")
+           "my.plan/current! selects; completing clears the selection.\n"
+           (repl/source-text (list 'seon.plan/plan {}))))))
 
 (defn render-plan-html
   "Show the objective, current focus, progress, and every step with its state."
