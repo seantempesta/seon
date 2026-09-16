@@ -1246,10 +1246,10 @@
       (into schema-tx
             (mapcat
              (fn [[identity-attribute identity-value declaration]]
-               (map (fn [attribute]
-                      [:db.fn/retractAttribute (:db/id declaration) attribute])
-                    (program/changed-attributes
-                     declaration {identity-attribute identity-value}))))
+               (program/exact-replacement-tx
+                declaration
+                (merge {identity-attribute identity-value}
+                       (select-keys declaration [:seon.fn/ns :seon.test/ns])))))
             declarations))
     (let [row (or (program/declaration-row row :all :agent)
                   (refuse! `receipt-settle-call

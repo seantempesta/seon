@@ -500,6 +500,24 @@
             (is (every? #(seq (db/datoms @connection :eavt %)) old-shapes)
                 "shared content-addressed shapes survive arity replacement")))))))
 
+(deftest runtime-deletion-preserves-identity-through-tuple-retractions
+  (test-support/with-database
+    (fn [connection]
+      (let [identity [:seon.fn/sym "seon.test/changed-since-green"]
+            database (db/db connection)
+            before (db/pull database '[*] identity)
+            row-tx (ns-resolve 'seon.turn 'row-tx)
+            result (db/transact!
+                    connection
+                    [[:db.fn/call
+                      (fn [current]
+                        (row-tx current {} {:seon.program/delete-identities [identity]}))]])]
+        (is (seq (:seon.fn/form-span before)))
+        (is (seq (:seon.fn/call-arities before)))
+        (is (some? (:db-after result)) (pr-str result))
+        (is (= (select-keys before [:db/id :seon.fn/sym :seon.fn/ns])
+               (db/pull (db/db connection) '[*] identity)))))))
+
 (deftest identical-runtime-redeclaration-builds-no-datoms
   (test-support/with-database
     (fn [connection]

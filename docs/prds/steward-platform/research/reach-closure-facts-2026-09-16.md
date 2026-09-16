@@ -164,3 +164,34 @@ and blob SCI read require the next gate. Publication verification follows
 this commit. Items h (verify deletion tuple failure) and g (retry failed shared
 fixture construction outside caller bounds) remain. Protected gate-session
 files and recording-notice code are excluded.
+
+### h: deletion bypassed tuple-aware replacement
+
+The hypothesis blaming `program/exact-replacement-tx` is refuted. The live
+`seon.turn/row-tx` emitted `[:db.fn/retractAttribute eid :seon.fn/form-span]`
+and the same three-slot operation for `:seon.fn/call-arities`. Datahike's
+`db/transaction.cljc:1279` checks tuples before operation dispatch; its
+`:1033` rejected both with the gate's exact “expecting 2 values, got 0”.
+Deletion did not call the tuple-aware replacement function at all.
+
+Deletion now calls that existing owner with an identity-only desired row,
+preserving the namespace ref. The added canonical `seon.program-test`
+regression runs deletion inside the writer, as terminal settlement does,
+and checks both tuple shapes and the exact surviving identity.
+
+PID 45917, reloaded test namespaces through the runner loader, daemon thread,
+100000 ms per test: the two named cluster tests reproduced 3/4/0 and 1/1/0.
+The live proposed function made the first 7/0/0 (48070 ms). With the file
+changed, both assertion bodies passed (7 and 2); concurrent development
+adoption changed instrumentation during those runs, so their final results
+were 7/0/1 and 2/0/1, explicitly reporting worker-global instrumentation
+drift. This is a verification boundary, not a green gate. The small new
+regression initially transacted the generated rows outside the writer and
+was corrected to use `:db.fn/call`; its final rerun is pending.
+
+The reader repair passed whole-tree analysis and branch publication twice.
+The explicit publication command exited 1 because source changed during
+adoption, not because of arity analysis. A background retry is queued behind
+other publications; no foreign session was operated. The gate request adds
+`src/seon/turn.clj`, `test/seon/program_test.clj`, `seon.program-test`, and
+`seon.cluster.turn-test`.
