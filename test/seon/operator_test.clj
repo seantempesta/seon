@@ -13,7 +13,8 @@
             [seon.operator :as operator]
             [seon.operator.runtime :as runtime]
             [seon.operator.state :as operator.state]
-            [seon.test-support :as test-support])
+            [seon.test-support :as test-support]
+            [taoensso.timbre :as log])
   (:import [java.util.concurrent CountDownLatch TimeUnit]))
 
 (defn- caught
@@ -540,6 +541,113 @@
       (finally
         (when (.isAlive owner) (.destroyForcibly owner))
         (test-support/delete-recursively! repository-root)))))
+
+(defn- checkout-store-bytes
+  []
+  (:seon.operator.footprint/file-bytes
+   (operator.state/footprint
+    (.getCanonicalPath (io/file (System/getProperty "user.dir")
+                                "data" "store")))))
+
+(defn- cleanup-outcome
+  [repository-root managed-root]
+  (try
+    (operator/cleanup-root!
+     {:seon.operator/repository-root repository-root
+      :seon.operator/managed-root managed-root})
+    (catch Throwable error
+      (or (ex-data error) {:seon.error/kind ::threw}))))
+
+(deftest a-destructive-root-is-declared-never-inferred-from-the-working-directory
+  ;; The class: a delete-and-recreate reachable with a root that is nil,
+  ;; relative, "." or the checkout itself wiped the development store
+  ;; (docs/seon/issues/a-platform-tier-test-wiped-the-checkouts-store.md).
+  ;; The rule is now unconstructable: the root must be an absolute,
+  ;; caller-held path, and the working directory's own data/ is deletable
+  ;; only by a JVM that DECLARED it as its operator root.
+  (let [scratch (.getCanonicalPath
+                 (io/file "tmp" (str "store-root-" (random-uuid))))
+        repository-root (str (io/file scratch "repo"))
+        managed-root (str (io/file repository-root "managed"))
+        cluster-root (io/file managed-root "data" "clusters")
+        store-dir (io/file managed-root "data" "store")
+        sentinel-root (io/file scratch "sentinel")
+        sentinel (io/file sentinel-root "survives.txt")
+        link (io/file cluster-root "escape-link")
+        checkout (.getCanonicalPath (io/file (System/getProperty "user.dir")))
+        checkout-store (.getCanonicalPath (io/file checkout "data" "store"))
+        before (checkout-store-bytes)]
+    (try
+      (.mkdirs cluster-root)
+      (.mkdirs store-dir)
+      (.mkdirs sentinel-root)
+      (spit sentinel "alive")
+      (spit (io/file store-dir "object.ksv") "stored")
+      ;; the sentinel target lives OUTSIDE the managed root: recursive
+      ;; deletion never follows a symlink out of its explicit root
+      (java.nio.file.Files/createSymbolicLink
+       (.toPath link) (.toPath (.getCanonicalFile sentinel-root))
+       (make-array java.nio.file.attribute.FileAttribute 0))
+      (operator/claim-root!
+       {:seon.operator/repository-root repository-root
+        :seon.operator/managed-root managed-root})
+
+      (testing "an undeclared root refuses before anything is deleted"
+        (doseq [root [nil "" "." "data/clusters" "tmp/operator-test"]]
+          (let [outcome (cleanup-outcome repository-root root)]
+            (is (contains? #{:seon.operator/undeclared-managed-root
+                             :seon.instrument/contract-violated}
+                           (:seon.error/kind outcome))
+                (str "root " (pr-str root) " must refuse with a typed value"))))
+        (is (.exists store-dir))
+        (is (= before (checkout-store-bytes))))
+
+      (testing "the checkout's own data is deletable only by its declared operator root"
+        (let [refusal (try
+                        (store/admit-destructive-path!
+                         {:seon.cluster.store/root checkout
+                          :seon.cluster.store/target checkout-store
+                          :seon.cluster.store/declared-root managed-root})
+                        (catch Throwable error (ex-data error)))]
+          (is (= :seon.cluster.store/undeclared-checkout-deletion
+                 (:seon.cluster.store/rule refusal)))
+          (is (= checkout-store (:seon.cluster.store/target refusal))))
+        (is (= checkout-store
+               (store/admit-destructive-path!
+                {:seon.cluster.store/root checkout
+                 :seon.cluster.store/target checkout-store
+                 :seon.cluster.store/declared-root checkout}))
+            "bin/seon reset --force declares the checkout and still runs")
+        (is (= before (checkout-store-bytes))))
+
+      (testing "a declared cleanup reports itself and never follows the symlink"
+        (let [lines (atom [])
+              result (log/with-merged-config
+                       {:appenders
+                        {::capture
+                         {:enabled? true
+                          :fn (fn [data]
+                                (swap! lines conj (str (force (:msg_ data)))))}}}
+                       (operator/cleanup-root!
+                        {:seon.operator/repository-root repository-root
+                         :seon.operator/managed-root managed-root}))
+              recorded (first (filterv #(str/includes? % "recursive deletion")
+                                       @lines))]
+          (is (true? (:seon.operator.cleanup/complete? result)))
+          (is (false? (.exists store-dir)))
+          (is (false? (.exists cluster-root)))
+          (is (= "alive" (slurp sentinel))
+              "the symlink's target outside the root survives")
+          (is (some? recorded) "the deletion records itself before it runs")
+          (is (str/includes? recorded managed-root))
+          (is (str/includes? recorded (.getCanonicalPath store-dir)))
+          (is (str/includes? recorded "#:seon.cluster.store{"))
+          (is (str/includes? recorded ":file-bytes 6"))
+          (is (str/includes? recorded ":caller \"seon.operator")
+              "the recorded caller names the first-party frame that asked"))
+        (is (= before (checkout-store-bytes))))
+      (finally
+        (test-support/delete-recursively! scratch)))))
 
 (deftest cleanup-is-complete-truthful-and-never-follows-a-symlink
   (let [repository-root (owned-root)

@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 created: 2026-09-17
 tags: [testing, platform-tier, store, root-resolution, destructive]
@@ -31,7 +31,74 @@ Evidence copy of the emptied store: `tmp/orchestrator/refork/store-wiped-2026-09
 Recovery: `bin/seon reset --force` + start + reseed (data disposable by
 ruling); the day's recorded test results were lost.
 
-## Fix shape
+## Cause (established 2026-09-16, fix lane)
+
+Not a garbage collection and not the platform tier's own drill: the store was
+DELETED AND RE-CREATED FROM GENESIS by a path that resolved its root from the
+PROCESS WORKING DIRECTORY (`docs/prds/context-generation/research/store-wipe-2026-09-17.md`
+§1-§2 established the genesis shape; this lane established the seam).
+
+`seon.cluster/operator-root` answered `-Dseon.operator.root` BEFORE the root
+its caller genuinely held, and fell back to the working directory when neither
+was declared. Both halves point at the developer's store:
+
+* undeclared JVM (`bin/test-fast` sets no operator root): the default cluster
+  root `"data/clusters"` is relative, so `(resolve-bootstrap {})` derived the
+  checkout and `:seon.boot/store-dir` = `<checkout>/data/store`;
+* declared JVM (the `default` development JVM declares the checkout): a
+  fixture's explicit `tmp/<name>/<uuid>` root was OUTRANKED by the property, so
+  `(resolve-bootstrap {:seon.boot/root "tmp/blob-publication-test/<uuid>"})`
+  also returned `<checkout>/data/store` — and
+  `seon.test-support/populate-published-root!` then ran
+  `replace-directory!` (delete-recursively! + clone) over it. That is an
+  in-process fixture run wiping the development store, verified live at the
+  REPL on 2026-09-16: the same call now returns
+  `<checkout>/tmp/blob-publication-test/<uuid>/data/store`.
+
+Nothing recorded the deletion, so a 3.6 GB removal left no line anywhere — the
+project's recurring absence-of-signal class.
+
+## Fix (2026-09-16)
+
+THE RULE, stated in the docstrings of both destructive owners: a recursive
+deletion is admitted only when its authority root and target are ABSOLUTE
+spellings, the canonical target lies under the canonical root, and the target
+is outside the working directory's own `data/` unless the caller DECLARES that
+directory as the operator root this JVM was launched to operate. The
+declaration is an argument, not a property read at the seam. `bin/seon
+[--root PATH]` declares it on every child JVM, so `bin/seon reset --force`
+still destroys the checkout's data deliberately; `bin/test` workers declare
+their own isolated run root and `bin/test-fast` declares none, so no worker,
+fixture, or lane JVM can spell the developer's `data/store` at all.
+
+* `src/seon/cluster/store.clj` — new `admit-destructive-path!` (the one rule),
+  `declared-operator-root`, and `log-deletion!` (root, canonical targets, file
+  bytes, first-party caller frame, pid, logged BEFORE the delete);
+  `create-store!` admits and records its deletion and now RE-DECIDES at the
+  seam: a store whose `:branches` roster is present is never deleted.
+* `src/seon/operator.clj` — `declared-managed-root` refuses a nil, blank or
+  relative managed root before any path is derived; `managed-data-paths` uses
+  it; `cleanup-root-under-lock!` admits EVERY path before the first deletion
+  and records the aggregate report.
+* `src/seon/cluster.clj` — `operator-root` derives from the root the caller
+  genuinely holds FIRST, uses the declared property only when the cluster root
+  resolves to the working directory, and refuses when neither is available.
+* `test/seon/test_support.clj` — `populate-published-root!`'s deletion
+  authority is the run root it holds, never the JVM-wide operator root.
+
+## Regressions
+
+* `seon.operator-test/a-destructive-root-is-declared-never-inferred-from-the-working-directory`
+  — nil/""/"."/relative roots each refuse with a typed value and delete
+  nothing; the checkout's store is refused for an undeclared root and admitted
+  for the declared one; a legitimate scratch cleanup completes, never follows
+  the symlinked sentinel out of its root, and records root/targets/bytes/caller;
+  the checkout's `data/store` byte count is asserted unchanged throughout.
+* `seon.cluster.store-test/creation-never-deletes-a-complete-store-or-an-undeclared-root`
+  — the inferred-root refusals at the store seam, and a complete store
+  surviving a `create-store!` call with its durable marker intact.
+
+## Original fix shape
 
 1. The fixture derives its root from the isolated operator root it was
    handed, never from the process's cwd; a nil root refuses, never defaults.
@@ -42,7 +109,11 @@ ruling); the day's recorded test results were lost.
    `:seon.test/long` or run only under an explicit isolated root, and the
    tier's selection checker fails when one is declared `:seon.test/platform`.
 
-Until (1)–(3) land: no gate runs the platform tier or `seon.cluster.registry-test`.
+(1) and (2) landed above. (3) — the platform tier declaring no destructive
+drill — is NOT part of this fix: the tier selection checker is a separate
+slice, tracked here as the remaining item. The gate hold is now the
+orchestrator's call: the root the wipe travelled through is closed, and the
+class regression names it.
 
 ## Verdict 2026-09-17 11:40Z (peer research `fbd9c0cd9`)
 

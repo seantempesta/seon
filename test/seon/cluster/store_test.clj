@@ -398,6 +398,56 @@
       (finally
         (test-support/delete-recursively! (str (io/file dir) "/.."))))))
 
+(deftest creation-never-deletes-a-complete-store-or-an-undeclared-root
+  ;; The class that wiped the development store: delete-then-create reached
+  ;; with a root inferred from the working directory
+  ;; (docs/seon/issues/a-platform-tier-test-wiped-the-checkouts-store.md).
+  (let [dir (fresh-dir)
+        checkout (.getCanonicalPath (io/file (System/getProperty "user.dir")))
+        checkout-store (.getCanonicalPath (io/file checkout "data" "store"))
+        rule (fn [f]
+               (try (f) ::admitted
+                    (catch Throwable error
+                      (:seon.cluster.store/rule (ex-data error)))))]
+    (try
+      (testing "an inferred root is refused before any deletion"
+        (is (= :seon.cluster.store/undeclared-destructive-root
+               (rule #(store/admit-destructive-path!
+                       {:seon.cluster.store/root nil
+                        :seon.cluster.store/target checkout-store}))))
+        (is (= :seon.cluster.store/relative-destructive-root
+               (rule #(store/admit-destructive-path!
+                       {:seon.cluster.store/root "."
+                        :seon.cluster.store/target "./data/store"}))))
+        (is (= :seon.cluster.store/undeclared-checkout-deletion
+               (rule #(store/admit-destructive-path!
+                       {:seon.cluster.store/root checkout
+                        :seon.cluster.store/target checkout-store
+                        :seon.cluster.store/declared-root
+                        (.getCanonicalPath (io/file dir))})))
+            "only a JVM launched to operate the checkout may destroy its data")
+        (is (.exists (io/file checkout-store))
+            "the checkout's store is still there"))
+      (testing "a complete store is never recreated"
+        (let [opened (store/open-store! {:seon.store/dir dir})]
+          (test-support/transacted! (:seon.store/connection-object opened)
+                                    probe-schema)
+          (test-support/transacted! (:seon.store/connection-object opened)
+                                    [{:seon.store.test/marker "durable"}])
+          (store/release-store! opened))
+        (is (= :seon.cluster.store/complete-store-not-recreated
+               (rule #((ns-resolve 'seon.cluster.store 'create-store!)
+                       (.getCanonicalPath (io/file dir))
+                       (store/datahike-configuration dir))))
+            "the authority re-decides at the seam, whatever the caller read")
+        (let [reopened (store/open-store! {:seon.store/dir dir})]
+          (try
+            (is (= #{"durable"} (markers reopened))
+                "the durable marker survived the refused recreation")
+            (finally (store/release-store! reopened)))))
+      (finally
+        (test-support/delete-recursively! (str (io/file dir) "/..")))))) 
+
 ;;; ---------------------------------------------------------------------------
 ;;; The flock across processes — a real child JVM holds the store
 ;;; ---------------------------------------------------------------------------

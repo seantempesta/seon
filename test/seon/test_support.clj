@@ -109,7 +109,10 @@
           source-store (io/file base "data" "store")
           store (:seon.boot/store-dir
                  (cluster/resolve-bootstrap {:seon.boot/root root}))
-          authority (or (System/getProperty "seon.operator.root") root)]
+          ;; the deletion authority is the run root this fixture genuinely
+          ;; holds — never the JVM-wide operator root, which in an
+          ;; undeclared worker resolves to the developer's checkout
+          authority root]
       (replace-directory! authority source-store store)
       (cluster.export/reidentify!
        store)

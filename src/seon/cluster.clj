@@ -788,14 +788,42 @@
   paths)
 
 (defn- operator-root
+  "The process root whose `data/store` this cluster root branches from.
+
+  DERIVED FROM THE ROOT THE CALLER GENUINELY HOLDS, never from the process
+  working directory. `<root>/data/clusters` names the operator root above it;
+  any other cluster root names itself. The declared
+  `-Dseon.operator.root` — set on every JVM `bin/seon [--root PATH]`
+  launches — answers only when the cluster root is relative and therefore
+  resolves to the working directory, which is the developer's checkout.
+
+  The removed fallback is the pair that wiped the development store: the
+  default cluster root \"data/clusters\" is relative, so an undeclared JVM
+  derived the checkout, while a declared JVM let its property outrank an
+  explicit `tmp/` fixture root and pointed that fixture at the developer's
+  live `data/store`. An undeclared JVM whose cluster root resolves to the
+  working directory is now a typed refusal naming it."
   [cluster-root]
-  (or (System/getProperty "seon.operator.root")
-      (let [root-file (.getCanonicalFile (io/file cluster-root))
-            parent (.getParentFile root-file)]
-        (if (and (= "clusters" (.getName root-file))
-                 parent (= "data" (.getName parent)))
-          (.getCanonicalPath (.getParentFile parent))
-          (.getCanonicalPath root-file)))))
+  (let [declared (System/getProperty "seon.operator.root")
+        root-file (.getCanonicalFile (io/file cluster-root))
+        parent (.getParentFile root-file)
+        derived (if (and (= "clusters" (.getName root-file))
+                         parent (= "data" (.getName parent)))
+                  (.getCanonicalPath (.getParentFile parent))
+                  (.getCanonicalPath root-file))
+        working (.getCanonicalPath (io/file (System/getProperty "user.dir")))]
+    (cond
+      ; the caller handed a root of its own: it wins over any property
+      (not= derived working) derived
+
+      (not (str/blank? declared)) declared
+
+      :else
+      (refused!
+       "The operator root is undeclared and the cluster root resolves to the working directory."
+       {:seon.boot/rule ::undeclared-operator-root
+        :seon.boot/root cluster-root
+        :seon.boot/working-directory working}))))
 
 (defn- warn-low-space!
   [managed-root effective]

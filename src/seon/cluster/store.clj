@@ -13,6 +13,7 @@
   owns transaction serialization; `seon.db/transact!` owns transaction
   admission and failure values."
   (:require [clojure.java.io :as io]
+            [clojure.string :as str]
             [datahike.api :as d]
             [datahike.connections :as connections]
             [datahike.store :as datahike.store]
@@ -24,7 +25,8 @@
             [seon.operator.state :as operator.state]
             [seon.operator.runtime :refer [held-flocks]]
             [seon.schema :as schema]
-            [seon.schema.edn :as schema.edn])
+            [seon.schema.edn :as schema.edn]
+            [taoensso.timbre :as log])
   (:import [java.nio.channels FileChannel FileLock OverlappingFileLockException]
            [java.nio.file OpenOption StandardOpenOption]))
 
@@ -192,6 +194,170 @@
                          ::refused rule
                          ::rule rule))))
 
+;;; ---------------------------------------------------------------------------
+;;; Destructive admission — the ONE rule for deleting a store or a managed root
+;;; ---------------------------------------------------------------------------
+
+;;; THE RULE. A recursive deletion is admitted only when
+;;;
+;;;   1. its authority root and its target are ABSOLUTE spellings — nil, "",
+;;;      ".", and "data/clusters" name the process working directory, which is
+;;;      never a deletion authority;
+;;;   2. the canonical target lies under the canonical authority root; and
+;;;   3. the target is outside the working directory's own `data/`, UNLESS the
+;;;      caller declares that directory as the operator root this JVM was
+;;;      launched to operate.
+;;;
+;;; `bin/seon [--root PATH]` declares that root on every child JVM
+;;; (`-Dseon.operator.root`), so `bin/seon reset --force` still destroys the
+;;; checkout's data deliberately. `bin/test` workers declare their own
+;;; isolated run root (`src/seon/test/runner.clj:2441`) and `bin/test-fast`
+;;; declares none, so no worker, fixture, or lane JVM can spell the
+;;; developer's `data/store` at all. The declaration is an ARGUMENT, never a
+;;; property read at the seam: admission is a pure decision over the values
+;;; the caller holds.
+
+(defn declared-operator-root
+  "The canonical operator root THIS JVM was launched to operate, or nil.
+  Read once at an owner's entry and handed to `admit-destructive-path!`."
+  {:malli/schema [:=> [:cat] [:maybe :string]]}
+  []
+  (let [declared (System/getProperty "seon.operator.root")]
+    (when-not (str/blank? declared)
+      (canonical-path declared))))
+
+(defn- path-string
+  [value]
+  (cond
+    (string? value) value
+    (instance? java.io.File value) (.getPath ^java.io.File value)))
+
+(defn- under-path?
+  [ancestor descendant]
+  (or (= ancestor descendant)
+      (str/starts-with? descendant (str ancestor java.io.File/separator))))
+
+(defn admit-destructive-path!
+  "Admit one recursive deletion, or refuse BEFORE anything is deleted.
+
+  Takes `{::root, ::target, ::declared-root}` and returns the canonical
+  target path. `::root` is the caller's deletion authority, `::target` the
+  path it wants removed, and `::declared-root` the operator root this JVM was
+  launched to operate (`declared-operator-root`), absent when none was
+  declared.
+
+  THE RULE, refused as a typed store refusal naming the offending value:
+  the root and the target must be absolute (nil, \"\", \".\" and any relative
+  spelling resolve against the process working directory and are refused);
+  the canonical target must lie under the canonical root; and a target
+  inside the working directory's own `data/` is refused unless
+  `::declared-root` is that working directory. So `bin/seon reset --force`
+  destroys the checkout's data because its JVM declared that root, while a
+  test worker, a fixture, or a lane JVM — which declare an isolated root or
+  none — cannot construct the deletion."
+  {:malli/schema
+   [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The admission judges caller-supplied path values of any shape, including nil and relative strings, and refuses them by typed value."}]]
+    :string]}
+  [request]
+  (let [root (::root request)
+        target (::target request)
+        declared (::declared-root request)
+        root-string (path-string root)
+        target-string (path-string target)]
+    (when (str/blank? root-string)
+      (refuse! ::undeclared-destructive-root
+               (str "a recursive deletion was requested with no deletion "
+                    "authority (" (pr-str root) "); the root is the disposable "
+                    "root the caller holds, never the working directory")
+               {::root root ::target target}))
+    (when (str/blank? target-string)
+      (refuse! ::undeclared-destructive-target
+               (str "a recursive deletion was requested with no target ("
+                    (pr-str target) ")")
+               {::root root ::target target}))
+    (when-not (.isAbsolute (io/file root-string))
+      (refuse! ::relative-destructive-root
+               (str "the deletion authority " (pr-str root-string)
+                    " is relative, so it names the process working directory "
+                    (pr-str (System/getProperty "user.dir"))
+                    "; hand the absolute disposable root instead")
+               {::root root-string ::target target-string}))
+    (when-not (.isAbsolute (io/file target-string))
+      (refuse! ::relative-destructive-target
+               (str "the deletion target " (pr-str target-string)
+                    " is relative, so it names the process working directory "
+                    (pr-str (System/getProperty "user.dir")))
+               {::root root-string ::target target-string}))
+    (let [authority (canonical-path root-string)
+          resolved (canonical-path target-string)
+          working (canonical-path (System/getProperty "user.dir"))
+          working-data (canonical-path (io/file working "data"))]
+      (when-not (under-path? authority resolved)
+        (refuse! ::destructive-path-outside-root
+                 (str "refusing to delete " resolved
+                      " because it lies outside the deletion authority "
+                      authority)
+                 {::root authority ::target resolved}))
+      (when (and (under-path? working-data resolved)
+                 (not= declared working))
+        (refuse! ::undeclared-checkout-deletion
+                 (str "refusing to delete " resolved
+                      " inside the working directory's own data directory: "
+                      "this JVM declared operator root " (pr-str declared)
+                      ", not " (pr-str working)
+                      "; only a JVM launched to operate that root (bin/seon "
+                      "[--root PATH]) may destroy it")
+                 {::root authority
+                  ::target resolved
+                  ::declared-root declared
+                  ::working-directory working}))
+      resolved)))
+
+(defn- caller-frame
+  []
+  ;; the deletion owners are not the caller, and neither is the plumbing
+  ;; between them (contract wrappers, apply, the JDK): the first FIRST-PARTY
+  ;; frame outside the owners is who asked for this deletion
+  (let [owners ["seon.cluster.store" "seon.fs" "seon.instrument"]
+        frames (map str (.getStackTrace (Thread/currentThread)))
+        outside (remove (fn [frame]
+                          (some #(str/starts-with? frame %) owners))
+                        frames)]
+    (or (first (filter #(str/starts-with? % "seon.") outside))
+        (first (remove (fn [frame]
+                         (some #(str/starts-with? frame %)
+                               ["clojure." "malli." "java." "jdk."]))
+                       outside))
+        "unknown")))
+
+(defn log-deletion!
+  "Record one admitted recursive deletion BEFORE it runs.
+
+  Takes `{::root, ::targets, ::file-bytes, ::operation}` and logs the
+  deletion authority, every canonical target, the bytes about to disappear,
+  the calling frame, and this process's pid, so a future wipe names itself
+  instead of leaving the recurring absence-of-signal. Returns the recorded
+  report."
+  {:malli/schema
+   [:=> [:cat [:map
+               [::root :string]
+               [::targets [:vector :string]]
+               [::file-bytes :int]
+               [::operation :string]]]
+    [:map
+     [::root :string]
+     [::targets [:vector :string]]
+     [::file-bytes :int]
+     [::operation :string]
+     [::caller :string]
+     [::pid :int]]]}
+  [request]
+  (let [report (assoc request
+                      ::caller (caller-frame)
+                      ::pid (.pid (java.lang.ProcessHandle/current)))]
+    (log/warn (str "seon recursive deletion: " (pr-str report)))
+    report))
+
 ;;; The flock. Non-blocking and exclusive: a foreign holder makes
 ;;; `.tryLock` return nil.
 ;;;
@@ -275,10 +441,44 @@
         stored-db (k/get konserve :db nil {:sync? true})]
     (get-in stored-db [:config :keep-history?])))
 
+(defn- complete-store?
+  "True when `store-dir` holds a store whose `:branches` roster is written."
+  [store-dir]
+  (let [dir (io/file store-dir)]
+    (boolean
+     (and (.isDirectory dir)
+          (seq (.list dir))
+          (try (genesis-complete? (str store-dir))
+               (catch Throwable _ false))))))
+
 (defn- create-store!
-  "Create a fresh store at `store-dir`, verifying genesis completed."
+  "Create a fresh store at `store-dir`, verifying genesis completed.
+
+  The deletion this performs is admitted by `admit-destructive-path!` and
+  recorded by `log-deletion!` before it runs: an absolute target under a
+  declared disposable root, never the working directory's own `data/` unless
+  this JVM was launched to operate it. The authority also RE-DECIDES at the
+  seam — a store whose `:branches` roster is present is complete and is never
+  deleted here, whatever existence read the caller made earlier."
   [store-dir configuration]
-  (fs/delete-recursively! store-dir store-dir)
+  (let [target (admit-destructive-path!
+                {::root store-dir
+                 ::target store-dir
+                 ::declared-root (declared-operator-root)})]
+    (when (complete-store? target)
+      (refuse! ::complete-store-not-recreated
+               (str "refusing to recreate the store at " target
+                    ": its branch roster is present, so creation would "
+                    "delete durable branches")
+               {::dir target}))
+    (log-deletion!
+     {::root target
+      ::targets [target]
+      ::file-bytes (long (or (:seon.operator.footprint/file-bytes
+                              (operator.state/footprint target))
+                             0))
+      ::operation "seon.cluster.store/create-store!"})
+    (fs/delete-recursively! target target))
   (d/create-database configuration)
   (when-not (genesis-complete? store-dir)
     (refuse! ::initialization-incomplete

@@ -273,24 +273,64 @@
              :seon.operator/low-space?
              (boolean (low-space? observation request))))))
 
+(defn- declared-managed-root
+  "The canonical managed root, refusing a root that was never declared.
+
+  A nil, blank, or relative root names the process working directory, which
+  is the developer's checkout — the one spelling this owner must never
+  destroy by inference. The refusal happens before any path is derived."
+  [managed-root]
+  (let [spelling (cond
+                   (string? managed-root) managed-root
+                   (instance? java.io.File managed-root)
+                   (.getPath ^java.io.File managed-root))]
+    (when (or (str/blank? spelling)
+              (not (.isAbsolute (io/file spelling))))
+      (throw (ex-info
+              (str "The managed root " (pr-str managed-root)
+                   " is not a declared absolute root; its disposable data "
+                   "paths would resolve against the working directory "
+                   (pr-str (System/getProperty "user.dir")) ".")
+              {:seon.error/kind :seon.operator/undeclared-managed-root
+               :seon.operator/managed-root managed-root
+               :seon.operator/working-directory
+               (System/getProperty "user.dir")})))
+    (.getCanonicalPath (io/file spelling))))
+
 (defn- managed-data-paths
   [managed-root]
-  (let [data-root (io/file managed-root "data")]
+  (let [data-root (io/file (declared-managed-root managed-root) "data")]
     (mapv #(.getCanonicalPath (io/file data-root %))
           ["clusters" "store" "store.lock" "blob-staging"])))
 
+;;; Cleanup obeys the one destructive rule declared by
+;;; `seon.cluster.store/admit-destructive-path!`: every path is admitted
+;;; BEFORE the first deletion, and the deletion is recorded with root,
+;;; canonical targets, bytes and caller so a future wipe names itself.
 (defn- cleanup-root-under-lock!
   [repository-root managed-root]
-  (let [managed-root (.getCanonicalPath (io/file managed-root))
+  (let [managed-root (declared-managed-root managed-root)
           target (.getCanonicalPath (io/file managed-root "data"))
           paths (managed-data-paths managed-root)
           present (filterv #(.exists (io/file %)) paths)
+          declared (store/declared-operator-root)
+          admitted (mapv #(store/admit-destructive-path!
+                           {:seon.cluster.store/root managed-root
+                            :seon.cluster.store/target %
+                            :seon.cluster.store/declared-root declared})
+                         present)
           removed-file-bytes
           (reduce + 0
                   (map #(get (state/footprint %)
                              :seon.operator.footprint/file-bytes)
                        present))
-          _ (doseq [path present]
+          _ (store/log-deletion!
+             {:seon.cluster.store/root managed-root
+              :seon.cluster.store/targets admitted
+              :seon.cluster.store/file-bytes (long removed-file-bytes)
+              :seon.cluster.store/operation
+              "seon.operator/cleanup-root-under-lock!"})
+          _ (doseq [path admitted]
               (fs/delete-recursively! managed-root path))
           remaining (filterv #(.exists (io/file %)) paths)
           complete? (empty? remaining)
