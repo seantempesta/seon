@@ -243,7 +243,6 @@ interrupted turn. An interrupted turn does not answer its wake.
 Candidate **44765 27/0/0**; source-reloaded fresh-base **44774 27/0/0**.
 The existing recovery writer and direct evaluation owner are used unchanged.
 
-
 ## Final batch-23 member verdicts
 
 Dated census: **44 cluster-turn members: 29 green unchanged, 11 repaired
@@ -370,7 +369,6 @@ records it. No default lifecycle operation occurred. Markdown hooks report 29
 unrelated historical gitlink citations in `agents-md-audit-2026-09-15.md`;
 those foreign audit bytes were preserved.
 
-
 ## Cleanup
 
 The last owned test future reported `:completed`. The owned operator root
@@ -382,7 +380,6 @@ without following it; the owned worktree/root and scratch directory were removed
 Shared dependency files, foreign worktrees, foreign processes and dirty source
 paths were preserved. No background command or test future remains owned by
 this continuation.
-
 
 ## Batch-28 continuation: evaluation call facts
 
@@ -410,7 +407,6 @@ after file edit and explicit loader reload, **52265 10/0/0**. This is a
 ruled expectation repair, with no production change. Hook publication queued;
 this proof claims explicit test-file reload, not complete default adoption.
 
-
 ### Batch-28 seed probe and live fixture boundary
 
 The original sparse config identity seed returns `:seon.db/invalid-write`,
@@ -435,7 +431,6 @@ The delimiter performance and provider prompt visibility candidates remain
 unlanded from the prior record. No production seam in this continuation was
 edited; protected source and unrelated working-tree edits remain untouched.
 
-
 Complete [batch-28 returned values](turn-test-reds-batch28-evidence-2026-09-16.edn)
 and [MCP forms](turn-test-reds-batch28-probes-2026-09-16.clj) are retained.
 All six owned futures reported realized; the checked-in cluster-turn namespace
@@ -443,7 +438,6 @@ was reloaded to remove the unlanded candidate. No scratch JVM, worktree or
 background shell was created. The four existing namespace names remain in
 `tmp/orchestrator/gate-requests/turn-test-reds.txt`; they were re-verified under
 `test/`. Final cold proof remains the orchestrator's responsibility.
-
 
 ## Owner-authorized one-shot fixture refresh — 2026-09-16 05:15 UTC
 
@@ -461,7 +455,6 @@ The fresh base was installed; its shutdown hook owns its lifetime. No retry
 was performed. This resolves the immediate stale-base verification boundary,
 not the missing automatic refresh mechanism described in the issue.
 
-
 ### Virtual-turn call-datom slice
 
 The canonical helper now counts the evaluation call edge introduced by
@@ -473,7 +466,6 @@ canonical forks complete, preserving the identity, private-object, compaction,
 generated-read, message-diff and real-proc obligations. The earlier closed-event
 timeout and renderer-ref error do not recur in these runs. This does not
 attribute either earlier failure to a specific concurrent change.
-
 
 ### Generated provider scenario slice
 
@@ -496,3 +488,23 @@ The unchanged **48 trials**, seed **202607280402**, pass on candidate
 conjunct remains: durable prefix before each call, target, ordinal, absence of
 a stored disposition, closure, episode count, and reply presence. No production
 provider policy or validator changed.
+
+### Terminal program refusal slice
+
+The fixture updates existing config/function entities through lookup refs and
+checks the seed result. It observes agent evaluations and their shown text,
+then proves the refused turn has a closing transaction. PRD section 14 permits
+a new turn after an accepted provider reply below the episode cap; it does not
+permit replay of the refused turn. The exact refusal, single durable error,
+unchanged program definition, no installation, next-prompt visibility and cap
+obligations remain asserted.
+
+Seed-only run 53862 exposed missing schema-admission source; lookup-ref updates
+fix that fixture shape. Run 55843 was 28/4/0, exposing the stale continuation
+expectation. Runs 56330 and 56331 were 33/0/0. A stronger closing-transaction
+assertion in run 56349 was 32/1/0 because the global installation observer saw
+default's concurrent deletion of `seon.blob.retention/reclaim!`. Injection now
+matches the fixture connection, and observation matches the declared deletion
+target. Final candidate **57019: 33/0/0**; explicit checked-in namespace reload
+through `seon.test`'s loader **60109: 33/0/0**. These are live in-process proofs,
+not a cold gate. No production function changed.

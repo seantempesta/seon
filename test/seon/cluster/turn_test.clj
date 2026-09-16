@@ -785,8 +785,9 @@
 (deftest refused-terminal-program-transactions-settle-and-do-not-refire
   ;; Checkpoint-audit blocker B1, through the real SCI boundary with the
   ;; terminal database outcome injected at its one transaction seam. ONE
-  ;; refused event settles and closes atomically, records once, and generates
-  ;; neither another pass nor another trigger. `ns-unmap` itself has ordinary
+  ;; refused evaluation settles and closes atomically, records once, and never
+  ;; replays that turn. An accepted provider reply may continue in a NEW turn
+  ;; under PRD section 14 and the same episode cap. `ns-unmap` itself has ordinary
   ;; SCI REPL semantics and is not the source of this refusal.
   (doseq [[label cap next-turn?]
           [["below the episode cap" 2 true]
@@ -799,16 +800,18 @@
                 transact! db/transact!
                 original-install! sci.eval/install-row!
                 installations (atom [])]
-            (db/transact!
+            (let [seed (db/transact!
              connection
              [(agent-row "peer")
-              {:seon.config/cluster "turn-test"
+              {:db/id [:seon.config/cluster "turn-test"]
                :seon.config.run/max-episode-runs cap}
               {:seon.ns/name 'seon.config}
-              {:seon.fn/sym "seon.config/defaults"
+              {:db/id [:seon.fn/sym "seon.config/defaults"]
                :seon.fn/ns [:seon.ns/name 'seon.config]
                :seon.fn/source "(defn defaults [] {})"
-               :seon.fn/spec "[:=> [:cat] :map]"}])
+               :seon.fn/spec "[:=> [:cat] :map]"}])]
+              (when (:seon.error/kind seed)
+                (throw (ex-info "Terminal refusal fixture seed was refused." seed))))
             ;; This test plants a pre-existing program row directly rather
             ;; than producing it through eval. Finish that cold fixture setup
             ;; before the first turn; live turns never reacquire facts.
@@ -840,7 +843,7 @@
                                         [2 :seon.program/row
                                          :seon.program/delete-identities]))))
                         tx-data)]
-                   (if deletion?
+                   (if (and (identical? target connection) deletion?)
                      {:seon.error/kind :seon.db/rejected
                       :seon.error/message
                       "injected terminal program refusal"
@@ -848,15 +851,15 @@
                      (transact! target transaction))))
                sci.eval/install-row!
                (fn [request]
-                 (swap! installations conj request)
+                 (when (some #{[:seon.fn/sym "seon.config/defaults"]}
+                             (get-in request [:seon.program/row
+                                              :seon.program/delete-identities]))
+                   (swap! installations conj request))
                  (original-install! request))]
-              (let [reports (drive-agent! cluster "agent-a" 10)
+              (let [reports (drive-agent! cluster "agent-a" 2)
                     db @connection
-                    receipts
-                    (db/q '[:find [(pull ?receipt [*]) ...]
-                           :where
-                           [?receipt :seon.cluster.eval/id _]]
-                         db)
+                    evaluations
+                    (agent-evaluations db)
                     error-facts
                     (db/q '[:find [?error ...]
                            :where
@@ -865,25 +868,31 @@
                 (is (= [:open :call]
                        (mapv :seon.turn.work/situation reports))
                     "the refusal closes in its terminal pass")
-                (is (= 1 (count receipts)))
-                (is (turn/terminal? (first receipts)))
+                (is (= 1 (count evaluations)))
+                (is (turn/terminal? (first evaluations)))
                 (is (= :seon.db/rejected
-                       (:seon.error/kind (first receipts))))
+                       (:seon.error/kind (first evaluations))))
                 (is (= :seon.db/rejected
                        (:seon.error/kind
                         (edn/read-string
-                         (:seon.cluster.eval/result-edn
-                          (first receipts))))))
+                         (:seon.eval/shown
+                          (first evaluations))))))
                 (is (= 1 (count error-facts))
                     "one refusal records exactly one durable error")
-                (is (empty? (drive-agent! cluster "agent-a" 10))
-                    "the event derives zero further passes")
-                (is (false?
+                (let [work (turn/next-agent-work db (request connection "agent-a"))
+                      refused-run (get-in (first evaluations) [:seon.cluster.eval/run :db/id])]
+                  (is (= (when next-turn? :open) (:seon.turn.work/situation work))
+                      "accepted replies may continue, but never resume the refused turn")
+                  (when next-turn?
+                    (is (some? (:seon.turn/closed-tx
+                                (db/pull db [:seon.turn/closed-tx] refused-run)))
+                        "the refused turn has an actual closing transaction")))
+                (is (= next-turn?
                      (turn/more-agent-work?
                       @connection (request connection "agent-a")))
-                    "the production self-rewake predicate is false")
+                    "the self-rewake predicate derives the bounded new-turn permission")
                 (is (= 1 (count @calls))
-                    "the event never re-calls the model")
+                    "the refused turn calls the model exactly once")
                 (is (empty?
                      (db/q '[:find ?message
                             :where
