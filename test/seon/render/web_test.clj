@@ -1050,13 +1050,13 @@ handle))}}
                     "the initial page selects a render function for its units")
                 (is (pos? (:invocation before))
                     "the initial comparison executes its applicable render functions")
+                ;; An entity NO acquisition derives interest in: no identity,
+                 ;; no listened attribute, no join. A bystander agent row mints
+                 ;; a half-agent beside the real creation path (peer issue
+                 ;; an-unrelated-fixture-transaction-mints-a-half-agent).
                 (support/transacted!
                         connection
-                        [{:seon.agent/id "debug-cache-bystander"}
-                         {:seon.message/id "debug-cache-unrelated"
-                          :seon.message/to [:seon.agent/id "debug-cache-bystander"]
-                          :seon.message/content
-                          "does not affect the inspected namespace"}])
+                        [{:db/doc "An unrelated fact on an entity nothing derives interest in."}])
                 (is (< pass-before (settle-render! context)))
                 (is (= before @counts)
                     "the database wake reuses observation, discovery, and invocation")
