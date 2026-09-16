@@ -181,13 +181,25 @@
              count of zero — nothing, because nothing is wrong")
         (is (seon.schema/valid-candidate-value? :seon.problems/problems value))))))
 
-(deftest stale-var-findings-declare-their-render-producers
+(deftest stale-var-findings-declare-no-render-pair
+  ;; A finding row whose ONLY attribute is another family's
+  ;; `:db.unique/identity` may not declare a render pair. Maps are open, so
+  ;; the pair this row used to declare was selected for every `:seon.fn`
+  ;; row an agent pulled, and the published program graph answered
+  ;; "Restart the JVM to remove stale loaded Var ..." instead of the row.
+  ;; The producers stay — `ai-prose` and `html-report` call them directly
+  ;; on the rows `stale-vars` derived, which is the one place the staleness
+  ;; is actually known.
   (let [properties
         (-> (schema.edn/packaged-forms)
             (get :seon.problems/stale-var)
             schema.form/schema-properties)]
-    (is (= `problems/stale-var-ai (:seon.render/ai properties)))
-    (is (= `problems/stale-var-html (:seon.render/html properties)))))
+    (is (nil? (:seon.render/ai properties)))
+    (is (nil? (:seon.render/html properties)))
+    (is (= [:seon.fn/sym]
+           (mapv first (schema.form/map-entries
+                        (get (schema.edn/packaged-forms) :seon.problems/stale-var))))
+        "the shape itself is unchanged; only the selection path is gone")))
 
 (deftest missing-model-findings-declare-their-render-producers
   (let [properties

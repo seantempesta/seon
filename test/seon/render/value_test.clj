@@ -167,6 +167,45 @@
              (is (not (str/includes? (pr-str (:seon.render.value/html prepared))
                                     "seon-data-capped"))))))))))
 
+(deftest a-pulled-function-row-is-its-attributes-not-steering-prose
+  ;; THE CLASS: a one-attribute finding row may not declare a render pair
+  ;; over another family's identity attribute. `:seon.problems/stale-var`
+  ;; is `[:map [:seon.fn/sym :seon.fn/sym]]` and maps are OPEN, so the pair
+  ;; it declared was selected for EVERY function row an agent pulled and
+  ;; the whole published program graph answered "Restart the JVM to remove
+  ;; stale loaded Var ...". The structural twin above cannot see it: that
+  ;; one passes `:seon.render.value/structural? true`, which is precisely
+  ;; the option an agent's own evaluation never sets. So this asserts the
+  ;; agent's real path, and then the derivation behind it — no shape a bare
+  ;; `:seon.fn` row matches may carry an AI pair at all.
+  (support/with-database
+   (fn [connection]
+     (support/seed-cluster! connection "fn-row")
+     (let [database (db/db connection)
+           ctx (support/fork-cluster-ctx connection "fn-row")
+           configuration (support/effective-config)
+           pattern [:seon.fn/sym :seon.fn/private?]
+           lookup [:seon.fn/sym "seon.db/q"]
+           raw (db/pull database pattern lookup)
+           result (evaluation/evaluate
+                    {:seon.cluster.eval/source
+                     (pr-str (list 'seon.db/pull (list 'quote pattern) lookup))
+                     :seon.sci.eval/ctx ctx :seon.db/db database
+                     :seon.render/profile (render/agent-render-profile configuration)
+                     :seon.sci.admit/caps (config/result-caps configuration)
+                     :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms configuration)
+                     :seon.config/on-core-error :panic})
+           shown (:seon.eval/shown result)]
+       (is (seq raw) (pr-str lookup))
+       (is (nil? (:seon.cluster.eval/error result)) (pr-str result))
+       (is (= raw (:seon.sci.admit/value result)))
+       (is (= raw (edn/read-string shown)) shown)
+       (is (not (str/includes? shown "Restart the JVM")) shown)
+       (is (empty? (filter :seon.render/ai
+                           (schema/matching-shapes-in
+                            (db/carried-projection database) raw)))
+           "a bare :seon.fn row must match no shape declaring an AI pair")))))
+
 (deftest background-poll-keeps-identity-while-payloads-grow
   (support/with-database
    (fn [connection]
