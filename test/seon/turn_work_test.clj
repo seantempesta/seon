@@ -703,13 +703,19 @@
             "and the agent hears it")))))
 
 (deftest triggers-come-back-oldest-first
+  ;; OLDEST IS THE WAKE DATOM'S `:t`. This test used to bind an arrival
+  ;; instant per message and expect the order to follow it — but the instant
+  ;; was never written (clj-kondo had been reporting the binding unused), and
+  ;; there is no arrival attribute to write it to: `unanswered-triggers` sorts
+  ;; by `(juxt :seon.wake/t :db/id)` because answeredness is decided in
+  ;; exactly one place, by `:t` (turn PRD §14, `src/seon/turn.clj:3003`).
+  ;; The expectation follows the ruling; the name still holds.
   (with-database
     (fn [connection]
-      (doseq [[id at] [["m-2" (Date. 2000)] ["m-1" (Date. 1000)]
-                       ["m-3" (Date. 3000)]]]
+      (doseq [id ["m-2" "m-1" "m-3"]]
         (support/transacted! connection
                            [{:seon.message/id id :seon.message/to [:seon.agent/id agent-id] :seon.message/content id :seon.message/inbox [:seon.agent/id agent-id]}]))
-      (is (= ["m-1" "m-2" "m-3"]
+      (is (= ["m-2" "m-1" "m-3"]
              (mapv :seon.message/id
                    (turn/unanswered-triggers (db/db connection) agent-id)))
-          "commit order is not arrival order; the fact carries the time"))))
+          "each wake comes back in its own datom's transaction order"))))
