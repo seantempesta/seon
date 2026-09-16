@@ -247,18 +247,14 @@
                  :terminal-refusal-settlement-refused :seon.turn/rule,
                  :forms-run [:int {:min 0}],
                  ; The cluster HANDLE is the value boot produced and the
-                 ; instance retains. Its connection is declared as the
-                 ; connection OBJECT, live or released: the handle outlives
-                 ; its own liveness (a stopped instance still holds it), and
-                 ; the authority — Datahike at the transaction, `seon.db` at
-                 ; its own contracts — decides whether work may still cross
-                 ; it. Asserting liveness in this shape refused a stopped
-                 ; instance at `seon.cluster/stop!`, the function whose
-                 ; idempotence exists for exactly that value.
+                 ; instance retains: it outlives its own liveness, because a
+                 ; stopped instance still holds it. `:seon.db/connection` is
+                 ; now the connection OBJECT, live or released, so this
+                 ; references the one key again.
                  :cluster
                  [:map
                   [:seon.agent/context-state {:optional true} :seon.agent/context-state]
-                  [:seon.db/connection :seon.store/connection-object]
+                  [:seon.db/connection :seon.db/connection]
                   [:seon.cluster/name :seon.cluster/name]
                   [:seon.db.process/id :seon.db.process/id]
                   [:seon.sci.eval/ctx :seon.sci.eval/ctx]

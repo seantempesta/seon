@@ -55,7 +55,7 @@
   through it (`seon.db/transact!`, the loop handle, the wake listener)."
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
   [value]
-  (instance? datahike.connector.Connection value))
+  (db/connection-object? value))
 
 (defn file-lock-object?
   "True for a java.nio.channels.FileLock, HELD or released.

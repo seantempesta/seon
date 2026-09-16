@@ -126,14 +126,24 @@
           :index :boolean,
           :no-history? :boolean,
           :unique :boolean,
+          ; A CONNECTION IS A CONNECTION OBJECT, live or released. Its
+          ; released-ness is temporal state the authority re-decides -- and
+          ; already does: `seon.db/transact!` answers the typed value "The
+          ; explicit transaction connection is not live."
+          ; (src/seon/db.clj:3195) and Datahike refuses at the write. Declaring
+          ; liveness here was a second, earlier, weaker copy of that decision,
+          ; and it refused every RELEASE-time caller whose whole job is the
+          ; released case: `seon.cluster/stop!` on a stopped instance and
+          ; `seon.cluster.wake/unlisten!`, whose own docstring says stop "may
+          ; arrive after a store release".
           :connection
           [:fn
            {:error/message
-            "must be a live unreleased Datahike connection from the calling cluster"
+            "must be a Datahike connection object, live or released"
             :gen/gen seon.db/connection-generator
             :seon.schema/identity-only true
             :seon.schema/identity-projection seon.db/connection-identity}
-           seon.db/connection?],
+           seon.db/connection-object?],
           :connection-id [:vector [:or :uuid :keyword]],
           :connection-identity
           [:map

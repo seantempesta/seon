@@ -104,6 +104,63 @@ the new predicate present. `clj-kondo` clean on the changed Clojure files
 (5 pre-existing shadowed-var warnings in boot_test, none new).
 NOT verified: no test JVM was run — the gate owns the proof.
 
+## Class 1, second wave (batch 71) — the last liveness predicate, deleted
+
+Batch 71 re-gated `7f99fe695` green everywhere except one remaining member of
+the same class: `a-failed-stop-remains-addressable-and-retryable` now refused at
+`seon.cluster.wake/unlisten!`, `[:seon.cluster.wake/connection]`, "must be a
+live unreleased Datahike connection from the calling cluster" — with the same
+four consequence assertions behind it. `unlisten!`'s own docstring says the
+released case is the point: "`::flow/stop` may arrive after a store release"
+(`src/seon/cluster/wake.clj:560-561`), and its body catches and returns nil for
+exactly that. The contract forbade what the body handles, one more time.
+
+A grep over `resources/seon/schemas/*.edn` for the live predicate found ONE
+occurrence left: `:seon.db/connection` itself (`seon.db.edn:136` at that HEAD).
+Every other member — wake's two requests, `my.*`, config, effect, env, fn,
+render, source, turn, test — references that one key. So the class had one
+remaining root, not one remaining member.
+
+Fixed there: `:seon.db/connection` is the connection OBJECT, live or released
+(`seon.db/connection-object?`, `src/seon/db.clj`), and
+`seon.cluster.store/connection-object?` delegates to it so there is ONE
+definition. `:seon.turn.loop/cluster` references `:seon.db/connection` again,
+the cross-namespace hop from the first wave no longer being needed.
+
+The decision this deletes was already made downstream, better: `transact!`
+answers the typed value "The explicit transaction connection is not live."
+for a released connection (`src/seon/db.clj:3195-3199`) and Datahike refuses at
+the write. The contract was a second, earlier, weaker copy of that decision.
+
+One totality repair rides along, because relaxing the predicate makes the case
+reachable: `seon.db/connection-identity` derefs the connection for its
+`:seon.schema/identity-projection`, and a released connection's wrapped state
+is the keyword `:released`, so `(:config @connection)` is nil and the
+dependency's `connection-id` has nothing to dispatch on — it would have thrown
+out of an identity projection. It now answers the typed unknown
+(`:seon.db/released-connection`), never a throw and never a nil.
+
+Verified live (default pid 74930): `:seon.db/connection`,
+`:seon.cluster.wake/unlisten-request`, `:seon.cluster.wake/route-request`,
+`:seon.turn.loop/cluster`, `:seon.boot/instance` and `:seon.store/store` all
+compile, and the set of identities that cannot compile against a naive static
+file population is UNCHANGED (the same six config composites
+`seon.schema.edn/derive-config-forms` builds at runtime). No test JVM was run.
+
+### Not done, and why
+
+The steward asked for `development-adoption-targets-one-of-two-cohosted-clusters`
+to be declared `:seon.test/long`. It already is, and has been since `d756a09d4`
+(2026-09-08): `test/seon/cluster/boot_test.clj:1007-1008` carries
+`^{:seon.test/long "Real source publication and two cohosted clusters verify
+named adoption and independent program facts."}`, the same shape the runner
+reads (`src/seon/test/runner.clj:633`) and the check pulls
+(`src/seon/test.clj:552`). Nothing was added. Its worker-exchange bound in
+batches 68 and 71 is therefore not a missing declaration: a gate that NAMES the
+namespace runs it complete, long tests included (AGENTS.md §5). If that test
+should not run inside the named-namespace gate, the selector is the thing to
+change, not the metadata.
+
 ## Class 2 — a fixture wrote a config row no mechanism can produce (`d427728d7`)
 
 `selected-config-repairs-locked-state-before-consumers-arm` wrote

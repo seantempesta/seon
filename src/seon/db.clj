@@ -47,6 +47,18 @@
        (some? (:wrapped-atom value))
        (not= @(:wrapped-atom value) :released)))
 
+(defn connection-object?
+  "True for a Datahike connection, live or RELEASED.
+  The shape question, as distinct from `connection?`'s liveness question:
+  a connection object outlives its own liveness, and the callers whose job
+  IS the released case -- `seon.cluster/stop!` on a stopped instance,
+  `seon.cluster.wake/unlisten!` after a store release -- hold exactly that
+  value. Liveness stays where it is DECIDED: `transact!` answers a typed
+  value for a released connection, and Datahike refuses at the write."
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
+  [value]
+  (connector/connection? value))
+
 (defn database-value?
   "True for any Datahike database value."
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
@@ -54,6 +66,7 @@
   (db.utils/db? value))
 
 (schema/register-core-predicate! 'seon.db/connection? connection?)
+(schema/register-core-predicate! 'seon.db/connection-object? connection-object?)
 (schema/register-core-predicate! 'seon.db/database-value? database-value?)
 
 (defn- fresh-connection
@@ -222,14 +235,48 @@
   (datahike.store/connection-id (:config @connection)))
 
 (defn connection-identity
-  "Plain-data identity of a live Datahike connection."
+  "Plain-data identity of a Datahike connection, or the typed unknown.
+  A RELEASED connection has no derivable identity: its wrapped state is
+  `:released`, so there is no `:config` to identify and the dependency's
+  `connection-id` has nothing to dispatch on. That is an unavailable
+  observation, which is a typed value here — never a throw out of an
+  identity projection, and never a silent nil."
   {:malli/schema
    [:=> [:cat [:or :seon.db/connection :seon.error/value]]
     [:or :seon.db/connection-identity :seon.error/value]]}
   [connection]
-  (if (error-value? connection)
-    connection
-    {:datahike/connection-id (connection-id connection)}))
+  (cond
+    (error-value? connection) connection
+
+    (not (map? (:config @connection)))
+    (error-value
+     ::released-connection
+     "This Datahike connection is released; a released connection has no identity."
+     {::connection (str connection)})
+
+    :else {:datahike/connection-id (connection-id connection)}))
+
+(defn call-without-custody
+  "Call `f` with NO ambient cluster custody bound on this thread.
+
+  The elided `seon.db` arities exist so an AGENT's evaluation writes its own
+  cluster without naming it. Anything else running on a thread that inherited
+  those bindings — an in-process test body, a fixture helper that elides its
+  connection — silently writes the LIVE cluster instead of failing. On
+  2026-09-17 that put a test's synthetic schema rows into `default`'s datoms
+  and every later write on the cluster was refused, which filled the store.
+
+  Removing the bindings turns that silence into the ordinary loud refusal
+  `seon.db` already has: a read or write with no connection names what it
+  needed. Absence is the honest answer here, never a fallback to whichever
+  cluster happens to be in scope."
+  {:malli/schema [:=> [:cat [:fn clojure.core/ifn?]]
+                  [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
+                         :seon.schema.admission/reason "A scope wrapper returns its body's arbitrary result unchanged."
+                         :gen/elements [nil false 0 "" :k [] {}]}]]}
+  [f]
+  (binding [*conn* nil *read-database* nil]
+    (f)))
 
 (defn database-value-identity
   "Plain-data identity of a COMMITTED immutable Datahike database value.
