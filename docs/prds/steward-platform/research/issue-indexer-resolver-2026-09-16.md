@@ -128,6 +128,11 @@ namespaces, and a git-derived open date.
 - `:seon.issue.parse/undated` — notes git could not date (an absence that is
   reported rather than read as health).
 
+Measured after the change: `bin/issues-index --check` exits **0**, prints
+**60,238 bytes** (was 242 KB and exit 1), and reports `:seon.issue/count 255`
+open issues, `:seon.issue/refusals []`, two ambiguities, 1,531 unresolved
+tokens over 736 paths, and `:seon.issue.parse/undated 0`.
+
 ## 4. Verification boundary
 
 - Live, on `default`, `jvm` mode with explicit custody: the resolver, the git
