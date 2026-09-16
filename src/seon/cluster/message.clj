@@ -466,7 +466,7 @@
 
 (defn render-inbox-ai
   "Read each acquired message once through its entity's AI pair."
-  {:malli/schema [:=> [:cat [:or :seon.message/inbox :seon.message/pulled-reference :seon.message/inbox-unit]] :seon.render/source]}
+  {:malli/schema [:=> [:cat [:or :seon.message/inbox :seon.db/ref :seon.message/inbox-unit]] :seon.render/source]}
   [recipient-or-inbox]
   (if (and (sequential? recipient-or-inbox)
            (every? map? recipient-or-inbox))
@@ -513,7 +513,7 @@
   The reverse unit hands every message it acquired and renders them through
   [[inbox-html]]; a walk from one message hands that message's single
   recipient reference and renders it as the reference it is."
-  {:malli/schema [:=> [:cat [:or :seon.message/inbox :seon.message/pulled-reference :seon.message/inbox-unit] :seon.db/database-value]
+  {:malli/schema [:=> [:cat [:or :seon.message/inbox :seon.db/ref :seon.message/inbox-unit] :seon.db/database-value]
                   :seon.render/hiccup]}
   [recipient-or-inbox database]
   ;; A LOOKUP REF IS ALSO SEQUENTIAL, so the collection branch is the one

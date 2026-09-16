@@ -9,7 +9,7 @@
              [:db/id {:optional true} :int]
              [:t {:optional true} :seon.db/basis-t]
              [:seon.cluster.eval/id :seon.cluster.eval/id]
-             [:seon.cluster.eval/run [:map [:db/id :int]]]
+             [:seon.cluster.eval/run :seon.cluster.eval/run]
              [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal]
              [:seon.cluster.eval/source
               {:optional true}
@@ -26,8 +26,7 @@
               :seon.db/basis-t]
              [:seon.eval/origin {:optional true} :seon.db/ref]
              [:seon.eval/renderer {:optional true} :seon.eval/renderer]
-             [:seon.eval/renderer-fn {:optional true}
-              [:or :seon.eval/renderer-fn [:map [:db/id :int]]]]
+             [:seon.eval/renderer-fn {:optional true} :seon.eval/renderer-fn]
              [:seon.eval/shown {:optional true} :string]
              [:seon.cluster.eval/output {:optional true} :string]
              [:seon.cluster.eval/error {:optional true} :string]

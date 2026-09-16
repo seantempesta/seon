@@ -1356,7 +1356,7 @@
          (is (= :seon.db/invalid-write (:seon.error/kind refusal)))
          (is (= attribute (:seon.db/attribute refusal)))
          (is (= (str "the required key " attribute
-                     " with an integer or a string or a tuple with 2 entries")
+                     " with an integer or a string or a tuple with 2 entries or a map")
                 (:seon.error/expected-description problem)))
          (is (= before (db/basis-t (db/db connection)))))))))
 

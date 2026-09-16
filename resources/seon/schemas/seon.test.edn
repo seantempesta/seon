@@ -65,8 +65,7 @@
              [:seon.test/reach-unknown {:optional true} :seon.test/reach-unknown]
              [:seon.test/run-basis-t :seon.test/run-basis-t]
              [:seon.test/run-at :seon.test/run-at]
-             [:seon.test/run {:optional true}
-              [:or :seon.test/run [:map [:db/id :int]]]]
+             [:seon.test/run {:optional true} :seon.test/run]
              [:seon.test/failing-assertions
               {:optional true}
               :seon.test/failing-assertions]

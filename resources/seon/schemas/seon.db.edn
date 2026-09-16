@@ -8,7 +8,9 @@
                       [:or :string :uuid :keyword :symbol :int
                        [:tuple :keyword [:ref :seon.db/lookup-value]]]}}
             [:tuple :keyword :seon.db/lookup-value]]],
-          :ref [:or :int :string [:tuple :keyword :seon.db/lookup-ref-value]],
+          :ref [:or {:description "A Datahike reference: entity id, tempid, lookup ref, or nested entity map carrying :db/id. Datahike transaction/explode resolves the nested map to that entity; wildcard pull returns the same spelling."}
+                :int :string [:tuple :keyword :seon.db/lookup-ref-value]
+                [:map [:db/id :int]]],
           :component :boolean,
           ;; One component's OWN entity map, as Datahike's transaction-data
           ;; grammar accepts it in the place of a ref. Nothing declares this

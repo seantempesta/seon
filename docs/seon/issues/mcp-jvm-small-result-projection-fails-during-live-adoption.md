@@ -69,3 +69,12 @@ Smaller select-keys results subsequently returned in 3–7 ms of JVM time.
 Large failure-message projection also delayed delivery well beyond the
 reported test execution time. No cause is attributed to adoption from this
 evidence, and no restart or alternate REPL transport was used.
+
+## Pulled-reference observation — 2026-09-16
+
+Default pid 41413 answered runtime health, but one read-only JVM evaluation
+requesting the carried projection's `:seon.db/ref` form, a pulled evaluation
+origin, and the bridge's ref type timed out at 20,000 ms. HTTP independently
+reproduced the origin contract refusal. The assignment permits only one
+evaluation, so no retry or alternate prepl transport was used. This records
+unavailable probe evidence without attributing its cause.

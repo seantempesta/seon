@@ -2,16 +2,138 @@
   "Regression proofs for the canonical schema registration boundary."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [clojure.test.check.generators :as gen]
             [clojure.walk :as walk]
             [datahike.api :as d]
+            [malli.core :as m]
             [malli.error :as me]
+            [malli.generator :as mg]
             [seon.call-preparation :as call-preparation]
             [seon.db]
             [seon.instrument :as instrument]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
+            [seon.schema.datahike :as schema.datahike]
+            [seon.schema.form :as schema.form]
             [seon.schema.internal :as schema.internal]
             [seon.test-support :as test-support]))
+
+(defn- reference-entry?
+  [projection entry]
+  (letfn [(reference? [form]
+            (let [resolved (schema.datahike/resolve-malli-form-in projection form)]
+              (or (= :seon.db/ref resolved)
+                  (and (vector? resolved)
+                       (#{:and :or :set :vector :sequential :seon.db/ref} (first resolved))
+                       (some reference? (schema.datahike/form-children resolved))))))]
+    (boolean (reference? (last entry)))))
+
+(defn- reference-value
+  [projection form value]
+  (let [resolved (schema.datahike/resolve-malli-form-in projection form)
+        children (schema.datahike/form-children resolved)]
+    (case (schema.datahike/form-head resolved)
+      :set #{(reference-value projection (first children) value)}
+      (:vector :sequential) [(reference-value projection (first children) value)]
+      :and (reference-value projection (first children) value)
+      :or (reference-value projection (first (filter #(reference-entry? projection [::entry %]) children)) value)
+      value)))
+
+(defn- required-entry-value
+  [projection form stored?]
+  (let [resolved (schema.datahike/resolve-datahike-form-in projection form)
+        form (if (and stored? (#{:set :vector :sequential} (schema.datahike/form-head resolved)))
+               (into [(first resolved)
+                      (assoc (or (schema.form/attr-form-properties resolved) {}) :min 1)]
+                     (schema.datahike/form-children resolved))
+               form)]
+    (mg/generate (m/schema form {:registry (:seon.schema.projection/registry projection)})
+                 {:seed 20260916 :size (if stored? 1 0)})))
+
+(defn- fixture-generation-projection
+  [projection connection lock]
+  (let [database (seon.db/db connection)
+        ctx (test-support/fork-cluster-ctx connection)
+        supplied {'seon.db/connection-generator connection
+                  'seon.cluster.store/connection-generator connection
+                  'seon.db/database-value-generator database
+                  'seon.cluster.store/database-value-generator database
+                  'seon.cluster.store/file-lock-generator lock
+                  'seon.sci.eval/ctx-generator ctx}]
+    (schema/declaration-projection
+     (walk/postwalk
+      (fn [value]
+        (if-let [entry (and (map? value) (find supplied (:gen/gen value)))]
+          (assoc value :gen/gen (gen/return (val entry)))
+          value))
+      (:seon.schema.projection/forms projection)))))
+
+(deftest pulled-references-satisfy-every-declared-entity-contract
+  (test-support/with-database
+   (fn [connection]
+     (let [lock-path (java.nio.file.Files/createTempFile
+                      (.toPath (java.io.File. "tmp")) "pulled-ref-" ".lock"
+                      (make-array java.nio.file.attribute.FileAttribute 0))]
+      (try
+       (with-open [channel (java.nio.channels.FileChannel/open
+                           lock-path (into-array java.nio.file.OpenOption
+                                                 [java.nio.file.StandardOpenOption/WRITE]))
+                   lock (.lock channel)]
+        (let [database (seon.db/db connection)
+           projection (schema/projection-from-database database)
+           generation (fixture-generation-projection projection connection lock)
+           forms (:seon.schema.projection/forms projection)
+           subjects (into (sorted-map)
+                          (keep (fn [[schema-key form]]
+                                  (when (schema.form/map-shape? form)
+                                   (let [entries (schema.form/map-entries form)]
+                                    (when (some #(reference-entry? projection %) entries)
+                                      [schema-key entries])))))
+                          forms)
+           target (:db/id (seon.db/pull database [:db/id] [:seon.ns/name 'seon.schema]))
+           storable? #(true? (:seon.db/attributes (schema.form/schema-properties (forms %))))]
+       (is (pos-int? target))
+       (is (seq subjects) "the packaged projection must declare entity refs")
+       (is (contains? subjects :seon.eval/entity) "the failing reader schema is covered")
+       (println "Pulled-reference map contracts:" (count subjects)
+                "storable:" (count (filter storable? (keys subjects))))
+       (is (= :db.type/ref (schema.datahike/form->datahike-value-type-in projection :seon.db/ref)))
+       (doseq [[schema-key entries] subjects]
+         (testing (str schema-key)
+          (try
+           (let [stored? (storable? schema-key)
+                 row (into {}
+                           (keep (fn [[attribute options :as entry]]
+                                   (let [reference? (reference-entry? projection entry)]
+                                     (when (or reference? (not (and (map? options) (:optional options))))
+                                       [attribute
+                                        (if reference?
+                                          (reference-value
+                                           projection (last entry)
+                                           (if (and stored? (schema/identity-attr? forms attribute))
+                                             target
+                                             {:db/id (if stored? target 1)}))
+                                          (required-entry-value generation (last entry) stored?))]))))
+                           entries)
+                 _ (is ((schema/projection-validator projection schema-key) row)
+                       (pr-str {:schema schema-key
+                                :errors (mapv :in (:errors ((schema/projection-explainer projection schema-key) row)))}))]
+             (when stored?
+              (let [
+                 report (test-support/transacted! connection [(assoc row :db/id "pulled-ref-subject")])
+                 eid (get (:tempids report) "pulled-ref-subject")
+                 pulled (seon.db/pull (seon.db/db connection) '[*] eid)]
+             (is ((schema/projection-validator projection schema-key) pulled)
+                 (pr-str {:schema schema-key
+                          :errors (mapv :in (:errors ((schema/projection-explainer projection schema-key) pulled)))}))
+             (doseq [entry entries :when (reference-entry? projection entry)]
+               (let [value (get pulled (first entry))]
+                 (is (if (map? value) (= target (:db/id value))
+                         (and (seq value) (every? #(= target (:db/id %)) value)))
+                     (str "nested reference landed at " (first entry))))))))
+           (catch Throwable failure
+             (is false (str schema-key ": " (ex-message failure)))))))))
+       (finally (java.nio.file.Files/deleteIfExists lock-path)))))))
 
 (defn- refusal
   [thunk]
@@ -626,8 +748,8 @@
 (deftest a-component-bearing-row-validates-its-own-declared-shape
   ;; CLASS: every component attribute declares `[<collection>
   ;; {:seon.db/component true} :seon.db/ref]`, and `:seon.db/ref` admits an
-  ;; entity id, a string, or a lookup ref — never the component's OWN entity
-  ;; map, which is what the producer of that row actually builds and what
+  ;; entity id, a string, a lookup ref, or a map with :db/id — not a new
+  ;; component's OWN entity map, which the producer actually builds and
   ;; Datahike's transaction-data grammar expects. So a row that carried its
   ;; components was refused by its own declared shape, and an agent's first
   ;; `defn` died at `seon.program/with-contract-facts`
@@ -668,10 +790,10 @@
              (case collection-kind :vector [17] :set #{17} :and 17)))))
     (testing "the widening is confined to component positions"
       (is (false? (schema/valid-candidate-value? forms :seon.db/ref entity))
-          ":seon.db/ref itself still admits no entity map")
+          ":seon.db/ref requires :db/id on a reference map")
       (is (false? (schema/valid-candidate-value?
                    forms :seon.fn.arity/input entity))
-          "a non-component ref attribute still admits no entity map")
+          "a non-component ref requires :db/id on a reference map")
       (is (false? (schema/valid-candidate-value? forms :seon.fn/arities [{}]))
           "an empty map is not a component entity"))
     (testing "the row an agent's contracted defn builds validates"

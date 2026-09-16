@@ -192,8 +192,7 @@
 
 (defn open?
   "True when the run has not closed."
-  {:malli/schema [:=> [:cat [:map [::closed-tx {:optional true}
-                                   [:or ::closed-tx [:map [:db/id :int]]]]]]
+  {:malli/schema [:=> [:cat [:map [::closed-tx {:optional true} ::closed-tx]]]
                   :boolean]}
   [run]
   (not (contains? run ::closed-tx)))

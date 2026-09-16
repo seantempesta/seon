@@ -100,16 +100,16 @@
                 [:seon.message/content :seon.message/content]
                 [:seon.message/from
                  {:optional true}
-                 :seon.message/pulled-reference]
+                 :seon.db/ref]
                 [:seon.message/to
                  {:optional true}
-                 :seon.message/pulled-reference]
+                 :seon.db/ref]
                 [:seon.message/about
                  {:optional true}
-                 :seon.message/pulled-reference]
+                 :seon.db/ref]
                 [:seon.message/caused-by
                  {:optional true}
-                 :seon.message/pulled-reference]],
+                 :seon.db/ref]],
                :caused-by
                [:and
                 {:description
@@ -182,12 +182,6 @@
                 [:seon.message/ambiguous-about
                  :seon.message/ambiguous-about]
                 [:seon.error/message :seon.error/message]],
-               :pulled-reference
-               [:or
-                {:description
-                 "One reference as a pull hands it to a renderer: an entity id, a lookup ref, or the referenced entity map the page already acquired."}
-                :seon.db/ref
-                [:map [:db/id :int]]],
                :delivery
                [:map
                 [:seon.message/rows :seon.db/tx-data]

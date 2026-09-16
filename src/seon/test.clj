@@ -56,7 +56,7 @@
   last green result. Includes retractions. Missing history or closure evidence
   is unknown. This names changed dependencies, not proof of causation."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.test/sym]
-                  [:or [:vector [:map [:db/id :int] [:seon.fn/sym :seon.fn/sym]]]
+                  [:or [:vector [:and :seon.db/ref [:map [:seon.fn/sym :seon.fn/sym]]]]
                    :seon.error/value]]}
   [database test-symbol]
   (let [row (db/pull database [:db/id :seon.test/reach-unknown {:seon.test/reach [:db/id]}]
