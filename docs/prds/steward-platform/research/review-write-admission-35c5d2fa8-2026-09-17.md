@@ -48,3 +48,39 @@ pushed, with the other Datahike fork commits.
 
 **Gate requested:** batch 107 = platform, then `seon.db-test seon.schema-test
 seon.maintenance-schema-test seon.turn-test`.
+
+## Addendum — `b1508dc8a` reviewed (orchestrator, 2026-09-16 20:55Z)
+
+Read in full: the diff to `src/seon/db.clj`, `src/seon/fn.clj`, both test
+files, and the landing note's repair section.
+
+**Approved.** The root fix is the right one: the final-report validator was
+handing each expanded member of a cardinality-many attribute to
+`write-value`, which implements Datahike's *submission* lookup-ref heuristic,
+so a stored set of two keywords became one nested set and failed `[:set …]`.
+`write-entity-error` now rebuilds the declared set/vector from the resolved
+EAVT values and never treats a resolved collection as transaction syntax.
+The refusal now carries attribute, offending value and entity through
+`require-committed!` into the exception message, which is the "flat refusal
+travels" requirement. The tombstone validator is derived from the same
+authored `:seon.program/row-schema` / `:seon.program/written-by` properties
+the indexer uses; a bare new identity is refused, removing one required
+definition fact is refused, and a retired row validates — that is validation
+of the real retired-row shape (ruling 47), not a grammar exception.
+Regressions run on the canonical fixture through the real writer and assert
+unchanged `:max-tx` on refusal.
+
+**What it exposed next (fixed by the orchestrator, `b023e93a9`).** With the
+validator no longer refusing, a complete publication ran past the operator's
+180 s bound three times. `jstack 53320` showed the writer inside
+`seon.cluster.source/identity-ref` → `seon.schema.edn/packaged-forms` →
+`read-schema-resource` (a full EDN parse of every schema resource) once per
+evidence ref, under seven nested `retry-with-tempid` frames. Law 2.1 defect
+(fetch at call time inside the transaction). Forms are now acquired once in
+`preserved-evidence-tx`. The lane was stopped after its commit; its scope
+question is answered by that fix.
+
+**Still open from this slice:** the recorder writing test entities without
+`:seon.schema.admission/source` (batch 105's refusal at `[47871 …]`) is not
+addressed by `b1508dc8a`; it is proven or refuted by the first cold gate on
+the converged base (batch 107 first).

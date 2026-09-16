@@ -974,27 +974,26 @@ Decisions I made under F8 that he may veto: write admission = final-report
 validator in the fork (option 2); fault entity stays evidence-free; the
 persistent-sorted-set pin stays; collections run when the store passes 2×.
 
-**THE BLOCKER.** The final-report validator (Seon `35c5d2fa8`, fork
-`73afe782`) rejects every complete program publication: it validates a
-cardinality-many attribute's expanded members one at a time against the
-whole `[:set …]` schema (`[4501 :seon.fn/keywords #{…}]: expected a set, got
-a keyword`, entity `my.agent/identity`); the refusal reaches the log as a
-generic "Transaction report validation rejected". Consequences: no adoption
-converges, no cold base builds (batch 106 failed at base preparation),
-`seon.test/run` refuses every lane with "No function in this program declares
-:seon.fn/destroys". A second real writer defect it exposed: the test recorder
-creates test entities without `:seon.schema.admission/source` (batch 105's
-recording refused at `[47871 …]`). The codex lane
-`write-admission-validates-all` is resumed on exactly this (fix the
-validator's multivalued handling and make the flat refusal travel; then fix
-the recorder; never bypass). Check `bin/codex-agent status` /
-`tmp/orchestrator/write-admission-validates-all-summary.txt` first thing.
+**THE BLOCKER — status at 2026-09-16 21:00Z.** The validator defect is
+fixed and reviewed (`b1508dc8a`, addendum in
+`review-write-admission-35c5d2fa8-2026-09-17.md`). It uncovered the next one:
+publication then exceeded the operator's 180 s bound because
+`seon.cluster.source/identity-ref` parsed every schema resource from disk per
+evidence ref inside the transaction; fixed at `b023e93a9` (forms acquired once).
+Default was stopped and restarted on that code and `bin/seon init --dev
+default` launched, log `tmp/orchestrator/restart-adopt-b023e93a9.log`. If
+adoption converged: run the gate queue below. If not: `jstack` the new pid,
+read the writer thread, fix the next fetch-at-call-time site — do not raise
+the bound. The recorder's missing `:seon.schema.admission/source` on test
+entities (batch 105) is unproven either way until the first cold gate.
+The `write-admission-validates-all` lane is stopped (resumable).
 
-**Running codex lanes (names survive compaction):** `write-admission-validates-all`
-(above), `call-graph-fidelity-fix` (batch-105 fn-test reds: macro usages
-counted as calls with arity; absent symbol widens to the world; gate-set
-scans references; NPE atom nil; per-call reference re-derivation — plus the
-widening-scope follow-up in `review-call-graph-fidelity-fix-2026-09-17.md`).
+**Running codex lanes (names survive compaction):** `call-graph-fidelity-fix`
+landed `3f0be21ed` (macro usages are references, file-scoped unresolved
+selection, batched `gate-sets`) and is resumed on one review correction: the
+reference fallback consulted `:seon.fn/references` only when a target had no
+resolved caller, which drops tests reaching through apply/requiring-resolve
+callers; it must always walk both edge kinds. Stop for review after that.
 A running codex lane cannot take `resume`; `bin/codex-agent stop <name>` first
 (verify pids gone), then `resume`. Opus subagents cannot be resumed after
 compaction — relaunch with the landing note as grounding.
