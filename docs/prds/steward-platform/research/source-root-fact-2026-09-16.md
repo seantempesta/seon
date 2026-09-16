@@ -118,6 +118,35 @@ asserts every file entity there carries a root and that the set of roots equals
 either refusing out-of-root files at the changed-path seam or fabricating a
 root, and would turn the honest absence into a lie.
 
+## Batch 46 B — one function for both seams (`0eba4b8c3`)
+
+`seon.fn-test/file-artifacts-and-manifests-are-byte-digested-and-deterministic`
+went red at `fn_test.clj:1029` on snapshot `2b996b1b5`: the fixture built the
+manifest with a temp root and the incremental artifact with NO `:seon.fn/roots`,
+which falls back to `seon.fn/source-roots` — under which the temp file lies
+beneath no root. The walk wrote a root, the single-file seam wrote none, and
+the two artifacts differed. My defect: two ways to answer one question.
+
+`rooted-source-files` is deleted. `build-manifest` and `build-artifact` now both
+call **`containing-root` with the roots of their own request**, so the same file
+under the same roots carries the same root fact by construction, and the
+regression asserts that equality — and the concrete root value — explicitly
+rather than inferring it from whole-artifact equality.
+
+**Not adopted and not run in-process.** A concurrent lane is mid-flight
+dissolving `seon.program/shapes` into shapes derived from the declared entity
+maps (uncommitted `src/seon/program.cljc` plus the `seon.ns`/`seon.fn`/
+`seon.test`/`seon.schema`/`seon.lint`/`seon.program` schema EDNs — the issue
+this lane recorded twice today). `default`'s loaded program now throws
+`A program identity attribute declares no row schema`, which refuses
+`bin/seon init --dev default` (twice, ten minutes apart) and every in-process
+`seon.test/run` with `Test provenance unavailable: …`. That lane's edits were
+preserved and nothing of theirs was touched. clj-kondo over both changed files
+reports 0 errors. That dissolution also SUBSUMES this lane's
+`src/seon/program.cljc` hunk: `:seon.fn.file/root`, declared on
+`:seon.fn.file/file`, is owned by derivation, and their note cites `925ca19fe`
+as the second silent strip.
+
 ## Verification boundary
 
 Adopted and measured on `default` only; `default` was never stopped, reforked,
