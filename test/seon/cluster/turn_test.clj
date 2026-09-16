@@ -194,36 +194,37 @@
                    :seon.config.flow.io/concurrency 2)})]
      (try
       (test-support/seed-cluster! connection "turn-test")
-      (db/transact! connection
+      (let [result
+            (db/transact! connection
                   [{:seon.ns/name 'clojure.set}
                    {:seon.ns/name 'clojure.test}
                    {:seon.ns/name 'seon.schema}
                    (agent-row "agent-a")
-                   ;; The loop resolves the one current config row at every
-                   ;; :call. Compile the complete production shape, changing
-                   ;; only the values that make this an inert paid-call
-                   ;; fixture. A sparse hand-built row would pin the deleted
-                   ;; boot-captured target shape.
-                   (:seon.config/desired-row
-                    (config/compile-manifest
-                     {:seon.boot/cluster-name "turn-test"
-                      :seon.config/manifest
-                      {:seon.config.run/max-episode-runs 100
-                       :seon.config.ai/endpoint "http://127.0.0.1:1/v1"
-                       :seon.config.ai/model "probe"
-                       ;; Most turn tests assume one target; failover tests
-                       ;; opt in explicitly through `configure-backup!`.
-                       :seon.config.ai.backup/model config/absent
-                       :seon.config.ai/max-tokens 32
-                       :seon.config.ai/api-key-variable "SEON_AI_TEST_KEY"
-                       :seon.config.ai/timeout-ms 200
-                       :seon.config.ai.retry/base-delay-ms 1
-                       :seon.config.ai.retry/multiplier 2.0
-                       :seon.config.ai.retry/jitter-fraction 0.0
-                       :seon.config.ai.retry/maximum-delay-ms 1
-                       :seon.config.ai.retry/maximum-retries 0
-                       :seon.config.ai.retry/maximum-total-delay-ms 0}}))
-                   {:seon.message/id "m-1" :seon.message/to [:seon.agent/id "agent-a"] :seon.message/content "count the widgets" :seon.message/inbox [:seon.agent/id "agent-a"]}])
+                   {:seon.message/id "m-1" :seon.message/to [:seon.agent/id "agent-a"] :seon.message/content "count the widgets" :seon.message/inbox [:seon.agent/id "agent-a"]}])]
+        (when (:seon.error/kind result)
+          (throw (ex-info "Turn fixture seed was refused." result))))
+      ;; Reconcile absence as well as values against the seeded defaults.
+      (let [result
+            (config/apply!
+             {:seon.db/connection connection
+              :seon.boot/cluster-name "turn-test"
+              :seon.config/manifest
+              {:seon.config.run/max-episode-runs 100
+               :seon.config.ai/endpoint "http://127.0.0.1:1/v1"
+               :seon.config.ai/model "probe"
+               ;; Failover tests opt in through `configure-backup!`.
+               :seon.config.ai.backup/model config/absent
+               :seon.config.ai/max-tokens 32
+               :seon.config.ai/api-key-variable "SEON_AI_TEST_KEY"
+               :seon.config.ai/timeout-ms 200
+               :seon.config.ai.retry/base-delay-ms 1
+               :seon.config.ai.retry/multiplier 2.0
+               :seon.config.ai.retry/jitter-fraction 0.0
+               :seon.config.ai.retry/maximum-delay-ms 1
+               :seon.config.ai.retry/maximum-retries 0
+               :seon.config.ai.retry/maximum-total-delay-ms 0}})]
+        (when (:seon.error/kind result)
+          (throw (ex-info "Turn fixture configuration was refused." result))))
       (with-render-context-proc
          connection
          ;; THE HANDLE IS THE PRODUCTION HANDLE: `test-support/cluster-handle`
@@ -2002,6 +2003,9 @@
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
             requests (atom [])]
+        (is (nil? (:seon.config.ai.backup/model
+                   (config/effective (db/db connection) "turn-test")))
+            "the fixture reconciles its explicit backup absence against seeded defaults")
         (with-redefs [ai/complete
                       (recording-completer
                        requests

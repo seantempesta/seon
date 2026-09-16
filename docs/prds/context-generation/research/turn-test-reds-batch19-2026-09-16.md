@@ -32,7 +32,43 @@ contracts. The final cold/platform gate belongs to the orchestrator.
 
 ## Class table
 
-Pending the serial fresh-base census and candidate probes.
+The per-member verdicts below distinguish a refused fixture write from a
+failure after successful setup. The namespace remains red.
+
+| Cause | Tests | Disposition | Regression |
+|---|---|---|---|
+| Error identity mistaken for occurrence evidence | Partial-stream truncation, reasoning-only diagnostic, backup attempt, cold SCI acquisition | Resolved by `2209387e2`; 36/0/0 before and after adoption | Existing exact payload, attempt-link and acquisition assertions |
+| Compiled config upsert cannot express explicit absence | Shared `with-cluster` constructor | Reconcile through `config/apply!`; candidate 9/0/0 | Strengthened `one-successful-call-leaves-exactly-one-attempt-fact` asserts absence of the seeded backup |
+| Partial config entity maps refused before test work | `refused-terminal-program-transactions-settle-and-do-not-refire`, `generated-model-attempt-traces-preserve-presence-and-episode-laws` | **Blocked by write-validation-class**; downstream assertions skipped after capturing the complete refused seed | Existing tests retained; no config-map workaround applied to these members |
+| Retired generated settlement fixture | `generated-fixed-point-closes-the-run`, `generated-membership-failure-never-advances-the-run-to-call` | Setup reaches `receipt-settle-call`, which returns `no-terminal-fact`; not attributed to raw write validation | Retained until current system-turn coverage verifies green |
+| Retired phase/private-state/recovery observations | Generated phase property, private-definition refusal, crash-intent test | Seeds commit; unresolved fixture/observation work | Original assertions retained |
+| Prompt fixture uses a now-legal triggerless turn as its failure | Prompt-refusal test | Candidate injects the actual prompt acquisition refusal on a real opened turn | Same no-provider, no-attempt and durable-error assertions |
+| Fake evaluation and retired result observations | Opening-database prompt, streaming pair, lost-call diagnostic, delimiter repair, schema refinement/unregister | Seeds commit; distinct current-observation candidates and boundaries recorded below | No failing candidate is retained |
+
+## Seed verification after the owner's batch-20 finding
+
+Read the raw-write issue and the error-graph landing note, including Batch 20
+triage, end to end. The isolated committed snapshot remains `9c03c1ec1` plus
+owned changes, excluding foreign uncommitted edits. `src/seon/db.clj` was
+not edited. The snapshot includes `26ec13420`; these results do not claim
+verification of the other lane's subsequent writer repair.
+
+Fifteen fresh canonical branches and SCI contexts each committed all three
+common setup writes: **45 committed writes, zero refusals**. Every remaining
+batch-19 member was then replayed individually through `seon.test/run` with
+a scoped observer that records a refused transaction's complete value and
+stops that execution before later assertions. Runs 48489–48511 are serial;
+the result files include each exact run ref. Two tests have refused partial
+config seeds at `:seon.config/applied-manifest-digest`; the property records
+eight refusals during shrinking, representing four distinct input maps.
+The common fixture succeeds; its success does not clear those extra writes.
+
+The generated settlement tests instead return `:seon.turn/no-terminal-fact`.
+The old prompt-refusal test reaches the provider and then gets
+`:seon.turn/not-call-situation`; its fixture no longer represents a prompt
+refusal. All other replayed members have no refused seed transaction in this
+snapshot. These distinctions prevent the platform finding from swallowing
+independently verified fixture drift or the pulled-renderer contract boundary.
 
 ## Dependency ledger and boundary
 
@@ -46,7 +82,6 @@ report supplies `:db-after`; no second evidence registry is needed.
 All explicitly protected owners remain untouched. Shared uncommitted program,
 schema, test-runner and issue edits are preserved. The snapshot excludes them;
 its result is an isolated verification boundary, not proof of default adoption.
-
 
 ## Slice 1 — occurrence evidence
 
@@ -90,3 +125,23 @@ Default's hook queued publication; its observed source at 02:59 UTC was still
 `6aa9fe1b-203b-5ca1-bea2-9047ea996105`. The passing adoption claim is for the
 isolated development JVM, not default. Existing global markdown lint reports
 12 unrelated gitlink-citation errors in the agents-md audit note.
+
+## Slice 2 — exact fixture configuration
+
+**Guarantee:** `with-cluster` reconciles its manifest through the configuration
+owner, so an explicitly absent setting cannot survive from seeded defaults;
+a refused fixture seed or reconciliation stops setup before the test body.
+
+The existing `one-successful-call-leaves-exactly-one-attempt-fact` regression
+now independently checks that the backup model is absent. Before the change,
+run 48517 was **8/1/0** and read the shipped backup model. The evaluated
+constructor candidate passed **9/0/0**, run 48522. A direct constructor call
+returned the actual agent identity and `{:seon.config.ai/model "probe"}` with
+no backup key; all four writes committed. After editing and isolated source
+adoption `6aaa0dae-4dcb-5985-a392-3b6843779939`, the same fresh-base in-process
+test passed **9/0/0**, run 48557. Complete values are in
+[the config evidence](turn-test-reds-batch19-config-2026-09-16.edn).
+
+The partial config seed maps in the two blocked members were left unchanged.
+This repair is about expressing absence through the existing reconciler,
+not accommodating the raw-write validation defect.

@@ -306,3 +306,11 @@ slice is `517e045d5`. The class remains open for the 16 unresolved census
 members (including the unexplained projection interleaving). Final cold
 verification is requested in `tmp/orchestrator/gate-requests/turn-test-reds.txt`
 for `seon.cluster.turn-test` and `seon.sci.eval-test`.
+
+The seeded-backup absence member is now repaired at `with-cluster`: it invokes
+`seon.config/apply!` instead of upserting only the compiled desired map, and
+reads seed/reconciliation refusals before entering the body. The strengthened
+successful-call regression was 8/1/0 before, 9/0/0 on the evaluated candidate,
+and 9/0/0 after isolated development adoption (run 48557). The batch-19
+landing records exact values and adoption. The generated-scenario partial-map
+seed remains blocked by write-validation-class, as directed by the owner.
