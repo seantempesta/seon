@@ -22,6 +22,7 @@ the same namespace twice for the same HEAD.
 | 2 | `f5ca25ba9`+ | p1-ambient-state (19) | ABORTED at 22:12Z by the orchestrator: the gate alone ran 9 pool workers + serial + 6 concurrent confirmation JVMs (load avg 75 on 18 cores, 26 GB compressed); runner capped, re-run as batch 2b. The killed batch-2 gate thread RELAUNCHED its run (uncapped) beside 2b; killed again at 22:45Z. Lesson: a gate thread's instruction must say "if the command is killed, do not rerun; report" | — |
 | 2b | `f5ca25ba9`+ | p1-ambient-state (19) | KILLED at 21:44Z by the superseded batch-2 thread (the two threads had swapped runs); partial log through seon.sci.eval-test, no tally | — |
 | 2c | `48605a1de` | p1-ambient-state (19), capped at 3 workers, nice 15 | 392/2437: 50 failures, 20 errors in 6 namespaces (sci.eval, render-simplification, schema.datahike, effect, render.value, cluster.mcp); 13 namespaces green; published-base 44 s, tests 748 s; results NOT recorded (live prepl unavailable) | p1-ambient-state: class = fixtures mint bare database values and the fallback now refuses; Datom-where-map in mcp-test; two effect events |
+| 33 | `7b3a9ecc8` | FRESH STORE (reset: 72 GB → 107 MB; default pid 27828): platform (recording) then seon.issue-test (indexer `75996a9e6`…`da0309344`) seon.test-runner-test seon.test.runner-test seon.test-support-test (reach-closure `bbbfafaf1`, `1086a7b80`) | running | steward; orchestrator |
 | 32 | `2843d6ec7` | fresh-operator config-proof read fix `8208754cb` + steward's program/shapes fix `7cfe02790`: seon.dev.fresh-operator-test seon.fn-test | 77/500, 0 F 0 E — both GREEN; NOT recorded: `:seon.test.run/unavailable The completion lacks its tested database reach membership` (new seam from reach-closure-facts `bbbfafaf1`/`1086a7b80`; handed to the steward); root run.HwsG9I | orchestrator; steward |
 | 31 | `34c5a9535` | turn-test-reds third slice: seon.cluster.turn-test seon.turn-test | 82/797, 7 F 6 E: seon.turn-test GREEN; seon.cluster.turn-test 3 — delimiter-repair… (bookkeeping 5.6 s vs 300 ms), a-lost-model-call… (provider diagnostic missing), generated-model-attempt-traces… hit the 270 s worker exchange bound (same cost class suspected); root run.6byCYT. Class: 44 → 3. Opus research lane on the bookkeeping cost launched | orchestrator |
 | 30 | `56f0a4ca8` | cold-arming fix `eeafb9dba` (98b5f2afe culprit; `direct-references` defaults an omitted predicate map to {}) + retention-sweep `5a10f5dfa` + arming/analyzer + transcript-test + issue-settlement `0c8f90630`: platform (recording) then 11 ns | A: PLATFORM GREEN 86/579 0/0, exit 0, root removed as successful, results RECORDED on default (runs 9a399119df79 / 4cf0c1d016be at 05:32Z) — first recorded gate since the sweep class was found. B: 178/1341, 77 F 8 E — GREEN: schedule, blob, registry, data-shapes, instrument, issue-settlement, issue-test; RED: seon.render.transcript-test 13 tests (renderer-ref class, steward), seon.fn-test 4 (analyzer-facets: `:seon.fn/call-arities` nil in cold workers — the dev-JVM-vs-cold-worker class), seon.render.web-debug-test 1 (known residual), seon.dev.fresh-operator-test/init-owns-current-source… 2 (shipped-decision prepl round-trip false after the dial removal → retention-sweep) | steward; retention-sweep |
@@ -348,3 +349,14 @@ already converged): `apply-compiled!` rebuilds `projection-from-database`
 cluster into the canonical base. Flagged: a 13 s / 89k-datom publication
 transaction on default; `request-profile` derived 64× per turn. The 5.6 s
 first-turn cost in a fresh worker is not yet attributed (needs a cold JVM).
+
+### 2026-09-16 09:40Z — store reset; config-apply-cost lane launched
+
+Steward session ran `bin/seon reset --force`: default pid 27828, forked from
+current-src at `f8c00a5be`; store 72 GB → 107 MB. Astra lane
+`config-apply-cost` launched (spec `tmp/orchestrator/wave2/config-apply-cost.spec`):
+carried projection into `apply-compiled!`, converged apply as a read on the
+applied-manifest digest, dissolve the zero-op reconcile plan cost, one
+`apply!` per fixture cluster. Steward owns the 13 s publication issue
+indexing (`issue-indexing-at-publication-costs-13-seconds.md`) and filed
+`request-profile-is-derived-64-times-per-turn.md`.
