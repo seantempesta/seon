@@ -1419,6 +1419,45 @@ AGAINST for this family: five provenance refs are meant to sweep. Five
 owner decisions priced in the note. Awaiting the program-graph and
 reset-edits passes before the decisions page.
 
+**OWNER DIRECTION ~00:20Z (verbatim intent, supersedes G2 as the goal):**
+(1) Agents: messages to or from a deleted agent lose meaning — sweeping
+them is fine; if that ever hurts, agents are simply not deleted and stay
+for archival. History keeps everything: weigh "losing" against "eliding
+what is no longer relevant" with that in mind. (2) Listeners: not the
+focus now; `:seon.listen/entity` "sounds like a broken hack" — listening
+should be matching parameters along the transaction log (entity id,
+attribute, value, transaction metadata, combinations). LEARN before
+advising (research pass `what-listening-is` launched; no lane). (3) Call
+edges: a function deleted while callers still name it is ALARM BELLS —
+refuse the deletion until the call edges are fixed, or use the breaking
+call graph to hand agents the refactoring and apply the retraction after.
+"Every connection is important. Retraction shouldn't be allowed until a
+fix is also proffered (same transaction?) ... STOP AGENTS from breaking
+things until a fix is in place." Program-graph research pass re-pointed
+at this contract (three deletion origins: SCI evaluation, edit-hook file
+deletion, complete republish). (4) Compaction answered: `compact-call`
+(turn.clj:2384) retracts the agent's evaluation ENTITIES only (source,
+shown text, out, error), never the render functions or forms; the refs
+from contributions/effects to those evaluations are swept — elision under
+(1), history answers. (5) Keep integrating Datahike findings into the
+datahike skill and, where core, AGENTS.md — docs lane launched.
+
+**Deletion research 2/3 + reset-edits 3/3 landed** (`da6ab3120`,
+`24bb39899`): the discriminator is statement-about-a-living-entity vs
+observation-of-a-token; a fifth behaviour PURGE exists (transaction.cljc
+:1084-1117, the only thing that stops as-of); `:seon.ns/requires` is the
+highest-fanout name-edge and a ref; arity input/output are REQUIRED refs
+into the ast component tree; greenness derived from presence of a
+`:seon.test/run` assertion in history; shape rows shared and never
+reclaimed; `:seon.issue/status` cannot go (1,742 datoms, zero resolved-tx);
+five "stored" attributes are not stored (`:map` has no bridge case);
+`db.clj:2398` writes a string into symbol-typed `:seon.error/exception-class`
+on the fault path (live defect); Datahike's heterogeneous tuple check is
+`(apply = …)` not `every?`; pull truncates cardinality-many at 1,000 with
+no signal (`:seon.test/reach` 484k datoms already cut); `#{}` is erased by
+explode before any seam — the required provenance datom is the only honest
+encoding (G4 confirmed).
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
