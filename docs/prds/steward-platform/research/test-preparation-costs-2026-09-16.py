@@ -5,6 +5,7 @@ This reads logs only; it never launches a gate or changes a store.
 """
 
 from pathlib import Path
+import hashlib
 import sys
 
 
@@ -23,7 +24,10 @@ def summarize(path):
             if worker not in first_tasks:
                 print(line)
                 first_tasks.add(worker)
-        elif line.startswith(("bin/test: PREPARED cached base",
+        elif line.startswith("bin/test: SOURCE") and not line.startswith("bin/test: SOURCE WARNING"):
+            print(line)
+        elif line.startswith(("bin/test: PUBLISH cached base",
+                              "bin/test: PREPARED cached base",
                               "bin/test: REUSE cached base",
                               "Ran ")) or " failures, " in line:
             print(line)
@@ -34,5 +38,17 @@ def summarize(path):
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         raise SystemExit("Supply one or more gate log paths.")
-    for argument in sys.argv[1:]:
-        summarize(argument)
+    if sys.argv[1] == "--fingerprint":
+        base = Path(sys.argv[2])
+        digest = hashlib.sha256()
+        files = sorted(path for path in base.rglob("*") if path.is_file())
+        if not files:
+            raise ValueError(f"No published base files in {base}")
+        for path in files:
+            digest.update(str(path.relative_to(base)).encode())
+            digest.update(b"\0")
+            digest.update(hashlib.sha256(path.read_bytes()).digest())
+        print(f"{base}: files={len(files)} sha256={digest.hexdigest()}")
+    else:
+        for argument in sys.argv[1:]:
+            summarize(argument)

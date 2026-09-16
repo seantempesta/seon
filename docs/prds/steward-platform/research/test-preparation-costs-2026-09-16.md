@@ -1,6 +1,6 @@
 ---
 type: research
-status: step 1 verified; platform admission refused; step 2 requires owner review
+status: steps 1-3 settled; step 2 and R6 landed on the shared tree
 created: 2026-09-16
 tags: [testing, performance, datahike]
 ---
@@ -286,3 +286,199 @@ The successful publication was opened by all three canonical worker fixtures.
 PHASE seconds: snapshot **3**; test-slot **0**; dependency-cache-and-classpath
 **2**; worker-checkouts **3**; published-base **91**; coordinator-and-tests
 **131**. Launcher exit **0**.
+
+## Approved continuation: retained publication reuse
+
+The owner chose option 1. The cache keeps the exact three inputs already
+hashed by `dev-cache/test-digest`: the selector's per-path fingerprints,
+the cache owner's source bytes, and the dependency-closure digest. The
+classpath producer writes those inputs beside its digest-keyed classpath;
+completed bases retain them in `ready.edn`. This does not compare a test
+digest with a source-publication digest.
+
+Compatibility requires matching cache-owner and dependency inputs, and
+matching every per-path input outside `seon.test.selection/graph-roots`.
+Additions, removals, and changes under those declared graph roots are handed
+to the incremental owner. Missing legacy evidence is not compatibility.
+Among compatible retained bases, the fewest changed paths wins, with the
+existing digest as a deterministic tie-break. Exact hits retain their
+existing behavior.
+
+Under the existing cache lock, a miss copies the immutable seed's
+`data/store` and completed `build/current-src.edn`, using the same filesystem
+clone operation as checkouts. `seon.cluster.export/reidentify!` rewrites
+only the copy before opening it. The publication child then invokes
+`seon.cluster/refresh-source!` with the changed paths. That owner alone
+decides whether a structural change requires a complete rebuild; arbitrary
+publication errors still fail preparation. No development store is copied
+or opened by this mechanism.
+
+The runner reads the completed source artifact for `manifest.edn` after
+either publication path. The old in-memory `source-analysis-cache` is not
+authoritative after an incremental refresh. Existing source-progress events
+are printed so the actual full/incremental decision remains observable.
+No selection, tier, worker-claim, or execution-bound change is included.
+
+Dependency ledger: the existing clone/reidentification owner is
+`src/seon/cluster/export.clj` (`reidentify!`), over Konserve records and
+Datahike branch heads; the publication owner is
+`src/seon/cluster.clj` (`incremental-source-refresh!`, `refresh-source!`,
+`source-artifact-file`), with `src/seon/cluster/source.clj` providing
+publication and upsert custody. Cache identity remains in `dev_cache.clj`
+and `src/seon/test/selection.clj`; `src/seon/test/cache.clj` owns retained
+base selection, cloning, the existing lock, and retention.
+
+The shared `src/seon/test/runner.clj` acquired unrelated in-flight selection
+edits during this assignment. Reuse implementation and measurements therefore
+use `tmp/test-preparation-wt`, based on **53eef8551**, with linked
+`reference-code` dependencies. Its `tmp/test-slots` links to the main
+checkout's slot directory: no extra admission capacity and no override.
+The dependency cache is shared through its existing lock; published test
+bases belong to this isolated checkout. No other lane's files or session
+were repaired. The one-line exit commit was corrected immediately after a
+concurrent runner edit entered it; the foreign working-tree bytes were
+preserved, and **53eef8551** contains only the exit call and its evidence.
+
+The armed fast regression passed **1 test / 36 assertions / 0 failures /
+0 errors** (`reuse-fast.log`), PHASE snapshot **4 s**, test-slot **0 s**.
+It checks missing input evidence, program additions/removals, every declared
+widening input, cache-owner and dependency changes, and path boundaries.
+
+Measurement command, serial and with the ordinary slot policy:
+
+```sh
+bin/test --paths src/seon/schedule.clj dev_cache.clj src/seon/test/cache.clj src/seon/test/runner.clj test/seon/test_cache_test.clj -- seon.db-test
+```
+
+The additional paths overlay only this implementation onto the fixed HEAD.
+
+The first full run constructed the publication and passed **48/357/0/0**,
+but the launcher exited **1**: this newly created worktree had no published
+`:current-src` for mandatory persistent result recording. The exact refusal
+was `:seon.cluster.source/source-absent`. Initialized this worktree's own
+publication with `bin/seon init` (`reuse-result-root-init.log`) before the
+next gate; no shared development cluster was stopped, restarted, or reforked.
+This is a recording boundary, not a test failure or a green gate claim.
+
+
+## Continuation on the shared tree: porting, R6, and one platform blocker
+
+The reuse implementation above was written in `tmp/test-preparation-wt` at
+**53eef8551** and left uncommitted when its lane ended. It is ported here onto
+the shared tree at **0c7711e59** (55 commits later) with three adaptations,
+none of which changes what compatibility means:
+
+- `seon.test.cache/compatible-changes` now asks
+  `seon.test.selection/widening-path?` whether a changed path is outside the
+  program graph. The worktree version re-derived that boundary from
+  `graph-roots`; `6df6967b8` moved the boundary to the declared predicate, and
+  two authorities for one question is the defect this file names elsewhere.
+- `seon.test-cache-test` derives its widening paths by filtering the selector's
+  own `input-digests` with that predicate. The worktree version enumerated the
+  deleted `selection/widening-inputs`.
+- The runner resolves `seon.cluster/source-artifact-file`,
+  `seon.cluster/*source-progress!*` and `seon.cluster.export/reidentify!`
+  through the load-cycle `defonce`/`delay` boundary the namespace already
+  declares for `seon.cluster/refresh-source!`, instead of a
+  `requiring-resolve` per call.
+
+### A platform blocker found first: the gate could not run at all
+
+`dev-cache/ensure-cache` load-files the selector into the `-T:dev-cache` tool
+JVM. `6df6967b8` gave the selector a `babashka.process` require; that alias
+declared only `tools.build`. Every `bin/test` at HEAD refused at its
+`dependency-cache-and-classpath` phase with
+`Could not locate babashka/process__init.class ... on classpath`, and four
+queued invocations across lanes sat at `phase=snapshot` with no
+dependency-cache line recorded. Fixed at **f33e9c05a** by declaring the
+dependency on the alias; the stale "pure namespace" comment in `dev_cache.clj`
+is corrected in the same slice. Because deps.edn bytes are part of
+`dependency-configuration-digest`, the closure rebuilt once: **57,424 ms**,
+372 namespaces, status `:rebuilt`. Filed as
+[dev-cache tool classpath](../../../seon/issues/dev-cache-tool-classpath-omits-the-selectors-dependencies.md).
+
+### R6: the hit check no longer waits out a peer's rebuild
+
+`ensure-cache` wrapped its whole body — the cache-hit check included — in the
+exclusive rebuild lock, so a gate whose cache was already valid waited out a
+peer's full closure build: **87,431 ms** measured in batch-106
+([recompute inventory](recompute-from-scratch-inventory-2026-09-16.md) R6).
+
+A published cache directory is immutable and `admit!` only ever moves a NEW
+directory into place, so a peer's rebuild cannot invalidate a valid cache.
+Validity is therefore decided without the rebuild lock. What the old lock
+genuinely guarded on that path was not the check but the pair
+*(choose a directory, record that it is in use)* against `reap`, the only
+deleter. That pair now has its own short lock
+(`target/dev-dependency-cache-references.lock`), taken by `claim-current-cache!`
+and by `reap`; the rebuild lock is taken only to rebuild, with the claim
+re-attempted under it so two cold gates do not both build. `test-classpath!`
+also moved out of the rebuild lock: it writes digest-named files atomically.
+
+Falsified directly rather than inferred, by
+[the probe](dev-cache-hit-outside-the-lock-2026-09-16.py), which holds the
+rebuild lock with the same advisory `fcntl` lock `FileChannel.lock` takes and
+then runs the real `ensure-cache` under a 90 s bound, reporting a block as its
+own failure rather than a silent timeout:
+
+```text
+rebuild-lock-held=yes exit=0 elapsed-ms=1880
+seon cache: reference lock wait-ms= 3 held-ms= 154
+#:seon.dev-cache{... :status :current ...}
+```
+
+**1,880 ms** end to end with the rebuild lock held, of which **154 ms** was the
+reference lock. The same probe run before the closure rebuild returned
+`BLOCKED ... did not return within 90s`, which is the old behaviour and is also
+the correct behaviour for a genuine miss. The cold rebuild above reported
+`rebuild lock wait-ms= 0 held-ms= 57424` and `reference lock ... held-ms= 3`:
+the long hold is now only the build.
+
+### Verification boundary for the shared-tree port
+
+Stated exactly, because the reuse path's own measurement is NOT among it:
+
+- **Proven.** The R6 probe above, run twice with the rebuild lock held: blocked
+  at 90 s on a genuine miss, `:status :current` in **1,880 ms** on a hit.
+  The cold rebuild `dev-cache` performed to recover from the deps.edn change
+  (**57,424 ms**, 372 namespaces) exercised the rebuild branch, the reference
+  lock, `test-classpath!` outside both locks, and the new
+  `<digest>.inputs.edn` retention (884,329 bytes written beside the classpath).
+- **Proven, unarmed.** `seon.test-cache-test/retained-base-compatibility-is-per-input`
+  run in a plain `-M:test` JVM: **1 test / 27 assertions / 0 failures / 0
+  errors**. This is an iteration result on a pure function, not the armed gate.
+- **Proven at the worktree base only.** At **53eef8551**, `bin/test --paths ...
+  -- seon.db-test` with this implementation passed **48 / 357 / 0 / 0** and
+  published a full base (`tmp/test-preparation-costs/reuse-hit.log`,
+  `reuse-full.log`). That run took the exact-digest and full-publication
+  branches.
+- **NOT observed.** The incremental branch has never executed: no completed
+  base yet carries `::inputs`, so `retained-base` has had nothing compatible to
+  select. The gate launched for it on the shared tree
+  (`tmp/test-preparation-costs/reuse-main-full.log`) was still queued for a
+  test slot behind three concurrent lanes when this note was written. The
+  sequence that closes it is two serial gates, the second after changing one
+  path under a graph root:
+
+```sh
+bin/test --paths src/seon/schedule.clj dev_cache.clj src/seon/test/cache.clj \
+  src/seon/test/runner.clj test/seon/test_cache_test.clj -- seon.db-test
+# then edit one src/ or test/ file and repeat; the second must print
+#   bin/test: PUBLISH cached base <digest> from retained base {...}
+#   bin/test: SOURCE ...
+bb docs/prds/steward-platform/research/test-preparation-costs-2026-09-16.clj \
+  target/test-published-bases/<first>/base \
+  target/test-published-bases/<second>/base <changed-path>
+```
+
+  That evidence script asserts the two completed manifests equal their own
+  artifacts, that the changed set is exactly the named path, and that the
+  incremental manifest observed the changed docstring — it fails rather than
+  reporting absence of signal.
+- The gated `dev_cache.clj` bytes differ from the committed ones by whitespace
+  only, in `reap`'s re-indentation after it gained the reference lock; no gate
+  path calls `reap`.
+- No default cluster was stopped, restarted or reforked; no scratch cluster or
+  worktree was created; `tmp/test-preparation-wt` (branch
+  `test-preparation-reuse`) is the ended lane's worktree and is left in place,
+  since its uncommitted bytes are the provenance of this port.
