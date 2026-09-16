@@ -298,3 +298,27 @@ Queue, in order:
   releases issue.clj. Pairs missing for linked entities: seon.fn.file,
   seon.lint, seon.test.run, render.cost, operator.footprint → one Opus
   pairs lane. R3 (effects + write-back provenance) launched.
+- 10:05Z issue-settlement landed both slices: P5 `d132df212` (an agent's
+  open issue tests run in-process before each plan settlement under one
+  deadline; resolution derived, `resolved-tx` written) and P6 `a6fee5b31`
+  (immutable guard snapshots; creator/assignment authority; a worker's test
+  retraction refused, the two-transaction bypass covered); default
+  converged; 19/0/0 and 33/0/0 post-adoption; live settlement recorded joint
+  step completion and resolution. Residual: a full live worker turn hits a
+  separately filed generated-read refusal. ALL schema lanes have landed →
+  refork default as soon as the fixture-base fixer commits (cluster.clj).
+- 10:10Z R2 test-failure-facts landed (`72090b6fe`). Schema:
+  `seon.test.failure` components per failing `is` under `:seon.test/failures`
+  (identity `seon.id/id [test-sym site ordinal]`, site = file+line or the
+  existing normalized claim; file as a REF to seon.fn.file; expected/actual
+  with the blob dial; seen-count/last-run replaced per run; green retracts).
+  MAJOR FINDING: "what made it red" by digest comparison is UNSOUND today —
+  runs are recorded on transient `building-source-*` publication branches
+  (42 on default) that default's history cannot address; recorded digests do
+  not reproduce; 73 of 87 red rows have no prior digest at all. The sound
+  derivation costs ≈58 ms: last green from the result's own history (3.9 ms)
+  ∩ functions whose source/spec changed since (3.4 ms) + warm closure
+  (50.6 ms); ONE accretion completes it: `:seon.test/reach` closure
+  membership refs written per result and replaced per run (never a digest
+  per reached function). Lane `reach-closure-facts` (astra — runner
+  recording + provenance) queued behind the refork.
