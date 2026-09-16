@@ -721,3 +721,21 @@ names the batch; narrower leaves or LMDB). `seon.fn/exact-source` threw
 IndexOutOfBounds again during a publication coincident with a live fn.clj
 edit — a typed "source changed during analysis" refusal is owed (queued
 after the gate-set-contract lane releases fn.clj).
+
+### 2026-09-17 04:50Z — render-coverage reds landed (`ac95db78a`, issue `f10d2e8ef`)
+
+Neither a missing root nor the shadow class: the fixture's single seed
+`transact!` was REFUSED (`{:seon.fn/sym "my.fs/read"}` lacked
+`:seon.schema.admission/source`), nothing seeded, every render got `{}` and
+fell to the floor — the unchecked-fixture-write class again (the fixture now
+asserts every report and seeds in two writes). Separately proven live:
+`seon.render/producer-argument` strips `:seon.render.call/id` before a
+declared producer runs (`render.clj:196`) and the page walk carries no
+`:seon.render.value/root` (`web.clj:2977`), so `node-id` now derives the
+address from the value's own installed identity attribute — no digest
+fallback (surface ids must be injective). A stale clause asserting an
+`:seon.effect/run` unit removed. In-process 39/0/0, 7/0/0, 12/0/1. The
+remaining ERROR is `render.clj:995`: `invocation-unknown` passes a nil
+`:seon.error/value` for a time-limited producer (issue
+`a-time-limited-render-producer-passes-nil-where-the-typed-unknown-requires-a-map.md`,
+render.clj — steward's).
