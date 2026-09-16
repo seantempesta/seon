@@ -1131,3 +1131,9 @@ prior commit equals the pre-publication commit — orchestrator territory,
 triage thread launched. Queued by the steward: the runner's drift-restore
 put four deliberately RETRACTED probe keys back into default's registry (a
 restore must not undo a committed retraction).
+
+Attributed, not changed (sweep pass 5, steward): `seon.ai/agent-overlay`
+is read 5× per turn where the ruling says 3 — the failover re-reads it
+(§2.1 question for the `seon.ai` seam); situation-totality and
+clean-last-form stay with the turn-loop owner ("ended without
+my.turn/complete or my.turn/wait" — where is it written?).
