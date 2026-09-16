@@ -918,8 +918,11 @@
                    @connection
                    '[* {:seon.turn/starting-ns [:seon.ns/name]}]
                    [::turn/id "replay-run"])]
-          (support/transacted! connection [{:seon.ns/name 'replay.later}
-                                           {::turn/id "replay-run" :seon.turn/opened-tx "datomic.tx"}])
+          (support/transacted! connection
+                               [{:seon.ns/name 'replay.later}
+                                {::turn/id "replay-run"
+                                 ::turn/agent [:seon.agent/id "replay-agent"]
+                                 :seon.turn/opened-tx "datomic.tx"}])
           (let [opening (turn/opening-db @connection "replay-run")]
             (is (= "replay-run"
                    (::turn/id (db/pull opening [::turn/id]
@@ -1181,7 +1184,9 @@
         (support/transacted!
                 connection
                 (turn/plan-tx {::turn/id "agent-source" ::turn/starting-ns [:seon.ns/name agent-namespace-name] ::turn/sources [{:seon.cluster.eval/source "(+ 1 1)"}]}))
-        (settle! "agent-source" true)
+        ;; `plan-tx` already minted ordinal 0's evaluation, so starting it
+        ;; again is the fixture writing what the mechanism wrote.
+        (settle! "agent-source" false)
         (close! "agent-source")
         (is (= ::turn/refresh-agent-authored
                (::turn/rule
@@ -1712,9 +1717,14 @@
                                           (str "boom-" ordinal))))
                                states)))
                  (when generated?
-                   (support/transacted! connection
-                                        [{::turn/id run-id
-                                          :seon.turn.work/situation :generate}]))
+                   ;; One attribute on a turn that already exists is a datom,
+                   ;; not a partial entity map: an identity-keyed map is read
+                   ;; against the whole turn schema and refused for the keys
+                   ;; the open transaction already wrote.
+                   (support/transacted!
+                    connection
+                    [[:db/add [::turn/id run-id]
+                      :seon.turn.work/situation :generate]]))
                  (let [terminals-before (pull-terminals connection run-id)
                        recovery
                        (turn/recover-tx
