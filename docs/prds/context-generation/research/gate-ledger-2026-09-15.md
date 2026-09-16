@@ -170,3 +170,14 @@ lanes. Same shape as the test-JVM saturation: the development JVM's prepl
 is one shared resource; in-process test runs need the same admission as
 gates (a slot, or the reaching-tests check running them serially).
 
+## 06:05Z — recording failures explained
+
+The "result-cluster store held by another live process" and
+"prepl-response-silent" recording failures in batches 19–20 came from
+`f2d537187` (reach-digest): `completion-reach-digests` opened the gate's
+shared published-base store under its lifetime flock on every
+`commit-results!`. Replaced at HEAD by `1b5c09e15` (canonical private
+fixture, no store open); recording should work again from the next gate at
+or after that commit. reach-digest's only remaining cold red belongs to
+agent-call-edges.
+
