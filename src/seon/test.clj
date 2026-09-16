@@ -120,6 +120,9 @@
       (finally (.setContextClassLoader thread previous)))))
 
 (defn- event-backstop-ms []
+  ;; `seon.test-support` lives under `test/`, off this namespace's classpath
+  ;; until `with-test-loader` installs the test loader: a deliberate late
+  ;; dependency, never a load-cycle dodge.
   (with-test-loader
     #(long (* 1000 @(requiring-resolve 'seon.test-support/event-backstop-seconds)))))
 
@@ -743,6 +746,9 @@
                 (swap! progress assoc :seon.test/progress "canonical fixture preparation")
                 ;; Realize the fixture owner's one base before starting a Var's
                 ;; event backstop. The total check deadline still applies.
+                ;; `seon.test-support` is reachable only under the test
+                ;; loader — the same deliberate late dependency as
+                ;; `event-backstop-ms`.
                 (with-test-loader
                   #(deref @(requiring-resolve 'seon.test-support/database-base))))
             prepared (when (seq runnable)
@@ -964,6 +970,81 @@
                              (str/join " " (map quote-arg (:seon.test/command excluded))))))
            (if (seq invocations) (str "\nrun " (str/join " then " invocations))
                "\nnext-tier: none; fix failures first")))))
+
+(defn check-request
+  "Perform one operator test check in the cluster JVM.
+
+  Projection, configuration, preparation and execution belong to this call.
+  The supplied bound covers the whole operation; without an override the
+  cluster's declared check allowance applies. Missing observations return a
+  typed error. Successful observations always carry all three assertion
+  counts, including a genuine zero, and the CLI verdict and display text."
+  {:malli/schema [:=> [:cat :seon.test.check/request]
+                  :seon.test.check/response]}
+  [{connection :seon.db/connection cluster :seon.boot/cluster-name
+    test-symbol :seon.test/sym override :seon.test/check-time-limit-ms}]
+  (let [database (db/db connection)
+        projection (db/carried-projection database)]
+    (schema/call-with-projection
+     projection
+     (fn []
+       (let [effective (config/effective database cluster)
+             bound (or override (:seon.test/check-time-limit-ms effective))]
+         (cond
+           (:seon.error/kind effective) effective
+           (not (pos-int? bound))
+           (unknown :seon.test/check-time-limit-ms
+                    "Apply cluster configuration to supply the test check allowance.")
+           :else
+           (let [started (System/nanoTime)
+                 task
+                 (FutureTask.
+                  ^java.util.concurrent.Callable
+                  (bound-fn []
+                    (let [result
+                          (if test-symbol
+                            (let [prepared (prepare-tests! database [test-symbol] effective)
+                                  remaining (- bound (long (/ (- (System/nanoTime) started) 1000000)))]
+                              (cond
+                                (:seon.error/kind prepared) prepared
+                                (not (pos? remaining))
+                                (unknown test-symbol "Test preparation exhausted the check allowance.")
+                                :else
+                                (if-let [test-var (resolve-test test-symbol)]
+                                  (run test-var connection
+                                       {:seon.test.run/provenance (runner/provenance database)
+                                        :seon.test/remaining-ms remaining})
+                                  (unknown test-symbol "The indexed test Var is unavailable."))))
+                            (check-adoption connection cluster))]
+                      (if (:seon.error/kind result)
+                        result
+                        (let [results (if test-symbol [result] (:seon.test/results result))
+                              passes (reduce + 0 (map :seon.test/pass-count results))
+                              failures (reduce + 0 (map :seon.test/fail-count results))
+                              errors (reduce + 0 (map :seon.test/error-count results))]
+                          {:seon.test/pass-count passes
+                           :seon.test/fail-count failures
+                           :seon.test/error-count errors
+                           :seon.test.check/text (if test-symbol (pr-str result) (feedback result))
+                           :seon.test.check/passed?
+                           (boolean (and (zero? failures) (zero? errors)
+                                         (not (:seon.test/expired result))
+                                         (or (not test-symbol) (pos? passes))))})))))]
+             (.start (.unstarted (Thread/ofVirtual) ^Runnable task))
+             (try
+               (await/await!
+                {:seon.await/future task
+                 :seon.await/bound {:seon.await/config-attribute :seon.test/check-time-limit-ms
+                                    :seon.await/config-value bound}
+                 :seon.await/diagnostic
+                 {:seon.error/diagnostic-layer :test
+                  :seon.error/diagnostic-operation ::check-request
+                  :seon.error/diagnostic-member :check-completion
+                  :seon.error/diagnostic-expected :seon.test.check/result
+                  :seon.error/diagnostic-offending :pending}})
+               (catch Exception failure
+                 (unknown (or test-symbol cluster) (ex-message failure)))
+               (finally (when-not (.isDone task) (.cancel task false)))))))))))
 
 (defn owned-symbols
   "Read the test symbols declared in the calling agent's assigned namespace."
