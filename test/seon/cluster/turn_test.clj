@@ -2597,94 +2597,90 @@
                     :seon.turn/now (Date. 1700000001000)})))
 
 (deftest turn-intent-is-the-complete-crash-falsifier
-  (testing "a cut immediately after intent names the run, trigger, and every ordinal"
-    (with-cluster
-      (fn [cluster]
-        (let [connection (:seon.db/connection cluster)
-              open-work (turn/next-agent-work @connection (request connection))
-              _ (turn/turn {:seon.turn.loop/cluster cluster
-                                    :seon.turn.work/next open-work}
-                                   now)
-              call-work (turn/next-agent-work @connection (request connection))
-              run-id (:seon.turn/id call-work)
-              evaluations (atom 0)
-              cut? (atom true)
-              transact! db/transact!
-              evaluate sci.eval/evaluate]
-          (is (thrown-with-msg?
-               clojure.lang.ExceptionInfo #"cut after intent"
-               (with-redefs
-                 [ai/complete
-                  (fn [_] {:seon.ai/text "(+ 1 1)\n(+ 2 2)\n(+ 3 3)"})
-                  sci.eval/evaluate
-                  (fn [request]
-                    (swap! evaluations inc)
-                    (evaluate request))
-                  db/transact!
-                  (fn [target transaction]
-                    (let [outcome (transact! target transaction)
-                          intent? (some #(and (vector? %)
-                                              (= #'turn/plan-call
-                                                 (second %)))
-                                        (:tx-data transaction))]
-                      (if (and intent? (compare-and-set! cut? true false))
-                        (throw (ex-info "cut after intent" {:process-cut true}))
-                        outcome)))]
-                 (turn/turn
-                  {:seon.turn.loop/cluster cluster
-                   :seon.turn.work/next call-work}
-                  now))))
-          (let [run-row (db/pull @connection
-                                 [:seon.turn/reply
-                                  {:seon.turn/trigger
-                                   [:seon.message/id]}]
-                                 [:seon.turn/id run-id])]
-            (is (= "(+ 1 1)\n(+ 2 2)\n(+ 3 3)"
-                   (:seon.turn/reply run-row)))
-            (is (= "m-1"
-                   (get-in run-row [:seon.turn/trigger
-                                    :seon.message/id])))
+  (doseq [prefix-count [0 2]]
+    (testing (str "recovery after " prefix-count " in-memory evaluations")
+      (with-cluster
+        (fn [cluster]
+          (let [connection (:seon.db/connection cluster)
+                source "(+ 1 1)\n(+ 2 2)\n(+ 3 3)"
+                open-work (turn/next-agent-work @connection (request connection))
+                _ (turn/turn {:seon.turn.loop/cluster cluster
+                              :seon.turn.work/next open-work} now)
+                call-work (turn/next-agent-work @connection (request connection))
+                run-id (:seon.turn/id call-work)
+                evaluations (atom 0)
+                cut? (atom true)
+                transact! db/transact!
+                evaluate sci.eval/evaluate]
+            (is (thrown-with-msg?
+                 clojure.lang.ExceptionInfo #"cut after intent"
+                 (with-redefs
+                   [ai/complete (fn [_] {:seon.ai/text source})
+                    sci.eval/evaluate
+                    (fn [request]
+                      (swap! evaluations inc)
+                      (evaluate request))
+                    db/transact!
+                    (fn [target transaction]
+                      (let [outcome (transact! target transaction)
+                            intent? (some #(and (vector? %)
+                                                (= #'turn/plan-call (second %)))
+                                          (:tx-data transaction))]
+                        (if (and intent? (compare-and-set! cut? true false))
+                          (throw (ex-info "cut after intent" {:process-cut true}))
+                          outcome)))]
+                   (turn/turn {:seon.turn.loop/cluster cluster
+                               :seon.turn.work/next call-work} now))))
+            (let [row (db/pull @connection
+                               '[:seon.turn/reply
+                                 {:seon.turn/trigger [:seon.message/id]}]
+                               [:seon.turn/id run-id])]
+              (is (= source (:seon.turn/reply row)))
+              (is (= "m-1" (get-in row [:seon.turn/trigger :seon.message/id]))))
+            (is (zero? @evaluations))
             (is (= [0 1 2] (unsettled-ordinals @connection run-id)))
-            (is (zero? @evaluations)))
-          (recover-cut-run! connection run-id)
-          (is (empty? (unsettled-ordinals @connection run-id)))
-          (is (nil? (turn/next-agent-work @connection (request connection))))
-          (is (zero? @evaluations) "recovery never re-executes source")))))
-  (testing "a cut after some in-memory evaluations still settles only by recovery"
-    (with-cluster
-      (fn [cluster]
-        (let [connection (:seon.db/connection cluster)
-              open-work (turn/next-agent-work @connection (request connection))
-              _ (turn/turn {:seon.turn.loop/cluster cluster
-                                    :seon.turn.work/next open-work}
-                                   now)
-              call-work (turn/next-agent-work @connection (request connection))
-              run-id (:seon.turn/id call-work)
-              evaluations (atom 0)
-              bind! sci.eval/bind-result!]
-          (is (thrown-with-msg?
-               clojure.lang.ExceptionInfo #"cut during evaluation"
-               (with-redefs [ai/complete
-                             (fn [_]
-                               {:seon.ai/text "(+ 1 1)\n(+ 2 2)\n(+ 3 3)"})
-                             sci.eval/bind-result!
-                             (fn [ctx handle value]
-                               (let [result (bind! ctx handle value)]
-                                 (swap! evaluations inc)
-                                 (if (= 2 @evaluations)
-                                   (throw (ex-info "cut during evaluation"
-                                                   {:process-cut true}))
-                                   result)))]
-                 (turn/turn
-                  {:seon.turn.loop/cluster cluster
-                   :seon.turn.work/next call-work}
-                  now))))
-          (is (= 2 @evaluations))
-          (is (= [0 1 2] (unsettled-ordinals @connection run-id)))
-          (recover-cut-run! connection run-id)
-          (is (empty? (unsettled-ordinals @connection run-id)))
-          (is (nil? (turn/next-agent-work @connection (request connection))))
-          (is (= 2 @evaluations) "recovery never re-executes the evaluated prefix"))))))
+            ;; Execute a real prefix without invoking the settlement writer.
+            ;; A caught host exception is a phase failure, not a process cut.
+            (when (pos? prefix-count)
+              (let [ctx (:seon.sci.eval/ctx
+                         (sci.eval/fork-for-turn
+                          {:seon.sci.eval/ctx (:seon.sci.eval/ctx cluster)
+                           :seon.db/db @connection
+                           :seon.agent/id "agent-a"}))
+                    planned (turn/planned-sources
+                             source 'my.agents.agent-a
+                             (get-in cluster [:seon.sci.admit/caps
+                                              :seon.config.eval.result/max-source]))
+                    evaluated
+                    (with-redefs [sci.eval/evaluate
+                                  (fn [request]
+                                    (swap! evaluations inc)
+                                    (evaluate request))]
+                      (turn/evaluate-sources
+                       {:seon.turn.loop/cluster cluster
+                        :seon.sci.eval/ctx ctx
+                        :seon.agent/id "agent-a"
+                        :seon.turn/id run-id
+                        :seon.cluster.eval/ordinal 0
+                        :seon.ns/name 'my.agents.agent-a
+                        :seon.cluster.reply/sources (subvec planned 0 prefix-count)}))]
+                (is (= [2 4]
+                       (mapv (comp :seon.sci.admit/value :seon.sci.eval/evaluation)
+                             evaluated)))))
+            (is (= prefix-count @evaluations))
+            (is (= [0 1 2] (unsettled-ordinals @connection run-id)))
+            (is (nil? (:seon.error/kind (recover-cut-run! connection run-id))))
+            (is (empty? (unsettled-ordinals @connection run-id)))
+            (let [row (db/pull @connection [:seon.turn/closed-tx]
+                               [:seon.turn/id run-id])
+                  work (turn/next-agent-work @connection (request connection))]
+              (is (some? (:seon.turn/closed-tx row)))
+              (is (= :open (:seon.turn.work/situation work))
+                  "an interrupted turn has not answered the wake")
+              (is (not= run-id (:seon.turn/id work))
+                  "the interrupted turn never resumes"))
+            (is (= prefix-count @evaluations)
+                "recovery never re-executes the in-memory prefix")))))))
 
 (defn- ordered-receipts
   [database]

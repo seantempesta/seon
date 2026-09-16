@@ -229,3 +229,16 @@ per-turn closure/evaluation/error counts and bounded supervisor escalation all
 pass. The early failed property never accumulated enough recurring failures
 to exercise escalation; its empty notification table was downstream evidence,
 not a production notification defect.
+
+## Recovery fixture slice
+
+`turn-intent-is-the-complete-crash-falsifier` now tests prefixes of zero and two
+real in-memory evaluations after the complete intent commits, deliberately
+omitting settlement before recovery. Throwing inside a total phase is a caught
+host failure and no longer simulates a process cut. The test checks the complete
+intent and trigger, exact prefix results, all unfinished ordinals, recovery's
+commit and closure, no re-execution, and new work rather than resumption of the
+interrupted turn. An interrupted turn does not answer its wake.
+
+Candidate **44765 27/0/0**; source-reloaded fresh-base **44774 27/0/0**.
+The existing recovery writer and direct evaluation owner are used unchanged.
