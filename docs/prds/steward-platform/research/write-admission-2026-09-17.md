@@ -609,3 +609,39 @@ The new retained probe passes clj-kondo with zero errors/warnings; source hooks
 accept the edits. Standalone clj-kondo still reports the existing dependency
 `parser.type/->Variable` at `db.clj:562` after dependency cache refresh; it is
 not in the changed admission code. No repository-wide lint-clean claim is made.
+
+Repair checkpoint: **`b1508dc8a`**. After reloading only `seon.db-test` and
+`seon.fn-test` through the canonical test loader, all four targeted runs
+(keyword-set, publication-diagnostic, retirement, six-case grammar parity)
+returned the same pre-execution `:seon.test/unknown`: “No function in this
+program declares :seon.fn/destroys”. Each run used the three-argument form,
+180000 ms, and `seon.test.runner/provenance`. These are **not passes** and
+executed no test bodies. A second all-thread dump showed the same publication
+writer in `identity-ref`/`packaged-forms`, with native `retry-with-tempid` frames
+increasing from three to five. The full operator command remained waiting for
+the preceding publication's monitor. The orchestrator was asked whether to
+expand the explicitly two-defect scope or leave this owner to its lane.
+
+### Final operator boundary for this repair
+
+The lane's own `bin/seon init --dev default` exited **1** with
+`:seon.operator/lock-hold-timeout`. It acquired the lifecycle lock at
+**2026-09-16T20:36:28.962Z** and expired at **20:51:28.994Z**, after its declared
+**900000 ms** hold bound. Exact terminal message:
+
+> Timed out holding the operator lifecycle lock /Users/sean/src/seon/data/operator/root-lifecycle.lock for `init --dev default`.
+
+It never advanced beyond “request accepted” at the JVM's source refresh
+monitor. **“development cluster converged” was not observed.** The earlier
+transaction performing evidence preservation may still be running in the JVM;
+closing the bounded operator client is not proof that server-side work ended.
+No server thread was interrupted, no other lane was operated, and default PID
+53320 was neither stopped nor restarted. The remaining requirement is the
+publication owner's per-reference declaration/retry path, followed by complete
+publication/adoption and the canonical tests. This is an explicit incomplete
+live-proof boundary, not a claimed green or an F2 exemption.
+
+The followup documentation commit retains the exact canonical test forms.
+All lane-owned shell commands ended; completed probe futures were removed from
+`user`, and `tmp/write-admission-repair` was removed after retaining the evidence.
+The gate request is appended for orchestrator review; no gate was run here.

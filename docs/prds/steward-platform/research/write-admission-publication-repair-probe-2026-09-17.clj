@@ -2,7 +2,7 @@
 ; connection mutation, fixture-base access, or dependency reload occurs here.
 (require '[datahike.api] '[seon.db] '[seon.fn] '[seon.operator]
          '[seon.schema] '[seon.schema.edn] '[seon.schema.datahike]
-         '[seon.error.refusal] '[seon.program])
+         '[seon.error.refusal] '[seon.program] '[seon.test] '[seon.test.runner])
 
 (def f2-publication-replay
   (future
@@ -69,3 +69,26 @@
 
 (if (realized? f2-adoption-replay) @f2-adoption-replay :seon.probe/running)
 (when (realized? f2-adoption-replay) (ns-unmap 'user 'f2-adoption-replay))
+
+; Run only after development convergence. Reload the test namespaces through
+; the canonical loader; never reload test-support or construct its base here.
+(def f2-repair-regressions
+  (future
+    (#'seon.test/with-test-loader
+     (fn [] (require 'seon.db-test :reload) (require 'seon.fn-test :reload)))
+    (let [connection (seon.operator/connection "default")
+          database (seon.db/db connection)
+          options {:seon.db/db database
+                   :seon.test/remaining-ms 180000
+                   :seon.test.run/provenance
+                   (seon.test.runner/provenance database)}]
+      (mapv (fn [test-name]
+              (seon.test/run (#'seon.test/resolve-test test-name)
+                             connection options))
+            '[seon.db-test/final-entity-keyword-sets-are-not-lookup-refs
+              seon.fn-test/publication-refusals-preserve-the-entity-key-and-value
+              seon.fn-test/retired-program-identities-validate-as-retired-rows
+              seon.db-test/all-transaction-grammars-validate-the-resulting-entity]))))
+
+(if (realized? f2-repair-regressions) @f2-repair-regressions :seon.probe/running)
+(when (realized? f2-repair-regressions) (ns-unmap 'user 'f2-repair-regressions))
