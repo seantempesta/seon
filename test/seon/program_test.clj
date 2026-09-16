@@ -148,6 +148,7 @@
             (fn [function-symbol source arglists spec]
               (merge {:seon.fn/sym function-symbol
                       :seon.fn/ns [:seon.ns/name 'sample]
+                      :seon.schema.admission/source :core
                       :seon.fn/source source
                       :seon.fn/arglists (pr-str arglists)
                       :seon.fn/private? false
@@ -506,6 +507,7 @@
             spec [:=> [:cat :int] :int]
             row (merge {:seon.fn/sym function-symbol
                         :seon.fn/ns [:seon.ns/name 'sample]
+                        :seon.schema.admission/source :agent
                         :seon.fn/source
                         "(defn idempotent {:malli/schema [:=> [:cat :int] :int]} [x] x)"
                         :seon.fn/arglists "([x])"
@@ -515,10 +517,10 @@
             row-tx (ns-resolve 'seon.turn 'row-tx)]
         (db/transact! connection [{:seon.ns/name 'sample
                                    :seon.ns/source "(ns sample)"}])
-        (db/transact! connection (row-tx @connection {} row))
+        (db/transact! connection (row-tx (db/db connection) {} row))
         (let [before (db/pull @connection '[*]
                               [:seon.fn/sym function-symbol])
-              replacement (row-tx @connection {} row)]
+              replacement (row-tx (db/db connection) {} row)]
           (is (empty? replacement))
           (is (= before
                  (db/pull @connection '[*]
@@ -532,6 +534,7 @@
             original
             (merge {:seon.fn/sym function-symbol
                     :seon.fn/ns [:seon.ns/name 'sample]
+                    :seon.schema.admission/source :agent
                     :seon.fn/source
                     "(defn redefined {:malli/schema [:=> [:cat :int] :int]} [x] x)"
                     :seon.fn/arglists "([x])"
@@ -545,12 +548,12 @@
             declared-content (ns-resolve 'seon.turn 'declared-content)]
         (db/transact! connection [{:seon.ns/name 'sample
                                    :seon.ns/source "(ns sample)"}])
-        (db/transact! connection (row-tx @connection {} original))
+        (db/transact! connection (row-tx (db/db connection) {} original))
         (let [current (db/pull @connection '[*]
                                [:seon.fn/sym function-symbol])
-              replacement (row-tx @connection {} changed)]
-          (is (not= (declared-content @connection current)
-                    (declared-content @connection changed))
+              replacement (row-tx (db/db connection) {} changed)]
+          (is (not= (declared-content (db/db connection) current)
+                    (declared-content (db/db connection) changed))
               "declared content receives the database before the row")
           (is (seq replacement))
           (db/transact! connection replacement)
@@ -573,6 +576,7 @@
             original
             (merge {:seon.fn/sym function-symbol
                     :seon.fn/ns [:seon.ns/name 'sample]
+                    :seon.schema.admission/source :agent
                     :seon.fn/source
                     "(defn unmeasured {:malli/schema [:=> [:cat :int] :int]} [x] x)"
                     :seon.fn/arglists "([x])"
@@ -585,12 +589,12 @@
             row-tx (ns-resolve 'seon.turn 'row-tx)]
         (db/transact! connection [{:seon.ns/name 'sample
                                    :seon.ns/source "(ns sample)"}])
-        (db/transact! connection (row-tx @connection {} original))
+        (db/transact! connection (row-tx (db/db connection) {} original))
         (testing "a request with no run opened on nothing and claims nothing"
-          (is (seq (row-tx @connection {} changed))))
+          (is (seq (row-tx (db/db connection) {} changed))))
         (testing "a request naming a run with no opening basis says so"
           (let [data (refusal-data
-                      #(row-tx @connection {:seon.turn/id "absent"}
+                      #(row-tx (db/db connection) {:seon.turn/id "absent"}
                                changed))]
             (is (= :seon.turn/refused (:seon.error/kind data)))
             (is (= :seon.turn/run-opening-basis-unreadable (:seon.turn/rule data))
@@ -628,6 +632,7 @@
           :source "(seon.schema/register! ::amount [:int {:min 0}])"
           :expected
           {:seon.schema/key :sample/amount
+           :seon.schema/ns [:seon.ns/name 'sample]
            :seon.schema/form "[:int {:min 0}]"
            :seon.schema.admission/source :agent}}
          {:label "test"
@@ -800,7 +805,7 @@
             settlement
             {:seon.turn/id "registration-delete"
              :seon.cluster.eval/ordinal 0
-             :seon.cluster.eval/result-edn "nil"
+             :seon.eval/shown "nil"
              :seon.cluster.eval/ns
              [:seon.ns/name 'my.agents.someone-else]
              :seon.program/row deletion}]
@@ -814,12 +819,14 @@
            :seon.agent/namespace namespace-ref}
           {:seon.fn/sym function-sym
            :seon.fn/ns namespace-ref
+           :seon.schema.admission/source :agent
            :seon.fn/source "(defn same-name [] 1)"
            :seon.fn/arglists "([])"
            :seon.fn/private? false
            :seon.fn/spec "[:=> [:cat] :int]"}
           {:seon.test/sym function-sym
            :seon.test/ns namespace-ref
+           :seon.schema.admission/source :agent
            :seon.test/source "(clojure.test/deftest same-name)"}])
         (db/transact!
          connection

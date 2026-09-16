@@ -563,7 +563,10 @@
         (fn [connection]
           (db/transact!
            connection
-           [{:seon.ns/name namespace-name
+           ;; The indexed row carries its file ref, so the emitted file rows
+           ;; are admitted first exactly as publication admits them.
+           (into (filterv :seon.fn.file/path rows)
+            [{:seon.ns/name namespace-name
              :seon.ns/source "(ns sample.settlement-parity)"}
             {:seon.fn/sym "sample.settlement-parity/helper"
              :seon.schema.admission/source :core
@@ -573,7 +576,7 @@
              :seon.fn/private? false}
             {:seon.agent/id "settlement-parity-agent"
              :seon.agent/namespace
-             [:seon.ns/name namespace-name]}])
+             [:seon.ns/name namespace-name]}]))
           (db/transact!
            connection
            (turn/open-tx
@@ -1030,8 +1033,9 @@
                                                  (.getCanonicalPath alpha)))))
       (is (= "(ns artifact.alpha)"
              (:seon.ns/source
-              (first (:seon.fn.file/rows
-                      (get artifacts (.getCanonicalPath alpha))))))))))
+              (first (filter :seon.ns/name
+                             (:seon.fn.file/rows
+                              (get artifacts (.getCanonicalPath alpha)))))))))))
 
 (deftest changed-file-planning-is-conservative-and-explicit
   (let [path "/repo/src/sample.clj"
@@ -1197,9 +1201,11 @@
           (fn [connection]
             (db/transact!
              connection
+             ;; Declaration rows refer to their file row, so the file rows
+             ;; are admitted with them exactly as publication admits them.
              (into (mapv #(dissoc % :seon.fn/keywords :seon.fn/calls)
-                         (filter #(or (:seon.ns/name %) (:seon.fn/sym %)
-                                      (:seon.test/sym %))
+                         (filter #(or (:seon.fn.file/path %) (:seon.ns/name %)
+                                      (:seon.fn/sym %) (:seon.test/sym %))
                                  rows))
                    (mapcat (fn [row]
                              (map (fn [used]

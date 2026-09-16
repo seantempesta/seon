@@ -149,11 +149,14 @@
   [contexts entry]
   (let [{:keys [text line-starts] ::keys [byte-line-starts]} (get contexts (::analyzer/filename entry))
         offset (fn [row col]
-                 (+ (nth byte-line-starts (dec row))
-                    (alength (.getBytes
-                              (subs text (nth line-starts (dec row))
-                                    (+ (nth line-starts (dec row)) (dec col)))
-                              StandardCharsets/UTF_8))))]
+                 ;; An analyzer column past the line's last character addresses
+                 ;; that line's end; no source byte exists beyond it.
+                 (let [start (nth line-starts (dec row))
+                       stop (min (+ start (dec col))
+                                 (nth line-starts row (count text)))]
+                   (+ (nth byte-line-starts (dec row))
+                      (alength (.getBytes (subs text start stop)
+                                          StandardCharsets/UTF_8)))))]
     [(offset (::analyzer/row entry) (::analyzer/col entry))
      (offset (::analyzer/end-row entry) (::analyzer/end-col entry))]))
 
@@ -812,8 +815,9 @@
         declarations (filter :seon.fn/form-span rows)]
     (mapv
      (fn [finding]
-       (let [row (::analyzer/row finding)
-             col (::analyzer/col finding)
+       ;; clj-kondo reports positions as JDK Integers; these facts are longs.
+       (let [row (long (::analyzer/row finding))
+             col (long (::analyzer/col finding))
              position (first (exact-form-span
                               {path context}
                               {::analyzer/filename path
