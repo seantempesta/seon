@@ -493,3 +493,15 @@ Queue, in order:
   only the STALE tests (reach-digest's `stale`) and only at the settlement
   that closes an ordinary turn, never per generated form — the efficiency
   rule applied to P5.
+- 15:05Z ROOT CAUSE of tonight's slowness (peer's latency lane, `4764c233a`,
+  issue `blob-retention-sweep-starves-every-roster-writer`):
+  `seon.blob.retention/reclaim!` fires every minute, takes the store's
+  EXCLUSIVE sweep permit and walks all 380,285 konserve keys (64.6 s) to
+  find 3,624 blobs; `branch!` waits on that permit unbounded → the
+  reachability gate closed 96 % of wall time, every branch/retire 57–74 s,
+  recording stalls, hook publication timeouts, slow forks. Store 72 GB /
+  380k files. Peer lanes: astra `retention-sweep` (candidates as a query
+  over blob-write facts; permit only around deletes — the aggregation rule
+  again) owning blob/retention/schedule files; Opus research on what the
+  380k keys are. The every-minute maintenance commits were also the
+  cold-page invalidator earlier tonight. My lanes stay off those files.
