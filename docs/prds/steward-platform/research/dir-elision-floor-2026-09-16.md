@@ -113,11 +113,17 @@ appears when a handle is supplied.
 - Adoption of this edit was REFUSED on the pre-refork `default`
   (`:seon.issue/agent` incompatible schema change, a foreign lane's). The
   post-refork JVM carries the edit; the live bytes above are from it.
-- **No in-process regression run recorded**: `seon.test-support/database-base`
-  had not finished constructing in the reforked JVM before this note was
-  written, and the fixture-base poison rule forbids forcing it inside a
-  bound-limited call. The four test files below need the cold gate; requested
-  in `tmp/orchestrator/gate-requests/dir-elision.txt`.
+- **No in-process regression run: the shared fixture base REFUSES to
+  construct in this JVM.** Followed the base construction rule exactly — a
+  daemon-thread `future`, no bound, reached through `seon.test`'s own loader
+  because `test/` is not on `default`'s classpath — and it answered
+  `#:seon.error{:kind :seon.test-support/database-base-unavailable, :message
+  "Canonical fixture base construction failed: Schema declaration resolution
+  requires the projection handed to the operation."}`. Nothing was rebuilt
+  (fixture-base poison rule); recorded in
+  [in-process-test-runs-poison-the-shared-fixture-base](../../../seon/issues/in-process-test-runs-poison-the-shared-fixture-base.md).
+  The five test files need the cold gate; requested in
+  `tmp/orchestrator/gate-requests/dir-elision.txt`.
 - clj-kondo: 0 errors on all changed files; warnings are pre-existing.
 
 ## Residual, filed not fixed
