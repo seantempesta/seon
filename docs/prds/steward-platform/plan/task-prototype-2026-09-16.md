@@ -7,6 +7,14 @@ tags: [plan, steward, task, schema]
 
 # The task as data — prototype for iteration
 
+> Superseded 2026-09-16 02:30Z by the owner's ruling "one family": the task IS an
+> issue with tests, functions and an assigned agent — see
+> [namespace-data-model §9](namespace-data-model-2026-09-16.md) and
+> [issue-family-spec-2026-09-16.md](issue-family-spec-2026-09-16.md). The
+> mechanics below (start! via creation-tx + generated-run-tx, the open test
+> set, units on the schema, the opening block) carry over unchanged under the
+> `seon.issue` name.
+
 Rulings this prototype obeys (owner, 2026-09-15/16): a task is data in the
 database; success is a set of deftests, at least one, all passing; settlement
 runs them; a session is an agent's turn chain, parallel sessions are parallel

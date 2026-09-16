@@ -57,3 +57,12 @@
   Data model §7 written: `seon.fault` (class, identity without process) +
   `:seon.error/fault`/`fn`/`proc-fn` refs; the full 29-row list of prose,
   EDN-text and string-named storage with verdict and writer seam.
+- 02:30Z owner: Clojure/Datahike terms only (no "fault"/"class"); the error
+  entity is keyed by its signature = seon.id/id over a sorted map of
+  {kind throwable-class fn frame}, process moves to `seon.error.occurrence`
+  component rows; ONE family for issues and tasks (`seon.issue`; the
+  my.task prototype folds in). Data model §9; spec
+  [issue-family-spec-2026-09-16.md](issue-family-spec-2026-09-16.md).
+  Lanes launched: error-graph, issue-family; running: reach-digest (beat 2),
+  attempt-and-eval-facts, program-provenance (corrected: file/span + lint
+  rows, no derived subject).

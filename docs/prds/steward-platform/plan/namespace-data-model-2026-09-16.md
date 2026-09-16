@@ -457,3 +457,76 @@ in one transaction function, increments `:seon.error/occurrences` from the
 mid-transaction value, asserts `first-at` only when absent, replaces `at`
 and the evidence blob ref. History keeps every replaced value with its
 transaction, so rates and recency are temporal queries, not rows.
+
+## 9. Rulings 02:30Z: Clojure terms only; one family for issues and tasks; the fingerprint
+
+- **No new nouns.** "fault", "class" are dropped. The deduplicated entity is
+  the `seon.error` entity itself: identity `:seon.error/signature`. The
+  per-agent, per-turn counts are `seon.error.occurrence` component rows
+  under it. Vocabulary is Clojure's (`ex-info`, `ex-data`, `ex-message`,
+  Throwable class, stack frame) and Datahike's (entity, identity, ref,
+  component).
+- **`:seon.error/process`** is the existing ref to the JVM process entity
+  (`seon.db.process/id` = pid + start instant). It leaves the signature and
+  moves to the occurrence: same bug, same entity across restarts.
+- **The fingerprint is `seon.id/id` over a map of the identity attributes**,
+  printed canonically (`(into (sorted-map) m)` before `id`, since `pr-str` of
+  a hash map has no guaranteed key order). `seon.id/id` already hashes the
+  `pr-str` of arbitrary data with SHA-256 (`src/seon/id.clj:30`); `digest`
+  is the vector form the current signature uses (`error.clj:279`). No new
+  generator.
+
+```clojure
+;; the error's identity: everything about WHAT failed, nothing about WHEN or WHO
+(seon.id/id (into (sorted-map)
+                  {:seon.error/kind            kind              ; qualified keyword
+                   :seon.error/throwable-class 'clojure.lang.ExceptionInfo   ; symbol, absent for flat values
+                   :seon.error/fn              'seon.render.web/feed         ; the raising function's symbol
+                   :seon.error/frame           '[seon.render.web$feed invokeStatic "web.clj" 2116]})
+             64)
+
+;; the occurrence's identity: WHO hit it WHERE
+(seon.id/id (into (sorted-map)
+                  {:seon.error/signature signature
+                   :seon.agent/id        "juniper"        ; absent when no agent
+                   :seon.turn/id         "958adc16c4b1"  ; or :seon.db.process/id when no turn
+                   }))
+```
+
+```clojure
+;; seon.error.edn — the entity keyed by signature (existing attributes keep their meaning)
+#:seon.error{:signature  [:string {:seon.db/identity true}]    ; was indexed, becomes identity
+             :fn         :seon.db/ref                           ; NEW: the raising function's program row
+             :frame      [:tuple :symbol :symbol :string :int]  ; NEW: class, method, file, line as data
+             :throwable-class :symbol                           ; was string
+             :occurrences [:set {:seon.db/component true} :seon.db/ref]   ; NEW: reuse of the declared key name as the component set
+             :regressions [:set :seon.db/ref]                   ; NEW: tests declaring ^{:seon.test/errors [signature …]}
+             :issue      :seon.db/ref                           ; NEW: the issue/task open on this error
+             :resolved-tx :seon.db/ref}                         ; NEW: absent = open
+;; seon.error.occurrence.edn — one row per (error, agent, turn|process)
+#:seon.error.occurrence{:id       [:string {:seon.db/identity true}]
+                        :count    [:int {:min 1}]
+                        :first-at :inst
+                        :last-at  :inst
+                        :process  :seon.db/ref     ; the JVM process entity
+                        :agent    :seon.db/ref
+                        :turn     :seon.db/ref
+                        :proc-fn  :seon.db/ref     ; the Flow step function's row, when it rode the error channel
+                        :data-blob :seon.db/ref    ; the latest ex-data, content-addressed
+                        :message  :string}         ; the latest exact message
+```
+
+The committer (`seon.cluster/commit-fault!` → `error/commit-tx`,
+`src/seon/error.clj:1306`) becomes one transaction function: upsert the
+error by signature, upsert the occurrence by its id, `count` from the
+mid-transaction value plus one, `first-at` only when absent, replace
+`last-at`, `message`, `data-blob`. Existing readers (`seon.problems`,
+the error render pair, the debug ledger) read counts from occurrences.
+
+- **One family for issues and tasks.** `my.task` is not built; the
+  [prototype](task-prototype-2026-09-16.md) folds into `seon.issue`
+  (§3.3 plus `agent`, `budget`, `instructions`): an issue with tests,
+  functions and an assigned agent IS a task in flight; it resolves when
+  its tests are verified on the current reach digest; `start!` assigns the
+  agent and opens its first turn. The 240 notes are indexed into it. Spec:
+  [issue-family-spec-2026-09-16.md](issue-family-spec-2026-09-16.md).
