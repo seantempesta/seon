@@ -2528,7 +2528,8 @@
           (is (= :seon.message/unknown-recipient (:seon.error/kind @actual-value)))
           (is (= 2 (count evaluations)))
           (is (str/includes? (:seon.eval/shown (first evaluations)) "missing-agent"))
-          (is (str/includes? (:seon.eval/shown (first evaluations)) "unknown-recipient"))
+          (is (= "There is no agent named \"missing-agent\"."
+                 (:seon.eval/shown (first evaluations))))
           (is (empty? (db/q '[:find ?message :where [?message :seon.message/from _]] database)))
           (is (nil? (turn/next-agent-work database (request connection)))))))))
 

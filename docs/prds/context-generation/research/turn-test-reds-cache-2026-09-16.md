@@ -191,3 +191,12 @@ restores all semantic assertions, but run **44708 is 14/1/0**: measured
 six-form bookkeeping **7198.085124 ms**, against the unchanged **300 ms** bound.
 The candidate and bound are not weakened or committed. This is a named
 performance residual, not a green test or a parser correctness attribution.
+
+## Delivery diagnostic observation slice
+
+`a-refused-delivery-becomes-a-durable-error-fact` separately asserts the live
+typed kind `:seon.message/unknown-recipient` and the exact shown diagnostic
+`There is no agent named "missing-agent".` The old assertion expected the
+kind token to be repeated in the human-facing text. All other delivery,
+evaluation-count and idle obligations remain. Candidate **44681 6/0/0**;
+source-reloaded fresh-base run **44729 6/0/0**.
