@@ -251,3 +251,15 @@ Queue, in order:
   schemas from D1; lane `issue-generator` (Opus) launches once
   issue-settlement releases seon.issue.edn (needs `:seon.issue/detector`,
   `:seon.issue/schema`). R2 (structured test failures) launched.
+- 09:20Z renderer-fn reader residual fixed (`52044b4f4`: the evaluation
+  entity map admits the pulled ref shape, precedent `:seon.test/run`;
+  faults-test 13/0/0). BLOCKER found by that fixer: at committed HEAD a
+  fresh fixture base refuses `:seon.schema/missing-projection` from
+  `accrete-schema-population!` (cluster.clj:1347, no projection carried) —
+  consequence of write-validation's stricter admission; a fresh test worker
+  would refuse at its first `with-database`. Gate session told to HOLD;
+  Opus fixer launched (carry the projection at the seam, regression:
+  create-base on a fresh store succeeds and carries its projection). Note:
+  default's `database-base` delay was swapped for a freshly built base by
+  the fixer (old one lingers until JVM exit); in-process runs before
+  ~03:47Z local validated against pre-edit schema.
