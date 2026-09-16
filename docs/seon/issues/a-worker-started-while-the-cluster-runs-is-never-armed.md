@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, agent, flow, issue-family]
 ---
@@ -48,3 +48,26 @@ proven by a regression that transacts an agent plus an open turn against a
 running cluster graph and awaits its first evaluation under the declared
 event backstop. Either agent creation writes a datom the wake listener
 matches, or `arm!` is part of the creation seam rather than a separate pass.
+
+## Resolution (2026-09-16, lane `start-arms`)
+
+Both halves are declarations, and `src/seon/turn.clj` was not touched.
+
+- `:seon.agent/id` carries `:seon.wake/arms true`. `seon.cluster.wake/arming-attributes`
+  derives the set and `wake/route!` offers the cluster's ONE armer a
+  payload-free wake on every assertion, so an agent created while the cluster
+  runs is armed by the same pass that arms boot-time agents. The armer's
+  docstring already claimed this; nothing declared it.
+- `:seon.issue/agent` carries `:seon.db/index true :seon.wake/listen true
+  :seon.wake/opens-turn? true`, so the assignment datom IS the worker's first
+  wake and no synthetic message is needed.
+- `seon.cluster.wake/arming-refusal` is deliberately separate from
+  `declarations-refusal`, which `seon.turn/opening-deferred?` consumes:
+  folding it in made a missing declaration defer every opening instead.
+
+Live proof on a scratch cluster: `start!` with no provider armed the worker
+with no hand `arm!`, stored an 11-evaluation opening, left exactly one
+unanswered `:seon.issue/agent` wake, and answered it with the worker's first
+accepted reply. Regressions:
+`test/seon/cluster/agent_arming_test.clj`. Measurements:
+[start-arms-and-wakes-2026-09-16](../../prds/steward-platform/research/start-arms-and-wakes-2026-09-16.md).
