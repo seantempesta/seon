@@ -8,7 +8,8 @@
   responsible for the finding. `seon.issue/generate` turns those subjects into
   issue entities whose identity is the detector plus the subject identity, so
   running a detector twice upserts the same entities."
-  (:require [seon.db :as db]))
+  (:require [seon.db :as db]
+            [seon.fn :as fn]))
 
 (defn- declared-keys
   "The attribute keys one entity-map schema declares, from its stored shape."
@@ -83,6 +84,56 @@
                         [?e :seon.schema/key ?key] [?e :seon.db/attributes true]]
                       database)))))
 
+(defn- shared-form-symbols
+  "Symbols of declarations that do not OWN their defining form.
+
+  Several functions sharing one `:seon.fn/form-span` in one file were interned
+  by a single form (a `defrecord`'s constructors), so neither a docstring nor a
+  `:malli/schema` can be written on them individually. The exclusion is the
+  stored span, never a name pattern."
+  [database]
+  (let [spans (db/q '[:find ?sym ?file ?span :where
+                      [?f :seon.fn/sym ?sym] [?f :seon.fn/file ?file] [?f :seon.fn/form-span ?span]]
+                    database)]
+    (if (:seon.error/kind spans)
+      spans
+      (into #{}
+            (comp (filter (fn [[_ group]] (> (count group) 1)))
+                  (mapcat (fn [[_ group]] (map first group))))
+            (group-by (fn [row] [(nth row 1) (nth row 2)]) spans)))))
+
+(defn- carrying
+  "The symbols of declarations that carry `attribute` at all.
+
+  One attribute index scan, joined in Clojure by the callers below, so the
+  standards differ by WHICH fact is absent and share one candidate query."
+  [database attribute]
+  (let [rows (db/q '[:find [?sym ...] :in $ ?attribute :where
+                     [?f :seon.fn/sym ?sym] [?f ?attribute _]]
+                   database attribute)]
+    (if (:seon.error/kind rows) rows (set rows))))
+
+(defn- declarations
+  "Public source-bearing declarations as sorted `[symbol namespace-name]` rows.
+
+  With no root this is the whole population, test helpers included: an honest
+  over-report, not a name-based exclusion. A root joins POSITIVELY on
+  `:seon.fn.file/relative-root`, the fact the indexer wrote for the source
+  directory it walked the file under, so a declaration under no declared root
+  is scoped out rather than assumed to be production."
+  [database root]
+  (let [rows (if root
+               (db/q '[:find ?sym ?name :in $ ?root :where
+                       [?f :seon.fn/sym ?sym] [?f :seon.fn/private? false] [?f :seon.fn/source _]
+                       [?f :seon.fn/file ?file] [?file :seon.fn.file/relative-root ?root]
+                       [?f :seon.fn/ns ?ns] [?ns :seon.ns/name ?name]]
+                     database root)
+               (db/q '[:find ?sym ?name :where
+                       [?f :seon.fn/sym ?sym] [?f :seon.fn/private? false] [?f :seon.fn/source _]
+                       [?f :seon.fn/ns ?ns] [?ns :seon.ns/name ?name]]
+                     database))]
+    (if (:seon.error/kind rows) rows (sort rows))))
+
 (defn- doc-subject [[sym namespace-name]]
   {:seon.fn/sym sym
    :seon.issue/namespaces #{namespace-name}
@@ -119,26 +170,123 @@
      [:or [:vector [:map [:seon.fn/sym :seon.fn/sym]]] :seon.error/value]]]}
   ([database] (public-without-doc database {}))
   ([database request]
-   (let [root (:seon.fn.file/relative-root request)
-         spans (db/q '[:find ?sym ?file ?span :where
-                       [?f :seon.fn/sym ?sym] [?f :seon.fn/file ?file] [?f :seon.fn/form-span ?span]]
-                     database)
-         shared (into #{}
-                      (comp (filter (fn [[_ group]] (> (count group) 1)))
-                            (mapcat (fn [[_ group]] (map first group))))
-                      (group-by (fn [row] [(nth row 1) (nth row 2)]) spans))
-         subjects (if root
-                    (db/q '[:find ?sym ?name :in $ ?root :where
-                            [?f :seon.fn/sym ?sym] [?f :seon.fn/private? false] [?f :seon.fn/source _]
-                            [?f :seon.fn/file ?file] [?file :seon.fn.file/relative-root ?root]
-                            [?f :seon.fn/ns ?ns] [?ns :seon.ns/name ?name]
-                            (not [?f :seon.fn/doc _])]
-                          database root)
-                    (db/q '[:find ?sym ?name :where
-                            [?f :seon.fn/sym ?sym] [?f :seon.fn/private? false] [?f :seon.fn/source _]
-                            [?f :seon.fn/ns ?ns] [?ns :seon.ns/name ?name]
-                            (not [?f :seon.fn/doc _])]
-                          database))]
-     (into []
-           (comp (remove (comp shared first)) (map doc-subject))
-           (sort subjects)))))
+   (let [subjects (declarations database (:seon.fn.file/relative-root request))
+         documented (carrying database :seon.fn/doc)
+         shared (shared-form-symbols database)]
+     (or (some #(when (:seon.error/kind %) %) [subjects documented shared])
+         (into []
+               (comp (remove (fn [[sym _]] (or (documented sym) (shared sym)))) (map doc-subject))
+               subjects)))))
+
+(defn- contract-subject [[sym namespace-name]]
+  {:seon.fn/sym sym
+   :seon.issue/namespaces #{namespace-name}
+   :seon.issue/title (str "Public function " sym " declares no contract")
+   :seon.issue/problem
+   (str "The public function " sym " stores source but no :seon.fn/spec, so nothing declares what "
+        "it accepts and promises. Instrumentation has no contract to arm, `doc` and `dir` answer "
+        "with arglists alone, and a wrong argument surfaces as an arbitrary failure inside the body "
+        "instead of a typed refusal naming the function and the offending value."
+        "\n\nDone when the definition carries a complete Malli `:malli/schema` on its var metadata — "
+        "no :any, :some or [:maybe X] without a genuinely polymorphic boundary — published so that "
+        "(:seon.fn/spec (seon.db/pull db [:seon.fn/spec] [:seon.fn/sym \"" sym "\"])) is present."
+        "\n\nThis issue is generated by seon.issue.detect/public-without-contract: it resolves on the "
+        "run after the contract is published, and reopens if it is removed.")})
+
+(defn public-without-contract
+  "Public source-bearing functions declaring no Malli contract.
+
+  Excluded by fact, never by name: a declaration the indexer recorded as a
+  macro (`:seon.fn/macro?` — a macro is handed forms, and no macro in the
+  population carries `:seon.fn/spec`), and a declaration that does not own its
+  defining form (several symbols sharing one `:seon.fn/form-span`, which is how
+  a `defrecord`'s constructors are interned).
+
+  The one-argument arity is the whole population, test helpers included: an
+  honest over-report. Given `{:seon.fn.file/relative-root \"src\"}` it yields the
+  declarations the indexer walked under that source root, joining positively on
+  the root the file entity carries."
+  {:malli/schema
+   [:function
+    [:=> [:cat :seon.db/database-value]
+     [:or [:vector [:map [:seon.fn/sym :seon.fn/sym]]] :seon.error/value]]
+    [:=> [:cat :seon.db/database-value
+          [:map [:seon.fn.file/relative-root {:optional true} :seon.fn.file/relative-root]]]
+     [:or [:vector [:map [:seon.fn/sym :seon.fn/sym]]] :seon.error/value]]]}
+  ([database] (public-without-contract database {}))
+  ([database request]
+   (let [subjects (declarations database (:seon.fn.file/relative-root request))
+         contracted (carrying database :seon.fn/spec)
+         macros (carrying database :seon.fn/macro?)
+         shared (shared-form-symbols database)]
+     (or (some #(when (:seon.error/kind %) %) [subjects contracted macros shared])
+         (into []
+               (comp (remove (fn [[sym _]] (or (contracted sym) (macros sym) (shared sym))))
+                     (map contract-subject))
+               subjects)))))
+
+(defn- reaching-test-subject [basis-t [sym namespace-name]]
+  {:seon.fn/sym sym
+   :seon.issue/namespaces #{namespace-name}
+   :seon.issue/title (str "No test reaches public function " sym)
+   :seon.issue/problem
+   (str "No indexed test reaches the public function " sym ". Reach was derived by "
+        "seon.fn/tests-reaching — the stored `:seon.fn/calls` walk seon.fn/gate-set uses to select a "
+        "commit's gate — over the database value at basis :t " basis-t ", and that walk named no test."
+        "\n\nRead this as \"no reach is recorded\", NEVER as \"no test exercises it\": the call graph "
+        "is currently incomplete. An edge is stored only for a syntactic call or a call through one "
+        "of clj-kondo's twenty-five higher-order clojure.core functions, so a function reached only "
+        "through apply, partial, comp, a var quote, a protocol implementation body or a defmethod "
+        "body carries no edge and is named here although a test does exercise it "
+        "(docs/prds/steward-platform/research/call-graph-fidelity-2026-09-17.md section 3, measured "
+        "2026-09-17). Read the reach before writing a new regression."
+        "\n\nDone when (seon.fn/tests-reaching (seon.db/db) \"" sym "\") names at least one test — "
+        "because a regression now reaches it, or because the edge that was missing is now indexed."
+        "\n\nThis issue is generated by seon.issue.detect/public-without-reaching-test: it resolves "
+        "on the run after reach appears, and reopens if it disappears.")})
+
+(defn public-without-reaching-test
+  "Public source-bearing functions no indexed test reaches.
+
+  Reach is `seon.fn/tests-reaching` — the one stored-edge derivation
+  `seon.fn/gate-set` uses to select a commit's gate — asked once per candidate:
+  never a name match, never a second reach derivation. A function whose
+  identity or whose file's references that walk cannot resolve is answered with
+  EVERY test and is therefore not a subject here: an unresolved reach is
+  unknown, and reporting unknown as a finding would be the same
+  absence-as-health mistake in the other direction.
+
+  The report is honest about its own evidence: the call graph under-reports
+  today (a call through `apply`, `partial`, `comp`, a var quote, a protocol
+  implementation body or a `defmethod` body stores no edge), so each subject's
+  problem text names the basis :t the reach was computed at and says the graph
+  may be incomplete. A subject resolves on the run after reach appears —
+  whether a regression was written or the missing edge became indexed.
+
+  Excluded by fact: a declaration that does not own its defining form (several
+  symbols sharing one `:seon.fn/form-span`).
+
+  The one-argument arity is the whole population, test helpers included. Given
+  `{:seon.fn.file/relative-root \"src\"}` it yields the declarations the indexer
+  walked under that source root."
+  {:malli/schema
+   [:function
+    [:=> [:cat :seon.db/database-value]
+     [:or [:vector [:map [:seon.fn/sym :seon.fn/sym]]] :seon.error/value]]
+    [:=> [:cat :seon.db/database-value
+          [:map [:seon.fn.file/relative-root {:optional true} :seon.fn.file/relative-root]]]
+     [:or [:vector [:map [:seon.fn/sym :seon.fn/sym]]] :seon.error/value]]]}
+  ([database] (public-without-reaching-test database {}))
+  ([database request]
+   (let [subjects (declarations database (:seon.fn.file/relative-root request))
+         shared (shared-form-symbols database)
+         basis-t (db/basis-t database)]
+     (or (some #(when (:seon.error/kind %) %) [subjects shared basis-t])
+         (reduce (fn [found [sym _ :as row]]
+                   (let [reach (fn/tests-reaching database sym)]
+                     (cond
+                       (:seon.error/kind reach) (reduced reach)
+                       (seq reach) found
+                       :else (conj found (reaching-test-subject basis-t row)))))
+                 []
+                 (remove (fn [[sym _]] (shared sym)) subjects))))))
