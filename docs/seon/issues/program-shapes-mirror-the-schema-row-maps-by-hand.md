@@ -28,6 +28,13 @@ This is the recurring failure class from AGENTS.md: the strip is silent, so
 the absence of a facet reads as "this declaration writes nothing" — absence
 of signal as health.
 
+Second hit, same day: `:seon.fn.file/root` (2026-09-16, `925ca19fe`) was
+declared on `:seon.fn.file/file`, written by the indexer where it mints the
+file row, and dropped by `canonical-row` with no diagnostic until the literal
+list was extended too — verified live in `default`'s JVM before the edit. Twice
+in one day the hand-maintained mirror silently stripped an owned attribute; the
+first was `:seon.fn/writes` / `:seon.fn/call-arities` in `7cfe02790`.
+
 Dissolution: derive `:seon.program/owned-attributes` from the identity
 family's declared schema row map (the keys of `:seon.fn/fn`,
 `:seon.test/test`, `:seon.ns/ns`, `:seon.fn.file/file`, `:seon.lint/lint`),

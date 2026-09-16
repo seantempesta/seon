@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, schema, program-graph, class/p2]
 ---
@@ -33,15 +33,32 @@ the classpath root it read the file from), a detector scopes on that fact, and
 one regression asserts a first-party production function and a test helper are
 distinguished by the query rather than by their names.
 
-## 2026-09-16 — attempted, blocked at a protected file
+## 2026-09-16 — resolved
 
-Status stays **open**. The fix was scoped and verified live, then stopped: the
+`925ca19fe` makes the walked source root a fact on the file entity
+(`:seon.fn.file/root`), written where `seon.fn/artifact` mints the row and
+replaced with it on re-index. `seon.issue.detect/public-without-doc` keeps its
+unscoped over-report and gains an optional `{:seon.fn.file/root "src"}` scope
+that joins positively on the fact. Adopted on `default` at `:current-src`
+commit `6aaa4925-cb32-5a6e-b004-105078c43e7a`: 335 file entities, **106 `src`**,
+**228 `test`**, one under no declared root; the docstring standard's 31 subjects
+are **2** under `src`, **28** under `test`, and one agent-admitted declaration
+with no file. Evidence, including the cold-gate boundary for the fixture
+regressions, is in
+[source-root-fact-2026-09-16](../../prds/steward-platform/research/source-root-fact-2026-09-16.md).
+
+### The blocker this had to clear first
+
+The fix was scoped and verified live, then stopped: the
 file row is minted through `seon.program/canonical-row`, which keeps only the
 attributes named in `seon.program/shapes` for `:seon.fn.file/path`
 (`src/seon/program.cljc:41`). A `:seon.fn.file/root` written by the indexer is
 silently dropped there, and re-index replacement uses the same list, so the
 fact needs one element added to that vector in `src/seon/program.cljc` — a file
-protected by the concurrent reach-closure verification.
+protected by the concurrent reach-closure verification; the coordinator cleared
+exactly that one element, and it is the second time in a day that mirror
+silently stripped an owned attribute
+([the mirror issue](program-shapes-mirror-the-schema-row-maps-by-hand.md)).
 
 Two findings that constrain the eventual fix:
 
