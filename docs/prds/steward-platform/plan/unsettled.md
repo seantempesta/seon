@@ -2758,3 +2758,9 @@ working tree, never Sonnet.
   the NEWEST published base, names its digest and age, refuses only when
   none exists); the orchestrator is preparing the current HEAD base now as
   the interim. Message-wake parked, all items done pending cold gate.
+- adoption-margin landed `fbb4a205b` (shared cleanup admission logs before
+  deletion again; stale identity-preservation expectations corrected;
+  68/519/1F fast — the remaining red is the open `schema-declaration-
+  regression-disagrees-with-current-row-shape`; `eca2d87a7` refuted as the
+  cause of the silent recording). Lane parked. Editing: stage 2, guardrails.
+  The one reset waits only on stage 2's stop.
