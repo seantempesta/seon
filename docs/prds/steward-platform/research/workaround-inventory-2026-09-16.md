@@ -228,7 +228,7 @@ first.
 17. **`bin/test:659-666` `find`-based namespace discovery** — the launcher's naming convention overrides every derived selection (test-execution-model D2).
 18. **`bin/seon-hook:1233-1237` English-phrase progress contract** — replace with a keyed progress value emitted by `report-source-progress!`. **Dissolved 2026-09-16** — [hook-progress-is-a-value](hook-progress-is-a-value-2026-09-16.md).
 19. **Four classpath derivations → one** (`dev_cache.clj`, `test.clj:108`, `analyzer.clj:172`, `runner.clj:2892`). Closes an open issue on the in-process test loader.
-20. **`src/seon/program.cljc:899-904` `declaration-required-attributes`** — read `:required` off the declared row schema.
+20. **`src/seon/program.cljc:899-904` `declaration-required-attributes`** — read `:required` off the declared row schema. **Deferred 2026-09-16, not blocked.** `src/seon/program.cljc` was held by a concurrently editing lane when this lane resumed; that lane has since landed and the file is clean again, so the item is released and unclaimed. The literal is unchanged.
 21. **`src/seon/test/selection.clj:28-35` `widening-inputs`** — invert the predicate; the list disappears.
 22. **`src/seon/cluster.clj:625-651` `retrying-source-change`** — the observable is the hook's coalescing window, not a retry.
 23. **`src/seon/bootstrap_drive.clj:186,259` two production regexes over source text** — banned substitutes; the reader and the program graph answer both.
@@ -241,7 +241,7 @@ first.
 27. Three gate entry points → one `select` (test-system PRD stage 1).
 28. Six evaluation minting calls + four terminal writers → one write path (evaluation-write-path note D1/D2).
 29. `:seon.test/platform` as an installed attribute (test-execution-model D1).
-30. `search/owners` and `mcp-projection` — process-global registry and `ThreadLocal`; the environment should carry both.
+30. `search/owners` and `mcp-projection` — process-global registry and `ThreadLocal`; the environment should carry both. **Search half landed 2026-09-16** (`68e95b029`): the Lucene owner is an `IndexHandle` VALUE carried as an optional facts-layer environment member, and `search/owners` is gone. That commit also wedged every live publication, whose cause and fix are in [environment-carries-it](environment-carries-it-2026-09-16.md). **`mcp-projection` deferred, not blocked**: `src/seon/cluster.clj:236` was held when this lane resumed and is clean again now; the `ThreadLocal` is unchanged and the item is unclaimed.
 
 ---
 
