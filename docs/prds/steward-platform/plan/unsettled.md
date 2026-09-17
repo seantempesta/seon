@@ -3479,3 +3479,16 @@ as orchestrator/astra lanes, easy pool as the first live-agent slice).
   fixture drift" on its clean snapshot; the delta is being attributed by a
   baseline gate at `4feab16ff` from a clean worktree
   (`b2-baseline-gate.log`). Recording still refused (`test-definition-absent`).
+- `sci-arm-leak` COMPLETE `0a58c769d`: the leak was the instrumented
+  return boundary of `kernel/arm` — the thread-local arm was installed
+  before output-contract validation, so a refused return never handed the
+  caller its `stop!` and the `finally` could not release. Callback-scoped
+  `kernel/with-arm` releases before output validation; every production
+  caller migrated; foreign-arm refusals now carry arm/ctx ids and a bounded
+  arming stack; regressions for exception/interrupt/time-limit/re-arm; 61
+  tests green fast. Cold gate `arm-leak-paths-gate.log` running.
+- `72439187a` (Opus): the instrument refusal regression measures the ruled
+  LEAF with both guarantees (HTML whole value; AI bounded with an honest
+  elision); new issue: a collection-member refusal does not name the
+  member's index (`error.clj` `collection-member-problem`).
+- Launched sol `my-plan-post-reset` (the four plan reds + triage #7).
