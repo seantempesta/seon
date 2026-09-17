@@ -3525,3 +3525,11 @@ as orchestrator/astra lanes, easy pool as the first live-agent slice).
   (`git merge --no-ff error-declaration-manifest-slice1`); cold gate and
   slice 2 (wrapper enforcement) next. Launched sol
   `turn-settlement-post-reset` (the inherited 31F/10E class).
+- Arm-leak cold gate (`arm-leak-paths-gate.log`, 61 tests): 0F/9E — the
+  new refusal diagnostics name ONE foreign interpreter (`846133226`) armed
+  afresh before every test at `kernel.clj:211 new-armed` by the COLD WORKER
+  itself (fast runs do not exercise that path): the worker/fixture arming
+  never releases. Lane resumed with the evidence to fix that owner and add
+  the in-process worker regression. Manifest merge cold gate
+  (`manifest-merge-gate.log`) running; slice 2 waits for a free slot
+  (editing: publication, my-plan, turn-settlement, arm-leak).
