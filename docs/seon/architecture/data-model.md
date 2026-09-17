@@ -94,8 +94,12 @@ or turn-to-wake copy is needed.
 
 Compaction retracts the agent's evaluations; the next system turn
 regenerates the opening. It does not change installed program identities.
-Program identity rows survive definition removal as tombstones, preserving
-refs to those identities.
+Deletion of a program identity is retraction and the past is a temporal
+query; there is no retirement attribute and no tombstone row (owner ruling
+2026-09-16, program-facts PRD §1f G1, which retires ruling 47's two
+corollaries). The reasoning, the alternatives, and the facts that close by a
+positive transition instead are in
+[the data-modeling decision guide](data-modeling-guide.md).
 
 ## Rendering and inspection
 
