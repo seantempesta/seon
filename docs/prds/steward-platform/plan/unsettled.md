@@ -1998,7 +1998,67 @@ records no declaring namespace (consumers render/ns.clj:893, my/program.clj
 :264, one cluster.turn-test predicted red) — exact hunks in the note; FOR
 THE S3 LANE (holds sci/eval.clj) at its next stop.
 
-## RESUME HERE (2026-09-17 ~05:40Z)
+## RESUME HERE (2026-09-17 ~07:00Z, written before a context compaction)
+
+**Read first:** [plan/README.md](README.md) "Long-term plan and schedule"
+(complete roster, queued triggers, decisions answered and still to ask),
+then this block, then `bin/codex-agent status`, `git status --short`,
+`bin/seon status`, and every landing note under `../research/` dated
+2026-09-17 that a lane reports.
+
+**BROKEN FIRST — default is unusable for live proofs:** (1) its effective
+configuration lost every required fact (68 attributes) after a 180 s
+lock-hold timeout inside a development adoption's config reconciliation
+(issue `the-default-clusters-effective-configuration-lost-every-required-
+fact`, blocker); `bin/seon config apply default config/default.edn` REFUSES
+with `reconcile-refused` (config.clj:205; log
+`data/operator/operations/config-config-87866.log`); MCP jvm eval still
+runs forms, but every config-gated path answers `:seon.config/missing-
+effective`. Suspects, unverified: the whole-entity validator refusing the
+config entity's create/partial upsert (the create-path lane is editing
+db.clj), or reconciliation needing rows the tree no longer publishes. Next
+step: probe `seon.config/apply!`/`reconcile` in the JVM for the first
+refusal value; if it is the validator, land that fix first; otherwise stop/
+start default once the S3 lane's seam is coherent (a restart boots from the
+working tree — verify the tree loads with `clj-kondo` syntax pass first; a
+reset is the fallback and is proven). (2) Adoption is refused tree-wide:
+"Initialization lookup refs do not resolve" — the activation closure names
+call-preparation suppliers (`seon.db/supplied-database-value`,
+`seon.env/supplied-agent-id`, `seon.search/supplied-handle`) whose rows the
+publication lacks; the S3 lane (`acquisition-by-provenance-s3`) is rewiring
+exactly that seam (program.cljc, sci/eval.clj, AGENTS.md held) — it owns the
+coherent landing. (3) Platform tier: fixed at `d65cc688c`; batch 116 running
+(`tmp/orchestrator/gate-results/batch-116.log`: A platform, B 25 named
+namespaces) is the cold proof of everything landed since 115.
+
+**Running (codex, all with hooks ON since the launcher fix c41dd408b):**
+reset-batch-integration (edge retype on worktree branch `reset-batch`,
+pushed), acquisition-by-provenance-s3, test-system-stage2 (+ the recorder
+admission-source blocker), lane-guardrails (items 2–4 + resume backfill),
+message-wake-model (rulings 1h), datahike-modeling-study (high; ruling 1i:
+its corrections OVERRIDE prior schema decisions; the integrator rebases on
+it). **Opus:** hook loophole inventory + verifier facts; create-path
+validator fix (an incomplete create is admitted); small fixes (pull cap
+first); data-modeling GUIDE consolidation (`docs/seon/architecture/
+data-modeling-guide.md`, owner ~06:50Z: "a reasoned guide for when we want
+data to retract vs archived, refs vs identities ... I'm worried we are
+losing information"). Landed this hour: debug outline `c81946d4a` (live
+route 200, screenshots blocked by the config loss), S12 writes `f5d268ed6`,
+guardrails `aba5d94a5`, platform fix `d65cc688c`, hooks refs `820769a3b`
+`84bba40da`, codex launcher `c41dd408b`.
+
+**Rules in force overnight (owner asleep ~05:55Z):** keep working while
+making progress; reason, don't rush; astra at high effort for modeling;
+NEVER use the questions tool while he is away; the ten open owner
+decisions stay open with options in the plan (recommended options taken
+for the reset batch are vetoable: issue-lifecycle carry-forward, AST merge-
+then-delete, tx-refs-for-db-events rule, retention removal stands, shape
+rows left); review every landing and write it here; gate when the platform
+tier is green; a hook config change requires restarting codex lanes; one
+lane launch per shell; lanes never `bin/test`; load cap exceeded all night
+— prune before adding.
+
+## (superseded) RESUME HERE (2026-09-17 ~05:40Z)
 
 Read [plan/README.md](README.md) "Long-term plan and schedule" first — it
 is the complete roster (owners, status, queued triggers, decisions answered
