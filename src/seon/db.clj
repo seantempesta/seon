@@ -1406,7 +1406,7 @@
                               (query-patterns parsed-query))]
                  {::attribute-position position}
                  (if (= (count encoded) (count attributes))
-                   (first encoded)
+                   (vec encoded)
                    (throw (ex-info "Select the attribute alongside values with different storage codecs."
                                    {:seon.error/kind ::invalid-read
                                     ::attributes attributes})))))))))
@@ -1432,7 +1432,7 @@
                         (when (and (keyword? attribute) (instance? Constant value)
                                    (edn-encoded? declarations attribute))
                           (let [form (parser.impl/get-source pattern)
-                                position (if (:source pattern) 3 2)]
+                                position (if (:symbol (:source pattern)) 3 2)]
                             [form (assoc (vec form) position (encode attribute (:value value)))])))))
               (query-patterns parsed-query))]
     (letfn [(encode-binding [binding value]
@@ -1449,9 +1449,16 @@
 
 (defn- decode-query-field
   [declarations attribute value]
-  (if (and attribute (some? value))
-    (decode-attribute-value declarations attribute value)
-    (decode-attribute-maps declarations value)))
+  (cond
+    (and (vector? attribute) (some? value))
+    (loop [[candidate & remaining] attribute]
+      (let [attempt (try {::value (decode-attribute-value declarations candidate value)}
+                         (catch Exception failure {::failure failure}))]
+        (if-let [failure (::failure attempt)]
+          (if (seq remaining) (recur remaining) (throw failure))
+          (::value attempt))))
+    (and attribute (some? value)) (decode-attribute-value declarations attribute value)
+    :else (decode-attribute-maps declarations value)))
 
 (defn- decode-query-tuple
   [declarations attributes tuple]

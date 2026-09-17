@@ -327,10 +327,10 @@
               (contains?
                published-functions
                [namespace-name
-                (str (symbol (str namespace-name) (str intern-name)))])))
+                (symbol (str namespace-name) (str intern-name))])))
            (map (fn [[namespace-name intern-name _]]
                   {:seon.fn/sym
-                   (str (symbol (str namespace-name) (str intern-name)))})))
+                   (symbol (str namespace-name) (str intern-name))})))
           first-party-namespaces)))
 
 (defn- missing-models

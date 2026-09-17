@@ -3,6 +3,7 @@
             [clojure.test :refer [deftest is testing use-fixtures]]
             [datahike.api :as d]
             [datahike.pull-api :as pull-api]
+            [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
             [seon.cluster.message :as message]
             [seon.config :as config]
@@ -1869,3 +1870,17 @@
        (is (= ['seon.db]
               (db/q database '[:find [?name ...] :in $ [?name ...]
                                :where [?e :seon.ns/name ?name]] ['seon.db])))))))
+
+(deftest activation-requests-join-the-symbolic-program-population
+  (test-support/with-database
+   (fn [connection]
+     (let [requested '#{seon.cluster/derive-activation seon.cluster/populate-source!}
+           result (cluster/derive-activation
+                   {:seon.db/connection connection
+                    :seon.source/digest (id/id :symbol-activation 64)
+                    :seon.activation/requested-symbols requested})
+           closure (:seon.activation/closure result)]
+       (is (map? closure) (pr-str result))
+       (is (empty? (:seon.activation/missing result)) (pr-str (:seon.activation/missing result)))
+       (is (every? qualified-symbol? (:seon.activation/executable-symbols closure)))
+       (is (every? (:seon.activation/executable-symbols closure) requested))))))

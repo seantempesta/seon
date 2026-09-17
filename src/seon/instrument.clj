@@ -178,7 +178,7 @@
                           :where
                           [?function :seon.fn/sym ?function-symbol]
                           [?function :seon.fn/arglists ?arglists]]
-                        database (str function-symbol))]
+                        database function-symbol)]
               (cond
                 (flat-error-value? result)
                 {:seon.instrument.lookup/status :failed}
@@ -263,7 +263,7 @@
   (when-let [environment (env/of effect/*request-context*)]
     (when-let [connection (:seon.db/connection environment)]
       (let [entries (call-preparation/supplied-map-entries (db/db connection)
-                                                           (str function-symbol))]
+                                                           function-symbol)]
         (when-not (:seon.error/kind entries)
           (into #{} (map (fn [[_ position entry-key]] [position entry-key])) entries))))))
 
