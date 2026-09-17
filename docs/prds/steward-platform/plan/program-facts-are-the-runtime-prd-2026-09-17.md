@@ -861,8 +861,14 @@ up with a full vocab and code them up so they work perfectly with our
 system. properly rejecting problems and suggesting solutions and even
 returning refactoring plans we can just launch."
 
+Owner correction (~01:35Z): "even if clojure has native versions we need
+our own so we can update the database. keep that in mind." Every operation
+is OUR function whose act is the database write; a native SCI/Clojure form
+is at most what it performs inside the agent's context, never the entry
+point; a native form that would bypass the facts is forbidden or wrapped.
+
 Slice: the full vocabulary of program operations an agent performs from its
-REPL, in Clojure's own names where Clojure has them (`defn` re-evaluation,
+REPL, using Clojure's names where they fit (`defn` re-evaluation,
 `ns-unmap`, `remove-ns`, a re-evaluated `deftest`) and one `my.*` function
 per operation Clojure does not name (rename, move, change-contract, breaks,
 who-calls, tests-reaching, revert an override). Every operation returns

@@ -1577,6 +1577,11 @@ class refined (main WAITING in `seon.eval.drive/await-fact!`). Editors now:
 no-default, environment, fault-path, bin/test bounds + codex integrator
 (tier 1, then the edge retype now that selection.clj is free).
 
+**Owner ~01:35Z:** "even if clojure has native versions we need our own so
+we can update the database." Every S12 operation is ours; the database
+write is the act; native forms that bypass the facts are forbidden or
+wrapped. Research pass told.
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
