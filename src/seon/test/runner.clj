@@ -240,6 +240,8 @@
                    :seon.test/pass-count 0
                    :seon.test/fail-count 0
                    :seon.test/error-count 0
+                   :seon.test.member/began? false
+                   :seon.test.member/ended? false
                    ::failure-messages []
                    ::failure-identities #{}}))))
 
@@ -266,6 +268,12 @@
                (let [current (ensure-result current test-symbol)
                      event-type (:type event)]
                  (case event-type
+                   :begin-test-var
+                   (assoc-in current [::results test-symbol :seon.test.member/began?] true)
+
+                   :end-test-var
+                   (assoc-in current [::results test-symbol :seon.test.member/ended?] true)
+
                    :pass
                    (update-in current [::results test-symbol
                                        :seon.test/pass-count] inc)
@@ -279,7 +287,9 @@
                                 failure-id)]
                      (cond-> (-> current
                                  (update-in [::results test-symbol :seon.test.failure/reports]
-                                            (fnil conj []) (failure-report event))
+                                            (fnil conj [])
+                                            (assoc (failure-report event)
+                                                   :seon.test/failure-identity failure-id))
                                  (update-in
                                         [::results test-symbol
                                          (if (= :fail event-type)
@@ -2235,6 +2245,7 @@
         row (-> (merge (select-keys request
                                    [:seon.test.run/cluster :seon.test.run/input-digest
                                     :seon.test.run/policy :seon.test.run/include-long?
+                                    :seon.test.run/deadline
                                     :seon.test.run/change-basis-t :seon.test.run/namespaces
                                     :seon.test.run/identities])
                        (select-keys run
@@ -2315,6 +2326,159 @@
            (seq reserved) (assoc :seon.test.run/members (vec reserved))
            (seq covered) (assoc :seon.test.run/covered-by (set (map :db/id covered))))]))))
 
+(defn- execution-refusal! [operation run-id kind expected observed]
+  (let [failure (error/diagnostic
+                 {:seon.error/kind kind
+                  :seon.error/message "The test execution evidence does not authorize this transition."
+                  :seon.error/diagnostic-layer :test-execution
+                  :seon.error/diagnostic-operation operation
+                  :seon.error/diagnostic-member run-id
+                  :seon.error/diagnostic-expected expected
+                  :seon.error/diagnostic-offending observed
+                  :seon.error/diagnostic-cause kind
+                  :seon.error/diagnostic-evidence {:seon.test.run/id run-id}})]
+    (throw (ex-info (:seon.error/message failure) failure))))
+
+(defn- execution-read [value]
+  (when (:seon.error/kind value)
+    (throw (ex-info (:seon.error/message value) value)))
+  value)
+
+(defn- execution-members [database run-id]
+  (let [run (execution-read
+             (db/pull database [:db/id :seon.test.run/selection-tx]
+                      [:seon.test.run/id run-id]))]
+    (when-not (:seon.test.run/selection-tx run)
+      (execution-refusal! 'seon.test.runner/claim-member run-id
+                          :seon.test/population-unknown :admitted-selection
+                          (or run :absent)))
+    (let [members-at
+          (fn [value]
+            (execution-read
+             (db/q '[:find [?member ...] :in $ ?run [?attribute ...]
+                     :where [?run ?attribute ?member]]
+                   value (:db/id run)
+                   [:seon.test.run/members :seon.test.run/covered-by])))
+          current (members-at database)
+          selected-at (get-in run [:seon.test.run/selection-tx :db/id])
+          selected (members-at (db/as-of database selected-at))]
+      (when (not= (set selected) (set current))
+        (execution-refusal! 'seon.test.runner/claim-member run-id
+                            :seon.test/population-unknown selected current))
+    (mapv
+     (fn [member-id]
+       (let [member (execution-read
+       (db/pull database
+                [:db/id :seon.test.member/symbol :seon.test.member/reasons
+                 :seon.test.member/worker :seon.test.member/claimed-at
+                 :seon.test.member/claim-tx :seon.test.member/host
+                 :seon.test.member/completed-tx :seon.test.member/terminated-tx
+                 :seon.test.member/pass-count :seon.test.member/fail-count
+                 :seon.test.member/error-count :seon.test.member/began?
+                 :seon.test.member/ended? :seon.test.member/error] member-id))
+             counts (select-keys member [:seon.test.member/pass-count :seon.test.member/fail-count
+                                         :seon.test.member/error-count])]
+         (when (or (and (:seon.test.member/completed-tx member)
+                        (or (not= 3 (count counts))
+                            (not (boolean? (:seon.test.member/began? member)))
+                            (not (boolean? (:seon.test.member/ended? member)))))
+                   (and (seq counts) (not (:seon.test.member/completed-tx member))))
+           (execution-refusal! 'seon.test.runner/claim-member run-id
+                               :seon.test/population-unknown :complete-outcome member))
+         member))
+     current))))
+
+(defn- worker-identity [database worker]
+  (execution-read
+   (db/pull database [:db/id :seon.db.process/id
+                     :seon.db.process/pid :seon.db.process/start-instant] worker)))
+
+(defn claim-member
+  "Claim one remaining namespace group at the mid-transaction database.
+
+  The supplied run's admitted and covered memberships are the only work list.
+  Confirmed dead generations may be reclaimed; elapsed time is not death.
+  The same process cannot hold two unterminated groups in this authority.
+  A primary JVM spanning independent branches requires one routed claim
+  authority; this pure function cannot serialize independent branch writers.
+  An empty transaction means no remaining obligation (or a platform red).
+  Read accepted claims from the transaction report, never a pre-read."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.test.run/claim-request]
+                  :seon.store/transaction-data]}
+  [database {run-id :seon.test.run/id worker :seon.test.member/worker
+             instant :seon.test.member/claimed-at host :seon.test.member/host
+             deadline :seon.test.run/deadline dead :seon.test.run/dead-workers
+             :as request}]
+  (let [operation 'seon.test.runner/claim-member
+        identity-keys [:seon.db.process/pid :seon.db.process/start-instant]
+        process (worker-identity database worker)
+        process-identity (select-keys process identity-keys)
+        declared-deadline (:seon.test.run/deadline
+                           (execution-read
+                            (db/pull database [:seon.test.run/deadline]
+                                     [:seon.test.run/id run-id])))
+        deaths (set dead)
+        dead? (fn [member]
+                (when-let [owner (get-in member [:seon.test.member/worker :db/id])]
+                  (contains? deaths (select-keys (worker-identity database owner)
+                                                identity-keys))))
+        members (execution-members database run-id)
+        unfinished (remove :seon.test.member/completed-tx members)
+        platform? #(contains? (set (:seon.test.member/reasons %)) :platform)
+        platform (filter platform? members)
+        platform-red? (some #(and (:seon.test.member/completed-tx %)
+                                 (pos? (+ (:seon.test.member/fail-count % 0)
+                                          (:seon.test.member/error-count % 0)))) platform)]
+    (when (or (not (:seon.db.process/id process))
+              (not= process-identity (select-keys request identity-keys))
+              (contains? deaths process-identity))
+      (execution-refusal! operation run-id :seon.test/process-state-unknown
+                          (select-keys request identity-keys) (or process :absent)))
+    (when (or (not= declared-deadline deadline)
+              (>= (inst-ms instant) (inst-ms deadline)))
+      (execution-refusal! operation run-id ::worker-exchange-bound
+                          {:seon.test.run/deadline deadline}
+                          {:seon.test.member/claimed-at instant
+                           :seon.test.member/worker worker}))
+    (doseq [member unfinished]
+      (when (and (:seon.test.member/claimed-at member)
+                 (or (not (:seon.test.member/claim-tx member))
+                     (not (:seon.test.member/worker member))))
+        (execution-refusal! operation run-id :seon.test/process-state-unknown
+                            :complete-claim member)))
+    (if (or (empty? unfinished) platform-red?)
+      []
+      (let [held (execution-read
+                  (db/q '[:find [?member ...] :in $ ?pid ?start
+                          :where [?worker :seon.db.process/pid ?pid]
+                                 [?worker :seon.db.process/start-instant ?start]
+                                 [?member :seon.test.member/worker ?worker]
+                                 [?member :seon.test.member/claim-tx]
+                                 (not [?member :seon.test.member/terminated-tx])]
+                        database (:seon.db.process/pid process)
+                        (:seon.db.process/start-instant process)))
+            platform-namespaces (set (map #(namespace (:seon.test.member/symbol %)) platform))
+            eligible (if (some #(not (:seon.test.member/completed-tx %)) platform)
+                       (filter #(contains? platform-namespaces
+                                           (namespace (:seon.test.member/symbol %))) unfinished)
+                       unfinished)
+            groups (sort-by first (group-by #(namespace (:seon.test.member/symbol %)) eligible))
+            group (some (fn [[_ candidates]]
+                          (when (every? #(or (not (:seon.test.member/claimed-at %))
+                                            (dead? %)) candidates)
+                            candidates)) groups)]
+        (when (or (seq held) (not group))
+          (execution-refusal! operation run-id :seon.test/claim-conflict
+                              :unclaimed-namespace-group
+                              {:seon.test.member/worker worker
+                               :seon.test.run/members (if (seq held) held (vec eligible))}))
+        (mapv #(hash-map :db/id (:db/id %)
+                         :seon.test.member/worker (:db/id process)
+                         :seon.test.member/claimed-at instant
+                         :seon.test.member/claim-tx "datomic.tx"
+                         :seon.test.member/host host)
+              (sort-by :seon.test.member/symbol group))))))
+
 (defn- prepare-failures!
   [connection database completion]
   (let [run (:seon.test.run/provenance completion)
@@ -2348,10 +2512,13 @@
                   reports (or (seq (:seon.test.failure/reports result))
                               (when (pos? (+ (:seon.test/fail-count result 0)
                                              (:seon.test/error-count result 0)))
-                                [{:seon.test.failure/type (if (pos? (:seon.test/error-count result 0)) :error :fail)
-                                  :seon.test.failure/message
-                                  (or (:seon.test/failure-message result)
-                                      "The runner reported a failure without an assertion event.")}]))
+                                (let [event {:type (if (pos? (:seon.test/error-count result 0)) :error :fail)
+                                             :message (or (:seon.test/failure-message result)
+                                                          "The runner reported a failure without an assertion event.")}]
+                                  [{:seon.test.failure/type (:type event)
+                                    :seon.test.failure/message (:message event)
+                                    :seon.test/failure-identity
+                                    (failure-identity {} (symbol test-symbol) event)}])))
                   [_ failures]
                   (reduce
                     (fn [[ordinals failures] report]
@@ -2418,7 +2585,131 @@
                   [:db/retract (:db/id old) :seon.test.failure/contexts context]))
               [row]))) failures))))
 
-(defn record-tx
+(defn complete-members
+  "Accept immutable member outcomes for an exact writer claim.
+
+  Called by record-tx after the existing blob preparation. Only failing
+  claims produce reports, keyed by the captured content signature. Program
+  rows are never created. A later observation of termination may add its
+  transaction without changing the recorded outcome."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.test.run/claim-completion]
+                  :seon.store/transaction-data]}
+  [database {run :seon.test.run/provenance results :seon.test.runner/results
+             worker :seon.test.member/worker claim :seon.test.member/claim-tx
+             terminated? :seon.test.run/terminated?}]
+  (let [run-id (:seon.test.run/id run)
+        operation 'seon.test.runner/record-tx
+        members (into {} (map (juxt :seon.test.member/symbol identity))
+                      (execution-members database run-id))
+        worker-id (:db/id (worker-identity database worker))
+        claim-id (:db/id (execution-read (db/pull database [:db/id] claim)))
+        forms (:seon.schema.projection/forms (db/carried-projection database))
+        provenance-attributes (mapv first (filter vector? (rest (get forms :seon.test.run/provenance))))
+        recorded-run (execution-read
+                      (db/pull database provenance-attributes [:seon.test.run/id run-id]))
+        _ (when (not= (select-keys run provenance-attributes)
+                      (dissoc recorded-run :db/id))
+            (execution-refusal! operation run-id :seon.test.run/immutable
+                                recorded-run run))
+        report-attributes (mapv first (drop 2 (get forms :seon.test.report/report)))
+        _ (when (empty? report-attributes)
+            (execution-refusal! operation run-id :seon.test/population-unknown
+                                :seon.test.report/report :absent))
+        outcome-keys [:seon.test.member/pass-count :seon.test.member/fail-count
+                      :seon.test.member/error-count :seon.test.member/began?
+                      :seon.test.member/ended? :seon.test.member/error]
+        prepared
+        (mapv
+         (fn [result]
+           (let [test-symbol (symbol (:seon.test/sym result))
+                 member (get members test-symbol)
+                 reports
+                 (mapv
+                  (fn [failure]
+                    (let [signature (:seon.test/failure-identity failure)
+                          _ (when-not signature
+                              (execution-refusal! operation run-id :seon.test/population-unknown
+                                                  :captured-claim-signature failure))
+                          path (when-let [file (:seon.test.failure/file failure)]
+                                 (:seon.fn.file/relative-path
+                                  (execution-read
+                                   (db/pull database [:seon.fn.file/relative-path] file))))]
+                      (cond-> (assoc (select-keys failure report-attributes)
+                                     :seon.test.report/id (id/id [test-symbol signature])
+                                     :seon.test.report/symbol test-symbol)
+                        path (assoc :seon.test.failure/reported-file path))))
+                  (:seon.test/failures result))
+                 outcome (cond-> {:seon.test.member/pass-count (:seon.test/pass-count result)
+                          :seon.test.member/fail-count (:seon.test/fail-count result)
+                          :seon.test.member/error-count (:seon.test/error-count result)
+                          :seon.test.member/began? (:seon.test.member/began? result)
+                          :seon.test.member/ended? (:seon.test.member/ended? result)}
+                           (:seon.test.member/error result)
+                           (assoc :seon.test.member/error
+                                  (execution-read
+                                   (db/pull database [:db/id] (:seon.test.member/error result)))))]
+             (when (or (not worker-id) (not claim-id) (not member)
+                       (not= worker-id (get-in member [:seon.test.member/worker :db/id]))
+                       (not= claim-id (get-in member [:seon.test.member/claim-tx :db/id])))
+               (execution-refusal! operation run-id :seon.test/claim-replaced
+                                   {:seon.test.member/worker worker
+                                    :seon.test.member/claim-tx claim}
+                                   (or member :absent)))
+             (when (or (not (boolean? (:seon.test.member/began? result)))
+                       (not (boolean? (:seon.test.member/ended? result)))
+                       (and (pos? (+ (:seon.test/fail-count result)
+                                     (:seon.test/error-count result)))
+                            (empty? reports)))
+               (execution-refusal! operation run-id :seon.test/population-unknown
+                                   :complete-outcome-events result))
+             {:seon.test.member/value member :seon.test.member/outcome outcome
+              :seon.test.report/values reports})) results)
+        _ (when (not= (count results) (count (set (map :seon.test/sym results))))
+            (execution-refusal! operation run-id :seon.test.run/immutable
+                                :one-outcome-per-member results))
+        reports (group-by :seon.test.report/id (mapcat :seon.test.report/values prepared))
+        report-tx
+        (into []
+              (keep (fn [[report-id variants]]
+                      (let [wanted (first variants)
+                            previous (execution-read
+                                      (db/pull database (into [:db/id] report-attributes)
+                                               [:seon.test.report/id report-id]))]
+                        (when (or (not (apply = variants))
+                                  (and (:db/id previous)
+                                       (not= wanted (dissoc previous :db/id))))
+                          (execution-refusal! operation run-id :seon.test/report-conflict
+                                              wanted (or previous variants)))
+                        (when-not (:db/id previous) wanted)))) reports)]
+    (into report-tx
+          (mapcat
+           (fn [{member :seon.test.member/value outcome :seon.test.member/outcome
+                 reports :seon.test.report/values}]
+             (let [eid (:db/id member)
+                   report-ids (set (map :seon.test.report/id reports))
+                   old-report-ids (set (execution-read
+                                       (db/q '[:find [?id ...] :in $ ?member
+                                               :where [?member :seon.test.member/failures ?report]
+                                                      [?report :seon.test.report/id ?id]]
+                                             database eid)))
+                   completed? (:seon.test.member/completed-tx member)]
+               (when (and completed?
+                          (or (not= outcome (select-keys member outcome-keys))
+                              (not= report-ids old-report-ids)))
+                 (execution-refusal! operation run-id :seon.test.run/immutable
+                                     (select-keys member outcome-keys) outcome))
+               (cond-> []
+                 (not completed?)
+                 (conj (cond-> (assoc outcome :db/id eid
+                                      :seon.test.member/completed-tx "datomic.tx")
+                         (seq report-ids)
+                         (assoc :seon.test.member/failures
+                                (set (map #(vector :seon.test.report/id %) report-ids)))))
+                 (and terminated? (not (:seon.test.member/terminated-tx member)))
+                 (conj [:db/add eid :seon.test.member/terminated-tx "datomic.tx"]))))
+           prepared))))
+
+(defn- record-latest-tx
   "Transaction data replacing each test row's complete latest result.
 
   The replacement is a DELTA and still total: every attribute, reach member
@@ -2430,9 +2721,6 @@
   reads the WRITER's own database value — a caller pre-read could strand
   a retract's lookup ref against a concurrently retracted row and reject
   the whole result transaction."
-  {:malli/schema [:=> [:cat :seon.db/database-value
-                       :seon.test.run/completion]
-                  :seon.test.runner/record-tx]}
   [database
    {results :seon.test.runner/results
     run :seon.test.run/provenance
@@ -2642,6 +2930,24 @@
             (failure-replacement-tx database test-row-id failures run-ref at))))
       results))))
 
+(defn record-tx
+  "Record one completion at the writer, using its admitted claim when present.
+
+  Admitted runs complete members without recreating program rows. Legacy
+  unadmitted runs retain the existing latest-result replacement until their
+  callers migrate to pre-execution admission."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.test.run/completion]
+                  :seon.test.runner/record-tx]}
+  [database completion]
+  (let [run-id (get-in completion [:seon.test.run/provenance :seon.test.run/id])
+        row (execution-read
+             (db/pull database [:seon.test.run/selection-tx] [:seon.test.run/id run-id]))]
+    (if (or (:seon.test.run/selection-tx row)
+            (:seon.test.member/claim-tx completion)
+            (:seon.test.member/worker completion))
+      (execution-read (complete-members database completion))
+      (record-latest-tx database completion))))
+
 (def ^:private result-selector
   [:seon.test/reach-digest
    :seon.test/reach-unknown
@@ -2655,6 +2961,26 @@
    {:seon.test/failures ['* {:seon.test.failure/file [:db/id :seon.fn.file/relative-path]}]}
    :seon.test/failing-assertions
    :seon.test/failure-message])
+
+(defn- recorded-member-result [database run test-symbol]
+  (let [member (first (filter #(= (symbol test-symbol) (:seon.test.member/symbol %))
+                             (execution-members database (:seon.test.run/id run))))
+        report-ids (execution-read
+                    (db/q '[:find [?report ...] :in $ ?member
+                            :where [?member :seon.test.member/failures ?report]]
+                          database (:db/id member)))
+        reports (execution-read (db/pull-many database '[*] report-ids))]
+    (cond-> {:seon.test/sym test-symbol
+             :seon.test/pass-count (:seon.test.member/pass-count member)
+             :seon.test/fail-count (:seon.test.member/fail-count member)
+             :seon.test/error-count (:seon.test.member/error-count member)
+             :seon.test/run-basis-t (:seon.test.run/basis-t run)
+             :seon.test/run-at (:seon.test.run/at run)
+             :seon.test/run [:seon.test.run/id (:seon.test.run/id run)]
+             :seon.test.member/completed-tx (:seon.test.member/completed-tx member)}
+      (seq reports) (assoc :seon.test.failure/reports (mapv #(dissoc % :db/id) reports)
+                          :seon.test/failure-message
+                          (str/join "\n\n" (map (requiring-resolve 'seon.test/failure-text) reports))))))
 
 (defn commit-results!
   "Commit captured test results and return those exact committed facts."
@@ -2681,11 +3007,14 @@
     (if (:seon.error/kind transaction-report)
       transaction-report
       (let [recorded (mapv (fn [{test-symbol :seon.test/sym}]
-              (dissoc
-               (db/pull (:db-after transaction-report)
-                        result-selector
-                        [:seon.test/sym test-symbol])
-               :db/id))
+              (if (:seon.test.member/claim-tx completion)
+                (recorded-member-result (:db-after transaction-report)
+                                        (:seon.test.run/provenance completion) test-symbol)
+                (dissoc
+                 (db/pull (:db-after transaction-report)
+                          result-selector
+                          [:seon.test/sym test-symbol])
+                 :db/id)))
             results)]
         (or (first (filter :seon.error/kind recorded)) recorded)))))
 

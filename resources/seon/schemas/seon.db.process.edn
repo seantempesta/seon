@@ -1,1 +1,7 @@
-#:seon.db.process{:id [:string {:min 1, :seon.db/identity true}]}
+#:seon.db.process{:id [:string {:min 1, :seon.db/identity true}]
+ :pid [:and {:description "Operating-system identity observed for this process record; the two fields identify one generation."} :seon.boot/pid]
+ :start-instant [:and {:description "Operating-system identity observed for this process record; the two fields identify one generation."} :seon.boot/start-instant]
+ :process [:map {:seon.db/attributes true}
+           [:seon.db.process/id :seon.db.process/id]
+           [:seon.db.process/pid {:optional true} :seon.db.process/pid]
+           [:seon.db.process/start-instant {:optional true} :seon.db.process/start-instant]]}

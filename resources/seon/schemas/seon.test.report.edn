@@ -1,0 +1,23 @@
+{:seon.test.report/id
+ [:string {:min 1 :seon.db/identity true
+           :description "Identity of immutable failing report content, derived from test symbol and report signature."}]
+ :seon.test.report/symbol
+ [:qualified-symbol {:description "Test name observed for this report, retained after program deletion."}]
+ :seon.test.report/report
+ [:map {:seon.db/attributes true}
+  [:seon.test.report/id :seon.test.report/id]
+  [:seon.test.report/symbol :seon.test.report/symbol]
+  [:seon.test/failure-identity :seon.test/failure-identity]
+  [:seon.test.failure/type :seon.test.failure/type]
+  [:seon.test.failure/signature {:optional true} :seon.test.failure/signature]
+  [:seon.test.failure/message {:optional true} :seon.test.failure/message]
+  [:seon.test.failure/contexts {:optional true} :seon.test.failure/contexts]
+  [:seon.test.failure/expected {:optional true} :seon.test.failure/expected]
+  [:seon.test.failure/actual {:optional true} :seon.test.failure/actual]
+  [:seon.test.failure/expected-blob {:optional true} :seon.test.failure/expected-blob]
+  [:seon.test.failure/actual-blob {:optional true} :seon.test.failure/actual-blob]
+  [:seon.test.failure/expected-size {:optional true} :seon.test.failure/expected-size]
+  [:seon.test.failure/actual-size {:optional true} :seon.test.failure/actual-size]
+  [:seon.test.failure/reported-file {:optional true} :seon.test.failure/reported-file]
+  [:seon.test.failure/line {:optional true} :seon.test.failure/line]
+  [:seon.test.failure/throwable {:optional true} :seon.test.failure/throwable]]}

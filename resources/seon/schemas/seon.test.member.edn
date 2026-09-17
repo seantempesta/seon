@@ -3,7 +3,33 @@
  :seon.test.member/reasons
  [:set {:min 1 :description "Selection reasons asserted at admission; several may apply."}
   [:enum :platform :reaches-changed :named :first-run]]
+ :seon.test.member/worker [:and {:description "Process record owning the current execution claim. Optional ref sweeps on process deletion; claim-tx without a worker is unknown, never unclaimed."} :seon.db/ref]
+ :seon.test.member/claimed-at [:and {:description "Instant accepted by the writer for this claim; never a lease expiry."} :seon.test.run/at]
+ :seon.test.member/claim-tx [:and {:description "Transaction accepting this claim; completion must name this exact transaction. Optional ref sweeps if its transaction is removed."} :seon.db/ref]
+ :seon.test.member/host :seon.test/host
+ :seon.test.member/completed-tx [:and {:description "Transaction accepting terminal execution evidence for this member. Optional ref sweeps if its transaction is removed."} :seon.db/ref]
+ :seon.test.member/pass-count [:and {:description "Observed clojure.test outcome count for this member's accepted execution."} :seon.test/pass-count]
+ :seon.test.member/fail-count [:and {:description "Observed clojure.test outcome count for this member's accepted execution."} :seon.test/fail-count]
+ :seon.test.member/error-count [:and {:description "Observed clojure.test outcome count for this member's accepted execution."} :seon.test/error-count]
+ :seon.test.member/began? [:boolean {:description "Whether the begin-test-var event was observed in the accepted execution."}]
+ :seon.test.member/ended? [:boolean {:description "Whether the end-test-var event was observed in the accepted execution."}]
+ :seon.test.member/terminated-tx [:and {:description "Transaction observing execution termination. Completion after a bound alone does not assert this fact. Optional ref sweeps with its transaction, leaving termination unknown."} :seon.db/ref]
+ :seon.test.member/failures [:set {:description "Signature-keyed failing reports observed in this execution; no pass report entities. Optional peer refs sweep with report deletion."} :seon.db/ref]
+ :seon.test.member/error [:and {:description "Boundary failure preventing normal member completion, when present. Optional peer ref sweeps with the error."} :seon.db/ref]
  :seon.test.member/member
  [:map {:seon.db/attributes true}
   [:seon.test.member/symbol :seon.test.member/symbol]
-  [:seon.test.member/reasons :seon.test.member/reasons]]}
+  [:seon.test.member/reasons :seon.test.member/reasons]
+  [:seon.test.member/worker {:optional true} :seon.test.member/worker]
+  [:seon.test.member/claimed-at {:optional true} :seon.test.member/claimed-at]
+  [:seon.test.member/claim-tx {:optional true} :seon.test.member/claim-tx]
+  [:seon.test.member/host {:optional true} :seon.test.member/host]
+  [:seon.test.member/completed-tx {:optional true} :seon.test.member/completed-tx]
+  [:seon.test.member/terminated-tx {:optional true} :seon.test.member/terminated-tx]
+  [:seon.test.member/pass-count {:optional true} :seon.test.member/pass-count]
+  [:seon.test.member/fail-count {:optional true} :seon.test.member/fail-count]
+  [:seon.test.member/error-count {:optional true} :seon.test.member/error-count]
+  [:seon.test.member/began? {:optional true} :seon.test.member/began?]
+  [:seon.test.member/ended? {:optional true} :seon.test.member/ended?]
+  [:seon.test.member/failures {:optional true} :seon.test.member/failures]
+  [:seon.test.member/error {:optional true} :seon.test.member/error]]}

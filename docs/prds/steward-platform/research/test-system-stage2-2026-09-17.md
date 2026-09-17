@@ -7,6 +7,78 @@ tags: [test, database, admission, stage-2]
 
 # Test recording and pre-execution admission
 
+## Claim/completion continuation
+
+Resolution landed in `a0c69cfd9`. The following transaction work is a separate
+slice. `claim-member` reads admitted and covered members
+at the mid-transaction database, groups them by namespace, prioritizes platform
+groups and refuses bulk after a platform red. It compares both process pid
+and start instant, fences completion with worker plus claim-tx, and accepts
+only confirmed dead generations for reclaim. The original deadline is an
+admitted run fact; a claim cannot substitute a later one.
+
+`record-tx` remains the one writer entry. Admitted runs complete members;
+legacy unadmitted callers retain their existing latest-result behavior until
+the post-reset caller migration. Member completion never creates a program
+row. Counts and begin/end observations live on members. Only failing reports
+have entities, shared by non-component refs and keyed by
+`seon.id/id [test-symbol captured-claim-signature]`. The captured
+`:seon.test/failure-identity` is the whole-claim signature; the existing
+`:seon.test.failure/signature` continues to mean an error's cause signature.
+Changing the payload for one captured signature refuses `report-conflict`.
+
+`:seon.test.member/terminated-tx` is separate from completion and test-var
+events. A bound can record an outcome while the body still runs; that does not
+release the JVM. A later identical completion may assert observed termination
+without altering counts or reports. Removed coverage is compared with the
+selection transaction's history and reported as unknown, not zero work.
+
+Iteration evidence:
+
+- `tmp/stage2-claims-first-fast.log`: refused before tests; the new timestamp
+  vector compiled differently at admission and instrumentation. The forms now
+  refer to the existing instant alias through `:and`.
+- `tmp/stage2-claims-second-fast.log`: **26 tests, 180 assertions, 0 failures,
+  1 error**. Process pid/start declarations needed an entity map to become
+  installed attributes; the canonical process schema now declares them.
+- `tmp/stage2-claims-third-fast.log`: **26 tests, 193 assertions, 0 failures,
+  0 errors**. `no-double-execution` took 1,694 ms, used an owned `cat` process,
+  observed its bounded `onExit`, reclaimed its original member and rejected
+  its late completion. Actual runner captures prove report deduplication and
+  absence of pass reports. Later platform checks and refinements require the
+  next run.
+- `tmp/stage2-claims-fourth-fast.log`: **56 tests, 390 assertions, 0 failures,
+  1 error**. The new platform fixture incorrectly seeded two cluster configs
+  into one branch. It now uses two named requests with different bases in the
+  same authority. This does not prove cross-branch serialization.
+- **Current slice:** `tmp/stage2-claims-fifth-fast.log`, **56 tests,
+  398 assertions, 0 failures, 0 errors**, exit 0. Foreground
+  `timeout 2400 bin/test-fast --paths` with the process/member/run/report
+  schemas, `src/seon/test/runner.clj`, and `test/seon/test/runner_test.clj`;
+  namespaces `seon.test.runner-test`, `seon.test-test`, `my.test-test`,
+  `seon.test-reaching-test`. This also proves platform-first claims, bulk
+  remaining unexecuted after platform red, same-process exclusion across
+  runs, exact-generation refusal, unchanged original deadline, and immutable
+  report conflicts. Cold and default proofs remain the orchestrator's work.
+
+The pure authority boundary remains explicit: one Datahike writer can
+serialize the JVM's claims across its run rows. Independent cluster branches
+cannot inspect one another's uncommitted claims. Designation/routing of one
+primary claim authority is still a Stage 3 integration decision, not a hidden
+global lock or a guarantee established by these pure functions.
+
+The separate operator-only iteration also ended on TERM, exit 143, without a
+tally; [the signal evidence](../../../seon/issues/operator-fast-iterations-end-on-unattributed-term.md)
+records both interrupted runs without attributing their sender. The
+[instant-form disagreement](../../../seon/issues/instant-vector-admission-and-instrumentation-disagree.md)
+records the schema boundary. Markdown hooks still report 31 stale Git-link
+citations in the unrelated AGENTS audit; no full-document lint pass is claimed.
+
+The owned scratch root reported **0/0 clusters alive, no orphan JVMs** before
+`tmp/stage2-wt` was removed with `git worktree remove --force`. Its production
+changes are preserved in `a0c69cfd9`; the shared `reference-code` target remains
+intact. No default operation was issued.
+
 ## Continuing resolution after the launcher release
 
 The launcher and guardrails edits landed before this continuation touched

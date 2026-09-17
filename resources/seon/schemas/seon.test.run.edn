@@ -22,10 +22,32 @@
                  [:seon.test.run/input-digest :seon.test.run/input-digest]
                  [:seon.test.run/policy :seon.test.run/policy]
                  [:seon.test.run/include-long? :seon.test.run/include-long?]
+                 [:seon.test.run/deadline {:optional true} :seon.test.run/deadline]
                  [:seon.test.run/change-basis-t {:optional true} :seon.test.run/change-basis-t]
                  [:seon.test.run/namespaces {:optional true} :seon.test.run/namespaces]
                  [:seon.test.run/identities {:optional true} :seon.test.run/identities]
                  [:seon.test.run/members [:vector :seon.test.member/member]]],
+                :deadline [:and {:description "Original request deadline; contention and reclaim never restart it."} :seon.test.run/at],
+                :dead-workers [:vector {:description "Confirmed exited process generations from the process census or observed child exit; timeout or unknown observations do not qualify."}
+                               [:map [:seon.db.process/pid :seon.db.process/pid]
+                                [:seon.db.process/start-instant :seon.db.process/start-instant]]],
+                :claim-request
+                [:map
+                 [:seon.test.run/id :seon.test.run/id]
+                 [:seon.test.member/worker :seon.test.member/worker]
+                 [:seon.db.process/pid :seon.db.process/pid]
+                 [:seon.db.process/start-instant :seon.db.process/start-instant]
+                 [:seon.test.member/claimed-at :seon.test.member/claimed-at]
+                 [:seon.test.member/host :seon.test.member/host]
+                 [:seon.test.run/deadline :seon.test.run/deadline]
+                 [:seon.test.run/dead-workers {:optional true} :seon.test.run/dead-workers]],
+                :terminated? [:boolean {:description "Caller observed execution return or exact process exit; a bound firing alone is false."}],
+                :claim-completion
+                [:and :seon.test.run/completion
+                 [:map
+                  [:seon.test.member/worker :seon.test.member/worker]
+                  [:seon.test.member/claim-tx :seon.test.member/claim-tx]
+                  [:seon.test.run/terminated? :seon.test.run/terminated?]]],
                 :immutable [:and {:seon.db/identity false} :seon.test.run/id],
                 :immutable-error
                 [:map {:seon.error/class true
@@ -73,4 +95,5 @@
                  [:seon.test.run/members {:optional true} :seon.test.run/members]
                  [:seon.test.run/covered-by {:optional true} :seon.test.run/covered-by]
                  [:seon.test.run/selection-tx {:optional true} :seon.test.run/selection-tx]
+                 [:seon.test.run/deadline {:optional true} :seon.test.run/deadline]
                  [:seon.test.run/branch {:optional true} :seon.test.run/branch]]}

@@ -19,6 +19,183 @@
             [seon.test-runner-failure-fixture]
             [seon.test-support :as test-support]))
 
+(deftest no-double-execution
+  (test-support/with-database
+   (fn [connection]
+     (test-support/seed-cluster! connection "claim-authority")
+     (let [child (.start (ProcessBuilder. ["cat"]))
+           release (fn [process]
+                     (.destroy ^Process process)
+                     (.get (.onExit ^Process process) test-support/event-backstop-seconds
+                           java.util.concurrent.TimeUnit/SECONDS))]
+       (with-open [owned (test-support/closeable child release)]
+         (let [process-row (fn [^java.lang.ProcessHandle handle]
+                             (let [pid (.pid handle)
+                                   start (java.util.Date/from (.get (.startInstant (.info handle))))]
+                               {:seon.db.process/id (id/id [pid start])
+                                :seon.db.process/pid pid :seon.db.process/start-instant start}))
+               child-row (process-row (.toHandle ^Process @owned))
+               parent-row (process-row (java.lang.ProcessHandle/current))
+               _ (test-support/transacted! connection [child-row parent-row])
+               database (db/db connection)
+               run (runner/provenance database)
+               other-run (assoc run :seon.test.run/id (id/id))
+               first-symbol 'seon.test-cache-test/resolved-classpath-preserves-order-and-rebases-only-checkout-roots
+               symbols [first-symbol 'seon.test-runner-failure-fixture/passing-example
+                        'seon.test-runner-failure-fixture/failing-example
+                        'seon.test-runner-failure-fixture/repeated-identical-error]
+               deadline (java.util.Date. (+ (System/currentTimeMillis)
+                                           (* 1000 test-support/event-backstop-seconds)))
+               admission {:seon.test.run/provenance run
+                          :seon.test.run/cluster [:seon.cluster/name "claim-authority"]
+                          :seon.test.run/input-digest (id/digest 64 [:claims :inputs])
+                          :seon.test.run/policy :named :seon.test.run/include-long? false
+                          :seon.test.run/deadline deadline
+                          :seon.test.run/members
+                          (mapv #(hash-map :seon.test.member/symbol %
+                                           :seon.test.member/reasons #{:named}) symbols)}
+               _ (test-support/transacted!
+                  connection [[:db.fn/call runner/admit-run admission]
+                              [:db.fn/call runner/admit-run
+                               (assoc admission :seon.test.run/provenance other-run)]])
+               claim-request (fn [provenance process]
+                               (merge (select-keys process [:seon.db.process/pid :seon.db.process/start-instant])
+                                      {:seon.test.run/id (:seon.test.run/id provenance)
+                                       :seon.test.member/worker [:seon.db.process/id (:seon.db.process/id process)]
+                                       :seon.test.member/claimed-at (java.util.Date.)
+                                       :seon.test.member/host :seon.test.host/isolated-snapshot
+                                       :seon.test.run/deadline deadline}))
+               claim! #(test-support/transacted! connection [[:db.fn/call runner/claim-member %]])
+               first-claim (claim! (claim-request run child-row))
+               second-claim (claim! (claim-request other-run parent-row))
+               claim-t (fn [report]
+                         (first (keep #(when (= :seon.test.member/claim-tx (:a %)) (:v %)) (:tx-data report))))
+               completion (fn [provenance process claim results terminated?]
+                            {:seon.test.run/provenance provenance
+                             :seon.test/run-basis-t (:seon.test.run/basis-t provenance)
+                             :seon.test/run-at (:seon.test.run/at provenance)
+                             :seon.test.member/worker [:seon.db.process/id (:seon.db.process/id process)]
+                             :seon.test.member/claim-tx claim
+                             :seon.test.run/terminated? terminated?
+                             :seon.test.runner/results results})
+               second-results (runner/run-vars! (mapv requiring-resolve (rest symbols)) {})
+               second-completion (completion other-run parent-row (claim-t second-claim) second-results false)]
+           (is (= 1 (count (filter #(= :seon.test.member/claim-tx (:a %)) (:tx-data first-claim)))))
+           (is (= 3 (count (filter #(= :seon.test.member/claim-tx (:a %)) (:tx-data second-claim)))))
+           (test-support/transacted! connection [[:db.fn/retractEntity [:seon.test/sym (str (nth symbols 2))]]])
+           (let [recorded (runner/commit-results! connection second-completion)]
+             (is (vector? recorded) (pr-str recorded)))
+           (is (nil? (:db/id (db/pull (db/db connection) [:db/id] [:seon.test/sym (str (nth symbols 2))])))
+               "Completion never recreates a deleted program row.")
+           (is (= 2 (db/q '[:find (count ?report) . :where [?report :seon.test.report/id]] (db/db connection)))
+               "Seven identical errors share one report; passes have no reports.")
+           (is (= :seon.test/claim-conflict
+                  (:seon.error/kind (db/transact! connection [[:db.fn/call runner/claim-member
+                                                              (claim-request run parent-row)]])))
+               "Recorded counts without termination do not release the process.")
+           (is (vector? (runner/commit-results! connection (assoc second-completion :seon.test.run/terminated? true))))
+           (is (= :seon.test/report-conflict
+                  (:seon.error/kind
+                   (runner/commit-results!
+                    connection (assoc-in second-completion
+                                         [:seon.test.runner/results 1 :seon.test.failure/reports 0 :seon.test.failure/actual]
+                                         "different content with the same captured signature")))))
+           (release child)
+           (let [reclaimed (claim! (assoc (claim-request other-run parent-row)
+                                          :seon.test.run/dead-workers
+                                          [(select-keys child-row [:seon.db.process/pid :seon.db.process/start-instant])]))
+                 result (runner/run-var! (requiring-resolve first-symbol))
+                 late (completion run child-row (claim-t first-claim) [result] true)
+                 accepted (completion other-run parent-row (claim-t reclaimed) [result] true)]
+             (is (not= (claim-t first-claim) (claim-t reclaimed)))
+             (is (= :seon.test/claim-replaced (:seon.error/kind (runner/commit-results! connection late))))
+             (is (vector? (runner/commit-results! connection accepted)))
+             (let [replay (test-support/transacted! connection [[:db.fn/call runner/record-tx accepted]])]
+               (is (empty? (filter #(contains? #{"seon.test.member" "seon.test.report"} (namespace (:a %)))
+                                   (:tx-data replay)))))
+             (is (= :seon.test.run/immutable
+                    (:seon.error/kind
+                     (runner/commit-results! connection
+                                             (update-in accepted [:seon.test.runner/results 0 :seon.test/pass-count] inc)))))
+             (is (empty? (filter #(= :seon.test.member/claim-tx (:a %))
+                                 (:tx-data (claim! (claim-request run parent-row))))))
+             (is (= 4 (db/q '[:find (count ?member) . :where [?member :seon.test.member/completed-tx]]
+                            (db/db connection)))))))))))
+
+(deftest platform-claims-and-original-bounds-govern-bulk
+  (test-support/with-database
+   (fn [connection]
+     (test-support/seed-cluster! connection "platform-claim")
+     (let [child (.start (ProcessBuilder. ["cat"]))]
+       (with-open [owned (test-support/closeable
+                          child #(do (.destroy ^Process %)
+                                     (.get (.onExit ^Process %) test-support/event-backstop-seconds
+                                           java.util.concurrent.TimeUnit/SECONDS)))]
+         (let [row (fn [^java.lang.ProcessHandle process]
+                     (let [pid (.pid process)
+                           start (java.util.Date/from (.get (.startInstant (.info process))))]
+                       {:seon.db.process/id (id/id [pid start])
+                        :seon.db.process/pid pid :seon.db.process/start-instant start}))
+               parent (row (java.lang.ProcessHandle/current))
+               other (row (.toHandle ^Process @owned))
+               _ (test-support/transacted! connection [parent other])
+               run (runner/provenance (db/db connection))
+               deadline (java.util.Date. (+ (System/currentTimeMillis) (* 1000 test-support/event-backstop-seconds)))
+               platform 'seon.test-runner-failure-fixture/failing-example
+               bulk 'seon.test-cache-test/resolved-classpath-preserves-order-and-rebases-only-checkout-roots
+               admission {:seon.test.run/provenance run
+                          :seon.test.run/cluster [:seon.cluster/name "platform-claim"]
+                          :seon.test.run/input-digest (id/digest 64 [:platform :inputs])
+                          :seon.test.run/policy :named :seon.test.run/include-long? false
+                          :seon.test.run/deadline deadline
+                          :seon.test.run/members [{:seon.test.member/symbol platform :seon.test.member/reasons #{:platform}}
+                                                  {:seon.test.member/symbol bulk :seon.test.member/reasons #{:named}}]}
+               _ (test-support/transacted! connection [[:db.fn/call runner/admit-run admission]])
+               other-run (runner/provenance (db/db connection))
+               _ (test-support/transacted!
+                  connection [[:db.fn/call runner/admit-run
+                               (assoc admission :seon.test.run/provenance other-run)]])
+               request (fn [provenance process]
+                         (merge (select-keys process [:seon.db.process/pid :seon.db.process/start-instant])
+                                {:seon.test.run/id (:seon.test.run/id provenance)
+                                 :seon.test.member/worker [:seon.db.process/id (:seon.db.process/id process)]
+                                 :seon.test.member/claimed-at (java.util.Date.)
+                                 :seon.test.member/host :seon.test.host/in-process
+                                 :seon.test.run/deadline deadline}))
+               claim (test-support/transacted! connection [[:db.fn/call runner/claim-member (request run parent)]])
+               claim-t (first (keep #(when (= :seon.test.member/claim-tx (:a %)) (:v %)) (:tx-data claim)))
+               refused #(db/transact! connection [[:db.fn/call runner/claim-member %]])]
+           (is (= #{platform}
+                  (set (db/q '[:find [?symbol ...] :in $ ?tx
+                               :where [?member :seon.test.member/claim-tx ?tx]
+                                      [?member :seon.test.member/symbol ?symbol]] (:db-after claim) claim-t))))
+           (is (= :seon.test/claim-conflict (:seon.error/kind (refused (request run other))))
+               "A different worker cannot claim bulk while platform is pending.")
+           (is (= :seon.test/claim-conflict (:seon.error/kind (refused (request other-run parent))))
+               "The same JVM cannot overlap groups across runs in this authority.")
+           (is (= :seon.test/process-state-unknown
+                  (:seon.error/kind (refused (update (request run other) :seon.db.process/pid inc)))))
+           (is (= :seon.test.runner/worker-exchange-bound
+                  (:seon.error/kind (refused (assoc (request run other) :seon.test.member/claimed-at deadline)))))
+           (is (= :seon.test.runner/worker-exchange-bound
+                  (:seon.error/kind (refused (assoc (request run other) :seon.test.run/deadline
+                                                  (java.util.Date. (inc (inst-ms deadline))))))))
+           (let [result (runner/run-var! (requiring-resolve platform))
+                 recorded (runner/commit-results!
+                           connection {:seon.test.run/provenance run
+                                       :seon.test/run-basis-t (:seon.test.run/basis-t run)
+                                       :seon.test/run-at (:seon.test.run/at run)
+                                       :seon.test.member/worker [:seon.db.process/id (:seon.db.process/id parent)]
+                                       :seon.test.member/claim-tx claim-t
+                                       :seon.test.run/terminated? true
+                                       :seon.test.runner/results [result]})]
+             (is (= 1 (:seon.test/fail-count (first recorded))))
+             (is (empty? (filter #(= :seon.test.member/claim-tx (:a %))
+                                 (:tx-data (test-support/transacted!
+                                            connection [[:db.fn/call runner/claim-member (request run other)]])))))
+             (is (= 1 (db/q '[:find (count ?member) . :where [?member :seon.test.member/completed-tx]]
+                            (db/db connection)))))))))))
+
 (deftest ^{:seon.test/fixture-observation
            "Verifies refusal before published-root/fresh-store acquisition and graph selection; no expensive fixture is acquired."}
   expensive-fixtures-require-a-declared-observation
