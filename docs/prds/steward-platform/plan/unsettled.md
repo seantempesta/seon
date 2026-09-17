@@ -2764,3 +2764,11 @@ working tree, never Sonnet.
   regression-disagrees-with-current-row-shape`; `eca2d87a7` refuted as the
   cause of the silent recording). Lane parked. Editing: stage 2, guardrails.
   The one reset waits only on stage 2's stop.
+- **Guardrails fast-path correction LANDED** (`312f60560`: fast runs use
+  the newest published graph and report its digest and commit age; cold
+  gates stay exact; 41 + 27 assertions green). Lane COMPLETE and parked.
+  **Batch 123 launched** (platform + 14 namespaces covering the refusal-
+  sentence fix, the message docstring, adoption-margin's reds, the fast
+  path). Only stage 2 is running (38 min into resolution / claims /
+  unchanged-result reuse); the merge of `reset-batch` and the one reset
+  follow its stop.
