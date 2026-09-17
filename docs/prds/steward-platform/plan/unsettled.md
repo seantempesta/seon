@@ -3657,3 +3657,19 @@ as orchestrator/astra lanes, easy pool as the first live-agent slice).
   serial tier). Until it lands, platform gates are not valid evidence.
 - Ruling 1s (acquisition by digest equality) recorded; slice queued behind
   the wrapper lane's hold on eval.clj.
+
+## 2026-09-18 ~08:30Z — publication projection complete; the db lane launches
+
+- `publication-report-projection` COMPLETE (`ac13b8b4d` `d15d9986e`): the
+  missing key was `:seon.db/database-value`; commit databases compose their
+  persisted projection over the packaged runtime schemas (a complete world,
+  no global fallback); the three fixture expectations were stale (atomic
+  retraction of referrer + function); all eight publication regressions
+  green; source-test 18 tests / 166 assertions 0/0; in one JVM the kernel-arm
+  and env tests green. Cold platform proof waits on the serial-worker fix.
+- `b2f62f288` (namespace-page lane, in progress): namespace pages bounded
+  to their selected namespace.
+- Launched sol `db-contracts-and-read-seams` (db.clj free): the wrapper's
+  two findings on `pull`/`transact-call` (1q unions), `pull`'s derived
+  pulled-form output (C1b #2), B4 #18/#19/#20, and ruling 1r's provenance-
+  derived write bound. Editing: wrapper (SCI), namespace-page, arm-leak, db.
