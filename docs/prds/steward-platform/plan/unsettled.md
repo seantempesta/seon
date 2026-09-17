@@ -3533,3 +3533,10 @@ as orchestrator/astra lanes, easy pool as the first live-agent slice).
   the in-process worker regression. Manifest merge cold gate
   (`manifest-merge-gate.log`) running; slice 2 waits for a free slot
   (editing: publication, my-plan, turn-settlement, arm-leak).
+- `my-plan-post-reset` COMPLETE (`4bcb6acc9` refused plan reads no longer
+  flow as rows/refs/ownership/`long` inputs — triage #7 dead; `dcb1959d5`
+  `049121590` the two stale fixtures; note `203c96e1a`); 22 tests green
+  fast; cold gate `my-plan-paths-gate.log` running. Launched astra
+  `error-wrapper-enforcement` (error PRD slice 2) on the merged manifest.
+  Pushed: Datahike fork `e11845ba`, seon `steward-platform` (111 commits);
+  owner: personal repos are pushed without asking (memory saved).
