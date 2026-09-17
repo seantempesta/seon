@@ -2362,3 +2362,28 @@
                      (db/db connection)
                      (assoc reader-row :seon.schema/form "[:int {:seon.db/identity true}]")))
             "a genuinely different declaration is still not the committed one")))))
+
+(deftest a-returned-values-non-string-error-message-is-still-the-declared-string
+  ;; `:seon.cluster.eval/error` is declared `:string`
+  ;; (`resources/seon/schemas/seon.cluster.eval.edn:3`), and the value it
+  ;; projects is ARBITRARY: any form may return a map carrying
+  ;; `:seon.error/kind` whose `:seon.error/message` is not a string. Reading
+  ;; that key verbatim handed `evaluate`'s own output contract a lookup-ref
+  ;; vector, so the diagnostic of the evaluation became a contract violation
+  ;; naming `seon.sci.eval/evaluate` instead of the evaluation naming its own
+  ;; failure (fault `7710efbc…`, default pid 66052, 2026-09-17 04:22:54Z).
+  ;; The projection is DERIVED here; the value's own shape is never the
+  ;; evaluation's declared text.
+  (test-support/with-database
+    (fn [connection]
+      (let [ctx (test-support/fork-cluster-ctx connection)
+            evaluation
+            (run-in ctx
+                    (str "{:seon.error/kind :probe/refused"
+                         " :seon.error/message [:seon.ns/name (quote user)]}")
+                    5000)]
+        (is (string? (:seon.cluster.eval/error evaluation))
+            "a failed evaluation names its failure with the string it declares")
+        (is (nil? (schema/explain-candidate-value
+                   :seon.sci.eval/evaluation evaluation))
+            "and the whole evaluation satisfies the contract it declares")))))

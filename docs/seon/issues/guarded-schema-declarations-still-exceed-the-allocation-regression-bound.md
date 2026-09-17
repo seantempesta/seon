@@ -44,3 +44,15 @@ The run snapshot contained only `src/seon/program.cljc` and
 attribution. The allocation assertion was left unchanged.
 See [the S3 note](../../prds/steward-platform/research/acquisition-by-provenance-s3-2026-09-16.md)
 for the complete verification boundary.
+
+## Still open, and worse — 2026-09-17
+
+Measured on `bin/test-fast` (`seon.sci.eval-test`, HEAD plus
+`src/seon/sci/eval.clj` and `test/seon/sci/eval_test.clj`):
+`schema-and-contract-declarations-have-bounded-allocation` recorded
+**223,519,720 bytes** and, on a second run, **223,408,128 bytes** against the
+same 67,108,864 (64 MiB) assertion — roughly double the 2026-09-15 figures
+above. Observed in passing by the lane fixing
+[the evaluation contract fault](the-over-bound-evaluation-path-returns-a-lookup-ref-where-its-contract-promises-a-string.md);
+not that slice's, and unchanged by it.
+

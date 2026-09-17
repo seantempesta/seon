@@ -2206,6 +2206,33 @@
      :seon.sci.eval/context-row context-row
      :seon.sci.eval/namespace-changed? namespace-changed?}))
 
+(defn- failure-text
+  "The declared string an evaluation names its failure with.
+
+  `:seon.cluster.eval/error` is declared `:string`
+  (`resources/seon/schemas/seon.cluster.eval.edn:3`), and the value it
+  projects is ARBITRARY: any form an agent evaluates may RETURN a map
+  carrying `:seon.error/kind` whose `:seon.error/message` is not a string.
+  Reading that key verbatim handed `evaluate`'s own output contract a
+  lookup-ref vector, so the evaluation stopped naming its own failure and
+  the diagnostic became a contract violation against `seon.sci.eval/evaluate`
+  (fault `7710efbc…`, default pid 66052, 2026-09-17 04:22:54Z). This text is
+  DERIVED from the value at the one seam that declares it; the value's own
+  shape is never the evaluation's declared text.
+
+  A non-string message is still evidence, so it is printed rather than
+  dropped: `seon.sci.admit/value` retains the value itself."
+  [value]
+  (let [message (:seon.error/message value)]
+    (cond
+      (string? message) message
+      (some? message) (pr-str message)
+      (some? (:seon.error/kind value)) (str (:seon.error/kind value))
+      ;; A value that names neither a message nor a kind still reached a
+      ;; failing arm. The declared string says exactly that rather than
+      ;; printing `nil` as though it were the failure.
+      :else "The evaluation failed and named no failure.")))
+
 (defn- shown-result
   [value request record]
   (let [function-name (when (= :seon.instrument/contract-violated (:seon.error/kind value))
@@ -2233,8 +2260,7 @@
       (:seon.render.call/selected-producer projection)
       (assoc :seon.eval/renderer (:seon.render.call/selected-producer projection))
       (:seon.error/kind value)
-      (assoc :seon.cluster.eval/error
-             (or (:seon.error/message value) (str (:seon.error/kind value))))
+      (assoc :seon.cluster.eval/error (failure-text value))
       record (assoc :seon.sci.admit/record record))))
 
 (defn- success-evaluation
@@ -2294,7 +2320,7 @@
   (cond-> (cond-> {:seon.print/options print-options
                    :seon.cluster.eval/ns [:seon.ns/name namespace-name]
                    :seon.sci.eval/ending-ns namespace-name
-                   :seon.cluster.eval/error (:seon.error/message value)
+                   :seon.cluster.eval/error (failure-text value)
                    :seon.sci.admit/record record}
             (contains? admitted :seon.sci.admit/value)
             (assoc :seon.sci.admit/value (:seon.sci.admit/value admitted))
@@ -2370,7 +2396,7 @@
                  interrupted? (assoc :seon.eval/outcome :time))]
     (cond-> {:seon.sci.admit/value value
              :seon.eval/shown (pr-str value)
-             :seon.cluster.eval/error (:seon.error/message value)
+             :seon.cluster.eval/error (failure-text value)
              :seon.cluster.eval/ns namespace-ref
              :seon.sci.eval/ending-ns (symbol (str (second namespace-ref)))
              :seon.print/options {}
