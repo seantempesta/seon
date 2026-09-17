@@ -185,10 +185,12 @@
     (doseq [namespace-name program]
       (require namespace-name))
     (let [applied (instrument/apply!
-                   {:seon.config/on-core-error
+                   (cond-> {:seon.config/on-core-error
                     (:seon.config/on-core-error decisions)
                     :seon.sci.admit/caps caps
-                    :seon.schema/projection projection})]
+                    :seon.schema/projection projection}
+                     (:seon.flow/commit-fault! decision)
+                     (assoc :seon.flow/commit-fault! (:seon.flow/commit-fault! decision))))]
       (when (:seon.error/kind applied)
         (throw
          (ex-info (:seon.error/message applied)

@@ -20,9 +20,11 @@
             [clojure.test :refer [deftest is testing use-fixtures]]
             [clojure.string :as str]
             [malli.instrument :as mi]
+            [malli.core :as m]
             [sci.core :as sci]
             [seon.ai.tokens :as tokens]
             [seon.config :as config]
+            [seon.cluster :as cluster]
             [seon.dev.docstring :as docstring]
             [seon.dev.markdown :as markdown]
             [seon.db :as db]
@@ -36,6 +38,7 @@
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
             [seon.sci.kernel :as kernel]
+            [seon.sci.admit :as admit]
             [seon.test.arm]
             [seon.test-support :as test-support])
   (:import [java.nio.file Files LinkOption]))
@@ -176,6 +179,63 @@
    (fn [_]
      (is (nil? (optional-positional nil))
          "a :maybe positional is validated as nil, not as its child schema"))))
+
+(deftest host-boundaries-enforce-per-arity-facets-in-both-modes
+  (test-support/with-database
+   (fn [connection]
+     (test-support/seed-cluster! connection "host-error-wrapper")
+     (let [projection (schema/projection-from-database (db/db connection))
+           caps (config/result-caps (test-support/effective-config))
+           contract [:function
+                     [:=> [:cat :map] :map]
+                     [:=> [:cat :map :int] [:or :int :seon.agent/error]]]
+           base {:seon.error/at #inst "2026-09-18T00:00:00Z"
+                 :seon.error/layer :seon.instrument-test/body
+                 :seon.error/operation 'seon.instrument-test/host-facet}
+           domain (assoc base :seon.agent/error-agent-id "observed-agent")
+           calls (atom 0)
+           candidate-name (symbol (str "host-facet-" (random-uuid)))
+           candidate (intern 'seon.instrument-test candidate-name
+                             (fn [value & _] (swap! calls inc) value))
+           committed (atom [])
+           recorder (fn [value]
+                      (let [outcome (#'cluster/commit-fault!
+                                     connection "host-error-wrapper" "host-wrapper-test" caps value)]
+                        (swap! committed conj [value outcome])
+                        outcome))]
+       (try
+         (doseq [mode [:panic :record]]
+           (#'instrument/arm-var! candidate contract projection projection caps
+                                 {:seon.config/on-core-error mode
+                                  :seon.flow/commit-fault! recorder})
+           (let [before @calls
+                 input (test-support/refusal-data #(candidate 42))
+                 arity (test-support/refusal-data #(candidate))]
+             (is (= before @calls) "Input and arity checks precede the body.")
+             (doseq [[refusal facet] [[input :seon.instrument/contract-error]
+                                      [arity :seon.instrument/arity-error]]]
+               (is ((schema/projection-validator projection facet) refusal)
+                   (pr-str refusal))))
+           (let [refusal (test-support/refusal-data #(candidate domain))]
+             (is (= #{:seon.agent/error} (:seon.instrument/actual-facets refusal)) (pr-str refusal))
+             (is (= 1 (:seon.instrument/arity refusal)))
+             (is ((schema/projection-validator projection :seon.instrument/undeclared-error) refusal))
+             (when (= :record mode)
+               (is (identical? refusal (first (peek @committed)))
+                   "The call returns the exact flat value handed to the committer."))
+             (is (= domain (candidate domain 1)) "Only the declaring arity permits this facet."))
+           (let [refusal (test-support/refusal-data #(candidate base))]
+             (is (= 0 (:seon.instrument/actual-facet-count refusal)))
+             (is ((schema/projection-validator projection :seon.instrument/undeclared-error) refusal))))
+         (is (= 4 (count @committed)))
+         (doseq [[value [_fact outcome]] @committed]
+           (is (= :seon.flow/committed outcome) (pr-str outcome))
+           (is (seq (db/q '[:find ?e :in $ ?function ?arity
+                           :where [?e :seon.instrument/fn ?function]
+                                  [?e :seon.instrument/arity ?arity]]
+                         (db/db connection) (:seon.instrument/fn value)
+                         (:seon.instrument/arity value)))))
+         (finally (ns-unmap 'seon.instrument-test candidate-name)))))))
 
 (deftest a-public-multi-arity-does-not-reenter-its-instrumented-var
   (let [base (str "tmp/instrumented-fs-test/" (random-uuid))
@@ -905,7 +965,7 @@
   (let [before (into {} (map (juxt identity deref)) (instrument/instrumented))
         applied (instrument/apply! {:seon.config/on-core-error :record})]
     (is (pos? (count before)))
-    (is (= (count before) (:seon.instrument/instrumented applied)))
+    (is (= :seon.instrument/missing-recorder (:seon.error/kind applied)))
     (is (= (count before) (instrument/remove!)))
     (is (= (count before) (instrument/remove!)))
     (is (every? (fn [[candidate root]] (identical? root @candidate)) before))
@@ -958,9 +1018,46 @@
           (is (= kind (get-in refusal [:seon.error/data :seon.instrument/arm])))
           (is (= 'seon.instrument-test/private-integer-boundary
                  (get-in refusal [:seon.error/data :seon.error/diagnostic-operation])))))
-      (is (= original-error
-             (test-support/refusal-data #(private-integer-boundary original-error)))
-          "a refused read survives the private consumer's shape refusal unchanged"))))
+      (let [refusal (test-support/refusal-data #(private-integer-boundary original-error))]
+        (is (= :seon.instrument/contract-violated (:seon.error/kind refusal)))
+        (is (= original-error
+               (get-in refusal [:seon.error/data :seon.error/problems 0 :seon.error/offending]))
+            "The consumer refuses its input and retains the causal value.")))))
+
+(deftest semantic-admission-explicitly-declares-every-error-facet
+  (let [projection (schema/handed-projection)
+        output (last (:malli/schema (meta #'admit/semantic-value)))
+        declared (#'instrument/declared-result projection output)]
+    (is (= (error/facet-keys projection) (:seon.instrument/declared declared)))
+    (is (true? (:seon.instrument/base? declared)))))
+
+(deftest hot-host-facet-check-measurement
+  (let [projection (schema/handed-projection)
+        caps (config/result-caps (test-support/effective-config))
+        samples 20000
+        measured (fn [call value]
+                   (dotimes [_ 3000] (call value))
+                   (let [start (System/nanoTime)]
+                     (dotimes [_ samples] (call value))
+                     (/ (double (- (System/nanoTime) start)) samples 1000.0)))]
+    (doseq [[label contract value]
+            [[:scalar [:=> [:cat :int] :int] 1]
+             [:ordinary-map [:=> [:cat :map] :map] {::value 1}]
+             [:declared-error [:=> [:cat :map] [:or :map :seon.agent/error]]
+              {:seon.error/at #inst "2026-09-18T00:00:00Z"
+               :seon.error/layer ::benchmark :seon.error/operation 'seon.instrument-test/benchmark
+               :seon.agent/error-agent-id "benchmark"}]]]
+      (let [before (m/-instrument {:schema contract :scope #{:input :output :guard}
+                                   :report (fn [kind data] (throw (ex-info (str kind) data)))}
+                                  identity (:seon.schema.projection/compile-options projection))
+            after (with-bindings {#'instrument/*compiling-contract* true}
+                    (#'instrument/compiled-wrapper projection 'seon.instrument-test/benchmark
+                                                   contract identity caps
+                                                   {:seon.config/on-core-error :panic}))
+            timings (mapv (fn [_] {:before-us (measured before value)
+                                   :after-us (measured after value)}) (range 3))]
+        (is (= value (after value)))
+        (prn {::facet-overhead label ::samples samples ::timings timings})))))
 
 (deftest the-work-launcher-api-is-collected-without-an-allowlist
   (instrumented!

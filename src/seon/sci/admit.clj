@@ -541,7 +541,35 @@
   accepted must be a value this can rebuild, and a node deep enough to
   exhaust the JVM stack would otherwise turn a stored result into an
   `Error` thrown out of a total operation."
-  {:malli/schema [:=> [:cat :seon.print/node] [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A print node represents an arbitrary original Clojure value; semantic decoding preserves its scalar or collection shape.", :gen/elements [nil false 0 "" :k [] {}]}]]}
+  {:malli/schema
+   [:=> [:cat :seon.print/node]
+    [:or
+     [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary,
+            :seon.schema.admission/reason "A print node represents an arbitrary original Clojure value; semantic decoding preserves its scalar or collection shape.",
+            :gen/elements [nil false 0 "" :k [] {}]}]
+     :seon.error/base
+     :my.background/error :my.edit/error :my.fs/error :my.message/error
+     :my.plan/error :my.shell/error :my.turn/error
+     :seon.agent/error :seon.agent.graph/error :seon.ai/request-error
+     :seon.artifact/error :seon.boot/error :seon.bootstrap/error
+     :seon.cluster/error :seon.cluster.prompt/error :seon.cluster.registry/error
+     :seon.cluster.reply/error :seon.cluster.source/error :seon.cluster.store/error
+     :seon.cluster.wake/error :seon.config/error :seon.config/rule-error
+     :seon.db.availability/error :seon.db.read/error :seon.db.write/error
+     :seon.dev.mcp/error :seon.effect/error :seon.env/error :seon.eval.drive/error
+     :seon.flow/error :seon.fn/error :seon.fn.binding/error
+     :seon.instrument/arity-error :seon.instrument/contract-error
+     :seon.instrument/registration-error :seon.instrument/undeclared-error
+     :seon.message/error :seon.operator/error :seon.operator.collect/error
+     :seon.problems/error :seon.program/error :seon.reconcile/error
+     :seon.render/error :seon.render.data/error :seon.render.value/error
+     :seon.render.walk/error :seon.render.web/error :seon.schedule/error
+     :seon.schema/error :seon.schema.datahike/error :seon.schema.shape/error
+     :seon.sci.admit/error :seon.sci.eval/acquisition-error
+     :seon.sci.eval/evaluation-error :seon.sci.kernel/error :seon.sci.reader/error
+     :seon.search/error :seon.test/error :seon.test.accretion/error
+     :seon.test.run/error :seon.test.runner/error :seon.turn/error
+     :seon.turn.loop/error]]}
   [print-node]
   (loop [stack []
          step [::open print-node]]

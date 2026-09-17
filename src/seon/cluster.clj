@@ -2339,7 +2339,7 @@
           (or (io/resource (str resource ".clj"))
               (io/resource (str resource ".cljc")))))))
 
-(declare commit-fault!)
+(declare commit-fault! process-identity)
 
 (defn- acquire-development!
   [connection cluster-name ctx projection]
@@ -2505,6 +2505,10 @@
              result (instrument/apply!
                      {:seon.config/on-core-error
                       (:seon.config/on-core-error effective)
+                      :seon.flow/commit-fault!
+                      #(commit-fault! connection cluster-name
+                                      (process-identity (:seon.boot/advertisement instance))
+                                      (config/result-caps effective) %)
                       :seon.sci.admit/caps (config/result-caps effective)
                       :seon.schema/projection projection})]
          (when (or (:seon.error/kind result)
