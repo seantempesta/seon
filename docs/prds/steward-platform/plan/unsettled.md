@@ -3255,3 +3255,16 @@ as orchestrator/astra lanes, easy pool as the first live-agent slice).
   RESET NEEDED pending from `eb8db3503` (new config fact
   `:seon.config.db/write-time-limit-ms`) — batched into the next reset after
   a green platform gate.
+
+## 2026-09-17 ~23:25Z — the error-entities PRD landed; review launched
+
+- `ea32d6dce`: [error-entities-prd-2026-09-17.md](error-entities-prd-2026-09-17.md)
+  (377 lines): base + facet schemas, the 338-declaration reset inventory,
+  the wiring (error?/diagnostic/facets/recorder/render/malli.error), error
+  facets as program facts (`:seon.fn/error-facets`), order/ownership/
+  estimates. Supersedes the "kind" spellings of the research note. Astra
+  review lane `error-entities-prd-review` launched (owner: read all research
+  and guidance, probe in the REPL, make suggestions). Implementation waits
+  for the review and the owner's read.
+- Also landed: `dc63e6ebf` (canonical projection encoding accelerated, boot
+  note fix #6), `841c4b577` (config-test symbol expectations).
