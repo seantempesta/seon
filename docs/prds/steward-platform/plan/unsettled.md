@@ -2729,3 +2729,17 @@ working tree, never Sonnet.
   proven). B running. Message-wake resumed for its live wake-flip proof on
   the adopted default (last owed item before the reset). Editing: stage 2,
   message-wake.
+- **Batch 122 B (HEAD 5dd6ef7cc, 17 namespaces): 368/3,066/12F/5E; results
+  NOT recorded (`prepl-response-silent` — default's prepl did not answer
+  the recorder while lanes were probing it; the known class).** Routed:
+  operator_test destructive-root (5E+1F: delete admission no longer
+  records before running) and program_test ×4 (identity attribute nil
+  after typed deletion; indexed vs evaluated schema row differ by `shape`)
+  → adoption-margin resumed with the lines; documentation_test
+  `a-contract-mistake-carries-the-same-documentation-as-doc` ×2 (the
+  `my.message/send` docstring changed by the about split) → message-wake at
+  its stop; wake-routing property → S3 at its next stop; the known three.
+  Green cold: agent, turn, cluster.turn, rereads, runner/test-runner
+  (guardrails proven), gen.loop, turn-work, problem-routing, source,
+  issue-deletion, fresh-operator-reset. Editing: stage 2, message-wake,
+  adoption-margin.
