@@ -1803,6 +1803,21 @@ remaining source_test.clj:334 red: a sparse program upsert now admitted
 where the test expects a refusal — stale expectation vs validator gap, one
 probe decides. Cold gate owed.
 
+**no-default-cluster LANDED** (`cdfc01058`, `0dff4a3f1`): all seven
+`(or … "default")` sites required inputs with typed refusals;
+`compile-manifest` no longer writes "default" as a durable fact; the
+scheduler's whichever-entity pre-read gone; doc/dir no longer render an
+absent contract as empty; `result-caps` keeps its declared refusal grammar
+with the configuration refusal as cause (the dead lane's pass-through had
+broken an armed guarantee). 282/1,448, 7F/1E vs a 7F/2E HEAD baseline, every
+remaining red named and foreign (bounded-allocation, declared-row delta,
+bare-test-macros nil sym, four sci arity-message parity diffs). Recorded
+hunks: three src/seon/test.clj sites (need a `seon.env/supplied-cluster-name`
+call-preparation supplier) and item 16. Issue filed: `blocking-static-
+analysis-names-no-finding`. **Batch 115 launched by the orchestrator** (load
+15): platform tier, then 24 namespaces across every slice landed since the
+resume, on HEAD (`tmp/orchestrator/gate-results/batch-115.log`).
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
