@@ -2428,3 +2428,15 @@ working tree, never Sonnet.
   hook, config, issue, db, schema; log `batch-117.log`).
 - Orphan staged docs from the stopped retirement lane committed as history
   (`1fb2e3f78`, superseded by G1).
+- **Small fixes LANDED** (`6a0f8a08a` pull totality at the one seam: every
+  named attribute gets Datahike's own `:limit nil`, regression 1,001 members;
+  `846d75e9c` captured-history compare dissolved into `capture-mismatch`;
+  `8242ec533` `:seon.fn/defined-by` on the row + detector exclusion by
+  Datalog clause; `027dfc5cd` note + wildcard-pull residue issue). Deferred
+  with hunks: `:entity-id/syntax` (transcript.clj held all session), reporter
+  ex-data (runner.clj). Its remaining red `sci-evaluation-has-one-first-
+  party-owning-namespace` names `my.program/native!` — the program-ops
+  lane's hook-arm hunk, queued for that lane. Cold gate owed (batch 118).
+- Reset: preflight 0.3 s, down 1 s, destroy 10 s, republish 145 s (bound
+  180); refork running. Batch 117 published its base in 80 s — the invalid
+  note was the whole base-publication blocker.
