@@ -2942,3 +2942,11 @@ working tree, never Sonnet.
   patch on the merged base → `bin/seon reset --force` → Juniper reseed → the
   seven serial gates → live proofs → resume the three lanes on the new base
   (plus the `seon.db/q` symbol-codec blocker for the integrator).
+- **RESET BATCH MERGED** (`git merge --ff-only reset-batch` → HEAD
+  `ca10e807a`, 118 files: indexed symbol edges, strict deletion with
+  final-state detection, G4 digest, G5 owned-value validation under the
+  projection-carried budget, the 19 required-many keys made optional,
+  archived-tx, capability symbol, origin/about values, fn.ast Q2 A, S2, S6).
+  Worktree and branch removed — no worktrees remain. Owner: keep committing
+  and merge to `main` at each green checkpoint. Next: message-wake's
+  cold-worker arming patch on the merged base, then `bin/seon reset --force`.
