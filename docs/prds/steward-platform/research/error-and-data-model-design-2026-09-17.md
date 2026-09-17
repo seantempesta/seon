@@ -7,6 +7,8 @@ tags: [error-model, data-model, contracts, schema, private-functions]
 
 # Errors, data shapes, and the contract campaign
 
+> **2026-09-17 — Binding successor:** [Error entities PRD](../plan/error-entities-prd-2026-09-17.md), implementing the owner’s program-facts rulings §1m/§1o. Errors are entities with composable schema facets, declared error-return contracts, and a base render block plus every matching facet’s block. No kind/class/boolean stamps, exclusive classification, required prose message, or durable side log/replay. The proposal below is preserved as the historical research record; where it conflicts, the successor and owner rulings govern.
+
 **Recommendation: make error identity unambiguous, make diagnostic evidence
 queryable, and derive read shapes before contracting their consumers.** Keep
 the existing error family, predicate, disposition helper, instrumentation
