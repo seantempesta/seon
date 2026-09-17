@@ -1767,6 +1767,21 @@ block fires immediately); payload writes before the write. 16/141/0/0 fast.
 Cost: ~170 ms per tool call for every agent. Shell writes are checked, not
 published (`init --dev --changed` stays the rule).
 
+**bin/test preparation bounds LANDED** (`cde8b17fa`): every preparation
+phase bounded and named; explicit refusals announce immediately and an
+`ERR` trap names the phase for anything `set -e` would end silently (3 s to
+a named refusal from a refusing clojure, 0 s from a failing rmdir); slot
+waits announce holders every 60 s; BASHPID replaced portably
+(`$(exec sh -c 'echo $PPID')`). SECOND DEFECT FOUND: the watchdog's
+foreground `sleep` outlived its disarm, holding the launcher's stdout pipe
+open — the hang-preventer manufactured hangs (a 300 s liveness kill; 23
+ppid=1 orphans across lanes) — fixed with a waited-on timer child. Manual
+proof: `SEON_TEST_PUBLISHED_BASE_SECONDS=1 bin/test …` → exit 70 with the
+phase line. Also: launcher fixtures now copy selection.clj (cleared three
+inherited reds). Reds not its own: agent-fork-callable (admission/source),
+`concurrent-bin-test-invocations…` killed by the silence bound while
+driving two gates (issue filed). Cold gate owed.
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
