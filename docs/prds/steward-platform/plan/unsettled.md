@@ -3492,3 +3492,14 @@ as orchestrator/astra lanes, easy pool as the first live-agent slice).
   elision); new issue: a collection-member refusal does not name the
   member's index (`error.clj` `collection-member-problem`).
 - Launched sol `my-plan-post-reset` (the four plan reds + triage #7).
+- B2 attributed CLEAN: baseline at `4feab16ff` (clean worktree,
+  `b2-baseline-gate.log`) 69 tests 31F/11E vs B2's 31F/10E with an
+  identical failing set (B2 fixed `one-wake-cannot-open-a-second-turn…`).
+  The 31F/10E are inherited reset drift in `seon.turn-test`,
+  `seon.turn-loop-test`, `seon.cluster-test`: `seon.turn/receipt-settle-tx`
+  refuses program rows missing `:seon.ns/name` or carrying lookup-ref
+  vectors where symbols are declared (settlement still writes the
+  pre-reset spelling), resumed-fold namespace mismatches
+  (`my.generated.after-resume` vs `my.agents.namespace-resume`), empty
+  seeds. QUEUED as lane `turn-settlement-post-reset` for the next free
+  editing slot (turn.clj free). Baseline worktree removed.
