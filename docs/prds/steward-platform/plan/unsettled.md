@@ -2625,3 +2625,19 @@ working tree, never Sonnet.
   never a declared contract); G5's work budget is projection-carried (a
   declared config fact handed to the final validator). Integrator resumed on
   G5 (closes the identity-less-entity hole) and the executable reset order.
+- **Guardrails items 4 + analysis findings LANDED** (`4155deef4`
+  `assert-clean-analysis!` names path/line/column/message; `0ab4541da`
+  orphaned gates announced with pid, slot, run root, last phase). Reviewed
+  with one correction sent back: a slot whose holder AND runner are both
+  dead is exhaust and must reclaim automatically (the commit left every
+  dead holder for the orchestrator — three slots would wedge 1800 s after
+  any killed gate); announce-and-retain only a live runner with a dead
+  launcher. Overlay question decided as recommended: no published graph
+  matching HEAD → refuse before any JVM naming the preparation command.
+  Resumed on that correction + item 3.
+- **Message-wake residue FIXED** (`db4a5526d`: planner census, stale
+  routing expectations, the continuation oracle; subjectless messages
+  legal; 16/100 green). Its live wake-flip proof owed on adoption. Lane
+  parked (session preserved). S3 resumed on its cold reds (no live
+  observation until adoption). Editing lanes: adoption-margin, integrator,
+  guardrails, S3.
