@@ -35,10 +35,14 @@ PRD §12 requires virtual replies through the ordinary proc.
 
 ## Persistent context, private layer, and handles — target
 
-Fork the cluster base once for each agent. Preserve that live context
-between turns and intern accepted base diffs into it. Private defs and
-atoms retain object identity; they never enter the base or another agent.
-A JVM restart loses them. Do not teach a serialization/restoration ladder.
+Derive the program-only base from one database value with `base-ctx`
+(`src/seon/sci/eval.clj:1956`). Before a later turn, `fork-for-turn`
+(`:1924`) regenerates the fork and reapplies the private layer in memory,
+preserving its context handle, owned Vars, atoms and result objects
+(`regenerate-agent-context!`, `:1861`). SCI's generation-based isolation
+is supplied by `reference-code/sci/src/sci/core.cljc:345`. Private objects
+never enter the base or another agent; a JVM restart loses them.
+Do not teach a serialization/restoration ladder.
 
 Accepted functions, schemas, and tests persist as program facts.
 A `defn` without a Malli contract is refused at installation. A plain

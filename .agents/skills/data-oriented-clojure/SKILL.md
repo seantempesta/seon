@@ -66,11 +66,13 @@ the value renderer produced at evaluation time, not derived current
 state. Its exact old bytes cannot be recovered by printing a changed
 object or applying a changed profile.
 
-The target keeps actual results and private defs/atoms in each agent's
-persistent SCI context. Accepted base diffs accrete into it; a turn
-does not refork or restore serialized state. Installed functions,
-schemas, and tests remain durable program rows. Restart loses private
-objects while saved shown text survives.
+Actual results and private defs/atoms remain in memory. `base-ctx` derives
+the program base from one database value (`src/seon/sci/eval.clj:1956`);
+`fork-for-turn` regenerates a fork and reapplies those private objects while
+preserving the agent's context handle (`:1924`, `regenerate-agent-context!`
+at `:1861`). Accepted-row installation optimizes that same regeneration.
+Installed functions, schemas, and tests remain durable program rows.
+Restart loses private objects while saved shown text survives.
 
 ## Render as a function of the data — target
 

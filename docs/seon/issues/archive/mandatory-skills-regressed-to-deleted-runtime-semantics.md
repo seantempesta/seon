@@ -79,3 +79,13 @@ skill creator's `quick_validate.py`, the canonical skill symlinks still resolve
 to `.agents/skills/`, and the changed files passed `git diff --check` before the
 path-limited commit. The required independent verification pass remains the
 next review boundary and is not claimed here.
+
+## S3 recurrence — 2026-09-17
+
+The REPL and data-oriented Clojure skills still said an agent forks once
+and later turns do not refork. The owner's S3 correction explicitly requires
+regeneration with the private layer reapplied in memory. Both paragraphs
+now cite the implemented `base-ctx`, `fork-for-turn` and
+`regenerate-agent-context!` owners. The [fresh live proof](../../../prds/steward-platform/research/acquisition-by-provenance-s3-2026-09-16.md)
+measures private-object and context-handle identity preservation. No wider
+skill audit is claimed.

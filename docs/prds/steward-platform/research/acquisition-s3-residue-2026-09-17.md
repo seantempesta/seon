@@ -135,3 +135,9 @@ slice; no documentation-audit files were changed.
 Baseline iteration uses one `timeout 2400 bin/test-fast --paths` process,
 no SEON_TEST overrides, and waits for the shared slot. Cold/platform gates
 remain the orchestrator's responsibility.
+
+The owner subsequently accepted `a95f8dee0` and confirmed default adoption.
+The [fresh live continuation](acquisition-by-provenance-s3-2026-09-16.md#fresh-live-proof--2026-09-17-default-pid-94566)
+records default PID 94566 timings and the real accepted override on the
+disposable scratch cluster. That later observation satisfies the live
+prerequisite that was unavailable during this residue landing.

@@ -25,22 +25,22 @@
       constructors (binding [*ns* owner]
                      (eval (list 'letfn (vec declarations)
                                  ['base-ctx 'fork-for-turn 'install-row! 'documentation-value])))
-      database (seon.db/as-of (seon.db/db (seon.operator/connection "default"))
-                              536871073)
+      database (seon.db/db (seon.operator/connection "default"))
       start (System/nanoTime)
       base ((first constructors) database)
       built (/ (- (System/nanoTime) start) 1e6)
-      instance (get @seon.operator.runtime/running-instances "default")
-      previous (get @(:seon.agent/context-state (:seon.turn.loop/cluster instance))
-                    "s3-provenance-b")
-      disposable (reduce (fn [ctx key] (update ctx key #(atom @%))) previous
-                         [:env :seon.sci.eval/base-bindings
-                          :seon.sci.kernel/installed-functions
-                          :seon.sci.kernel/program-snapshot seon.env/state-carrier])
+      previous (:seon.sci.eval/ctx
+                ((second constructors)
+                 {:seon.sci.eval/ctx base :seon.db/db database
+                  :seon.agent/id "2393cac275ae"}))
+      private-object (atom :s3-private)
+      _ (sci.core/intern previous 'user 's3-private private-object)
+      _ (swap! (:seon.sci.eval/result-objects previous) assoc "s3-probe" private-object)
+      disposable previous
       started (System/nanoTime)
       forked ((second constructors)
               {:seon.sci.eval/ctx base :seon.sci.eval/agent-ctx disposable
-               :seon.db/db database :seon.agent/id "s3-provenance-b"})
+               :seon.db/db database :seon.agent/id "2393cac275ae"})
       next (:seon.sci.eval/ctx forked)
       private-ms (/ (- (System/nanoTime) started) 1e6)
       target (symbol "seon.eval.drive/uuid-text")
@@ -49,7 +49,7 @@
       fresh (:seon.sci.eval/ctx
              ((second constructors)
               {:seon.sci.eval/ctx base :seon.db/db database
-               :seon.agent/id "s3-provenance-c"}))
+               :seon.agent/id "2393cac275ae"}))
       fresh-root? (identical? @(sci.core/resolve base target)
                               @(sci.core/resolve fresh target))
       admitted (seon.db/pull database
@@ -77,28 +77,27 @@
                                        [?f :seon.fn/sym ?name] [?f :seon.fn/file ?file]
                                        [?file :seon.fn.file/relative-root "src"]] database))
       unavailable-src (filter #(src-identities (:seon.fn/sym %)) unavailable)
-      current (seon.db/db (seon.operator/connection "default"))
+      current database
       core-start (System/nanoTime)
       core-base ((first constructors) current)
       core-ms (/ (- (System/nanoTime) core-start) 1e6)
       reverted (:seon.sci.eval/ctx
                 ((second constructors)
                  {:seon.sci.eval/ctx core-base :seon.sci.eval/agent-ctx next
-                  :seon.db/db current :seon.agent/id "s3-provenance-b"}))]
-  {:s3/basis (seon.db/basis-t database)
+                  :seon.db/db current :seon.agent/id "2393cac275ae"}))]
+  {:s3/pid (.pid (java.lang.ProcessHandle/current))
+   :s3/basis (seon.db/basis-t database)
    :s3/function-identities (seon.db/q '[:find (count ?f) . :where [?f :seon.fn/sym]] database)
    :s3/sourced-functions (seon.db/q '[:find (count ?f) . :where [?f :seon.fn/source]] database)
    :s3/base-ms built :s3/private-ms private-ms
    :s3/reinstall-ms install-ms :s3/install-state (:seon.sci.eval/load-state installed)
-   :s3/requested-as-of 536871073
    :s3/value (:seon.sci.admit/value evaluated)
    :s3/core-root-identical (identical? @#'seon.id/valid?
                                       @(sci.core/resolve base 'seon.id/valid?))
    :s3/retained-root-identical retained-root?
    :s3/fresh-root-identical fresh-root?
    :s3/overrides (seon.program/overrides database)
-   :s3/doc-note (:seon.schema.admission/note
-                 ((nth constructors 3) database target target))
+   :s3/core-doc ((nth constructors 3) database 'seon.id/valid? 'seon.id/valid?)
    :s3/core-base-ms core-ms
    :s3/current-admission (:seon.schema.admission/source
                           (seon.db/pull current [:seon.schema.admission/source]
@@ -106,12 +105,15 @@
    :s3/reverted-root-identical
    (identical? @(ns-resolve 'seon.eval.drive 'uuid-text)
                @(sci.core/resolve reverted target))
-   :s3/load-results (filterv #(not= :unavailable (:seon.sci.eval/load-state %))
-                             (get-in base [:seon.sci.eval/acquisition :seon.sci.eval/load-results]))
+   :s3/load-states (frequencies
+                   (map :seon.sci.eval/load-state
+                        (get-in base [:seon.sci.eval/acquisition :seon.sci.eval/load-results])))
    :s3/unavailable-count (count unavailable)
    :s3/unavailable-src-count (count unavailable-src)
    :s3/unavailable-src-sample (vec (take 8 unavailable-src))
    :s3/private-state (:seon.sci.eval/private-state forked)
    :s3/context-identical (identical? disposable next)
+   :s3/private-object-identical
+   (identical? private-object @(sci.core/resolve next 'user/s3-private))
    :s3/result-store-identical (identical? (:seon.sci.eval/result-objects previous)
                                          (:seon.sci.eval/result-objects next))}))

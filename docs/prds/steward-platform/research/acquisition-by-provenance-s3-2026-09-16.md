@@ -400,5 +400,128 @@ The owner approved `684f185f8`; its AGENTS description landed in `e706884cd`.
 The follow-up [cold residue landing](acquisition-s3-residue-2026-09-17.md)
 records the declaration-retraction, pre-provider turn-bound and documentation
 read-evidence repairs, including governing rulings for changed expectations.
-Fresh-cluster measurements remain pending adoption convergence of default;
+At that landing, fresh-cluster measurements remained pending adoption convergence of default;
 the original PID 33583 measurements above are not observations of PID 94566.
+
+## Fresh live proof — 2026-09-17, default PID 94566
+
+The owner confirmed adoption convergence after `c772db2d3` / `be9c90e2f`.
+`bin/seon status` reported PID 94566 alive; MCP runtime status answered with
+responsive plumbing and two agents. This is the adopted development JVM.
+No default lifecycle, publication, adoption, configuration or program write
+was performed by the probe. Two default JVM evaluations were used, both
+declared read-only. The first diagnostic incorrectly called the one-argument
+`seon.cluster.source/current` with zero arguments and received a typed arity
+refusal; it supplied no measurement. The second ran the committed probe.
+
+The [regeneration probe](acquisition-by-provenance-s3-regeneration-probe-2026-09-16.clj)
+now captures the CURRENT database once through
+`(seon.db/db (seon.operator/connection "default"))`, rather than the discarded
+store's hard-coded as-of basis. Its lexical constructors still compile the
+exact evaluator source without replacing installed JVM Vars. It creates a
+disposable fork, private atom and result map; it touches no retained live
+agent context. The final core-base construction uses that same immutable
+database value, not a later read. [Complete MCP result](acquisition-s3-default-live-result-2026-09-17.json).
+
+| Observation | Value |
+|---|---:|
+| PID | 94566 |
+| Database basis `:t` | 536871131 |
+| Function identities | 5159 |
+| Sourced functions | 4387 |
+| Base construction | 2142.538 ms |
+| Current admitted-row installation | 326.353542 ms |
+| Private-layer regeneration | 6.442416 ms |
+| Current core-base construction, second construction | 700.013458 ms |
+
+The override query answered **`[]`**. The installed target's current admission
+was `:core`, so this default installation measurement exercised `:jvm` loading;
+it is not presented as an accepted-agent installation. That measurement is
+below on the scratch cluster. The core JVM root, inherited/fresh roots,
+retained context handle, private atom and result-store identities all compared
+identical. The private state was `:preserved-in-memory`. Acquisition reported
+1369 unavailable definitions, **zero under an indexed src root**, and one
+interpreted definition; the full typed result is in the linked envelope.
+
+The core `(doc seon.id/valid?)` summary was exactly:
+
+> Whether `id` is `length` lowercase hex characters.
+
+It carried no override note. The probe called the same `documentation-value`
+owner used by `doc`, with this supplied database.
+
+## Accepted override on scratch — 2026-09-17, PID 53141
+
+Commands were scoped to `tmp/s3-live-root`. The first `start s3-live` correctly
+refused because a new isolated root has no published `current-src`; `init`
+published that root, then `start s3-live` succeeded. Scratch publication was
+`6aab852c-3374-5f8e-b352-efe6127b5275`. No Juniper fixture was seeded.
+Boot supplied `root`; the [scratch probe](acquisition-s3-scratch-live-probe-2026-09-17.clj)
+created only `s3-live-a` through `seon.cluster.agent/creation-tx`, with its own
+no-provider setting. Thus agent count went from one to two. B and C in this
+proof are disposable SCI forks for that agent identity, not extra agent rows
+or provider turns. The canonical regression separately proves a second
+durable agent's next turn; this probe exercises its same fork regeneration.
+
+A submitted this exact source through `virtual-turn!`, the ordinary proc,
+candidate checking, acceptance and terminal writer:
+
+```clojure
+(defn- uuid-text {:malli/schema [:=> [:cat] :string]} [] "s3-accepted-database-definition")
+```
+
+The probe subscribed before submission and awaited its exact closed-turn
+fact under the configured turn-completion bound. Turn `cea4d68f9e78`,
+evaluation `381eeeb9f0e8`, stored `#'seon.eval.drive/uuid-text` as shown text.
+Admission was `:agent`, and the stored source equalled the exact submitted
+source. [Stored gate evidence](acquisition-s3-scratch-gate-evidence-2026-09-17.json)
+reports **25 requested / 25 executed auto-check cases, status `:passed`**, zero
+selected tests and zero gate failures. No evaluation error attribute was
+present; the provider-attempt query found no A attempts. This is acceptance
+through the real gate, not a direct transaction of an agent-provenance row.
+
+| Observation | Value |
+|---|---|
+| Before / after basis `:t` | 536870974 / 536870981 |
+| B before acceptance | `9557c28b-e9ca-464c-8133-bf906c6b84cd` |
+| Shared base after acceptance | `"s3-accepted-database-definition"` |
+| Existing B after `fork-for-turn` | `"s3-accepted-database-definition"` |
+| Fresh C | `"s3-accepted-database-definition"` |
+| Base rebuilt from the accepted database | `"s3-accepted-database-definition"` |
+| Accepted-agent row installation, disposable rebuilt base | 1148.939458 ms, `:interpreted` |
+| B private-layer regeneration | 3.396833 ms |
+| Base rebuilding | 1502.970042 ms |
+
+B retained its exact handle and private atom. B and C resolved the identical
+accepted base root. The override query returned
+`["seon.eval.drive/uuid-text"]` under the currently installed string identity
+schema. The derived `doc` line was exactly:
+
+> Accepted database override for SCI; JVM callers retain the compiled definition until write-back and reload.
+
+[Complete scratch MCP result](acquisition-s3-scratch-live-result-2026-09-17.json).
+These are single observations, not statistical benchmarks. Row installation
+was cheaper than base rebuilding in both samples, supporting retention of the
+existing accepted-row optimization; private regeneration was smaller again.
+The canonical equivalence regression remains the correctness proof for that
+optimization, rather than timing being treated as equivalence evidence.
+
+During scratch setup a hook reported another lane's in-flight syntax error
+in `src/seon/error.clj:830`. That file and the concurrent database,
+instrumentation, source-schema and evaluator-test changes were untouched.
+Scratch publication and boot subsequently completed, so no worktree fallback
+was needed. Scratch runtime status before the probe reported two errored
+evaluations and two stale Vars; this proof does not assert that all scratch
+health counters were zero.
+
+`bin/seon --root tmp/s3-live-root down` confirmed PID 53141 stopped and the
+store flock free (4346 ms); the process table then had no such PID. The root
+was deleted without following symlinks. No scratch worktree or running shell
+remains. Default was never stopped, started, adopted or reset. No test gate
+was launched: this continuation changes probe/documentation artifacts only;
+the owner reports cold batch 122 running for accepted `a95f8dee0`.
+
+The two loaded skills still taught fork-once/no-refork, contradicting the
+approved S3 shape. Their paragraphs now cite `base-ctx`, `fork-for-turn` and
+private-layer reapplication; the existing skill-drift issue records the
+recurrence. No wider skill audit is claimed.

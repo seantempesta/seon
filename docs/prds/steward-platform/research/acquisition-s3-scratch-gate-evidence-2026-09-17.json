@@ -1,0 +1,8 @@
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"seon.dev.mcp/namespace\":\"user\",\"seon.dev.mcp/session-id\":\"s3-live-proof\",\"seon.dev.mcp/cluster\":\"s3-live\",\"seon.dev.mcp/mode\":\"jvm\",\"seon.dev.mcp/events\":[{\"tag\":\"ret\",\"val\":{\"seon.dev.mcp/value\":{\"s3/a-provider-attempts\":null,\"s3/agents\":[\"s3-live-a\",\"root\"],\"s3/evidence\":{\"seon.test.accretion/case-count\":25,\"seon.test.accretion/executed-count\":25,\"seon.test.accretion/gate-fail-count\":0,\"seon.test.accretion/gate-test-count\":0,\"seon.test.accretion/status\":\"passed\"}},\"seon.dev.mcp/windowed?\":false},\"ns\":\"user\",\"ms\":4}],\"seon.dev.mcp/runtime\":\"clj\",\"seon.dev.mcp/cluster-state\":\"alive\",\"seon.dev.mcp/form\":\"(let [database (seon.db/db (seon.operator/connection \\\"s3-live\\\"))] {:s3/agents (seon.db/q '[:find [?id ...] :where [?a :seon.agent/id ?id]] database) :s3/evidence (seon.db/pull database [:seon.test.accretion/status :seon.test.accretion/case-count :seon.test.accretion/executed-count :seon.test.accretion/gate-test-count :seon.test.accretion/gate-fail-count :seon.test.accretion/report-edn :seon.cluster.eval/error] [:seon.cluster.eval/id \\\"381eeeb9f0e8\\\"]) :s3/a-provider-attempts (seon.db/q '[:find (count ?attempt) . :where [?a :seon.agent/id \\\"s3-live-a\\\"] [?turn :seon.turn/agent ?a] [?turn :seon.turn/attempts ?attempt]] database)})\",\"seon.dev.mcp/root\":\"/Users/sean/src/seon/tmp/s3-live-root\"}"
+    }
+  ]
+}
