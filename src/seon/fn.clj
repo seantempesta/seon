@@ -735,6 +735,27 @@
            [base])))
      targets)))
 
+(defn- interpreter-refer-rows
+  "Refer rows for the bindings every SCI namespace resolves without a require.
+
+  `seon.sci.eval/build-base-ctx` installs each declared binding's target in
+  `clojure.core`, so a submitted form resolves `deftest`, `is`, `doc`, `dir`
+  and `help` bare. A submitted form's ANALYSIS must resolve exactly what its
+  EVALUATION resolves, or a bare `deftest` analyses to no var definition at
+  all and its test row is never minted. The declared attribute name is the
+  bare name the interpreter binds."
+  [forms]
+  (into []
+        (keep (fn [[attribute definition]]
+                (when-let [target (:seon.sci.binding/target
+                                   (schema.form/attr-form-properties
+                                    definition))]
+                  (let [local (symbol (name attribute))]
+                    {:seon.ns.refer/local local
+                     :seon.ns.refer/target-ns (symbol (namespace target))
+                     :seon.ns.refer/target-name local}))))
+        forms))
+
 (defn- runtime-namespace-form
   [namespace-name namespace-row referenced-namespaces]
   (let [program-requires
@@ -791,6 +812,10 @@
                        [?f :seon.fn/ns ?n] [?f :seon.fn/sym _]]
               database namespace-names)
         prelude (analyzer/program-prelude available-functions)
+        interpreter-refers
+        (interpreter-refer-rows
+         (or (:seon.schema.projection/forms (db/carried-projection database))
+             (schema/declaration-population)))
         {:keys [source spans]}
         (loop [remaining requests
                source (if (seq prelude) (str prelude "\n") "")
@@ -810,8 +835,11 @@
                   (analyzer/referenced-program-namespaces
                    namespace-name [form-source])
                   namespace-source
-                  (pr-str (runtime-namespace-form namespace-name namespace-row
-                                                   referenced-namespaces))
+                  (pr-str (runtime-namespace-form
+                           namespace-name
+                           (update namespace-row :seon.ns/refers
+                                   (fnil into []) interpreter-refers)
+                           referenced-namespaces))
                   prefix (str source namespace-source "\n")
                   first-source-row (inc (count (filter #{\newline} prefix)))
                   last-source-row (+ first-source-row

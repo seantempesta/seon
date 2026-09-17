@@ -12,4 +12,10 @@
            :seon.sci.binding/reason "The initial REPL can inspect program namespace facts before acquiring program functions."}]
  :seon.sci.binding/doc
  [:symbol {:seon.sci.binding/target seon.bootstrap/doc
-           :seon.sci.binding/reason "The initial REPL can inspect program function facts before acquiring program functions."}]}
+           :seon.sci.binding/reason "The initial REPL can inspect program function facts before acquiring program functions."}]
+ :seon.sci.binding/deftest
+ [:symbol {:seon.sci.binding/target clojure.test/deftest
+           :seon.sci.binding/reason "Every context resolves the test macro bare, without a clojure.test referral; declaring it is how the analysis seam resolves what the interpreter resolves."}]
+ :seon.sci.binding/is
+ [:symbol {:seon.sci.binding/target clojure.test/is
+           :seon.sci.binding/reason "Every context resolves the assertion macro bare, without a clojure.test referral; declaring it is how the analysis seam resolves what the interpreter resolves."}]}
