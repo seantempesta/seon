@@ -56,7 +56,7 @@ before a wave launches; every landing gets a cold `bin/test --paths <files>
 boot, cluster, store, runner or the indexer; `steward-platform` merges to
 `main` at each green platform checkpoint; a lane that meets a held file
 stops at that item and continues with the rest (per item, not per lane);
-sol at capacity falls back to terra without waiting; every lane spec cites
+sol at capacity falls back to astra low (owner, 19:55Z); every lane spec cites
 the triage note's row and carries raw evidence, never an attribution.
 
 **Tracks** (serial inside a track, parallel across tracks; file ownership is
@@ -66,7 +66,7 @@ the scheduling constraint, named per lane):
 |---|---|---|---|---|
 | **0 Platform green** | `fabricated-symbol-edges` (running) → cold platform gate → `bin/seon reset --force` (stored fabricated members) → Juniper reseed → the seven serial gates (`reset-batch-2026-09-17.md` §"Reset procedure" step 6) → merge to main | orchestrator | — | — |
 | **A Test system** | stage 1 (resume `test-system-stage1` with `tmp/orchestrator/worktree-patches/test-system-stage1-wip-2026-09-17.patch` reapplied; absorbs triage #14 gate-set-shrinks-silently since it rewrites `gate-sets`) → stage 3 (claims at the writer; `bin/test` a launcher; old paths deleted; absorbs #16 record-latest-tx) → stage 2 (resolution by identity; needs parent S1 for agent tests) → stage 4 tally (Opus) → stage 5 docs (Opus) | astra | `src/seon/test.clj`, `src/seon/test/runner.clj`, `selection.clj`, `cache.clj`, `fn.clj` gate-set seam, `seon.test*.edn` | Track 0 |
-| **B1 One predicate** | `private-contracts` resumed: triage #1 (nine copies onto `seon.error/error?`), then #5 `transact-call`, then #17 `config/refuse!` as a value | sol (low) | the nine call-site files, `db.clj:3707-3763`, `config.clj` | Track 0; runs FIRST in wave 2 because its edits are one-line replacements across files other lanes need |
+| **B1 One predicate** | `private-contracts` resumed: triage #1 (nine copies onto `seon.error/error?`), then #5 `transact-call`, then #17 `config/refuse!` as a value | sol (low) | the nine call-site files, `db.clj:3707-3763`, `config.clj` | **C1 design note landed (owner, 2026-09-17 19:55Z: the predicate waits for the design)**; then Track 0; runs first in its wave because its edits are one-line replacements across files other lanes need |
 | **B2 Turn and cluster writer reds** | `audit2-blockers` resumed with triage rows #2, #6, #12, #8, #13 | sol | `src/seon/turn.clj`, `src/seon/cluster.clj` | B1 landed |
 | **B3 Detector, recorder, delivery** | `audit3-blockers` resumed with #3, #4, #11 (its items 1–2 were never named; the note says so) | sol | `src/seon/issue/detect.clj`, `src/seon/error.clj`, `src/seon/cluster/message.clj` | B1 landed |
 | **B4 Database read seams** | #18 declarations-as-refusal, #19 replay-read default arm, #20 projection-from-empty-table | sol | `src/seon/db.clj`, `src/seon/schema.clj` | B1 landed (db.clj is shared) |
@@ -82,8 +82,8 @@ the scheduling constraint, named per lane):
 **Waves (editing slots; research lanes do not count):**
 
 1. **Wave 1 (now):** lane `fabricated-symbol-edges` (editing); C1 design resumed (research). Then Track 0's gate, reset, serial gates, merge.
-2. **Wave 2 (platform green):** A stage 1; B1 predicate (short, mechanical, lands first); B6 dead proc; B7 namespace page. When B1 lands: B2 and B3 take its slot in turn (B2 first: the serial writer).
-3. **Wave 3:** A stage 3; B4 db seams; B5 indexer/operator (after stage 1 releases `fn.clj`); B8 smalls; C0 probe.
+2. **Wave 2 (platform green):** A stage 1; B6 dead proc; B7 namespace page; the fourth slot stays free for the first B lane the moment C1's note lands (B1 first, then B2 and B3 in turn — the owner ruled 19:55Z that the predicate and the repairs spelled with it wait for the design). C0 probe as soon as B6 lands.
+3. **Wave 3:** A stage 3; B1 → B2/B3 (design landed); B4 db seams; B5 indexer/operator (after stage 1 releases `fn.clj`); B8 smalls.
 4. **Wave 4:** A stage 2 → 4 → 5; C2 contract campaign (two lanes); C3 first paid slice once stage 3 and B6 are proven live.
 5. **Wave 5:** S5 write-back (Phase 5 below) once a worker-authored change is green through the merge gate.
 
@@ -167,6 +167,7 @@ adoption. RESET NEEDED is recorded, never improvised.
 | Listening redesign (matching over the transaction log; `:seon.listen/entity` widening) | owner designs | parked by ruling; `what-listening-is-2026-09-16.md` |
 
 ### Owner decisions — answered this session
+- 2026-09-17 19:55Z (new orchestrator): the one-predicate consolidation and the repairs spelled with it WAIT for the §1l design note; the first paid live-agent slice runs after stage 1 + stage 3 land and the dead-turn-proc fix is proven live (a $0 loop probe earlier); `steward-platform` merges to `main` at every green platform checkpoint; sol at capacity falls back to astra low.
 - Deletion: strict, no escape; all fixes in one transaction verified on `:db-after`, or farmed to agents. An agent's own unreferenced definition deletes trivially.
 - Agents: never retracted; an archived positive fact, hidden from the UI.
 - `:seon.fn/capability-fn`: ref deleted (decided from research; overturns G2).
