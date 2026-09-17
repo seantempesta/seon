@@ -1,7 +1,7 @@
 ---
 type: issue
 status: open
-severity: friction
+severity: blocker
 created: 2026-09-17
 tags: [issue, test, gate, bounded-execution, liveness]
 ---
@@ -38,6 +38,17 @@ busy the machine is, which is exactly the property a gate must not have.
   at `2026-09-17T01:34:40.874346Z`, killed `exiting 124`.
 - The same namespace's other launcher fixtures, which drive ONE child gate,
   complete well inside the bound.
+
+## It also conceals every test behind it
+
+The test is declared before `gate-completions-travel-as-a-file-not-as-code` and
+`result-recording-is-total-under-concurrent-test-retraction`. In the 2026-09-17
+fast run the watchdog killed the JVM here after 32 of the namespace's 46 tests,
+so those two reds were never reached and were first seen in the cold gate hours
+later. With `SEON_TEST_SILENCE_SECONDS=1800` the same fast invocation ran all
+46 tests in 13 minutes and reported 13 failures across 4 tests — the same two
+classes the cold gate found, and nothing else. A silent block is not one failing test; it is an unknown number of
+unrun ones. That is why this is a blocker and not friction.
 
 ## Direction
 
