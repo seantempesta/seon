@@ -3410,3 +3410,13 @@ as orchestrator/astra lanes, easy pool as the first live-agent slice).
   (publication needs its own declared bound; validator cost on the writer
   thread is the root). Gate re-run. B2 landed rows #2, #6, #12, #8
   (`92d644cdc` `820d0ab60` `da73fcd28` `9d91b2422`), cold gate owed.
+- Owner rulings 1r (three refinements): root/system writes carry no
+  per-write timeout (the operation's own deadline reports); agent writes
+  keep the dial and a bounded-out write is re-runnable by root; the bound
+  derives from the transaction's `:seon.db/user`/`:seon.db/process`
+  provenance. Owner: "what was the writer hang? that sounds like a bug" →
+  astra research lane `writer-hang-root-cause` launched on the Datahike
+  writer/validator/konserve seams with the jstack dumps and today's
+  measurements; wedge vs slow is the question.
+- `publication-report-projection` landed `ac13b8b4d` (db.clj projection
+  world completed; source fixtures) and continues.
