@@ -2803,7 +2803,20 @@
                               before-intern-values source
                               (assoc (binding-rows before-reader-context)
                                      :seon.ns/name namespace-name)))
-            row (or var-row reader-row)
+            ending-namespace-row
+            (when (and (nil? var-row)
+                       (nil? reader-row)
+                       (not= namespace-name @ending-namespace))
+              ;; `in-ns` creates the namespace in SCI. Persist that living
+              ;; declaration so the next form's entity ref resolves; this is
+              ;; not a stub for an observed unresolved name.
+              (program/declaration-row
+               (merge {:seon.ns/name @ending-namespace
+                       :seon.ns/source source}
+                      (binding-rows
+                       (reader-context execution-ctx @ending-namespace)))
+               :contracted :agent))
+            row (or var-row reader-row ending-namespace-row)
             next-projection
             (cond
               (:seon.schema/key reader-row)
