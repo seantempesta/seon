@@ -1723,6 +1723,14 @@ continuations no-default-cluster, fault-path, bin/test bounds, seal triage
 (resumed from their transcripts). Running fix lanes: `reset-is-total`
 (astra), hook path-resolution (Opus).
 
+**~02:25Z census (owner asked "how many are bullshit"):** load average 161
+on 18 cores; nine agents (four codex, five Opus) each with a test JVM.
+Killed: two lane-launched full `bin/test` gates (forbidden; the integrator's
+db/fn/program namespaces and the program-ops lane's issue-generate) and one
+duplicate reset-drill test-fast run. Rule re-asserted: ≤4 editing lanes; no
+new launches until under the cap; seal triage first to hold if needed.
+Owner: "stay on top of things and keep the agents productive and effective."
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
