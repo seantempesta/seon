@@ -3775,3 +3775,14 @@ as orchestrator/astra lanes, easy pool as the first live-agent slice).
   a lane's in-flight `cluster.clj` (`:seon.ai.model/provider-id`);
   investigating whether it is committed (the manifest's `seon.ai` facets,
   the operator move) or a dirty edit.
+- Reset 3's refusal is in `transact-initialization!` (`cluster.clj:1268`):
+  no initialization row is "ready" because the readiness probe
+  `(db/pull database [:db/id] [attr value])` answers nothing for every
+  provider lookup ref (`:seon.activation/missing` lists
+  `[:seon.ai.model/provider-id "openrouter"]` …) — consistent with `pull`
+  refusing in that context. Two candidates: the db Opus agent's in-flight
+  `read-declarations` change in the dirty `db.clj` (the republish loads the
+  working tree), or a committed change since reset 2. Discriminating with a
+  scratch-root publication from a clean worktree at HEAD
+  (`scratch-republish-head.log`). Population also shrank 87,639 → 74,303
+  datoms — to explain.
