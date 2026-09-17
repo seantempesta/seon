@@ -2680,3 +2680,12 @@ working tree, never Sonnet.
   the declaration-world per file and per row; …). Stage 2 resumed (its
   held file is free). Owed now that adoption works: S3 live regeneration
   numbers, message-wake's live wake-flip — when slots free.
+- **Guardrails corrections LANDED** (`d88837ddd`): edamame require removed
+  with a real `-T:dev-cache` regression (the class regression the first
+  instance never left); baselines keyed on the recorded source inputs (a
+  docs-only commit reuses the base); cold gates self-prepare, `--fast`
+  refuses naming `bin/test --prepare-head-base`. 2/37 fast. **Batch 122
+  launched** (platform + 17 namespaces across guardrails, S3, message-wake,
+  adoption-margin, stage 2). S3 resumed for its live proof on the adopted
+  default + a scratch cluster. Editing: integrator, stage 2, S3, Opus
+  arity triage.
