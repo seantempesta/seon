@@ -3268,3 +3268,22 @@ as orchestrator/astra lanes, easy pool as the first live-agent slice).
   for the review and the owner's read.
 - Also landed: `dc63e6ebf` (canonical projection encoding accelerated, boot
   note fix #6), `841c4b577` (config-test symbol expectations).
+
+## 2026-09-17 ~23:45Z — gate 6: 101 tests, 3F/13E, all in one namespace
+
+- Gate 6 (clean worktree, HEAD `b60fc26d2`, `post-reset-platform-6-wt.log`):
+  registry, test-support, selection, runner, env (except the arm cascade)
+  all green. Remaining: 8 × `:malli.core/invalid-schema` in
+  `seon.cluster.source-test` (armed contracts against the projection
+  `carry-derived-projection` derives from a partial scratch population —
+  54e3a45ce's seam; the value must carry a COMPLETE projection or refuse
+  naming the missing keys), 3 fixture assertions in that file (`:370`,
+  `:594-595` + "Deleted declaration definition facts remain after commit"),
+  and the 4 SCI-arm errors that follow in the same worker (cascade until
+  shown otherwise). `publication-report-projection` resumed with all three.
+  Recording in the worktree is refused ("requires a published current-src")
+  — expected for a store-less worktree; the main-root gate records once the
+  snapshot defect is fixed.
+- Running: `predictable-reset` (no test classpath; HEAD-exact snapshot),
+  `attribute-aware-tempid-rewrite`, `transaction-report-schema`,
+  `boot-load-bounds` (note), `error-entities-prd-review` (astra).
