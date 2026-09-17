@@ -26,6 +26,7 @@
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.test.arm :as test.arm]
+            [seon.test.bounds :as bounds]
             [seon.test.selection :as selection]
             [seon.test.cache :as cache])
   (:import (java.io BufferedReader PrintWriter StringWriter)
@@ -358,10 +359,19 @@
     (announce! progress (str "END namespace " (ns-name (:ns event))))
 
     :begin-test-var
-    (announce! progress (str "BEGIN test " (event-symbol event)))
+    (let [var-meta (meta (:var event))
+          declaration (merge (meta (:ns var-meta)) var-meta)
+          allowance (if (:seon.test/long declaration)
+                      (quot (+ (or (:seon.test/long-ms declaration) 0) 999) 1000)
+                      0)]
+      (swap! progress assoc-in [::silence-allowances :test-body]
+             (max 0 (- allowance bounds/ordinary-exchange-seconds)))
+      (announce! progress (str "BEGIN test " (event-symbol event))))
 
     :end-test-var
-    (announce! progress (str "END test " (event-symbol event)))
+    (do
+      (announce! progress (str "END test " (event-symbol event)))
+      (swap! progress update ::silence-allowances dissoc :test-body))
 
     nil))
 
@@ -528,21 +538,7 @@
 
 (defn- silence-seconds
   []
-  (let [configured (System/getenv "SEON_TEST_SILENCE_SECONDS")]
-    (if (str/blank? configured)
-      300
-      (let [seconds (try
-                      (Long/parseLong configured)
-                      (catch NumberFormatException _
-                        0))]
-        (when-not (pos? seconds)
-          (throw
-           (ex-info
-            "SEON_TEST_SILENCE_SECONDS must be a positive integer."
-            {:seon.error/kind ::invalid-silence-seconds
-             ::invalid-silence-seconds seconds
-             ::configured configured})))
-        seconds))))
+  (bounds/silence-seconds (into {} (System/getenv))))
 
 (defn- exchange-bound-seconds
   "The per-exchange bound: strictly inside the suite silence horizon.
@@ -553,7 +549,7 @@
   The exchange fires first, converts to an attributed result, and that
   result IS reporter progress, so the watchdog never needs to."
   []
-  (max 60 (- (silence-seconds) 30)))
+  (- (silence-seconds) bounds/reporter-grace-seconds))
 
 (defn- start-liveness-backstop!
   [progress silence-limit-seconds suite-start]
@@ -3252,7 +3248,9 @@
                        :seon.test.runner/worker-launch-failure true))))
     (println "bin/test: WORKER READY" (pr-str ready))
     (flush)
-    worker))
+    (cond-> worker
+      (::fixture-preparation-ms ready)
+      (assoc ::fixture-preparation-ms (::fixture-preparation-ms ready)))))
 
 (defn- initialize-worker!
   [worker namespace-names]
@@ -3366,11 +3364,11 @@
   `:seon.test/long-ms` states how long it legitimately takes — so the bound
   DERIVES from that declaration instead of expiring a test the program
   already said would run longer."
-  [task]
-  (let [default (exchange-bound-seconds)
-        declared (when-let [allowance (::task-long-ms task)]
-                   (long (Math/ceil (/ (double allowance) 1000.0))))]
-    (max default (or declared 0))))
+  ([task] (task-exchange-bound-seconds task bounds/fixture-priming-ms))
+  ([task preparation-ms]
+   (max (exchange-bound-seconds)
+        (bounds/exchange-seconds (or (::task-long-ms task) 0)
+                                 preparation-ms))))
 
 (defn- execute-bounded-worker-task!
   [progress worker task bound-seconds]
@@ -3444,15 +3442,17 @@
   (str "BEGIN worker=" worker-id
        " task=" (str/join "," (::task-symbols task))
        " bound=" bound "s "
-       (if (pos? (- bound (exchange-bound-seconds)))
+       (if (::task-long-ms task)
          (str "(declared :seon.test/long-ms " (::task-long-ms task)
               " — " (::task-long-reason task) ")")
-         "(default per-exchange bound)")))
+         "(default per-exchange bound)")
+       "; includes measured fixture priming"))
 
 (defn- execute-worker-task!
   [progress worker task]
   (let [default-bound (exchange-bound-seconds)
-        bound (task-exchange-bound-seconds task)
+        bound (task-exchange-bound-seconds
+               task (or (::fixture-preparation-ms worker) bounds/fixture-priming-ms))
         allowance (- bound default-bound)]
     (announce! progress (task-bound-notice (::worker-id worker) task bound))
     ;; The suite's silence horizon is widened for exactly as long as this

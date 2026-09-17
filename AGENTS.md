@@ -876,8 +876,14 @@ isolated gate's proof.
 Both entry points acquire a slot through `bin/_test-slot:14` before launching
 test JVMs and release it on exit. That shell declaration owns the default
 count per source checkout, shared by its lanes; separate checkouts have
-separate slot directories. `SEON_TEST_SLOTS` sets the count and
-`SEON_TEST_SLOT_WAIT_SECONDS` bounds the wait. A slot bounds invocations,
+separate slot directories. `SEON_TEST_SLOTS` sets the count only with
+`SEON_TEST_ORCHESTRATOR=1` and no lane identity; the same admission rule
+applies to `SEON_TEST_SILENCE_SECONDS`. Both launchers refuse unauthorized
+overrides before acquiring a slot or launching a JVM. Silence and worker
+exchange bounds include declared `:seon.test/long-ms` work and measured
+fixture priming; the fast reporter carries long-test allowances too.
+`SEON_TEST_SLOT_WAIT_SECONDS` bounds the wait.
+A slot bounds invocations,
 not the number of worker JVMs inside one gate.
 
 `bin/test` is the one correctness gate, tiered: the declared
@@ -1112,6 +1118,9 @@ has done its job.
   Until hook-side admission is installed, instructions bound their gate use.
   Do not infer
   lane identity from a model name, worker count, or ephemeral-owner PID.
+  Lanes cannot set `SEON_TEST_SILENCE_SECONDS` or `SEON_TEST_SLOTS`, even
+  alongside an orchestrator flag; declare test duration with
+  `:seon.test/long` and `:seon.test/long-ms` instead.
   Codex snapshots hook configuration at process start: after changing
   `.codex/hooks.json`, the orchestrator stops and resumes running lanes.
   `bin/codex-agent` enables the vetted project hooks explicitly and resumes

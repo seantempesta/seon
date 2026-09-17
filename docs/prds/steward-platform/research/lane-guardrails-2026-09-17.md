@@ -238,3 +238,78 @@ by this launcher: a turn-end event is not an input it receives. The one
 requested detector is the orphan announcement above. It detects the
 parent-death case; it cannot detect a turn ending while the parent remains
 alive, or prove whether a tally was read. No broader guarantee is claimed.
+
+## Item 2 review: declared bounds and override admission
+
+This item is implemented in a HEAD-based worktree at
+`6bea78e2b78b7fd2ea433f825e19b2336f8fc48e`, because the shared runner still
+contains another lane's uncommitted 153-line change and AGENTS.md carries
+the S3 changes. Those shared files were not edited. The resulting isolated
+commit needs orchestrator integration; its HEAD-based tests deliberately
+exclude the foreign acquisition, schema and test-system work.
+
+`bin/_test-slot` admits `SEON_TEST_SLOTS` and
+`SEON_TEST_SILENCE_SECONDS` only with `SEON_TEST_ORCHESTRATOR=1` and no
+nonempty `SEON_CODEX_LANE`. Presence without authority refuses, including
+an empty override; a lane plus an orchestrator flag still refuses. Both
+launchers source this admission before Java resolution, slot acquisition,
+or snapshot creation. Count and duration must be positive integers.
+
+The JVM's one environment reader is `seon.test.bounds/silence-seconds`.
+Both runner and cache use it; the cache validates before starting its
+child. The ordinary body/exchange allowance remains **270 seconds**.
+The dated maximum priming measurement **19,760 ms** comes from the three
+worker readiness observations in
+[test-preparation-costs-2026-09-16.md](test-preparation-costs-2026-09-16.md)
+(19,760 / 19,549 / 19,686 ms). Whole-second bounds round upward: ordinary
+exchange **290 s**, silence **320 s** including **30 s** reporter grace.
+A numeric long declaration replaces the ordinary body allowance when
+larger, then adds priming. A reason-only `:seon.test/long` does not invent
+a duration; `:seon.test/long-ms` supplies it. An explicit orchestrator
+override can widen, but cannot lower, the declared silence horizon.
+
+Worker readiness already reports actual `fixture-preparation-ms`; the
+worker now carries that measurement into its task exchange calculation.
+The existing in-flight allowance carries the resulting horizon into the
+watchdog. Fast `begin-test-var`/`end-test-var` reporter events now install
+and remove the same declared long-body allowance, including declarations
+in namespace metadata. Ordinary announcements preserve that allowance.
+No polling mechanism, progress surrogate, or automatic retry was added.
+
+Regression owners are `seon.test.bounds-test` (derivation and the real
+shell admission across absent/lane/both/orchestrator identities) and the
+existing `seon.test.runner-test` (real indexed declarations, reporter
+events, and actual worker priming carried into the bound). The focused
+command is:
+
+```sh
+bin/test-fast --paths bin/_test-slot bin/test bin/test-fast src/seon/test/bounds.clj src/seon/test/cache.clj src/seon/test/runner.clj test/seon/test/bounds_test.clj test/seon/test/runner_test.clj -- seon.test.bounds-test seon.test.runner-test
+```
+
+The first armed attempt refused this slice's inadmissible `:pos-int`
+contract during initialization; corrected to an explicit integer schema
+with minimum 1 before rerunning. The corrected run passed **21 tests / 171
+assertions / 0 failures / 0 errors**, exit **0**. Review then fixed the END
+event ordering: publish progress before removing its long allowance, so
+the watchdog never sees the old timestamp under a shorter horizon. The
+final rerun, including that transition regression, passed **21 tests / 172
+assertions / 0 failures / 0 errors**, exit **0**, ending at
+**2026-09-17T03:22:45.351365Z**. Both runs used the ordinary slot policy in
+the isolated worktree and acquired a slot without waiting. Shell syntax
+and owned-path whitespace checks also passed. No run remains in flight.
+Two live fast-entry probes exited **64** before launching a JVM:
+`SEON_CODEX_LANE=bounds-probe SEON_TEST_SILENCE_SECONDS=1500` on the
+selected-path entry, and `SEON_CODEX_LANE=bounds-probe
+SEON_TEST_ORCHESTRATOR=1 SEON_TEST_SLOTS=4` on the plain entry. The latter
+printed `SEON_TEST_SLOTS refused: declared slot bound is 3`; the former
+named `:seon.test/long`, `:seon.test/long-ms`, measured fixture priming and
+the required orchestrator identity. No cold gate or default lifecycle
+operation ran. The edit hook queued worktree paths through the main-root
+publication queue; default adoption is not claimed. This is the existing
+[worktree hook boundary](../../../seon/issues/worktree-edit-hook-publication-targets-main-root.md).
+
+Owned paths: `bin/_test-slot`, `bin/test`, `bin/test-fast`,
+`src/seon/test/bounds.clj`, `src/seon/test/cache.clj`,
+`src/seon/test/runner.clj`, `test/seon/test/bounds_test.clj`,
+`test/seon/test/runner_test.clj`, AGENTS.md's new bound sentences, and
+this note. Items 3–4 remain pending at this review checkpoint.

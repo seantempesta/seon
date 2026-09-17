@@ -1,5 +1,6 @@
 (ns seon.test.runner-test
   (:require [clojure.set :as set]
+            [seon.test.bounds :as bounds]
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :as test :refer [deftest is]]
@@ -400,6 +401,7 @@
         default-bound (#'runner/exchange-bound-seconds)
         allowance-seconds (inc default-bound)
         allowance-ms (* 1000 allowance-seconds)
+        priming-seconds (quot (+ bounds/fixture-priming-ms 999) 1000)
         support (program-fn/build-artifact
                  {:seon.fn/source-path "test/seon/test_support.clj"
                   :seon.fn.file/first-party-functions []})
@@ -435,11 +437,11 @@
               bound (#'runner/task-exchange-bound-seconds task)]
           (is (true? (::runner/task-long? task)))
           (is (= allowance-ms (::runner/task-long-ms task)))
-          (is (= allowance-seconds bound)
-              "the declared allowance, not the default, bounds the exchange")
+          (is (= (+ allowance-seconds priming-seconds) bound)
+              "the declared allowance plus measured priming bounds the exchange")
           (is (> bound default-bound))
           (let [notice (#'runner/task-bound-notice "pool-1" task bound)]
-            (is (str/includes? notice (str "bound=" allowance-seconds "s")) notice)
+            (is (str/includes? notice (str "bound=" (+ allowance-seconds priming-seconds) "s")) notice)
             (is (str/includes? notice (str ":seon.test/long-ms " allowance-ms)) notice)
             (is (str/includes? notice reason) notice)))
         (let [task (task-for 'declared)]
@@ -481,7 +483,31 @@
     (is (= {"task-a" 630} (::runner/silence-allowances @progress))
         "an announcement never drops a declared allowance from the horizon")
     (swap! progress update ::runner/silence-allowances dissoc "task-a")
-    (is (= {} (::runner/silence-allowances @progress)))))
+    (is (= {} (::runner/silence-allowances @progress))))
+  (let [namespace-object (create-ns (symbol (str "bounds-fixture-" (random-uuid))))
+        test-var (intern namespace-object 'long-body (fn [] nil))
+        progress (atom {})]
+    (try
+      (alter-meta! test-var assoc :seon.test/long "Measured body"
+                   :seon.test/long-ms 900001)
+      (#'runner/progress-event! progress {:type :begin-test-var :var test-var})
+      (is (= 631 (get-in @progress [::runner/silence-allowances :test-body]))
+          "fast reporter events carry the declaration without a worker exchange")
+      (let [began (::runner/at-nanos @progress)
+            transitions (atom [])]
+        (add-watch progress :bound-transition
+                   (fn [_ _ _ after] (swap! transitions conj after)))
+        (#'runner/progress-event! progress {:type :end-test-var :var test-var})
+        (remove-watch progress :bound-transition)
+        (is (every? #(or (get-in % [::runner/silence-allowances :test-body])
+                        (> (::runner/at-nanos %) began))
+                    @transitions)
+            "the watchdog never sees the old timestamp under a reduced horizon"))
+      (is (empty? (::runner/silence-allowances @progress)))
+      (is (= 951 (#'runner/task-exchange-bound-seconds
+                  {::runner/task-long-ms 900001} 50000))
+          "the actual worker priming measurement travels into its exchange")
+      (finally (remove-ns (ns-name namespace-object))))))
 
 (deftest a-namespace-declared-long-reaches-every-test-row
   ;; A namespace of real-boot drills declares the cost ONCE on its ns form
