@@ -26,7 +26,7 @@
 
 (defn- production-request
   [db ctx namespace-name source]
-  (let [effective (config/effective db)]
+  (let [effective (config/effective db "default")]
     {:seon.cluster.eval/source source
      :seon.db/db db
      :seon.cluster.eval/ns [:seon.ns/name namespace-name]
@@ -205,7 +205,7 @@
   [run-tests]
   (test-support/with-database
     (fn [connection]
-      (config/apply! {:seon.db/connection connection
+      (config/apply! {:seon.boot/cluster-name "default" :seon.db/connection connection
                       :seon.config/manifest
                       {:seon.config/on-core-error :record}})
       (binding [*database* @connection

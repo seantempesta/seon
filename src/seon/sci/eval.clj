@@ -630,11 +630,14 @@
 (defn- database-effective-config
   "The selected cluster's effective config, or the refusal naming its absence.
 
-  NEVER NIL. `config/effective` declares its output as the config or one
-  bounded `:seon.config/missing-effective-error`, and `config/result-caps`
-  declares exactly that pair as its input; handing it the `nil` a database
-  carrying no config singleton used to produce violated that contract at
-  every SCI contract install."
+  NEVER NIL, and never an invented cluster name. A database carrying no
+  config singleton names no cluster, so there is no cluster whose effective
+  config could be read and none to report: the answer is a flat refusal
+  naming this function and the `:seon.boot/cluster-name` it wanted.
+  `config/result-caps` and `seon.render/agent-render-profile` admit that
+  shape alongside `:seon.config/missing-effective-error`; handing them the
+  `nil` this used to produce violated their contracts at every SCI contract
+  install."
   [db]
   (let [cluster-name
         (db/q '[:find ?cluster .
@@ -644,10 +647,10 @@
              db)]
     (if cluster-name
       (config/effective db cluster-name)
-      ;; The default arity names the cluster it looked for and lists the
-      ;; clusters this database actually carries — a typed unknown, not an
-      ;; absence downstream has to guess about.
-      (config/effective db))))
+      {:seon.error/kind :seon.config/required-absent
+       :seon.config/required-absent :seon.boot/cluster-name
+       :seon.error/message
+       "seon.sci.eval/database-effective-config requires configuration naming its cluster; this database has none."})))
 
 (defn- instrumentation-config
   "Read the contract dial and admission caps from this database value.
@@ -1179,6 +1182,22 @@
    :seon.error/kind :seon.sci.eval/documentation-unavailable
    :seon.error/message (str "No public program documentation is available for " requested ".")})
 
+(defn- declaration-statement
+  "The sentence `doc` and `dir` show in place of a declaration this row lacks."
+  [attribute]
+  (str "This program row carries no " attribute "."))
+
+(defn- declaration-absent
+  "The typed unknown `doc` and `dir` show for an absent declaration.
+
+   An absent contract and a declared empty one are different facts, and this
+   is the surface an agent reads before deciding how to call a function: a
+   missing `:seon.fn/spec` rendered as `[]` says the function declares
+   nothing, which is a claim the row does not support (AGENTS.md section 2.4)."
+  [attribute]
+  {:seon.error/kind :seon.sci.eval/declaration-absent
+   :seon.error/message (declaration-statement attribute)})
+
 (defn docstring-parts
   "Split a declared docstring into its summary, body, and final Example section."
   {:malli/schema [:=> [:cat :string] :map]}
@@ -1216,14 +1235,16 @@
                outputs (mapv #(m/form (:output %)) arities)]
            {:in (if (= 1 (count inputs)) (first inputs) inputs)
             :out (if (= 1 (count outputs)) (first outputs) outputs)}))))
-    {:in [] :out []}))
+    {:in (declaration-absent :seon.fn/spec)
+     :out (declaration-absent :seon.fn/spec)}))
 
 (defn- agent-documentation-contract
   [database row]
   (let [entries (call-preparation/supplied-map-entries database (:seon.fn/sym row))
         contract (documentation-contract database row)
         expanded (walk/postwalk-replace (into {} (documentation-schemas row)) contract)
-        arities (if (= :function (first (edn/read-string (or (:seon.fn/spec row) "[]"))))
+        spec (:seon.fn/spec row)
+        arities (if (and spec (= :function (first (edn/read-string spec))))
                   (:in expanded) [(:in expanded)])]
     (if (:seon.error/kind entries)
       entries
@@ -1248,8 +1269,12 @@
 
 (defn- function-doc-map
   [database row]
-  (merge (docstring-parts (or (:seon.fn/doc row) ""))
-         {:arglists (edn/read-string (or (:seon.fn/arglists row) "()"))}
+  (merge (if-let [doc (:seon.fn/doc row)]
+           (docstring-parts doc)
+           {:summary (declaration-statement :seon.fn/doc) :body "" :example ""})
+         {:arglists (if-let [arglists (:seon.fn/arglists row)]
+                      (edn/read-string arglists)
+                      (declaration-absent :seon.fn/arglists))}
          (agent-documentation-contract database row)))
 
 (defn directory-value
@@ -1274,8 +1299,12 @@
                         (:seon.schema/_ns namespace-row))
          :functions (mapv (fn [row]
                             (merge {:sym (symbol (:seon.fn/sym row))
-                                    :arglists (edn/read-string (or (:seon.fn/arglists row) "()"))
-                                    :doc (:summary (docstring-parts (or (:seon.fn/doc row) "")))}
+                                    :arglists (if-let [arglists (:seon.fn/arglists row)]
+                                                (edn/read-string arglists)
+                                                (declaration-absent :seon.fn/arglists))
+                                    :doc (if-let [doc (:seon.fn/doc row)]
+                                           (:summary (docstring-parts doc))
+                                           (declaration-statement :seon.fn/doc))}
                                    (agent-documentation-contract database row)))
                           functions)})
       :else (documentation-unavailable namespace-name))))

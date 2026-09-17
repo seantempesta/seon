@@ -425,7 +425,7 @@
       (support/transacted! connection
                            (filterv :seon.call-preparation/key
                                     (:seon.config/initialization
-                                     (config/compile-manifest {}))))
+                                     (config/compile-manifest {:seon.boot/cluster-name "default"}))))
       (add connection "alice-work" "Alice work")
       (plan/add! {:my.plan.item/id "bob-work" :my.plan.item/title "Bob work"}
                  connection "bob")

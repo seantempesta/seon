@@ -595,74 +595,56 @@
   manufacture an unbounded replay storm. Returns the number of newly committed
   fires."
   {:malli/schema
-   [:function
-    [:=> [:cat :seon.db/connection :seon.agent/id :inst]
-     :seon.schedule/fire-count]
-    [:=> [:cat :seon.db/connection :seon.agent/id :inst
-          :seon.schedule/execution-context]
-     :seon.schedule/fire-count]]}
-  ([connection agent-id observed-at]
-   (let [cluster-name
-         (or (db/q '[:find ?cluster-name .
-                     :where [_ :seon.cluster/name ?cluster-name]]
-                   @connection)
-             "default")
-         instance (get @operator.runtime/running-instances cluster-name)
-         cluster (:seon.turn.loop/cluster instance)]
-     (when-not cluster
-       (throw (ex-info "The cluster execution handle is unavailable."
-                       {:seon.error/kind ::missing-execution-handle
-                        :seon.cluster/name cluster-name :seon.schedule/missing-execution-handle true})))
-     (fire-due! connection agent-id observed-at
-                (assoc (execution-context @connection cluster)
-                       :seon.turn.loop/cluster cluster))))
-  ([connection agent-id observed-at context]
-   (let [cluster (:seon.turn.loop/cluster context)
-         common-request (dissoc context :seon.turn.loop/cluster)]
+   [:=> [:cat :seon.db/connection :seon.agent/id :inst
+         :seon.schedule/execution-context]
+    :seon.schedule/fire-count]}
+  [connection agent-id observed-at context]
+  (let [cluster (:seon.turn.loop/cluster context)
+        common-request (dissoc context :seon.turn.loop/cluster)]
     (reduce
-   (fn [fire-count task]
-     (let [database @connection
-           last-fire (latest-fire-at database (:db/id task))
-           nominal
-           (latest-nominal-at-or-before
-            {:seon.schedule/expression (:seon.schedule/expression task)
-             :seon.schedule/zone-id (:seon.schedule/zone-id task)
-             :seon.schedule/reference-at observed-at})]
-       (if (and nominal
-                (if last-fire
-                  (.after ^Date nominal ^Date last-fire)
-                  (.after ^Date nominal
-                          (task-created-at database (:db/id task)))))
-         (let [task-id (:seon.schedule.task/id task)
-               claimed-fire-id (nominal-fire-id task-id nominal)
-               request
-               (merge common-request
-                      {:seon.schedule.task/id task-id
-                       :seon.schedule.fire/id claimed-fire-id
-                       :seon.agent/id agent-id
-                       :seon.fn/sym (:seon.fn/sym task)
-                       :seon.schedule.fire/nominal-at nominal
-                       :seon.schedule.fire/observed-at observed-at})
-               result
-               (transact-result!
-                connection
-                [[:db.fn/call #'fire-call request]]
-                ::fire-refused
-                {:seon.schedule.task/id task-id})
-               claimed?
-               (some #(= :seon.maintenance.receipt/id (nth % 1))
-                     (:tx-data result))]
-           (if claimed?
-             (do
-               (settle! connection cluster (receipt-identity claimed-fire-id)
-                        agent-id
-                        (invoke-handler (:seon.fn/sym task)
-                                        (assoc request :seon.db/connection connection)))
-               (inc fire-count))
-             fire-count))
-         fire-count)))
-   0
-   (task-rows @connection agent-id)))))
+       (fn [fire-count task]
+         (let [database @connection
+               last-fire (latest-fire-at database (:db/id task))
+               nominal
+               (latest-nominal-at-or-before
+                {:seon.schedule/expression (:seon.schedule/expression task)
+                 :seon.schedule/zone-id (:seon.schedule/zone-id task)
+                 :seon.schedule/reference-at observed-at})]
+           (if (and nominal
+                    (if last-fire
+                      (.after ^Date nominal ^Date last-fire)
+                      (.after ^Date nominal
+                              (task-created-at database (:db/id task)))))
+             (let [task-id (:seon.schedule.task/id task)
+                   claimed-fire-id (nominal-fire-id task-id nominal)
+                   request
+                   (merge common-request
+                          {:seon.schedule.task/id task-id
+                           :seon.schedule.fire/id claimed-fire-id
+                           :seon.agent/id agent-id
+                           :seon.fn/sym (:seon.fn/sym task)
+                           :seon.schedule.fire/nominal-at nominal
+                           :seon.schedule.fire/observed-at observed-at})
+                   result
+                   (transact-result!
+                    connection
+                    [[:db.fn/call #'fire-call request]]
+                    ::fire-refused
+                    {:seon.schedule.task/id task-id})
+                   claimed?
+                   (some #(= :seon.maintenance.receipt/id (nth % 1))
+                         (:tx-data result))]
+               (if claimed?
+                 (do
+                   (settle! connection cluster (receipt-identity claimed-fire-id)
+                            agent-id
+                            (invoke-handler (:seon.fn/sym task)
+                                            (assoc request :seon.db/connection connection)))
+                   (inc fire-count))
+                 fire-count))
+             fire-count)))
+       0
+       (task-rows @connection agent-id))))
 
 (defn- earliest-next-at
   [database agent-id reference-at]

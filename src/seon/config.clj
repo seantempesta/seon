@@ -110,11 +110,25 @@
   "Derive complete value-admission caps or name the first absent key."
   {:malli/schema
    [:=> [:cat [:or :seon.config/effective
-                :seon.config/missing-effective-error]]
+                :seon.config/missing-effective-error
+                :seon.error/value]]
     [:or :seon.sci.admit/caps
      :seon.error/value]]}
   [effective]
-  (let [reported-missing
+  ;; ONE GRAMMAR OUT. A configuration refusal arrives here in one of two
+  ;; shapes — a `missing-effective-error`, which names its cluster and the
+  ;; facts that cluster lacks, or a flat refusal from a database that names
+  ;; no cluster at all and so has no cluster to report. Either way the answer
+  ;; this function owes its callers is its own class marker naming the first
+  ;; cap key it wanted: that marker is what `seon.instrument/wrap-interpreted`
+  ;; reports when a `:panic` contract cannot be armed. A flat refusal is
+  ;; carried as the cause rather than replacing that report, because the cap
+  ;; key alone would bury the configuration absence that produced it.
+  (let [cluster-less-refusal
+        (when (and (:seon.error/kind effective)
+                   (not (:seon.config/missing-effective effective)))
+          effective)
+        reported-missing
         (set (get-in effective [:seon.error/data ::missing]))
         missing
         (or (some reported-missing result-cap-attributes)
@@ -124,12 +138,18 @@
       {:seon.error/kind ::missing-result-cap
        :seon.error/message
        (str "Value-admission caps require config key " missing
-            "; a partial caps map cannot be constructed.")
+            "; a partial caps map cannot be constructed."
+            (when cluster-less-refusal
+              (str " The configuration itself was refused: "
+                   (:seon.error/message cluster-less-refusal))))
        :seon.error/data
        (cond-> {::key missing}
          (:seon.config/missing-effective effective)
          (assoc :seon.config/missing-effective
-                (:seon.config/missing-effective effective))) :seon.config/missing-result-cap true}
+                (:seon.config/missing-effective effective))
+         cluster-less-refusal
+         (assoc ::configuration-refusal cluster-less-refusal))
+       :seon.config/missing-result-cap true}
       (select-keys effective result-cap-attributes))))
 
 ;;; Every function below asks the declaration population one question per
@@ -356,14 +376,7 @@
     (long (.availableProcessors (Runtime/getRuntime)))
     decision))
 
-(defn compile-manifest
-  "Compile defaults + sparse manifest + explicit typed environment map once.
-
-  The optional cluster name defaults to `default`. The digest covers only the
-  canonical effective config, so equal configs in distinct clusters have the
-  same digest."
-  {:malli/schema
-   [:=> [:cat :seon.config/compile-request] :seon.config/compiled]}
+(defn- compile-settings
   [request]
   (let [forms (schema.edn/packaged-forms)
         {:seon.config/keys [decisions initialization]}
@@ -397,23 +410,38 @@
             (schema/sha-256
              [(.getBytes
                ^String (schema/canonical-data-string effective)
-               StandardCharsets/UTF_8)])
-            row
-            (assoc effective
-                   :seon.config/cluster
-                   (or (:seon.boot/cluster-name request) "default")
-                   :seon.config/applied-manifest-digest digest)]
+               StandardCharsets/UTF_8)])]
         {:seon.config/effective effective
          :seon.config/applied-manifest-digest digest
-         :seon.config/desired-row row
          :seon.config/initialization initialization
          :seon.config/resolved-attributes (set (keys decisions))}))))
+
+(defn compile-manifest
+  "Compile settings and a desired row for the explicitly named cluster.
+
+  The digest covers only effective config, so equal configs in distinct
+  clusters have the same digest."
+  {:malli/schema
+   [:=> [:cat :seon.config/compile-request] :seon.config/compiled]}
+  [request]
+  (let [cluster-name (:seon.boot/cluster-name request)]
+    (when-not (and (string? cluster-name) (seq cluster-name))
+      (refuse! ::required-absent
+               {::key :seon.boot/cluster-name
+                :seon.error/diagnostic-operation 'seon.config/compile-manifest}
+               nil))
+    (let [compiled (compile-settings request)]
+      (assoc compiled :seon.config/desired-row
+             (assoc (:seon.config/effective compiled)
+                    :seon.config/cluster cluster-name
+                    :seon.config/applied-manifest-digest
+                    (:seon.config/applied-manifest-digest compiled))))))
 
 (defn defaults
   "Compile the zero-overlay shipped defaults into one effective config."
   {:malli/schema [:=> [:cat] :seon.config/effective]}
   []
-  (:seon.config/effective (compile-manifest {})))
+  (:seon.config/effective (compile-settings {})))
 
 (defn- desired-tempid
   [identity]
@@ -540,18 +568,13 @@
 (defn effective
   "Read one cluster's effective config from its carried projection."
   {:malli/schema
-   [:function
-    [:=> [:cat :seon.db/database-value]
-     [:or :seon.config/effective :seon.error/value]]
-    [:=> [:cat :seon.db/database-value :seon.boot/cluster-name]
-     [:or :seon.config/effective :seon.error/value]]]}
-  ([db]
-   (effective db "default"))
-  ([db cluster-name]
-   (if-let [projection (or (db/carried-projection db)
+   [:=> [:cat :seon.db/database-value :seon.boot/cluster-name]
+    [:or :seon.config/effective :seon.error/value]]}
+  [db cluster-name]
+  (if-let [projection (or (db/carried-projection db)
                           (schema/handed-projection))]
-     (effective-in db (or cluster-name "default") projection)
-     (db/projection-fallback 'seon.config/effective))))
+    (effective-in db cluster-name projection)
+    (db/projection-fallback 'seon.config/effective)))
 
 (defn- effective-in
   [db cluster-name projection]

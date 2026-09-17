@@ -202,7 +202,7 @@
 (deftest provider-reasoning-is-retained-only-by-an-explicit-setting
   (support/with-database
    (fn [connection]
-     (config/apply! {:seon.db/connection connection})
+     (config/apply! {:seon.boot/cluster-name "default" :seon.db/connection connection})
      (let [created (db/transact! connection
                                 (agent/creation-tx {:seon.agent/id "reasoning-agent"
                                                     :seon.ns/name 'my.agents.reasoning :seon.cluster/name "default"}))
@@ -243,7 +243,7 @@
 (deftest attempt-usage-is-queryable
   (support/with-database
    (fn [connection]
-     (config/apply! {:seon.db/connection connection})
+     (config/apply! {:seon.boot/cluster-name "default" :seon.db/connection connection})
      (support/transacted!
              connection
              (into (agent/creation-tx
@@ -282,7 +282,7 @@
 (deftest attempt-settings-and-model-are-related-entities
   (support/with-database
    (fn [connection]
-     (config/apply! {:seon.db/connection connection})
+     (config/apply! {:seon.boot/cluster-name "default" :seon.db/connection connection})
      (support/transacted!
              connection
              (into (agent/creation-tx

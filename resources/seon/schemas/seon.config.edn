@@ -37,7 +37,6 @@
                 {:optional true}
                 :seon.config/manifest]
                [:seon.boot/cluster-name
-                {:optional true}
                 :seon.boot/cluster-name]],
               :cluster [:string {:min 1, :seon.db/identity true}],
               :missing-effective :seon.boot/cluster-name
@@ -51,7 +50,6 @@
                 {:optional true}
                 :seon.config/manifest]
                [:seon.boot/cluster-name
-                {:optional true}
                 :seon.boot/cluster-name]],
               :compiled
               [:map

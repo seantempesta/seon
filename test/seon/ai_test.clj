@@ -652,7 +652,7 @@
 (deftest stop-is-effective-per-agent-and-recorded-with-the-attempt
   (test-support/with-database
    (fn [connection]
-     (config/apply! {:seon.db/connection connection})
+     (config/apply! {:seon.boot/cluster-name "default" :seon.db/connection connection})
      (doseq [tx [(agent/creation-tx {:seon.agent/id "stop-agent"
                                     :seon.ns/name 'my.agents.stop
                                     :seon.cluster/name "default"})

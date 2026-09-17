@@ -40,7 +40,7 @@
    (config/defaults))
   ([manifest]
    (:seon.config/effective
-    (config/compile-manifest {:seon.config/manifest manifest}))))
+    (config/compile-manifest {:seon.boot/cluster-name "default" :seon.config/manifest manifest}))))
 
 (defn render-context-channel
   "Create a channel supplying one profile to every context request."
@@ -279,10 +279,18 @@
   nil)
 
 (defn- checked-fixture-result
-  "Stop setup at its first flat refusal, retaining the complete diagnostic."
+  "Stop setup at its first flat refusal, naming it and retaining its data.
+
+   \"Fixture setup was refused.\" alone names nothing: clojure.test prints the
+   exception message and not its data, so every refusal in base construction
+   read identically and the diagnosing agent had to reconstruct which one
+   fired."
   [result]
   (when (:seon.error/kind result)
-    (throw (ex-info "Fixture setup was refused." result)))
+    (throw (ex-info (str "Fixture setup was refused by "
+                         (:seon.error/kind result) ": "
+                         (:seon.error/message result))
+                    result)))
   result)
 
 (defn- offending-fixture-row

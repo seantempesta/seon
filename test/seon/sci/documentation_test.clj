@@ -231,3 +231,34 @@
        (let [unrelated (run "(/ 1 0)")]
          (is (:seon.cluster.eval/error unrelated))
          (is (not (find (:seon.sci.admit/value unrelated) :seon.error/doc))))))))
+
+(deftest an-absent-declaration-is-a-typed-statement-not-an-empty-one
+  ;; `doc` and `dir` used to render an absent :seon.fn/spec as [], absent
+  ;; arglists as () and an absent docstring as "": three claims the row does
+  ;; not support. An agent reads this surface before deciding how to call a
+  ;; function, so absence must say so (AGENTS.md section 2.4).
+  (support/with-database
+   (fn [connection]
+     (support/transacted!
+      connection
+      [(assoc (support/program-fn-row 'my.note/undeclared)
+              :seon.fn/private? false)])
+     (let [database (db/db connection)
+           doc (evaluation/documentation-value database
+                                               'my.note/undeclared
+                                               'my.note/undeclared)
+           row (some #(when (= 'my.note/undeclared (:sym %)) %)
+                     (:functions (evaluation/directory-value database 'my.note false)))]
+       (is (not (:seon.error/kind doc)))
+       (is (some? row) "the undeclared row is still listed by dir")
+       (doseq [[label value attribute]
+               [["doc :in" (:in doc) :seon.fn/spec]
+                ["doc :out" (:out doc) :seon.fn/spec]
+                ["doc arglists" (:arglists doc) :seon.fn/arglists]
+                ["dir arglists" (:arglists row) :seon.fn/arglists]]]
+         (is (= :seon.sci.eval/declaration-absent (:seon.error/kind value)) label)
+         (is (str/includes? (:seon.error/message value) (str attribute)) label))
+       (is (not= [] (:in doc)) "an absent contract never reads as a declared empty one")
+       (is (not= "" (:summary doc)))
+       (is (str/includes? (:summary doc) (str :seon.fn/doc)))
+       (is (str/includes? (:doc row) (str :seon.fn/doc)))))))

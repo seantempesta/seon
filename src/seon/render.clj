@@ -62,11 +62,17 @@
   "Derive the agent generic-value fit profile from effective config facts."
   {:malli/schema
    [:=> [:cat [:or :seon.config/effective
-                :seon.config/missing-effective-error]]
+                :seon.config/missing-effective-error
+                :seon.error/value]]
     [:or :seon.render.profile/profile
-     :seon.config/missing-effective-error]]}
+     :seon.config/missing-effective-error
+     :seon.error/value]]}
   [effective]
-  (if (:seon.config/missing-effective effective)
+  ;; Either refusal shape is returned unchanged. A profile built from a
+  ;; refusal would carry nil budgets and every downstream render would then
+  ;; read that absence as a policy (AGENTS.md section 2.4).
+  (if (or (:seon.config/missing-effective effective)
+          (:seon.error/kind effective))
     effective
     {:seon.render.profile/id :seon.render.profile/agent
      :seon.render.profile/token-budget

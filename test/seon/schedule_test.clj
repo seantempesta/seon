@@ -17,6 +17,16 @@
   (:import [java.time Instant]
            [java.util Date]))
 
+(deftest firing-requires-the-callers-cluster-execution-context
+  (test-support/with-database
+   (fn [connection]
+     (let [basis (:max-tx @connection)
+           refusal (test-support/refusal-data
+                    #(apply schedule/fire-due! [connection "root" (Date.)]))]
+       (is (= :seon.instrument/contract-violated (:seon.error/kind refusal)))
+       (is (= "seon.schedule/fire-due!" (:seon.instrument/contract-violated refusal)))
+       (is (= basis (:max-tx @connection)))))))
+
 (deftest root-maintenance-seed-is-complete-and-has-no-minute-task
   (test-support/with-database
    (fn [connection]

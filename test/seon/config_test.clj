@@ -91,7 +91,7 @@
       (let [data
             (test-support/refusal-data
              #(config/compile-manifest
-               {:seon.config/manifest
+               {:seon.boot/cluster-name "default" :seon.config/manifest
                 {config/initialization-key [row]}}))]
         (is (= ::config/initialization-not-allowed (::config/rule data)))))
     (doseq [[label population expected-rule expected-key]
@@ -144,10 +144,10 @@
       #(test-support/with-database
          (fn [connection]
            (let [first-result
-                 (config/apply! {:seon.db/connection connection})
+                 (config/apply! {:seon.boot/cluster-name "default" :seon.db/connection connection})
                  committed-basis (:max-tx @connection)
                  second-result
-                 (config/apply! {:seon.db/connection connection})]
+                 (config/apply! {:seon.boot/cluster-name "default" :seon.db/connection connection})]
              (is (false? (:seon.reconcile/converged? first-result)))
              (is (= process-id
                     (db/q
@@ -164,7 +164,8 @@
 (deftest converged-apply-uses-carried-projection-and-remains-exact
   (test-support/with-database
    (fn [connection]
-     (let [request {:seon.db/connection connection}
+     (let [request {:seon.db/connection connection
+                    :seon.boot/cluster-name "default"}
            first-result (config/apply! request)
            basis (:max-tx @connection)
            rebuild schema/projection-from-database
@@ -200,7 +201,7 @@
        (is (= [0] @planned-operations)
            "a real exact read observes convergence without rebuilding")
        (is (= basis (:max-tx @connection)))
-       (let [compiled (config/compile-manifest {})
+       (let [compiled (config/compile-manifest {:seon.boot/cluster-name "default"})
              digest (:seon.config/applied-manifest-digest compiled)
              queue-depth (get-in compiled [:seon.config/effective
                                           :seon.config.flow.compute/queue-depth])]
@@ -221,7 +222,7 @@
          (is (false? (:seon.reconcile/converged? (config/apply! request)))
              "the same manifest repairs a hand edit")
          (is (= queue-depth (:seon.config.flow.compute/queue-depth
-                             (config/effective @connection))))
+                             (config/effective @connection "default"))))
          (let [process-identity [:seon.db.process/id "config-apply-cost-initialization"]
                changed (update compiled :seon.config/initialization conj
                                {(first process-identity) (second process-identity)})]
@@ -268,20 +269,33 @@
               (test-support/refusal-data
                #(config/apply-compiled!
                  connection
-                 (config/compile-manifest {}))))]
+                 (config/compile-manifest {:seon.boot/cluster-name "default"}))))]
         (is (= :seon.config/refused (:seon.error/kind result)))
         (is (= :seon.config/reconcile-refused (:seon.config/rule result)))
         (is (= flat-error (:seon.config/reconcile-result result)))))))
 
+(deftest cluster-scoped-config-refuses-an-omitted-cluster
+  (test-support/with-database
+   (fn [connection]
+     (let [basis (:max-tx @connection)]
+       (doseq [[caller invoke]
+               [["seon.config/compile-manifest" #(config/compile-manifest {})]
+                ["seon.config/apply!" #(config/apply! {:seon.db/connection connection})]
+                ["seon.config/effective" #(apply config/effective [(db/db connection)])]]]
+         (let [refusal (test-support/refusal-data invoke)]
+           (is (= :seon.instrument/contract-violated (:seon.error/kind refusal)))
+           (is (= caller (:seon.instrument/contract-violated refusal)))))
+       (is (= basis (:max-tx @connection)))))))
+
 (deftest zero-overlay-compilation-resolves-every-registered-config-attribute
-  (let [compiled (config/compile-manifest {})
+  (let [compiled (config/compile-manifest {:seon.boot/cluster-name "default"})
         effective (:seon.config/effective compiled)
         row (:seon.config/desired-row compiled)]
     (is (= dial-attributes (:seon.config/resolved-attributes compiled))
         "this is the standing zero-overlay completeness proof")
     (is (= effective (select-keys row dial-attributes)))
     (is (= "default" (:seon.config/cluster row))
-        "cluster name is optional everywhere")
+        "the caller names the cluster explicitly")
     (is (schema/valid-candidate-value? :seon.config/effective effective))
     (is (schema/valid-candidate-value? :seon.config/entity row))
     (is (= (long (.availableProcessors (Runtime/getRuntime)))
@@ -325,11 +339,11 @@
        :seon.config/manifest
        {:seon.config.error/escalate-to config/absent})
       "the derived manifest schema admits explicit absence for an optional dial")
-  (let [baseline (config/compile-manifest {})
-        omitted (config/compile-manifest {:seon.config/manifest {}})
+  (let [baseline (config/compile-manifest {:seon.boot/cluster-name "default"})
+        omitted (config/compile-manifest {:seon.boot/cluster-name "default" :seon.config/manifest {}})
         absent
         (config/compile-manifest
-         {:seon.config/manifest
+         {:seon.boot/cluster-name "default" :seon.config/manifest
           {:seon.config.error/escalate-to config/absent}})
         effective (:seon.config/effective absent)
         row (:seon.config/desired-row absent)]
@@ -348,7 +362,7 @@
       (let [data
             (test-support/refusal-data
              #(config/compile-manifest
-               {:seon.config/manifest
+               {:seon.boot/cluster-name "default" :seon.config/manifest
                 {:seon.config.flow.compute/queue-depth config/absent}}))]
         (is (= ::config/required-absent (::config/rule data)))
         (is (= :seon.config.flow.compute/queue-depth
@@ -357,7 +371,7 @@
 (deftest canonical-digest-is-independent-of-map-construction-order
   (let [left
         (config/compile-manifest
-         {:seon.config/manifest
+         {:seon.boot/cluster-name "default" :seon.config/manifest
           (array-map
            :seon.config/on-core-error :record
            :seon.config.flow.compute/queue-depth 22)})
@@ -391,7 +405,7 @@
   (testing "unknown means no registered config attribute schema"
     (let [compiled
           (config/compile-manifest
-           {:seon.config/manifest
+           {:seon.boot/cluster-name "default" :seon.config/manifest
             {:seon.config.old/transport-timeout-ms 60000}})]
       (is (not (contains? (:seon.config/effective compiled)
                           :seon.config.old/transport-timeout-ms))
@@ -400,7 +414,7 @@
     (let [data
           (test-support/refusal-data
            #(config/compile-manifest
-             {:seon.config/environment
+             {:seon.boot/cluster-name "default" :seon.config/environment
               {:seon.config.flow.compute/queue-depth 0}}))]
       (is (= :seon.instrument/contract-violated (:seon.error/kind data)))
       (is (= "seon.config/compile-manifest"
@@ -422,13 +436,13 @@
     (fn [connection]
       (let [result
             (config/apply!
-             {:seon.db/connection connection
+             {:seon.boot/cluster-name "default" :seon.db/connection connection
               :seon.config/manifest
               {:seon.config/on-core-error :record}})
             committed-basis (:max-tx @connection)
             converged
             (config/apply!
-             {:seon.db/connection connection
+             {:seon.boot/cluster-name "default" :seon.db/connection connection
               :seon.config/manifest
               {:seon.config/on-core-error :record}})]
         (is (false? (:seon.reconcile/converged? result)))
@@ -438,7 +452,7 @@
             "a converged apply writes no transaction")
         (is (= :record
                (:seon.config/on-core-error
-                (config/effective @connection))))
+                (config/effective @connection "default"))))
         (is (= config/managing-process-identity
                (db/q
                 '[:find ?process-id .
@@ -472,21 +486,49 @@
                (:seon.config.flow.compute/queue-depth
                 (config/effective @connection "fork"))))))))
 
-(deftest result-caps-refuses-a-stale-config-row-at-construction
+(deftest a-config-row-cannot-be-left-without-a-required-result-cap
+  ;; This assertion moved. It used to retract a cap key, then prove
+  ;; `result-caps` refused the stale row it produced. Write admission reads an
+  ;; identity-keyed map against the WHOLE config schema, so that row can no
+  ;; longer be constructed at all: the retraction itself is refused, naming
+  ;; the key, and nothing lands. `result-caps` remains proven against the
+  ;; refusal shapes that DO reach it — a `missing-effective-error` in
+  ;; `two-clusters-on-one-jvm-have-no-config-bleed`, and a cluster-less
+  ;; refusal below — because `:seon.config/effective`, its other declared
+  ;; input, cannot itself be missing a cap key.
   (test-support/with-database
     (fn [connection]
-      (config/apply! {:seon.db/connection connection})
-      (test-support/transacted!
-       connection
-       [[:db/retract
-         [:seon.config/cluster "default"]
-         :seon.config.eval.result/max-nodes]])
-      (let [result (config/result-caps (config/effective @connection))]
-        (is (= ::config/missing-result-cap (:seon.error/kind result)))
-        (is (= :seon.config.eval.result/max-nodes
-               (get-in result [:seon.error/data :seon.config/key])))
-        (is (str/includes? (:seon.error/message result)
-                           ":seon.config.eval.result/max-nodes"))))))
+      (config/apply! {:seon.boot/cluster-name "default" :seon.db/connection connection})
+      (let [basis (:max-tx @connection)
+            refused (db/transact!
+                     connection
+                     [[:db/retract
+                       [:seon.config/cluster "default"]
+                       :seon.config.eval.result/max-nodes]])]
+        (is (:seon.error/kind refused))
+        (is (str/includes? (:seon.error/message refused)
+                           ":seon.config.eval.result/max-nodes"))
+        (is (= basis (:max-tx @connection))
+            "and nothing landed")))))
+
+(deftest caps-refused-for-want-of-a-cluster-carry-that-refusal-as-the-cause
+  ;; `seon.sci.eval/database-effective-config` answers a flat refusal for a
+  ;; database naming no cluster. `result-caps` keeps its own class marker —
+  ;; `seon.instrument/wrap-interpreted` reports that marker when a `:panic`
+  ;; contract cannot be armed — and carries the configuration refusal as the
+  ;; cause, so neither fact is buried by the other.
+  (let [refusal {:seon.error/kind :seon.config/required-absent
+                 :seon.config/required-absent :seon.boot/cluster-name
+                 :seon.error/message "this database names no cluster."}
+        result (config/result-caps refusal)]
+    (is (= ::config/missing-result-cap (:seon.error/kind result)))
+    (is (= :seon.config.eval.result/max-bytes
+           (get-in result [:seon.error/data :seon.config/key])))
+    (is (= refusal
+           (get-in result [:seon.error/data
+                           :seon.config/configuration-refusal])))
+    (is (str/includes? (:seon.error/message result)
+                       "this database names no cluster."))))
 
 (deftest two-clusters-on-one-jvm-have-no-config-bleed
   (test-support/with-database

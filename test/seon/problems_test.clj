@@ -40,7 +40,7 @@
   [body]
   (test-support/with-database
     (fn [connection]
-      (config/apply! {:seon.db/connection connection})
+      (config/apply! {:seon.boot/cluster-name "default" :seon.db/connection connection})
       (test-support/transacted! connection [{:seon.agent/id "agent-a"}])
       (body connection))))
 
