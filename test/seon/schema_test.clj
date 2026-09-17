@@ -247,6 +247,78 @@
            (is (and (seq ids) (every? expected ids))
                (str "Pulled ids come from the actual relation: " attribute))))))))
 
+(deftest pulled-forms-derive-from-the-entity-schema-and-selector
+  (test-support/with-database
+   (fn [connection]
+     (let [database (seon.db/db connection)
+           projection (schema/projection-from-database database)
+           namespace-eid
+           (seon.db/q
+            '[:find ?namespace .
+              :where
+              [?namespace :seon.ns/name seon.schema]]
+            database)
+           test-eid
+           (seon.db/q
+            '[:find ?test .
+              :where
+              [?test :seon.test/sym _]
+              [?test :seon.test/ns _]]
+            database)
+           scenarios
+           {:scalar [:seon.test/test test-eid [:seon.test/sym]]
+            :renamed [:seon.test/test test-eid
+                      '[(:seon.test/sym :as :seon.schema-test/test-symbol)]]
+            :defaulted [:seon.test/test test-eid
+                        '[(:seon.test/reach-unknown :default "not measured")]]
+            :peer [:seon.test/test test-eid
+                   [{:seon.test/ns [:db/id :seon.ns/name]}]]
+            :wildcard [:seon.test/test test-eid '[*]]
+            :reverse [:seon.ns/ns namespace-eid
+                      [{:seon.fn/_ns [:db/id :seon.fn/sym]}]]}]
+       (is (pos-int? namespace-eid))
+       (is (pos-int? test-eid))
+       (doseq [[scenario [schema-key entity selector]] scenarios]
+         (testing (name scenario)
+           (let [form (schema/pulled-form-in projection schema-key selector)
+                 value (seon.db/pull database selector entity)]
+             (is (vector? form) (pr-str form))
+             (is (m/validate
+                  (m/schema form
+                            {:registry
+                             (:seon.schema.projection/registry projection)})
+                  value)
+                 (pr-str {:selector selector :form form :value value})))))
+       (let [selector (get-in scenarios [:scalar 2])
+             form (schema/pulled-form-in projection :seon.test/test selector)
+             validator
+             (m/validator
+              (m/schema form
+                        {:registry
+                         (:seon.schema.projection/registry projection)}))
+             value (seon.db/pull database selector test-eid)
+             projected (schema/projection-with-pulled-form-in
+                        projection :seon.test/test selector)
+             derived-key (schema/pulled-schema-key :seon.test/test selector)]
+         (is (not (validator (assoc value :seon.test/sym 42)))
+             "the derived form checks selected value types instead of accepting a bare map")
+         (is (= form
+                (get (:seon.schema.projection/forms projected) derived-key)))
+         (is (identical?
+              projected
+              (schema/projection-with-pulled-form-in
+               projection :seon.test/test selector))
+             "the projection-owned cache reuses the registered derivation"))
+       (let [selector '[{:seon.ns/steward 2}]
+             refused (schema/pulled-form-in
+                      projection :seon.ns/ns selector)]
+         (is (= :seon.schema/unsupported-pull-selector
+                (:seon.error/kind refused)))
+         (is (= {:seon.ns/steward 2}
+                (get-in refused
+                        [:seon.error/data
+                         :seon.error/diagnostic-offending]))))))))
+
 (defn- refusal
   [thunk]
   (try

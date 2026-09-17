@@ -7,6 +7,39 @@
                {:error/message "must be a parseable, EDN-readable Malli form"
                 :gen/schema [:enum :string :int [:vector :keyword]]}
                seon.schema/malli-form?],
+              :pull-selector
+              [:fn
+               {:error/message "must be a Datahike pull selector"
+                :gen/schema [:enum [:= [*]] [:= [:db/id]]]}
+               seon.schema/pull-selector?],
+              :pull-selector-element
+              [:or [:= *] :keyword
+               [:sequential {:min 1} :seon.schema/value]
+               [:map-of :seon.schema/value :seon.schema/value]],
+              :parsed-pull-spec
+              [:map
+               [:wildcard? :boolean]
+               [:attrs [:map-of :keyword :seon.schema/value]]],
+              :parsed-pull-attribute-options
+              [:map
+               [:attr :keyword]
+               [:as {:optional true} :keyword]
+               [:limit {:optional true} [:or :nil [:int {:min 0}]]]
+               [:default {:optional true} :seon.schema/value]
+               [:subpattern {:optional true} :seon.schema/value]
+               [:recursion {:optional true} :seon.schema/value]],
+              :pulled-entry
+              [:or
+               [:tuple :keyword :seon.schema/definition]
+               [:tuple :keyword
+                [:map [:optional [:= true]]]
+                :seon.schema/definition]],
+              :pulled-entry-result
+              [:or :seon.schema/pulled-entry :seon.error/value],
+              :pulled-form-result
+              [:or :seon.schema/malli-form :seon.error/value],
+              :pulled-projection-result
+              [:or :seon.schema/projection :seon.error/value],
               :definition :seon.schema/malli-form,
               :value [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
                             :seon.schema.admission/reason "The shared value schema represents arbitrary in-memory Clojure values, including nil and host objects; callers declaring concrete data must use their own shape."

@@ -24,6 +24,7 @@
             [clojure.set :as set]
             [clojure.walk :as walk]
             [datahike.api :as d]
+            [datahike.pull-api :as pull-api]
             [datahike.db.interface :as dbi]
             [seon.schema.form :as form]
             [seon.schema.internal :as internal]
@@ -42,6 +43,16 @@
   (delay (requiring-resolve 'seon.schema.datahike/storable-properties-in)))
 (defonce ^:private schema-datahike-database-attributes-in
   (delay (requiring-resolve 'seon.schema.datahike/database-attributes-in)))
+(defonce ^:private schema-datahike-malli->datahike-attr-in
+  (delay (requiring-resolve 'seon.schema.datahike/malli->datahike-attr-in)))
+(defonce ^:private schema-datahike-form->cardinality-in
+  (delay
+    (require 'seon.schema.datahike)
+    (ns-resolve 'seon.schema.datahike 'form->cardinality-in)))
+(defonce ^:private schema-datahike-form->child-form-in
+  (delay
+    (require 'seon.schema.datahike)
+    (ns-resolve 'seon.schema.datahike 'form->child-form-in)))
 
 (defn- direct-references*
   "Canonical registry keys directly referenced by one compiled schema.
@@ -1195,6 +1206,27 @@
     (catch Exception _ false)))
 
 (register-core-predicate! 'seon.schema/malli-form? malli-form?)
+
+(defn pull-selector?
+  "True when `value` is a Datahike pull selector."
+  {:malli/schema
+   [:=>
+    [:cat
+     [:any
+      {:seon.schema.admission/exemption
+       :seon.schema.admission/polymorphic-boundary
+       :seon.schema.admission/reason
+       "A total selector predicate accepts arbitrary objects and asks Datahike's parser whether each is a selector."
+       :gen/elements [nil false 0 "" :k [] {}]}]]
+    :boolean]}
+  [value]
+  (try
+    (pull-api/compile-pull-plan value)
+    true
+    (catch Exception _ false)))
+
+(register-core-predicate! 'seon.schema/pull-selector? pull-selector?)
+
 
 ;;; ---------------------------------------------------------------------------
 ;;; Registration API
@@ -2691,6 +2723,277 @@
                    :seon.schema.projection/fingerprint fingerprint}))]
       (assert-render-contracts! result affected-schema-keys)
       result)))
+
+(defn pulled-schema-key
+  "Stable registry key for `schema-key` pulled under exactly `selector`."
+  {:malli/schema [:=> [:cat ::registry-key :seon.schema/pull-selector]
+                  ::registry-key]}
+  [schema-key selector]
+  (keyword "seon.schema.pulled" (id/id [schema-key selector])))
+
+(defn- pulled-selector-refusal
+  "Typed refusal naming the selector element whose shape is unknown."
+  {:malli/schema
+   [:=> [:cat ::registry-key :seon.schema/pull-selector-element
+         :keyword :string]
+    :seon.error/value]}
+  [schema-key selector-element cause message]
+  (@error-diagnostic
+   {:seon.error/kind :seon.schema/unsupported-pull-selector
+    :seon.error/message message
+    :seon.error/diagnostic-layer :schema-derivation
+    :seon.error/diagnostic-operation 'seon.schema/pulled-form-in
+    :seon.error/diagnostic-member schema-key
+    :seon.error/diagnostic-expected :seon.schema/pull-selector-element
+    :seon.error/diagnostic-offending selector-element
+    :seon.error/diagnostic-cause cause
+    :seon.error/diagnostic-evidence
+    {:seon.schema/key schema-key
+     :seon.schema/pull-selector-element selector-element}}))
+
+(defn- entity-entry-map
+  "Map one entity schema's attributes to their Malli map entries."
+  {:malli/schema
+   [:=> [:cat ::projection [:or :nil ::registry-key]]
+    [:map-of :qualified-keyword :seon.schema/value]]}
+  [projection schema-key]
+  (if-let [entity-form
+           (get (:seon.schema.projection/forms projection) schema-key)]
+    (into {} (map (fn [entry] [(first entry) entry]))
+          (form/map-entries entity-form))
+    {}))
+
+(defn- reverse-target-schema
+  "The sole entity schema declaring `attribute`, or nil when ambiguous."
+  {:malli/schema
+   [:=> [:cat ::projection :qualified-keyword]
+    [:or :nil ::registry-key]]}
+  [projection attribute]
+  (let [rows (:seon.schema.projection/shape-rows projection)
+        candidates
+        (->> (get-in projection
+                     [:seon.schema.projection/shape-index attribute])
+             (filter #(true? (:seon.schema/entity? (get rows %)))))]
+    (when (= 1 (count candidates)) (first candidates))))
+
+(defn- selector-target-schema
+  "The sole entity schema identified by a sub-selector's identity attribute."
+  {:malli/schema
+   [:=> [:cat ::projection :seon.schema/parsed-pull-spec]
+    [:or :nil ::registry-key]]}
+  [projection pull-spec]
+  (let [forms (:seon.schema.projection/forms projection)
+        candidates
+        (into #{}
+              (keep (fn [[_ options]]
+                      (some-> (get forms (:attr options))
+                              form/attr-form-properties
+                              :seon.program/row-schema)))
+              (:attrs pull-spec))]
+    (when (= 1 (count candidates)) (first candidates))))
+
+(declare pulled-form-from-spec)
+
+(defn- pulled-attribute-entry
+  "Derive one result-map entry from Datahike's parsed attribute options."
+  {:malli/schema
+   [:=> [:cat ::projection [:or :nil ::registry-key]
+         :keyword :seon.schema/parsed-pull-attribute-options
+         [:set ::registry-key]]
+    :seon.schema/pulled-entry-result]}
+  [projection schema-key raw-key options seen]
+  (let [forms (:seon.schema.projection/forms projection)
+        attribute (:attr options)
+        result-key (or (:as options) raw-key)
+        forward? (= raw-key attribute)
+        owner-key (or schema-key :seon.schema/registry-key)]
+    (cond
+      (contains? options :recursion)
+      (pulled-selector-refusal
+       owner-key {raw-key (:recursion options)} :seon.schema/pull-recursion
+       "Recursive selectors may return nested and id-only maps; this derivation refuses that union.")
+
+      (= :db/id raw-key)
+      [:db/id :int]
+
+      (not (keyword? attribute))
+      (pulled-selector-refusal
+       owner-key raw-key :seon.schema/dynamic-pull-attribute
+       "A pulled form requires a keyword attribute in the supplied projection.")
+
+      :else
+      (let [attribute-form
+            (or (get forms attribute)
+                (case attribute :db/ident :keyword :db/txInstant :inst nil))]
+        (if-not attribute-form
+          (pulled-selector-refusal
+           owner-key raw-key :seon.schema/unknown-pull-attribute
+           (str "Pull attribute " attribute " has no declaration."))
+          (let [datahike-attribute
+                (case attribute
+                  :db/ident {:db/valueType :db.type/keyword
+                             :db/cardinality :db.cardinality/one}
+                  :db/txInstant {:db/valueType :db.type/instant
+                                 :db/cardinality :db.cardinality/one}
+                  (try
+                    (@schema-datahike-malli->datahike-attr-in
+                     projection attribute)
+                    (catch clojure.lang.ExceptionInfo failure failure)))]
+            (if (instance? Throwable datahike-attribute)
+              (pulled-selector-refusal
+               owner-key raw-key :seon.schema/unstorable-pull-attribute
+               (ex-message datahike-attribute))
+              (let [reference? (= :db.type/ref
+                                  (:db/valueType datahike-attribute))
+                    component? (:db/isComponent datahike-attribute)
+                    declared-many?
+                    (= :db.cardinality/many
+                       (@schema-datahike-form->cardinality-in
+                        projection attribute-form))
+                    many? (if forward? declared-many? (not component?))
+                    component-schema
+                    (:seon.db/component-schema
+                     (form/attr-form-properties attribute-form))
+                    nested-target
+                    (or component-schema
+                        (when-not forward?
+                          (reverse-target-schema projection attribute))
+                        (when-let [subpattern (:subpattern options)]
+                          (selector-target-schema projection subpattern)))
+                    child
+                    (cond
+                      (contains? options :subpattern)
+                      (pulled-form-from-spec projection nested-target
+                                             (:subpattern options) seen
+                                             {raw-key :subpattern})
+
+                      (and reference? component? forward?)
+                      (if component-schema
+                        (pulled-form-from-spec
+                         projection component-schema
+                         (pull-api/pull-plan-spec
+                          (pull-api/compile-pull-plan '[*]))
+                         seen raw-key)
+                        (pulled-selector-refusal
+                         owner-key raw-key :seon.schema/missing-component-schema
+                         (str "Component attribute " attribute
+                              " has no declared target schema.")))
+
+                      reference?
+                      [:map [:db/id :int]
+                       [:db/ident {:optional true} :keyword]]
+
+                      (not forward?)
+                      (pulled-selector-refusal
+                       owner-key raw-key :seon.schema/reverse-non-reference
+                       (str "Reverse attribute " raw-key
+                            " does not name a reference."))
+
+                      :else
+                      (@schema-datahike-form->child-form-in
+                       projection attribute-form))]
+                (if (map? child)
+                  child
+                  (let [limit (get options :limit 1000)
+                        pulled-value
+                        (if many?
+                          (if (nil? limit)
+                            [:vector child]
+                            [:vector {:max limit} child])
+                          child)
+                        pulled-value
+                        (if (contains? options :default)
+                          [:or pulled-value [:= (:default options)]]
+                          pulled-value)]
+                    (if (contains? options :default)
+                      [result-key pulled-value]
+                      [result-key {:optional true} pulled-value])))))))))))
+
+(defn- pulled-form-from-spec
+  "Derive a pull-result form from one parsed Datahike PullSpec."
+  {:malli/schema
+   [:=> [:cat ::projection [:or :nil ::registry-key]
+         :seon.schema/parsed-pull-spec [:set ::registry-key]
+         :seon.schema/pull-selector-element]
+    :seon.schema/pulled-form-result]}
+  [projection schema-key pull-spec seen selector-element]
+  (let [forms (:seon.schema.projection/forms projection)
+        wildcard? (:wildcard? pull-spec)]
+    (cond
+      (and schema-key (nil? (get forms schema-key)))
+      (pulled-selector-refusal
+       schema-key selector-element :seon.schema/unknown-schema
+       (str "Cannot derive a pulled form for unknown schema " schema-key "."))
+
+      (and wildcard? (nil? schema-key))
+      (pulled-selector-refusal
+       :seon.schema/registry-key selector-element
+       :seon.schema/unknown-pull-target
+       "A wildcard nested selector requires its target entity schema.")
+
+      (and wildcard? (contains? seen schema-key))
+      (pulled-selector-refusal
+       schema-key selector-element :seon.schema/pull-component-cycle
+       (str "Wildcard component expansion revisits " schema-key "."))
+
+      :else
+      (let [seen (cond-> seen schema-key (conj schema-key))
+            wildcard-attributes
+            (if wildcard?
+              (into {:db/id {:attr :db/id}}
+                    (map (fn [attribute] [attribute {:attr attribute}]))
+                    (keys (entity-entry-map projection schema-key)))
+              {})
+            attributes (merge wildcard-attributes (:attrs pull-spec))
+            entries
+            (reduce-kv
+             (fn [result raw-key options]
+               (if (map? result)
+                 (reduced result)
+                 (let [entry (pulled-attribute-entry
+                              projection schema-key raw-key options seen)]
+                   (if (map? entry)
+                     (reduced entry)
+                     (conj result entry)))))
+             [] attributes)]
+        (if (map? entries) entries (into [:map] entries))))))
+
+(defn projection-with-pulled-form-in
+  "Return `projection` with the selector-specific form registered."
+  {:malli/schema
+   [:=> [:cat ::projection ::registry-key :seon.schema/pull-selector]
+    :seon.schema/pulled-projection-result]}
+  [projection schema-key selector]
+  (let [derived-key (pulled-schema-key schema-key selector)
+        cache-key [::pulled-form (id/id [schema-key selector])]]
+    (projection-cache-value
+     projection cache-key
+     (fn []
+       (let [pull-spec (pull-api/pull-plan-spec
+                        (pull-api/compile-pull-plan selector))
+             definition (pulled-form-from-spec
+                         projection schema-key pull-spec #{}
+                         (or (first selector) '*))]
+         (if (map? definition)
+           definition
+           (projection-with-schema
+            projection derived-key definition
+            {:seon.schema.admission/source :core})))))))
+
+(defn pulled-form-in
+  "Return the Malli form of `schema-key` pulled under exactly `selector`.
+
+   Unsupported selectors return a flat refusal naming their element."
+  {:malli/schema
+   [:=> [:cat ::projection ::registry-key :seon.schema/pull-selector]
+    :seon.schema/pulled-form-result]}
+  [projection schema-key selector]
+  (let [derived-key (pulled-schema-key schema-key selector)
+        projected (projection-with-pulled-form-in
+                   projection schema-key selector)]
+    (if (and (map? projected) (:seon.error/kind projected))
+      projected
+      (get (:seon.schema.projection/forms projected) derived-key))))
 
 (defn projection-without-schema
   "Validate the projection produced by removing one unused schema.
