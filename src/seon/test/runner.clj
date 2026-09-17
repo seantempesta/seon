@@ -16,6 +16,7 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.env :as env]
+            [seon.error :as error]
             [seon.fn :as seon.fn]
             [seon.instrument :as instrument]
             [seon.id :as id]
@@ -2133,6 +2134,158 @@
    :seon.test.run/basis-t (db/basis-t database)
    :seon.test.run/branch (get-in database [:config :branch])})))
 
+(defn- admission-refusal! [kind run-id expected offending]
+  (let [failure
+        (error/diagnostic
+         {:seon.error/kind kind
+          :seon.error/message "Test run admission refused inconsistent evidence."
+          :seon.error/diagnostic-layer :test
+          :seon.error/diagnostic-operation :seon.test.runner/admit-run
+          :seon.error/diagnostic-member run-id
+          :seon.error/diagnostic-expected expected
+          :seon.error/diagnostic-offending offending})]
+    (throw (ex-info (:seon.error/message failure) failure))))
+
+(defn- admission-members [database run-id]
+  ;; Query refs rather than pulling the parent's cardinality-many collection:
+  ;; Datahike's default pull limit must not shorten an execution obligation.
+  (let [ids (db/q '[:find [?member ...] :in $ ?run [?attribute ...]
+                    :where [?run ?attribute ?member]]
+                  database run-id
+                  [:seon.test.run/members :seon.test.run/covered-by])]
+    (when (:seon.error/kind ids)
+      (throw (ex-info (:seon.error/message ids) ids)))
+    (mapv #(let [row (db/pull database
+                             [:db/id :seon.test.member/symbol :seon.test.member/reasons] %)]
+             (when (or (:seon.error/kind row)
+                       (not (:seon.test.member/symbol row))
+                       (not (seq (:seon.test.member/reasons row))))
+               (admission-refusal! :seon.test/population-unknown run-id
+                                   :admitted-member (or row :seon.error/unknown)))
+             row)
+          ids)))
+
+(defn- admission-scope [row]
+  (cond-> (-> (select-keys row [:seon.test.run/cluster :seon.test.run/program-digest
+                       :seon.test.run/input-digest :seon.test.run/branch
+                       :seon.test.run/tested-branch :seon.test.run/change-basis-t
+                       :seon.test.run/policy :seon.test.run/include-long?])
+      (assoc :seon.test.run/namespaces (set (:seon.test.run/namespaces row))
+             :seon.test.run/identities (set (:seon.test.run/identities row))))
+    (= :named (:seon.test.run/policy row))
+    (assoc :seon.test.run/basis-t (:seon.test.run/basis-t row))))
+
+(defn- admission-member-values [members]
+  (into #{} (map #(-> (select-keys % [:seon.test.member/symbol
+                                     :seon.test.member/reasons])
+                      (update :seon.test.member/reasons set))) members))
+
+(defn admit-run
+  "Reserve a supplied selection at the writer, before any test executes.
+
+  Invoke with [:db.fn/call seon.test.runner/admit-run request]. The request
+  carries the publisher's input digest and immutable tested provenance;
+  selection remains its caller's responsibility. This function does not
+  select tests or execute bodies. It checks the current program and custody,
+  then reserves only members not already covered by matching admitted runs.
+  Concurrent requests see earlier reservations in the transaction database.
+  An identical replay emits no evidence datoms; a changed replay refuses.
+
+  This entry admits the primary host's own branch. Isolated snapshot custody
+  requires its separate immutable publication handoff before admission."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.test.run/admission]
+                  :seon.store/transaction-data]}
+  [database {run :seon.test.run/provenance
+             cluster :seon.test.run/cluster
+             members :seon.test.run/members :as request}]
+  (let [run-id (:seon.test.run/id run)
+        cluster-row (db/pull database [:db/id :seon.cluster/name] cluster)
+        cluster-id (:db/id cluster-row)
+        branch (get-in database [:config :branch])
+        digest (program-digest database)
+        row (-> (merge (select-keys request
+                                   [:seon.test.run/cluster :seon.test.run/input-digest
+                                    :seon.test.run/policy :seon.test.run/include-long?
+                                    :seon.test.run/change-basis-t :seon.test.run/namespaces
+                                    :seon.test.run/identities])
+                       (select-keys run
+                                    [:seon.test.run/id :seon.test.run/at :seon.test.run/git-sha
+                                     :seon.test.run/program-digest :seon.test.run/basis-t
+                                     :seon.test.run/branch :seon.test.run/tested-branch]))
+                (assoc :seon.test.run/cluster cluster-id))
+        selector (into [:db/id :seon.test.run/selection-tx
+                        [:seon.test.run/namespaces :limit nil]
+                        [:seon.test.run/identities :limit nil]]
+                       (keys (dissoc row :seon.test.run/members
+                                     :seon.test.run/namespaces :seon.test.run/identities)))
+        previous (db/pull database selector [:seon.test.run/id run-id])]
+    (doseq [read-result [cluster-row previous]]
+      (when (:seon.error/kind read-result)
+        (throw (ex-info (:seon.error/message read-result) read-result))))
+    (when-not (:seon.cluster/name cluster-row)
+      (admission-refusal! :seon.test/cluster-unavailable run-id
+                          :explicit-authority-cluster cluster))
+    (when (or (not= branch (:seon.test.run/branch run))
+              (:seon.test.run/tested-branch run))
+      (admission-refusal! :seon.test/cluster-mismatch run-id branch
+                          (select-keys run [:seon.test.run/branch
+                                            :seon.test.run/tested-branch])))
+    (when (or (:seon.error/kind digest)
+              (not= digest (:seon.test.run/program-digest run)))
+      (admission-refusal! :seon.test/program-mismatch run-id digest
+                          (:seon.test.run/program-digest run)))
+    (when (or (> (:seon.test.run/basis-t run) (db/basis-t database))
+              (> (get request :seon.test.run/change-basis-t 0)
+                 (:seon.test.run/basis-t run)))
+      (admission-refusal! :seon.test/invalid-basis run-id
+                          (db/basis-t database)
+                          (select-keys row [:seon.test.run/basis-t
+                                            :seon.test.run/change-basis-t])))
+    (when (not= (count members) (count (set (map :seon.test.member/symbol members))))
+      (admission-refusal! :seon.test.run/immutable run-id
+                          :one-membership-per-symbol members))
+    (if (:db/id previous)
+      (let [prior (-> (dissoc previous :db/id :seon.test.run/selection-tx)
+                      (assoc :seon.test.run/cluster
+                             (get-in previous [:seon.test.run/cluster :db/id])))
+            normalize #(-> %
+                           (dissoc :seon.test.run/namespaces :seon.test.run/identities)
+                           (merge (select-keys (admission-scope %)
+                                              [:seon.test.run/namespaces
+                                               :seon.test.run/identities])))]
+        (when (or (not (:seon.test.run/selection-tx previous))
+                  (not= (normalize row) (normalize prior))
+                  (not= (admission-member-values members)
+                        (admission-member-values
+                         (admission-members database (:db/id previous)))))
+          (admission-refusal! :seon.test.run/immutable run-id row prior))
+        [])
+      (let [runs (db/q '[:find [?run ...] :in $ ?cluster ?digest ?inputs
+                         :where [?run :seon.test.run/cluster ?cluster]
+                                [?run :seon.test.run/program-digest ?digest]
+                                [?run :seon.test.run/input-digest ?inputs]
+                                [?run :seon.test.run/selection-tx]]
+                       database cluster-id digest (:seon.test.run/input-digest row))
+            _ (when (:seon.error/kind runs)
+                (throw (ex-info (:seon.error/message runs) runs)))
+            existing
+            (into {}
+                  (mapcat (fn [run-eid]
+                            (let [candidate (db/pull database selector run-eid)
+                                  _ (when (:seon.error/kind candidate)
+                                      (throw (ex-info (:seon.error/message candidate) candidate)))
+                                  candidate (assoc candidate :seon.test.run/cluster
+                                                   (get-in candidate [:seon.test.run/cluster :db/id]))]
+                              (when (= (admission-scope row) (admission-scope candidate))
+                                (map (juxt :seon.test.member/symbol identity)
+                                     (admission-members database run-eid))))))
+                  (sort > runs))
+            covered (keep #(get existing (:seon.test.member/symbol %)) members)
+            reserved (remove #(get existing (:seon.test.member/symbol %)) members)]
+        [(cond-> (assoc row :seon.test.run/selection-tx "datomic.tx")
+           (seq reserved) (assoc :seon.test.run/members (vec reserved))
+           (seq covered) (assoc :seon.test.run/covered-by (set (map :db/id covered))))]))))
+
 (defn- prepare-failures!
   [connection database completion]
   (let [run (:seon.test.run/provenance completion)
@@ -2408,7 +2561,15 @@
                                                     (str "test-failure:" failure-id))))
                                             failures))
                 (not exists?)
-                (assoc :seon.test/ns (namespace-tempid namespace-name)))]
+                (assoc :seon.test/ns (namespace-tempid namespace-name)
+                       :seon.schema.admission/source
+                       (or (db/q '[:find ?source .
+                                   :in $ ?name
+                                   :where
+                                   [?namespace :seon.ns/name ?name]
+                                   [?namespace :seon.schema.admission/source ?source]]
+                                 database namespace-name)
+                           :agent)))]
           (into (cond-> []
             ;; An attribute is retracted ONLY when this result does not
             ;; assert it: a cardinality-one add replaces its own value, and

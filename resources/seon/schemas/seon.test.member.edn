@@ -1,0 +1,9 @@
+{:seon.test.member/symbol
+ [:qualified-symbol {:description "Selected test name as observed at admission; a value that survives deletion of its program row."}]
+ :seon.test.member/reasons
+ [:set {:min 1 :description "Selection reasons asserted at admission; several may apply."}
+  [:enum :platform :reaches-changed :named :first-run]]
+ :seon.test.member/member
+ [:map {:seon.db/attributes true}
+  [:seon.test.member/symbol :seon.test.member/symbol]
+  [:seon.test.member/reasons :seon.test.member/reasons]]}

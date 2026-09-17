@@ -1019,7 +1019,7 @@
             (fn [source]
               (eval/evaluate
                {:seon.cluster.eval/source source
-                :seon.cluster.eval/ns [:seon.ns/name 'user]
+                :seon.cluster.eval/ns [:seon.ns/name 'seon.test-runner-test]
                 :seon.sci.eval/ctx ctx
                 :seon.sci.admit/caps
                 (config/result-caps (config/defaults))
@@ -1038,15 +1038,14 @@
                     analysis (functions/analyze-forms
                               (db/db connection)
                               [{:seon.cluster.eval/source source
-                                :seon.cluster.eval/ns [:seon.ns/name 'user]
+                                :seon.cluster.eval/ns [:seon.ns/name 'seon.test-runner-test]
                                 :seon.program/row (:seon.program/row evaluation)}])
                     row (when-not (:seon.error/kind analysis)
                           (second (first analysis)))]
-                (is (map? row) (pr-str evaluation))
+                (is (map? row) (pr-str analysis))
                 (when row
-                  (is (:db-after (db/transact!
-                                  connection
-                                  [(dissoc row :seon.sci.eval/evaluated?)]))))))
+                  (test-support/transacted!
+                   connection [(dissoc row :seon.sci.eval/evaluated?)]))))
             _ (evaluate
                "(require '[clojure.test :refer [deftest is]])")
             _ (admit!
@@ -1054,7 +1053,7 @@
             result
             (:seon.sci.admit/value
              (evaluate "(seon.test/run #'agent-fork-example)"))
-            stored (db/pull @connection
+            stored (db/pull (db/db connection)
                             @#'runner/result-selector
                             [:seon.test/sym (:seon.test/sym result)])]
         (is (= result stored))))))

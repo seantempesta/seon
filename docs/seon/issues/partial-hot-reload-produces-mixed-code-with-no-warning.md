@@ -17,6 +17,17 @@ The shell-launcher regression continued in its HEAD-plus-owned-paths test
 snapshot. This matches the observation below without establishing its cause;
 see [the guardrail landing note](../../prds/steward-platform/research/lane-guardrails-2026-09-17.md).
 
+## September 17 test-system lane observation
+
+The `test-system-stage2` MCP session on default returned
+`:seon.config/missing-effective` (68 required keys) in its result projection.
+A read-only `println` probe exposed basis `536871223`, the new member schema
+present, and `seon.test.runner/admit-run` not loaded. Hook publication
+`d6a16add-83d1-4a80-ac42-7df04240d14a` separately reported a source-change
+refusal during analysis. No causal attribution is established by these
+observations. Exact REPL lines are in
+[the stage-2 landing note](../../prds/steward-platform/research/test-system-stage2-2026-09-17.md).
+The lane did not restart, reset, or change configuration on default.
 
 ## September 15 live verification boundary, 19:45Z
 

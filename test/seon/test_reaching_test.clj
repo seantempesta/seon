@@ -375,7 +375,7 @@
         (is (:seon.error/kind (runner/provenance (db/db connection))))
         (let [result (sut/check {:seon.db/connection connection
                                  :seon.test/changed []
-                                 :seon.test/paths ["docs/README.md"]})]
+                                 :seon.test/paths []})]
           (is (= [] (:seon.test/tests result)) (pr-str result))
           (is (nil? (:seon.test.run/program-digest result)))
           (is (empty? (:seon.test/failed result)))

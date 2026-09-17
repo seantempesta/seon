@@ -397,7 +397,9 @@
         namespace-name (symbol (str "seon.fixture.long-bound-" (id/id)))
         reason "Boots two co-hosted clusters against a real store."
         plain-reason "Forks a published root once."
-        allowance-ms 900000
+        default-bound (#'runner/exchange-bound-seconds)
+        allowance-seconds (inc default-bound)
+        allowance-ms (* 1000 allowance-seconds)
         support (program-fn/build-artifact
                  {:seon.fn/source-path "test/seon/test_support.clj"
                   :seon.fn.file/first-party-functions []})
@@ -422,8 +424,7 @@
             task-for (fn [name-symbol]
                        (first (#'runner/test-tasks
                                all-vars [(ns-resolve namespace-name name-symbol)]
-                               declarations)))
-            default-bound (#'runner/exchange-bound-seconds)]
+                               declarations)))]
         (is (= {(str namespace-name "/allowed")
                 {:seon.test/long reason :seon.test/long-ms allowance-ms}
                 (str namespace-name "/declared")
@@ -434,12 +435,12 @@
               bound (#'runner/task-exchange-bound-seconds task)]
           (is (true? (::runner/task-long? task)))
           (is (= allowance-ms (::runner/task-long-ms task)))
-          (is (= 900 bound)
+          (is (= allowance-seconds bound)
               "the declared allowance, not the default, bounds the exchange")
           (is (> bound default-bound))
           (let [notice (#'runner/task-bound-notice "pool-1" task bound)]
-            (is (str/includes? notice "bound=900s") notice)
-            (is (str/includes? notice ":seon.test/long-ms 900000") notice)
+            (is (str/includes? notice (str "bound=" allowance-seconds "s")) notice)
+            (is (str/includes? notice (str ":seon.test/long-ms " allowance-ms)) notice)
             (is (str/includes? notice reason) notice)))
         (let [task (task-for 'declared)]
           (is (true? (::runner/task-long? task)))

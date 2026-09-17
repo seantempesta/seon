@@ -1,12 +1,33 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 created: 2026-09-17
+resolved: 2026-09-17
 tags: [issue, test, database, write-admission, program-graph]
 ---
 
 # The recorder creates a test row the write-grammar validator refuses
+
+## Resolution
+
+`record-tx` already runs as `:db.fn/call`. Its absent-row branch now supplies
+`:seon.schema.admission/source` by querying namespace provenance at that
+mid-transaction database, defaulting to `:agent` when none was declared,
+following `seon.error/function-identity-call`. Existing test provenance is
+not overwritten. A new canonical regression changes namespace provenance
+before the transaction call, then retracts/recreates the test, proving both
+branches against the real writer.
+
+The three named regressions below completed without failures in the
+`ec350ece0` plus selected-paths fast snapshot. The agent-callable regression
+also needed its existing canonical namespace instead of an absent `user`
+namespace before calling the analysis owner; fixture writes now use
+`transacted!`. The 2,000-result completion and concurrent retraction tests
+then completed green through the same recorder. This does not claim the
+whole broader run passed: its remaining fixture failures and publication
+errors are recorded in
+[the landing note](../../prds/steward-platform/research/test-system-stage2-2026-09-17.md).
 
 ## Problem
 

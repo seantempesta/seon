@@ -33,6 +33,15 @@ busy the machine is, which is exactly the property a gate must not have.
 
 ## Evidence
 
+- Reproduced by the test-system-stage2 lane on isolated HEAD `0b900a2b0`:
+  parent JVM 82698 last progressed at `2026-09-17T03:07:25.484199Z`, then
+  reported the same 300-second silence and exited 124. Its dump reported
+  `deadlocked-thread-ids nil` and live child gate processes. The three new
+  admission/recorder regressions had already passed; the two later recorder
+  regressions remained unreached. The next iteration explicitly uses the
+  previously documented `SEON_TEST_SILENCE_SECONDS=1800` observation bound.
+  See [the lane note](../../prds/steward-platform/research/test-system-stage2-2026-09-17.md).
+
 - `bin/test: no reporter progress for 300 seconds`, last-progress
   `BEGIN test seon.test-runner-test/concurrent-bin-test-invocations-both-reach-their-tallies`
   at `2026-09-17T01:34:40.874346Z`, killed `exiting 124`.
