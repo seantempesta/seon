@@ -1699,6 +1699,20 @@ wait naming the holder and its liveness, dead holder reclaimed; non-zero
 exit and "store NOT destroyed" line on any failure; reset performs start +
 first adoption; scratch-root drills including a planted syntax error.
 
+**Owner ~01:45Z:** "How do we have syntax errors? don't we have an edit
+hook that fixes and errors if it can't fix?" — hook log line 912: the
+integrator's codex `apply_patch` was resolved by the hook to
+`/Users/sean/src/seon/db.clj` (nonexistent; real path src/seon/db.clj), no
+PostToolUse/SOURCE_EDIT followed — the hook linted nothing and passed the
+broken file (absence of signal read as health; likely a `src/seon/` prefix
+lost against the root basename `seon`). Opus fix lane launched on
+bin/seon-hook (exact apply_patch path grammar; an unlintable path REFUSES;
+pre-write check if the harness offers it). Owner: "waiting minutes to find
+out a problem we should know immediately is a bug -- fix it" → reset lane
+restarted with immediacy as requirement one (dead lock holder reclaimed at
+once; tree load probe in seconds before any destructive step; each phase
+fails the moment it fails, non-zero, named).
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
