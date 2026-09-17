@@ -3336,3 +3336,10 @@ as orchestrator/astra lanes, easy pool as the first live-agent slice).
 - Owner (00:35Z): the error-entities implementation starts when the revised
   PRD lands (manifest slice, wrapper enforcement, B1 alongside); render
   pairs stay schema properties (1p).
+- `4ddb97369`: the error-entities PRD revised in place from the review (526
+  lines): all eight recommendations applied, a literal declaration manifest,
+  the live-fault attribute mapping, prerequisites reordered; one owner
+  decision left (§8: generic propagation as a projection-derived union
+  `:seon.error/result`, recommended). `647694741` (B6 item 3): overwritten
+  agent wake signals counted. Editing lanes at the cap; the manifest slice
+  launches on the first freed slot.
