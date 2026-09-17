@@ -184,14 +184,40 @@
   (io/file source-root "tmp" "test-basis" "green-basis.edn"))
 
 (defn read-basis
-  "The last recorded green basis, or nil when none exists or it is unreadable."
+  "The last recorded green basis, or nil when none has been recorded.
+
+  Absence is an honest nil, which `seon.test.runner` announces on the gate
+  output as its selection reason before widening to every eligible test. A
+  file that exists but does not read as a basis carrying input digests is a
+  different fact and is refused: treating a corrupt artifact as absence would
+  quietly widen, and treating it as a basis would quietly narrow."
   {:malli/schema [:=> [:cat [:string {:min 1}]] [:maybe [:map]]]}
   [source-root]
   (let [file (basis-file source-root)]
-    (when (.isFile file)
+    (if (.exists file)
       (try
-        (edn/read-string (slurp file))
-        (catch Throwable _ nil)))))
+        (let [basis (edn/read-string (slurp file))
+              digests (:seon.test.basis/digests basis)]
+          (when-not (and (map? basis) (map? digests)
+                         (every? (fn [[path digest]]
+                                   (and (string? path) (seq path)
+                                        (string? digest) (seq digest)))
+                                 digests))
+            (throw (ex-info "Green basis must carry input digests." {})))
+          basis)
+        (catch Throwable failure
+          (throw (ex-info "Cannot read the recorded green basis."
+                          {:seon.error/kind ::invalid-basis
+                           :seon.error/message "Cannot read the recorded green basis."
+                           :seon.error/data
+                           {::path (.getPath file)
+                            ::cause (let [message (ex-message failure)]
+                                      (if (or (nil? message)
+                                              (= "" (.trim ^String message)))
+                                        (.getName (class failure))
+                                        message))}}
+                          failure))))
+      nil)))
 
 (defn write-basis!
   "Record one green basis atomically below the checkout root."

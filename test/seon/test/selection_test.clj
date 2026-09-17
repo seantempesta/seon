@@ -193,6 +193,14 @@
               :seon.test.basis/mode "all"
               :seon.test.basis/digests {"src/a.clj" "abc"}}
              (selection/read-basis (.getPath root))))
+      (doseq [corrupt ["{" "nil" "[]" "{}"
+                       "{:seon.test.basis/digests {\"src/a.clj\" nil}}"]]
+        (spit (io/file root "tmp/test-basis/green-basis.edn") corrupt)
+        (let [refusal (try (selection/read-basis (.getPath root))
+                           (catch clojure.lang.ExceptionInfo failure
+                             (ex-data failure)))]
+          (is (= ::selection/invalid-basis (:seon.error/kind refusal)))
+          (is (string? (get-in refusal [:seon.error/data ::selection/cause])))))
       (finally
         ((requiring-resolve 'seon.fs/delete-recursively!)
          (.getCanonicalPath (io/file "tmp"))
