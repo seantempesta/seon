@@ -1682,6 +1682,23 @@ destroyed, republish, refork, start, `init --dev`, then Juniper reseed;
 gates rebuild against the regenerated store. Relaunch after: the three
 codex resumes and the four continuations from their transcripts.
 
+**Reset #1 tonight FAILED and future resets must not** (owner: "fix all
+the issues and make sure future resets work properly"): `reset --force`
+waited >100 s on the lifecycle lock held by a dead hook publication (pid
+30085), then the clean step — a JVM loading the whole tree — died on the
+stopped integrator's half-written `src/seon/db.clj` (unmatched delimiter
+3085:89), "operations owner did not completely clean the managed root",
+store untouched at 4.6 GB, pipeline exit 0; `start` then refused at the
+namespaces phase on the same error (loud, correct). Orchestrator removed
+the one extra paren in place (the lane's hunk otherwise intact), linted
+every dirty file (no syntax errors; the db.clj:583 kondo "unresolved var"
+is the stale-cache class), reran the reset (log `reset-2026-09-17T0135Z`).
+Astra lane `reset-is-total` (high) launched: destroy without loading the
+program; refuse before destroying if the tree cannot load; bounded lock
+wait naming the holder and its liveness, dead holder reclaimed; non-zero
+exit and "store NOT destroyed" line on any failure; reset performs start +
+first adoption; scratch-root drills including a planted syntax error.
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
