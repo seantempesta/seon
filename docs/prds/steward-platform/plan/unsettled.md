@@ -2743,3 +2743,9 @@ working tree, never Sonnet.
   (guardrails proven), gen.loop, turn-work, problem-routing, source,
   issue-deletion, fresh-operator-reset. Editing: stage 2, message-wake,
   adoption-margin.
+- **Message-wake LIVE PROOF LANDED** (`b6364775c`): on default pid 94566,
+  message `3168e0a55d3d` flipped unanswered → answered; its `:seon.message/
+  to` edge survived handling; the handling claim and the turn closure share
+  transaction 536871186; zero provider attempts. Ruling 70 ("retracting a
+  routed edge would wake") is now the implemented behaviour. Lane resumed
+  on its one cold red (the `my.message/send` docstring vs `doc`).
