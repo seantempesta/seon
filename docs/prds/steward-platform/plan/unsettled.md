@@ -1915,6 +1915,19 @@ incremental, bin/test-bounds, baseline-reds. Queued: an independent
 verifier driving both platforms' probes end to end once the hook agent and
 the docs land; the admission-bypass (`datahike.api/with`) detector.
 
+**Owner ~04:05Z asks about the progressive test system** ("agents ask for
+tests whenever they want; already-run requests are ignored and the results
+returned if nothing has changed"). Status: stage 1–3 design landed
+(`61f8e7145`); stage 0 (platform fact, destructive derivation, recording
+total + delta, reach digests, `check` runs only stale tests in process)
+landed; NO implementation lane on stages 1–3 until now. Launched astra
+`test-system-stage2` (high): resolution from the admitted identity in the
+cluster JVM (first-party via the loader, agent-authored SCI tests from
+stored source, one owner), pure claim/completion transaction functions on
+the run entity, and the unchanged-request policy (recorded result returned
+as data with its basis :t, never re-executed). Stage 1 selection waits on
+the symbol-edge reset; stage 3 scheduling on 1+2.
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
