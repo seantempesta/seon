@@ -527,8 +527,37 @@
   and `::failure-kind` otherwise. `:seon.fn/sym` is the invoked function
   symbol when one exists: it prefixes the message and rides in the data. A
   form evaluation supplies no symbol, which is the ONLY difference between
-  the two entrances — the classification itself is identical."
-  {:malli/schema [:=> [:cat :seon.sci.kernel/failure-request [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A kernel failure can carry any thrown or returned value; normalization must preserve evidence of an unrecognized failure.", :gen/elements [nil false 0 "" :k [] {}]}] :seon.sci.admit/record] :seon.error/value]}
+  the two entrances — the classification itself is identical.
+
+  THE OUTPUT UNION ENUMERATES EVERY ERROR FACET (program-facts PRD §1q).
+  This boundary classifies failures it did not raise, so the facet a value
+  carries is whatever the original refusal declared. A generic pass-through
+  lists the whole facet population rather than claiming a narrower one; the
+  armed wrapper derives its permissions from that union and refuses an
+  unlisted facet. The 63 members are `seon.error/facet-keys` over the
+  packaged declarations, sorted, on 2026-09-18."
+  {:malli/schema
+   [:=> [:cat :seon.sci.kernel/failure-request [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A kernel failure can carry any thrown or returned value; normalization must preserve evidence of an unrecognized failure.", :gen/elements [nil false 0 "" :k [] {}]}] :seon.sci.admit/record]
+    [:or :seon.error/value :seon.error/base
+         :my.background/error :my.edit/error :my.fs/error :my.message/error :my.plan/error
+         :my.shell/error :my.turn/error :seon.agent/error :seon.agent.graph/error
+         :seon.ai/request-error :seon.artifact/error :seon.boot/error :seon.bootstrap/error
+         :seon.cluster/error :seon.cluster.prompt/error :seon.cluster.registry/error
+         :seon.cluster.reply/error :seon.cluster.source/error :seon.cluster.store/error
+         :seon.cluster.wake/error :seon.config/error :seon.config/rule-error
+         :seon.db.availability/error :seon.db.read/error :seon.db.write/error
+         :seon.dev.mcp/error :seon.effect/error :seon.env/error :seon.eval.drive/error
+         :seon.flow/error :seon.fn/error :seon.fn.binding/error :seon.instrument/arity-error
+         :seon.instrument/contract-error :seon.instrument/registration-error
+         :seon.instrument/undeclared-error :seon.message/error :seon.operator/error
+         :seon.operator.collect/error :seon.problems/error :seon.program/error
+         :seon.reconcile/error :seon.render/error :seon.render.data/error
+         :seon.render.value/error :seon.render.walk/error :seon.render.web/error
+         :seon.schedule/error :seon.schema/error :seon.schema.datahike/error
+         :seon.schema.shape/error :seon.sci.admit/error :seon.sci.eval/acquisition-error
+         :seon.sci.eval/evaluation-error :seon.sci.kernel/error :seon.sci.reader/error
+         :seon.search/error :seon.test/error :seon.test.accretion/error :seon.test.run/error
+         :seon.test.runner/error :seon.turn/error :seon.turn.loop/error]]}
   [{subject :seon.fn/sym
     time-limit-kind ::time-limit-kind
     failure-kind ::failure-kind}

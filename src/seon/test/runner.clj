@@ -36,8 +36,8 @@
            (java.lang.management ManagementFactory ThreadInfo)
            (java.time Instant)
            (java.util.concurrent CompletableFuture Executors
-                                 LinkedBlockingQueue ThreadFactory TimeUnit
-                                 TimeoutException))
+                                 ExecutionException LinkedBlockingQueue
+                                 ThreadFactory TimeUnit TimeoutException))
   (:gen-class))
 
 (defn var-reference?
@@ -1308,7 +1308,10 @@
                                  (or (::task-long-ms task) 0) 0))})]
     (cond
       (= (count host-vars) (count test-vars))
-      (run-vars! test-vars custody)
+      ;; `eval/run-tests` handed the complete request to `run-vars!`: the ctx
+      ;; is fixture input even though host Vars must not run under its arm.
+      ;; Keep that value carriage when the host path bypasses the SCI owner.
+      (run-vars! test-vars request)
 
       (empty? host-vars)
       (@run-interpreted-tests request)
@@ -1845,6 +1848,55 @@
   (.flush writer)
   (not (.checkError writer)))
 
+(defn- bounded-worker-task!
+  "Run one task inside the worker's own bound, before the coordinator's bound.
+
+  Host Vars deliberately do not borrow the canonical SCI ctx's arm. That
+  makes the worker command—not an unrelated interpreter—the owner of their
+  aggregate extent. Its earlier deadline leaves enough time to publish the
+  terminal exchange event; the coordinator remains the process-level
+  backstop when code does not respond to interruption."
+  [task resolution ^java.util.concurrent.ExecutorService executor]
+  (let [started-at (Instant/now)
+        started-nanos (System/nanoTime)
+        bound-seconds (bounds/exchange-seconds (or (::task-long-ms task) 0) 0)
+        ^java.util.concurrent.Callable task-callable
+        (on-caller-loader #(run-task! task resolution))
+        execution (.submit executor task-callable)]
+    (try
+      (.get ^java.util.concurrent.Future execution bound-seconds TimeUnit/SECONDS)
+      ;; The execution thread is an implementation detail of this bound, never
+      ;; a new failure class: a task that throws reaches the worker's own
+      ;; handler exactly as it did when `run-task!` was called in place.
+      (catch ExecutionException failure
+        (throw (or (.getCause failure) failure)))
+      (catch TimeoutException _
+        (.cancel ^java.util.concurrent.Future execution true)
+        (let [test-symbols (mapv str (::task-symbols task))
+              elapsed-ms (quot (- (System/nanoTime) started-nanos) 1000000)
+              message (str "Worker task reached its " bound-seconds
+                           "s execution bound before returning.")]
+          (assoc task
+                 ::task-started-at (str started-at)
+                 ::task-ended-at (str (Instant/now))
+                 ::task-elapsed-ms elapsed-ms
+                 ::task-summary {::test-count (count test-symbols)
+                                 ::pass-count 0
+                                 ::fail-count 0
+                                 ::error-count (count test-symbols)}
+                 ::task-results
+                 (mapv (fn [test-symbol]
+                         #:seon.test{:sym test-symbol
+                                     :pass-count 0
+                                     :fail-count 0
+                                     :error-count 1
+                                     :failing-assertions
+                                     [(id/id [test-symbol ::worker-task-bound] 64)]
+                                     :failure-message message})
+                       test-symbols)
+                 ::task-output (str message "\n")
+                 ::worker-task-bound true))))))
+
 (defn- serve-worker-commands!
   "Read and execute worker commands serially until explicitly stopped."
   [worker-id ^BufferedReader reader ^PrintWriter writer arming]
@@ -1885,14 +1937,22 @@
             ;; the work derives it either side of the task and reports the
             ;; difference as that task's own fact.
             (let [before (ambient-snapshot)
-                  result (run-task! (::worker-task command) (::resolution arming))
+                  result (bounded-worker-task! (::worker-task command)
+                                               (::resolution arming)
+                                               (::task-executor arming))
                   drift (ambient-drift before (ambient-snapshot))]
               (write-protocol! writer
                                (cond-> (assoc result
                                               ::worker-event :task-complete
                                               ::worker-id worker-id
                                               ::exchange-id
-                                              (::exchange-id command))
+                                              (::exchange-id command)
+                                              ;; A terminal exchange never
+                                              ;; prints an empty elapsed field,
+                                              ;; even if an injected task owner
+                                              ;; omitted its own measurement.
+                                              ::task-elapsed-ms
+                                              (or (::task-elapsed-ms result) 0))
                                  (seq drift)
                                  (assoc ::task-ambient-drift drift))))
             (recur))
@@ -1929,14 +1989,24 @@
                             (quot (- (System/nanoTime) started) 1000000)
                             ::exchange-id (str worker-id "/readiness")})
     (let [connection (:seon.test-support/connection base)
-          database (db/db connection)]
-      (serve-worker-commands!
-       worker-id reader writer
-       {::projection projection
-        ::resolution {:seon.db/db database :seon.db/connection connection
-                      :seon.sci.eval/ctx (:seon.sci.eval/ctx base)
-                      :seon.schema/projection (schema/projection-from-database database)
-                      :seon.test/class-loader (clojure.lang.RT/baseLoader)}}))))
+          database (db/db connection)
+          task-executor
+          (Executors/newSingleThreadExecutor
+           (reify ThreadFactory
+             (newThread [_ runnable]
+               (doto (Thread. runnable (str "seon-test-worker-" worker-id))
+                 (.setDaemon true)))))]
+      (try
+        (serve-worker-commands!
+         worker-id reader writer
+         {::projection projection
+          ::task-executor task-executor
+          ::resolution {:seon.db/db database :seon.db/connection connection
+                        :seon.sci.eval/ctx (:seon.sci.eval/ctx base)
+                        :seon.schema/projection (schema/projection-from-database database)
+                        :seon.test/class-loader (clojure.lang.RT/baseLoader)}})
+        (finally
+          (.shutdownNow task-executor))))))
 
 (defn- worker-main!
   [worker-id]
