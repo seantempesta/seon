@@ -50,7 +50,11 @@ lanes is the cap and was exceeded all night — expect load; lanes never run
 ### Phase 0 — stabilize (now)
 | Item | Owner | Status |
 |---|---|---|
-| **Default's effective configuration lost all 68 required facts** (`config apply` refuses `reconcile-refused`); no live proof possible on default until fixed | orchestrator | in flight, FIRST (probe `seon.config/reconcile` for the first refusal value; else stop/start once S3's seam is coherent; reset is the proven fallback) |
+| Default's "config loss" | orchestrator | ROOT-CAUSED + repaired live 03:40Z: no fact was lost; an intermediate hot-reload of an uncommitted db.clj hunk broke every `seon.db/pull`, and two config readers read the error value as a row. Issue resolved. Follow-up below. |
+| `seon.config/effective-in` (config.clj:579) and `population-transaction-data` (:452) return the pull's error value instead of reading it as a row/absence; one regression through a refusing pull | Opus (fully specified; launch when an editing slot frees) | queued |
+| Two platform reds in batch 116 A: `declaration-population` tests measure 0 resource reads because the R4 memo (`5e54c9ae1`) serves the second resolution; tests must invalidate through the memo's declared seam before measuring | Opus (fully specified; launch when a slot frees) | queued |
+| Gate recording refused `:seon.test.run/immutable` (runner.clj:2486) on batch 116 A — a run row with different provenance already exists for the run id; retained root `tmp/test-runs/run.jHOFSg` | astra `test-system-stage2` (owns the recorder) | fold at its next stop |
+| Guardrails item 2 (`89802502a`, branch `lane-guardrails-bounds-2026-09-17`): declared bounds, overrides refused; reviewed, approved | orchestrator cherry-picks when runner.clj frees (stage 2 holds it) | blocked on file |
 | **Adoption refused tree-wide** (activation closure names call-preparation suppliers whose rows the publication lacks) | astra `acquisition-by-provenance-s3` (owns the seam) | in flight |
 | Platform tier refused: registry tests reach a declared destroyer since the fs consolidation (batch 115 A) | astra `reset-is-total` | landed `d65cc688c`; cold proof = batch 116 A |
 | The whole-entity validator ADMITS an incomplete create (new `:seon.fn` row missing ns + admission source) | Opus | REFUTED by probe: the create path refuses at HEAD; class regression landed `770cf35d3`; the real hole is identity-less entities never validated (issue filed) |
@@ -58,7 +62,7 @@ lanes is the cap and was exceeded all night — expect load; lanes never run
 | Two-gate test eats the silence bound and hides every red (blocker) | astra `lane-guardrails` (bounds) | in flight |
 | `declared-row…delta`: sci/eval.clj:303 dropped `:seon.schema/ns` (writer regression) + stale shape expectation; hunks in `baseline-reds-sci-eval-documentation-2026-09-17.md` | astra `acquisition-by-provenance-s3` (holds the file) | at its next stop |
 | Lane guardrails: lane identity, no lane `bin/test`, declared bounds, overlay completeness, orphan announcement, resume reads the session id from the launcher record | astra `lane-guardrails` | in flight |
-| Hook: loophole inventory; `agent_id` recorded; git checkout/stash/apply as unpayloaded writes | Opus hook agent | in flight |
+| Hook: loophole inventory; `agent_id` recorded; codex drops PostToolUse blocks → every refusal exits 2 with stderr reason; scan on every PostToolUse | Opus hook agent | landed `db0c51fa6` `8952da44f` |
 | Independent end-to-end hook verifier on both platforms | Opus | queued behind the hook agent |
 | `datahike.api/with` admission-bypass detector | Opus | queued |
 | Republish margin (173 s of 180): issue-index at publication, complete-publication cost | Opus | queued |
@@ -71,7 +75,7 @@ lanes is the cap and was exceeded all night — expect load; lanes never run
 | Edge retype (calls/references/reach as indexed symbol sets), stub minting + tombstones + second validator deleted, `:seon.fn/file` required, G4 provenance fact, the 19 unsatisfiable-required keys, deletion refusal in `write-report-error` (strict, no escape — ruled), `:seon.agent/archived-tx`, `capability-fn` ref deleted, fn.ast merge-then-delete, S2, S6 | integrator on worktree branch `reset-batch` (pushed) | in flight |
 | Validator cost on the writer thread (75.9 → 41.6 s; more owed) | integrator | in flight |
 | Message/wake/provenance model: split `about` three ways, `from` the inside marker, origin → `:seon.issue/id`, `refreshes` deleted, inbox-retraction drift repaired (rulings §1h) | astra `message-wake-model` (high) | in flight |
-| Datahike modeling study: second opinion on the reset batch; its corrections OVERRIDE prior schema decisions (§1i); O9: a value edge needs `{:seon.db/index true}` | astra `datahike-modeling-study` (high) | in flight (skill edits on disk; note not landed) |
+| Datahike modeling study: second opinion on the reset batch; its corrections OVERRIDE prior schema decisions (§1i) | astra `datahike-modeling-study` (high) | landed `bd5923a8c`; integrator stopped+resumed on its correction table 03:55Z; Q2 AST = A and message subject = A taken as recommended (vetoable) |
 | Data-modeling decision guide (owner: retract vs archived, refs vs identities, one reasoned guide) | Opus | landed `ec350ece0` (`docs/seon/architecture/data-modeling-guide.md`); its link lines in AGENTS.md + both skills uncommitted (files held) |
 | Reset of default with the whole batch + Juniper reseed + live proofs (walk parity; a deletion refused naming callers; an archived issue retracted) | orchestrator | after the branch is green and merged |
 
