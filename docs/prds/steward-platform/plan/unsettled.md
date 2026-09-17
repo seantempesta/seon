@@ -2287,3 +2287,24 @@ working tree, never Sonnet.
 - The twelve repeated orchestrator mistakes and their rules written into
   [docs/TRANSFER_PROMPT.md](../../../TRANSFER_PROMPT.md) (owner's
   compaction ask).
+- **Clock correction:** entries above labelled "~03:20Z" through "~07:00Z"
+  (2026-09-17) ran up to two hours ahead of the real clock; commit times
+  are authoritative (`git log --format=%aI`): rulings §1h `5f6a796ec` =
+  02:54Z, RESUME HERE `a156cf5ce` = 03:05Z, this entry = 03:35Z. The owner
+  has NOT gone to bed yet at 03:35Z; overnight starts after this status.
+- Create-path validator agent REFUTED its premise (`770cf35d3`): the
+  incomplete create is refused at HEAD; the batch-115 red was a stale
+  expectation already rewritten by `1768b466b`; class regression landed in
+  db_test; issues filed: identity-less entities never validated (29
+  component maps), the reporter attributing a failing `is` to its enclosing
+  `let` line. `src/seon/db.clj` untouched.
+- Worktree sweep: four holderless lane worktrees removed
+  (`test-fast-final-wt` 8 days old, `s11-fixes-wt`, `test-preparation-wt`,
+  `workaround-tier0-wt`); each one's non-submodule diff saved under
+  `tmp/orchestrator/worktree-patches/` before removal; branch
+  `test-preparation-reuse` deleted (its work landed on main). Remaining:
+  `reset-batch-wt` (the reset-only batch, deliberate), `lane-bounds-wt`,
+  `message-wake-model-wt`, `small-fixes-wt` (live lanes' baselines).
+- Plan README updated: Phase 0 rows for the two default blockers, the
+  refuted create-path item, batch 116, the load cap; tonight's ordered plan
+  as its own section.

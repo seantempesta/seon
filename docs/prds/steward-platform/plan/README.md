@@ -18,7 +18,7 @@ what moved and when. Every entity names the mechanism it builds on (file), what
 is genuinely missing, the proof that closes it, and its dependencies. Status:
 **landed** (commit), **in flight** (lane), **planned**, **decision**.
 
-## Long-term plan and schedule (orchestrator; last updated 2026-09-17 ~05:40Z; owner: "keep the plan up to date and include all the future plans so they don't get lost")
+## Long-term plan and schedule (orchestrator; last updated 2026-09-17 03:35Z (real clock; earlier labels in the working edge ran up to 2 h fast); owner: "keep the plan up to date and include all the future plans so they don't get lost")
 
 **How to resume after a compaction:** read this section, then
 [unsettled.md](unsettled.md) from its last "RESUME HERE" block, then
@@ -37,11 +37,23 @@ requires restarting codex lanes (they snapshot hooks at start); ≤4 editing
 lanes is the cap and was exceeded all night — expect load; lanes never run
 `bin/test`; one lane launch per shell.
 
+
+### Tonight (2026-09-17, owner asleep from ~03:40Z) — the ordered plan
+1. **Unblock default.** Probe `seon.config/reconcile` for the first refusal value. If the tree loads (kondo syntax pass over every dirty file), stop/start default and re-adopt once the S3 lane commits a coherent seam; otherwise `bin/seon reset --force` (proven, under six minutes at load < 20). Default usable = live proofs resume for every lane.
+2. **Read batch 116 and route every red** to the lane that owns the class (one lane per class, after a ledger query). Gate each landing that arrives after it in one batch per HEAD, only when a slot is free.
+3. **Review and record every landing** (S3, integrator rebase on the modeling study, stage 2, guardrails 2–4, message-wake model, modeling study, hook loopholes, small fixes) in the working edge in the same beat; landing notes under `../research/`.
+4. **Keep the load under the cap.** ≤4 editing lanes; research passes read-only; no new lane until one lands. Sweep holderless worktrees and run roots at each checkpoint.
+5. **Do not decide for the owner.** The ten open decisions stay open with options written; recommended options taken for the reset batch are vetoable. No questions tool.
+6. **When the modeling study lands:** the integrator rebases `reset-batch` on it, then the reset of default with the whole batch + Juniper reseed + the three live proofs (walk parity; a deletion refused naming callers; an archived issue retracted). Only if the platform tier is green and the owner has not vetoed §1i's overrides — otherwise it waits for morning.
+7. **If a class of failure keeps recurring, write the rule** into AGENTS.md or TRANSFER_PROMPT.md in the same commit as the fix.
+
 ### Phase 0 — stabilize (now)
 | Item | Owner | Status |
 |---|---|---|
-| Platform tier refused: registry tests reach a declared destroyer since the fs consolidation (batch 115 A) | astra `reset-is-total` | in flight, first |
-| The whole-entity validator ADMITS an incomplete create (new `:seon.fn` row missing ns + admission source) | Opus | in flight |
+| **Default's effective configuration lost all 68 required facts** (`config apply` refuses `reconcile-refused`); no live proof possible on default until fixed | orchestrator | in flight, FIRST (probe `seon.config/reconcile` for the first refusal value; else stop/start once S3's seam is coherent; reset is the proven fallback) |
+| **Adoption refused tree-wide** (activation closure names call-preparation suppliers whose rows the publication lacks) | astra `acquisition-by-provenance-s3` (owns the seam) | in flight |
+| Platform tier refused: registry tests reach a declared destroyer since the fs consolidation (batch 115 A) | astra `reset-is-total` | landed `d65cc688c`; cold proof = batch 116 A |
+| The whole-entity validator ADMITS an incomplete create (new `:seon.fn` row missing ns + admission source) | Opus | REFUTED by probe: the create path refuses at HEAD; class regression landed `770cf35d3`; the real hole is identity-less entities never validated (issue filed) |
 | `record-tx` creates test rows without admission source (3 batch-115 reds) | astra `test-system-stage2` | in flight (folded) |
 | Two-gate test eats the silence bound and hides every red (blocker) | astra `lane-guardrails` (bounds) | in flight |
 | `declared-row…delta`: sci/eval.clj:303 dropped `:seon.schema/ns` (writer regression) + stale shape expectation; hunks in `baseline-reds-sci-eval-documentation-2026-09-17.md` | astra `acquisition-by-provenance-s3` (holds the file) | at its next stop |
@@ -50,24 +62,27 @@ lanes is the cap and was exceeded all night — expect load; lanes never run
 | Independent end-to-end hook verifier on both platforms | Opus | queued behind the hook agent |
 | `datahike.api/with` admission-bypass detector | Opus | queued |
 | Republish margin (173 s of 180): issue-index at publication, complete-publication cost | Opus | queued |
-| Cold gates owed for every slice landed since the resume (batch 116 once the platform tier is green) | orchestrator | queued |
+| Cold gates owed for every slice landed since the resume | orchestrator | batch 116 running (platform A, then 25 namespaces B); waited 17 min for a slot under load 71 |
+| Load cap: ≤4 editing lanes, three test slots shared with iteration | orchestrator | EXCEEDED at 03:15Z (six codex + three Opus); nothing new launches until batch 116 has run; prune before adding |
 
 ### Phase 1 — the one reset
 | Item | Owner | Status |
 |---|---|---|
 | Edge retype (calls/references/reach as indexed symbol sets), stub minting + tombstones + second validator deleted, `:seon.fn/file` required, G4 provenance fact, the 19 unsatisfiable-required keys, deletion refusal in `write-report-error` (strict, no escape — ruled), `:seon.agent/archived-tx`, `capability-fn` ref deleted, fn.ast merge-then-delete, S2, S6 | integrator on worktree branch `reset-batch` (pushed) | in flight |
 | Validator cost on the writer thread (75.9 → 41.6 s; more owed) | integrator | in flight |
-| Message/wake/provenance modeling from the prior notes (`:seon.eval/origin`, `about`, `refreshes`; owner: not identity values, refactor the model) | Opus research | in flight → then a design decision with pros/cons |
+| Message/wake/provenance model: split `about` three ways, `from` the inside marker, origin → `:seon.issue/id`, `refreshes` deleted, inbox-retraction drift repaired (rulings §1h) | astra `message-wake-model` (high) | in flight |
+| Datahike modeling study: second opinion on the reset batch; its corrections OVERRIDE prior schema decisions (§1i); O9: a value edge needs `{:seon.db/index true}` | astra `datahike-modeling-study` (high) | in flight (skill edits on disk; note not landed) |
+| Data-modeling decision guide (owner: retract vs archived, refs vs identities, one reasoned guide) | Opus | landed `ec350ece0` (`docs/seon/architecture/data-modeling-guide.md`); its link lines in AGENTS.md + both skills uncommitted (files held) |
 | Reset of default with the whole batch + Juniper reseed + live proofs (walk parity; a deletion refused naming callers; an archived issue retracted) | orchestrator | after the branch is green and merged |
 
 ### Phase 2 — the runtime is the database
 | Item | Owner | Status |
 |---|---|---|
 | S3 base SCI context as pure `(base-ctx db)`; overrides by provenance; regenerate on accepted change; base diffs proven equal or deleted by measurement | astra `acquisition-by-provenance-s3` | in flight |
-| S12 REPL operations: reads landed (`a2e16338b`); `ns-unmap!`/`remove-ns!`/`ns-unalias!` breaks-first + hook arms forbidding bypass forms + `overrides` | astra `repl-program-operations` | in flight |
+| S12 REPL operations: reads `a2e16338b`, writes `f5d268ed6` (breaks-first `ns-unmap!`/`remove-ns!`/`ns-unalias!`, `overrides`) | astra `repl-program-operations` | landed; owed: hook-arm hunk (sci/eval.clj held by S3) + AGENTS.md vocabulary rows; live proof after adoption works |
 | S12 after the reset: `rename!`, `move!`, `change-contract!`, `revert!`, `launch!`, `seon.program/unresolved-callers` | astra | queued (Phase 1) |
 | Tier 3: implementations as declarations (defmethod/protocol bodies as rows) | astra | queued (Phase 1) |
-| Debug page outline (turns → units → HTML with AI-text toggle; comments as thinking; raw prompt) | Opus | in flight |
+| Debug page outline (turns → units → HTML with AI-text toggle; comments as thinking; raw prompt) | Opus | landed `c81946d4a` (`?outline=true`); screenshots blocked by the config loss |
 | S10 conversational reply | astra | queued (S7, S11 landed) |
 | S8 root collects at 2× automatically | Opus | queued |
 | Small fixes: pull's 1,000 cap on reach reads; captured-history compare; `:entity-id/syntax`; `:defined-by`; reporter ex-data; the reporter's FAIL line pointing at the enclosing `let` | Opus | in flight |
