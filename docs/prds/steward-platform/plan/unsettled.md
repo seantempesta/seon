@@ -2097,6 +2097,15 @@ current dirty hunk is the S3 lane's base-ctx paragraph (not guardrails');
 guardrails resumed with LANE_SID after its own new resume path refused a
 pre-change lane (backfill from the retained log = its next item).
 
+**S12 write operations LANDED** (`f5d268ed6`): `my.program/ns-unmap!`,
+`remove-ns!`, `ns-unalias!` as our functions — `breaks` first, the flat
+refusal with the affected set and computed plan when anything would break
+(neither db nor ctx touched), else the facts through the existing writer and
+only then the native SCI call; `overrides` query; 7/98 in a candidate
+context. Owed: the hook-arm hunk (sci/eval.clj held by S3; its regression
+red by design until then) and the AGENTS.md vocabulary rows (file held by
+S3). Live proof deferred: adoption refused tree-wide (S3's seam).
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
