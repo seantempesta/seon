@@ -1250,6 +1250,10 @@
   (route/path ::route/agent-debug {:id agent-id}
               (cond-> {:turn turn-id} raw? (assoc :prompt "true"))))
 
+(defn- outline-url
+  [agent-id]
+  (route/path ::route/agent-debug {:id agent-id} {:outline "true"}))
+
 (defn- session-origin [database row saved]
   (cond
     (:seon.cluster.eval/error saved) "error"
@@ -1379,15 +1383,23 @@
   (let [agent-id (:seon.agent/id request)
         rows (turn-rows (:seon.db/db request) agent-id)
         selected (or (:seon.turn/id request) (when (vector? rows) (:seon.turn/id (last rows))))
-        url (when selected (session-url agent-id selected (::raw? request)))]
+        ;; THE OUTLINE IS NOT TURN-SCOPED. It names every turn, so its
+        ;; deferred fetch carries no turn id; the selected-turn prompt keeps
+        ;; its own url unchanged.
+        url (cond
+              (not selected) nil
+              (::outline? request) (outline-url agent-id)
+              :else (session-url agent-id selected (::raw? request)))]
     [:section {:id (session-id agent-id) :class "seon-session" :data-ignore-morph ""}
      (session-header request (if (vector? rows) rows []))
      [:h2 "Session"]
      (cond
        (:seon.error/kind rows) [:p {:class "seon-emission-error"} (:seon.error/message rows)]
-       selected
+       url
        [:p {:role "status" :data-init (str "@get('" url "')")}
-        "Loading the selected turn’s saved prompt…"]
+        (if (::outline? request)
+          "Loading the agent’s history outline…"
+          "Loading the selected turn’s saved prompt…")]
        :else [:p "No turns recorded."])]))
 
 (defn render-session
@@ -1519,6 +1531,228 @@
                   (get-in projection [:seon.schema.projection/forms schema-key])))
         (some-> schema-key str)
         (str "Evaluation " (inc (or (:seon.cluster.eval/ordinal saved) 0))))))
+
+;;; ---------------------------------------------------------------------------
+;;; The outline
+;;;
+;;; THE SESSION PANEL IS AN OUTLINE, NOT A DUMP (owner, 2026-09-16). Every unit
+;;; in the agent's history is ONE evaluation rendered through the evaluation
+;;; schema's declared pair, and it knows its origin: the turn that produced it,
+;;; its ordinal, the entity whose render declared it (`:seon.eval/origin`), the
+;;; renderer that produced its shown text (`:seon.eval/renderer`), and what it
+;;; costs under the agent's own calibration.
+;;;
+;;; NOTHING HERE RENDERS A SECOND TIME. The AI bytes are the ones acquisition
+;;; already composed — the same bytes `seon.cluster.prompt/compose` joins — and
+;;; the HTML is the same declared pair the agent page selects. There is no
+;;; presentation clipping on this path (2.4): the shown text each unit carries
+;;; was bounded once, at evaluation time, by the value renderer.
+;;; ---------------------------------------------------------------------------
+
+(defn- outline-signal
+  "One Datastar signal per unit: false shows the HTML pair, true the AI bytes."
+  [evaluation-id]
+  (str "ai" (str/replace (str evaluation-id) #"[^A-Za-z0-9]" "")))
+
+(defn- outline-turn-kind
+  "The turn's kind as the outline names it, derived, never stamped.
+
+  `turn-kind` already derives provider/system/virtual from the turn's own
+  facts; the agent's FIRST system turn is its opening, which is the same rule
+  `session-origin` uses for a unit."
+  [database row]
+  (let [kind (turn-kind database row)]
+    (if (and (zero? (::ordinal row)) (= "System" kind)) "Opening" kind)))
+
+(defn- outline-calibration
+  "The calibration the prompt itself would price these units against.
+
+  A model with recorded usage supplies its own ratio through
+  `seon.cluster.prompt/agent-calibration`; an agent with no settled attempt
+  yet uses the measured shipped prior rather than inventing one."
+  [database agent-id rows]
+  (let [model (some :seon.ai/model
+                    (reverse (sort-by :seon.ai.attempt/ordinal
+                                      (mapcat :seon.turn/attempts rows))))
+        fitted (when model
+                 ((requiring-resolve 'seon.cluster.prompt/agent-calibration)
+                  database agent-id model))]
+    (if (or (nil? fitted) (:seon.error/kind fitted))
+      tokens/shipped-calibration
+      fitted)))
+
+(defn- outline-origins
+  "Name the entity whose render declared each generated evaluation.
+
+  `:seon.eval/origin` is a ref, so the outline reads the identity attributes
+  actually installed on this database rather than guessing a naming
+  convention (2.2)."
+  [database saveds]
+  (let [eids (into [] (comp (keep #(get-in % [:seon.eval/origin :db/id])) (distinct))
+                   saveds)
+        attributes (identity-attributes database)
+        rows (pulled-many database (into [:db/id] attributes) eids)]
+    (into {}
+          (keep (fn [row]
+                  (when-let [pair (first (keep (fn [attribute]
+                                                 (when-some [value (get row attribute)]
+                                                   [attribute value]))
+                                               attributes))]
+                    [(:db/id row) pair])))
+          rows)))
+
+(defn- outline-renderer
+  "The declared renderer that produced this unit's saved shown text.
+
+  Absent means the value renderer's own AI projection made it; the unit
+  itself is always emitted by the evaluation schema's declared pair."
+  [saved]
+  (or (some-> (get-in saved [:seon.eval/renderer-fn :seon.fn/sym]) symbol)
+      (:seon.eval/renderer saved)
+      'seon.render.value/render-ai))
+
+(defn- outline-unit
+  "One collapsed unit line and, expanded, its two honest projections."
+  [request projection origins calibration database row entry saved]
+  (let [bytes (or (:seon.render.history/bytes entry) "")
+        evaluation-id (:seon.cluster.eval/id saved)
+        signal (outline-signal evaluation-id)
+        origin (session-origin database row saved)
+        declared (get origins (get-in saved [:seon.eval/origin :db/id]))
+        html (render/render-call
+              (assoc request :seon.render/value saved
+                     :seon.render/output :seon.render/html
+                     :seon.render.call/id (:seon.render.history/call-id entry)))]
+    [:details {:class "seon-outline-unit" :data-evaluation-id evaluation-id
+               :data-unit-origin origin :data-preserve-attr "open"}
+     [:summary {:class "seon-outline-unit-line"}
+      [:span {:class (str "seon-outline-ordinal seon-origin-" origin)}
+       (str "#" (:seon.cluster.eval/ordinal saved))]
+      [:span {:class "seon-outline-origin"} origin]
+      (when declared
+        [:span {:class "seon-outline-declared"}
+         (str "declared by " (pr-str (first declared)) " " (pr-str (second declared)))])
+      [:span {:class "seon-outline-schema"}
+       (str (emission-label projection saved) " · " (outline-renderer saved))]
+      [:span {:class "seon-outline-tokens"}
+       (str "≈" (format "%,d" (tokens/estimate bytes calibration)) " tokens")]]
+     [:div {:class "seon-outline-unit-body"}
+      [:button {:type "button" :class "seon-outline-toggle"
+                (keyword "data-on:click") (str "$" signal " = !$" signal)}
+       [:span {:data-show (str "!$" signal)} "As the model saw it"]
+       [:span {:data-show (str "$" signal)} "Rendered"]]
+      [:div {:class "seon-outline-html" :data-show (str "!$" signal)}
+       (if (:seon.error/kind html)
+         [:div {:class "seon-emission-error"}
+          (error/render-html (assoc request :seon.render/value html))]
+         html)]
+      [:pre {:class "seon-outline-ai" :data-show (str "$" signal)
+             :data-ai-bytes (utf8-size bytes)}
+       [:code bytes]]]]))
+
+(defn- outline-everything
+  "The composed prompt, exactly as the provider boundary receives it.
+
+  This is `seon.cluster.prompt/prompt`'s own text — `compose` over the
+  selection, then the turn frame — not a second assembly of the same units.
+  A refusal is shown as the refusal it is."
+  [request]
+  (let [composed (try
+                   ((requiring-resolve 'seon.cluster.prompt/prompt)
+                    (:seon.db/db request) request)
+                   (catch clojure.lang.ExceptionInfo failure
+                     (let [refusal (ex-data failure)]
+                       (if (:seon.error/kind refusal) refusal (throw failure)))))]
+    [:details {:class "seon-outline-everything" :data-preserve-attr "open"}
+     [:summary
+      (if (:seon.error/kind composed)
+        "Show everything · the composed prompt was refused"
+        (let [text (:seon.cluster.prompt/text composed)]
+          (str "Show everything · the composed prompt · "
+               (format "%,d" (utf8-size text)) " bytes · ≈"
+               (format "%,d" (tokens/estimate text)) " tokens")))]
+     (if (:seon.error/kind composed)
+       [:div {:class "seon-emission-error"}
+        (error/render-html (assoc request :seon.render/value composed))]
+       [:pre {:class "seon-session-raw"
+              :data-prompt-bytes (utf8-size (:seon.cluster.prompt/text composed))}
+        [:code (:seon.cluster.prompt/text composed)]])]))
+
+(defn render-outline
+  "The agent's history as an OUTLINE: one line per turn, one line per unit.
+
+  A collapsed turn names its kind and its size; a collapsed unit names its
+  ordinal, what produced it, the schema whose render made it and its tokens.
+  Expanding a unit shows the declared HTML pair, with one toggle to the exact
+  AI bytes the model read. Every number and every byte derives from the same
+  acquisition the prompt composes.
+
+  AN UNAVAILABLE PANEL SAYS SO. A refused acquisition renders the refusal;
+  it never leaves the reader a spinner."
+  {:malli/schema [:=> [:cat :seon.cluster.prompt/request] :seon.render/hiccup]}
+  [request]
+  (let [database (:seon.db/db request)
+        agent-id (:seon.agent/id request)
+        rows (turn-rows database agent-id)
+        acquired (try
+                   (render/acquire-context! (dissoc request :seon.turn/id))
+                   (catch clojure.lang.ExceptionInfo failure
+                     (let [refusal (ex-data failure)]
+                       (if (:seon.error/kind refusal) refusal (throw failure)))))
+        entries (:seon.render.history/entries acquired)
+        saved (mapv :seon.render/value entries)
+        by-eid (into {} (map (juxt :db/id identity)) (if (vector? rows) rows []))
+        projection (when-let [ctx (:seon.sci.eval/ctx request)]
+                     ((requiring-resolve 'seon.sci.kernel/context-projection) ctx))
+        origins (outline-origins database saved)
+        calibration (outline-calibration database agent-id (if (vector? rows) rows []))
+        by-turn (group-by #(get-in (:seon.render/value %)
+                                   [:seon.cluster.eval/run :db/id])
+                          entries)
+        signals (str "{" (str/join "," (map #(str (outline-signal (:seon.cluster.eval/id %))
+                                                  ":false")
+                                            saved))
+                     "}")]
+    [:section {:id (session-id agent-id) :class "seon-session seon-outline"
+               :data-ignore-morph "" :data-signals signals}
+     (session-header request (if (vector? rows) rows []))
+     [:h2 "Session"]
+     (cond
+       (:seon.error/kind rows)
+       [:div {:class "seon-emission-error"}
+        (error/render-html (assoc request :seon.render/value rows))]
+
+       (:seon.error/kind acquired)
+       [:div {:class "seon-emission-error"}
+        (error/render-html (assoc request :seon.render/value acquired))]
+
+       (empty? rows) [:p "No turns recorded."]
+
+       :else
+       [:div {:class "seon-outline-turns"}
+        (for [row rows
+              :let [units (get by-turn (:db/id row) [])
+                    turn-bytes (transduce (map #(or (:seon.render.history/bytes %) "")) str units)]]
+          [:details {:class "seon-outline-turn" :data-turn-id (:seon.turn/id row)
+                     :data-turn-kind (outline-turn-kind database row)
+                     :data-preserve-attr "open"}
+           [:summary {:class "seon-outline-turn-line"}
+            [:span {:class "seon-outline-turn-ordinal"} (str "Turn " (::ordinal row))]
+            [:span {:class "seon-outline-turn-kind"} (outline-turn-kind database row)]
+            [:span {:class "seon-outline-turn-units"}
+             (str (count units) (if (= 1 (count units)) " unit" " units"))]
+            [:span {:class "seon-outline-tokens"}
+             (str "≈" (format "%,d" (tokens/estimate turn-bytes calibration)) " tokens")]]
+           (if (seq units)
+             (into [:div {:class "seon-outline-units"}]
+                   (map (fn [entry]
+                          (let [value (:seon.render/value entry)]
+                            (outline-unit request projection origins calibration database
+                                          (get by-eid (get-in value [:seon.cluster.eval/run :db/id]))
+                                          entry value))))
+                   units)
+             [:p {:class "seon-outline-empty"} "This turn stored no evaluations."])])
+        (outline-everything request)])]))
 
 (defn- ledger-acquisition [request]
   (let [selector '[:seon.cluster.eval/source :seon.cluster.eval/comment

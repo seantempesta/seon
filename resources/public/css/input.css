@@ -848,6 +848,27 @@ details.tool-call-details[open] .tool-preview {
 .seon-session-gutter { align-self: stretch; display: flex; flex-direction: column; justify-content: flex-start; align-items: flex-start; padding: 0.5rem 0.6rem; font-size: 0.625rem; color: var(--color-text-400); border-right: 1px solid var(--color-base-800); }
 .seon-session-gutter span { display: block; }
 .seon-session-line pre, .seon-session-raw { margin: 0; padding: 0.5rem 0.75rem; font: inherit; overflow: visible; }
+/* The outline — one line per turn, one line per unit, expanded on demand. */
+.seon-outline-turns { font-family: var(--font-mono); font-size: 0.75rem; }
+.seon-outline-turn { border-top: 1px solid var(--color-base-800); }
+.seon-outline-turn > summary, .seon-outline-unit > summary { cursor: pointer; list-style: none; padding: 0.35rem 0.6rem; display: flex; flex-wrap: wrap; gap: 0 0.75rem; align-items: baseline; }
+.seon-outline-turn > summary::-webkit-details-marker, .seon-outline-unit > summary::-webkit-details-marker { display: none; }
+.seon-outline-turn > summary::before, .seon-outline-unit > summary::before { content: "\25B8"; color: var(--color-text-400); }
+.seon-outline-turn[open] > summary::before, .seon-outline-unit[open] > summary::before { content: "\25BE"; }
+.seon-outline-turn-ordinal { font-weight: 600; }
+.seon-outline-turn-kind, .seon-outline-origin { color: var(--color-text-300); }
+.seon-outline-turn-units, .seon-outline-tokens, .seon-outline-schema, .seon-outline-declared { color: var(--color-text-400); font-size: 0.625rem; }
+.seon-outline-tokens { margin-left: auto; }
+.seon-outline-units { border-left: 2px solid var(--color-base-800); margin-left: 0.75rem; }
+.seon-outline-unit { border-top: 1px solid var(--color-base-900); }
+.seon-outline-ordinal { color: var(--color-text-400); }
+.seon-outline-unit-body { padding: 0.25rem 0.6rem 0.6rem 1.5rem; }
+.seon-outline-toggle { font: inherit; font-size: 0.625rem; color: var(--color-text-400); background: none; border: 1px solid var(--color-base-700); border-radius: 0.2rem; padding: 0.1rem 0.4rem; cursor: pointer; margin-bottom: 0.35rem; }
+.seon-outline-ai { margin: 0; padding: 0.5rem 0.75rem; font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--color-base-900); }
+.seon-outline-empty { padding: 0.35rem 0.6rem; color: var(--color-text-400); font-size: 0.625rem; }
+.seon-outline-everything { border-top: 1px solid var(--color-base-700); margin-top: 0.75rem; }
+.seon-outline-everything > summary { cursor: pointer; padding: 0.5rem 0.6rem; font-size: 0.75rem; }
+.seon-outline-everything .seon-session-raw { white-space: pre-wrap; overflow-wrap: anywhere; background: var(--color-base-900); }
 .seon-ledger { font-family: var(--font-mono); font-size: 0.75rem; }
 .seon-ledger-strip { margin: 0.35rem 0 0.5rem; }
 .seon-problem-summary { margin: 0.25rem 0; font-size: 0.75rem; }

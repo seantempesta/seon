@@ -10,6 +10,7 @@
             [seon.config :as config]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
+            [seon.cluster.prompt :as prompt]
             [seon.context-blocks-fixture :as fixture]
             [seon.eval :as evaluation]
             [seon.flow :as flow]
@@ -392,11 +393,11 @@
                           :seon.context.capture/prompt (:seon.cluster.prompt/text acquired)}])
              request (assoc request :seon.db/db @connection :seon.turn/id "history-probe-turn")]
          (is (:db-after captured) (pr-str captured))
-         (is (= acquired (#'render/captured-history request acquired)))
-         (is (= :seon.render/capture-mismatch
-                (:seon.error/kind (#'render/captured-history request
-                                   (assoc acquired :seon.cluster.prompt/text "Changed canonical bytes"))))
-             "Capture verification refuses a mismatch instead of repulling entries to repair it."))
+         (is (nil? (:seon.error/kind (render/acquire-context! request)))
+             "Acquisition publishes units; it does not judge a capture it cannot
+              recompose. The capture is compose(select(units)) plus the frame,
+              so only seon.cluster.prompt holds the bytes to compare — see
+              seon.cluster.prompt-test/a-replay-under-a-selecting-budget-reconstructs-its-own-capture."))
        (let [changed (db/transact! connection
                                   [[:db/add component-eid :my.plan/objective
                                     "The current component changed"]])]
@@ -851,3 +852,190 @@
              (is (= 1 @batches) "retained acquisition carries its effect summaries")
              (is (= ["fixture-model"] @calibrations))
              (is (= first-labels @labels) "retained history carries evaluation labels"))))))))
+
+;;; ---------------------------------------------------------------------------
+;;; The debug outline
+;;;
+;;; The owner's ask (2026-09-16): the session panel is an OUTLINE, not a dump.
+;;; These assert the three things that make it one — the structure derives from
+;;; the same acquisition the prompt composes, the AI toggle serves the stored
+;;; shown text byte for byte, and "show everything" is the composed prompt.
+;;; ---------------------------------------------------------------------------
+
+(defn- outline-fixture
+  "One agent whose history is an opening system turn and a provider turn.
+
+  THE TURNS ARE OPENED BY THEIR OWN WRITER. A hand-written turn map carries no
+  `:seon.runtime/turns` edge, so the agent's history query finds nothing and
+  the panel would read that absence as an agent with no history at all."
+  [connection]
+  (config/apply! {:seon.db/connection connection
+                  :seon.boot/cluster-name "debug-outline"
+                  :seon.config/manifest {:seon.config.ai/no-provider true}})
+  (cluster/ensure-cluster-entity! connection "debug-outline" cluster/boot-process-identity)
+  (let [agent-written
+        (support/transacted!
+         connection
+         [{:seon.ns/name 'my.agents.outline-probe}
+          {:seon.agent/id "outline-probe"
+           :seon.agent/namespace [:seon.ns/name 'my.agents.outline-probe]}])
+        opening
+        (support/transacted!
+         connection
+         (conj (vec (turn/open-tx {:seon.turn/id "outline-turn-0"
+                                   :seon.turn/agent [:seon.agent/id "outline-probe"]
+                                   ;; A generated opening IS a system turn; the
+                                   ;; kind is derived from this fact, not stamped.
+                                   :seon.turn.work/situation :generate
+                                   :seon.turn/opened-tx "datomic.tx"}))
+               [:db/add [:seon.turn/id "outline-turn-0"]
+                :seon.turn/reply "The opening was generated."]
+               [:db/add [:seon.turn/id "outline-turn-0"]
+                :seon.turn/closed-tx "datomic.tx"]))
+        opening-evaluation
+        (support/transacted!
+         connection
+         [{:seon.cluster.eval/id "outline-e0"
+           :seon.cluster.eval/at (java.util.Date. 0)
+           :seon.cluster.eval/run [:seon.turn/id "outline-turn-0"]
+           :seon.cluster.eval/ordinal 0
+           :seon.cluster.eval/ns [:seon.ns/name 'my.agents.outline-probe]
+           :seon.cluster.eval/source "(my.plan/plan {})"
+           :seon.eval/origin [:seon.agent/id "outline-probe"]
+           :seon.eval/shown "The plan's shown text."}])
+        provider
+        (support/transacted!
+         connection
+         (conj (vec (turn/open-tx {:seon.turn/id "outline-turn-1"
+                                   :seon.turn/agent [:seon.agent/id "outline-probe"]
+                                   :seon.turn/opened-tx "datomic.tx"}))
+               {:db/id "attempt" :seon.ai.attempt/id "outline-attempt"
+                :seon.ai.attempt/ordinal 0
+                :seon.ai.attempt/at (java.util.Date. 1)
+                :seon.ai/endpoint "http://fixture.invalid"
+                :seon.ai.attempt/settings-edn "{}"
+                :seon.ai/model "fixture-model"
+                :seon.ai.attempt/finish-reason "stop"}
+               [:db/add [:seon.turn/id "outline-turn-1"] :seon.turn/attempts "attempt"]
+               [:db/add [:seon.turn/id "outline-turn-1"] :seon.turn/closed-tx "datomic.tx"]))
+        evaluation
+        (support/transacted!
+         connection
+         [{:seon.cluster.eval/id "outline-e1"
+           :seon.cluster.eval/at (java.util.Date. 2)
+           :seon.cluster.eval/run [:seon.turn/id "outline-turn-1"]
+           :seon.cluster.eval/ordinal 0
+           :seon.cluster.eval/ns [:seon.ns/name 'my.agents.outline-probe]
+           :seon.cluster.eval/comment ";; I should check the total."
+           :seon.cluster.eval/source "(+ 40 2)"
+           :seon.eval/shown "42"}])]
+    (doseq [written [agent-written opening opening-evaluation provider evaluation]]
+      (is (:db-after written) (pr-str written)))
+    {:seon.db/db @connection
+     :seon.db/connection connection
+     :seon.agent/id "outline-probe"
+     :seon.cluster/name "debug-outline"
+     :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
+     :seon.sci.admit/caps (config/result-caps (config/defaults))
+     :seon.sci.eval/time-limit-ms 5000
+     :seon.config/on-core-error :record}))
+
+(defn- outline-nodes [rendered predicate]
+  (filter #(and (vector? %) (map? (second %)) (predicate (second %)))
+          (tree-seq coll? seq rendered)))
+
+(deftest the-debug-outline-is-one-line-per-turn-and-one-line-per-unit
+  (support/with-database
+   (fn [connection]
+     (let [request (outline-fixture connection)
+           rendered (transcript/render-outline request)
+           turns (outline-nodes rendered :data-turn-kind)
+           units (outline-nodes rendered :data-evaluation-id)
+           raw (outline-nodes rendered #(= "seon-session-raw" (:class %)))]
+       (is (nil? (:seon.error/kind rendered)) (pr-str rendered))
+       (is (not (str/includes? (element-text rendered) "No turns recorded."))
+           (pr-str rendered))
+
+       ;; (1) One line per turn, collapsed, with its kind and its size.
+       (is (= 2 (count turns)) (pr-str (map second turns)))
+       (is (every? #(= :details (first %)) turns)
+           "a turn line stays collapsed until it is opened")
+       (is (= ["Opening" "Provider"] (mapv #(:data-turn-kind (second %)) turns))
+           "the kind derives from the turn's own facts, never a stamp")
+       (doseq [turn turns]
+         (is (re-find #"≈[\d,]+ tokens" (element-text turn))
+             (str "every turn line names its size: " (element-text turn))))
+       (is (str/includes? (element-text (first turns)) "Turn 0"))
+       (is (str/includes? (element-text (first turns)) "1 unit"))
+
+       ;; (2) One line per unit: ordinal, what produced it, the schema whose
+       ;; render made it, and its tokens.
+       (is (= 2 (count units)) (pr-str (map second units)))
+       (is (every? #(= :details (first %)) units))
+       (is (= ["outline-e0" "outline-e1"]
+              (mapv #(:data-evaluation-id (second %)) units)))
+       (is (= ["opening" "agent"] (mapv #(:data-unit-origin (second %)) units))
+           "the opening and the agent's own evaluation are distinguished")
+       (let [opening (element-text (first units))]
+         (is (str/includes? opening "#0") "the unit names its ordinal")
+         (is (re-find #"≈[\d,]+ tokens" opening) "the unit names its tokens")
+         (is (str/includes? opening "seon.render.value/render-ai")
+             "the unit names the renderer that produced its shown text")
+         (is (str/includes? opening ":seon.agent/id")
+             "the unit names the entity whose render declared it")
+         (is (str/includes? opening "outline-probe")))
+
+       ;; (4) Exactly one composed prompt, behind the one "show everything".
+       (is (= 1 (count raw)) "the outline is not a dump")
+       (is (str/includes? (element-text rendered) "Show everything"))))))
+
+(deftest the-outline-toggle-serves-the-exact-stored-shown-text
+  (support/with-database
+   (fn [connection]
+     (let [request (outline-fixture connection)
+           acquired (render/acquire-context! request)
+           entries (:seon.render.history/entries acquired)
+           expected (mapv :seon.render.history/bytes entries)
+           rendered (transcript/render-outline request)
+           ai (outline-nodes rendered #(= "seon-outline-ai" (:class %)))]
+       (is (= 2 (count expected)) (pr-str acquired))
+       (is (= 2 (count ai)) (pr-str rendered))
+       (is (= expected (mapv element-text ai))
+           "the AI toggle serves the acquired bytes byte for byte")
+       ;; The bytes ARE the evaluation schema's declared AI pair, unchanged.
+       (is (= expected
+              (mapv #(repl/render-ai (assoc request :seon.render/value %
+                                            :seon.cluster.eval/id
+                                            (:seon.cluster.eval/id %)))
+                    (map :seon.render/value entries)))
+           "no second renderer produced them")
+       (is (str/includes? (first expected) "The plan's shown text.")
+           "the stored shown text travels unchanged")
+       ;; (3) The comment is its own thinking block in the HTML projection.
+       (is (= 1 (count (outline-nodes rendered #(= "seon-eval-thinking" (:class %)))))
+           (pr-str rendered))))))
+
+(deftest the-outlines-show-everything-is-the-composed-prompt
+  (support/with-database
+   (fn [connection]
+     (let [request (outline-fixture connection)
+           composed (prompt/prompt (:seon.db/db request) request)
+           rendered (transcript/render-outline request)
+           raw (first (outline-nodes rendered #(= "seon-session-raw" (:class %))))]
+       (is (nil? (:seon.error/kind composed)) (pr-str composed))
+       (is (some? raw) (pr-str rendered))
+       (is (= (:seon.cluster.prompt/text composed) (element-text raw))
+           "show everything is the prompt the provider boundary receives")
+       ;; And that text begins with `compose` over a selection of the very
+       ;; units the outline lists — the same function, not a second assembly.
+       (let [acquired (render/acquire-context! request)
+             profile (render/request-profile request)
+             settings (#'prompt/effective-ai-settings (:seon.db/db request) "outline-probe")
+             selection (prompt/select (vec (:seon.render.history/entries acquired))
+                                      (:seon.config.ai/prompt-token-budget settings)
+                                      (prompt/model-calibration
+                                       (:seon.db/db request)
+                                       (:seon.config.ai/model settings))
+                                      "outline-probe" profile)]
+         (is (str/starts-with? (element-text raw) (prompt/compose selection))
+             "the outline shows compose's output, never a re-join"))))))

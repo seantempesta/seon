@@ -3070,6 +3070,23 @@
                                    (assoc service :seon.turn/id turn-id
                                           ::transcript/raw? raw?)))))}))))
 
+(defn- debug-outline-response
+  "The agent's history OUTLINE, deferred from the session page's first paint.
+
+  It is not turn-scoped: the outline names every turn, so the request carries
+  no turn id and `render-outline` acquires the whole history once."
+  [{connection :seon.store/connection-object :as service} agent-id]
+  (let [database (db/db connection)]
+    {:status 200
+     :headers {"content-type" "text/html; charset=utf-8"
+               "datastar-mode" "replace"}
+     :body (hiccup/->string
+            (transcript/render-outline
+             (session-controls
+              (debug-turn-request database connection agent-id
+                                  (:seon.sci.admit/caps service)
+                                  (dissoc service :seon.turn/id)))))}))
+
 (defn- debug-response
   [{connection :seon.store/connection-object
     :as service}
@@ -3085,6 +3102,10 @@
                            :data-signals__ifmissing "{showEverything:true}"}]
                     (map hiccup/raw)
                     (vals (dissoc page stream-strip-id))))})
+
+    (and agent-id (= "true" (get (query-params request) "outline"))
+         (= "true" (get-in request [:headers "datastar-request"])))
+    (debug-outline-response service agent-id)
 
     (and (get (query-params request) "turn")
          (= "true" (get-in request [:headers "datastar-request"])))
@@ -3113,8 +3134,13 @@
                                     (cond-> service
                                       (get (query-params request) "turn")
                                       (assoc :seon.turn/id (get (query-params request) "turn"))
+                                      ;; THE SESSION PANEL IS AN OUTLINE, NOT A
+                                      ;; DUMP (owner, 2026-09-16). `?prompt=true`
+                                      ;; defers to the outline, which carries the
+                                      ;; composed prompt behind its own control.
                                       (= "true" (get (query-params request) "prompt"))
-                                      (assoc ::transcript/raw? true)))))
+                                      (assoc ::transcript/raw? true
+                                             ::transcript/outline? true)))))
                [:details {:class "seon-session-record"
                           (keyword "data-on:toggle")
                           (str "el.open && @get('" (route/path ::route/agent-debug {:id agent-id} {:record "true"}) "')")}
