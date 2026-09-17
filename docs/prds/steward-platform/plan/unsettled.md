@@ -2440,3 +2440,18 @@ working tree, never Sonnet.
 - Reset: preflight 0.3 s, down 1 s, destroy 10 s, republish 145 s (bound
   180); refork running. Batch 117 published its base in 80 s — the invalid
   note was the whole base-publication blocker.
+- **Reset refork REFUSED "held elsewhere" naming no holder** (log
+  `reset-refork-60487.log`; `lsof` found nothing a second later; only
+  candidate: the reset's own republish JVM releasing its flock after its
+  phase reported complete). Issue filed (`f476299d4`, blocker: holder-less
+  refusal + phase boundary ≠ process boundary). Finished by hand: `init
+  default --force; start; init --dev default` (log
+  `tmp/orchestrator/refork/resume-reset-2026-09-17T0500Z.log`).
+- **Declaration-population tests FIXED** (`b5cabe732`, Opus): one public
+  `seon.schema.edn/forget-packaged-population!` under the resolution's own
+  lock; both regressions forget before measuring and assert the memo's
+  zero-read second resolution as wanted behaviour; 23/1082 green fast.
+  **Batch 117 A** (platform, HEAD b8dc9d008): 96/681/2F/0E — exactly those
+  two reds, results recorded this time (the `:seon.test.run/immutable`
+  refusal did not recur; stage 2 has the evidence). Platform tier is green
+  once b5cabe732 is gated: batch 118.
