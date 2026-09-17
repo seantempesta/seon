@@ -1872,6 +1872,12 @@ allowed" — bytes left by the running program-ops lane; the lane meets the
 same block on its next call and repairs it. First live proof of the
 closed shell route.
 
+**Integrator LANDED writer-cost slice** (`1768b466b`): complete publication
+validation 75.9 s → 41.6 s (prebuilt manifest); 75/1,007 green; the 19 G4
+keys folded into the reset plan. Edge retype still unlanded: program.cljc,
+schema.clj and sci/eval.clj held (S3 and program-ops lanes). Fault-path fix
+landed `27f0a0242` (the failing function's identity minted at the writer).
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
