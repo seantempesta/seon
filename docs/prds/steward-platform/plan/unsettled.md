@@ -3562,3 +3562,9 @@ as orchestrator/astra lanes, easy pool as the first live-agent slice).
   arming under `:record` refuses without one; `:panic` needs none; the
   fixture supplies its own committer. Lane resumed with expanded ownership
   (cluster.clj arming call site, env member if needed).
+- Wrapper lane stopped again at a held hunk (`06b9616b0`): the SCI-side
+  wrapper is built by `install-function-contract!` (`sci/eval.clj:674`)
+  and the committer must thread through `base-ctx`; eval.clj is held by
+  `turn-settlement-post-reset`. Resumed on the HOST side only (instrument
+  + cluster arming + error facets + regressions); the SCI side resumes when
+  eval.clj frees.
