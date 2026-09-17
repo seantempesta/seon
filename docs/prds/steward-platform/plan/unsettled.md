@@ -2506,3 +2506,21 @@ working tree, never Sonnet.
 - Stage 2 stopped at held `src/seon/sci/eval.clj` + `eval_test.clj` (the
   over-bound Opus fix holds them) after recording its acquisition-evidence
   gap (`497b36122`); resume the moment that fix lands.
+- **Batch 118 (A HEAD 2a36c0af9; B HEAD b84b0b2f1, 18 namespaces):** A
+  platform 96/683/3F — the ONLY platform red is now the launcher-fixture
+  hand-maintained file list (missing `seon.test.bounds`); guardrails lane
+  resumed on it FIRST (derive the copied set from the requires + a
+  regression). The declaration-population reds are GONE cold (`b5cabe732`
+  proven). B: 350/4,056/28F/0E, recorded. By class: transaction-feedback
+  12F (the lane-filed validation-boundary issue; owner: the write-admission
+  design — the final-report validator changed what the feedback tests
+  assert); turn_test 12F = the retraction-provenance/schema-unregister/
+  runtime-tests-delete class (S3 + program-ops seams, `ns-unmap` durable
+  in a fresh context) + delimiter-repair timing (446/300 ms, issue open)
+  + `a-wake-meeting-an-open-turn-releases-without-a-fault` (message-wake's
+  own new regression, seam 1 landed mid-gate; its fast verification is
+  the lane's); rereads 1F (`failed-evaluations-are-not-promoted…`, S3
+  admission class); the two known (requery render; `my.program/native!`).
+  Everything in the memo-test fix, invalid-input fix, small fixes, seam 4
+  (rereads' other test, db, message, transcript), guardrails bounds: GREEN
+  cold. Swept `run.jppcnC`, `run.kgYuqX` (1.4 GB).
