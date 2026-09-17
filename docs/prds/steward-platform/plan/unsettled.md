@@ -1745,6 +1745,16 @@ DECIDED (F8): close the shell route — the hook fires on every tool and
 derives changed Clojure files from per-session content digests of the tree;
 shell writes are caught PostToolUse and block at once. Same agent resumed.
 
+**reset-is-total LANDED first slice** (`c4d1be3ac`, reviewed): syntax
+preflight over changed+untracked source with kondo syntax-only BEFORE any
+lifecycle wait or destruction (refusals under 2 s); lock holder timeout =
+the publication bound with holder pid + liveness printed; every phase a
+typed refusal; delete admission consolidated in `seon.fs`; 9/97 fast green.
+Boundary: the isolated drill exited 1 at republish's 180 s bound under load
+average 160 — honest firing, slice unproven until one drill reaches a live
+adopted scratch cluster; lane resumed to run it once load < 20 and to print
+per-phase elapsed ms.
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
