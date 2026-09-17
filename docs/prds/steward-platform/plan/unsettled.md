@@ -2462,3 +2462,12 @@ working tree, never Sonnet.
   `:seon.config/read-refused` instead of minting a tempid. 31/238/1F fast;
   the red is the known `the-issue-ai-render-no-longer-teaches-its-requery-
   form` (issue open, small render fix queued). Cold gate: batch 118.
+- **RESET COMPLETE ~05:05Z**: default pid 66052, fresh store, adoption
+  converged (`6aab6ab8…`), Juniper reseeded, `runtime_status` answers, ready
+  in 11.4 s. Two faults within minutes of boot, both filed: `seon.sci.eval/
+  evaluate` violates its own output contract on the admission over-bound
+  path (`:seon.cluster.eval/error` a lookup ref, contract says string; 2.2 MB
+  of evidence) → Opus fix launched; Juniper's reseed message wake refused
+  `run-exists` at open-call → message-wake lane at resume. The two "failed
+  tests" on the fresh cluster are batch 117 A's recorded declaration-
+  population reds (fixed at `b5cabe732`, gate 118).
