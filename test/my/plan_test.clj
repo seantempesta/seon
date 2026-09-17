@@ -593,6 +593,10 @@
         (is (not (contains? agent :my.plan/steps)))
         (is (not (contains? agent :my.plan/current-step)))
         (is (= "ship" (:my.plan.item/id (plan/current @connection "alice"))))
-        (support/transacted! connection [[:db.fn/retractEntity [:seon.agent/id "alice"]]])
+        (support/transacted! connection [[:db.fn/retractEntity (:db/id component)]])
+        (is (= "alice" (:seon.agent/id
+                        (db/pull @connection [:seon.agent/id]
+                                 [:seon.agent/id "alice"])))
+            "the fixture preserves the agent's durable identity")
         (is (nil? (db/pull @connection '[*] (:db/id component))))
         (is (nil? (db/pull @connection '[*] [:my.plan.item/id "ship"])))))))
