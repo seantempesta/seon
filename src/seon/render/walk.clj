@@ -180,18 +180,24 @@
 
 (defn- shallow-entity
   [entity ref-attributes id-attributes]
-  (reduce
-   (fn [result attribute]
-     (if-let [value (get result attribute)]
-       (assoc result attribute
-              (cond
-                (map? value) (ref-identity id-attributes value)
-                (sequential? value)
-                (mapv #(ref-identity id-attributes %) value)
-                :else value))
-       result))
-   (apply dissoc entity (map reverse-attribute ref-attributes))
-   ref-attributes))
+  (let [connected-attributes
+        (cond-> ref-attributes
+          (:seon.ns/name entity) (conj :seon.ns/requires))]
+    (reduce
+     (fn [result attribute]
+       (if-let [value (get result attribute)]
+         (assoc result attribute
+                (cond
+                  (= :seon.ns/requires attribute)
+                  (mapv :seon.ns/name value)
+
+                  (map? value) (ref-identity id-attributes value)
+                  (sequential? value)
+                  (mapv #(ref-identity id-attributes %) value)
+                  :else value))
+         result))
+     (apply dissoc entity (map reverse-attribute connected-attributes))
+     connected-attributes)))
 
 (defn- connection-observation
   "One elision value naming WHICH bound cut an attribute's connections.
@@ -581,7 +587,7 @@
 (defn- namespace-render-distance
   [root-namespace-eid eid entity traversal-hops]
   (if (contains? entity :seon.ns/name)
-    (if (= root-namespace-eid eid) 1 2)
+    (if (= root-namespace-eid eid) 1 0)
     traversal-hops))
 
 (defn owning-namespace
@@ -626,9 +632,11 @@
   (let [root (get-in acquisition
                      [:seon.render.walk/members
                       (first (:seon.render.walk/order acquisition))])
-        namespace-ref (get-in root [:seon.render/value
-                                    :seon.agent/namespace])]
-    (when (map? namespace-ref) (:db/id namespace-ref))))
+        entity (:seon.render/value root)
+        namespace-ref (:seon.agent/namespace entity)]
+    (if (:seon.ns/name entity)
+      (:seon.render.walk/eid root)
+      (when (map? namespace-ref) (:db/id namespace-ref)))))
 
 (defn- distance-cap-unit
   [member remaining]

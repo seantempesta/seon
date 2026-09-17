@@ -673,7 +673,13 @@
    [:p "Requires"]
    (into [:ul]
          (map (fn [required]
-                [:li [:code (pr-str required)]]))
+                (let [namespace-name (if (sequential? required)
+                                       (first required)
+                                       required)]
+                  [:li
+                   [:a {:href (route/path ::route/namespace
+                                          {:namespace (str namespace-name)})}
+                    [:code (pr-str required)]]])))
          requires)])
 
 (defn- full-html-view
@@ -766,7 +772,10 @@
   [data included-count]
   (case (::distance data)
     0 [:section {:class "seon-family-entry seon-namespace-entry"}
-       [:h2 [:code (str (::namespace-name data))]]]
+       [:h2
+        [:a {:href (route/path ::route/namespace
+                               {:namespace (str (::namespace-name data))})}
+         [:code (str (::namespace-name data))]]]]
     1 (full-html-view data included-count true)
     (compact-html-view data included-count)))
 

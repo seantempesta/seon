@@ -97,3 +97,52 @@
 (deftest test-entity-pair-is-total-through-the-issue-walk
   (exercise-pair [:seon.test/sym (quote entity-pairs.fixture/test)]
                  'seon.render.test/render-ai 'seon.render.test/render-html))
+
+(deftest namespace-page-renders-one-full-namespace-and-linked-references
+  (support/with-database
+   (fn [connection]
+     (support/seed-cluster! connection "namespace-page")
+     (support/transacted!
+      connection
+      [{:seon.ns/name 'fixture.namespace-page
+        :seon.ns/source
+        "(ns fixture.namespace-page (:require [seon.id]))\n\n(def own-marker true)"
+        :seon.ns/requires ['seon.id]}
+       {:seon.agent/id "namespace-page-agent"
+        :seon.agent/namespace [:seon.ns/name 'fixture.namespace-page]}])
+     (let [database (db/db connection)
+           request {:seon.db/db database
+                    :seon.db/connection connection
+                    :seon.agent/id "namespace-page-agent"
+                    :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
+                    :seon.render.walk/lookup
+                    [:seon.agent/id "namespace-page-agent"]
+                    :seon.render/output :seon.render/html
+                    :seon.render/distance 2
+                    :seon.render/profile
+                    (render/agent-render-profile (config/defaults))
+                    :seon.sci.admit/caps
+                    (config/result-caps (config/defaults))
+                    :seon.sci.eval/time-limit-ms 5000
+                    :seon.config/on-core-error :panic}
+           namespace-units
+           (->> (walk/neighborhood request)
+                (filter #(= :seon.ns/name
+                            (first (:seon.render.walk/lookup %))))
+                vec)
+           html-by-lookup
+           (into {}
+                 (map (juxt :seon.render.walk/lookup
+                            (comp hiccup/->string :seon.render/output)))
+                 namespace-units)
+           html (vals html-by-lookup)
+           page (str/join "" html)]
+       (is (= #{[:seon.ns/name 'fixture.namespace-page]}
+              (into #{} (map :seon.render.walk/lookup) namespace-units))
+           (pr-str (mapv :seon.render.walk/lookup namespace-units)))
+       (is (= 1 (count (filter #(str/includes? % "namespace source") html)))
+           page)
+       (is (str/includes? page "own-marker") page)
+       (is (str/includes? page "href=\"/ns/seon.id\"") page)
+       (is (not (str/includes? page "seon.id/id"))
+           page)))))
