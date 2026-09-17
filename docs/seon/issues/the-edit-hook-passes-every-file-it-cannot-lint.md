@@ -76,6 +76,22 @@ cold in this tree. Evidence and the full table:
 Still open by design: a shell write is checked for readability, not
 published — `bin/seon init --dev default --changed PATH` remains the rule.
 
+## Does it reach a codex lane?
+
+Partly, and the gap was measured rather than assumed. Codex fires the hook
+for `apply_patch` and — since the matcher widened — for shell commands too
+(`tool_name: "Bash"`). It surfaces a PreToolUse block verbatim, and
+surfaces NOTHING from a PostToolUse `decision: block`: a scratch probe lane
+wrote an unmatched delimiter through a shell heredoc, the hook blocked at
+2026-09-17T02:26:41.262071Z, and the lane reported "NO FEEDBACK STEP 3 …
+I was not prevented from continuing". Every refusal now also exits 2 with
+its reason on stderr, which blocks unconditionally and cannot be silently
+dropped, and the derived scan runs on every PostToolUse so a codex lane is
+told at its next `apply_patch` even when the shell event's block is
+dropped. A codex shell write still cannot be refused BEFORE it lands:
+codex has no event for it. Full evidence and a loophole inventory in
+[the landing note](../../prds/steward-platform/research/hook-passes-unlinted-paths-2026-09-17.md).
+
 ## Regressions
 
 `test/seon/dev/edit_feedback_test.clj`:
