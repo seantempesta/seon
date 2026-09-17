@@ -412,6 +412,50 @@
              ::marker marker)
       admitted)))
 
+(def ^:private classifying-error-keys
+  ;; Dated 2026-09-18 against error-entities PRD §2.2. These are the base
+  ;; observations whose values must remain readable when the remainder is
+  ;; over-bound. The PRD's schemas are deliberately not implemented here.
+  [:seon.error/kind
+   :seon.error/at
+   :seon.error/layer
+   :seon.error/operation
+   :seon.error/message
+   :seon.error/member
+   :seon.error/expected-key
+   :seon.error/expected-shape
+   :seon.error/location
+   :seon.error/offending-projection
+   :seon.error/evidence-items
+   :seon.error/evidence-unavailable
+   :seon.error/cause
+   :seon.error/fix
+   :seon.error/basis])
+
+(defn- classifying-error-data
+  "Present current and proposed base observations, in declared priority order."
+  [source failure]
+  (let [error-value (if failure (refusal failure) source)
+        candidates (merge (when (map? source) source)
+                          (when (map? error-value) error-value))]
+    (into (array-map)
+          (keep (fn [member]
+                  (when-let [entry (find candidates member)] entry)))
+          classifying-error-keys)))
+
+(defn- bounded-error-admission
+  "Admit complete evidence, retaining classifying observations on overflow."
+  [source failure caps]
+  (let [request {:seon.sci.admit/value source
+                 :seon.sci.admit/interrupt-fn (constantly nil)
+                 :seon.sci.admit/caps caps
+                 :seon.config/on-core-error :record}
+        admitted (admit/admit-partitioned
+                  request (classifying-error-data source failure))]
+    (if (admit/missing-marker admitted)
+      (bounded-admission source caps)
+      admitted)))
+
 (defn- bounded-text
   "One value as the text a fault field stores, under the evidence bound.
 
@@ -538,7 +582,8 @@
         available (max 1 (- inline-limit (utf8-size (pr-str base-fact))))]
     (loop [field-limit (max 1 (quot available payload-count))]
       (let [field-caps (evidence-caps caps field-limit)
-            evidence (bounded-admission source field-caps)
+            evidence (bounded-error-admission source (throwable source)
+                                              field-caps)
             fact
             (cond-> (assoc base-fact
                            :seon.error/message
@@ -572,7 +617,7 @@
         class-name (when failure (.getName (class failure)))
         error-kind (kind source failure)
         source (meaningful-source source)
-        admitted (bounded-admission source caps)
+        admitted (bounded-error-admission source failure caps)
         full-edn (:seon.sci.admit/edn admitted)
         ;; ONE KEY, AND IT IS SUPPLIED. The fault family's own declared bound
         ;; decides how much evidence the FACT keeps; the blob threshold
@@ -606,7 +651,8 @@
         ;; the evidence being recorded.
         actual (offending-entry error-value)
         actual-size (when actual (admitted-size (val actual) caps))
-        marker (::marker admitted)
+        marker (or (::marker admitted)
+                   (:seon.sci.admit/remainder admitted))
         data-size (if marker
                     (:seon.sci.admit/bytes marker)
                     (utf8-size full-edn))

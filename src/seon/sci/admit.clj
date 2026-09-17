@@ -797,3 +797,24 @@
   {:malli/schema [:=> [:cat :seon.sci.admit/request] :seon.sci.admit/admitted]}
   [request]
   (admit* request))
+
+(defn admit-partitioned
+  "Admit a value whole, or retain a supplied priority map before its remainder.
+
+  This is the fault-evidence boundary: ordinary stored values remain whole or
+  missing. When the complete value is missing under its byte bound, the caller
+  may supply the small classifying facts that must remain queryable. They are
+  admitted first as ordinary data beside the original missing marker. If that
+  partition itself cannot fit, the honest missing answer is returned."
+  {:malli/schema [:=> [:cat :seon.sci.admit/request :map]
+                  :seon.sci.admit/admitted]}
+  [request priority]
+  (let [admitted (admit request)]
+    (if-let [marker (missing-marker admitted)]
+      (let [partitioned (admit (assoc request
+                                      ::value
+                                      (assoc priority ::remainder marker)))]
+        (if (missing-marker partitioned)
+          admitted
+          (assoc partitioned ::remainder marker)))
+      admitted)))

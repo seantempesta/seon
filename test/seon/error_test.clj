@@ -489,6 +489,36 @@
     (is (true? (:seon.error/capped? wide))
         "a source wider than the caps says so")))
 
+(deftest over-bound-fault-evidence-retains-its-classifying-base
+  (let [source {:seon.error/kind :seon.error-test/classified
+                :seon.error/layer :seon.agent/turn
+                :seon.error/operation 'seon.turn/step
+                :seon.error/member :seon.test/acquisition
+                :seon.error/message "classified failure"
+                :seon.error/data {:rows (vec (range 10000))}}
+        prepared (error/prepare
+                  (-> (request source)
+                      (assoc-in [:seon.sci.admit/caps
+                                 :seon.config.eval.result/max-bytes]
+                                1024)))
+        fact (:seon.error/fact prepared)
+        retained (#'admit/semantic-value
+                  (edn/read-string (:seon.error/data-edn fact)))]
+    (is (true? (:seon.error/capped? fact)))
+    (is (= (select-keys source [:seon.error/kind
+                                :seon.error/layer
+                                :seon.error/operation
+                                :seon.error/member
+                                :seon.error/message])
+           (select-keys retained [:seon.error/kind
+                                  :seon.error/layer
+                                  :seon.error/operation
+                                  :seon.error/member
+                                  :seon.error/message])))
+    (is (= :over-bound
+           (get-in retained [:seon.sci.admit/remainder
+                             :seon.sci.admit/reason])))))
+
 (defn ^{:malli/schema [:=> [:cat :int]
                        [:map
                         [:seon.error-test/payload [:vector :string]]
