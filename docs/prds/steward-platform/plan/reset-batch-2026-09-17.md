@@ -220,7 +220,7 @@ publication, browser observation or reset was performed for this plan.
 | A/D retired-tx and referenced-tx versus P G1/G3 | **P wins.** No retirement attribute, identity stub, synthetic historical event or second validator. Retraction plus history is the model. |
 | S2's required calls key/empty-set acceptance versus P G4 | **G4 and approved E §1 win.** Require analyzed-source-digest; construct all computed relations, but normalize absent many-datoms to logical empty sets only under positive analysis evidence. Missing provenance refuses at the final writer, including native datoms and transaction-function output. |
 | P G4's file/evaluation examples versus E's single digest | **Approved E wins the concrete encoding.** Digest exact analyzed input on both seams; retain admission source separately. Do not require a ref to a compactable evaluation. A digest is source identity, not a claim of analyzer version or resolver-environment completeness. |
-| E/S retain subject/pending-subject, capability refs and schedule refs versus R N7/N9/N10 | **H N7/N9/N10 wins.** Subject and scheduled handler become symbols; declaration fn/capability-fn stays a living ref under G2. The historical effect ref may go only after exact dispatched-handler symbol is handed to and persisted by its writer. Held consumers remain boundaries. |
+| E/S retain subject/pending-subject, capability refs and schedule refs versus R N7/N9/N10 | **H N7/N9/N10 wins.** Subject and scheduled handler become symbols; Owner correction: delete declaration fn/capability-fn; its existing handler symbol joins the strict deletion refusal set. The historical effect ref may go only after exact dispatched-handler symbol is handed to and persisted by its writer. Held consumers remain boundaries. |
 | S says citation/error/renderer refs are already correct versus R N5/N6/N13 | **R wins.** These record names and historical observations. Keep token values and derive resolution; remove redundant refs. Error citation tokens are signature strings, not function symbols. |
 | R N15 suggests definition digest proves recorded reach | **E §3 and G4 win.** Definition analysis and reach computation are different events. Keep reach-digest required conditionally on a successfully recorded closure. Delete reach-unknown only when failed/absent reach is represented as a typed refusal and cannot record a green run. Definition digest alone must never imply computed-empty reach. |
 | R N17 globally requires block/name versus A's two contribution constructors | **A's constructor evidence wins.** Require name/hash/tokens for capture contributions; append contributions require agent and retain their distinct selection shape. Do not break append-tx or infer its shape from an empty evaluations set. |
@@ -452,7 +452,7 @@ removing keys superseded by these decisions.
 
 | Group | Edit | Source finding | Kind | Writers in the same publication | Readers in the same publication | Regression that proves it |
 |---|---|---|---|---|---|---|
-| 2 | Retype sym, caller, callee and tuple callee to qualified-symbol; calls/references to indexed qualified-symbol sets; writes to indexed qualified-keyword set. Keep namespace/file/arities relations. Require function file with stub removal and every constructor (including program-fn-row) in this publication. Require source/arglists/private? and analyzed-source-digest. Logical empty calls/references/writes/keywords/call-arities derive only under provenance. Remove pending-calls and retyped uses of reference-to; KEEP declaration capability-fn ref as G2 specifies; no retired-tx. | P G1–G4/S2; E §1–3; S §1.1; A fn; R N1/N2/N10 | retype; required; delete | seon.fn var-row/analyzed-form/reconcile-tx-in; seon.program; seon.sci.eval; seon.turn relation-assertions/row-tx | seon.fn gate-sets/reach/output graph; seon.test, runner, selection; seon.db sink reach; effect, bootstrap, run, render/ns/test, issue/detect; all S §2 sites | seon.fn-test, seon.test-reaching-test: nonempty actual symbol datoms, tuple schema, deleting B with surviving A refuses atomically; repairing A in the same transaction succeeds; stale reach is reported, redefinition preserves identity; unknown analyzer namespace is not minted as an unreadable symbol |
+| 2 | Retype sym, caller, callee and tuple callee to qualified-symbol; calls/references to indexed qualified-symbol sets; writes to indexed qualified-keyword set. Keep namespace/file/arities relations. Require function file with stub removal and every constructor (including program-fn-row) in this publication. Require source/arglists/private? and analyzed-source-digest. Logical empty calls/references/writes/keywords/call-arities derive only under provenance. Remove pending-calls and retyped uses of reference-to; DELETE declaration capability-fn ref under the latest owner ruling; its existing :seon.effect/capability symbol joins the refusal set; no retired-tx. | P G1–G4/S2; E §1–3; S §1.1; A fn; R N1/N2/N10 | retype; required; delete | seon.fn var-row/analyzed-form/reconcile-tx-in; seon.program; seon.sci.eval; seon.turn relation-assertions/row-tx | seon.fn gate-sets/reach/output graph; seon.test, runner, selection; seon.db sink reach; effect, bootstrap, run, render/ns/test, issue/detect; all S §2 sites | seon.fn-test, seon.test-reaching-test: nonempty actual symbol datoms, tuple schema, deleting B with surviving A refuses atomically; repairing A in the same transaction succeeds; stale reach is reported, redefinition preserves identity; unknown analyzer namespace is not minted as an unreadable symbol |
 | 4 | Add absence-condition docstrings for surviving optional entries: `:seon.effect/capability`, `:seon.fn/arglists-override?`, `:seon.fn/arities`, `:seon.fn/call-arities`, `:seon.fn/destroys`, `:seon.fn/doc`, `:seon.fn/doc-order`, `:seon.fn/external-sink`, `:seon.fn/file`, `:seon.fn/form-span`, `:seon.fn/internal?`, `:seon.fn/keywords`, `:seon.fn/macro?`, `:seon.fn/projection-boundary`, `:seon.fn/references`, `:seon.fn/spec`, `:seon.fn/workload`, `:seon.fn/writes`, `:seon.test/subject`. Keep optionality unless the specific required/transition row above changes it; for renamed entries apply the condition to the replacement. | A seon.fn reset row | add | `seon.cluster.source/mintable-identity` (`src/seon/cluster/source.clj:305`); `seon.fn/backfill-contract-facts!` (`src/seon/fn.clj:2229`); `seon.fn/reconcile-tx-in` (`src/seon/fn.clj:2557`); `seon.fn/var-row` (`src/seon/fn.clj:584`); `seon.program/contract-facts` (`src/seon/program.cljc:729`); `seon.program/declaration-row` (`src/seon/program.cljc:906`); `seon.program/with-contract-facts` (`src/seon/program.cljc:792`); `seon.sci.eval/declared-row` (`src/seon/sci/eval.clj:1902`); `seon.sci.eval/definition-row` (`src/seon/sci/eval.clj:392`); `seon.turn/row-tx` (`src/seon/turn.clj:1280`) | seon.fn gate-sets/reach/output graph; seon.test, runner, selection; seon.db sink reach; effect, bootstrap, run, render/ns/test, issue/detect; all S §2 sites | seon.fn-test, seon.test-reaching-test: nonempty actual symbol datoms, tuple schema, deleting B with surviving A refuses atomically; repairing A in the same transaction succeeds; stale reach is reported, redefinition preserves identity; unknown analyzer namespace is not minted as an unreadable symbol |
 | 6 | Remove ast attribute and map entry only after Q2 reader replacement; remove backfill's nil-AST analysis test. Keep canonical spec and schema.shape facts. | R N16/N29; B.4/C.2; Q2 | delete | seon.program/with-contract-facts; seon.fn/backfill-contract-facts!; seon.turn declared projection | seon.fn reconciliation comparison; canonical shape consumers | seon.program-test: repeated publication is no-op, contract change detected, no fn.ast datoms |
 
@@ -1217,3 +1217,60 @@ consumers of the coordinated edge/provenance change. This checkpoint lands
 the measured prerequisite only and stops for review. **The edge retype is not
 landed; RESET NEEDED remains for that publication.** Default stayed PID 33583;
 no default publication, restart or reset was performed by this lane.
+
+## Worktree integration and owner corrections — 2026-09-17
+
+The reset publication is implemented on branch `reset-batch` in
+`tmp/reset-batch-wt`, based initially on `b7863b176`. S3 and program-ops hold
+`program.cljc`, `schema.clj`, and `sci/eval.clj` in the shared checkout;
+this branch changes its own copies only. Rebase here with
+`git -C tmp/reset-batch-wt rebase steward-platform` as those commits land.
+The orchestrator, after the holders release and the branch's fast results
+are reviewed, merges from the main `steward-platform` checkout with
+`git merge --ff-only reset-batch`. **RESET NEEDED**: do not adopt this
+incompatible schema publication into the existing default branch. The
+orchestrator owns the cold gate, platform proof, merge and single reset.
+The worktree links its `tmp/test-slots` to the main checkout's slot directory;
+fast iterations use `SEON_TEST_SLOTS=3` and explicit owned paths.
+
+The latest owner rulings supersede every conflicting option above:
+
+* Deletion has no escape. All repairs are in the same transaction and checked
+  against `:db-after`; otherwise the complete refusal is the work given to
+  agents. An agent's unreferenced definition retracts normally. A fresh reset
+  publication is not an escape: it retracts no prior definition. Any complete
+  publication that actually removes a live identity obeys the same rule.
+* Delete the declaration's `:seon.fn/capability-fn` ref. The existing exact
+  handler symbol `:seon.effect/capability` is authoritative and joins the
+  deletion refusal set. This overturns the earlier G2 exception/N10 ruling;
+  do not introduce a second handler-symbol attribute.
+* Agents are never retracted. Design `:seon.agent/archived-tx` as an optional
+  ref to the transaction that archived the agent, asserted with
+  `:db/current-tx` by the agent lifecycle writer. `archived?` derives from
+  this datom's presence; `open?` derives from its absence on an existing
+  agent. Missing agent identity is unknown, not an open agent. UI population
+  excludes archived agents; historical messages, sender refs, turns and
+  ownership remain intact. No boolean, tombstone, or deletion API is added.
+  This is the archive design for the reset batch; implementation must include
+  the lifecycle writer, agent/UI readers and idempotent archive regression
+  together, after the relevant shared holders release.
+
+Implementation and fast verification are in progress; this section is not a
+claim that the branch is ready to merge.
+
+Worktree progress: rebased onto `steward-platform` at `affac5672`; retained the
+new program-operation implementation and the runner's artifact-based fixture
+selection, converting their reset-facing symbol consumers. Git cannot rebase
+through a symlinked submodule parent: temporarily expose empty gitlink directories
+for the rebase, then restore the requested `reference-code` link. Any active
+owned test snapshot links directly to the main dependency checkout throughout.
+No shared source path or foreign session was modified. Verification remains in
+progress; this is not a merge approval.
+
+Verification checkpoint (not green): `reset-edge-fast-3.log` reached the canonical
+fixture and reported two setup errors from the remaining string-valued supplier
+lookup refs. Those config declarations now use symbols. `reset-edge-fast-4.log`
+then stopped during namespace loading; the fast runner exposed only the compiler
+wrapper, so its diagnostic now retains the exception cause chain. The next
+snapshot includes that diagnostic and the rebase. No default operation was run.
+The working implementation and regressions remain uncommitted until verified.
