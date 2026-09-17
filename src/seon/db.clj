@@ -14,6 +14,7 @@
             [datahike.api :as d]
             [datahike.connector :as connector]
             [datahike.constants :as const]
+            [datahike.datom :as datahike.datom]
             [datahike.db :as datahike.db]
             [datahike.db.interface :as dbi]
             [datahike.db.utils :as db.utils]
@@ -91,9 +92,25 @@
   [value]
   (db.utils/db? value))
 
+(defn transaction-report-datom?
+  "True for a native Datahike transaction-report datom.
+
+  It has the documented
+  five fields: integer entity, keyword attribute, value, integer transaction,
+  and boolean added flag."
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
+  [value]
+  (and (datahike.datom/datom? value)
+       (int? (:e value))
+       (keyword? (:a value))
+       (int? (:tx value))
+       (boolean? (:added value))))
+
 (schema/register-core-predicate! 'seon.db/connection? connection?)
 (schema/register-core-predicate! 'seon.db/connection-object? connection-object?)
 (schema/register-core-predicate! 'seon.db/database-value? database-value?)
+(schema/register-core-predicate! 'seon.db/transaction-report-datom?
+                                 transaction-report-datom?)
 
 (defn- fresh-connection
   []
@@ -115,6 +132,15 @@
          :since (d/since database 0)
          :history (d/history database))))
    (gen/elements [:current :as-of :since :history])))
+
+(def transaction-report-datom-generator
+  (gen/fmap (fn [[entity attribute value transaction added]]
+              (datahike.datom/datom entity attribute value transaction added))
+            (gen/tuple (gen/choose 1 100)
+                       (gen/elements [:sample/attribute])
+                       (gen/elements [false 0 "" :sample/value [] {}])
+                       (gen/choose 1 100)
+                       (gen/elements [true false]))))
 
 (def ^:dynamic *conn*
   "The current cluster's live branch connection, bound by its owning pass."
@@ -3721,6 +3747,10 @@
                          (retention-check before (retention-snapshot after rules) actor))])))] ])))))
 
 (defn- transact-call
+  {:malli/schema
+   [:=> [:cat [:or :seon.db/connection :seon.error/value]
+         :seon.store/transaction]
+    [:or :seon.db/transaction-report :seon.error/value]]}
   [connection transaction]
   (if (error-value? connection)
     connection
@@ -3955,6 +3985,9 @@
   (@error-render-html unit))
 
 (defn- transaction-result
+  {:malli/schema
+   [:=> [:cat [:or :seon.db/transaction-report :seon.error/value]]
+    [:or :seon.db/transaction-result :seon.error/value]]}
   [report]
   (if (error-value? report)
     report
@@ -4009,7 +4042,7 @@
     [:=> [:cat :seon.store/transaction]
      [:or :seon.db/transaction-result :seon.error/value]]
     [:=> [:cat [:or :seon.db/connection :seon.error/value] :seon.store/transaction]
-     [:or :map :seon.error/value]]]}
+     [:or :seon.db/transaction-report :seon.error/value]]]}
   ([transaction]
    (or (missing-transaction-data-error transaction)
        (transaction-result (transact-call (current-connection) transaction))))

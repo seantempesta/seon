@@ -184,8 +184,9 @@
           :tx :seon.db/basis-t,
           :transaction-result
           [:map
+           {:description "Runtime-only result of the connection-elided seon.db/transact! arity. This is a registered non-entity schema, not a storable attribute."}
            [:seon.db/tx :seon.db/tx]
-           [:seon.db/datoms :seon.db/datoms]],
+           [:seon.db/datoms [:vector :seon.db/transaction-datom]]],
           :index-page-cursor
           [:tuple :seon.schema/value :seon.schema/value :seon.schema/value
            :int :boolean],
@@ -242,19 +243,23 @@
            [:max-result-weight {:optional true} [:int {:min 1}]]],
           :time-point [:or :inst :int],
           :tx-data :seon.store/transaction-data,
+          :transaction-report-datom
+          [:or
+           {:description "One runtime-only Datahike report datom in dependency order [entity attribute value transaction added]. The tuple declares the field grammar; Datahike returns its native indexed Datom object. This schema is not a stored entity attribute."}
+           [:tuple :int :keyword :seon.schema/value :int :boolean]
+           [:fn {:error/message "must be a native Datahike transaction-report Datom with [integer entity, keyword attribute, value, integer transaction, boolean added]"
+                 :gen/gen seon.db/transaction-report-datom-generator}
+            seon.db/transaction-report-datom?]],
           :transaction-report
           [:map
-           {:seon.render/ai seon.db/render-transaction-ai
+           {:description "The runtime-only Datahike transaction report returned after a committed explicit-connection write. Database values and Datom objects are process values; this registered non-entity schema is not stored."
+            :seon.render/ai seon.db/render-transaction-ai
             :seon.render/html seon.db/render-transaction-html}
-           [:db-before
-            [:or :seon.db/database-value
-             :seon.db/database-value-identity]]
-           [:db-after
-            [:or :seon.db/database-value
-             :seon.db/database-value-identity]]
-           [:tx-data [:vector :seon.schema/value]]
-           [:tempids :map]
-           [:tx-meta :map]],
+           [:db-before :seon.db/database-value]
+           [:db-after :seon.db/database-value]
+           [:tx-data [:vector :seon.db/transaction-report-datom]]
+           [:tempids [:map-of :seon.schema/value :int]]
+           [:tx-meta {:optional true} [:map-of :keyword :seon.schema/value]]],
           :user [:and #:seon.db{:index true} :seon.db/ref],
           :conflict-attribute :qualified-keyword,
           :conflict-value :seon.schema/value,

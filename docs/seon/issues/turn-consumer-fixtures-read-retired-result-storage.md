@@ -7,6 +7,18 @@ tags: [issue, test, runtime, class/p3, wave/contract-gate]
 
 # Turn consumers retain obsolete fixture and observation contracts
 
+## Transaction report contract sweep — 2026-09-17
+
+The armed four-namespace transaction-report sweep at `a16354a1f` again
+finds turn fixtures supplying incomplete program rows, lookup-ref namespace
+requirements, string detector identities and retired call-edge expectations.
+The new transaction output contract itself has no observed caller refusal.
+Exact test sites and first diagnostics are recorded in the
+[transaction-report landing note](../../prds/steward-platform/research/transaction-report-schema-2026-09-17.md#caller-findings).
+The same note records related issue-fixture string/symbol mismatches and the
+separately tracked issue-render assertion. These consumer repairs remain
+outside the bounded transaction-report lane.
+
 ## Batch-23 continuation — 2026-09-16
 
 The transaction-cache class is repaired in maintained Datahike `49ea5933`

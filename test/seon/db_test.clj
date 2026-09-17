@@ -6,6 +6,7 @@
             [datahike.tools :as datahike.tools]
             [datahike.writer :as datahike.writer]
             [datahike.writing :as datahike.writing]
+            [malli.core :as m]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
             [seon.cluster.message :as message]
@@ -13,6 +14,7 @@
             [seon.turn :as turn]
             [seon.db :as db]
             [seon.env :as env]
+            [seon.fn :as seon.fn]
             [seon.id :as id]
             [seon.instrument :as instrument]
             [seon.program :as program]
@@ -289,6 +291,36 @@
     :seon.error/diagnostic-cause
     :seon.error/diagnostic-evidence-availability
     :seon.error/diagnostic-evidence})
+
+(deftest transaction-success-and-refusal-shapes-are-declared
+  (test-support/with-database
+   (fn [connection]
+     (let [projection (schema/handed-projection)
+           options {:registry (:seon.schema.projection/registry projection)}
+           report (db/transact! connection [])
+           result (binding [db/*conn* connection]
+                    (db/transact! []))
+           refusal (db/transact! connection [{:seon.agent/id 42}])
+           findings (->> (seon.fn/contract-findings (db/db connection))
+                         (filterv #(= "seon.db" (namespace (:seon.fn/sym %)))))
+           transaction-findings
+           (filterv #(#{'seon.db/transact! 'seon.db/transact-call
+                        'seon.db/transaction-result}
+                      (:seon.fn/sym %))
+                    findings)]
+       (println {:seon.db-test/contract-finding-count (count findings)
+                 :seon.db-test/contract-finding-kinds
+                 (frequencies (map :seon.fn.contract/finding findings))
+                 :seon.db-test/transaction-contract-findings
+                 transaction-findings})
+       (is (m/validate :seon.db/transaction-report report options)
+           (pr-str (m/explain :seon.db/transaction-report report options)))
+       (is (m/validate :seon.db/transaction-result result options)
+           (pr-str (m/explain :seon.db/transaction-result result options)))
+       (is (m/validate :seon.error/value refusal options))
+       (is (= :seon.db/invalid-write (:seon.error/kind refusal)))
+       (is (= [] transaction-findings))
+       (is (not (instance? Throwable refusal)))))))
 
 (deftest transaction-wrappers-cannot-hide-a-classified-refusal
   (test-support/with-database
