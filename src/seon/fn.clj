@@ -330,8 +330,17 @@
         (::analyzer/var-definitions analysis)))
 
 (defn- usage-symbol
+  "Return the real qualified target name clj-kondo resolved for `usage`.
+
+  `:clj-kondo/unknown-namespace` means there is no target identity. Mapping it
+  to the caller namespace fabricates first-party names for Java methods,
+  special forms, gensyms, and unresolved aliases. The conservative file
+  relation remains target-keyed and therefore carries only actual qualified
+  target names; analysis provenance remains on the file digest."
   [usage]
-  (when (and (::analyzer/to usage) (::analyzer/name usage))
+  (when (and (::analyzer/to usage)
+             (not= :clj-kondo/unknown-namespace (::analyzer/to usage))
+             (::analyzer/name usage))
     (symbol (str (::analyzer/to usage))
             (str (::analyzer/name usage)))))
 
@@ -800,8 +809,8 @@
 
   Existing declarations supply the same namespace context as admission lint.
   Every form retains its exact source row span, excluding context declarations.
-  Unknown unqualified usages retain the analyzer's calling namespace until
-  the writer can resolve their target identity."
+  Unknown-namespace usages carry no target identity and are excluded by the
+  shared usage projection instead of being remapped to the calling namespace."
   [database requests]
   (let [namespace-names (vec (distinct (map :namespace-name requests)))
         available-functions
@@ -849,15 +858,7 @@
             {:source source :spans spans}))
         analysis
         (with-in-str source
-          (analyzer/analyze {::analyzer/paths ["-"]}))
-        analysis
-        (update analysis ::analyzer/var-usages
-                (fn [usages]
-                  (mapv (fn [usage]
-                          (if (= :clj-kondo/unknown-namespace (::analyzer/to usage))
-                            (assoc usage ::analyzer/to (::analyzer/from usage))
-                            usage))
-                        usages)))]
+          (analyzer/analyze {::analyzer/paths ["-"]}))]
     {:seon.fn/analysis analysis
      :seon.fn/source source
      :seon.fn/source-spans spans

@@ -16,6 +16,30 @@
   [:seon.ns/name :seon.fn/sym :seon.schema/key :seon.test/sym
    :seon.fn.file/relative-path :seon.lint/id])
 
+(defn edn-round-trip-symbol?
+  "Whether `value` is a symbol whose printed EDN reads back as that symbol.
+
+  This total predicate is the storage boundary for program-graph edge names.
+  It rejects symbols whose namespace begins with `:`, including symbols made
+  from clj-kondo's `:clj-kondo/unknown-namespace` sentinel: `pr-str` prints
+  those as keywords, so an EDN boundary changes their type."
+  {:malli/schema
+   [:=>
+    [:cat
+     [:any
+      {:seon.schema.admission/exemption
+       :seon.schema.admission/polymorphic-boundary
+       :seon.schema.admission/reason
+       "A total schema predicate accepts arbitrary objects and returns false for values that are not round-tripping symbols."
+       :gen/elements [nil false 0 "" :k 'plain 'qualified/name]}]]
+    :boolean]}
+  [value]
+  (and (symbol? value)
+       (try
+         (= value (#?(:clj edn/read-string :cljs reader/read-string)
+                   (pr-str value)))
+         (catch #?(:clj Throwable :cljs :default) _ false))))
+
 #?(:clj
    (defn overrides
      "Return current agent-admitted function identities in indexed src namespaces.
