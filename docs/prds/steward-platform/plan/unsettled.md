@@ -2017,6 +2017,27 @@ reset-is-total lands. A hook config change requires restarting codex
 lanes. Owner's last words: "keep finding bugs and fixing them"; "keep the
 plan up to date".
 
+**Message/wake/provenance modeling LANDED** (`f6c355e9a`): the prior note
+(deletion-semantics-agents-and-turns §0/§7) already said "no one size fits
+all"; the identity-pair carrier was its own undecided option and is
+withdrawn in all three cases. DRIFT MEASURED: message handling RETRACTS the
+`:seon.message/inbox` edge on handling (turn.clj:435-437, message.clj:276-277)
+— ruling 70 forbade exactly that ("retracting a routed edge would wake");
+the PRD named `:seon.message/to` as the listened attribute; live proof:
+`unanswered-wakes … :answered? :any` returns 0 for every agent against 5
+message wakes in history — the declared :t answering rule is UNREACHABLE for
+messages. Per case: `:seon.message/about` answers three unrelated questions
+(subject; inside-wake flag by correlation; assignment/declination key) →
+split: subject = the identity token the agent supplies (kills
+`resolve-about`'s whole-db pre-read), `from` = the sole inside marker, the
+protocol gets its own edge (Option C: derive inside/outside from tx
+provenance and delete `:seon.wake/inside`, blocked on a human account
+identity); `:seon.eval/origin` 0 datoms, one writer already holding
+`[:seon.issue/id …]` → retype to `:seon.issue/id` or delete; `:seon.cluster.
+eval/refreshes` 0 datoms, writer `refresh-call` has no src caller, the
+since-diff already answers supersession per PRD §14 → delete attribute +
+both functions. Four policy choices → owner (questions tool).
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
