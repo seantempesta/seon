@@ -1246,7 +1246,9 @@
              root (:db/id (db/pull database [:db/id] [::manifest-id "large-path"]))
              location (:v (first (db/datoms database :eavt root ::manifest-location)))
              problems (:v (first (db/datoms database :eavt root ::manifest-explanations)))
-             observations (db/datoms database :avet :seon.agent/error-agent-id "same-observed-agent")]
+             ; This observation is non-unique and unindexed; AEVT contains every attribute datom.
+             observations (filter #(= "same-observed-agent" (:v %))
+                                  (db/datoms database :aevt :seon.agent/error-agent-id))]
          (is (= 1001 (count (db/datoms database :eavt location :seon.error.location/segments))))
          (is (= 2 (count (db/datoms database :eavt problems :seon.instrument.explanations/items))))
          (is (= 2 (count (set (map :e observations)))) "Observed identity tokens cannot upsert two errors together.")
