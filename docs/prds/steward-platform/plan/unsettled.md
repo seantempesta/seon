@@ -3603,3 +3603,18 @@ as orchestrator/astra lanes, easy pool as the first live-agent slice).
   refutation; new issue `the-cold-gate-misses-the-250-ms-listener-completion-bound`
   (the test must assert the completion EVENT under the declared backstop).
   Lesson re-learned: verify the claim before naming the cause.
+
+## 2026-09-18 ~06:30Z — wrapper enforcement (host) landed; it found its first two
+
+- `error-wrapper-enforcement` host side committed (`09869c8f1`
+  `e42f494ab` `8c5dca3f4`): recorder acquired at arm time; body-vs-boundary
+  facet check; input/arity refusals before the body under both dials;
+  measured overhead scalar 0.04 µs, map 0.08 µs, declared error 36.6 µs.
+  NOT green by design: 79 tests 3F/1E — the enforcement exposed
+  `seon.db/pull` and `seon.error.refusal/refusal` returning error values
+  their output contracts do not declare (the owner's "welcome the
+  breakage"; 1q). refusal.clj → Opus agent now; `seon.db/pull` → the
+  publication lane's resume (db.clj held). SCI side still waits eval.clj.
+- `7854d35b2` `c0ca0b89c` (Opus): the listener regression awaits the
+  completion EVENT; issue resolved. Load 15 and falling; gates resume when
+  two of the three lanes land.
