@@ -26,9 +26,13 @@ exits nonzero when citations or note metadata cannot be resolved. It no
 longer validates a second hand-maintained schedule.
 
 `bin/seon init` indexes the folder at source publication; development
-adoption copies those exact published facts by identity. The source digest
-includes the issue folder. Markdown-only changes are included at the next
-publication; an explicit `bin/seon init --dev default` publishes them now.
+adoption copies those exact published facts by identity. Issue notes are NOT
+part of the source digest: a note owns no program facts, so editing one
+never re-identifies `current-src` and never rebuilds the program graph
+(`src/seon/cluster.clj:1685`, `src/seon/cluster/source.clj:94`). The
+publication's issue owner indexes the folder as it stands at every
+publication, and an explicit `bin/seon init --dev default --changed
+docs/seon/issues/<note>.md` indexes an edit now.
 Ordinary older clusters retain their chosen publication.
 
 Query directly with:

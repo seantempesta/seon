@@ -9,7 +9,7 @@ tags: [issue, config, schema, test, class/n7, wave/config-derivation]
 
 ## Resolution — 2026-09-16
 
-Removed the remaining composite-builder prefix arm. The packaged old union
+Commit `0dec68dc4` removed the remaining composite-builder prefix arm. The packaged old union
 and declared property populations are identical (94 dials; 89 prefix-matched,
 zero prefix-only). The regression proves a prefixed nondial stays out and a
 declared dial outside that prefix enters. Fast snapshot verification:
@@ -89,4 +89,4 @@ Implemented slice: `5deb40e4e`; owner gate 82 tests / 418 assertions and
 platform gate 86 tests / 542 assertions, both green. Default's live query
 returned 92 explicitly declared dials. This note remains open solely for the
 protected composite-builder fallback; see
-[the exact patch and probes](../../prds/context-generation/research/n7-query-classification-2026-09-15.md).
+[the exact patch and probes](../../../prds/context-generation/research/n7-query-classification-2026-09-15.md).
