@@ -1,0 +1,69 @@
+{
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :seon.db.read.target/arguments
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.projection/entity}
+ :seon.db/ref]
+
+ :seon.db.read.target/attribute
+ :qualified-keyword
+
+ :seon.db.read.target/entity
+ [:and
+ [:map
+  {:seon.db/attributes true}
+  [:seon.db.read.target/query
+   {:optional true}
+   :seon.db.read.target/query]
+  [:seon.db.read.target/arguments
+   {:optional true}
+   :seon.db.read.target/arguments]
+  [:seon.db.read.target/selector
+   {:optional true}
+   :seon.db.read.target/selector]
+  [:seon.db.read.target/entity-projection
+   {:optional true}
+   :seon.db.read.target/entity-projection]
+  [:seon.db.read.target/index
+   {:optional true}
+   :seon.db.read.target/index]
+  [:seon.db.read.target/index-request
+   {:optional true}
+   :seon.db.read.target/index-request]
+  [:seon.db.read.target/attribute
+   {:optional true}
+   :seon.db.read.target/attribute]]
+ [:fn
+  {:error/message "read-target-complete?",
+   :gen/gen seon.error/read-target-complete-generator}
+  seon.error/read-target-complete?]]
+
+ :seon.db.read.target/entity-projection
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.projection/entity}
+ :seon.db/ref]
+
+ :seon.db.read.target/index
+ [:enum :eavt :aevt :avet]
+
+ :seon.db.read.target/index-request
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.projection/entity}
+ :seon.db/ref]
+
+ :seon.db.read.target/query
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.projection/entity}
+ :seon.db/ref]
+
+ :seon.db.read.target/selector
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.projection/entity}
+ :seon.db/ref]
+}

@@ -240,4 +240,42 @@
   [:seon.program/affected :seon.program/affected]
   [:seon.db/basis-t :int]
   [:seon.program/unknown :seon.program/unknown]]
+
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :seon.program/error
+ [:and
+ {:seon.db/attributes true}
+ :seon.error/base
+ [:map
+  {:seon.db/attributes true}
+  [:seon.program/error-subject :seon.program/error-subject]
+  [:seon.program/source-observation :seon.program/source-observation]]]
+
+ :seon.program/error-facet-arity
+ [:map
+ [:seon.fn.arity/min :seon.fn.arity/min]
+ [:seon.fn.arity/max {:optional true} :seon.fn.arity/max]
+ [:seon.fn.arity/error-facets
+  {:optional true}
+  :seon.fn.arity/error-facets]
+ [:seon.fn.arity/error-facet-digest :seon.fn.arity/error-facet-digest]]
+
+ :seon.program/error-facet-result
+ [:map
+ [:seon.fn/sym :seon.fn/sym]
+ [:seon.fn/error-facets {:optional true} :seon.fn/error-facets]
+ [:seon.fn/arities [:vector :seon.program/error-facet-arity]]]
+
+ :seon.program/error-subject
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.projection/entity}
+ :seon.db/ref]
+
+ :seon.program/source-observation
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.evidence/entity}
+ :seon.db/ref]
 }

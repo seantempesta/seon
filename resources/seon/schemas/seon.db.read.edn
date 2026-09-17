@@ -1,0 +1,24 @@
+{
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :seon.db.read/error
+ [:and
+ [:and
+  {:seon.db/attributes true}
+  :seon.error/base
+  [:map
+   {:seon.db/attributes true}
+   [:seon.db/read-operation :seon.db/read-operation]
+   [:seon.db.read/target :seon.db.read/target]
+   [:seon.error/basis :seon.error/basis]]]
+ [:fn
+  {:error/message "read-operation-agrees?",
+   :gen/gen seon.error/read-operation-agrees-generator}
+  seon.error/read-operation-agrees?]]
+
+ :seon.db.read/target
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.db.read.target/entity}
+ :seon.db/ref]
+}
