@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 created: 2026-09-18
 tags: [issue, errors, schema, manifest]
@@ -35,3 +35,13 @@ consumers land together. The admitted constructor outputs validate against
 those exact contracts under the canonical armed fixture; the real wrong-arity
 refusal satisfies the arity facet without fabricated observations. Retaining
 the old base alternative or weakening the new base does not meet acceptance.
+
+## Resolution — owner ruling, 2026-09-18
+
+The owner accepted additive slice 1: only new declarations plus expansion and
+checker rules; old declarations stay untouched. The 280 measured same-key
+replacements, including `:seon.error/value`, move to the PRD §6 constructor
+groups. Each group lands its replacements together with constructors and
+recorder changes, all in the one reset. Omit `:seon.error/result` under §1q.
+The sequencing dependency is resolved by this explicit assignment; no runtime
+implementation proof is implied. The additive implementation continues.
