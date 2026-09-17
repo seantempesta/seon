@@ -12,6 +12,44 @@ remain unimplemented at this checkpoint, per the
 assignment's stop-after-first-coherent-item rule. No cold correctness gate
 or platform proof is claimed.
 
+## Accepted-item follow-up: pre-record lanes
+
+The owner accepted `aba5d94a5`, then observed its resume refusal on this
+lane, which had launched before retained records existed. The next review
+checkpoint restores that one compatibility case: when the record is
+absent and no explicit `LANE_SID` is supplied, resume reads the retained
+stdout log's **first** valid CLI session header using `read_launch_session`.
+After acquiring the lane and session claims, the existing atomic write
+backfills `lanes/<name>/sid`. Subsequent resumes use that record. A present
+but corrupt record still refuses; it never selects a later quoted header.
+This supersedes the first checkpoint's missing-record refusal described
+below. No other lane's actual session or record was read or modified.
+
+The existing owning regression now covers ordinary run/resume, deleting
+the record to simulate an older launch, successful backfill from a log
+containing a later different quoted session, corrupt-record refusal despite
+that log, and refusal when both record and log are absent. Its exact shell
+script, extracted with the Clojure reader, returns **65** against the
+accepted launcher (only **2** verified completions), and **0** against the
+updated launcher (**3** verified completions, **2** expected refusals).
+Only the paid Codex executable is replaced; both launchers are real. This
+before/after shell proof does not claim an armed namespace tally.
+
+`sh -n bin/codex-agent` and the owned-path whitespace check passed.
+The command `bin/test-fast --paths bin/codex-agent
+test/seon/test_runner_test.clj -- seon.test-runner-test` waited for a slot
+on snapshot basis `79e0b0752a205bfd580c2fe22a1f33af247bf1bf`. At the
+120-second report all three slots were still occupied. After the shell
+proof completed, this slice's queued launcher PID 84818 was terminated and
+awaited (**143**); no test JVM had launched and no armed tally is claimed.
+No foreign holder was operated and no slot or silence bound was changed.
+The owner reports default PID 33583's adoption refused
+tree-wide at another lane's seam; verification uses fixtures, without
+operating default. AGENTS.md's S3 diff and all foreign edits stay untouched.
+This follow-up owns only `bin/codex-agent`,
+`test/seon/test_runner_test.clj`, and this note. Items 2–4 remain next;
+this compatibility correction is the next coherent review checkpoint.
+
 ## Grounding and dependency ledger
 
 Read AGENTS.md §§0–7 and

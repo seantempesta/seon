@@ -2300,11 +2300,14 @@
                  "bin/codex-agent resume lane-fixture 'Verify resumed lane admission.'\n"
                  "test \"$(cat tmp/orchestrator/lanes/lane-fixture/sid)\" = \"$SEON_FIXTURE_SID\"\n"
                  "rm tmp/orchestrator/lanes/lane-fixture/sid\n"
-                 "status=0\nbin/codex-agent resume lane-fixture 'No record.' > tmp/missing 2>&1 || status=$?\n"
-                 "test \"$status\" = 65\ngrep -F 'no valid session identity' tmp/missing\n"
+                 "bin/codex-agent resume lane-fixture 'Backfill pre-record launch.'\n"
+                 "test \"$(cat tmp/orchestrator/lanes/lane-fixture/sid)\" = \"$SEON_FIXTURE_SID\"\n"
                  "printf 'invalid\\n' > tmp/orchestrator/lanes/lane-fixture/sid\n"
                  "status=0\nbin/codex-agent resume lane-fixture 'Invalid record.' > tmp/invalid 2>&1 || status=$?\n"
-                 "test \"$status\" = 65\ngrep -F 'no valid session identity' tmp/invalid\n"))
+                 "test \"$status\" = 65\ngrep -F 'no valid session identity' tmp/invalid\n"
+                 "rm tmp/orchestrator/lanes/lane-fixture/sid tmp/orchestrator/lane-fixture-stdout.log\n"
+                 "status=0\nbin/codex-agent resume lane-fixture 'No record or log.' > tmp/missing 2>&1 || status=$?\n"
+                 "test \"$status\" = 65\ngrep -F 'no valid session identity' tmp/missing\n"))
       (let [process (.start (doto (ProcessBuilder. ^java.util.List
                                                  ["/bin/bash" (.getPath script)
                                                   (.getPath project-root)
@@ -2317,7 +2320,7 @@
         (when-not (.isAlive process)
           (let [output (slurp log)]
             (is (zero? (.exitValue process)) output)
-            (is (= 2 (count (filter #{"LANE_IDENTITY_VERIFIED"}
+            (is (= 3 (count (filter #{"LANE_IDENTITY_VERIFIED"}
                                     (str/split-lines output)))) output))))
       (finally
         (when-let [process @child] (stop-process-tree! process))

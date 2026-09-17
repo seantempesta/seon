@@ -396,6 +396,11 @@ case "$command" in
 
     if [ "$command" = resume ]; then
       sid=${LANE_SID:-$(sed -n '1p' "$lanes_dir/$name/sid" 2>/dev/null || true)}
+      # Pre-record launchers retained only stdout. Recover their first CLI
+      # header once; an existing record (even invalid) never falls back.
+      if [ -z "${LANE_SID:-}" ] && [ ! -e "$lanes_dir/$name/sid" ]; then
+        sid=$(read_launch_session || true)
+      fi
       valid_sid "$sid" || {
         echo "bin/codex-agent: no valid session identity in $lanes_dir/$name/sid; pass LANE_SID=<uuid>" >&2
         exit 65
