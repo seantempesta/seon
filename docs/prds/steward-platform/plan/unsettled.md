@@ -1943,6 +1943,19 @@ the hook verifier, first paid agent tasks, S5 write-back. Integrator resumed
 to build the edge retype on an isolated worktree branch `reset-batch`
 (its three files are held by long lanes and the batch is RESET-only).
 
+**Incremental agent's attribution** (`5800a238b`): the scalar-rows red is
+not its slice (proven both directions; the assertion was red 23 min before
+its first commit). The REAL defect: the whole-entity validator ADMITS AN
+INCOMPLETE CREATE (a new `:seon.fn` identity with only sym + doc, missing
+required ns and admission source) — `write-entity-error` returns nil where
+the required keys have no datoms; absence read as health on the write side
+(db.clj:2703-3031, landed 35c5d2fa8/b1508dc8a). The issue note had quoted
+the wrong transaction; corrected. Opus fix lane launched (create validated
+against the complete required set, decided from :db-before; sparse upsert of
+an existing row keeps the ruled behaviour). Also seen: the gate's FAIL
+header points at the enclosing `let` line, not the failing `is` — issue to
+file.
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
