@@ -885,6 +885,11 @@ fixture priming; the fast reporter carries long-test allowances too.
 `SEON_TEST_SLOT_WAIT_SECONDS` bounds the wait.
 A slot bounds invocations,
 not the number of worker JVMs inside one gate.
+Slot waits and the `bin/test` preamble announce orphaned gates with their
+PID, run root, elapsed time and last recorded phase. A dead launcher or
+parent never authorizes a lane to reclaim the slot or its retained root;
+the orchestrator decides. This detects parent death, not a turn ending
+while its launcher remains alive or whether anyone read the tally.
 
 `bin/test` is the one correctness gate, tiered: the declared
 `:seon.test/platform` regressions run FIRST and stop the run when red; bare

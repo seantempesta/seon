@@ -296,6 +296,7 @@ if [ "$result_cluster" = "default" ]; then
 fi
 
 source bin/_test-slot
+announce_test_slot_holders 1
 source bin/_java-home-resolver
 
 git_sha=$(git rev-parse HEAD)
@@ -330,6 +331,15 @@ bb --config "$source_root/bb.edn" -e '
           (quote [java.nio.file Files LinkOption NoSuchFileException])
           (quote [java.time Duration Instant]))
   (let [run-parent (first *command-line-args*)
+        held-roots (into #{}
+                         (keep (fn [slot]
+                                 (try
+                                   (let [record (io/file slot "run-root")]
+                                     (when (.isFile record)
+                                       (.trim (slurp record))))
+                                   (catch FileNotFoundException _ nil)
+                                   (catch NoSuchFileException _ nil))))
+                         (.listFiles (io/file (second *command-line-args*))))
         no-follow (into-array LinkOption [LinkOption/NOFOLLOW_LINKS])
         pid-of (fn [root]
                  (try
@@ -379,8 +389,9 @@ bb --config "$source_root/bb.edn" -e '
                                       {:root root
                                        :modified-at observed-at
                                        :active? (boolean
-                                                 (and pid
-                                                      (active-pid? pid)))}))))))
+                                                 (or (contains? held-roots (.getPath root))
+                                                     (and pid
+                                                          (active-pid? pid))))}))))))
         inactive (sort-by :modified-at #(compare %2 %1)
                           (remove :active? candidates))]
     (doseq [[rank {:keys [root modified-at]}] (map-indexed vector inactive)
@@ -390,7 +401,7 @@ bb --config "$source_root/bb.edn" -e '
       (binding [*out* *err*]
         (println "bin/test: reaped retained isolated operator root"
                  (.getPath root)))))
-  nil' "$run_parent"
+  nil' "$run_parent" "$test_slot_parent"
 
 process_start=$(ps -p "$$" -o lstart= | sed 's/^[[:space:]]*//')
 suite_start=$(date -u '+%Y-%m-%dT%H:%M:%SZ')

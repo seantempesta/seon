@@ -1228,6 +1228,71 @@
             (finally (stop-process-tree! child)))))
       (finally (test-support/delete-recursively! root)))))
 
+(deftest ^{:seon.test/platform "Orphaned gates remain visible and are never reclaimed by a waiting lane."}
+  orphaned-gates-are-announced-by-wait-and-preamble
+  (let [root (doto (io/file project-root "tmp" (str "orphaned-gates-" (random-uuid))) .mkdirs)
+        checkout (launcher-checkout! root)
+        pid-file (io/file root "orphan.pid")
+        log (io/file root "probe.log")
+        orphan (atom nil)]
+    (try
+      (let [launcher (.start
+                      (doto (ProcessBuilder. ^java.util.List
+                                             ["bash" "-c" "sleep 120 >/dev/null 2>&1 & echo $!"])
+                        (.redirectOutput pid-file)))]
+        (try
+          (is (.waitFor launcher test-support/event-backstop-seconds TimeUnit/SECONDS))
+          (let [pid (Long/parseLong (str/trim (slurp pid-file)))
+                handle (.orElseThrow (ProcessHandle/of pid))]
+            (reset! orphan handle)
+            (doseq [[slot holder] [[1 pid] [2 (.pid launcher)]
+                                   [3 (.pid (ProcessHandle/current))]]]
+              (let [directory (doto (io/file checkout "tmp/test-slots" (str "slot-" slot)) .mkdirs)
+                    run-root (doto (io/file checkout "tmp/test-runs" (str "run.fixture-" slot)) .mkdirs)]
+                (spit (io/file directory "pid") (str holder "\n"))
+                (spit (io/file directory "run-root") (str (.getCanonicalPath run-root) "\n"))
+                (spit (io/file run-root "test-run.txt")
+                      (str "phase=snapshot elapsed-seconds=1\n"
+                           "runner-pid=" pid " runner-started-at=fixture\n"
+                           "phase=published-base elapsed-seconds=7\n"))
+                (.setLastModified run-root (- (System/currentTimeMillis) (* 2 24 60 60 1000)))))
+            (let [script (str "set -euo pipefail\nsource bin/_test-slot\n"
+                              "test_slot_wait_seconds=0\n"
+                              "if acquire_test_slot; then exit 91; else test \"$?\" = 75; fi\n"
+                              "echo PREAMBLE\nmkdir -p fake-bin\n"
+                              "printf '#!/bin/sh\\nexit 66\\n' > fake-bin/git\nchmod +x fake-bin/git\n"
+                              "if PATH=\"$PWD/fake-bin:$PATH\" bin/test --fast --paths docs/fixture -- seon.fixture-test; then exit 92; else test \"$?\" = 66; fi\n"
+                              "test -f tmp/test-slots/slot-1/pid\ntest -f tmp/test-slots/slot-2/pid\n"
+                              "rm fake-bin/git\nrm -r tmp/test-slots/slot-3\n"
+                              "printf '#!/bin/sh\\necho FIXTURE_FAST_EXIT\\nexit 0\\n' > fake-bin/clojure\nchmod +x fake-bin/clojure\n"
+                              "PATH=\"$PWD/fake-bin:$PATH\" bin/test --fast --paths docs/fixture -- seon.fixture-test\n"
+                              "test -d tmp/test-runs/run.fixture-1\ntest -d tmp/test-runs/run.fixture-2\n")
+                  child (.start (doto (ProcessBuilder. ^java.util.List ["bash" "-c" script])
+                                  (.directory checkout)
+                                  (.redirectErrorStream true)
+                                  (.redirectOutput log)))]
+              (try
+                (is (.waitFor child test-support/event-backstop-seconds TimeUnit/SECONDS))
+                (is (and (not (.isAlive child)) (zero? (.exitValue child))) (slurp log))
+                (let [output (slurp log)
+                      boundary (.indexOf output "PREAMBLE")]
+                  (is (pos? boundary) output)
+                  (when (pos? boundary)
+                    (doseq [part [(subs output 0 boundary) (subs output boundary)]
+                            slot [1 2]]
+                      (is (str/includes? part (str "orphaned gate pid " pid " (parent dead) holds slot-" slot)) part)
+                      (is (str/includes? part (.getCanonicalPath (io/file checkout "tmp/test-runs" (str "run.fixture-" slot)))) part)
+                      (is (str/includes? part "last PHASE: phase=published-base elapsed-seconds=7") part)))
+                  (is (str/includes? output "FIXTURE_FAST_EXIT") output)
+                  (is (.isAlive handle) "announcing an orphan never kills it"))
+                (finally (stop-process-tree! child)))))
+          (finally (stop-process-tree! launcher))))
+      (finally
+        (when-let [handle @orphan]
+          (.destroyForcibly ^ProcessHandle handle)
+          (.get (.onExit ^ProcessHandle handle) test-support/event-backstop-seconds TimeUnit/SECONDS))
+        (test-support/delete-recursively! root)))))
+
 (deftest interrupted-launcher-awaits-its-runner-before-retaining-the-root
   (let [fixture-root
         (io/file project-root "tmp" "test-runner-interrupt"

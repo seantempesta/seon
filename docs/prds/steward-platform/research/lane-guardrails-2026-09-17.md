@@ -434,3 +434,67 @@ the selected snapshot. A transient unbalanced edit in
 action; no foreign bytes were changed, and the next attempt proceeded after
 the tree converged. Default PID 94566 was not operated; hook publication is
 not a claim of adoption. The orchestrator still owns the cold proof.
+
+## Orphaned gate announcements — 2026-09-17
+
+`bin/_test-slot` records the holder's parent PID on acquisition and derives
+orphan status from the process table and that record. A holder reparented
+to PID 1, a missing recorded parent, or a dead launcher is announced by
+both slot waits and `bin/test`'s preamble. When the launcher is dead but
+the ledger's runner still lives, the announcement identifies that runner.
+The line includes the slot, elapsed process time, launcher PID, run root
+and last recorded `phase=` line. Missing elapsed time is printed as `gone`,
+not fabricated. A disappearing PID does not abort the preamble under
+`pipefail`.
+
+No orphan is killed or automatically reclaimed. Slots with dead holders
+remain for the orchestrator; the normal root-retention sweep now also
+preserves roots referenced by slots. Otherwise its dead-launcher retention
+rule could delete the live orphan's files before anyone read the warning.
+Empty unclaimed slot directories retain their existing cleanup path.
+Ending a turn with a live launcher, or failing to read its tally, cannot be
+refused or inferred from these records. This detects parent death only.
+
+The canonical launcher fixture's
+`orphaned-gates-are-announced-by-wait-and-preamble` creates a real child
+whose launcher exits, covers both the reparented holder and the dead
+recorded launcher, and exercises both announcement paths. It checks that
+the process remains alive and both slots remain. A subsequent real fast
+launcher invocation (only its Clojure executable is a no-JVM fixture)
+proves that the sweep preserves two-day-old orphan roots. The regression
+owns and reaps that child itself. No host gate or default process is used.
+
+The first focused run found four assertions failing because `ps` on a dead
+PID caused the preamble's `pipefail` exit; fixed at the process observation.
+The corrected run passed, followed by a final pass after making the sweep
+tolerate a concurrently removed slot record: **2 tests / 27 assertions /
+0 failures / 0 errors**, exit **0**, ending
+**2026-09-17T05:31:20.517751Z** at HEAD `c772db2d3`. Final command:
+
+```sh
+timeout 2400 bin/test-fast --paths src/seon/fn.clj test/seon/fn_test.clj bin/test bin/_test-slot test/seon/test_runner_test.clj tmp/lane_guardrails_admission_probe.clj -- tmp.lane-guardrails-admission-probe
+```
+
+Exact disposable probe source (removed after the run; it delegates to the
+owning test bodies without copying their harness):
+
+```clojure
+(ns tmp.lane-guardrails-admission-probe
+  (:require [clojure.test :refer [deftest]]
+            [seon.fn-test]
+            [seon.test-runner-test]))
+
+(deftest blocking-findings-name-their-evidence
+  ((:test (meta #'seon.fn-test/publication-refuses-a-required-artifact-load-finding))))
+
+(deftest orphaned-gates-remain-visible
+  ((:test (meta #'seon.test-runner-test/orphaned-gates-are-announced-by-wait-and-preamble))))
+```
+
+Shell syntax and owned-path whitespace checks pass. All own verification
+processes exited and their snapshots were removed. Markdown publication
+still reports the previously recorded 31 repository-wide lint findings.
+Owned paths: `bin/_test-slot`, `bin/test`, `test/seon/test_runner_test.clj`,
+AGENTS.md's slot paragraph, and this note. No `SEON_TEST_*` override was set
+on a lane command; the shell fixture directly sets its local wait variable
+to zero to test the wait refusal without waiting thirty minutes.

@@ -8,8 +8,8 @@
 # cluster and the live agent run. The bound is declared here, enforced at the
 # seam that admits the work, and a wait that never ends is reported as a
 # failure naming the holders, never a silent hang. Slots are project-local
-# directories whose mkdir is atomic; a slot whose holder pid is dead is
-# reclaimed. SEON_TEST_SLOTS overrides the count; SEON_TEST_SLOT_WAIT_SECONDS
+# directories whose mkdir is atomic; orphaned holders are announced and left
+# for the orchestrator to reclaim. SEON_TEST_SLOTS overrides the count; SEON_TEST_SLOT_WAIT_SECONDS
 # the bound; SEON_TEST_SLOT_ANNOUNCE_SECONDS the progress interval.
 test_slot_count=3
 for test_override in SEON_TEST_SILENCE_SECONDS SEON_TEST_SLOTS; do
@@ -41,17 +41,42 @@ held_test_slot=
 # root it is working in: enough to decide whether to keep waiting or to look at
 # the holder.
 announce_test_slot_holders() {
-  local slot holder holder_elapsed
+  local only_orphans=${1:-0} slot holder holder_elapsed parent recorded_parent root line phase runner orphan gate_pid
   for slot in $(seq 1 "$test_slot_count"); do
     holder=$(cat "$test_slot_parent/slot-$slot/pid" 2>/dev/null || echo none)
     holder_elapsed=none
+    root=$(cat "$test_slot_parent/slot-$slot/run-root" 2>/dev/null || echo none)
+    phase=unknown
+    runner=
+    if [ -f "$root/test-run.txt" ]; then
+      while IFS= read -r line; do
+        case "$line" in
+          phase=*) phase=$line ;;
+          runner-pid=*) runner=${line#runner-pid=}; runner=${runner%% *} ;;
+        esac
+      done <"$root/test-run.txt"
+    fi
+    orphan=0
+    gate_pid=$holder
     if [ "$holder" != none ]; then
-      holder_elapsed=$(ps -p "$holder" -o etime= 2>/dev/null | tr -d ' ')
+      parent=$(ps -p "$holder" -o ppid= 2>/dev/null | tr -d ' ' || true)
+      recorded_parent=$(cat "$test_slot_parent/slot-$slot/parent-pid" 2>/dev/null || true)
+      if [ "$parent" = 1 ] || ! kill -0 "$holder" 2>/dev/null ||
+         { [ -n "$recorded_parent" ] && ! kill -0 "$recorded_parent" 2>/dev/null; }; then
+        orphan=1
+        if ! kill -0 "$holder" 2>/dev/null && [ -n "$runner" ] && kill -0 "$runner" 2>/dev/null; then
+          gate_pid=$runner
+        fi
+      fi
+      holder_elapsed=$(ps -p "$gate_pid" -o etime= 2>/dev/null | tr -d ' ' || true)
       holder_elapsed=${holder_elapsed:-gone}
     fi
-    printf 'bin/test:   slot-%s pid=%s elapsed=%s run-root=%s\n' "$slot" \
-      "$holder" "$holder_elapsed" \
-      "$(cat "$test_slot_parent/slot-$slot/run-root" 2>/dev/null || echo none)" >&2
+    if [ "$orphan" -eq 1 ]; then
+      printf 'bin/test: orphaned gate pid %s (parent dead) holds slot-%s since %s; launcher-pid=%s run-root=%s last PHASE: %s; orchestrator must reclaim\n' \
+        "$gate_pid" "$slot" "$holder_elapsed" "$holder" "$root" "$phase" >&2
+    elif [ "$only_orphans" -eq 0 ]; then
+      printf 'bin/test:   slot-%s pid=%s elapsed=%s run-root=%s\n' "$slot" "$holder" "$holder_elapsed" "$root" >&2
+    fi
   done
 }
 
@@ -62,6 +87,7 @@ acquire_test_slot() {
     for slot in $(seq 1 "$test_slot_count"); do
       if mkdir "$test_slot_parent/slot-$slot" 2>/dev/null; then
         printf '%s\n' "$$" >"$test_slot_parent/slot-$slot/pid"
+        ps -p "$$" -o ppid= | tr -d ' ' >"$test_slot_parent/slot-$slot/parent-pid"
         printf '%s\n' "${run_root:-$PWD}" >"$test_slot_parent/slot-$slot/run-root"
         held_test_slot="$test_slot_parent/slot-$slot"
         if [ -n "${run_root-}" ]; then
@@ -71,9 +97,9 @@ acquire_test_slot() {
         return 0
       fi
       holder=$(cat "$test_slot_parent/slot-$slot/pid" 2>/dev/null || true)
-      if [ -z "$holder" ] || ! kill -0 "$holder" 2>/dev/null; then
-        if [ -n "$holder" ] || [ -z "$(ls -A "$test_slot_parent/slot-$slot" 2>/dev/null)" ]; then
-          echo "bin/test: reclaiming test slot $slot from dead holder pid=${holder:-none}" >&2
+      if [ -z "$holder" ]; then
+        if [ -z "$(ls -A "$test_slot_parent/slot-$slot" 2>/dev/null)" ]; then
+          echo "bin/test: reclaiming empty test slot $slot" >&2
           rm -rf "$test_slot_parent/slot-$slot"
         fi
       fi
