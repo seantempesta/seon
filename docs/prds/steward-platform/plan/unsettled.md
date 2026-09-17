@@ -1862,6 +1862,16 @@ held by S3, hunk + red-by-design regression) and 4 (`ns-unmap!`,
 `remove-ns!`, `ns-unalias!` over existing writers, breaks-first) and
 `overrides`, with a live proof. Cold gate owed.
 
+**~03:20Z:** owner: "keep fixing the code then so we can see the cracks and
+fires that were already burning." Opus triage launched on the two unowned
+baseline reds (`declared-row-…-delta`: expectation carries `(quote user)`
+vs the stored symbol; `bare-test-macros…`: nil `:seon.test/sym` and a nil
+element handed to transact!). The hook's shell-write scan fired on the
+orchestrator's own Bash for `src/my/program.clj:530` "Nested #()s are not
+allowed" — bytes left by the running program-ops lane; the lane meets the
+same block on its next call and repairs it. First live proof of the
+closed shell route.
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
