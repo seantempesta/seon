@@ -1385,6 +1385,41 @@
                     (message-tx fact recipient reason notification))))
           recipients)))
 
+(defn function-identity-call
+  "Inside the transaction: the rows that make the failing function's
+  `:seon.fn/sym` identity resolvable, or nothing when it already is.
+
+  `:seon.error/fn` is a REF, so the fault cannot be recorded unless that
+  identity exists (the POPULATION INVARIANT). `:seon.fn/fn` REQUIRES
+  `:seon.schema.admission/source`, and that value belongs to whoever
+  admitted the declaration: asserting one here would overwrite the
+  publication's answer for every function the graph already knows, and
+  omitting it refuses the whole fault transaction for every function it
+  does not. So the question is asked of the MID-TRANSACTION database,
+  where the writer is about to decide it, instead of being pre-read and
+  re-decided: an existing identity gets nothing, and an absent one is
+  minted with the source its namespace declares — `:agent` when the
+  namespace declares none, because a name no publication admitted was
+  learned from a running agent."
+  {:malli/schema [:=> [:cat :seon.db/database-value :symbol]
+                  :seon.store/transaction-data]}
+  [database function]
+  (let [sym (str function)
+        namespace-name (some-> (namespace function) symbol)]
+    (if (or (nil? namespace-name)
+            (entity-exists? database :seon.fn/sym sym))
+      []
+      [{:seon.fn/sym sym
+        :seon.fn/ns [:seon.ns/name namespace-name]
+        :seon.schema.admission/source
+        (or (db/q '[:find ?source .
+                    :in $ ?name
+                    :where
+                    [?namespace :seon.ns/name ?name]
+                    [?namespace :seon.schema.admission/source ?source]]
+                  database namespace-name)
+            :agent)}])))
+
 (defn recording
   "Prepared identities, flat value and transaction data for one error.
 
@@ -1411,15 +1446,14 @@
                        :seon.error/id signature :seon.error/signature signature
                        :seon.error/kind (:seon.error/kind fact)}
          rows (cond-> [identity-row]
-                namespace-name (conj (program/canonical-row {:seon.ns/name namespace-name}))
-                function (conj (program/canonical-row
-                                (cond-> {:seon.fn/sym (str function)}
-                                  namespace-name (assoc :seon.fn/ns [:seon.ns/name namespace-name])))))
+                namespace-name (conj (program/canonical-row {:seon.ns/name namespace-name})))
          rows (into [identity-row]
                     (mapcat (fn [row]
                               (let [tempid (pr-str (program/row-identity row))]
                                 (map (fn [[attribute value]] [:db/add tempid attribute value]) row))))
                     (rest rows))
+         rows (cond-> rows
+                function (conj [:db.fn/call #'function-identity-call function]))
          tx (conj rows [:db.fn/call #'commit-call
                         (assoc request :seon.error/fact fact :seon.error.occurrence/id occurrence-id)])]
      {:seon.error/fact fact

@@ -60,9 +60,9 @@
                       (commit-request failure {:seon.agent/id agent :seon.turn/id "error-graph-turn"
                                                :seon.error/process process :seon.error/at instant
                                                :seon.config.error/recurrence-limit 100}))
+            _ (test-support/seed-cluster! connection "error-graph")
             _ (is (:db-after (db/transact! connection
-                                          [[:db/add "error-graph-cluster" :seon.cluster/name "error-graph"]
-                                           {:seon.agent/id "error-graph-a"}
+                                          [{:seon.agent/id "error-graph-a"}
                                            {:seon.agent/id "error-graph-b"}
                                            {:seon.agent/id "error-graph-steward"}
                                            {:seon.ns/name 'my.error-graph
@@ -1025,3 +1025,52 @@
                        db)]
         (is (some? about)
             "the tempid resolved: fact and message land in ONE transaction")))))
+
+(deftest a-fault-mints-the-failing-functions-identity-without-inventing-its-admission
+  ;; THE CLASS: the fault-committing path refers to the failing function by
+  ;; REF, so it mints `[:seon.fn/sym …]` when the program graph has no row
+  ;; for it. `:seon.fn/fn` REQUIRES `:seon.schema.admission/source`, and the
+  ;; minted row carried none, so the whole-entity validator rejected every
+  ;; such fault transaction — `:db-after` nil, the steward never woken, and
+  ;; the writer's only signal a `:transaction/validation-rejected` log line.
+  ;; The admission source is equally not this seam's to assert for a function
+  ;; the graph already knows, so the decision is made at the writer's own
+  ;; database rather than pre-read here.
+  (with-db
+    (fn [connection]
+      (test-support/transacted! connection
+                                [{:seon.agent/id "mint-steward"}
+                                 {:seon.ns/name 'my.mint
+                                  :seon.ns/steward [:seon.agent/id "mint-steward"]}])
+      (let [failure (doto (IllegalStateException. "a real Java class")
+                      (.setStackTrace
+                       (into-array StackTraceElement
+                                   [(StackTraceElement. "my.mint$broken" "invokeStatic"
+                                                        "mint.clj" 11)])))
+            recording (error/recording (db/db connection)
+                                       (commit-request (transform-error failure) {}))]
+        (is (:db-after (db/transact! connection (:seon.db/tx-data recording)))
+            "the fault transaction is accepted")
+        (let [database (db/db connection)
+              stored (db/pull database '[*] (:seon.error/ref recording))
+              minted (db/pull database '[*] [:seon.fn/sym "my.mint/broken"])]
+          (testing "the exception class is stored as a symbol, never a string"
+            (is (= 'java.lang.IllegalStateException
+                   (:seon.error/exception-class stored)))
+            (is (symbol? (:seon.error/exception-class stored))))
+          (testing "the minted identity is a complete `:seon.fn/fn` row"
+            (is (= :agent (:seon.schema.admission/source minted)))
+            (is (= 'my.mint (:seon.ns/name (db/pull database '[:seon.ns/name]
+                                                    (:db/id (:seon.fn/ns minted)))))))
+          (testing "the steward of the failing function's namespace is derived"
+            (is (= "mint-steward" (error/steward database stored)))))
+        (testing "a second fault never re-decides an admitted function's source"
+          (test-support/transacted! connection
+                                    [{:seon.fn/sym "my.mint/broken"
+                                      :seon.schema.admission/source :core}])
+          (let [again (error/recording (db/db connection)
+                                       (commit-request (transform-error failure) {}))]
+            (is (:db-after (db/transact! connection (:seon.db/tx-data again))))
+            (is (= :core (:seon.schema.admission/source
+                          (db/pull (db/db connection) '[*]
+                                   [:seon.fn/sym "my.mint/broken"]))))))))))
