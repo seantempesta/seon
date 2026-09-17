@@ -1,66 +1,85 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: friction
 created: 2026-09-17
-tags: [sci, evaluation, deadline, instrumentation, gate, flake]
+tags: [sci, evaluation, instrumentation, gate, cold-only]
 ---
 
-# The evaluation deadline latches around a ten-millisecond refusal
+# The cold-only arity red is a pre-arming SCI copy, not a deadline
 
-## Problem
+Superseded by the pre-arming SCI acquisition work
+(`3170a0060` "Trace cold message contract refusal to pre-arming SCI
+acquisition", `7e04a0bb1` "cold workers acquire SCI before arming — root
+cause of cold-only contract reds"), which owns the repair in
+`src/seon/sci/eval.clj`. This note records the measured mechanism and the
+one observation that remains open.
+
+## What this note originally claimed, and why it was wrong
 
 `seon.sci.eval-test/an-instrumented-multi-arity-miss-reads-like-clojure`
-evaluates `(seon.db/as-of)` under a 2000 ms `:seon.sci.eval/time-limit-ms`
-and reads the instrumented arity refusal. It failed in both cold gates of
-2026-09-17 — and in neither case was the refusal wrong:
+failed cold in batches 119, 120 and 123. Batch 120's shown text named
+`:seon.sci.kernel/time-limit`, and this note proposed a stale or inherited
+arm. That hypothesis is REFUTED as the general cause: batch 123's failure
+carries no deadline at all, and its `:seon.error/message` is
 
-- `batch-120.log`: `:seon.sci.eval/evaluation-failed`, shown text
-  `The renderer seon.error/render-ai did not return: time-limit.`,
-  `:seon.render.unknown/refusal :seon.sci.kernel/time-limit`.
-- `batch-119.log`: shown text carries
-  `Fix: Wrong number of args (0) passed to: seon.db/as-of`, which is
-  `seon.instrument/minimal-violation`'s fallback — reached only when
-  `violation`'s `(catch Throwable …)` (`src/seon/instrument.clj:433`)
-  catches something. A deadline interrupt raised inside the refusal
-  construction is exactly that something.
+```text
+Wrong number of args (0) passed to: seon.db/as-of
+```
 
-Measured in a candidate SCI context (canonical fixture, real fork, armed
-contracts), 20 iterations: the JVM-direct refusal is **0–2 ms**, the whole
-SCI evaluation including the render is **98 ms first, 8–12 ms after**, the
-render alone is **<1 ms**, and the evaluation's own record says
-`:seon.eval/fn-entries 0, :seon.eval/duration-ms 5`. A 2000 ms bound around
-10 ms of work is a 200× margin, so "raise the limit" is not the answer and
-the path is not slow.
+which is Clojure's own `ArityException` text for a NON-variadic function —
+not `seon.instrument`'s lookalike, whose value carries `:seon.instrument/arity`
+and `:seon.instrument/arglists` (both nil in the gate). The evaluation
+therefore called an UNINSTRUMENTED `seon.db/as-of`, which is why the kind was
+`:seon.sci.eval/evaluation-failed` and not a contract violation.
 
-## Why it matters
+## The mechanism, measured
 
-Two things read as absence of signal here. A deadline that latches for a
-reason unrelated to the work it governs turns a 10 ms path into an
-intermittent red that costs every reader the time to disprove a message
-drift (this lane's whole first half). And `violation`'s `catch Throwable`
-converts a bound firing into a DIFFERENT diagnosis: batch-119 reports a
-contract violation where the truth is a deadline, which is precisely the
-class AGENTS §2.3 names — a bound firing must be a bug report naming what
-never arrived, never something else's error.
+`sci/copy-var*` builds the SCI var with `(new-var nm @clojure-var new-m)` —
+it dereferences the Var exactly ONCE
+(`reference-code/sci/src/sci/core.cljc:137`). `seon.sci.eval` installs core
+admission through it (`src/seon/sci/eval.clj:1248`, `:1266`). So an SCI
+context is a one-time SNAPSHOT of a root that `seon.instrument/apply!` will
+re-decide: the owner law's mirror, exactly.
 
-## Where to look
+Probe under `bin/test-fast` (canonical fixture, real `fork-cluster-ctx`,
+armed contracts):
 
-`seon.sci.kernel/arm` (`src/seon/sci/kernel.clj:276`) installs the arm in a
-ThreadLocal and `own-arm`'s `::stop!` removes it — unless the owning
-evaluation leaves without calling it. An inherited arm carries the previous
-evaluation's `::deadline-nanos` and its already-set `::reached` latch, so the
-next evaluation on that pool thread for the same interpreter would interrupt
-at its first interpreted entrance. This is a HYPOTHESIS: it was not
-reproduced. It was not reproducible in `bin/test-fast` at all (the test is
-green at 52–62 ms every run), so the reproduction needs the gate's parallel
-workers.
+- `jvm-root-instrumented?` true; the fork's binding is `identical?` to the
+  JVM root and its class is `clojure.lang.AFunction$1` (malli's wrapper);
+  the evaluation refuses correctly.
+- After `alter-var-root` re-roots the Var underneath that same context:
+  `bound-after-follows-new-root? false`, `bound-after-is-stale-copy? true`.
+  The context keeps calling the old value.
 
-## The class, not the instance
+A context acquired before arming — or inside an unarmed window left by
+`preserving-instrumentation-state` / `seon.instrument/restore!` — therefore
+calls the original for the JVM's whole life. That is a deterministic
+cold-worker property, which is why the red reproduces every gate and never
+in the fast loop.
 
-A refusal path must not be able to report someone else's cause. Independently
-of the deadline's origin, `seon.instrument/violation`'s catch should re-raise
-SCI's interrupt (`seon.sci.kernel/interrupted?`) rather than fall back to
-`minimal-violation`, so a deadline is always reported as a deadline. That
-change is not in this lane's owned paths for the arity sentence and is filed
-here rather than made in passing.
+It also explains the rest of batch 123's cluster with one cause:
+`seon.transact-feedback-test/bad-value-type` recorded a write that SUCCEEDED
+where the supplied projection should have refused it, and
+`seon.sci.documentation-test/a-contract-mistake-carries-the-same-documentation-as-doc`
+saw the refusal named by the system-side owner rather than the agent-facing
+function.
+
+## The check that now names it
+
+`an-instrumented-multi-arity-miss-reads-like-clojure` asserts, before it
+evaluates, that the fork's binding is `identical?` to the armed root. Without
+it the four downstream assertions read as a message drift and cost a lane its
+whole first half.
+
+## Still open, separately
+
+Batch 120's shown text really did name `:seon.sci.kernel/time-limit` around a
+path measured at 0–2 ms direct, 8–12 ms through SCI, with
+`:seon.eval/fn-entries 0, :seon.eval/duration-ms 5` against a 2000 ms bound.
+Whether that was a second symptom of the same uninstrumented call or a
+genuinely separate deadline event is unproven. Independently of it,
+`seon.instrument/violation`'s `(catch Throwable …)` will convert a deadline
+interrupt into `minimal-violation`'s contract-violation sentence; it should
+re-raise `seon.sci.kernel/interrupted?` throwables so a bound firing is
+always reported as itself.

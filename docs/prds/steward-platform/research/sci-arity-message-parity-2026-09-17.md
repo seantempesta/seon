@@ -129,3 +129,99 @@ seon.sci.eval-test seon.instrument-test seon.db-test` plus `--platform`.
 - The canonical fixture base refuses construction when static analysis finds
   blocking errors anywhere in the tree — a literal `(db/as-of)` in a probe is
   one. The probe called through `(apply (var-get #'db/as-of) [])`.
+
+---
+
+# Addendum — the cold red is a pre-arming SCI copy (2026-09-17, batch 123 B)
+
+The red returned cold at HEAD `312f60560` (`batch-123b.log`, six assertions).
+This addendum records what it is, measured, and refutes the deadline
+hypothesis this note filed above.
+
+## The discriminating byte
+
+Batch 123's failure carries `:seon.error/message`
+
+```text
+Wrong number of args (0) passed to: seon.db/as-of
+```
+
+with `:seon.error/kind :seon.sci.eval/evaluation-failed` and NO
+`:seon.instrument/arity` or `:seon.instrument/arglists`. That sentence is
+Clojure's own `ArityException` for a non-variadic function.
+`seon.instrument/minimal-violation` imitates it deliberately, but its value
+carries both of those keys — so this is not the fallback, it is the raw host
+exception. The evaluation called an UNINSTRUMENTED `seon.db/as-of`.
+
+## The mechanism
+
+`sci/copy-var*` is `(new-var nm @clojure-var new-m)` — one deref, ever
+(`reference-code/sci/src/sci/core.cljc:137`), and core admission installs
+through it (`src/seon/sci/eval.clj:1248`, `:1266`). An SCI context is a
+one-time snapshot of a root that `seon.instrument/apply!` later re-decides.
+
+Probe, `bin/test-fast`, canonical fixture + real `fork-cluster-ctx` + armed
+contracts:
+
+```text
+PROBE jvm-root-instrumented? true
+PROBE bound-identical-to-jvm-root? true
+PROBE bound-class clojure.lang.AFunction$1
+PROBE program-row [:core "([time-point] [database time-point])"]
+PROBE outcome :seon.instrument/contract-violated "seon.db/as-of refused …"
+```
+
+and, re-rooting the Var under an already-built context:
+
+```text
+PROBE bound-before-identical-to-then-root? true
+PROBE bound-after-follows-new-root? false
+PROBE bound-after-is-stale-copy? true
+```
+
+So a context acquired before arming, or inside an unarmed window left by
+`preserving-instrumentation-state` / `seon.instrument/restore!`, calls the
+original for the JVM's whole life. Deterministic in the cold worker, absent
+in the fast loop — which is exactly the observed distribution (red in 119,
+120 and 123; green in every fast run of this lane).
+
+One cause covers the rest of batch 123's cluster too:
+`seon.transact-feedback-test/bad-value-type` recorded a write that SUCCEEDED
+where the projection should have refused it, and
+`seon.sci.documentation-test/a-contract-mistake-carries-the-same-documentation-as-doc`
+saw the system-side owner named instead of the agent-facing function.
+
+## Reproduction boundary
+
+Not reproducible in `bin/test-fast`: the arity test is green there in every
+combination this lane ran — alone (73 tests), with `seon.instrument-test`
+(102), with `seon.error-test seon.db-test seon.instrument-test
+seon.program-test seon.sci.documentation-test seon.transact-feedback-test`
+(235), and with `my.message-test seon.cluster.message-test seon.operator-test
+seon.test.runner-test seon.test-runner-test seon.test.selection-test` (212).
+Those runs did reproduce the OTHER members of the cluster (13 failures in
+`seon.transact-feedback-test` and `seon.program-test`), which is what first
+tied them together. The gate orders tests alphabetically round-robin across
+three pools; the arity test was pool-3's fifteenth task.
+
+A leaked arm was falsified directly: an un-stopped arm on the calling thread
+makes the next evaluation answer `:seon.sci.kernel/already-armed`, never a
+time-limit, because `seon.sci.kernel/arm` compares interpreters
+(`src/seon/sci/kernel.clj:276`).
+
+## What landed here, and what is owed elsewhere
+
+The repair belongs in `src/seon/sci/eval.clj`, which the orchestrator's own
+pre-arming acquisition work holds (`3170a0060`, `7e04a0bb1` — same root
+cause, reached independently). This lane did not touch it.
+
+What landed instead: `an-instrumented-multi-arity-miss-reads-like-clojure`
+now asserts, BEFORE it evaluates, that the fork's binding is `identical?` to
+the armed root. The cold gate then reports the cause by name instead of four
+downstream assertions that read as a message drift.
+
+Fast tally, clean HEAD worktree (`tmp/arity-wt`, removed after):
+`bin/test-fast seon.sci.eval-test` → **73 tests, 385 assertions, 1 failure**,
+the failure being `schema-and-contract-declarations-have-bounded-allocation`
+(223 MB against a 64 MB limit), which fails identically without this change
+and appears in no cold gate batch.

@@ -1291,6 +1291,17 @@
             failure (:seon.sci.admit/value evaluation)]
         (is (> (count arglists) 1))
         (is (contains? (instrument/instrumented) #'db/as-of))
+        ;; NAME THE CAUSE, NOT THE SYMPTOM. `sci/copy-var*` derefs the Var
+        ;; ONCE (reference-code/sci/src/sci/core.cljc:137), so a context
+        ;; acquired before `seon.instrument/apply!` re-roots the Var keeps the
+        ;; UNINSTRUMENTED original for the JVM's life and this evaluation
+        ;; throws Clojure's own "Wrong number of args (0) passed to:
+        ;; seon.db/as-of" with no contract evidence at all — measured in the
+        ;; cold gate, batches 119/120/123, while every fast run binds the
+        ;; armed root. Without this assertion the four downstream failures
+        ;; read as a message drift.
+        (is (identical? @#'db/as-of (sci/eval-string* ctx "seon.db/as-of"))
+            "the fork calls the armed root, not a pre-arming copy")
         (is (= :seon.instrument/contract-violated (:seon.error/kind failure)))
         (is (= 0 (get-in failure [:seon.error/data :seon.instrument/arity])))
         (is (= arglists (get-in failure [:seon.error/data :seon.instrument/arglists])))
