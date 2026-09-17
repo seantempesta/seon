@@ -357,6 +357,11 @@ compaction — "make sure the mistakes the agent kept making are corrected").
     required config facts. Rule: one `init --dev` at a time; a lock-hold
     timeout inside reconciliation is a blocker to report the minute it is
     seen, not a symptom to work around.
+13. *A lane spec passed as a double-quoted shell string* lost its launch
+    to a backtick (command substitution) and the lane never started while
+    the roster looked full. Rule: every `bin/codex-agent run`/`resume` spec
+    goes through a quoted heredoc (`<<'SPEC'`), and the launch is confirmed
+    by `bin/codex-agent status` before anything else is assumed.
 
 ## The orchestrator's sweep (owner, 2026-09-08)
 
