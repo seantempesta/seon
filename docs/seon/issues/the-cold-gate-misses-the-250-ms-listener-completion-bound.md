@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 created: 2026-09-18
 tags: [issue, testing, datahike, writer, bounded-execution, wave/contract-gate]
@@ -33,12 +33,30 @@ or 255 — the bound itself, so the promise was never delivered inside it.
   URLs on every reuse. A stale-AOT explanation is refuted: see
   [the pins note](the-gate-snapshot-cannot-read-dependency-pins-so-fork-aot-classes-go-stale.md).
 
-## What is not yet known
+## Resolution (2026-09-17, `7854d35b2`)
 
-Whether the cold gate's first write genuinely needs more than 250 ms (cold
-JVM, cold store, competing gate JVMs) or whether the listener completion path
-behaves differently there. The next observation should record the write's own
-phase timings in the cold worker rather than only the elapsed refusal, and the
-test should assert the completion EVENT — the listener diagnostic and the
-delivered report — rather than a tuned 250 ms deadline that stands in for it
-(AGENTS §2.3: a bound firing is a bug report naming what never arrived).
+The test asserts the completion EVENT and declares no bound of its own.
+
+- The tuned `{:seon.config.db/write-time-limit-ms 250}` overlay is gone; the
+  shipped default (`config/default.edn:11`, 600000 ms) governs, so no clock
+  the test invents can stand in for the event.
+- The submission runs in a `future` awaited through
+  `seon.test-support/await-event!` (`test/seon/test_support.clj:772`), whose
+  `Future` branch waits the declared `event-backstop-seconds` and throws
+  naming the wait when the promise is never realized. A stranded write is
+  therefore still a loud failure, not a pass.
+- The observed facts are: the realized answer is the committed report
+  (`:db-after` present); an explicit separate assertion that it is NOT
+  `:seon.db/write-bound-exceeded`; the listener's own diagnostic
+  (`:datahike/listener-error` at `:error` with the listener key and the
+  identical exception); the durable fact; and a following write that commits
+  through the same writer with an advanced branch head.
+
+The property was never a latency one: Datahike delivers the result promise at
+`reference-code/datahike/src/datahike/writer.cljc:410` and only then notifies
+listeners at `:427`, so a throwing listener cannot strand a committed write by
+construction.
+
+Tally: `bin/test-fast --paths test/seon/db_test.clj -- seon.db-test` — 58
+tests, 438 assertions, 0 failures, 0 errors (this test 183 ms). The cold
+`bin/test` proof is the orchestrator's and is still owed.
