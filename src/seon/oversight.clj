@@ -25,7 +25,6 @@
   (:require [clojure.core.async.flow :as flow]
             [clojure.datafy :as datafy]
             [clojure.string :as str]
-            [seon.cluster.agent :as agent]
             [seon.turn :as turn]
             [seon.config :as config]
             [seon.db :as db]
@@ -112,10 +111,12 @@
      :seon.oversight/ping :unknown}))
 
 (defn- agent-story
-  "One armed agent's current story."
+  "One armed agent's current story, including every declared proc."
   [db timeout-ms agent-id entry]
-  (let [ping (flow/ping (:seon.flow/graph entry)
-                        :timeout-ms timeout-ms)
+  (let [graph (:seon.flow/graph entry)
+        ping (flow/ping graph :timeout-ms timeout-ms)
+        pids (sort (keys (:procs (datafy/datafy graph))))
+        procs (mapv #(proc-ping % (get ping %)) pids)
         mailbox (get ping :seon.agent/mailbox)
         turn (get ping :seon.agent/turn)
         run-id (current-run-id db agent-id)
@@ -129,6 +130,7 @@
              ;; remains observable without inventing another counter.
              (get-in mailbox [::flow/outs :seon.agent/episode])))]
     (cond-> {:seon.agent/id agent-id
+             :seon.oversight/procs procs
              :seon.turn.work/episode-runs
              (turn/episode-runs db agent-id)}
       run-id
@@ -179,14 +181,6 @@
                   :map]}
   [db instance]
   (fleet-value db instance))
-
-(defn cluster-flow-status
-  "Return only the selected cluster graph's bounded Flow observations."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.boot/instance]
-                  :map]}
-  [db instance]
-  {:seon.oversight/plumbing
-   (plumbing-story (:seon.flow/graph instance) (ping-timeout-ms db))})
 
 (defn unit
   "Build the live fleet render unit, or omit it without a cluster."

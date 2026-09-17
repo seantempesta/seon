@@ -603,7 +603,7 @@
              (if (and connection (:seon.flow/graph instance))
                (schema/call-with-projection-state
                 projection-state
-                #(oversight/cluster-flow-status (db/db connection) instance))
+                #(oversight/flow-status (db/db connection) instance))
                :unknown)
              :seon.dev.mcp/problem-counts problem-counts}
       readiness-face (assoc :seon.dev.mcp/readiness readiness-face))))

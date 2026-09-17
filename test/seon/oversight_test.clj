@@ -109,6 +109,7 @@
                                    :seon.sci.admit/caps caps})
             value (:seon.render/value built)
             root (first (:seon.oversight/agents value))
+            agent-procs (:seon.oversight/procs root)
             plumbing (:seon.oversight/plumbing value)
             declared-plumbing
             (set (keys (:procs (datafy/datafy
@@ -131,6 +132,17 @@
                     (:seon.oversight/capacity occupancy))))
           (is (= declared-plumbing
                  (into #{} (map :seon.oversight/proc) plumbing)))
+          (is (= #{:seon.agent/mailbox
+                   :seon.agent/turn
+                   :seon.agent/schedule}
+                 (into #{} (map :seon.oversight/proc) agent-procs))
+              "every proc declared by the agent blueprint is visible")
+          (is (every? #(case (:seon.oversight/ping %)
+                         :reply (int? (:seon.oversight/passes %))
+                         :unknown (not (contains? % :seon.oversight/passes))
+                         false)
+                      agent-procs)
+              "an agent proc missing the bounded pong is unknown")
           (is (every? #(case (:seon.oversight/ping %)
                          :reply (int? (:seon.oversight/passes %))
                          :unknown (not (contains? % :seon.oversight/passes))

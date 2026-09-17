@@ -345,15 +345,17 @@
              (with-redefs
               [cluster/readiness
                (fn [_] {:seon.boot/cluster-name cluster-name})
-               oversight/cluster-flow-status
+               oversight/flow-status
                (fn [database _]
                  (let [effective (config/effective database cluster-name)]
                    (if (:seon.error/kind effective)
                      effective
-                     {:seon.oversight/plumbing []})))]
+                     {:seon.oversight/agents []
+                      :seon.oversight/plumbing []})))]
                (let [result (cluster/mcp-runtime-observation cluster-name)]
                  (is (= :observed (:seon.dev.mcp/health result)))
-                 (is (= {:seon.oversight/plumbing []}
+                 (is (= {:seon.oversight/agents []
+                         :seon.oversight/plumbing []}
                         (:seon.dev.mcp/flow result)))
                  (is (not (contains? result :seon.error/kind)))))
              (finally
