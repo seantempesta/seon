@@ -2713,3 +2713,14 @@ working tree, never Sonnet.
   "other agents use the definition in the database, not the base system"
   is proven live. S3 parked (session preserved); Phase 2's S3 row is DONE
   pending the cold gate (batch 122 covers its namespaces).
+- **"Arity-message parity" reds ROOT-CAUSED** (`ae4018ff6`, Opus): not a
+  message drift — the two cold reds were the evaluation DEADLINE latching
+  around a ~10 ms refusal (2,000 ms bound; issue filed with the
+  ThreadLocal-arm-inheritance hypothesis, unreproduced) and its
+  `catch Throwable` re-report as a contract violation. The real defect the
+  probe found: ONE refusal sentence had THREE composers (`refusal-text`,
+  `instrument/violation`, `seon.db`), and `3e41a5d22` fixed the flat message
+  by breaking the rendered one ("an argument count of 0 0"); now
+  `seon.error/problem-sentence` is the one composer with `scalar-text` for a
+  bounded offending value. 102/527/1F fast (the open allocation bound).
+  Cold gate: batch 123 after 122.
