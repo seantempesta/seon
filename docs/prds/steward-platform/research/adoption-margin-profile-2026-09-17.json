@@ -1,0 +1,66 @@
+{
+  "samples": 3443,
+  "encoding_stacks": 842,
+  "first_seon_frame": [
+    [
+      "seon/schema$canonical_data_string",
+      599
+    ],
+    [
+      "seon/instrument$arm_var_BANG_$fn__91211$fn__91214",
+      498
+    ],
+    [
+      "seon/fn/analyzer$invoke_kondo",
+      193
+    ],
+    [
+      "seon/fn$index_tempids",
+      142
+    ],
+    [
+      "seon/fn/analyzer$contains_position_QMARK_",
+      84
+    ],
+    [
+      "seon/schema/internal$assert_compilable_schema_BANG_",
+      81
+    ],
+    [
+      "seon/fn$compile_index_transaction",
+      80
+    ],
+    [
+      "seon/fn/schema_shape$encode_form",
+      73
+    ],
+    [
+      "seon/instrument$supplied_projection$fn__91192",
+      71
+    ],
+    [
+      "seon/schema$projection_cache_value$fn__73886",
+      70
+    ],
+    [
+      "seon/schema$canonical_definition",
+      53
+    ],
+    [
+      "seon/test/accretion$schema_row",
+      41
+    ],
+    [
+      "seon/schema$framed",
+      37
+    ],
+    [
+      "seon/instrument$supplied_projection",
+      34
+    ],
+    [
+      "seon/schema$canonical_coll_string",
+      33
+    ]
+  ]
+}

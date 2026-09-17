@@ -109,3 +109,17 @@ reached final-report validation. Carry the projection/derived mintable
 identities once with the evidence operation; do not fetch declarations per
 reference. This owner is outside the urgent two-defect write-admission repair.
 Evidence: [write-admission landing note](../../prds/steward-platform/research/write-admission-2026-09-17.md).
+
+## Adoption-margin repair — 2026-09-17
+
+The publication evidence path now carries packaged forms once and resolves
+each distinct evidence identity once at the writer's current database value.
+Default had 1146092 reach references but only 3793 distinct reached functions.
+The read and transaction phases measured 4735 ms and 25570 ms.
+
+The same repeated-work pattern appeared in development reconciliation: the
+reference pull memoization lived inside one row normalization. It now lives
+with each immutable operation database, separately for published-row reads,
+the writer transaction and each side of the comparison. A successful default
+adoption measured reconciliation transaction 5373 ms and comparison 4982 ms.
+See [the measured landing note](../../prds/steward-platform/research/adoption-margin-2026-09-17.md).

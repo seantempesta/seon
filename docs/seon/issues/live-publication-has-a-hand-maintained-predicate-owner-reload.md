@@ -57,3 +57,17 @@ prerequisite. A recurring test moves a predicate registration between two
 already-loaded namespaces without editing an operator reload list and live
 publication still succeeds. Missing readiness must name both the predicate and
 the namespace that must load or reload.
+
+## 2026-09-17 fixture verification boundary
+
+The adoption-margin HEAD-plus-owned-paths fast iteration reached this test
+after all source-publication tests completed. The deliberate stale
+`canonical-row` replacement at `test/seon/dev/fresh_operator_test.clj:1265`
+still takes one argument; the current caller at `src/seon/fn.clj:1281` passes
+two. At 05:36:21Z the assertion at line 1277 expected
+`:capability-without-request` but received `ArityException` instead. Raw output:
+`tmp/adoption-margin/baseline-fast.log`; isolated snapshot
+`tmp/adoption-margin-wt/tmp/test-runs/run.YXdSxD`. The broad operator iteration
+was ended after this unrelated fixture failure; its production/test owners
+were not changed by the adoption-margin assignment. Update the fixture's
+arity before treating this scenario as proof of predicate-owner readiness.

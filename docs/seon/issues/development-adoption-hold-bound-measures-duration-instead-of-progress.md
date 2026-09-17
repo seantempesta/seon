@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 created: 2026-09-17
 tags: [operator, adoption, bounded-execution, class/absence-as-health]
@@ -44,3 +44,15 @@ CLI timeouts. A closed CLI does not cancel its submitted JVM evaluation.
 No foreign session was stopped or resumed. A transport timeout and a remote
 operation's terminal event are different boundaries; the unfinished remote
 work must not be mistaken for completed adoption.
+
+## Resolution — 2026-09-17
+
+The literal progressing holder completed 540838 ms; the stalled SCI phase
+refused after 30075 ms under the declared 30000 ms window. Default pid 94566
+converged without restart/refork, and an explicit `bin/seon init --dev default`
+returned successfully in 37354 ms (190874 ms including lock acquisition).
+MCP then read equal adopted/published commit IDs,
+`6aab814a-c7b5-5d2d-950b-1ea7970b16d6`, and the unchanged 30000 ms effective
+configuration. Phase measurements, hot-reload scope and remaining unrelated
+verification failures are in the linked landing note. Cold/platform proof
+remains the orchestrator's responsibility.

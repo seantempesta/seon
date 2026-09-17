@@ -65,3 +65,17 @@ is nil and the armed `seon.db/pull` refuses that entity id. No schema declaratio
 writer or this regression was changed by the message-wake slice. This records
 the matching observable; it does not independently re-prove the attribution
 above. See the [landing evidence](../../prds/steward-platform/research/message-wake-model-2026-09-17.md).
+
+## Adoption-margin baseline verification — 2026-09-17
+
+`seon.program-test/indexed-and-evaluated-declarations-are-the-same-entities`
+now observes the namespace on the evaluated `:sample.s1/value` schema and
+none on its indexed resource counterpart. The 05:56Z reconciliation
+iteration reported that exact mismatch. A second armed HEAD-plus-paths run
+using the unchanged `c772db2d3` indexer and original test reproduced it:
+27 tests / 227 assertions, one failure / zero errors. Thus the mismatch
+exists without the adoption-margin reference-reader change. This observation
+does not reverse the resource-versus-evaluation ruling in the archived parity
+note or decide what namespace a resource schema should name. Logs and the
+bounded verification scope are recorded in
+[the adoption landing note](../../prds/steward-platform/research/adoption-margin-2026-09-17.md).

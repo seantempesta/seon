@@ -57,3 +57,19 @@ would close it from the other side.
 Related: `render/request-profile` was observed derived 64 times per turn by
 the same research (fetch-at-call-time, §2.1); see
 [request-profile-is-derived-64-times-per-turn](request-profile-is-derived-64-times-per-turn.md).
+
+## Adoption-margin measurement — 2026-09-17
+
+The armed fresh-store publication measured complete issue indexing at 3176 ms
+before the canonical encoding change and 2317 ms after it. On default the
+measured complete index was 1908 ms. These are current observations, not the
+historical 13-second result being relabelled.
+
+A separate adoption cost was found by the phase-silence probe: `identity-row`
+recomputed `citation-attributes`, parsing every stored schema form, once per
+issue. `seon.issue/adopt!` now derives one selector and reads all issue rows
+with `seon.db/pull-many`; the existing adoption regression retains unchanged
+rows, citations, class membership and later edits. The whole-entity writer
+validation and issue transaction remain unchanged. Detailed measurements and
+the verification boundary live in
+[adoption-margin-2026-09-17](../../prds/steward-platform/research/adoption-margin-2026-09-17.md).
