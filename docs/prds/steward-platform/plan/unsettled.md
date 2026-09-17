@@ -3440,3 +3440,11 @@ as orchestrator/astra lanes, easy pool as the first live-agent slice).
   declared (triage #7 territory) — a lane at the next free slot.
   Recording refused (`test-definition-absent`) — the stage-1 lane's
   runner-test symbol work.
+- B2 `audit2-blockers` COMPLETE: rows #2 `92d644cdc`, #6 `820d0ab60`,
+  #12 `da73fcd28`, #8 `9d91b2422`, #13 `a3f4870a9`, plus pull-shape
+  contract corrections `47f0bc9c1` `b451313cb`, note `9e2343baa`; six
+  armed regressions green on the canonical fixture; its broader run shows
+  11F/10E of post-reset symbol/config fixture drift in turn/cluster tests
+  (findings, not its rows). Cold gate `b2-paths-gate.log` running.
+  Launched sol `sci-arm-leak` (the standalone "different SCI context is
+  already armed" class) into the freed slot.
