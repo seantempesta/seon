@@ -2080,6 +2080,15 @@ for anyone; lanes prove in candidate contexts / fixtures. program-ops told
 to commit its code without waiting on AGENTS.md (held by guardrails) and to
 add the vocabulary rows when it frees.
 
+**Guardrails LANDED first slice** (`aba5d94a5`): codex lanes (exported lane
+identity) are REFUSED by `bin/test` (cold gates) while `bin/test-fast`
+snapshots stay admitted; `resume` reads the session id from the launcher's
+retained record, not the lane's stdout; hook-snapshot/restart guidance in
+bin/codex-agent. Regressions green; its full-namespace run hit two known
+reds then the 300 s watchdog (no green tally claimed). Resumed on items 2–4
+(declared bounds; overlay completeness + named analysis findings; orphaned
+gate announcement) and the AGENTS.md hold.
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
