@@ -3768,3 +3768,10 @@ as orchestrator/astra lanes, easy pool as the first live-agent slice).
   agent's.
 - `acquisition-by-digest` resumed (codex). Running: stage 1 (codex),
   acquisition-by-digest (codex), serial-worker (Opus), db (Opus).
+- **Reset 3 REFUSED at republish** ("Initialization lookup refs do not
+  resolve", `reset-republish-30162.log`); the new preflight passed in 13.1 s
+  (lint of the dirty tree), down/destroy ran — DEFAULT IS DOWN until the
+  cause is fixed. The Opus preflight agent had already seen this refusal on
+  a lane's in-flight `cluster.clj` (`:seon.ai.model/provider-id`);
+  investigating whether it is committed (the manifest's `seon.ai` facets,
+  the operator move) or a dirty edit.
