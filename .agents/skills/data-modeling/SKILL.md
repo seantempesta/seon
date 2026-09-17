@@ -37,12 +37,16 @@ Before declaring any `:seon.db/ref`, ask what the fact MEANS to the writer
 that produced it.
 
 - **A STATEMENT ABOUT A LIVING ENTITY.** The referrer asserts a relation to
-  something that must exist. Either the target CONTAINS the referrer —
-  `:seon.db/component true`, and it dies with its parent — or they are peers,
+  something that must exist. If the referrer owns the target as part of its
+  value, the parent-to-child attribute carries `:seon.db/component true`
+  and the child dies when the parent is retracted. Otherwise they are peers,
   and the fact becomes false when the target goes. A peer's deletion policy is
   already declared, by required-ness: a required ref in the referrer's entity
-  map REFUSES the deletion, an optional one lets it SWEEP silently. That is
-  not a separate mechanism; see the datahike skill for the writer chain.
+  map REFUSES a sweep only when the surviving row is selected and validated;
+  an optional one lets it SWEEP silently. Required presence is not a native
+  foreign-key constraint: numeric ref values do not prove target existence
+  (`reference-code/datahike/src/datahike/db/utils.cljc:109-148`). See the
+  datahike skill for the writer chain and component coverage gap.
 - **AN OBSERVATION OF A TOKEN.** The writer saw a NAME — in source text, in
   metadata, in a note, in a report — and a name denotes itself. Whether
   anything by that name exists is a SEPARATE, derivable question. Store the
@@ -81,6 +85,39 @@ Grounding:
 
 Cardinality-many does not acquire order because a Malli declaration used
 a vector. Store an ordinal on ordered members.
+
+Choose a tuple for one fixed ordered observation, such as callee and argument
+count; its complete value is the index key, not each member
+(`reference-code/datahike/src/datahike/index/persistent_set.cljc:31-132`).
+Choose components when children belong to one parent's value. Datahike's
+cascade does not enforce exclusive ownership (`db/transaction.cljc:831-836`);
+shared fingerprint-identified shapes stay behind ordinary refs. The existing
+shape model owns child/entry occurrence rows but their `/schema` refs lead
+to shared shapes (`resources/seon/schemas/seon.schema.shape.edn:8-11`,
+`resources/seon/schemas/seon.schema.shape.child.edn:3-4`). Preserve that
+distinction when merging another representation into it.
+
+Validate complete owning values, including owners discovered from before and
+after a child-only edit or unlink. Wildcard pull is not a completeness proof:
+it caps each many-valued attribute at 1,000 and recursion can yield id-only
+maps (`reference-code/datahike/src/datahike/pull_api.cljc:238-243`, `:315-351`).
+Obtain the complete value under the declared work bound or refuse.
+
+An event fact proves exactly the observation its writer completed. A definition
+analysis digest does not prove test reach ran; a maintenance request's existence
+does not prove every sub-operation ran. Do not require nonempty datoms for a
+legitimate empty result. The event's positive provenance permits interpreting
+absent membership as empty (`db/transaction.cljc:718-770`). A digest records
+content identity, not the number of times identical content was observed:
+idempotent assertions are omitted from effective tx-data (`:587-625`).
+
+Use history for retained changes, and a positive transition fact for current
+state when its writer actually supplies one. `:db/noHistory` deliberately
+removes the former guarantee (`db/transaction.cljc:440-484`). An imported
+observation time is not its import transaction time. The
+[modeling study](../../../docs/prds/steward-platform/research/datahike-modeling-study-2026-09-17.md)
+records live counterexamples: terminal issue status without resolved-tx,
+zero-argument arity without argument datoms, and separate message subject/sender.
 
 Use fully namespaced keys and reuse declared constraints by reference.
 An entity is its attributes and connections, never a stored kind.
@@ -136,7 +173,8 @@ generated-form family.
 
 ## Results and identity — target
 
-The agent retains one SCI context receiving base diffs across turns.
+The agent retains a context handle; `fork-for-turn` regenerates from the current
+base and reapplies its private layer (`src/seon/sci/eval.clj:1912-1944`).
 Its private defs, atoms, and result objects remain in memory.
 Shown text is stored because it records what was seen, not because
 it can restore the object. The profile is applied once at evaluation
@@ -147,11 +185,11 @@ Use `seon.id/evaluation` for branch/turn/ordinal identity and
 (`src/seon/id.clj:55`, `:47`). Do not add a random-id generator.
 
 Read evidence is a dependency observation, not a copied result:
-`src/seon/db.clj:784`. Every distinct read form's latest evidence
+`src/seon/db.clj:805`. Every distinct read form's latest evidence
 feeds the since-query diff; changed reads append, writes/effects never
 rerun. Compaction retracts evaluations and regenerates the opening.
 Program identity tombstones are RETIRED by owner ruling 2026-09-16
 (program-facts PRD §1f G1/G3): deletion is `[:db/retractEntity …]` and the
 past is a temporal query. The tombstone machinery
-(`seon.db/write-tombstone-validator`, `src/seon/db.clj:2913`) is still in
+(`seon.db/write-tombstone-validator`, `src/seon/db.clj:3023`) is still in
 the tree until the edge schema lands; do not build on it.
