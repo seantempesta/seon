@@ -2914,3 +2914,22 @@ working tree, never Sonnet.
   operator's durable fault log, never into the database that refused them.**
   Folded into the private-contracts lane's F1–F3 (one predicate, one
   throw-or-record helper on the existing dial).
+- **Audit 4/4 LANDED** (my/render/operator, `c314408c0`): 991 fns, 630
+  private, 0 contracted; 69 more instances of the refused-read-as-row
+  class in four repair-distinct shapes (72 total now; the class issue is
+  updated by the note); BLOCKER: `seon.db/q` lies about symbol-valued
+  attributes — a symbol literal in value position refuses
+  (`Symbol cannot be cast to String`), a collection binding returns the
+  STORAGE STRING — so any agent asking the graph for callers today gets an
+  empty answer (the same seam audit 3 met: the symbols ruling half-landed);
+  the operator supervisor (`seon.fresh-operator`, 136 fns) is outside the
+  program graph entirely and `seon.operator.state`'s 33 private functions
+  carry no private flag. Owner ruling §1l recorded (`2e65957bc`+): the
+  data-model analysis comes FIRST — astra `error-and-data-model-design`
+  (high) launched on the error value family, the shapes the four audits
+  found, the checks, and the campaign order; the private-contracts lane
+  stops after the predicate + helper for that design to land before the
+  contract campaign. Routed: the `seon.db/q` symbol codec → the
+  reset-batch integrator at its next stop (it owns the symbol retype); the
+  operator-outside-the-graph finding → an issue + the publication owner
+  after the reset. Design lane also reads all four audits.
