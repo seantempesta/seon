@@ -1878,6 +1878,24 @@ keys folded into the reset plan. Edge retype still unlanded: program.cljc,
 schema.clj and sci/eval.clj held (S3 and program-ops lanes). Fault-path fix
 landed `27f0a0242` (the failing function's identity minted at the writer).
 
+**Fault path FIXED** (`27f0a0242`, `b37a19c77`): two defects, not one —
+db.clj:2398 wrote a string into symbol-typed `:seon.error/exception-class`
+(on the diff refusal path; fixed, the one-liner swept into 5a5359205 by the
+integrator's commit, now reviewed); and the real wake red: `seon.error/
+recording` minted the failing function's identity WITHOUT the required
+`:seon.schema.admission/source`, so EVERY fault naming a function with no
+row refused its whole transaction (no fact, no occurrence, no steward wake)
+— now a `:db.fn/call` deciding at the mid-transaction database; a
+hand-written cluster row in error_test seeded through the helper. 70/542
+green fast. **Owner asks about loopholes**: the hook agent is resumed on (1)
+whether codex honors the hook at all after the matcher change (no codex
+event logged since; program.clj:530 still broken under a running lane that
+started before the change — stale hook config in long-lived sessions is the
+suspect) with a live codex probe, and (2) a loophole inventory from
+tonight's evidence (`SEON_TEST_SILENCE_SECONDS` raised by three lanes; lane
+`bin/test`; --paths omitting callers; `datahike.api/with`; turns ended with
+runs in flight; git checkout/stash/apply as unpayloaded writes).
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
