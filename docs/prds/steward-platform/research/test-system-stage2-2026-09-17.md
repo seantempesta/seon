@@ -7,6 +7,87 @@ tags: [test, database, admission, stage-2]
 
 # Test recording and pre-execution admission
 
+## Follow-up: batch 116 recording refusal
+
+The accepted first seam is `7795e54f4`. The next coherent slice corrects
+the recorder's interpretation of a refused provenance read. Resolution,
+claim/completion, and unchanged-green reuse remain outstanding in that order.
+
+Raw evidence: `tmp/orchestrator/gate-results/batch-116.log:1449` records
+`:seon.test.run/immutable` after 96 platform tests; the retained execution
+snapshot is `tmp/test-runs/run.jHOFSg`. Recording ran through the separate
+live store holder (`record-persistent-results!` → `commit-staged-completion!`
+→ `source/record-results!`), so the execution snapshot does not establish
+which definition of `seon.db/pull` the recording JVM had loaded.
+
+The run ID is a fresh event: the coordinator calls zero-argument
+`seon.id/id`, which hashes a fresh UUID. The compared provenance also carries
+time, Git SHA, program digest, tested basis and branch. Nothing derives the
+run ID from the program digest or reuses the published base's run ID. The
+published `provenance.edn` contains only program digest, basis and branch.
+The gate log retained neither compared value nor even the alleged colliding
+ID, so it does **not** establish an actual identity collision.
+
+The contemporaneous read defect is independently documented in
+[the config-loss incident](../../../seon/issues/the-default-clusters-effective-configuration-lost-every-required-fact.md).
+Raw probes `tmp/orchestrator/config-loss-probe-4.edn` and `-5.edn` show
+`seon.db/pull` returning `:seon.db/invalid-read`: a sequence passed to
+`append-pull-evidence!` caused `Cons cannot be cast to Associative`.
+The on-disk repair has landed in `6a0f8a08a`; no database-owner edit belongs
+in this slice. This explains how the recorder could produce the reported
+false conflict: its truthy `previous` was allowed to be an error map.
+The historical gate's exact `previous` value is unavailable; the regression
+proves the failure class rather than claiming to recover that missing value.
+
+`record-tx` now throws a refused read with its original error data, letting
+the existing transaction boundary return that refusal unchanged. It only
+compares real rows for immutability. A genuine conflict includes both stored
+and submitted provenance and the writer's basis, so the next diagnosis has
+the evidence batch 116 omitted. There is no new ID derivation or runner.
+
+The canonical regression records two independently captured run IDs at the
+same tested basis, replays the first, and records across a different
+destination branch. It verifies two distinct runs, atomic refusal of changed
+provenance, and preservation of a real database read refusal injected only
+at the run lookup. All other reads and the transaction use the canonical
+fixture and writer. The initial run/replay/conflict iteration passed
+**4 tests, 24 assertions, zero failures/errors**, at snapshot HEAD
+`73306eaac1d024954d9ff9bbd6b91b6ff5e9994a` plus the two source/test paths.
+The next four-namespace iteration ran **52 tests, 362 assertions, two
+failures, zero errors**: the two failures were this regression looking for
+diagnostic evidence at the top level instead of under `:seon.error/data`.
+The read-refusal assertion passed. After correcting those assertion paths,
+the final four-namespace iteration passed **52 tests, 362 assertions, zero
+failures, zero errors**, exit 0. Its snapshot was HEAD
+`2a36c0af9aa357da0cf63e2c04895b2f264afecb` plus the two source/test paths;
+1,123 contracts were armed. Slot wait was zero seconds. Test execution ran
+from `2026-09-17T04:32:20.549894Z` to `04:35:40.288723Z`.
+
+```bash
+timeout 2400 bin/test-fast --paths src/seon/test/runner.clj test/seon/test_test.clj -- seon.test-test seon.test.runner-test my.test-test seon.test-reaching-test
+```
+
+Raw iteration logs: `tmp/test-system-stage2-recording-refusal-fast.log` and
+`tmp/test-system-stage2-recording-refusal-final-fast.log`.
+Runs were sequential, foreground commands with a 2400-second bound; neither
+slot nor silence settings were overridden. No default REPL, start, stop,
+reset, or explicit adoption command was issued during the owner's reset.
+The configured edit hook queued publication automatically. Cold recording
+and platform proof remain the orchestrator's responsibility. No foreign
+session or file was operated on.
+
+Hook lint reported the existing dependency-pin errors in
+`docs/prds/context-generation/research/agents-md-audit-2026-09-15.md`.
+That foreign authority was not edited; repository-wide Markdown lint is not
+claimed green. Clojure lint reported existing runner shadowed/unused-var and
+docstring warnings, with no blocking finding on this change.
+
+The recorder defect and resolution are recorded in
+[the issue note](../../../seon/issues/test-recording-misreports-a-refused-provenance-read-as-an-identity-collision.md).
+Stopping at this coherent recorder repair for review under the assignment's
+landing rule. No resolution, selection, claim/completion, or unchanged-request
+implementation is included in this follow-up.
+
 The owner goal, verbatim: "We want agents to be able to ask for tests whenever they want and for it to just ignore requests that have already been run and to just return the results if nothing has changed."
 
 Earlier, verbatim: "specify which cluster we are running on and I'll only run the minimum amount of tests based on what has changed since the last run and I will do it as efficiently as possible knowing globally how many tests are running in different workers."

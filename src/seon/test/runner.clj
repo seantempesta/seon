@@ -2488,11 +2488,24 @@
               (cond-> (dissoc failure :seon.test.failure/file)
                 reported-path? (assoc :seon.test.failure/reported-file path)))))
         previous (db/pull database (vec (keys run)) run-ref)]
+    (when (:seon.error/kind previous)
+      (throw (ex-info (:seon.error/message previous) previous)))
     (when (and previous (not= run (dissoc previous :db/id)))
-      (throw (ex-info "A test run's provenance is immutable."
-                      {:seon.error/kind :seon.test.run/immutable
-                       :seon.test.run/immutable run-id
-                       :seon.test.run/id run-id})))
+      (let [failure (error/diagnostic
+                     {:seon.error/kind :seon.test.run/immutable
+                      :seon.error/message "A test run's provenance is immutable."
+                      :seon.error/diagnostic-layer :test
+                      :seon.error/diagnostic-operation 'seon.test.runner/record-tx
+                      :seon.error/diagnostic-member run-id
+                      :seon.error/diagnostic-expected (dissoc previous :db/id)
+                      :seon.error/diagnostic-offending run
+                      :seon.error/diagnostic-cause :seon.test.run/immutable
+                      :seon.error/diagnostic-evidence
+                      {:seon.test.run/id run-id
+                       :seon.db/basis-t (db/basis-t database)}
+                      :seon.test.run/id run-id
+                      :seon.test.run/immutable run-id})]
+        (throw (ex-info (:seon.error/message failure) failure))))
     (into
      (into (into (source/identity-tombstone-rows packaged-forms absent-identities)
                  [(assoc run :db/id "test-run")])

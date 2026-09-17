@@ -43,6 +43,59 @@
        (is (= :agent (source-of))
            "recreation sees namespace provenance at the mid-transaction database")))))
 
+(deftest recording-distinguishes-run-replay-from-a-new-event
+  (test-support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           test-symbol (first (db/q '[:find [?symbol ...]
+                                      :where [_ :seon.test/sym ?symbol]] database))
+           first-run (runner/provenance database)
+           second-run (runner/provenance database)
+           completion (fn [run]
+                        {:seon.test.run/provenance run
+                         :seon.test/run-basis-t (:seon.test.run/basis-t run)
+                         :seon.test/run-at (:seon.test.run/at run)
+                         :seon.test.run/branch :current-src
+                         :seon.db/db database
+                         :seon.test.runner/results
+                         [{:seon.test/sym test-symbol
+                           :seon.test/pass-count 1
+                           :seon.test/fail-count 0
+                           :seon.test/error-count 0}]})]
+       (is (not= (:seon.test.run/id first-run) (:seon.test.run/id second-run)))
+       (doseq [run [first-run first-run second-run]]
+         (let [result (runner/commit-results! connection (completion run))]
+           (is (vector? result) (pr-str result))))
+       (is (= #{(:seon.test.run/id first-run) (:seon.test.run/id second-run)}
+              (set (db/q '[:find [?id ...] :where [_ :seon.test.run/id ?id]]
+                         (db/db connection)))))
+       (let [pull db/pull
+             read-refusal (pull database [:db/id] [:seon.test.run/id 42])
+             basis (db/basis-t (db/db connection))
+             refused (with-redefs [db/pull
+                                   (fn [database selector entity]
+                                     (if (= [:seon.test.run/id (:seon.test.run/id first-run)] entity)
+                                       read-refusal
+                                       (pull database selector entity)))]
+                       (test-support/refusal-data
+                        #(runner/commit-results! connection (completion first-run))))]
+         (is (= :seon.db/invalid-read (:seon.error/kind read-refusal)))
+         (is (= read-refusal refused)
+             "a refused read is never evidence of an existing run or an identity collision")
+         (is (= basis (db/basis-t (db/db connection)))))
+       (let [basis (db/basis-t (db/db connection))
+             changed (assoc first-run :seon.test.run/basis-t (inc (:seon.test.run/basis-t first-run)))
+             refused (test-support/refusal-data
+                      #(runner/commit-results! connection (completion changed)))]
+         (is (= :seon.test.run/immutable (:seon.error/kind refused)) (pr-str refused))
+         (is (= (:seon.test.run/basis-t first-run)
+                (get-in refused [:seon.error/data :seon.error/diagnostic-expected
+                                 :seon.test.run/basis-t])))
+         (is (= (:seon.test.run/basis-t changed)
+                (get-in refused [:seon.error/data :seon.error/diagnostic-offending
+                                 :seon.test.run/basis-t])))
+         (is (= basis (db/basis-t (db/db connection)))))))))
+
 (deftest overlapping-admissions-reserve-complementary-memberships
   (test-support/with-database
    (fn [connection]
