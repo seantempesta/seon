@@ -2508,9 +2508,8 @@
 
 (defn- normalized-index-row
   "Compare stored refs by identity and anonymous components by their values."
-  [row-shapes database row identity-attributes]
-  (let [entity (memoize #(db/pull database '[*] %))
-        row-identity
+  [row-shapes database row identity-attributes entity]
+  (let [row-identity
         (fn [row]
           (some (fn [attribute]
                   (when-let [entry (find row attribute)]
@@ -2545,6 +2544,7 @@
   "Replace source definitions, owning rows by the shapes `row-shapes` carries."
   [row-shapes database rows previous-identities]
   (let [identity-attributes (db/identity-attributes database)
+        entity (memoize #(db/pull database '[*] %))
         desired-identities (into #{} (map program/row-identity) rows)
         removed (remove desired-identities previous-identities)
         desired
@@ -2555,13 +2555,13 @@
         (into []
               (keep
                (fn [row]
-                 (let [current (db/pull database '[*] (program/row-identity row))
+                 (let [current (entity (program/row-identity row))
                        normalized-current
                        (normalized-index-row row-shapes database current
-                                             identity-attributes)
+                                             identity-attributes entity)
                        normalized-desired
                        (normalized-index-row row-shapes database row
-                                             identity-attributes)]
+                                             identity-attributes entity)]
                    (when (not= normalized-current normalized-desired)
                      {:seon.program/row row
                       :seon.fn/retractions
@@ -2600,8 +2600,9 @@
 (defn- published-index-rows
   "Read compiled rows with portable program refs and complete owned components."
   [database]
-  (letfn [(reference [value]
-            (let [pulled (db/pull database '[*] (:db/id value))]
+  (let [entity (memoize #(db/pull database '[*] %))]
+   (letfn [(reference [value]
+            (let [pulled (entity (:db/id value))]
               (or (program/row-identity pulled) (row pulled))))
           (row [entity]
             (reduce-kv
@@ -2618,11 +2619,11 @@
              {} entity))]
     (into []
           (mapcat (fn [attribute]
-                    (map #(row (db/pull database '[*] %))
+                    (map #(row (entity %))
                          (db/q '[:find [?entity ...] :in $ ?attribute
                                  :where [?entity ?attribute]]
                                database attribute))))
-          (filter #(get (:schema database) %) program/identity-attributes))))
+          (filter #(get (:schema database) %) program/identity-attributes)))))
 
 (defn index!
   "Populate one fresh source scratch branch from static analysis.
@@ -2647,6 +2648,8 @@
          rows (if source-database
                 (published-index-rows source-database)
                 (desired-rows request progress!))
+         _ (when source-database
+             (report-index-progress! progress! "development published rows read"))
          _ (assert-one-row-per-identity! rows)
          _ (assert-populated! rows)
          existing (some (fn [identity-attribute]
@@ -2674,6 +2677,7 @@
                    (filter #(get (:schema previous-database) %)
                            program/identity-attributes))
              projection (schema/handed-projection)
+             _ (report-index-progress! progress! "development reconciliation transaction")
              report
              (require-committed!
               (db/transact!
@@ -2687,7 +2691,10 @@
                                                previous-identities)))]]}
                  process (assoc :tx-meta {:seon.db/process process})))
               :seon.fn/population)
+             _ (report-index-progress! progress! "development changed definition comparison")
              changed-entities (into #{} (map :e) (:tx-data report))
+             previous-entity (memoize #(db/pull previous-database '[*] %))
+             current-entity (memoize #(db/pull (:db-after report) '[*] %))
              previous-identity-attributes (db/identity-attributes previous-database)
              current-identity-attributes (db/identity-attributes (:db-after report))
              source-changed-identities
@@ -2699,11 +2706,11 @@
                                      row-shapes
                                      previous-database
                                      (when (get (:schema previous-database) (first identity))
-                                       (db/pull previous-database '[*] identity))
-                                     previous-identity-attributes)
+                                       (previous-entity identity))
+                                     previous-identity-attributes previous-entity)
                                     (normalized-index-row
                                      row-shapes (:db-after report) row
-                                     current-identity-attributes))
+                                     current-identity-attributes current-entity))
                                identity))))
                    rows)
              removed-identities

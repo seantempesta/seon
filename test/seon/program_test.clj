@@ -1086,7 +1086,8 @@
                                    (#'seon.fn/normalized-index-row
                                     (assoc-in shapes [(first identity) :seon.program/owned-attributes]
                                               (vec (keys pulled)))
-                                    database pulled identity-attributes)
+                                    database pulled identity-attributes
+                                    #(db/pull database '[*] %))
                                    (into [:db/id :seon.schema.admission/source
                                           :seon.fn/file :seon.fn/form-span]
                                          (filter #(= "seon.fn.file" (namespace %)))
