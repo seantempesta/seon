@@ -1854,6 +1854,71 @@
   the same seam `index!` itself calls with the shapes it derived once."
   @#'seon.fn/reconcile-tx-in)
 
+(deftest incremental-tempid-rewrite-follows-the-installed-attribute-type
+  (let [target-namespace 'sample.attribute-aware.target
+        owner-namespace 'sample.attribute-aware.owner
+        identity-pair [:seon.ns/name target-namespace]]
+    (test-support/with-database
+     {:seon.test-support/extra-schema
+      [{:db/ident ::identity-value
+        :db/valueType :db.type/tuple
+        :db/tupleTypes [:db.type/keyword :db.type/symbol]
+        :db/cardinality :db.cardinality/one
+        :seon.schema/key ::identity-value
+        :seon.schema/form "[:tuple :keyword :symbol]"
+        :seon.schema.admission/source :agent}
+       {:db/ident ::identity-ref
+        :db/valueType :db.type/ref
+        :db/cardinality :db.cardinality/one
+        :seon.schema/key ::identity-ref
+        :seon.schema/form ":seon.db/ref"
+        :seon.schema.admission/source :agent}]}
+     (fn [connection]
+       (let [database (db/carry-derived-projection @connection)
+             projection (db/carried-projection database)
+             forms (-> (:seon.schema.projection/forms projection)
+                       (update :seon.ns/ns conj
+                               [::identity-value {:optional true}
+                                ::identity-value]
+                               [::identity-ref {:optional true}
+                                ::identity-ref]))
+             rows [{:seon.ns/name target-namespace}
+                   {:seon.ns/name owner-namespace
+                    ::identity-value identity-pair
+                    ::identity-ref identity-pair}]
+             tx-data (reconcile-in (program/shapes-in forms)
+                                   database rows [])
+             target-tempid
+             (some (fn [[operation tempid attribute value]]
+                     (when (and (= :db/add operation)
+                                (= :seon.ns/name attribute)
+                                (= target-namespace value))
+                       tempid))
+                   tx-data)
+             owner-tempid
+             (some (fn [[operation tempid attribute value]]
+                     (when (and (= :db/add operation)
+                                (= :seon.ns/name attribute)
+                                (= owner-namespace value))
+                       tempid))
+                   tx-data)
+             owner-entity
+             (some #(when (and (map? %) (= owner-tempid (:db/id %))) %)
+                   tx-data)]
+         (is (string? target-tempid) "the target has a transaction tempid")
+         (is (= identity-pair (::identity-value owner-entity))
+             "the tuple value remains the exact identity-shaped value")
+         (is (= target-tempid (::identity-ref owner-entity))
+             "the genuine ref is rewritten to the target's transaction tempid")
+         (let [report (test-support/transacted! connection tx-data)
+               stored
+               (db/pull (:db-after report)
+                        [::identity-value {::identity-ref [:seon.ns/name]}]
+                        [:seon.ns/name owner-namespace])]
+           (is (= identity-pair (::identity-value stored)))
+           (is (= target-namespace
+                  (get-in stored [::identity-ref :seon.ns/name])))))))))
+
 (deftest an-attribute-declared-after-this-jvm-started-is-indexed-without-a-restart
   ;; THE CLASS, at the indexer. `seon.program/shapes` cached the declarations
   ;; in a process-level defonce, so an attribute declared AFTER this JVM

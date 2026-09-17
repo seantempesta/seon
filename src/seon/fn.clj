@@ -2568,9 +2568,18 @@
   string tempids instead let namespace, declaration, shape, and call refs all
   resolve inside one transaction. Identified nested maps are emitted once per
   population, rather than normalized again at every owning declaration."
-  [rows identity-attributes]
+  [projection rows identity-attributes]
   (let [identity-attribute-set (set identity-attributes)
         tempids (index-tempids rows identity-attributes)
+        ref-attribute?
+        (memoize
+         (fn [attribute]
+           (and (qualified-keyword? attribute)
+                (schema.datahike/storable-attribute-in? projection attribute)
+                (= :db.type/ref
+                   (:db/valueType
+                    (schema.datahike/malli->datahike-attr-in
+                     projection attribute))))))
         entity-id
         (fn [entity]
           (or (some (fn [attribute]
@@ -2587,63 +2596,63 @@
         (fn [value]
           (when (and (vector? value) (= 2 (count value)))
             (get tempids value)))
-        entities (volatile! {})
-        rewrite
-        (fn rewrite [value]
-          (cond
-            (lookup-tempid value)
-            (lookup-tempid value)
-
-            (map? value)
-            (let [eid (entity-id value)
-                  entity
-                  (reduce-kv (fn [result attribute child]
-                               (cond
-                                 (= :db/id attribute) result
-                                 (contains? identity-attribute-set attribute)
-                                 result
-                                 :else
-                                 (assoc result attribute (rewrite child))))
-                             (cond-> (empty value)
-                               eid (assoc :db/id eid))
-                             value)]
-              (if eid
-                (do
-                  (when-let [prior (get @entities eid)]
-                    (when-not (= prior entity)
-                      (throw
-                       (ex-info
-                        "Program indexing found conflicting entity maps."
-                        {:seon.error/kind ::index-refused
-                         ::identity eid
-                         :seon.fn/index-refused true}))))
-                  (vswap! entities assoc eid entity)
-                  eid)
-                entity))
-
-            (vector? value) (mapv rewrite value)
-            (set? value) (into #{} (map rewrite) value)
-            (seq? value) (map rewrite value)
-            :else value))
-        keyword-operations
-        (into []
-              (comp
-               (mapcat keyword-facts)
-               (map (fn [[operation program-identity attribute value]]
-                      [operation (or (get tempids program-identity)
-                                     program-identity)
-                       attribute value])))
-              rows)]
-    (doseq [row rows]
-      (rewrite (dissoc row :seon.fn/keywords)))
-    {:seon.fn/index-entities
-     (->> @entities (sort-by key) (mapv val))
-     :seon.fn/index-identity-operations
-     (into []
-           (map (fn [[[attribute value] tempid]]
-                  [:db/add tempid attribute value]))
-           (sort-by (comp pr-str key) tempids))
-     :seon.fn/index-keyword-operations keyword-operations}))
+        entities (volatile! {})]
+    (letfn [(rewrite-reference [value]
+              (cond
+                (lookup-tempid value) (lookup-tempid value)
+                (map? value) (rewrite-entity value)
+                (vector? value) (mapv rewrite-reference value)
+                (set? value) (into #{} (map rewrite-reference) value)
+                (seq? value) (map rewrite-reference value)
+                :else value))
+            (rewrite-entity [value]
+              (let [eid (entity-id value)
+                    entity
+                    (reduce-kv (fn [result attribute child]
+                                 (cond
+                                   (= :db/id attribute) result
+                                   (contains? identity-attribute-set attribute)
+                                   result
+                                   :else
+                                   (assoc result attribute
+                                          (if (ref-attribute? attribute)
+                                            (rewrite-reference child)
+                                            child))))
+                               (cond-> (empty value)
+                                 eid (assoc :db/id eid))
+                               value)]
+                (if eid
+                  (do
+                    (when-let [prior (get @entities eid)]
+                      (when-not (= prior entity)
+                        (throw
+                         (ex-info
+                          "Program indexing found conflicting entity maps."
+                          {:seon.error/kind ::index-refused
+                           ::identity eid
+                           :seon.fn/index-refused true}))))
+                    (vswap! entities assoc eid entity)
+                    eid)
+                  entity)))]
+      (let [keyword-operations
+            (into []
+                  (comp
+                   (mapcat keyword-facts)
+                   (map (fn [[operation program-identity attribute value]]
+                          [operation (or (get tempids program-identity)
+                                         program-identity)
+                           attribute value])))
+                  rows)]
+        (doseq [row rows]
+          (rewrite-entity (dissoc row :seon.fn/keywords)))
+        {:seon.fn/index-entities
+         (->> @entities (sort-by key) (mapv val))
+         :seon.fn/index-identity-operations
+         (into []
+               (map (fn [[[attribute value] tempid]]
+                      [:db/add tempid attribute value]))
+               (sort-by (comp pr-str key) tempids))
+         :seon.fn/index-keyword-operations keyword-operations}))))
 
 (defn- normalized-index-row
   "Compare stored refs by identity and anonymous components by their values."
@@ -2682,7 +2691,9 @@
 (defn- reconcile-tx-in
   "Replace source definitions, owning rows by the shapes `row-shapes` carries."
   [row-shapes database rows previous-identities]
-  (let [identity-attributes (db/identity-attributes database)
+  (let [projection (or (db/carried-projection database)
+                       (schema/projection-from-database database))
+        identity-attributes (db/identity-attributes database)
         entity (memoize #(db/pull database '[*] %))
         desired-identities (into #{} (map program/row-identity) rows)
         removed (remove desired-identities previous-identities)
@@ -2712,7 +2723,8 @@
         {entities :seon.fn/index-entities
          identity-operations :seon.fn/index-identity-operations
          keyword-operations :seon.fn/index-keyword-operations}
-        (compile-index-transaction (mapv :seon.program/row changes)
+        (compile-index-transaction projection
+                                   (mapv :seon.program/row changes)
                                    identity-attributes)]
     (into (into (into (into (mapv #(vector :db/retractEntity %) removed) (mapcat :seon.fn/retractions) changes)
                           identity-operations)
@@ -2860,11 +2872,14 @@
          {:seon.reconcile/converged? (empty? changed-identities)
           :seon.reconcile/operations (count changed-identities)
           :seon.program/identities (vec changed-identities)})
-       (let [identity-attributes (db/identity-attributes @connection)
-           {entities :seon.fn/index-entities
-            identity-operations :seon.fn/index-identity-operations
-            keyword-operations :seon.fn/index-keyword-operations}
-           (compile-index-transaction rows identity-attributes)]
+       (let [database @connection
+             projection (or (db/carried-projection database)
+                            (schema/projection-from-database database))
+             identity-attributes (db/identity-attributes database)
+             {entities :seon.fn/index-entities
+              identity-operations :seon.fn/index-identity-operations
+              keyword-operations :seon.fn/index-keyword-operations}
+             (compile-index-transaction projection rows identity-attributes)]
        (report-index-progress!
         progress!
         (str "program population compiled: " (count entities)
