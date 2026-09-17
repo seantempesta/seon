@@ -7,6 +7,30 @@ tags: [issue, errors, instrumentation, contracts, wave/instrumentation-error-dat
 
 # Instrumentation record mode has no acquired fault recorder
 
+**2026-09-18 host implementation update:** acquisition is implemented on the
+host path, but the complete behavior remains blocked by generic return
+contracts. The real canonical recorder regression reaches
+`seon.error/commit-call` and its `db/pull` of an earlier occurrence.
+`src/seon/db.clj:2032–2054` declares each `pull` result as
+`[:or :nil :map :seon.error/value]`; it declares neither base nor the new
+facets. Returning a stored contract refusal therefore triggers the new
+independent check. The writer reports `seon.db/pull returned undeclared error
+facets #{:seon.instrument/contract-error}`. Handling that failure encounters
+the same gap in `src/seon/error/refusal.clj:4–8`, whose output is
+`[:or :nil :map]`. Both generic helpers need explicit facet alternatives under
+owner §1q, including explicit base permission. This is a declaration dependency
+exposed by enforcement, not foreign in-flight breakage. The database owner
+was not edited; its path was clean at this observation, but remains outside
+this lane's assigned host files.
+
+The three-namespace fast run completed **79 tests / 424 assertions / 3 failures
+/ 1 error**. The recurrence assertions and generic refusal helper identify
+the dependency; the arm-release namespace passed. Do not call the host side
+green. SCI acquisition and its regressions remain explicitly deferred by the
+owner. The linked research note carries implementation and timing evidence.
+
+The sections below preserve the earlier acquisition stops chronologically.
+
 Error-entities PRD §5.2 requires invalid invocations to stop before the body,
 record their flat refusal through the existing fault owner, and return it
 under `:record`. `wrap-interpreted` instead returns the original function

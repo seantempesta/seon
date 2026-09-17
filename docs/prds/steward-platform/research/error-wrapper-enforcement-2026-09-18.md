@@ -7,6 +7,13 @@ tags: [errors, instrumentation, contracts]
 
 # Wrapper enforcement: recording dependency
 
+**Current status, host-only resume:** partial implementation, not green.
+The host wrapper acquires a recorder and enforces body facets, input and arity;
+the canonical recording test now exposes undeclared generic returns in
+`seon.db/pull` and `seon.error.refusal/refusal`. The final section records this
+new dependency. Earlier sections are the historical stops, not the current
+implementation inventory.
+
 Slice 2 is **not implemented**. The lane stopped before production edits at
 the missing acquired recording/disposition operation. Source inspection used
 `steward-platform` HEAD `1e0e17d717cf50bd0451272407541b352ba44160`.
@@ -186,3 +193,169 @@ before/after overhead remains **unmeasured**. `git diff --check` is the
 verification for this documentation-only update; cold/platform proof remains
 orchestrator-owned. No new runtime probe, default operation, worktree, test
 JVM or scratch root was created during this resumed turn.
+
+## Host-only implementation — 2026-09-18
+
+The owner subsequently deferred SCI and authorized completing the host lane.
+Commits `09869c8f1` and `e42f494ab` contain the implementation below. This is
+a dependency checkpoint, **not a green landing**.
+
+### Implemented seams
+
+- `src/seon/error.clj:1693,1712`: contracted `facet-keys` and `facets` derive
+  canonical base extensions and validate complete values. Catalogue, narrowed
+  candidate projection and validators are memoised on the supplied projection;
+  no value-membership cache or global facet registry was added.
+- `src/seon/instrument.clj:596,702`: result-position references, aliases,
+  `:or`/`:orn`, `:and`, `:multi` entries, `:schema` and `:maybe` derive per-arity
+  permissions. Declared sets and base permission are captured once by the
+  compiled callable. Maps/collections are terminals, so a nested facet name
+  does not grant permission. Actual base-shaped returns undergo facet checking
+  even when ordinary Malli output validation accepts them. Exact arity precedes
+  variadic selection; another arity's permission is not used.
+- `src/seon/instrument.clj:648,823,871`: input/arity reports abort before the
+  body. Boundary values validate against `:seon.instrument/refusal-result`,
+  with separate contract, arity and undeclared-return observations. They never
+  re-enter the body's result contract. Panic throws the flat value; record
+  invokes its acquired operation and returns the identical value only after
+  `:seon.flow/committed`. A recording failure throws with that refusal retained;
+  it is not presented as successfully recorded. Public record-mode acquisition
+  refuses a missing operation before mutating roots.
+- `src/seon/cluster.clj:2505`: host rearming supplies the existing private
+  `commit-fault!` closure with connection, cluster, caps and advertisement-derived
+  process identity. `src/seon/test/arm.clj:167` forwards an operation present on
+  its decision. The shipped worker decision is panic and needs none; there is
+  no fabricated worker connection. `seon.instrument/request` now admits the
+  existing `:seon.flow/commit-fault!` member. No environment member was invented.
+- `src/seon/error.clj:1485`: the existing writer transaction preserves the
+  source's validated base/facet members on the occurrence. Replacing an
+  occurrence retracts prior facet attributes with Datahike's existing
+  `:db.fn/retractAttribute`, including owned components
+  (`reference-code/datahike/src/datahike/db/transaction.cljc:1073`).
+- `src/seon/sci/admit.clj:536`: the generic semantic reconstruction helper now
+  explicitly enumerates base and the 63 canonical facets. This free source
+  path was a necessary scope addition: its previous arbitrary-value contract
+  refused reconstructed errors during recording. A regression compares the
+  declaration with the canonical projection to fail on drift. No SCI wrapper
+  installation or `kernel/with-arm` hunk was changed.
+
+The host regression uses a real interned host Var, both dials, the canonical
+database fixture and the same private cluster committer with that fixture's
+connection. It verifies pre-body input/arity refusal, matching boundary schemas,
+declared versus undeclared per-arity returns, base-only refusal through a map,
+and identity of the value handed to and returned from the recorder. It also
+asserts positive recording outcomes and stored function/arity facts; those
+assertions exposed the dependency below instead of accepting an unrecorded
+refusal as success.
+
+### Named dependency and remaining scope
+
+On recurrence, `error/commit-call` reads the previous occurrence through
+`src/seon/db.clj:2032–2054` `pull`. Every arity declares
+`[:or :nil :map :seon.error/value]`, which does not declare the new base or
+facets. The actual writer reported:
+
+```text
+seon.db/pull returned undeclared error facets #{:seon.instrument/contract-error}.
+seon.db/pull returned undeclared error facets #{}.
+```
+
+The empty set in the second message is a base-only value without explicit base
+permission. The failure path then crosses `src/seon/error/refusal.clj:4–8`,
+whose generic `[:or :nil :map]` output likewise refuses the returned
+`:seon.instrument/undeclared-error` or contract error. These generic contracts
+must enumerate what they return under §1q. Neither a blanket base arm, a
+generic error-union alias, nor disabling enforcement around the recorder is
+an acceptable repair. `db.clj` was clean at the observation, but outside the
+explicit host ownership; no foreign source or session was changed. This is
+an integration declaration dependency, not an excuse to stop on dirty code.
+
+Further proof remains owed after that dependency: record-mode acquisition of
+all host Vars with real custody, stored complete-facet validation on recurrence,
+and isolation when distinct clusters arm the same JVM Vars. The present root
+captures one arm request's policy; preserving the right acquired operation
+when a later cluster replaces that shared root needs explicit verification.
+
+The result traversal is still the wrapper's provisional derivation, not the
+slice-4 analyzer. It rejects cycles and `:merge`, but positive unsupported
+bare-predicate/unknown-extension findings and the full grammar matrix remain
+unproven. Slice 4 must supply the single complete per-arity derivation and its
+published analysis findings; do not describe this checkpoint as that completed
+analysis. SCI recorder threading, both-dial SCI regressions and any SCI deadline
+refusal changes remain the explicitly deferred `install-function-contract!` /
+`base-ctx` item. No host deadline mechanism was added.
+
+### Fast evidence and downstream consumption
+
+The requested `--paths` run refused an incomplete overlay naming dirty caller
+paths, including held SCI/kernel/runner/turn files. Per the assignment, iteration
+continued with plain `bin/test-fast`, without adding those files to ownership.
+The first facet-only run passed **77 tests / 398 assertions**. The first host
+draft produced **78 / 416 / 19 failures / 1 error**. Its allocation regression
+was repaired by using the declared fault-evidence byte bound rather than the
+general result bound; canonical schema fingerprinting was corrected to receive
+the projection's definitions and predicate bindings.
+
+The subsequent complete command was:
+
+```sh
+bin/test-fast seon.instrument-test seon.error-test seon.sci.kernel-arm-carriage-test
+```
+
+It completed **79 tests / 424 assertions / 3 failures / 1 error**. Three failures
+are the host recording regression's outcome/storage assertions; one error is
+the existing fault-normalization regression crossing `error.refusal/refusal`.
+All `seon.sci.kernel-arm-carriage-test` tests passed. These are fast iterations,
+not cold/platform proof. The final timing-only follow-up is recorded below.
+
+Slice 3 consumes the public projection-bound facet derivation and observation
+projection; complete owned-value acquisition and constructor migration remain
+its work. Slice 4 consumes the per-arity enforcement seam and must replace the
+provisional result analysis with its complete published derivation. The recorder
+owner consumes the preserved occurrence members and recurrence failure above.
+
+No cold gate, default lifecycle, explicit default reload/adoption, or foreign
+lane operation was run. Automatic edit hooks queued publication; no live
+adoption success is claimed. The unchanged `with-arm` return boundary passed
+the fast regressions. Cold/platform and the reset-boundary live proof remain
+orchestrator-owned. The requested focused PRD §5.2/§6 and both manifest consume
+sections were read in full; the historical note's broader end-to-end grounding
+limitation is not retroactively represented as a completed read.
+
+### Measured hot-call overhead
+
+The retained executable probe is
+`test/seon/instrument_test.clj:1034`, `hot-host-facet-check-measurement`.
+`bin/test-fast seon.instrument-test` armed 1,234 contracts and completed
+**33 tests / 195 assertions / 3 failures / 0 errors**; the same recorder
+dependency accounts for all three failures. The benchmark's three result
+checks passed. This follow-up includes the final cluster process-identity
+change and the timing test added after the preceding JVM loaded its namespace.
+
+It compares the previous Malli input/output/guard callable with the new compiled
+host callable, using the same identity body, contracts, values and canonical
+projection. It measures the changed compiled seam, **not** the additional
+unchanged outer Var/projection lookup. Each batch warms 3,000 calls and times
+20,000 calls, three batches per case, using `System/nanoTime`. These are an
+armed fast JVM's measurements under shared machine load, not an isolated
+JMH result or a production percentile.
+
+| Return | Before µs/call, three batches | After µs/call, three batches | Difference of medians |
+|---|---|---|---|
+| Scalar integer | 0.3330042, 0.2699625, 0.2283854 | 0.3245896, 0.2970896, 0.3119021 | +0.0419396 µs |
+| Ordinary map | 0.23611665, 0.25008335, 0.24565 | 0.3303271, 0.34430205, 0.31011665 | +0.0846771 µs |
+| Declared agent error | 0.2471958, 0.23031665, 0.22321665 | 38.8611125, 36.8567875, 34.721125 | +36.62647085 µs |
+
+The declared-error path exceeds a few microseconds. Its declared-facet set is
+already memoised per compiled function/arity in the wrapper captured by the
+Var, with the compiler cache on its projection; it is never a global set.
+Facet candidate metadata and validators are likewise projection-owned. Each
+returned error must still be validated to derive its actual facets; these
+measurements do not justify caching value membership or claim that the
+remaining 36.6 µs has been optimized away.
+
+All lane test launchers exited. No scratch worktree or cluster was created.
+Only this lane's temporary logs and thread dump were removed after their
+tallies, dependency messages and timings were retained here. `git diff --check`
+passed. The markdown hook continued to report the same 44 pre-existing
+repository citation errors recorded above, without edits to their owners.
