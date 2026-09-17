@@ -3174,3 +3174,28 @@ as orchestrator/astra lanes, easy pool as the first live-agent slice).
   "schemas not doing their job" list as a query), astra `error-and-data-model-design`
   resumed to re-express the error family as entity schemas per §1m, Opus
   boot-and-load-sequence investigation (read-only).
+
+## 2026-09-17 ~22:00Z — a landed-unverified commit broke base publication; reverted
+
+- `864e1a2d8` (schema reconciliation idempotence) wrote `:seon.schema/references`
+  members as `[:seon.schema/key k]` lookup refs into an attribute declared and
+  installed as a keyword value set (`seon.schema.edn:50`; live: `db.type/keyword`).
+  Its lane could not run its regression (no published base) and committed
+  anyway. Result: gate 3 failed at `published-base` (`run.ESnUIZ`), and fast
+  `seon.test-support-test` went 17 tests 1F → 3F/11E, all
+  "refused at [35746 :seon.schema/references]: expected a set, got a set".
+  Reverted as `f9eab9e31`. Rule (already in AGENTS §5): a lane never commits a
+  change whose regression it could not run; the orchestrator prepares the
+  HEAD base BEFORE launching lanes that need `--paths`. The idempotence redo is
+  queued behind `boot-load-bounds` (which holds `src/seon/schema.clj`): the fix
+  must compare the reconciled rows in the declared representation (keywords),
+  not change the write.
+- Owner (21:50Z): "the main system depends on the platform tests working and
+  being green" — Track 0 gates every wave; nothing launches on a red platform.
+- Owner ruling §1n: boot carries no test namespaces (PRD). Queued to the
+  `predictable-reset` lane's resume (it holds `fresh_operator.clj`).
+- Boot investigation landed `d84ce75d0`; lanes launched on its fixes #2
+  (`bounded-write-deref`, db.clj) and #3/#5/#6 (`boot-load-bounds`: cluster.clj
+  monitor, sci/eval.clj cause, schema.clj canonicalization). Fix #4 (attribute-
+  blind tempid rewrite, `fn.clj:2415`) queued behind `contract-findings-query`.
+- Gate 4 launched on `f9eab9e31` after re-preparing the HEAD base.
