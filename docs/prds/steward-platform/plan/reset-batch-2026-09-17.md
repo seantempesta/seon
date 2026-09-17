@@ -80,33 +80,59 @@ reset; none of these checks introduces a stored fact or universal deletion rule.
 
 | Item | Integration order and evidence |
 |---|---|
-| Core file requirement | **Prerequisite discovered:** 802 live core function rows have no file, including manufactured external stubs. `fn/desired-rows` stamps these core. Remove them in G1/G2 first; do not impose the requirement on agent `definition-row`, which deliberately removes file coordinates. The held canonical `program-fn-row` helper also needs a writer fix. [Evidence and boundary](../../../seon/issues/core-program-stubs-prevent-required-file-provenance.md). |
+| Core file requirement | **Prerequisite discovered:** 802 live core function rows have no file, including manufactured external stubs. `fn/desired-rows` stamps these core. Remove them in G1/G2 first; do not impose the requirement on agent `definition-row`, which deliberately removes file coordinates. The canonical `program-fn-row` helper also needs a writer fix in that group. [Evidence and boundary](../../../seon/issues/core-program-stubs-prevent-required-file-provenance.md). |
 | Required namespace/task refs | Canonical regression must name the surviving function/task in the existing whole-entity refusal and prove no commit. No deletion-policy property. |
-| Call-site arity | **Unlanded candidate:** one shared mismatch query at final report admission. Changes to caller tuples, function identities, arity ownership or min/max trigger it; child-only edits and same-transaction repairs are included. Default read-only observation: 8,939 checked, 46,999 unchecked, zero mismatches, 395 ms. These are current measurements, not the inventory's older 3,412/31,020 census. |
-| Render target admission | **Unlanded candidate:** check final stored schema forms for named AI/HTML renderers and require their function rows. Complete bootstrap currently writes schemas before functions; move those canonical rows into `index!`'s existing combined population transaction before enabling refusal. Incremental schema-only publication and branch acquisition retain their existing canonical-schema reconciliation. |
+| Call-site arity | **Landed Tier 1 implementation:** one shared report at final admission, including child-only edits, supplied-default changes and same-transaction repairs. Only raw-count mismatches need preparation plans. The pre-reset read-only observation was 8,939 checked, 46,999 unchecked, zero mismatches, 395 ms; it is dated evidence, not a claim about the regenerated store. |
+| Render target admission | **Landed Tier 1:** check final stored schema forms for named AI/HTML renderers and require their function rows. Complete bootstrap now admits canonical schema rows with functions in `index!`'s existing combined population transaction. Incremental schema-only publication and branch acquisition retain their existing canonical-schema reconciliation. |
 
-**Arity publication boundary discovered during verification:** the raw source
-count is not the prepared invocation count. The complete read-only probe for
-`(my.message/inbox)` reports declared arity 1, supported source counts `[0 1]`,
-and analyzer tuple `["my.message/inbox" 0]`. The strict candidate would reject
-a supported agent definition. Hold that enforcement until the owner chooses
-preparation-aware admission, explicit core-only coverage, or deferral; the
-[reproduction and three priced options](../../../seon/issues/source-call-arity-is-not-prepared-call-arity.md)
-are the decision text. This corrects the inventory's claim that a clean
-indexed census alone proves the invariant ready for all writers.
+**Owner review accepted preparation-aware admission (2026-09-17):**
+source counts are compared with ranges derived by `seon.call-preparation`
+from its existing invocation plans. `(my.message/inbox)` accepts source
+counts 0 and 1; its declared count remains 1. Partial omissions retain the
+runtime's value-dependent placement check. No supplier executes at write
+admission. The raw-count candidate is superseded, not an implementation to
+apply. The refusal carries caller, callee, source count, declared ranges and
+prepared ranges, without presentation clipping.
+
+**File provenance moves to group 2, the edge-retype publication:** delete
+external-stub and identity minting, then require function file provenance
+with every remaining constructor, including the canonical `program-fn-row`
+helper, changed in that same publication. Preserve the authored-definition
+provenance contract; do not make agent `definition-row` impossible. This is
+an accepted ordering decision, not a Tier 1 prerequisite still awaiting a
+ruling. The edge retype still needs the orchestrator's coordinated reset. The Tier 1
+consumers join that same publication: `seon.db/write-render-target-error`
+drops its current symbol-to-string lookup conversion, and the shared arity
+report, call-preparation plans and their canonical fixtures consume the native
+function identity and call-tuple value types. Do not leave these newly landed
+readers outside the symbols inventory.
 
 `src/seon/test/selection.clj` was released at `d6659f21a`; its earlier hold
-is no longer a boundary. `test/seon/test_support.clj` and `src/seon/schema.clj`
-remain held at the observed integration boundary. Do not edit their hunks.
+is no longer a boundary. At the final status check, `test/seon/test_support.clj`
+and the no-default-cluster source files are also released (`cdfc01058`).
+`src/seon/program.cljc`, `resources/seon/schemas/seon.program.edn` and
+`src/seon/schema.clj` remain held (program-read and admission-provenance work).
+Do not edit those foreign hunks.
 The requested `seon.render-test` namespace does not exist at this HEAD;
 use `seon.render.entity-pairs-test` for the render-pair regression surface.
 
-**Stop for owner review:** [Tier 1 boundary and exact candidate patches](../../context-generation/research/reset-tier1-admission-boundary-2026-09-17.md).
-No production commit landed and no source/schema hunk remains from this
-attempt. The new canonical regressions passed in the candidate run, but the
-full six-namespace run did not finish green; its timing/watchdog results are
-recorded in the landing note. Do not apply the raw-arity patch until the
-preparation counterexample is resolved.
+**Tier 1 landed after review:** render-target and preparation-aware arity
+checks are enforced at final report admission; required namespace/task refs
+have canonical refusal regressions. The earlier
+[boundary note](../../context-generation/research/reset-tier1-admission-boundary-2026-09-17.md)
+records the rejected raw-count attempt, not the current implementation.
+The seven-namespace run completed 189 tests / 1,832 assertions with 17
+failures, all from the known stored-versus-pulled grammar assertion in one
+schema regression. The other 165 tests passed. The clean schema test now
+asserts authored-key preservation and the installed cardinality-many vector
+grammar, retaining row admission and reference-target checks; it no longer
+claims a stored schema validates a wildcard pull. The focused schema rerun passed 24 tests / 632 assertions, zero failures
+and errors, with unchanged production bytes. Group 1's derived reader contracts remain incomplete and the
+[existing issue](../../../seon/issues/wildcard-pulled-collections-do-not-satisfy-entity-set-contracts.md)
+stays open. This is the first coherent landed seam; stop here for review.
+Tier 1 needs no reset; the edge retype still does. The current
+[implementation note](../../context-generation/research/reset-tier1-prepared-admission-2026-09-17.md)
+records the exact test boundary and live observation.
 
 
 ## Previous review correction — superseded on deletion by J/K/X above
@@ -405,7 +431,7 @@ removing keys superseded by these decisions.
 
 | Group | Edit | Source finding | Kind | Writers in the same publication | Readers in the same publication | Regression that proves it |
 |---|---|---|---|---|---|---|
-| 2 | Retype sym, caller, callee and tuple callee to qualified-symbol; calls/references to indexed qualified-symbol sets; writes to indexed qualified-keyword set. Keep namespace/file/arities relations. Require source/arglists/private? and analyzed-source-digest. Logical empty calls/references/writes/keywords/call-arities derive only under provenance. Remove pending-calls and retyped uses of reference-to; KEEP declaration capability-fn ref as G2 specifies; no retired-tx. | P G1–G4/S2; E §1–3; S §1.1; A fn; R N1/N2/N10 | retype; required; delete | seon.fn var-row/analyzed-form/reconcile-tx-in; seon.program; seon.sci.eval; seon.turn relation-assertions/row-tx | seon.fn gate-sets/reach/output graph; seon.test, runner, selection; seon.db sink reach; effect, bootstrap, run, render/ns/test, issue/detect; all S §2 sites | seon.fn-test, seon.test-reaching-test: nonempty actual symbol datoms, tuple schema, deleting B with surviving A refuses atomically; repairing A in the same transaction succeeds; stale reach is reported, redefinition preserves identity; unknown analyzer namespace is not minted as an unreadable symbol |
+| 2 | Retype sym, caller, callee and tuple callee to qualified-symbol; calls/references to indexed qualified-symbol sets; writes to indexed qualified-keyword set. Keep namespace/file/arities relations. Require function file with stub removal and every constructor (including program-fn-row) in this publication. Require source/arglists/private? and analyzed-source-digest. Logical empty calls/references/writes/keywords/call-arities derive only under provenance. Remove pending-calls and retyped uses of reference-to; KEEP declaration capability-fn ref as G2 specifies; no retired-tx. | P G1–G4/S2; E §1–3; S §1.1; A fn; R N1/N2/N10 | retype; required; delete | seon.fn var-row/analyzed-form/reconcile-tx-in; seon.program; seon.sci.eval; seon.turn relation-assertions/row-tx | seon.fn gate-sets/reach/output graph; seon.test, runner, selection; seon.db sink reach; effect, bootstrap, run, render/ns/test, issue/detect; all S §2 sites | seon.fn-test, seon.test-reaching-test: nonempty actual symbol datoms, tuple schema, deleting B with surviving A refuses atomically; repairing A in the same transaction succeeds; stale reach is reported, redefinition preserves identity; unknown analyzer namespace is not minted as an unreadable symbol |
 | 4 | Add absence-condition docstrings for surviving optional entries: `:seon.effect/capability`, `:seon.fn/arglists-override?`, `:seon.fn/arities`, `:seon.fn/call-arities`, `:seon.fn/destroys`, `:seon.fn/doc`, `:seon.fn/doc-order`, `:seon.fn/external-sink`, `:seon.fn/file`, `:seon.fn/form-span`, `:seon.fn/internal?`, `:seon.fn/keywords`, `:seon.fn/macro?`, `:seon.fn/projection-boundary`, `:seon.fn/references`, `:seon.fn/spec`, `:seon.fn/workload`, `:seon.fn/writes`, `:seon.test/subject`. Keep optionality unless the specific required/transition row above changes it; for renamed entries apply the condition to the replacement. | A seon.fn reset row | add | `seon.cluster.source/mintable-identity` (`src/seon/cluster/source.clj:305`); `seon.fn/backfill-contract-facts!` (`src/seon/fn.clj:2229`); `seon.fn/reconcile-tx-in` (`src/seon/fn.clj:2557`); `seon.fn/var-row` (`src/seon/fn.clj:584`); `seon.program/contract-facts` (`src/seon/program.cljc:729`); `seon.program/declaration-row` (`src/seon/program.cljc:906`); `seon.program/with-contract-facts` (`src/seon/program.cljc:792`); `seon.sci.eval/declared-row` (`src/seon/sci/eval.clj:1902`); `seon.sci.eval/definition-row` (`src/seon/sci/eval.clj:392`); `seon.turn/row-tx` (`src/seon/turn.clj:1280`) | seon.fn gate-sets/reach/output graph; seon.test, runner, selection; seon.db sink reach; effect, bootstrap, run, render/ns/test, issue/detect; all S §2 sites | seon.fn-test, seon.test-reaching-test: nonempty actual symbol datoms, tuple schema, deleting B with surviving A refuses atomically; repairing A in the same transaction succeeds; stale reach is reported, redefinition preserves identity; unknown analyzer namespace is not minted as an unreadable symbol |
 | 6 | Remove ast attribute and map entry only after Q2 reader replacement; remove backfill's nil-AST analysis test. Keep canonical spec and schema.shape facts. | R N16/N29; B.4/C.2; Q2 | delete | seon.program/with-contract-facts; seon.fn/backfill-contract-facts!; seon.turn declared projection | seon.fn reconciliation comparison; canonical shape consumers | seon.program-test: repeated publication is no-op, contract change detected, no fn.ast datoms |
 

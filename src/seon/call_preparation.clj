@@ -875,6 +875,29 @@
                   :seon.call-preparation/entries
                   (:seon.call-preparation/entries variadic)}))))))
 
+(defn prepared-arities
+  "Source argument-count ranges compatible with an invocation plan.
+
+  Fixed arities may omit the plan's suppliable slots. Intermediate counts
+  still require prepare's value-dependent unique placement; this count-only
+  projection neither chooses positions nor runs suppliers. Variadic calls
+  retain their declared minimum: prepare does not insert their fixed slots."
+  {:malli/schema [:=> [:cat :seon.call-preparation/plan]
+                  :seon.fn/declared-arities]}
+  [plan-value]
+  (->> (:seon.call-preparation/arities plan-value)
+       (map (fn [arity]
+              (if (:seon.call-preparation/variadic? arity)
+                {:seon.fn.arity/min (:seon.fn.arity/min arity)}
+                (let [n (:seon.fn.arity/argument-count arity)]
+                  {:seon.fn.arity/min
+                   (- n (count (:seon.call-preparation/slots arity)))
+                   :seon.fn.arity/max n}))))
+       distinct
+       (sort-by (juxt :seon.fn.arity/min
+                      #(get % :seon.fn.arity/max Long/MAX_VALUE)))
+       vec))
+
 (defn plan
   "The cached invocation plan for one function identity in this cluster.
 

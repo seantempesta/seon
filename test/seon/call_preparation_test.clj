@@ -532,6 +532,9 @@
          (is (= #{1 3} (set (keys (:seon.call-preparation/by-supplied-count
                                    plan))))
              "partial placements are decided from values, never enumerated")
+         (is (= [{:seon.fn.arity/min 1 :seon.fn.arity/max 3}]
+                (cp/prepared-arities plan))
+             "the count invariant includes partial calls without choosing their placement")
          (is (= [true true] (probe ctx "probe-received-both \"a\""))
              "the one-argument call receives both declared values")
          (is (= [true true]

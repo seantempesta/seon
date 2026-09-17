@@ -68,7 +68,7 @@
           value))
       (:seon.schema.projection/forms projection)))))
 
-(deftest pulled-references-satisfy-every-declared-entity-contract
+(deftest declared-references-round-trip-with-the-pull-collection-grammar
   (test-support/with-database
    (fn [connection]
      (let [lock-path (java.nio.file.Files/createTempFile
@@ -123,9 +123,16 @@
                  report (test-support/transacted! connection [(assoc row :db/id "pulled-ref-subject")])
                  eid (get (:tempids report) "pulled-ref-subject")
                  pulled (seon.db/pull (seon.db/db connection) '[*] eid)]
-             (is ((schema/projection-validator projection schema-key) pulled)
-                 (pr-str {:schema schema-key
-                          :errors (mapv :in (:errors ((schema/projection-explainer projection schema-key) pulled)))}))
+             ;; Entity schemas describe stored values. Pull's cardinality-many
+             ;; vector grammar is distinct, even when storage declares a set.
+             (is (= (set (keys row)) (disj (set (keys pulled)) :db/id))
+                 (str "wildcard pull preserves the authored members of " schema-key))
+             (doseq [attribute (keys row)
+                     :when (= :db.cardinality/many
+                              (get-in (seon.db/db connection)
+                                      [:schema attribute :db/cardinality]))]
+               (is (vector? (get pulled attribute))
+                   (str "Datahike pulls cardinality-many as a vector: " attribute)))
              (doseq [entry entries :when (reference-entry? projection entry)]
                (let [value (get pulled (first entry))]
                  (is (if (map? value) (= target (:db/id value))

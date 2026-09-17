@@ -36,3 +36,20 @@ by Datahike's upsert resolution. The generator uses the same existing eid
 directly for those identity attributes and exercises nested-map admission
 on the ordinary refs. This is not evidence that all transaction positions
 accept all four spellings interchangeably.
+
+## Ruled grammar and Tier 1 verification, 2026-09-17
+
+The owner has ruled that entity schemas describe stored entities; pulled
+reader shapes must derive separately from their selectors. The 17 failures
+recurred exactly in the Tier 1 isolated run (189 tests, 1,832 assertions,
+17 failures, zero errors; `tmp/reset-tier1-prepared-fast-4.log`). The assertion
+that an entire wildcard pull satisfies the stored entity schema was itself
+stale. The regression now retains all generated-row admission and actual
+reference-target assertions and checks authored-key preservation and the
+installed Datahike cardinality-many vector grammar. It does not widen any
+stored schema to admit a pulled vector.
+
+This issue stays **open** for reset group 1's derived reader contracts. The
+corrected regression does not claim that derivation exists. `src/seon/schema.clj`
+is concurrently held; Tier 1 changes only the clean test file. The dependency
+returns vectors in `reference-code/datahike/src/datahike/pull_api.cljc:318`.

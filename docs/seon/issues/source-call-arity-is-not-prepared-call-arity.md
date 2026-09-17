@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, program-graph, schema-admission, call-preparation]
 ---
@@ -55,7 +55,17 @@ actual argument values; a source count alone cannot establish their unique
 placement. No second implementation of that preparation algorithm belongs
 in the write validator.
 
-## Owner decision requested
+## Owner decision (2026-09-17)
+
+Option 1 is accepted. The implementation derives count compatibility from
+the existing plans in `seon.call-preparation`; placement remains there at
+invocation. The Tier 1 canonical run passed the analyzer-produced inbox
+source-count regression, the true mismatch refusal, the same-transaction
+arity repair, and all 16 existing preparation tests including real SCI partial
+placement. The former raw-count candidate is superseded. Evidence:
+[prepared admission landing note](../../prds/context-generation/research/reset-tier1-prepared-admission-2026-09-17.md).
+
+### Reviewed options
 
 1. **Preparation-aware admission (recommended).** Reuse preparation's
    declared plans to prove a source count can reach a declared callee arity;

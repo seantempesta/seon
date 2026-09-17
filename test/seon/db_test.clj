@@ -11,8 +11,10 @@
             [seon.env :as env]
             [seon.id :as id]
             [seon.instrument :as instrument]
+            [seon.program :as program]
             [seon.render :as render]
             [seon.render.value :as render.value]
+            [seon.schedule :as schedule]
             [seon.sci.admit :as admit]
             [seon.sci.eval :as sci.eval]
             [seon.schema :as schema]
@@ -1592,3 +1594,122 @@
          (is (= "UTC" (:seon.schedule/zone-id
                         (db/pull (db/db connection) '[*]
                                  [:seon.schedule/id "f2-composed"])))))))))
+
+(deftest required-program-relations-name-the-surviving-referrer
+  (test-support/with-database
+   (fn [connection]
+     (test-support/transacted!
+      connection [{:seon.agent/id "root"}
+                  [:db.fn/call #'schedule/root-maintenance-seed-call]])
+     (let [database (db/db connection)
+           [task-id function]
+           (first (sort (db/q '[:find ?task-id ?function
+                                :where
+                                [?task :seon.schedule.task/id ?task-id]
+                                [?task :seon.schedule.task/function ?f]
+                                [?f :seon.fn/sym ?function]] database)))
+           namespace-name 'seon.id
+           functions (set (db/q '[:find [?symbol ...]
+                                  :in $ ?name
+                                  :where
+                                  [?ns :seon.ns/name ?name]
+                                  [?fn :seon.fn/ns ?ns]
+                                  [?fn :seon.fn/sym ?symbol]]
+                                database namespace-name))]
+       (is (seq functions))
+       (is (some? task-id))
+       (doseq [[target attribute expected]
+               [[[:seon.ns/name namespace-name] :seon.fn/ns functions]
+                [[:seon.fn/sym function] :seon.schedule.task/function #{task-id}]]]
+         (let [basis (:max-tx @connection)
+               refusal (db/transact! connection [[:db/retractEntity target]])
+               entity (get-in refusal [:seon.error/data :seon.db/entity])]
+           (is (= :seon.db/invalid-write (:seon.error/kind refusal)) (pr-str refusal))
+           (is (= attribute (:seon.db/attribute refusal)))
+           (is (some expected (vals entity)) (pr-str refusal))
+           (is (= basis (:max-tx @connection)))))))))
+
+(deftest arity-components-and-callers-are-checked-in-the-final-state
+  (test-support/with-database
+   (fn [connection]
+     (let [projection (db/carried-projection (db/db connection))
+           forms (:seon.schema.projection/forms projection)
+           callee "sample.arity/target"
+           caller "sample.arity/caller"
+           row (program/with-contract-facts
+                {:seon.program/row
+                 (assoc (test-support/program-fn-row callee)
+                        :seon.schema.admission/source :agent
+                        :seon.fn/source "(defn target [x] x)"
+                        :seon.fn/arglists "([x])"
+                        :seon.fn/private? false
+                        :seon.fn/spec "[:=> [:cat :int] :int]")
+                 :seon.program/compile-options
+                 (:seon.schema.projection/compile-options projection)
+                 :seon.program/predicate-functions (schema/predicate-functions-in projection)
+                 :seon.program/schema-keys (set (keys forms))
+                 :seon.program/schema-forms forms})]
+       (test-support/transacted!
+        connection
+        [{:seon.ns/name 'sample.arity}
+         row
+         (assoc (test-support/program-fn-row caller)
+                :seon.schema.admission/source :agent
+                :seon.fn/source "(defn caller [x] (target x))"
+                :seon.fn/arglists "([x])"
+                :seon.fn/private? false
+                :seon.fn/call-arities #{[callee 1]})])
+       (let [arity (db/q '[:find ?arity . :in $ ?callee
+                          :where [?f :seon.fn/sym ?callee]
+                          [?f :seon.fn/arities ?arity]] (db/db connection) callee)
+             edits [[:db/add arity :seon.fn.arity/min 2]
+                    [:db/add arity :seon.fn.arity/max 2]
+                    [:db/add arity :seon.fn.arity/argument-count 2]]
+             basis (:max-tx @connection)
+             refusal (db/transact! connection edits)]
+         (is (= :seon.db/invalid-write (:seon.error/kind refusal)) (pr-str refusal))
+         (is (= [{:seon.fn/caller caller :seon.fn/callee callee
+                  :seon.fn/call-arity 1
+                  :seon.fn/declared-arities [{:seon.fn.arity/min 2 :seon.fn.arity/max 2}]
+                  :seon.fn/prepared-arities [{:seon.fn.arity/min 2 :seon.fn.arity/max 2}]}]
+                (get-in refusal [:seon.error/data :seon.fn/arity-mismatches])))
+         (is (= basis (:max-tx @connection)))
+         (test-support/transacted!
+          connection
+          (into edits [[:db/retract [:seon.fn/sym caller] :seon.fn/call-arities [callee 1]]
+                       [:db/add [:seon.fn/sym caller] :seon.fn/call-arities [callee 2]]]))
+         (is (empty? (:seon.fn/arity-mismatches (db/arity-mismatches (db/db connection))))))))))
+
+(deftest render-declarations-require-their-final-function-row
+  (test-support/with-database
+   (fn [connection]
+     (let [renderer 'sample.render/ai
+           schema-key ::render-target
+           definition [:map {:seon.render/ai renderer}]
+           row (first (schema/canonical-schema-rows {schema-key definition}))
+           basis (:max-tx @connection)
+           refusal (db/transact! connection [row])
+           expected [{:seon.schema/key schema-key
+                      :seon.render/property :seon.render/ai
+                      :seon.render/function renderer}]]
+       (is (= :seon.db/invalid-write (:seon.error/kind refusal)) (pr-str refusal))
+       (is (= expected (get-in refusal [:seon.error/data :seon.render/declarations])))
+       (is (= basis (:max-tx @connection)))
+       (test-support/transacted!
+        connection
+        [{:seon.ns/name 'sample.render}
+         (assoc (test-support/program-fn-row renderer)
+                :seon.schema.admission/source :agent
+                :seon.fn/source "(defn ai [value] value)"
+                :seon.fn/arglists "([value])"
+                :seon.fn/private? false)
+         row])
+       (let [refusal (db/transact! connection [[:db/retractEntity [:seon.fn/sym (str renderer)]]])]
+         (is (= :seon.db/invalid-write (:seon.error/kind refusal)) (pr-str refusal))
+         (is (= expected (get-in refusal [:seon.error/data :seon.render/declarations]))))
+       (test-support/transacted!
+        connection
+        [[:db/retractEntity [:seon.schema/key schema-key]]
+         [:db/retractEntity [:seon.fn/sym (str renderer)]]])
+       (is (nil? (:db/id (db/pull (db/db connection) [:db/id]
+                                 [:seon.fn/sym (str renderer)]))))))))

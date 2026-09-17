@@ -1484,71 +1484,13 @@
        sort
        vec))
 
-(defn- declared-arity-bounds
-  [database]
-  (reduce
-   (fn [bounds [function-symbol minimum maximum]]
-     (update bounds function-symbol (fnil conj #{})
-             (cond-> {:seon.fn.arity/min minimum}
-               (nat-int? maximum) (assoc :seon.fn.arity/max maximum))))
-   {}
-   (db/q '[:find ?function-symbol ?minimum ?maximum
-           :where
-           [?function :seon.fn/sym ?function-symbol]
-           [?function :seon.fn/arities ?arity]
-           [?arity :seon.fn.arity/min ?minimum]
-           [(get-else $ ?arity :seon.fn.arity/max -1) ?maximum]]
-         database)))
-
-(defn- arity-admitted?
-  [declared arity]
-  (boolean
-   (some (fn [{minimum :seon.fn.arity/min maximum :seon.fn.arity/max}]
-           (and (<= (long minimum) (long arity))
-                (or (nil? maximum) (<= (long arity) (long maximum)))))
-         declared)))
-
 (defn arity-mismatches
-  "Call sites whose arity no declared arity of the callee admits.
-
-  An arity error becomes a query over stored call sites instead of a
-  load-time surprise. Only a callee whose contract declares arities can be
-  compared, so the report carries its own coverage: an empty mismatch list
-  beside a zero `:seon.fn/arity-checked` reports that nothing was compared,
-  never that everything agrees."
+  "Call sites whose source count no prepared arity of the callee admits.
+   Uses the same report as final write admission, including coverage counts."
   {:malli/schema [:=> [:cat :seon.db/database-value]
                   [:or :seon.fn/arity-mismatch-report :seon.error/value]]}
   [database]
-  (let [edges (db/q '[:find ?caller-symbol ?call
-                      :where
-                      [?caller :seon.fn/call-arities ?call]
-                      (or [?caller :seon.fn/sym ?caller-symbol]
-                          [?caller :seon.test/sym ?caller-symbol])]
-                    database)]
-    (if (:seon.error/kind edges)
-      edges
-      (let [bounds (declared-arity-bounds database)
-            checked (filterv (fn [[_ [callee _]]] (contains? bounds callee))
-                             edges)]
-        {:seon.fn/arity-mismatches
-         (->> checked
-              (keep (fn [[caller [callee arity]]]
-                      (let [declared (get bounds callee)]
-                        (when-not (arity-admitted? declared arity)
-                          {:seon.fn/caller caller
-                           :seon.fn/callee callee
-                           :seon.fn/call-arity (long arity)
-                           :seon.fn/declared-arities
-                           (vec (sort-by
-                                 (juxt :seon.fn.arity/min
-                                       #(get % :seon.fn.arity/max
-                                             Integer/MAX_VALUE))
-                                 declared))}))))
-              (sort-by (juxt :seon.fn/caller :seon.fn/callee
-                             :seon.fn/call-arity))
-              vec)
-         :seon.fn/arity-checked (count checked)
-         :seon.fn/arity-unchecked (- (count edges) (count checked))}))))
+  (db/arity-mismatches database))
 
 (def ^:private required-projection-by-sink
   {:ai-visible-text :seon.render/ai

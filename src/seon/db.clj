@@ -4,6 +4,7 @@
   elided, the current connection of the calling agent's cluster (`*conn*`,
   bound per evaluation). Failures return flat `:seon.error` values."
   (:require [clojure.data :as data]
+            [clojure.edn :as edn]
             [clojure.set :as set]
             [clojure.string :as str]
             [clojure.walk :as walk]
@@ -55,6 +56,9 @@
   (delay (requiring-resolve 'seon.call-preparation/snapshot)))
 (defonce ^:private call-preparation-plan-for
   (delay (requiring-resolve 'seon.call-preparation/plan-for)))
+
+(defonce ^:private call-preparation-arities
+  (delay (requiring-resolve 'seon.call-preparation/prepared-arities)))
 
 (defn connection?
   "True for a live (unreleased) Datahike connection."
@@ -2395,7 +2399,7 @@
        :seon.fn/sym :seon.fn/fn (callee-symbol function-var)
        ::function-threw
        {:seon.db/basis-t (basis-t database)
-        :seon.error/exception-class (.getName (class cause))
+        :seon.error/exception-class (symbol (.getName (class cause)))
         :seon.error/dependency-data (ex-data cause)}))))
 
 (defn- identity-diff
@@ -3006,6 +3010,127 @@
                            {::entity identities ::entity-value row ::path (into [entity-id] in)})))))
        schema-keys))))
 
+(defn- declared-arity-bounds
+  [query-fn database]
+  (let [rows (query-fn '[:find ?function-symbol ?minimum ?maximum
+                         :where
+                         [?function :seon.fn/sym ?function-symbol]
+                         [?function :seon.fn/arities ?arity]
+                         [?arity :seon.fn.arity/min ?minimum]
+                         [(get-else $ ?arity :seon.fn.arity/max -1) ?maximum]]
+                       database)]
+    (if (:seon.error/kind rows)
+      rows
+      (reduce
+       (fn [bounds [function-symbol minimum maximum]]
+         (update bounds function-symbol (fnil conj #{})
+                 (cond-> {:seon.fn.arity/min minimum}
+                   (nat-int? maximum) (assoc :seon.fn.arity/max maximum))))
+       {}
+       rows))))
+
+(defn- arity-admitted?
+  [declared arity]
+  (boolean
+   (some (fn [{minimum :seon.fn.arity/min maximum :seon.fn.arity/max}]
+           (and (<= (long minimum) (long arity))
+                (or (nil? maximum) (<= (long arity) (long maximum)))))
+         declared)))
+
+(defn- arity-mismatches-with
+  [query-fn database projection]
+  (let [edges (query-fn '[:find ?caller-symbol ?call
+                         :where [?caller :seon.fn/call-arities ?call]
+                         (or [?caller :seon.fn/sym ?caller-symbol]
+                             [?caller :seon.test/sym ?caller-symbol])]
+                       database)
+        bounds (when-not (error-value? edges)
+                 (declared-arity-bounds query-fn database))]
+    (or (when (error-value? edges) edges)
+        (when (error-value? bounds) bounds)
+        (let [checked (filterv (fn [[_ [callee _]]] (contains? bounds callee)) edges)
+              candidates (filterv (fn [[_ [callee n]]]
+                                    (not (arity-admitted? (get bounds callee) n)))
+                                  checked)
+              snapshot (when (seq candidates)
+                         (@call-preparation-snapshot database projection))
+              refusal (or (when (error-value? snapshot) snapshot)
+                          (first (:seon.call-preparation/refusals snapshot)))]
+          (or refusal
+              (let [plans (into {} (map (fn [callee]
+                                         [callee (@call-preparation-plan-for
+                                                  database snapshot callee)]))
+                                (distinct (map (comp first second) candidates)))
+                    refused (some #(when (error-value? %) %) (vals plans))]
+                (or refused
+                    {:seon.fn/arity-mismatches
+                     (->> candidates
+                          (keep (fn [[caller [callee n]]]
+                                  (let [declared (vec (sort-by
+                                                      (juxt :seon.fn.arity/min
+                                                            #(get % :seon.fn.arity/max Long/MAX_VALUE))
+                                                      (get bounds callee)))
+                                        prepared (if-let [plan (get plans callee)]
+                                                   (@call-preparation-arities plan)
+                                                   declared)]
+                                    (when-not (arity-admitted? prepared n)
+                                      {:seon.fn/caller caller
+                                       :seon.fn/callee callee
+                                       :seon.fn/call-arity (long n)
+                                       :seon.fn/declared-arities declared
+                                       :seon.fn/prepared-arities prepared}))))
+                          (sort-by (juxt :seon.fn/caller :seon.fn/callee :seon.fn/call-arity))
+                          vec)
+                     :seon.fn/arity-checked (count checked)
+                     :seon.fn/arity-unchecked (- (count edges) (count checked))})))))))
+
+(defn arity-mismatches
+  "Call sites whose source count no prepared arity of the callee admits.
+
+  An arity error becomes a query over stored call sites instead of a
+  load-time surprise. Only a callee whose contract declares arities can be
+  compared, so the report carries its own coverage: an empty mismatch list
+  beside a zero `:seon.fn/arity-checked` reports that nothing was compared,
+  never that everything agrees."
+  {:malli/schema [:=> [:cat :seon.db/database-value]
+                  [:or :seon.fn/arity-mismatch-report :seon.error/value]]}
+  [database]
+  (arity-mismatches-with q database (or (carried-projection database)
+                                           (schema/handed-projection))))
+
+(defn- write-render-target-error
+  [database]
+  (let [missing
+        (into []
+              (mapcat
+               (fn [[schema-key encoded]]
+                 (let [properties (schema.form/attr-form-properties (edn/read-string encoded))]
+                   (keep (fn [property]
+                           (let [renderer (get properties property)]
+                             (when (and (qualified-symbol? renderer)
+                                        (not (db.utils/entid database [:seon.fn/sym (str renderer)])))
+                               {:seon.schema/key schema-key
+                                :seon.render/property property
+                                :seon.render/function renderer})))
+                         [:seon.render/ai :seon.render/html]))))
+              (sort-by first
+                       (d/q '[:find ?key ?form :where
+                              [?schema :seon.schema/key ?key]
+                              [?schema :seon.schema/form ?form]] database)))]
+    (when (seq missing)
+      (diagnostic
+       {:seon.error/kind ::invalid-write
+        ::transaction-refused true
+        :seon.error/message "Render declarations name functions absent from the final program. Admit the definitions or repair the declarations in the same transaction."
+        :seon.error/diagnostic-layer :database-write
+        :seon.error/diagnostic-operation 'seon.db/transact!
+        :seon.error/diagnostic-member :seon.schema/form
+        :seon.error/diagnostic-expected :seon.fn/sym
+        :seon.error/diagnostic-offending missing
+        :seon.error/diagnostic-cause :seon.render/function
+        :seon.error/diagnostic-evidence {:seon.render/declarations missing}
+        :seon.error/data {:seon.render/declarations missing}}))))
+
 (defn- write-report-error
   "One final check for native operations and all expanded transaction-function output."
   [projection report]
@@ -3038,7 +3163,28 @@
                                           (d/datoms before :eavt entity-id))
                    identities (merge prior-identities (select-keys row identity-attrs))]
                (write-entity-error database projection entity-id identities row before)))
-           affected))))
+           affected)
+     (when (some (comp #{:seon.schema/form :seon.schema/key :seon.fn/sym} :a)
+                 (concat attempted (:tx-data report)))
+       (write-render-target-error database))
+     (when (seq affected)
+       (let [result (arity-mismatches-with d/q database projection)
+             mismatches (:seon.fn/arity-mismatches result)]
+         (if (error-value? result)
+           (assoc result ::transaction-refused true)
+           (when (seq mismatches)
+           (diagnostic
+            {:seon.error/kind ::invalid-write
+             ::transaction-refused true
+             :seon.error/message "Recorded source argument counts disagree with the final prepared arities. Repair the callers or declaration in the same transaction."
+             :seon.error/diagnostic-layer :database-write
+             :seon.error/diagnostic-operation 'seon.db/transact!
+             :seon.error/diagnostic-member :seon.fn/call-arities
+             :seon.error/diagnostic-expected :seon.fn/prepared-arities
+             :seon.error/diagnostic-offending mismatches
+             :seon.error/diagnostic-cause :seon.fn/arity-mismatches
+             :seon.error/diagnostic-evidence {:seon.fn/arity-mismatches mismatches}
+             :seon.error/data {:seon.fn/arity-mismatches mismatches}}))))))))
 
 (defn- write-report-validator
   "Acquire the callback on its immutable projection, primed when the connection acquires it."

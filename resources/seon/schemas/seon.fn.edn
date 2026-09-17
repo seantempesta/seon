@@ -77,19 +77,21 @@
            [:map
             [:seon.fn.arity/min :seon.fn.arity/min]
             [:seon.fn.arity/max {:optional true} :seon.fn.arity/max]]],
+          :prepared-arities :seon.fn/declared-arities,
           :arity-mismatch
           [:map
            [:seon.fn/caller :seon.fn/caller]
            [:seon.fn/callee :seon.fn/callee]
            [:seon.fn/call-arity :seon.fn/call-arity]
-           [:seon.fn/declared-arities :seon.fn/declared-arities]],
+           [:seon.fn/declared-arities :seon.fn/declared-arities]
+           [:seon.fn/prepared-arities :seon.fn/prepared-arities]],
           :arity-mismatches [:vector :seon.fn/arity-mismatch],
           :arity-checked [:int {:min 0}],
           :arity-unchecked [:int {:min 0}],
           :arity-mismatch-report
           [:map
            {:description
-            "Call sites the callee's declared arities refuse, beside their
+            "Call sites the callee's prepared count ranges refuse, beside their
   coverage. An empty mismatch list is legible only next to
   `:seon.fn/arity-checked` and `:seon.fn/arity-unchecked`: silence with a
   zero checked count reports that nothing was compared, never health."}

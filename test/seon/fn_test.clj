@@ -126,7 +126,7 @@
       (let [namespace-ref [:seon.ns/name 'sample.evaluation-edges]
             function-symbol "sample.evaluation-edges/observed"
             test-symbol "sample.evaluation-edges/observed-test"
-            source "(do (seon.db/q '[:find ?e :where [?e :seon.agent/id]]) (my.turn/wait))"
+            source "(do (seon.db/q '[:find ?e :where [?e :seon.agent/id]]) (my.turn/wait {:my.turn/note \"Waiting for input.\"}))"
             definition (str "(defn observed [] " source ")")
             test-source "(clojure.test/deftest observed-test (observed))"
             function-row {:seon.fn/sym function-symbol
@@ -2117,13 +2117,47 @@
           (is (= (:seon.fn/call-arities static)
                  (:seon.fn/call-arities admitted))))))))
 
-(deftest arity-mismatch-is-a-query-over-stored-call-sites
+(deftest prepared-source-counts-are-admitted-and-real-mismatches-refuse
+  (test-support/with-database
+   (fn [connection]
+     (let [caller "sample.prepared/inbox"
+           source "(defn inbox [] (my.message/inbox))"
+           row (assoc (test-support/program-fn-row caller)
+                      :seon.schema.admission/source :agent
+                      :seon.fn/source source
+                      :seon.fn/arglists "([])"
+                      :seon.fn/private? false)
+           _ (test-support/transacted! connection [{:seon.ns/name 'sample.prepared}])
+           analyzed (seon.fn/analyze-forms
+                     (db/db connection)
+                     [{:seon.cluster.eval/source source
+                       :seon.cluster.eval/ns [:seon.ns/name 'sample.prepared]
+                       :seon.program/row row}])
+           admitted (second (first analyzed))]
+       (is (= #{["my.message/inbox" 0]} (:seon.fn/call-arities admitted)))
+       (test-support/transacted! connection [admitted])
+       (is (empty? (:seon.fn/arity-mismatches (seon.fn/arity-mismatches (db/db connection)))))
+       (let [basis (:max-tx @connection)
+             refusal (db/transact! connection
+                                   [[:db/add [:seon.fn/sym caller]
+                                     :seon.fn/call-arities ["my.message/inbox" 2]]])]
+         (is (= :seon.db/invalid-write (:seon.error/kind refusal)) (pr-str refusal))
+         (is (= [{:seon.fn/caller caller
+                  :seon.fn/callee "my.message/inbox"
+                  :seon.fn/call-arity 2
+                  :seon.fn/declared-arities [{:seon.fn.arity/min 1 :seon.fn.arity/max 1}]
+                  :seon.fn/prepared-arities [{:seon.fn.arity/min 0 :seon.fn.arity/max 1}]}]
+                (get-in refusal [:seon.error/data :seon.fn/arity-mismatches])))
+         (is (= basis (:max-tx @connection))))))))
+
+(deftest arity-mismatch-refuses-the-final-write
   (test-support/with-database
     (fn [connection]
       (let [contracted
             (->> (db/q '[:find ?function-symbol ?minimum ?maximum
                          :where
                          [?function :seon.fn/sym ?function-symbol]
+                         [?function :seon.fn/sym "seon.id/digest"]
                          [?function :seon.fn/arities ?arity]
                          [?arity :seon.fn.arity/min ?minimum]
                          [(get-else $ ?arity :seon.fn.arity/max -1) ?maximum]]
@@ -2131,7 +2165,8 @@
                  (group-by first))
             [callee declarations]
             (->> contracted
-                 (filter (fn [[_ rows]] (= 1 (count rows))))
+                 (filter (fn [[_ rows]] (and (= 1 (count rows))
+                                               (nat-int? (nth (first rows) 2)))))
                  (sort-by key)
                  first)]
         (is (some? callee)
@@ -2150,20 +2185,27 @@
              :seon.fn/arglists "([])"
              :seon.fn/private? false
              :seon.schema.admission/source :agent
-             :seon.fn/call-arities #{[callee admitted] [callee refused]}}])
-          (let [report (seon.fn/arity-mismatches (db/db connection))]
+             :seon.fn/call-arities #{[callee admitted]}}])
+          (let [basis (:max-tx @connection)
+                refusal (db/transact!
+                         connection
+                         [{:seon.fn/sym caller
+                           :seon.fn/call-arities #{[callee refused]}}])]
+            (is (= :seon.db/invalid-write (:seon.error/kind refusal))
+                (pr-str refusal))
             (is (= [{:seon.fn/caller caller
                      :seon.fn/callee callee
                      :seon.fn/call-arity (long refused)
                      :seon.fn/declared-arities
-                     [(cond-> {:seon.fn.arity/min minimum}
-                        (nat-int? maximum)
-                        (assoc :seon.fn.arity/max maximum))]}]
-                   (:seon.fn/arity-mismatches report))
-                "the refused arity is named, the admitted one is not")
-            (is (<= 2 (:seon.fn/arity-checked report))
-                "an empty mismatch list is legible only beside its coverage")
-            (is (nat-int? (:seon.fn/arity-unchecked report)))))))))
+                     [{:seon.fn.arity/min minimum :seon.fn.arity/max maximum}]
+                     :seon.fn/prepared-arities
+                     [{:seon.fn.arity/min minimum :seon.fn.arity/max maximum}]}]
+                   (get-in refusal [:seon.error/data :seon.fn/arity-mismatches])))
+            (is (= basis (:max-tx @connection)))
+            (let [report (seon.fn/arity-mismatches (db/db connection))]
+              (is (empty? (:seon.fn/arity-mismatches report)))
+              (is (pos-int? (:seon.fn/arity-checked report)))
+              (is (nat-int? (:seon.fn/arity-unchecked report))))))))))
 
 (deftest re-index-replaces-analysis-facets-exactly
   (test-support/with-database

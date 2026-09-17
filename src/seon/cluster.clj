@@ -1564,7 +1564,9 @@
   `:seon.schema/missing-projection`. A projection the caller already handed
   (`refresh-source!`'s declaration projection, a cluster's advanceable
   projection state) wins, so this derives one only when nothing supplied it."
-  [connection cluster-name]
+  ([connection cluster-name]
+   (accrete-schema-population! connection cluster-name true))
+  ([connection cluster-name publish-schema-rows?]
   (let [forms (schema.edn/packaged-forms)]
     (schema/call-with-forms
      forms
@@ -1584,7 +1586,8 @@
               (require-committed!
                (db/transact! connection {:tx-data process-rows})
                {:seon.boot/population :seon.db/processes})))
-          (let [schema-rows (schema-row-changes (db/db connection) forms)]
+          (let [schema-rows (when publish-schema-rows?
+                              (schema-row-changes (db/db connection) forms))]
             (when (seq schema-rows)
               (require-committed!
                (db/transact! connection
@@ -1593,7 +1596,7 @@
                               {:seon.db/process
                                [:seon.db.process/id boot-process-identity]}})
                {:seon.boot/population :seon.schema/rows}))))))))
-  nil)
+  nil))
 
 (defn populate-source!
   "The default `current-src` content: this code's schema and program rows.
@@ -1633,7 +1636,9 @@
           ;; document never re-accretes the schema.
           (when (or (nil? classes) (classes :schema-resource))
           (report-source-progress! "schema population started")
-          (accrete-schema-population! connection nil)
+          ;; Complete publication admits schema rows with their renderer
+          ;; definitions in index!'s one final transaction.
+          (accrete-schema-population! connection nil (some? classes))
           (report-source-progress! "schema population complete"))
           (when (nil? classes)
           (report-source-progress! "instruction rows")
