@@ -2641,3 +2641,16 @@ working tree, never Sonnet.
   parked (session preserved). S3 resumed on its cold reds (no live
   observation until adoption). Editing lanes: adoption-margin, integrator,
   guardrails, S3.
+- **Guardrails COMPLETE** (`56b8a1cd8` dead-holder/dead-runner slots
+  reclaim, live orphaned runners retained; `6f80d1a4d` incomplete overlays
+  refused before any JVM against the published HEAD graph, a missing
+  baseline names `bin/test --prepare-head-base`). Lane parked.
+- **S3 residue LANDED** (`a95f8dee0`: retraction, pre-provider turn
+  counting, diagnostic assertions, documentation read evidence; 143/980/1F
+  fast — the open installation timing bound; wake timeout not reproduced
+  in 24 trials). Live measurements owed on adoption. Lane parked.
+- adoption-margin landed its first cut on the branch: `627a24047` issue
+  adoption citations read once per source database.
+- **Batch 121 launched** (platform + the S3/guardrails/message-wake residue
+  namespaces). Editing: adoption-margin, integrator (+ an Opus triage on
+  the sci arity-message parity, queued item, now launched).
