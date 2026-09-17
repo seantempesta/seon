@@ -3643,3 +3643,17 @@ as orchestrator/astra lanes, easy pool as the first live-agent slice).
   three are `seon.db/pull` and `seon.db/transact-call` (held db.clj).
 - Wrapper lane resumed on the SCI side (eval.clj free). Editing: publication,
   namespace-page, wrapper.
+
+## 2026-09-18 ~08:00Z — gate 9: the serial worker regression is ea676d0af, not load
+
+- Gates 6 and 7 have 0 `worker-retired`; gates 8 and 9 (first after
+  `ea676d0af`) have 168 and 170. Gate 9 (`run.SMT0SG`): the serial worker
+  logs BEGIN then END with an EMPTY elapsed-ms 0.2 ms later, the coordinator
+  reports `missing-worker-event :task-complete`, retires the worker, and the
+  whole serial tier (store-test …) is reported failed unrun. Gate 8's "load
+  casualty" reading was wrong: the new host-Var dispatch path does not
+  complete the serial exchange. `sci-arm-leak` resumed with the evidence
+  (runner.clj dispatch, both sides of the protocol, regression through the
+  serial tier). Until it lands, platform gates are not valid evidence.
+- Ruling 1s (acquisition by digest equality) recorded; slice queued behind
+  the wrapper lane's hold on eval.clj.
