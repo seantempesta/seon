@@ -525,6 +525,15 @@ system operations (publication, adoption, reseed, boot recovery, collection)
 hand the writer the bound their own config family declares (publication's
 `publication-bound-ms` already exists). No third constant; the refusal
 shape is unchanged. Interim: the single default is 600 s (`02cb1b2b7`).
+Refined by the owner ~02:25Z: "root access (system) for no limits, and
+then agents; if they fail, root can re-run whatever transaction it is."
+Ruling as recorded: root/system writes carry NO per-write timeout; the
+operation's own lifecycle deadline (publication, boot, reset, adoption)
+remains the only bound and is the one that reports; agent/turn writes keep
+the short db dial; a bounded-out agent write returns its refusal WITH the
+transaction data so root can re-run it. (Orchestrator's caveat, stated
+once: an unbounded system write is the hang class seen today; the
+operation deadline is what keeps it loud.)
 
 ## 2. What exists today, with the seams named
 
