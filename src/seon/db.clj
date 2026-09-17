@@ -216,6 +216,21 @@
         projection (vary-meta assoc :seon.schema/projection projection)))
     database))
 
+(defn carry-derived-projection
+  "Derive and carry the immutable projection owned by `database` itself.
+
+  Commit database values have no live connection whose projection state they
+  can inherit.  Derive from that exact value's installed program facts once
+  and attach the resulting snapshot, so later reads never depend on a caller's
+  handed projection."
+  {:malli/schema
+   [:=> [:cat :seon.db/database-value] :seon.db/database-value]}
+  [database]
+  (if (:seon.schema/projection (meta database))
+    database
+    (vary-meta database assoc :seon.schema/projection
+               (schema/projection-from-database database))))
+
 (defn- resolve-database-value
   [connection]
   (try

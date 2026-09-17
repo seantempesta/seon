@@ -167,9 +167,24 @@
    [:=> [:cat :seon.store/store :seon.source/commit-id]
     :seon.db/database-value]}
   [store commit-id]
-  (or (d/commit-as-db (:seon.store/connection-object store) commit-id)
-      (refuse! ::source-absent "the adopted source commit is unavailable"
-               {:seon.source/commit-id commit-id})))
+  (if-let [database
+           (d/commit-as-db (:seon.store/connection-object store) commit-id)]
+    (db/carry-derived-projection database)
+    (refuse! ::source-absent "the adopted source commit is unavailable"
+             {:seon.source/commit-id commit-id})))
+
+(defn- unresolved-report!
+  {:malli/schema
+   [:=> [:cat :seon.db/database-value]
+    :seon.program/unresolved-report]}
+  [database]
+  (let [report (fn/unresolved-callers database)]
+    (when (:seon.error/kind report)
+      (refuse! ::publish-readback-failed
+               "the published source unresolved-callers read was refused"
+               {:seon.source/read 'seon.fn/unresolved-callers
+                :seon.source/read-result report}))
+    report))
 
 (defn deleted-identities
   "Identities with historical definitions and no current definition."
@@ -580,7 +595,8 @@
            :seon.source/commit-id commit-id
            :seon.source/digest source-digest
            :seon.source/built? true
-           :seon.program/unresolved-report (fn/unresolved-callers (database store commit-id))})
+           :seon.program/unresolved-report
+           (unresolved-report! (database store commit-id))})
         (catch Throwable failure
           (retire-scratch! store scratch)
           (throw failure)))))
@@ -688,7 +704,8 @@
          :seon.source/commit-id commit-id
          :seon.source/digest source-digest
          :seon.source/built? true
-           :seon.program/unresolved-report (fn/unresolved-callers (database store commit-id))})
+           :seon.program/unresolved-report
+           (unresolved-report! (database store commit-id))})
       (catch Throwable failure
         (retire-scratch! store scratch)
         (throw failure)))))
