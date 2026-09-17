@@ -420,3 +420,41 @@
        (clojure.test/is (= :seon.issue/not-a-test
                            (:seon.error/kind (seon.issue/tests! {:seon.db/connection c :seon.agent/id "issue-author"
                                                                :seon.issue/id issue-id :seon.issue/tests #{[:seon.agent/id "issue-author"]}})))))))))
+
+(clojure.test/deftest an-invalid-note-refuses-itself-and-mints-no-identity-only-row
+  ;; The class: a reader that treats an invalid input as an ordinary row. An
+  ;; invalid note's result carries no datoms, but its slug was still minted as
+  ;; a bare `{:seon.issue/id ...}` row; the whole-entity validator requires
+  ;; `:seon.issue/title`, so ONE bad note refused the ENTIRE publication —
+  ;; batch 116's base publication and every development adoption that night.
+  (seon.test-support/with-database
+   (fn [connection]
+     (let [notes [{:seon.issue/path "docs/seon/issues/probe-valid-note.md"
+                   :seon.issue/text "---\ntype: issue\nstatus: open\nseverity: cleanup\ntags: [issue]\n---\n# A valid probe note\n## Problem\nThis note is admitted."}
+                  {:seon.issue/path "docs/seon/issues/probe-defect-typed-note.md"
+                   :seon.issue/text "---\ntype: defect\nstatus: open\nseverity: cleanup\ntags: [issue]\n---\n# A defect typed probe note\n## Problem\nOnly `issue` is a valid type."}]
+           tx (seon.issue/index-tx (seon.db/db connection) notes)
+           refusals (:seon.issue/refusals (meta tx))]
+       (clojure.test/is (not-any? #(= {:seon.issue/id "probe-defect-typed-note"} %) tx)
+                        (pr-str tx))
+       (clojure.test/is (= 1 (count refusals)) (pr-str refusals))
+       (clojure.test/is (= :invalid-type (:seon.issue/reason (first refusals)))
+                        (pr-str refusals))
+       (clojure.test/is (= "probe-defect-typed-note" (:seon.issue/value (first refusals)))
+                        (pr-str refusals))
+       (clojure.test/is (= "docs/seon/issues/probe-defect-typed-note.md"
+                           (:seon.issue/path (first refusals)))
+                        (pr-str refusals))
+       ;; The whole transaction admits through the real writer: one bad note no
+       ;; longer refuses the publication that carries every good one.
+       (seon.test-support/transacted! connection tx)
+       (let [d (seon.db/db connection)]
+         (clojure.test/is (= "A valid probe note"
+                             (:seon.issue/title
+                              (seon.db/pull d '[:seon.issue/title]
+                                            [:seon.issue/id "probe-valid-note"]))))
+         (clojure.test/is
+          (empty? (seon.db/q '[:find [?e ...] :in $ ?slug
+                               :where [?e :seon.issue/id ?slug]]
+                             d "probe-defect-typed-note"))
+          "the invalid slug has no entity at all"))))))

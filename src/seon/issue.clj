@@ -285,7 +285,16 @@
   Metadata carries refused notes, ambiguous
   citations and unresolved tokens. An unresolved token is evidence stored on
   the issue, never a refusal. Worker assignment and additive tests survive
-  replacement of the prose."
+  replacement of the prose.
+
+  An invalid note contributes its refusal diagnostic and NO datoms: its slug
+  is never minted as an identity, and it never names a class member. Minting
+  an identity-only row for an invalid note made the whole-entity validator
+  refuse the entire publication for one bad note, because
+  `:seon.issue/title` is required. An invalid note is also NOT removed: a
+  note present on disk but refused leaves its already stored row alone, so a
+  prose defect never retracts indexed facts. Only a slug with no note at all
+  is retracted."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        [:sequential [:map [:seon.issue/path :string] [:seon.issue/text :string]]]]
                   :seon.db/tx-data]}
@@ -304,11 +313,25 @@
         existing (mapv #(db/pull database '[*] %) existing)
         by-slug (into {} (map (juxt :seon.issue/id identity)) existing)
         present (set (map :seon.issue/id parsed))
+        ;; Validity is decided once, before anything derives datoms from a
+        ;; note, so an invalid note can neither mint its identity nor be
+        ;; named as a class member by a lookup ref nothing asserts.
+        invalid-reason
+        (fn [{:seon.issue/keys [id title status severity problem] :as note}]
+          (cond
+            (contains? duplicates id) :duplicate-slug
+            (not= "issue" (:seon.issue.parse/type note)) :invalid-type
+            (not (contains? #{:open :resolved :superseded} status)) :invalid-status
+            (not (contains? #{:blocker :friction :cleanup} severity)) :invalid-severity
+            (str/blank? title) :missing-title
+            (str/blank? problem) :missing-problem))
+        valid (filterv (complement invalid-reason) parsed)
+        admitted (set (map :seon.issue/id valid))
         classes (into {} (mapcat (fn [note]
                                   (when (contains? (:seon.issue.parse/tags note) "class-kill")
                                     (for [tag (:seon.issue.parse/tags note)
                                           :when (str/starts-with? tag "class/")]
-                                      [tag (:seon.issue/id note)])))) parsed)
+                                      [tag (:seon.issue/id note)])))) valid)
         ;; Membership in one pass over the notes, not one scan of every note per
         ;; note: the pairwise scan was 691 ms of every index for 115 members.
         members-by-class (reduce (fn [membership member]
@@ -318,18 +341,12 @@
                                                  (update membership class-id (fnil conj []) member)
                                                  membership)))
                                            membership (:seon.issue.parse/tags member)))
-                                 {} parsed)
+                                 {} valid)
         component-ids (fn [value] (into #{} (map #(if (map? %) (:db/id %) %)) value))
         results
         (mapv
-         (fn [{:seon.issue/keys [id path title status severity problem] :as note}]
-           (let [invalid (cond
-                           (contains? duplicates id) :duplicate-slug
-                           (not= "issue" (:seon.issue.parse/type note)) :invalid-type
-                           (not (contains? #{:open :resolved :superseded} status)) :invalid-status
-                           (not (contains? #{:blocker :friction :cleanup} severity)) :invalid-severity
-                           (str/blank? title) :missing-title
-                           (str/blank? problem) :missing-problem)
+         (fn [{:seon.issue/keys [id path] :as note}]
+           (let [invalid (invalid-reason note)
                  tokens (:seon.issue.parse/words note)
                  resolutions (into [] (keep #(citation index %)) tokens)
                  ambiguous (mapv #(diagnostic path :ambiguous-citation (:seon.issue/value %))
@@ -395,13 +412,18 @@
                         (replacement-tx current (merge (apply dissoc current replaced) row))
                         [row]))})))
          parsed)
+        ;; `present`, not `admitted`: a note on disk that this index refused
+        ;; is still present, so its stored row is left exactly as it was.
         removed (remove #(contains? present (:seon.issue/id %)) existing)
-        ;; A slug the database does not hold yet is minted here, so a class note
-        ;; may name a member first seen in this same transaction by lookup ref.
-        ;; An already stored slug needs no upsert: it re-asserts one identity
-        ;; fact per note the database already holds (1,649 of them today).
+        ;; A VALID slug the database does not hold yet is minted here, so a
+        ;; class note may name a member first seen in this same transaction by
+        ;; lookup ref. An already stored slug needs no upsert: it re-asserts
+        ;; one identity fact per note the database already holds (1,649 of
+        ;; them today). An invalid slug is never minted: an identity-only row
+        ;; has no `:seon.issue/title`, which the whole-entity validator
+        ;; requires, so one bad note refused every publication.
         tx (into (mapv #(hash-map :seon.issue/id %)
-                       (remove by-slug (sort present)))
+                       (remove by-slug (sort admitted)))
                  (concat (mapcat :seon.issue/tx results)
                          (map (fn [issue]
                                 [:db/retractEntity [:seon.issue/id (:seon.issue/id issue)]])

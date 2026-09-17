@@ -454,9 +454,16 @@
         (into {}
               (map
                (fn [identity]
-                 [identity
-                  (or (:db/id (db/pull database [:db/id] identity))
-                      (desired-tempid identity))]))
+                 ;; A refused read is not "no such entity". Minting a tempid
+                 ;; for an identity the database already holds produces a
+                 ;; conflicting upsert; refuse with the read as the cause.
+                 (let [pulled (db/pull database [:db/id] identity)]
+                   (when (:seon.error/kind pulled)
+                     (refuse! ::read-refused
+                              {:seon.config/identity identity
+                               ::read-error pulled}
+                              nil))
+                   [identity (or (:db/id pulled) (desired-tempid identity))])))
               identities)
         ref-value
         (fn [value]
@@ -579,30 +586,35 @@
 (defn- effective-in
   [db cluster-name projection]
   (let [forms (:seon.schema.projection/forms projection)
-        row (db/pull db '[*] [:seon.config/cluster cluster-name])
-        effective (select-keys row (dial-attributes forms))
-        missing (vec (sort (set/difference (required-dial-attributes forms)
-                                           (set (keys effective)))))]
-     (if (and row (empty? missing))
-       effective
-       (let [shown (take 6 missing)
-             remaining (- (count missing) (count shown))
-             available
-             (vec
-              (sort
-               (db/q '[:find [?available ...]
-                       :where
-                       [_ :seon.config/cluster ?available]]
-                     db)))]
-         {:seon.config/missing-effective cluster-name
-          :seon.error/kind ::missing-effective
-          :seon.error/data {::missing missing}
-          :seon.error/message
-          (if row
-            (str "Effective configuration for cluster " (pr-str cluster-name)
-                 " is missing required facts " (pr-str (vec shown))
-                 (when (pos? remaining)
-                   (str " and " remaining " more")) ".")
-            (str "No effective configuration facts match cluster "
-                 (pr-str cluster-name) "; available clusters "
-                 (pr-str available) "."))}))))
+        row (db/pull db '[*] [:seon.config/cluster cluster-name])]
+    ;; A refused read is not an absent row. Reading the refusal's own keys as
+    ;; the config row reports every dial missing and blames the facts; the
+    ;; cause here is the read, so return the read's refusal unchanged.
+    (if (:seon.error/kind row)
+      row
+      (let [effective (select-keys row (dial-attributes forms))
+            missing (vec (sort (set/difference (required-dial-attributes forms)
+                                               (set (keys effective)))))]
+        (if (and row (empty? missing))
+          effective
+          (let [shown (take 6 missing)
+                remaining (- (count missing) (count shown))
+                available
+                (vec
+                 (sort
+                  (db/q '[:find [?available ...]
+                          :where
+                          [_ :seon.config/cluster ?available]]
+                        db)))]
+            {:seon.config/missing-effective cluster-name
+             :seon.error/kind ::missing-effective
+             :seon.error/data {::missing missing}
+             :seon.error/message
+             (if row
+               (str "Effective configuration for cluster " (pr-str cluster-name)
+                    " is missing required facts " (pr-str (vec shown))
+                    (when (pos? remaining)
+                      (str " and " remaining " more")) ".")
+               (str "No effective configuration facts match cluster "
+                    (pr-str cluster-name) "; available clusters "
+                    (pr-str available) "."))}))))))

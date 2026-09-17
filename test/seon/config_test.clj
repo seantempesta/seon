@@ -563,3 +563,25 @@
                    (:seon.error/message missing-beta)))
             (is (= "No effective configuration facts match cluster \"alpha\"; available clusters [\"beta\"]."
                    (:seon.error/message missing-alpha)))))))))
+
+(deftest a-refused-read-is-returned-as-the-cause-not-reported-as-missing-facts
+  ;; The class: a reader that treats an error value as an ordinary/absent row.
+  ;; `effective-in` bound `seon.db/pull`'s answer as the config row and derived
+  ;; `missing` from its keys, so an hour of `:seon.db/invalid-read` refusals
+  ;; reported every dial missing and named the FACTS instead of the READ.
+  ;; `seon.db/pull` returns its database argument unchanged when that argument
+  ;; is itself an error value (`pull-call`), so a flat refusal handed as the
+  ;; database is the honest construction of a refused read.
+  (test-support/with-database
+    (fn [connection]
+      (config/apply! {:seon.boot/cluster-name "default" :seon.db/connection connection})
+      (let [projection (or (db/carried-projection (db/db connection))
+                           (schema/projection-from-database (db/db connection)))
+            refusal {:seon.error/kind :seon.db/invalid-read
+                     :seon.error/message "Datahike refused the database read."}
+            result (#'config/effective-in refusal "default" projection)]
+        (is (= :seon.db/invalid-read (:seon.error/kind result))
+            (pr-str result))
+        (is (not= ::config/missing-effective (:seon.error/kind result))
+            "the refusal names the read, not the facts")
+        (is (not (contains? result :seon.config/missing-effective)))))))
