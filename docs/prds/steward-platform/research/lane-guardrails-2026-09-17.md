@@ -498,3 +498,33 @@ Owned paths: `bin/_test-slot`, `bin/test`, `test/seon/test_runner_test.clj`,
 AGENTS.md's slot paragraph, and this note. No `SEON_TEST_*` override was set
 on a lane command; the shell fixture directly sets its local wait variable
 to zero to test the wait refusal without waiting thirty minutes.
+
+## Exhaust correction — 2026-09-17
+
+Owner review corrected the retention policy: a dead holder with a dead or
+absent recorded runner is exhaust, not work in flight. `bin/_test-slot`
+again reclaims that slot automatically. A dead launcher with a live runner
+is still announced and retained, and a live holder is never reclaimed.
+One ledger reader supplies the recorded runner to both decisions.
+The preceding orphan section's blanket dead-holder retention statement is
+superseded by this correction; AGENTS.md now states the narrower rule.
+
+The same canonical regression now proves dead-runner **and** absent-runner
+reclamation while both live-orphan slots survive. No environment override
+was used. The focused armed run at HEAD `a5516ca62` passed **1 test / 20
+assertions / 0 failures / 0 errors**, exit **0**, ending
+`2026-09-17T05:35:28.501519Z`:
+
+```sh
+timeout 2400 bin/test-fast --paths bin/_test-slot test/seon/test_runner_test.clj tmp/lane_guardrails_slot_probe.clj -- tmp.lane-guardrails-slot-probe
+```
+
+Exact disposable probe, removed after completion:
+
+```clojure
+(ns tmp.lane-guardrails-slot-probe
+  (:require [clojure.test :refer [deftest]]
+            [seon.test-runner-test]))
+(deftest orphan-and-exhaust
+  ((:test (meta #'seon.test-runner-test/orphaned-gates-are-announced-by-wait-and-preamble))))
+```

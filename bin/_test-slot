@@ -37,6 +37,19 @@ test_slot_announce_seconds=${SEON_TEST_SLOT_ANNOUNCE_SECONDS:-60}
 test_slot_parent="${source_root:-$PWD}/tmp/test-slots"
 held_test_slot=
 
+test_slot_runner_pid() {
+  local root line runner=
+  root=$(cat "$1/run-root" 2>/dev/null || true)
+  if [ -f "$root/test-run.txt" ]; then
+    while IFS= read -r line; do
+      case "$line" in
+        runner-pid=*) runner=${line#runner-pid=}; runner=${runner%% *} ;;
+      esac
+    done <"$root/test-run.txt"
+  fi
+  printf '%s\n' "$runner"
+}
+
 # Each held slot, its holder pid, that holder's own elapsed time, and the run
 # root it is working in: enough to decide whether to keep waiting or to look at
 # the holder.
@@ -47,12 +60,11 @@ announce_test_slot_holders() {
     holder_elapsed=none
     root=$(cat "$test_slot_parent/slot-$slot/run-root" 2>/dev/null || echo none)
     phase=unknown
-    runner=
+    runner=$(test_slot_runner_pid "$test_slot_parent/slot-$slot")
     if [ -f "$root/test-run.txt" ]; then
       while IFS= read -r line; do
         case "$line" in
           phase=*) phase=$line ;;
-          runner-pid=*) runner=${line#runner-pid=}; runner=${runner%% *} ;;
         esac
       done <"$root/test-run.txt"
     fi
@@ -61,8 +73,9 @@ announce_test_slot_holders() {
     if [ "$holder" != none ]; then
       parent=$(ps -p "$holder" -o ppid= 2>/dev/null | tr -d ' ' || true)
       recorded_parent=$(cat "$test_slot_parent/slot-$slot/parent-pid" 2>/dev/null || true)
-      if [ "$parent" = 1 ] || ! kill -0 "$holder" 2>/dev/null ||
-         { [ -n "$recorded_parent" ] && ! kill -0 "$recorded_parent" 2>/dev/null; }; then
+      if [ "$parent" = 1 ] ||
+         { ! kill -0 "$holder" 2>/dev/null && [ -n "$runner" ] && kill -0 "$runner" 2>/dev/null; } ||
+         { kill -0 "$holder" 2>/dev/null && [ -n "$recorded_parent" ] && ! kill -0 "$recorded_parent" 2>/dev/null; }; then
         orphan=1
         if ! kill -0 "$holder" 2>/dev/null && [ -n "$runner" ] && kill -0 "$runner" 2>/dev/null; then
           gate_pid=$runner
@@ -81,7 +94,7 @@ announce_test_slot_holders() {
 }
 
 acquire_test_slot() {
-  local waited=0 slot holder announced=0 announced_at=0
+  local waited=0 slot holder runner announced=0 announced_at=0
   mkdir -p "$test_slot_parent"
   while :; do
     for slot in $(seq 1 "$test_slot_count"); do
@@ -100,6 +113,12 @@ acquire_test_slot() {
       if [ -z "$holder" ]; then
         if [ -z "$(ls -A "$test_slot_parent/slot-$slot" 2>/dev/null)" ]; then
           echo "bin/test: reclaiming empty test slot $slot" >&2
+          rm -rf "$test_slot_parent/slot-$slot"
+        fi
+      elif ! kill -0 "$holder" 2>/dev/null; then
+        runner=$(test_slot_runner_pid "$test_slot_parent/slot-$slot")
+        if [ -z "$runner" ] || ! kill -0 "$runner" 2>/dev/null; then
+          echo "bin/test: reclaiming test slot $slot from dead holder pid=$holder and runner pid=${runner:-none}" >&2
           rm -rf "$test_slot_parent/slot-$slot"
         fi
       fi

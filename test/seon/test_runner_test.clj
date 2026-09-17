@@ -1263,7 +1263,17 @@
                               "printf '#!/bin/sh\\nexit 66\\n' > fake-bin/git\nchmod +x fake-bin/git\n"
                               "if PATH=\"$PWD/fake-bin:$PATH\" bin/test --fast --paths docs/fixture -- seon.fixture-test; then exit 92; else test \"$?\" = 66; fi\n"
                               "test -f tmp/test-slots/slot-1/pid\ntest -f tmp/test-slots/slot-2/pid\n"
-                              "rm fake-bin/git\nrm -r tmp/test-slots/slot-3\n"
+                              "rm fake-bin/git\n"
+                              "for runner_state in dead absent; do\n"
+                              "  printf '%s\\n' " (.pid launcher) " > tmp/test-slots/slot-3/pid\n"
+                              "  ledger=tmp/test-runs/run.fixture-3/test-run.txt\n"
+                              "  if [ \"$runner_state\" = dead ]; then printf 'runner-pid=%s\\n' " (.pid launcher) " > \"$ledger\"; else : > \"$ledger\"; fi\n"
+                              "  if acquire_test_slot; then exit 93; else test \"$?\" = 75; fi\n"
+                              "  test ! -e tmp/test-slots/slot-3\n"
+                              "  test -f tmp/test-slots/slot-1/pid\ntest -f tmp/test-slots/slot-2/pid\n"
+                              "  mkdir tmp/test-slots/slot-3\n"
+                              "  printf '%s\\n' \"$PWD/tmp/test-runs/run.fixture-3\" > tmp/test-slots/slot-3/run-root\n"
+                              "done\nrm -r tmp/test-slots/slot-3\necho EXHAUST_RECLAIMED\n"
                               "printf '#!/bin/sh\\necho FIXTURE_FAST_EXIT\\nexit 0\\n' > fake-bin/clojure\nchmod +x fake-bin/clojure\n"
                               "PATH=\"$PWD/fake-bin:$PATH\" bin/test --fast --paths docs/fixture -- seon.fixture-test\n"
                               "test -d tmp/test-runs/run.fixture-1\ntest -d tmp/test-runs/run.fixture-2\n")
@@ -1284,6 +1294,8 @@
                       (is (str/includes? part (.getCanonicalPath (io/file checkout "tmp/test-runs" (str "run.fixture-" slot)))) part)
                       (is (str/includes? part "last PHASE: phase=published-base elapsed-seconds=7") part)))
                   (is (str/includes? output "FIXTURE_FAST_EXIT") output)
+                  (is (str/includes? output "EXHAUST_RECLAIMED") output)
+                  (is (not (str/includes? output "holds slot-3")) output)
                   (is (.isAlive handle) "announcing an orphan never kills it"))
                 (finally (stop-process-tree! child)))))
           (finally (stop-process-tree! launcher))))

@@ -886,9 +886,10 @@ fixture priming; the fast reporter carries long-test allowances too.
 A slot bounds invocations,
 not the number of worker JVMs inside one gate.
 Slot waits and the `bin/test` preamble announce orphaned gates with their
-PID, run root, elapsed time and last recorded phase. A dead launcher or
-parent never authorizes a lane to reclaim the slot or its retained root;
-the orchestrator decides. This detects parent death, not a turn ending
+PID, run root, elapsed time and last recorded phase. A dead launcher with
+a live recorded runner remains for the orchestrator to reclaim. When both
+holder and recorded runner are dead (or the runner is absent), the slot is
+exhaust and is reclaimed automatically. This detects parent death, not a turn ending
 while its launcher remains alive or whether anyone read the tally.
 
 `bin/test` is the one correctness gate, tiered: the declared
