@@ -2,7 +2,7 @@
                         :spelling
                         [:enum :explicit :keys :strs :syms],
                         :binding
-                        [:and {:seon.db/component true} :seon.db/ref],
+                        [:and {:seon.db/component true :seon.db/component-schema :seon.fn.binding/row} :seon.db/ref],
                         :default-edn :string,
                         :row
                         [:map

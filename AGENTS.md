@@ -484,9 +484,9 @@ transaction touched, the swept ones included (`src/seon/db.clj:3014`,
 deletion and an **optional** one lets it SWEEP silently. Choose deliberately
 and say which of the five behaviours you chose in the attribute's docstring:
 cascade (component), sweep, refuse, value, or a pending edge its settlement
-moves to a durable sibling. One hole to know: the validator selects schemas
-from the row's identity attributes, so an entity with NO identity attribute is
-never validated at all.
+moves to a durable sibling. Identity-less owned children validate through their
+relation's declared `:seon.db/component-schema`; a nonempty identity-less row
+without an owning root refuses (`src/seon/db.clj:3071`).
 
 **A fact that must outlive its target stores a VALUE, not a ref** (ruled
 2026-09-16, §1f G2). Call edges and test reach become
@@ -524,11 +524,14 @@ pre-read the authority re-decides.
 
 **A component is part of its parent's value** (ruled 2026-09-16, §1f G5).
 Pull expands a component without being asked and `retractEntity` destroys
-it with the parent, so the validation unit is the parent pulled with its
-components expanded, validated as one value against the parent's schema.
-Do not invent identity attributes on component rows to make a selector
-see them. TARGET: 29 marked component maps are currently unselected
-(`docs/prds/steward-platform/research/schema-key-audit-2026-09-16.md`).
+it with the parent. Final write validation discovers owners in both before
+and after through indexed seeks, expands complete EAVT child values, and
+validates roots and the relation's declared child schema as one owning value
+(`src/seon/db.clj:3071`). Cycles, multiple owners, missing children and exhausted
+`:seon.config.db/validation-node-limit` refuse; wildcard pull cannot prove
+completeness. Do not invent identity attributes on component rows to make a
+selector see them. The bound is declared in `seon.config.db.edn` and carried
+by the projection, shared by every writer.
 
 **An entity schema describes the STORED entity only.** A reference has
 three grammars — transaction data, datom, pull result — and one Malli key

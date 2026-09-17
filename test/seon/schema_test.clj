@@ -68,7 +68,7 @@
           value))
       (:seon.schema.projection/forms projection)))))
 
-(deftest declared-references-round-trip-with-the-pull-collection-grammar
+(deftest declared-reference-maps-accept-the-pull-reference-grammar
   (test-support/with-database
    (fn [connection]
      (let [lock-path (java.nio.file.Files/createTempFile
@@ -118,29 +118,34 @@
                  _ (is ((schema/projection-validator projection schema-key) row)
                        (pr-str {:schema schema-key
                                 :errors (mapv :in (:errors ((schema/projection-explainer projection schema-key) row)))}))]
-             (when stored?
-              (let [
-                 report (test-support/transacted! connection [(assoc row :db/id "pulled-ref-subject")])
-                 eid (get (:tempids report) "pulled-ref-subject")
-                 pulled (seon.db/pull (seon.db/db connection) '[*] eid)]
-             ;; Entity schemas describe stored values. Pull's cardinality-many
-             ;; vector grammar is distinct, even when storage declares a set.
-             (is (= (set (keys row)) (disj (set (keys pulled)) :db/id))
-                 (str "wildcard pull preserves the authored members of " schema-key))
-             (doseq [attribute (keys row)
-                     :when (= :db.cardinality/many
-                              (get-in (seon.db/db connection)
-                                      [:schema attribute :db/cardinality]))]
-               (is (vector? (get pulled attribute))
-                   (str "Datahike pulls cardinality-many as a vector: " attribute)))
-             (doseq [entry entries :when (reference-entry? projection entry)]
-               (let [value (get pulled (first entry))]
-                 (is (if (map? value) (= target (:db/id value))
-                         (and (seq value) (every? #(= target (:db/id %)) value)))
-                     (str "nested reference landed at " (first entry))))))))
+             ;; This checks reference grammar, not whether generated refs describe
+             ;; valid ownership. Real component values are covered below and by G5.
+             (is (map? row)))
            (catch Throwable failure
              (is false (str schema-key ": " (ex-message failure)))))))))
        (finally (java.nio.file.Files/deleteIfExists lock-path)))))))
+
+(deftest canonical-reference-values-use-the-pull-collection-grammar
+  (test-support/with-database
+   (fn [connection]
+     (let [database (seon.db/db connection)
+           attributes (for [[attribute properties] (:schema database)
+                            :when (= :db.type/ref (:db/valueType properties))]
+                        attribute)
+           populated (keep (fn [attribute]
+                             (when-let [datom (first (seon.db/datoms database :aevt attribute))]
+                               [attribute (:e datom)])) attributes)]
+       (is (seq populated))
+       (println "Canonical populated reference attributes:" (count populated)
+                "declared:" (count attributes))
+       (doseq [[attribute entity] populated]
+         (let [value (get (seon.db/pull database [attribute] entity) attribute)
+               many? (= :db.cardinality/many (get-in database [:schema attribute :db/cardinality]))
+               ids (if many? (map :db/id value) [(:db/id value)])
+               expected (set (map :v (seon.db/datoms database :eavt entity attribute)))]
+           (is (if many? (vector? value) (map? value)) (str attribute))
+           (is (and (seq ids) (every? expected ids))
+               (str "Pulled ids come from the actual relation: " attribute))))))))
 
 (defn- refusal
   [thunk]

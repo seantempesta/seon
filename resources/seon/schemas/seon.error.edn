@@ -58,7 +58,7 @@
                :seon.error/notification]
               [:seon.agent/id {:optional true} :seon.agent/id]],
              :capped? :boolean,
-             :occurrences [:set {:seon.db/component true} :seon.db/ref],
+             :occurrences [:set {:seon.db/component true :seon.db/component-schema :seon.error.occurrence/occurrence} :seon.db/ref],
              :occurrence-count [:int {:min 1}],
              :reason
              [:enum

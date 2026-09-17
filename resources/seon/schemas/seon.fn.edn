@@ -24,7 +24,7 @@
   functions and a detector must guess from their names. The indexer already
   had the fact from `:seon.fn.analyzer/defined-by` — the row simply keeps
   it, so the question is a Datalog clause."}],
-          :arities [:vector #:seon.db{:component true} :seon.db/ref],
+          :arities [:vector #:seon.db{:component true :seon.db/component-schema :seon.fn.arity/row} :seon.db/ref],
           :calls [:set {:seon.db/index true} :qualified-symbol],
           :destroys
           [:string

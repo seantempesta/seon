@@ -2,7 +2,7 @@
                     :read-basis-transaction [:and {:seon.wake/context-inert true} :seon.db/basis-t],
                     :error [:and {:seon.wake/context-inert true} :string],
                     :read-evidence
-                    [:vector #:seon.db{:component true :seon.wake/context-inert true} :seon.db/ref],
+                    [:vector #:seon.db{:component true :seon.db/component-schema :seon.cluster.eval/read-evidence-entity :seon.wake/context-inert true} :seon.db/ref],
                     :source
                     [:string {:min 1, :seon.db/no-history? true :seon.wake/context-inert true}],
                     :author

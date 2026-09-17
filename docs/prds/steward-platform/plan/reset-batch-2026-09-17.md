@@ -232,7 +232,7 @@ publication, browser observation or reset was performed for this plan.
 | R N38/N39 all instants become tx refs | Use tx refs for database transitions only; retain actual occurrence/provider event instants and imported issue opening dates as observations with distinct semantics. Never reinterpret an old date as the transaction that imported it. |
 | R D.4 calls nil-enum removal accretion | It narrows a boundary; **AGENTS §2.5 wins**. Treat wake offer-result as a contract-only narrowing with all callers changed (X2), not a reset-gated storage retype. |
 | R B.4 says four AST resources; C.2 says two | At this HEAD the targeted resources are `seon.fn.ast.edn` and `seon.fn.ast.entry.edn`, plus the attribute in `seon.fn.edn`. Q2 records the actual grep; no invented deletion paths. |
-| S reset --force versus this assignment's exact default sequence | **Assignment wins.** Only the orchestrator executes the four-command default sequence below. Do not down unrelated clusters or delete the shared store. |
+| Earlier four-command reset versus the latest integrator assignment | **Latest owner/orchestrator direction wins.** After the complete branch merge, the orchestrator executes ONE `bin/seon reset --force`; the older manual sequence is superseded. Lanes never operate default. |
 | R B.12 render/form versus current vocabulary | Retire form as a third output selector; render functions choose executable forms within their existing AI/HTML pair. Change the ten declaring schema sites and walk consumers before deleting the key. Preserve rendered HTML under its own Hiccup value key, not a string-only output slot. |
 
 ### Dependency ledger
@@ -942,31 +942,31 @@ attributes. Do not run AST deletion while E owns its source files.
 
 ## Reset procedure — orchestrator only, after review and implementation
 
-1. Collect group commits, held-file release reports and namespace fast results.
-   Verify the complete integrated schema/constructors/readers are present.
-   Read each E/no-default-cluster continuation's final report before takeover.
-   Record HEAD, tree residue, source publication identity and outstanding
-   boundaries here. Preserve unrelated edits; no branch switch or broad stage.
-2. Confirm the old-default reverse-walk capture exists and is readable before
-   destruction. Use the E probe and captured result below; do not relabel it a
-   post-reset number. Confirm no live runner owns any obsolete test basis/root
-   before removing only invalid basis/exhaust. Do not sweep foreign live runs.
-3. With the complete batch ready, the orchestrator executes **exactly in this
-   order**, awaiting each successful exit (the following is a sequence, not a
-   shell chain that ignores failure):
+1. Merge prerequisites in this order: the message/wake/subject seams
+   `a50424f6b`, `57581f12f`, `31ac4c05d` are already on `steward-platform`.
+   Finish the reset-batch edge/provenance/G4 publication and its G5 slice on
+   `reset-batch`. Rebase that branch on the **current** `steward-platform` HEAD,
+   preserving the landed message/wake resources and resolving only this lane's
+   overlaps. Run the namespace fast checks from the worktree after the rebase.
+   Record the rebased branch head and exact result in the landing note.
+2. After review, the orchestrator merges the rebased branch from the main
+   checkout with `git merge --ff-only reset-batch`. If steward-platform advanced,
+   rebase and verify again before merging; do not publish a partial resource/
+   writer/consumer group. Preserve unrelated working-tree edits. Confirm the
+   recorded equal-population reverse-walk evidence is readable before discarding
+   the old store; it is not a post-reset measurement.
+3. With the complete publication merged, the orchestrator executes ONE command
+   and awaits its successful exit:
 
    ```sh
-   bin/seon stop default
-   bin/seon init default --force
-   bin/seon start
-   bin/seon init --dev default
+   bin/seon reset --force
    ```
 
-   This is the owner's selected boundary. Confirm forced init acquired the new
-   publication and installed the new attribute types before proceeding; if it
-   refuses, report the exact operator error, do not improvise a second reset or
-   migrate the old store. Other clusters retain their custody. Build manifests
-   come from publication, never hand-patched serialized rows.
+   This is the reset operator's preflight, shutdown, store destruction, complete
+   publication, refork, start and development adoption sequence. Do not also run
+   the superseded manual stop/init/start/init sequence. A failed operator stage
+   is an explicit failed reset, not permission to migrate rows or improvise a
+   second reset. **RESET NEEDED** for the indexed symbol edge/type changes.
 4. Reach new default with MCP runtime status and explicit root/cluster. Reseed
    through the **canonical Juniper fixture**, keeping provider calls disabled.
    Current existing live wrapper (revalidate after renamed schema consumers
@@ -997,7 +997,7 @@ attributes. Do not run AST deletion while E owns its source files.
 
    ```sh
    bin/test --platform
-   bin/test -- seon.db-test seon.schema-test seon.program-test seon.fn-test
+   bin/test -- seon.db-test seon.owned-value-test seon.schema-test seon.program-test seon.fn-test
    bin/test -- seon.test-reaching-test seon.test.selection-test seon.test.runner-test seon.source-reconciliation-test
    bin/test -- seon.sci.eval-test seon.eval-test seon.rereads-test seon.repl-parity-test
    bin/test -- seon.issue-test seon.issue-deletion-test seon.schedule-test seon.maintenance-schema-test seon.effect-test
@@ -1289,7 +1289,7 @@ refusal. G5 closes the different identity-less entity coverage hole.
 | G4 digest | Writer derives digest from exact analyzed bytes including resolver prelude. Complete definition required; core-file and agent provenance separate arms. Retain publication provenance; no compactable evaluation dependency. | Digest and separate provenance arms present; exact-input regression passed in fast 22. |
 | Nineteen required-many keys | Optional stored memberships: cluster 2, arity 1, adoption 2, maintenance 14. Positive existing construction facts replace false required collections. No marker booleans; activation six already landed separately. | Optionality implemented; the four actual maintenance constructors and empty/partial outcomes passed fast 26. |
 | Maintenance evidence | Parent completion cannot prove a skipped child operation. Validate four actual constructors, empty success, partial/error and absent result using their own scalar evidence. | Canonical constructor proof passed fast 26; no marker booleans added. |
-| G5 components | Discover roots through before AND after; complete traversal under declared bound, not wildcard pull. Test 1,001 children, child-only edit/unlink, multiple parents, cycles and identity-less orphan rows. Owned occurrence links differ from shared shape refs. | New explicit obligations; implementation incomplete. |
+| G5 components | Discover roots through before AND after; complete traversal under declared bound, not wildcard pull. Test 1,001 children, child-only edit/unlink, multiple parents, cycles and identity-less orphan rows. Owned occurrence links differ from shared shape refs. | Implemented with projection-carried config bound and typed owned relations; canonical G5 proof recorded in the final landing note. |
 | Archived agents | Install archived-tx and lifecycle writer; derive archived?/open? for UI. Never retract agents, even coordinated removal of their incoming refs. Archive does not stop graphs or detach ownership. | Co-deletion proof deleted; archive writer and derived open?/archived? passed fast 22. Namespace agent listings omit archived identities; historical direct reads remain available. |
 | Capability handler | Delete declaration capability-fn; existing handler symbol is a final deletion obligation. | In worktree schema and final validator; declared handler reach regression passed fast 22. |
 | Message subject/sender/protocol | §1h in one publication; option A accepted: preserve existing token grammar, remove resolution/inside-about classification; from marks inside; assignment/declination separate facts. | Foreign owner landings a50424f6b, 57581f12f and 31ac4c05d are incorporated by rebase; no direct resource edits here. Cold/live integration proof remains owed. |
@@ -1300,7 +1300,7 @@ refusal. G5 closes the different identity-less entity coverage hole.
 | Optional refs | “Required when present” supplies no deletion guarantee. A surviving outcome/provenance condition or observation value must establish the requirement. Attempts need not have error/failover facts. | Replaces blanket recommendation; audit affected family rows before implementation. |
 | Issue status | Keep authoritative status until positive writers cover imported resolved AND superseded notes. | Already retained. |
 | -at→-tx | Recording/transition time only. Preserve distinct external occurrence time and never infer asynchronous success solely from transaction provenance. | Qualifies earlier rename inventory. |
-| Pulled contracts | Derive selector contracts; unsupported selectors refuse honestly. Limit/recursion are valid dependency features. Complete validation versus bounded presentation with elision are separate obligations. | Existing derivation retained; G5 proof incomplete. |
+| Pulled contracts | Derive selector contracts; unsupported selectors refuse honestly. Limit/recursion are valid dependency features. Complete validation versus bounded presentation with elision are separate obligations. | Existing derivation retained; G5 expands complete EAVT values independently of presentation pull limits. |
 | Shared shapes/GC | No new collector. Measure logical roots first; storage GC cannot retract live unreferenced shape rows or erase temporal history reachable from head. | Existing shared shape model retained; reclamation remains out of scope. |
 
 RESET NEEDED. Work remains exclusively on `reset-batch`; no default adoption or
@@ -1429,7 +1429,7 @@ validate typed owned children, and refuse incomplete/cyclic ownership rather
 than accept id-only placeholders. No budget or validator is silently chosen
 in this checkpoint. The identity-less-entity issue stays open. The query-cost
 boundary is also recorded in
-[its issue](../../../seon/issues/the-carried-query-ratio-fails-after-symbol-edge-retyping.md).
+[its issue](../../../seon/issues/archive/the-carried-query-ratio-fails-after-symbol-edge-retyping.md).
 
 
 Fast 28: **32 tests / 180 assertions / zero failures / zero errors** for the
@@ -1462,3 +1462,35 @@ runner sessions exited; the requested branch/worktree remain. Stop for review
 at this committed implementation checkpoint: G5 and the unchanged query-cost
 assertion remain incomplete, so the full reset group is not green or merge-ready.
 No default lifecycle/adoption action was performed.
+
+
+### Accepted G5 and query-cost decisions — current implementation
+
+The orchestrator accepted recommended option 1 for both decisions under the
+owner's overnight rule. This supersedes the open decision boundaries in the
+historical checkpoint entries above. The query contract is the existing
+absolute **5 ms per query**; the wrapped/raw ratio is measured and reported,
+not asserted as an undeclared 2× contract.
+
+G5 declares `:seon.config.db/validation-node-limit` with the schema config
+population (default 250,000 distinct before/after entity nodes). Every acquired
+projection carries the declaration's default. At the final report authority,
+asserted configuration in `:db-after` supplies the bound; when more than one
+configuration row declares it, all policies apply, so the minimum governs.
+Before config construction, the projection carries the declared bootstrap
+value. No transaction constructor chooses its own budget and no constant or
+marker boolean duplicates the fact.
+
+Owned attributes declare `:seon.db/component-schema`, the schema of the child
+value. This is a type declaration, not a deletion-policy classifier or entity
+kind stamp. The writer discovers owners through indexed component attribute/
+value seeks in before AND after, expands complete EAVT values iteratively,
+then validates roots and typed children. Missing children, identity-less
+unowned rows, multiple ownership, cycles and exhausted traversal budget refuse
+with diagnostic data. Empty retracted children are permitted only when no
+surviving component edge requires them. No wildcard pull, 1,000-member cap,
+id-only placeholder or invented component identity is involved.
+
+Verification is still in progress in the isolated worktree. The final landing
+note must record the green fast tally, measured query ratio and rebased head
+before this batch is considered ready for orchestrator review/merge.

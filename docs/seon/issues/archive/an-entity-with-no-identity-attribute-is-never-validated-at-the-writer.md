@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 created: 2026-09-17
 tags: [issue, write-admission, seon.db, schema, class/absence-as-health]
@@ -26,9 +26,9 @@ side.
 
 The population this leaves unchecked is not hypothetical: the schema-key audit
 counted **29 marked component maps** with no identity attribute
-([audit](../../prds/steward-platform/research/schema-key-audit-2026-09-16.md)),
+([audit](../../../prds/steward-platform/research/schema-key-audit-2026-09-16.md)),
 and the deletion study names the same hole at the same seam
-([section 0](../../prds/steward-platform/research/deletion-semantics-agents-and-turns-2026-09-16.md)).
+([section 0](../../../prds/steward-platform/research/deletion-semantics-agents-and-turns-2026-09-16.md)).
 A component row swept or half-written by a foreign transaction is admitted in
 any shape.
 
@@ -47,6 +47,19 @@ see them is explicitly not the fix.
 ## Evidence
 
 Found while refuting
-[a sparse program upsert is now admitted…](archive/a-sparse-program-upsert-is-now-admitted-where-the-test-expects-a-refusal.md)
+[a sparse program upsert is now admitted…](a-sparse-program-upsert-is-now-admitted-where-the-test-expects-a-refusal.md)
 on 2026-09-17: the create path there is sound precisely because
 `:seon.fn/sym` is an identity attribute. Out of that lane's scope.
+
+
+## Resolution — 2026-09-17
+
+G5 closes this hole in `seon.db/write-owned-values-error`: discover before/after
+owning roots, expand complete EAVT values under the projection-carried config
+node bound, and validate typed child schemas declared by their owned relation.
+Nonempty identity-less unowned rows refuse. No child identity is invented.
+`seon.owned-value-test` proves child-only invalidation, detachment, valid atomic
+reparenting/retraction, missing children, cycles, multiple owners, a malformed
+1,001st child and bound exhaustion, with unchanged basis after refusal.
+The armed fast run passed 89 tests / 948 assertions across G5, database,
+schema and maintenance. The orchestrator still owns cold and reset live proof.

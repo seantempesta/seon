@@ -32,7 +32,7 @@
                          :seon.error/message]
                         ],
                        :contributions
-                       [:set #:seon.db{:component true} :seon.db/ref],
+                       [:set #:seon.db{:component true :seon.db/component-schema :seon.context.contribution/contribution} :seon.db/ref],
                        :id [:string {:min 1, :seon.db/identity true}],
                        :prompt
                        [:string {:min 1,

@@ -34,7 +34,7 @@
            [:my.plan/state {:optional true} :my.plan/state]]
           :steps
           [:set
-           {:seon.db/component true,
+           {:seon.db/component true :seon.db/component-schema :my.plan.item/item,
             :description
             "The root steps of this agent's one plan. The component edge is the ownership fact: retracting the agent or a step retracts everything it owns, and nothing stores a backlink."}
            :seon.db/ref],

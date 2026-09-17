@@ -50,7 +50,7 @@ that produced it.
   an optional one lets it SWEEP silently. Required presence is not a native
   foreign-key constraint: numeric ref values do not prove target existence
   (`reference-code/datahike/src/datahike/db/utils.cljc:109-148`). See the
-  datahike skill for the writer chain and component coverage gap.
+  datahike skill for the writer chain and complete owned-value check.
 - **AN OBSERVATION OF A TOKEN.** The writer saw a NAME — in source text, in
   metadata, in a note, in a report — and a name denotes itself. Whether
   anything by that name exists is a SEPARATE, derivable question. Store the
@@ -106,6 +106,11 @@ after a child-only edit or unlink. Wildcard pull is not a completeness proof:
 it caps each many-valued attribute at 1,000 and recursion can yield id-only
 maps (`reference-code/datahike/src/datahike/pull_api.cljc:238-243`, `:315-351`).
 Obtain the complete value under the declared work bound or refuse.
+Every owned relation declares `:seon.db/component-schema`; the final writer
+validates those typed values as well as the root (`src/seon/db.clj:3071`).
+The config schema declares `:seon.config.db/validation-node-limit`, carried by
+projection acquisition and shared across writers; there is no per-constructor
+escape. A nonempty identity-less row without an owner refuses.
 
 An event fact proves exactly the observation its writer completed. A definition
 analysis digest does not prove test reach ran; a maintenance request's existence
@@ -194,6 +199,6 @@ feeds the since-query diff; changed reads append, writes/effects never
 rerun. Compaction retracts evaluations and regenerates the opening.
 Program identity tombstones are RETIRED by owner ruling 2026-09-16
 (program-facts PRD §1f G1/G3): deletion is `[:db/retractEntity …]` and the
-past is a temporal query. The tombstone machinery
-(`seon.db/write-tombstone-validator`, `src/seon/db.clj:3023`) is still in
-the tree until the edge schema lands; do not build on it.
+past is a temporal query. The edge publication deletes the tombstone validator and external stub minting.
+The final report refuses identity removal or rename when surviving symbol
+observers still name it; repairs are judged in the same final database.

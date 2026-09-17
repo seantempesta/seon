@@ -3,7 +3,7 @@
                 :input-schema :seon.db/ref,
                 :input-refs [:set {:seon.db/index true} :qualified-keyword],
                 :arguments
-                [:vector {:seon.db/component true} :seon.db/ref],
+                [:vector {:seon.db/component true :seon.db/component-schema :seon.fn.argument/row} :seon.db/ref],
                 :argument-count :int,
                 :return-schema :seon.db/ref,
                 :guard-schema :seon.db/ref,

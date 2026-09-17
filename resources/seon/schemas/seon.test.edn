@@ -38,7 +38,7 @@
             [:vector {:seon.db/cardinality :many}
              :seon.test/failure-identity],
             :failure-message :string,
-            :failures [:vector {:seon.db/component true} :seon.db/ref],
+            :failures [:vector {:seon.db/component true :seon.db/component-schema :seon.test.failure/failure} :seon.db/ref],
             :var
             [:fn
              {:error/message "must be a host or SCI Var"

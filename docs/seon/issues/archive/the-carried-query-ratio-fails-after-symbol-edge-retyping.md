@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 created: 2026-09-17
 tags: [issue, reset, query, performance]
@@ -27,3 +27,16 @@ retain the two-times-raw ratio (about 1–3 hours); or retain this failure as a
 landing boundary. The branch is not ready for merge or reset while this is
 unresolved. The canonical test and the reset plan retain the reproducible
 query and exact measurements; no default mutation or cold gate was used.
+
+
+## Resolution — 2026-09-17
+
+The orchestrator accepted recommended option 1 under the owner's overnight
+rule: the declared contract is the existing absolute 5 ms per query; the 2×
+ratio was never a declared contract. The test is now
+`seon.db-test/carried-queries-stay-within-the-five-millisecond-budget`, asserts
+each measured wrapped call against that absolute budget, and reports the ratio.
+G5 fast 7 passed 89 tests / 948 assertions; its ten raw calls took 608,917 ns,
+ten wrapped calls 2,904,626 ns (ratio 4.770150940111707). Correctness and the
+absolute bound passed. This resolves the mistaken relative assertion, not a
+claim that the wrapper is now twice as fast or faster.

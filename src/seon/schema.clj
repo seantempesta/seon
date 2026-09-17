@@ -316,7 +316,12 @@
    because its key is the value it hangs on."
   ([projection] (with-compiled-cache projection {}))
   ([projection compiled-contracts]
-   (assoc projection :seon.schema.projection/compiled
+   (assoc projection
+          :seon.config.db/validation-node-limit
+          (:seon.config/default
+           (form/attr-form-properties
+            (get (:seon.schema.projection/forms projection) :seon.config.db/validation-node-limit)))
+          :seon.schema.projection/compiled
           (atom (into {}
                       (map (fn [[sym compiled]]
                              [[::function-arities sym]

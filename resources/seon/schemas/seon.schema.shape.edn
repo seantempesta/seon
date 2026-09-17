@@ -6,9 +6,9 @@
                     :type :keyword,
                     :properties :string,
                     :children
-                    [:vector {:seon.db/component true} :seon.db/ref],
+                    [:vector {:seon.db/component true :seon.db/component-schema :seon.schema.shape.child/row} :seon.db/ref],
                     :entries
-                    [:vector {:seon.db/component true} :seon.db/ref],
+                    [:vector {:seon.db/component true :seon.db/component-schema :seon.schema.shape.entry/row} :seon.db/ref],
                     :row
                     [:map
                      #:seon.db{:attributes true}

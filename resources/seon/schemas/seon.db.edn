@@ -12,6 +12,7 @@
                 :int :string [:tuple :keyword :seon.db/lookup-ref-value]
                 [:map [:db/id :int]]],
           :component :boolean,
+          :component-schema [:qualified-keyword {:description "Canonical stored child schema for an owned relation; final write validation expands and checks the complete owned value."}],
           ;; One component's OWN entity map, as Datahike's transaction-data
           ;; grammar accepts it in the place of a ref. Nothing declares this
           ;; key at a call site: the registry derives it as the second arm of

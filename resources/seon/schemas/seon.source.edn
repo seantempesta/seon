@@ -25,7 +25,7 @@
               :previous-database :seon.db/database-value,
               :activation :qualified-symbol,
               :activation-closure
-              [:and {:seon.db/component true} :seon.db/ref],
+              [:and {:seon.db/component true :seon.db/component-schema :seon.activation/closure} :seon.db/ref],
               :path [:string {:min 1}],
               :population
               [:map

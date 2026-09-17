@@ -17,7 +17,7 @@
                               :description "Schema key entities the note cites as qualified keywords."} :seon.db/ref]
              :namespaces [:set {:seon.issue/cites [:seon.ns/name]
                                :description "Namespaces the note cites by name, including notes that cite no symbol at all."} :seon.db/ref]
-             :files     [:set {:seon.db/component true
+             :files     [:set {:seon.db/component true :seon.db/component-schema :seon.issue.citation/citation
                               :seon.issue/cites [:seon.fn.file/relative-path]
                               :description "One seon.issue.citation component per cited file and span; the path resolves to the seon.fn.file entity whose stored path ends with it."} :seon.db/ref]
              :runs      [:set {:seon.issue/cites [:seon.test.run/id]

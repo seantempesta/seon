@@ -129,7 +129,7 @@
             :missing-opening-datom [:= {:seon.wake/context-inert true} true],
             :attempts
             [:set
-             {:seon.db/component true,
+             {:seon.db/component true :seon.db/component-schema :seon.ai/attempt,
               :description "The provider attempts owned by this turn." :seon.wake/context-inert true}
              :seon.db/ref],
             :refused [:and {:seon.wake/context-inert true} :seon.turn/rule],

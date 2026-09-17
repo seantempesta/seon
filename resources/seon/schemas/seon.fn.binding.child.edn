@@ -1,7 +1,7 @@
 #:seon.fn.binding.child{:order :int,
                         :role [:enum :element :rest :as],
                         :binding
-                        [:and {:seon.db/component true} :seon.db/ref],
+                        [:and {:seon.db/component true :seon.db/component-schema :seon.fn.binding/row} :seon.db/ref],
                         :row
                         [:map
                          #:seon.db{:attributes true}

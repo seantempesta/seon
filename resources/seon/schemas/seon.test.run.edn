@@ -7,7 +7,7 @@
                 :tested-branch [:and {:description "Branch of the immutable database tested, when different from the result destination. basis-t belongs to this branch; it must not be interpreted as destination history."} :seon.source/branch],
                 :cluster [:and {:description "Explicit authority cluster that owns this run and its results. Required at admission; the optional stored ref sweeps on cluster deletion, leaving authority unavailable."} :seon.db/ref],
                 :change-basis-t [:and {:description "Earlier tested basis used to select changes in the same lineage; absent for first-run."} :seon.db/basis-t],
-                :members [:set {:seon.db/component true :description "Selected memberships admitted atomically before execution; deleting the run cascades to these components."} :seon.db/ref],
+                :members [:set {:seon.db/component true :seon.db/component-schema :seon.test.member/member :description "Selected memberships admitted atomically before execution; deleting the run cascades to these components."} :seon.db/ref],
                 :covered-by [:set {:description "Existing run members accepted instead of duplicate execution at admission. Optional refs sweep with their targets; a reader must report missing coverage as unknown."} :seon.db/ref],
                 :selection-tx [:and {:description "Transaction admitting the complete selection, including zero members. Required at admission; the optional stored ref sweeps if that transaction is removed, leaving selection unavailable."} :seon.db/ref],
                 :policy [:enum {:description "Requested gate policy; an execution scope, never an entity discriminator."} :incremental :named :platform :all :full],

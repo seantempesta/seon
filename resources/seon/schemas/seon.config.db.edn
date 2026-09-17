@@ -1,1 +1,2 @@
-#:seon.config.db{:keep-history? [:boolean #:seon.config{:dial true}]}
+#:seon.config.db{:validation-node-limit [:int {:min 1 :seon.config/dial true :seon.config/default 250000 :description "Maximum distinct before/after entity nodes visited by final owning-value validation in one transaction. Exhaustion refuses the complete transaction; projection acquisition carries this policy. Every asserted branch policy applies, so the smallest configured limit governs all writers."}]
+                 :keep-history? [:boolean #:seon.config{:dial true}]}

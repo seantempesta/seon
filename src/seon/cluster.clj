@@ -2558,7 +2558,7 @@
 (defn- require-committed!
   [result offense]
   (when (:seon.error/kind result)
-    (refused! "The cluster population transaction was refused."
+    (refused! (str "The cluster population transaction was refused: " (:seon.error/message result))
               (assoc offense :seon.boot/result result)))
   result)
 

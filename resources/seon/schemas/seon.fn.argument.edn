@@ -1,7 +1,7 @@
 #:seon.fn.argument{:order :int,
                    :index :int,
                    :rest? :boolean,
-                   :binding [:and {:seon.db/component true} :seon.db/ref],
+                   :binding [:and {:seon.db/component true :seon.db/component-schema :seon.fn.binding/row} :seon.db/ref],
                    :schema :seon.db/ref,
                    :rest-tail-schema :seon.db/ref,
                    :rest-element-schema :seon.db/ref,

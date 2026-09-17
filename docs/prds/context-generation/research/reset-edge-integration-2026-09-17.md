@@ -160,7 +160,7 @@ inventory; later documentation-only evidence is separate):
 - `docs/seon/issues/README.md`
 - `docs/seon/issues/historical-function-values-do-not-identify-an-error-entity.md`
 - `docs/seon/issues/refused-issue-notes-mint-incomplete-identity-rows.md`
-- `docs/seon/issues/the-carried-query-ratio-fails-after-symbol-edge-retyping.md`
+- `docs/seon/issues/archive/the-carried-query-ratio-fails-after-symbol-edge-retyping.md`
 - `docs/seon/issues/two-keyword-value-members-are-mistaken-for-one-lookup-ref.md`
 - `docs/seon/issues/worktree-edit-hook-publication-targets-main-root.md`
 - `resources/seon/schemas/seon.agent.edn`
@@ -283,3 +283,78 @@ performance-contract decision. The old incomplete-create premise was not used
 to weaken admission. After those obligations and orchestrator cold/live proof,
 rebase onto current `steward-platform`, then merge with
 `git merge --ff-only reset-batch`. **RESET NEEDED.**
+
+
+## G5 owning values and accepted query-cost contract
+
+The latest assignment accepts the projection-carried bound and the absolute
+five-millisecond query contract. The historical decision boundary above is
+superseded. The modeling study was read end to end; its G5 row changes the
+implementation from flat identity-selected rows to complete owning values.
+The indexed-symbol edges, rename/retraction detection, exact analyzed-input
+provenance, optional many-values with positive construction facts, archived
+agent fact, handler symbols, message seams, and AST replacement were already
+satisfied by the reviewed edge commits. No message/wake resource is edited here.
+
+The dependency ledger for this slice is Datahike's AVET attribute/value seek
+(`reference-code/datahike/src/datahike/db/search.cljc:148`), EAVT entity seek
+(`:147`), automatic ref indexing (`db/utils.cljc:307`), and final report
+validation (`db/transaction.cljc:1206`). Pull's cycle placeholder
+(`pull_api.cljc:238`) and default many cap (`:315`) are reasons not to use pull
+as a completeness proof. The existing component submission widening
+(`src/seon/schema/form.cljc:117`) remains the transaction grammar; final
+validation additionally checks each expanded owned child's declared schema.
+
+All existing component relation declarations now name their canonical child
+schema through `:seon.db/component-schema`. This adds no child identities.
+`seon.db/write-owned-values-error` walks owner links in before and after,
+including targets of removed links, then expands final EAVT values in iterative
+postorder. It refuses missing children, cycles, multiple ownership and
+nonempty identity-less orphans. A same-transaction unlink plus retraction is
+valid. A valid 1,001-child value is fully visited; damaging the last child's
+required key while retaining another datom refuses atomically.
+
+The work bound is declared in `seon.config.db.edn`, carried at the existing
+projection construction seam, and read from final configuration facts by the
+writer callback. The declaration default supplies bootstrap before config
+exists. Every asserted branch policy applies (minimum if multiple rows), so
+all writers share the bound. The refusal names the dial, limit, visited count
+and entity; a caller cannot supply an escape. Budget exhaustion is not a
+partial success or a presentation elision.
+
+The query regression now asserts every measured query is within 5 ms and
+prints the ratio. G5 fast 4 measured ten raw queries at **621,875 ns** and ten
+wrapped queries at **1,636,960 ns**, ratio **2.632297487437186**; that absolute
+check passed. Its overall run had 57 tests / 420 assertions / zero failures /
+two fixture errors: an anonymous unrelated row and an untyped synthetic
+component relation. Both fixtures are corrected rather than weakening G5.
+The unrelated-write test now changes a real namespace's documentation; the
+pull-evidence test declares its child shape and retracts the owned child.
+
+Verification and rebase are in progress. No default operation, cold gate,
+foreign session operation or main-tree source edit was performed. The exact
+merge/reset instructions live in the reset plan: rebase onto current
+`steward-platform`, review, `git merge --ff-only reset-batch`, then the
+orchestrator runs ONE `bin/seon reset --force`. **RESET NEEDED.**
+
+
+### G5 fast checkpoint before final rebase
+
+Fast 7 passed **89 tests / 948 assertions / zero failures / zero errors** across
+`seon.owned-value-test`, `seon.db-test`, `seon.schema-test` and
+`seon.maintenance-schema-test`. [Exact log](reset-g5-fast-7-2026-09-17.txt).
+Ten raw queries took **608,917 ns**, ten wrapped queries **2,904,626 ns**;
+reported ratio **4.770150940111707**, all measured calls within the 5 ms contract.
+The schema sweep now separates generated reference grammar from pulls of actual
+canonical rows: 31 populated reference attributes out of 157 installed ref
+attributes at this snapshot. It no longer misrepresents a namespace entity as
+every unrelated component shape. The G5 declaration regression derives its
+inventory from all canonical component properties, not a maintained roster.
+
+Fast 6's larger run had 189 tests / 1,576 assertions / 28 failures / zero errors;
+all 28 were that invalid schema fixture. Function, program, maintenance and
+reset-edge checks passed. The corrected schema fixture and final ownership
+checks are green in fast 7. Both the identity-less entity issue and mistaken
+query-ratio issue are resolved and archived in this slice. The two subsequent
+edits only clarify error/config description text; final rebased verification
+will include them. Cold/platform/live proof remains the orchestrator's boundary.

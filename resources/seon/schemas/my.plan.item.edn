@@ -55,7 +55,7 @@
                  "The zero-based order of this step among the siblings owned by one component parent. Cardinality-many is a set, so authored order is a stored fact."}],
                :steps
                [:set
-                {:seon.db/component true,
+                {:seon.db/component true :seon.db/component-schema :my.plan.item/item,
                  :description
                  "Nested steps owned by this step. Retracting this step retracts them, and the reverse component edge derives each child's parent."}
                 :seon.db/ref],

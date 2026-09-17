@@ -1,7 +1,7 @@
 #:seon.ns{:context-relevant? [:boolean {:description "This namespace declares agent-facing context relevance; it never controls callability."}],
-          :aliases [:set #:seon.db{:component true} :seon.db/ref],
+          :aliases [:set #:seon.db{:component true :seon.db/component-schema :seon.ns.alias/binding} :seon.db/ref],
           :doc [:string #:seon.search{:index :text}],
-          :imports [:set #:seon.db{:component true} :seon.db/ref],
+          :imports [:set #:seon.db{:component true :seon.db/component-schema :seon.ns.import/binding} :seon.db/ref],
           :name
           [:symbol
            {:seon.db/identity true, :seon.search/index :symbol,
@@ -28,7 +28,7 @@
             {:optional true
              :seon.program/written-by seon.cluster.agent/steward-call}
             :seon.ns/steward]],
-          :refers [:set #:seon.db{:component true} :seon.db/ref],
+          :refers [:set #:seon.db{:component true :seon.db/component-schema :seon.ns.refer/binding} :seon.db/ref],
           :requires [:set {:seon.db/index true} :symbol],
           :source [:string {:min 1}],
           :steward

@@ -3012,7 +3012,7 @@
 
 (defn- write-entity-value
   "Read a resulting entity as logical values without expanding reference graphs."
-  [database projection attribute-plans entity-id]
+  [database projection attribute-plans entity-id & [visit-child]]
   (reduce
    (fn [row datom]
      (let [attribute (:a datom)
@@ -3020,6 +3020,8 @@
                     (write-attribute-plan projection attribute
                                           (db.utils/multival? database attribute)))
            value ((::decode plan) (:v datom))]
+       (when (and visit-child (:db/isComponent (get (dbi/-schema database) attribute)))
+         (visit-child value))
        (if (db.utils/multival? database attribute)
          (update row attribute (fnil conj #{}) value)
          (assoc row attribute value))))
@@ -3033,11 +3035,11 @@
 
 (defn- write-entity-error
   "Validate the whole resulting entity, including identities present before a retraction."
-  [database projection attribute-plans entity-id identities row]
+  [database projection attribute-plans entity-id identities row & [owned-schemas]]
   (when (seq row)
     (let [forms (:seon.schema.projection/forms projection)
           schemas (write-entity-schemas projection)
-          schema-keys (distinct (mapcat #(get schemas %) (keys identities)))
+          schema-keys (distinct (concat owned-schemas (mapcat #(get schemas %) (keys identities))))
           normalized (reduce-kv (fn [result attribute value]
                                   (assoc result attribute
                                          ;; Final EAVT values are already resolved. A many-value
@@ -3068,6 +3070,143 @@
                  (assoc-in [:seon.error/data :seon.error/diagnostic-evidence]
                            {::entity identities ::entity-value row ::path (into [entity-id] in)})))))
        schema-keys))))
+
+(defn- write-owned-values-error
+  "Validate complete owning values, reached through both sides of this report.
+   EAVT supplies every child; AVET discovers owners without pull's 1,000 cap."
+  [projection report attribute-plans identity-attrs]
+  (let [before (:db-before report)
+        after (:db-after report)
+        limit (:seon.config.db/validation-node-limit projection)
+        components (into #{} (keep (fn [[a properties]]
+                                     (when (:db/isComponent properties) a)))
+                         (merge (dbi/-schema before) (dbi/-schema after)))
+        targets (into {} (map (fn [a]
+                               [a (:seon.db/component-schema
+                                   (schema.form/attr-form-properties
+                                    (get (:seon.schema.projection/forms projection) a)))]))
+                      components)
+        seen (volatile! #{})
+        rows (volatile! {})
+        owners (volatile! {})
+        fail! (fn [cause data]
+                (throw (ex-info "Owned entity validation refused."
+                                {::owned-refusal
+                                 (assoc
+                                  (error-value
+                                   ::invalid-write
+                                   (str "Complete component validation refused: " (name cause) "; bound "
+                                        :seon.config.db/validation-node-limit "=" limit "; " (pr-str data) ".")
+                                   (merge {::diagnostic-cause cause
+                                           ::validation-bound :seon.config.db/validation-node-limit
+                                           ::validation-limit limit}
+                                          data))
+                                  ::transaction-refused true)})))
+        charge! (fn [phase entity-id]
+                  (let [cache-key [phase entity-id]]
+                    (when-not (@seen cache-key)
+                      (when (>= (count @seen) limit)
+                        (fail! ::validation-node-limit {::entity entity-id ::visited (count @seen)}))
+                      (vswap! seen conj cache-key))))
+        row (fn [phase database entity-id]
+              (let [cache-key [phase entity-id]]
+                (charge! phase entity-id)
+                (if-let [entry (find @rows cache-key)]
+                  (val entry)
+                  (let [value (write-entity-value database projection attribute-plans entity-id
+                                                  #(charge! phase %))]
+                    (vswap! rows assoc cache-key value)
+                    value))))
+        owners-of (fn [phase database entity-id]
+                  (let [cache-key [phase entity-id]]
+                    (charge! phase entity-id)
+                    (if-let [entry (find @owners cache-key)]
+                      (val entry)
+                      (let [value (into [] (mapcat #(map (fn [datom]
+                                                         (charge! phase (:e datom))
+                                                         [(:e datom) (:a datom)])
+                                                        (d/datoms database :avet % entity-id)))
+                                        (filter #(get (dbi/-schema database) %) components))]
+                        (vswap! owners assoc cache-key value)
+                        value))))
+        owning-ancestors (fn [phase database seeds]
+                    (loop [pending (vec seeds) visited #{}]
+                      (if-let [entity-id (peek pending)]
+                        (if (visited entity-id)
+                          (recur (pop pending) visited)
+                          (let [edges (owners-of phase database entity-id)]
+                            (when (and (= phase :after) (> (count edges) 1))
+                              (fail! ::multiple-component-owners {::entity entity-id ::owners edges}))
+                            (recur (into (pop pending) (map first edges)) (conj visited entity-id))))
+                        visited)))
+        report-datoms (concat (:datahike/attempted-tx-data report) (:tx-data report))
+        seeds (into #{} (comp (mapcat #(cond-> [(:e %)] (components (:a %)) (conj (:v %))))
+                              (filter #(< (long %) const/tx0))) report-datoms)]
+    (try
+      (when-not (pos-int? limit)
+        (fail! ::missing-validation-bound {}))
+      (let [prior (owning-ancestors :before before seeds)
+            current (owning-ancestors :after after (into seeds prior))
+            roots (filterv #(empty? (owners-of :after after %)) current)
+            expanded (volatile! {})
+            visited (volatile! #{})]
+        ;; Iterative postorder avoids using JVM stack depth as the graph bound.
+        (doseq [root roots]
+          (loop [pending [[root false]] active #{}]
+            (when-let [[entity-id exit?] (peek pending)]
+              (let [value (row :after after entity-id)
+                    child-edges (into []
+                                      (mapcat (fn [[a v]]
+                                                (when (components a)
+                                                  (map #(vector a %) (if (db.utils/multival? after a) v [v])))))
+                                      value)]
+                (cond
+                  exit?
+                  (let [whole (reduce (fn [result [a child]]
+                                        (if (db.utils/multival? after a)
+                                          (update result a (fnil conj []) (get @expanded child))
+                                          (assoc result a (get @expanded child))))
+                                      (apply dissoc value components) child-edges)]
+                    (vswap! expanded assoc entity-id whole)
+                    (vswap! visited conj entity-id)
+                    (recur (pop pending) (disj active entity-id)))
+
+                  (@visited entity-id) (recur (pop pending) active)
+                  (active entity-id) (fail! ::component-cycle {::entity entity-id ::root root})
+                  :else
+                  (do
+                    (doseq [[a child] child-edges]
+                      (when-not (get (:seon.schema.projection/forms projection) (get targets a))
+                        (fail! ::missing-component-schema {::attribute a ::entity entity-id}))
+                      (when (> (count (owners-of :after after child)) 1)
+                        (fail! ::multiple-component-owners
+                               {::entity child ::owners (owners-of :after after child)}))
+                      (when (empty? (row :after after child))
+                        (fail! ::missing-component {::entity child ::owner entity-id ::attribute a})))
+                    (recur (into (conj (pop pending) [entity-id true])
+                                 (map (fn [[_ child]] [child false]) child-edges))
+                           (conj active entity-id))))))))
+        (when-let [entity-id (first (remove @visited current))]
+          (fail! ::component-cycle {::entity entity-id}))
+        (or
+         (some (fn [root]
+                 (let [value (get @expanded root)
+                       identities (merge (select-keys (row :before before root) identity-attrs)
+                                         (select-keys value identity-attrs))]
+                   (when (and (seq value) (empty? identities))
+                     (fail! ::unowned-entity {::entity root ::entity-value value}))
+                   (write-entity-error after projection attribute-plans root identities value)))
+               roots)
+         (some (fn [[entity-id value]]
+                 (when-let [[parent attribute] (first (owners-of :after after entity-id))]
+                   (let [target (get targets attribute)
+                         identities (select-keys value identity-attrs)]
+                     (when-let [refusal (write-entity-error after projection attribute-plans entity-id identities value [target])]
+                       (update refusal :seon.error/data assoc
+                               ::owner parent ::attribute attribute ::component-schema target)))))
+               @expanded)))
+      (catch clojure.lang.ExceptionInfo exception
+        (if-let [refusal (::owned-refusal (ex-data exception))] refusal (throw exception))))))
 
 (defn- declared-arity-bounds
   [query-fn database]
@@ -3340,16 +3479,7 @@
            attempted)
      (write-agent-retraction-error (:tx-data report))
      (write-deletion-error before database affected identity-attrs)
-     (some (fn [entity-id]
-             (let [row (write-entity-value database projection attribute-plans entity-id)
-                   prior-identities (into {}
-                                          (keep (fn [datom]
-                                                  (when (identity-attrs (:a datom))
-                                                    [(:a datom) (:v datom)])))
-                                          (d/datoms before :eavt entity-id))
-                   identities (merge prior-identities (select-keys row identity-attrs))]
-               (write-entity-error database projection attribute-plans entity-id identities row)))
-           affected)
+     (write-owned-values-error projection report attribute-plans identity-attrs)
      (when (some (comp #{:seon.schema/form :seon.schema/key :seon.fn/sym} :a)
                  (concat attempted (:tx-data report)))
        (write-render-target-error database))
@@ -3379,7 +3509,14 @@
    projection ::write-report-validator
    #(fn [report]
       (schema/call-with-projection projection
-        (fn [] (write-report-error projection report))))))
+        (fn []
+          (let [attribute :seon.config.db/validation-node-limit
+                configured (when (get (dbi/-schema (:db-after report)) attribute)
+                             (map :v (d/datoms (:db-after report) :aevt attribute)))
+                ;; Every asserted policy on this branch applies to every writer.
+                ;; Before config construction, the projection carries the declared default.
+                limit (if (seq configured) (apply min configured) (get projection attribute))]
+            (write-report-error (assoc projection attribute limit) report)))))))
 
 (defn- retention-rules [projection]
   (schema/projection-cache-value

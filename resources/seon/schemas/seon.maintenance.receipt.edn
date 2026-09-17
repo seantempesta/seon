@@ -7,13 +7,13 @@
                            :handler
                            [:and #:seon.db{:index true} :seon.db/ref],
                            :request
-                           [:and #:seon.db{:component true} :seon.db/ref],
+                           [:and #:seon.db{:component true :seon.db/component-schema :seon.maintenance.request/entity} :seon.db/ref],
                            :started-at
                            [:and #:seon.db{:index true} :inst],
                            :completed-at
                            [:and #:seon.db{:index true} :inst],
                            :result
-                           [:and #:seon.db{:component true} :seon.db/ref],
+                           [:and #:seon.db{:component true :seon.db/component-schema :seon.maintenance.result/entity} :seon.db/ref],
                            :error
                            [:and #:seon.db{:index true} :seon.db/ref],
                            :interrupted-at

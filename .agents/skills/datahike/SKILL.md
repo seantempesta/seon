@@ -75,18 +75,21 @@ So:
 - the swept ref is `{:optional true}` → the row still validates and **the
   deletion sweeps silently**.
 
-Two holes in that dial, both real. `write-entity-error` skips an entity
-retracted to nothing (`(when (seq row))`, `:3055`) — correct, and it is why
-coordinated deletion works. And it selects schemas from the row's **identity
-attributes from before and after** (`:3058`, `:3254-3265`), so a component
-with no such identity selects no whole-entity schema. Attribute validation
-still occurs; it does not establish that component's required-key obligations.
+`write-entity-error` skips an entity retracted to nothing — coordinated deletion
+is valid. Final owning-value validation (`src/seon/db.clj:3071`) discovers roots
+from before and after, expands complete EAVT children, and validates each owned
+child through its relation's `:seon.db/component-schema`. Identity-less unowned
+rows, missing children, cycles, multiple owners and exhausted
+`:seon.config.db/validation-node-limit` refuse. No component identity is invented.
+The projection carries the declared bootstrap bound (`src/seon/schema.clj:317`);
+the final callback reads asserted configuration from the report's final database
+(`src/seon/db.clj:3500`).
 
 State the lifecycle consequence in the attribute's docstring: **cascade**
 (component), **sweep** (optional ref), **refuse** (required ref in a validated
 surviving row), or **value** (the observation outlives the named entity).
-Required presence does not prove target existence, and the component coverage
-gap above still matters. A settlement that moves an edge is application logic,
+Required presence alone does not prove a peer target exists. Owned children
+have the complete-value check above. A settlement that moves an edge is application logic,
 not a fifth native deletion mode. Do not copy the old message inbox move:
 [program-facts PRD §1h](../../../docs/prds/steward-platform/plan/program-facts-are-the-runtime-prd-2026-09-17.md)
 restores listened `:seon.message/to` and a handling-turn claim.
