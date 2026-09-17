@@ -1,4 +1,16 @@
-#:seon.sci.eval{:evaluation
+#:seon.sci.eval{:private-state
+                [:enum {:description "In-process regeneration preserves private Var roots, atoms, result objects and captured values by identity. A fresh agent or JVM restart has no private layer to restore; only public program facts are loaded."}
+                 :preserved-in-memory :absent],
+                :load-state
+                [:enum {:description "Current core admission copies the JVM root; agent admission interprets source. An unevaluable agent source uses the loaded JVM root only with jvm-fallback and its diagnostic. Unavailable means no loaded root could be installed."}
+                 :jvm :interpreted :jvm-fallback :unavailable],
+                :load-result
+                [:map
+                 [:seon.sci.eval/load-state :seon.sci.eval/load-state]
+                 [:seon.fn/sym :seon.fn/sym]
+                 [:seon.error/message {:optional true} :seon.error/message]],
+                :load-results [:vector :seon.sci.eval/load-result],
+                :evaluation
                 [:map
                  [:seon.test.accretion/candidate-ctx {:optional true}
                   :seon.test.accretion/candidate-ctx]

@@ -39,6 +39,15 @@ busy the machine is, which is exactly the property a gate must not have.
 - The same namespace's other launcher fixtures, which drive ONE child gate,
   complete well inside the bound.
 
+## It also conceals every test behind it
+
+The test is declared before `gate-completions-travel-as-a-file-not-as-code` and
+`result-recording-is-total-under-concurrent-test-retraction`. In the 2026-09-17
+fast run the watchdog killed the JVM here after 32 of the namespace's 46 tests,
+so those two reds were never reached and were first seen in the cold gate hours
+later. Raising `severity` is justified on that ground alone: a silent block is
+not one failing test, it is an unknown number of unrun ones.
+
 ## Direction
 
 Two options, neither taken here because both are outside the gate-preparation

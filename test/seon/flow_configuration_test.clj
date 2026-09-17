@@ -1,6 +1,4 @@
-(ns ^{:seon.test/platform
-       "Moving part: production Flow graph construction and lifecycle."}
-    seon.flow-configuration-test
+(ns seon.flow-configuration-test
   (:require [clojure.core.async :as async]
             [seon.config :as config]
             [clojure.string :as str]
@@ -34,7 +32,9 @@
 (def ^:private test-environment
   (delay (test-support/environment "seon.flow-configuration-test")))
 
-(deftest proc-construction-refuses-the-mixed-scaling-cliff
+(deftest ^{:seon.test/platform
+           "Moving part: production Flow construction refuses the mixed workload."}
+  proc-construction-refuses-the-mixed-scaling-cliff
   ;; THE MIXED WORKLOAD IS UNCONSTRUCTABLE, and under the contracts every
   ;; cluster arms (and the gate now arms) the DECLARED contract is what says
   ;; so first — a typed value naming the function, the member and the
@@ -50,6 +50,8 @@
     (is (str/includes? (:seon.error/message refusal)
                        "either :io or :compute"))))
 
+;; Graph definitions reference schedule execution and its root cleanup owner.
+;; This census belongs to the ordinary tier under the same reach rule.
 (deftest every-built-graph-proc-declares-a-specific-workload
   ;; the fault graph's io-exec wraps its work in the schema projection,
   ;; so this census hands one over explicitly, like the production caller

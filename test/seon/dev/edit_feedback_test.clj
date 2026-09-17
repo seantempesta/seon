@@ -493,6 +493,13 @@
               (str "*** Begin Patch\n*** Update File: " (relative "nowhere.clj")
                    "\n@@\n-(def a 1)\n+(def a 2)\n*** End Patch")
               (relative "nowhere.clj"))
+             :seon.probe/out-of-order
+             (reconstruct-patched-file
+              (str "*** Begin Patch\n*** Update File: " (relative "updated.clj")
+                   "\n@@ -2,1 +2,1 @@\n-(def value 1)\n+(def value 2)\n"
+                   "@@ -1,1 +1,1 @@\n-(ns updated)\n+(ns renamed)\n"
+                   "*** End Patch")
+              (relative "updated.clj"))
              :seon.probe/unapplicable
              (reconstruct-patched-file
               (str "*** Begin Patch\n*** Update File: " (relative "updated.clj")
@@ -535,6 +542,11 @@
         (testing "a Delete File header needs no prospective content"
           (is (= {:seon.hook.reconstruction/status :deleted}
                  (:seon.probe/deleted observed))))
+        (testing "hunks in any order apply, because the tool accepts any order"
+          (is (= {:seon.hook.reconstruction/status :available
+                  :seon.hook.reconstruction/source "(ns renamed)\n(def value 2)\n"}
+                 (:seon.probe/out-of-order observed))
+              "Refusing an out-of-order hunk is a veto apply_patch would not issue."))
         (testing "an unbuildable prospective file is named, never passed"
           (doseq [key [:seon.probe/unnamed :seon.probe/absent
                        :seon.probe/unapplicable]]
@@ -693,6 +705,37 @@
           (let [response (event command)]
             (is (= "block" (:decision response)))
             (is (str/includes? (:reason response) "[error/syntax]")))))
+      (testing "a payload-named edit still reports an unnamed shell write"
+        ;; a codex lane fires this hook for `apply_patch` and for nothing
+        ;; else, so its next patch is the first moment an earlier shell
+        ;; write of its own can reach it at all
+        (spit source "(ns probe)\n(def value 1)\n")
+        (is (true? (:continue (event "repair"))))
+        (let [other (io/file directory "sibling.clj")
+              command (str "printf '(ns probe)\\n(def value (inc 1)\\n' > "
+                           (.getPath source))]
+          (spit other "(ns sibling)\n")
+          (is (zero? (::exit (shell command))))
+          (let [result
+                (run-process
+                 {::command [(str (io/file repo-root "bin/seon-hook"))]
+                  ::directory repo-root
+                  ::environment {"SEON_HOOK_CONFIG" (str config)
+                                 "SEON_HOOK_STATE_DIR" (str state)}
+                  ::input
+                  (json/generate-string
+                   {:hook_event_name "PostToolUse"
+                    :tool_name "apply_patch"
+                    :session_id "shell-write-regression"
+                    :tool_input {:command (str "*** Begin Patch\n*** Add File: "
+                                               root "/sibling.clj\n+(ns sibling)\n"
+                                               "*** End Patch")}})})
+                response (json/parse-string (str/trim (::stdout result)) true)]
+            (is (zero? (::exit result)) (::stderr result))
+            (is (= "block" (:decision response))
+                "The patch was fine; the shell write it never named was not.")
+            (is (str/includes? (:reason response) "probe.clj")))))
+
       (testing "a command that touches no Clojure file costs only the scan"
         (spit source "(ns probe)\n(def value 1)\n")
         (is (true? (:continue (event "repair"))))

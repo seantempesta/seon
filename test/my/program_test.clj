@@ -138,9 +138,10 @@
            directory (:seon.sci.admit/value (run "(dir my.program)"))
            documentation (:seon.sci.admit/value (run "(doc my.program/breaks)"))
            read-evaluation (run "(my.program/breaks {:seon.program/subject 'seon.turn/open?})")]
-       (is (= '#{my.program/breaks my.program/callers my.program/tests-reaching
-                 my.program/reads-key my.program/history}
-              (set (map :sym (:functions directory)))))
+       (is (every? (set (map :sym (:functions directory)))
+                   '#{my.program/breaks my.program/callers my.program/tests-reaching
+                      my.program/reads-key my.program/history my.program/overrides
+                      my.program/ns-unmap! my.program/remove-ns! my.program/ns-unalias!}))
        (is (every? #(and (:in %) (:out %) (:doc %)) (:functions directory)))
        (is (:example documentation))
        (is (not (:seon.cluster.eval/error read-evaluation)) (pr-str read-evaluation))

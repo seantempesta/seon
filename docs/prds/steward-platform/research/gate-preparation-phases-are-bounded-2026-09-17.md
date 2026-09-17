@@ -200,3 +200,55 @@ refuses the test row for a missing `:seon.schema.admission/source`, which is
 the concurrently landing required-key work, not a preparation-phase fact.
 `src/seon/test/runner.clj` and `test/seon/test/runner_test.clj` were not
 touched.
+
+
+## Addendum, 2026-09-17: cold gate batch 115 attribution
+
+Batch 115 B (`tmp/orchestrator/gate-results/batch-115.log`, retained root
+`tmp/test-runs/run.Z4ufFh`, HEAD `defd915cd`) named two reds in
+`seon.test-runner-test` as possibly new since `cde8b17fa`. Neither is.
+
+**`gate-completions-travel-as-a-file-not-as-code`** — `(= 2000 (count
+(commit-results! …)))` returned `9`, immediately after
+`:datahike/write-rejected {:kind :transaction/validation-rejected}`. `9` is the
+key count of the `:seon.error/value` the refusal returns in place of the
+recorded facts. Two sibling tests in the same namespace fail on the identical
+refusal, quoting the missing key verbatim:
+`result-recording-is-total-under-concurrent-test-retraction` (lines 900, 902,
+904) and `the-agent-fork-callable-returns-the-committed-projection` (1037,
+1052). The root is that `seon.test.runner/record-tx` creates a test row with
+no `:seon.schema.admission/source` while the final-report validator now
+rebuilds the merged entity from the resulting datoms and requires it. Filed as
+[the recorder creates a test row the write-grammar validator refuses](../../../seon/issues/the-recorder-creates-a-test-row-the-write-grammar-validator-refuses.md);
+`src/seon/test/runner.clj` belongs to the write-admission lane and is untouched
+here.
+
+Attribution against this slice, measured rather than asserted:
+
+- The key has been REQUIRED on the stored test entity since `9648aed33`
+  (2026-08-12); it is required at `cde8b17fa^` and at HEAD.
+- The validator commits that made it bite — `35c5d2fa8`
+  (2026-09-16T14:10:17-06:00) and `b1508dc8a` (14:42:13) — are both ancestors
+  of `cde8b17fa` (19:41:16), landing five hours earlier.
+- `cde8b17fa`'s only changes to `test/seon/test_runner_test.clj` are one
+  independent `deftest` and two `cp` lines inside fixture checkout shell
+  scripts. None of the three failing tests starts a process or loads `bin/test`
+  or `bin/_test-slot`.
+
+**`concurrent-bin-test-invocations-both-reach-their-tallies`** — confirmed to
+be the filed silence-bound class and nothing else. The failing assertion is
+`(every? true? completed)` → `[false false]`
+(`test/seon/test_runner_test.clj:1826`): neither child gate finished inside the
+test's own `event-backstop-seconds`. Both children's captured output ends at
+`bin/test: SOURCE program rows started` — mid published-base, with
+`PHASE snapshot`, `PHASE test-slot`, `PHASE dependency-cache-and-classpath` and
+`PHASE worker-checkouts` all recorded normally, **no** `EXCEEDED ITS BOUND` and
+**no** `PHASE … FAILED`. No preparation bound fired; the children were simply
+still publishing.
+
+That test also HID the other two reds from the fast loop: it is declared before
+them, and in the 2026-09-17 fast run it consumed the whole 300 s suite silence
+bound and the coordinator killed the JVM after 32 of 46 tests, so
+`gate-completions-travel-as-a-file-not-as-code` was never reached. A test that
+blocks silently does not only fail — it conceals every test behind it, which is
+the reason its issue is worth fixing rather than tolerating.

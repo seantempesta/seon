@@ -6,11 +6,13 @@ description: "Test Seon with the canonical Datahike fixture, real SCI evaluation
 # Test the running contract
 
 The binding gate is [turn PRD §10](../../../docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md).
-A lane gates its owned changes with
-`bin/test --paths <owned files> -- <subject namespaces>` and runs
-`bin/test --paths <owned files> --platform` before reporting. This is the
-owner's 2026-09-08 paths-only refinement; foreign working-tree edits are not
-inputs to that snapshot. Never run `--all` or `--full` in a lane.
+A lane iterates with `bin/test-fast --paths <owned files> -- <subject namespaces>`.
+The orchestrator owns `bin/test --paths <owned files> -- <subject namespaces>`
+and `--platform`; report that cold proof separately from the fast tally.
+`bin/test` refuses cold gates carrying the launcher's `SEON_CODEX_LANE`
+identity; its `--fast` snapshot path stays admitted (`bin/test`, immediately
+after argument parsing). Foreign working-tree edits are not inputs to a
+selected snapshot. Never run cold gates, `--all`, or `--full` in a lane.
 
 ## Select and read the real gate
 

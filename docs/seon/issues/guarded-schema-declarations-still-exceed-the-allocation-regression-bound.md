@@ -32,3 +32,15 @@ Decompose the existing `seon.sci.eval/evaluate` path with its carried
 projection and ThreadMXBean, then remove the expensive stage at its owner.
 Keep the existing real-SCI allocation regression and its wanted behavior;
 do not raise the bound to hide this observation.
+
+## S3 query-seam observation — 2026-09-16
+
+The HEAD-plus-owned-paths fast run for the S3 override query at `e481946f6`
+re-observed the same assertion: **221,730,944 bytes**, limit **67,108,864**.
+The run snapshot contained only `src/seon/program.cljc` and
+`test/seon/sci/eval_test.clj`; its namespace sequence was `seon.sci.eval-test`,
+`seon.cluster.agent-test`, `seon.cluster.turn-test`, and
+`seon.sci.documentation-test`. This is another measurement, not a new
+attribution. The allocation assertion was left unchanged.
+See [the S3 note](../../prds/steward-platform/research/acquisition-by-provenance-s3-2026-09-16.md)
+for the complete verification boundary.

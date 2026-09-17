@@ -236,6 +236,11 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+if [ -n "${SEON_CODEX_LANE:-}" ] && [ "$fast_iteration" -ne 1 ]; then
+  printf 'bin/test: refusing gate from Codex lane %s; use bin/test-fast --paths <your files> -- <namespaces>; the orchestrator owns the cold gate.\n' "$SEON_CODEX_LANE" >&2
+  exit 64
+fi
+
 confirm_symbols=
 if [ "$confirm" -eq 1 ]; then
   if [ ${#namespaces[@]} -eq 0 ] || [ -n "$requested_mode" ] || [ "$fast_iteration" -eq 1 ]; then

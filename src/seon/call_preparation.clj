@@ -100,7 +100,7 @@
   live call site until this call landed."
   {:malli/schema [:=> [:cat :map] :map]}
   [ctx]
-  (assoc ctx carrier (state)))
+  (assoc ctx carrier (state) :my.program/base-ctx ctx))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Errors as values
@@ -1223,7 +1223,8 @@
             (if-not (contains? (:seon.call-preparation/prepared-symbols current)
                                sym)
               arguments
-              (let [prepared (prepare current environment
+              (let [environment (env/scope environment {:my.program/executing-ctx ctx})
+                    prepared (prepare current environment
                                       (plan call-state database current sym)
                                       (vec arguments))]
                 (if (error-value? prepared)

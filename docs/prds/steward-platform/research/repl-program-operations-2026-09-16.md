@@ -276,3 +276,74 @@ Owned paths for this checkpoint: `src/my/program.clj`, `src/seon/issue.clj`,
 the refactoring specification's §10 correction, this landing note, and the
 three linked issue notes for prospective issue rendering, test-fast census
 classification and collection-bound attribute decoding.
+
+## Continuation: guarded mutations and override query
+
+The owner accepted `a2e16338b` for the gate and authorized items 3–4 and
+`overrides`. Default remains PID 33583; descriptor status and MCP answered.
+MCP observed one error signature and 13 errored evaluations, not a clean
+cluster claim. No restart or reset was issued.
+
+The ordinary supplied-default mechanism now carries the executing context
+as a turn-layer environment member. `call-preparation/install` retains the
+cluster context it is installing; SCI forks inherit that reference, while
+`fork-cluster-ctx` installs fresh custody for a different connection. The
+new supplier returns that base, the executing context, and the environment's
+connection. The mutation API uses a supplied context plus named positional
+arguments, so the owner's exact `(my.program/ns-unmap! 'seon.turn/open?)`
+form has one unambiguous omitted argument. No ambient JVM lookup or new
+writer is introduced.
+
+### Exact held hook hunk
+
+`src/seon/sci/eval.clj` is held by the acquisition lane. Replace the existing
+hook value at `build-base-ctx` with these exact bytes (no require cycle):
+
+```diff
+-         :call-preparation-hook call-preparation/hook
++         :call-preparation-hook
++         (fn [ctx callee arguments]
++           (or ((requiring-resolve 'my.program/native-call-refusal)
++                ctx callee arguments)
++               (call-preparation/hook ctx callee arguments)))
+```
+
+`my.program-mutation-test/native-program-mutations-refuse-at-the-installed-hook`
+is deliberately red until this hunk lands, with a one-line comment naming
+this note. The guard returns `reduced` diagnostics naming the native member
+and the replacement operation. Private `intern` and `alter-var-root`
+bindings remain permitted when no program identity exists, per §5.5.
+The native call performed by our writer after acceptance evaluates only
+its constructed literal form with preparation disabled; agent-authored
+forms do not enter that path.
+
+The writer calls `breaks` before submission and again inside `:db.fn/call`
+against the authority's own database value. A rejection changes neither
+context. Until the integrator's seam-B backstop lands, this is protection
+from `breaks` alone; success and refusal both retain the analyzer's explicit
+unknowns for dispatch, apply and macro callers. Plans remain computed.
+
+Namespace removal has one additional held boundary: `turn.clj`'s private
+schema-deletion arm also reconciles Datahike attributes. Until that existing
+calculation can be shared, a namespace owning schema declarations returns
+an explicit refusal; deleting just those declaration entities would be
+incorrect. This is recorded in
+[program-namespace-retraction-needs-shared-schema-writer.md](../../../seon/issues/program-namespace-retraction-needs-shared-schema-writer.md).
+Function/test-only namespace removal remains independently implementable.
+
+Pending vocabulary rows, to apply when the acquisition lane releases
+`AGENTS.md` (its current edits are preserved):
+
+| Term | Meaning and grounding | Legacy spellings |
+|---|---|---|
+| `my.program/ns-unmap!` | Retract a function or test through `seon.db/transact!`, then call SCI's native `ns-unmap` in the executing fork and cluster base. `breaks` runs before submission and inside the writer transaction function (`src/my/program.clj`). | delete!, remove-fn |
+| `my.program/remove-ns!` | Retract a namespace with its owned declarations in one transaction, excluding references internal to that affected set; then remove its SCI namespace (`src/my/program.clj`; `sci/impl/namespaces.cljc`, `sci-remove-ns`). Schema-owning namespaces retain the explicitly recorded writer boundary. | drop-ns |
+| `my.program/ns-unalias!` | Retract the namespace alias component before SCI's native `ns-unalias` in fork and base (`src/my/program.clj`; `resources/seon/schemas/seon.ns.alias.edn`). | drop-alias |
+| `my.program/overrides` | Thin read over the declaration owner's current `:agent` admission and indexed src provenance query (`src/seon/program.cljc`, `overrides`). | override flag |
+| `my.program/supplied-context`; `my.program/context` | The existing supplied-default mechanism hands a mutation its executing SCI context, cluster base and explicit connection; `call-preparation/install` retains the base and the hook carries the executing context (`src/seon/call_preparation.clj`). | ambient context |
+| `my.program/native-call-refusal` | The SCI call-preparation hook's typed `reduced` refusal for native mutations that bypass program facts, naming our replacement operation (`src/my/program.clj`; `reference-code/sci/src/sci/impl/analyzer.cljc:1793`). | deny list |
+
+The environment schema and its loaded consumer publish together:
+`env/scope`'s delayed member projection must be rebuilt when the executing
+context member is added. Its docstring is updated in the same change, so
+adoption reloads that consumer as well as the new schema.

@@ -1,5 +1,5 @@
 (ns seon.shell.jvm-test
-  (:require [clojure.java.io :as io]
+  (:require [seon.schema] [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [my.shell :as shell]
@@ -373,7 +373,7 @@
                            ;; evaluation's deadline can end this child
                            {:seon.config.shell/time-limit-ms 600000
                             :seon.config.shell/termination-grace-ms 100})
-                armed (kernel/arm (sci.eval/build-base-ctx) 750)
+                armed (kernel/arm (sci.eval/build-base-ctx (seon.schema/handed-projection)) 750)
                 started (System/nanoTime)
                 result
                 (try

@@ -2355,13 +2355,24 @@
           artifact-exports #{}
           pure-predicate-symbols #{}}}
     reusable-projection]
-   (let [admission-for-transaction
-         (memoize
-          (fn [asserting-tx-eid]
-            (admission-from-asserting-transaction
-             database-value
-             asserting-tx-eid)))]
-     (letfn [(parse-rows [rows identity-fn identity-label]
+   (let [recorded-admissions
+         (if (contains? (dbi/-schema database-value) :seon.schema.admission/source)
+           (into {}
+                 (map (fn [[attribute identity source]]
+                        [[attribute identity] {:seon.schema.admission/source source}]))
+                 (d/q '[:find ?attribute ?identity ?source
+                        :in $ [?attribute ...]
+                        :where [?declaration ?attribute ?identity]
+                               [?declaration :seon.schema.admission/source ?source]]
+                      database-value [:seon.schema/key :seon.fn/sym]))
+           {})
+         admission-for-identity
+         (fn [attribute identity]
+           (get recorded-admissions [attribute identity]
+                {:seon.schema.admission/source :agent
+                 :seon.schema.admission/note
+                 "The supplied database has no admission provenance for this identity."}))]
+     (letfn [(parse-rows [rows identity-fn identity-label identity-attribute]
             (reduce
               (fn [parsed row]
                 (when-not (and (sequential? row)
@@ -2372,7 +2383,7 @@
                                    :seon.schema/malformed-projection-row
                                    :seon.schema/row row
                                    :seon.error/kind :core-bug :seon.schema/malformed-projection-row true})))
-                (let [[raw-identity form-string asserting-tx-eid] row
+                (let [[raw-identity form-string _asserting-tx-eid] row
                       identity (identity-fn raw-identity)]
                   (when-not (string? form-string)
                     (throw (ex-info (str "Malformed committed " identity-label
@@ -2393,7 +2404,7 @@
                          {:seon.schema.parsed/form
                           (edn/read-string form-string)
                           :seon.schema.parsed/admission
-                          (admission-for-transaction asserting-tx-eid)})))
+                          (admission-for-identity identity-attribute raw-identity)})))
               {}
               rows))]
     (let [schemas
@@ -2406,7 +2417,7 @@
                                        :seon.schema/malformed-projection-identity
                                        :seon.schema/identity identity
                                        :seon.error/kind :core-bug :seon.schema/malformed-projection-identity true}))))
-                  "schema")
+                  "schema" :seon.schema/key)
           contracts
           (parse-rows function-contract-rows
                   (fn [identity]
@@ -2427,7 +2438,7 @@
                                        :seon.schema/malformed-projection-identity
                                        :seon.schema/identity identity
                                        :seon.error/kind :core-bug :seon.schema/malformed-projection-identity true}))))
-                   "function contract")
+                   "function contract" :seon.fn/sym)
           source-admissions
           (reduce
            (fn [admissions row]
@@ -2437,7 +2448,7 @@
                                 :seon.schema/malformed-projection-row
                                 :seon.schema/row row
                                 :seon.error/kind :core-bug :seon.schema/malformed-projection-row true})))
-             (let [[raw-identity source asserting-tx-eid] row
+             (let [[raw-identity source _asserting-tx-eid] row
                    identity (cond
                               (qualified-symbol? raw-identity) raw-identity
                               (string? raw-identity) (symbol raw-identity)
@@ -2457,7 +2468,7 @@
                                   :seon.schema/identity identity
                                   :seon.error/kind :core-bug})))
                (assoc admissions identity
-                      (admission-for-transaction asserting-tx-eid))))
+                      (admission-for-identity :seon.fn/sym raw-identity))))
            {}
            function-source-rows)
           artifact-exports

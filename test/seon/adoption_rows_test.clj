@@ -50,7 +50,7 @@
                        :seon.fn/private? false
                        :seon.fn/spec "[:=> [:cat :int] :int]"}])
         (let [ctx
-              (assoc (eval/build-base-ctx)
+              (assoc (eval/build-base-ctx (seon.schema/handed-projection))
                      :seon.sci.eval/custody
                      {:seon.db/connection connection})
               acquired

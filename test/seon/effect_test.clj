@@ -55,7 +55,7 @@
 ;;; regression needs: entrance counting and interruption both prove the arm
 ;;; arrived, and neither can be faked by the test.
 
-(defonce ^:private probe-ctx (delay (sci.eval/build-base-ctx)))
+(defonce ^:private probe-ctx (delay (sci.eval/build-base-ctx (seon.schema/handed-projection))))
 
 (def ^:private bounded-loop
   '(fn [] (loop [i 0] (if (< i 20000) (recur (inc i)) i))))

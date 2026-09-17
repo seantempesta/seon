@@ -604,8 +604,15 @@
             anchored (when-not (str/blank? anchor)
                        (sublist-index lines [anchor] cursor))
             from (or anchored cursor)
+            ;; hunks usually advance through the file, so the cursor is the
+            ;; cheap first guess — but a patch may order them any way it
+            ;; likes, and refusing an out-of-order hunk is a veto the tool
+            ;; itself would not have issued (one such refusal reached a lane
+            ;; on 2026-09-17T01:39:12Z)
             at (or (sublist-index lines old from)
-                   (trailing-blank-tolerant-index lines old from))]
+                   (trailing-blank-tolerant-index lines old from)
+                   (sublist-index lines old 0)
+                   (trailing-blank-tolerant-index lines old 0))]
         (cond
           unexpected
           {:seon.hook.reconstruction/status :unavailable
@@ -1704,39 +1711,27 @@
     (spit file (pr-str digests))
     (prune-session-digests!)))
 
-(defn- record-edited-digests!
-  "Fold a payload-named edit into this session's digests, when it has some.
-
-  Without this the next derived scan would re-report files the hook already
-  checked at the edit itself."
-  [session file-paths]
-  (when-let [recorded (recorded-digests session)]
-    (record-digests!
-     session
-     (reduce (fn [digests path]
-               (let [file (io/file (or (absolute-file-path path) path))
-                     key (display-path path)]
-                 (if (and (clojure-file? path) (.isFile file))
-                   (assoc digests key (content-digest file))
-                   (dissoc digests key))))
-             recorded
-             file-paths))))
-
 (defn- derived-write-refusal
-  "Refuse when a tool that named no path left unreadable Clojure on disk.
+  "Refuse when a write the payload never named left unreadable Clojure.
 
   The bytes are already written — a shell write has no payload to check
   before it lands — so the refusal fires the moment the tool returns and
-  names the path and the tool that wrote it."
+  names the path and the tool that wrote it. It runs on EVERY PostToolUse,
+  including a payload-named edit: a codex lane fires this hook only for
+  `apply_patch`, so its next patch is the first moment an earlier shell
+  write of its own can be reported to it at all. Paths the payload named
+  are left to the payload's own check, which already ran."
   [event config]
   (when (and (= "PostToolUse" (:hook_event_name event))
              (get-in config [:shell-writes :enabled] true))
     (let [session (or (:session_id event) "orchestrator")
           previous (recorded-digests session)
           digests (tree-digests config)
+          named (into #{} (map display-path) (event-file-paths event))
           changed (when previous
                     (vec (sort (keep (fn [[path digest]]
-                                       (when (not= digest (get previous path))
+                                       (when (and (not= digest (get previous path))
+                                                  (not (contains? named path)))
                                          path))
                                      digests))))]
       (record-digests! session digests)
@@ -1877,9 +1872,8 @@
                           schema-admission))
                     (conj (current-source-feedback event config)))
                   feedback (vec feedback)
-                  refusal (:seon.hook.lint/refusal lint)]
-              (record-edited-digests! (or (:session_id event) "orchestrator")
-                                      file-paths)
+                  refusal (or (:seon.hook.lint/refusal lint)
+                              (derived-write-refusal event config))]
               (when-not (str/blank? refusal) (log! "CLOJURE_REFUSAL" refusal))
               (output! (feedback-response feedback refusal)))))
         (catch Exception e

@@ -18,6 +18,7 @@
             [seon.flow :as seon.flow]
             [seon.render.web :as web]
             [seon.cluster :as cluster]
+            [seon.cluster.agent :as agent]
             [seon.turn :as turn]
             [seon.error :as error]
             [seon.cluster.message :as message]
@@ -1329,40 +1330,66 @@
                                 (schema/current-projection))
                     "A-B-A acquisition never repoints the global registry")))))))))
 
-(deftest another-agent-calls-the-live-cluster-definition-without-reinstall
+(deftest accepted-first-party-definition-reaches-an-existing-agent-next-turn
   (with-cluster
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
-            replies (atom
-                     [(str
-                       "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
-                       "persisted [x] (inc x))\n"
-                       "(seon.run/complete \"published\")")
-                      (str
-                       "(seon.run/complete "
-                       "(str (my.agents.agent-a/persisted 41)))")])]
+            original (db/pull @connection '[*] [:seon.fn/sym "seon.eval.drive/uuid-text"])
+            source "(defn- uuid-text {:malli/schema [:=> [:cat] :string]} [] \"s3-database-definition\")"
+            replies (atom [(str source "\n(seon.run/complete \"published\")")
+                           "(seon.run/complete (seon.eval.drive/uuid-text))"])]
+        (test-support/transacted!
+         connection
+         (into [[:db/add [:seon.agent/id "agent-a"] :seon.agent/namespace
+                 [:seon.ns/name 'seon.eval.drive]]]
+               (agent/creation-tx {:seon.cluster/name "turn-test"
+                                  :seon.agent/id "s3-peer"
+                                  :seon.ns/name 'my.agents.s3-peer})))
+        (let [author (agent/acquire-context! cluster "agent-a")
+              peer (agent/acquire-context! cluster "s3-peer")]
+          (is (some? (sci.core/resolve peer 'seon.eval.drive/uuid-text)))
         (with-redefs [ai/complete
                       (fn [_]
-                        {:seon.ai/text
-                         (let [reply (first @replies)]
-                           (swap! replies subvec 1)
-                           reply)})]
-          (drive-agent! cluster "agent-a" 2)
+                        (let [[before _] (swap-vals! replies #(if (seq %) (subvec % 1) %))]
+                          {:seon.ai/text (or (first before)
+                                            "(seon.run/complete \"finished\")")}))]
+          (drive-agent! (assoc cluster :seon.sci.eval/agent-ctx author) "agent-a" 2)
+          (let [admitted (db/pull @connection '[*]
+                                 [:seon.fn/sym "seon.eval.drive/uuid-text"])]
+            (is (= :agent (:seon.schema.admission/source admitted)))
+            (is (= source (:seon.fn/source admitted))))
+          (sci.eval/acquire! {:seon.sci.eval/ctx (:seon.sci.eval/ctx cluster)
+                             :seon.db/db @connection})
+          (agent/acquire-context! cluster "agent-a")
+          (is (identical? @(sci.core/resolve (:seon.sci.eval/ctx cluster)
+                                            'seon.eval.drive/uuid-text)
+                          @(sci.core/resolve author 'seon.eval.drive/uuid-text))
+              "regeneration does not mistake the author's accepted root for a private def")
           (test-support/transacted!
-                       connection
-                       [{:seon.ns/name 'my.agents.agent-b}
-                        (assoc (agent-row "agent-b")
-                               :seon.agent/namespace
-                               [:seon.ns/name 'my.agents.agent-b])
-                        {:seon.message/id "m-agent-b" :seon.message/to [:seon.agent/id "agent-b"] :seon.message/content "call the published function" :seon.message/inbox [:seon.agent/id "agent-b"]}])
-          (drive-agent! cluster "agent-b" 2)
-          (is (some #(str/includes? % "42")
+           connection
+           (message/inbound-tx @connection
+                               {:seon.agent/id "s3-peer"
+                                :seon.message/inbound-content "call the accepted definition"
+                                :seon.config.eval.result/max-string 1000}))
+          (drive-agent! (assoc cluster :seon.sci.eval/agent-ctx peer) "s3-peer" 2)
+          (is (some #(str/includes? % "s3-database-definition")
                     (db/q '[:find [?result ...]
-                           :where
-                           [?evaluation :seon.eval/shown ?result]
-                           [?evaluation :seon.cluster.eval/author :agent]]
-                         @connection))
-              "the second agent used the same live cluster program graph"))))))
+                            :where
+                            [?agent :seon.agent/id "s3-peer"]
+                            [?turn :seon.turn/agent ?agent]
+                            [?evaluation :seon.cluster.eval/run ?turn]
+                            [?evaluation :seon.eval/shown ?result]
+                            [?evaluation :seon.cluster.eval/author :agent]]
+                          @connection))
+              "the existing peer evaluates the accepted first-party definition")
+          (test-support/transacted! connection [original])
+          (sci.eval/acquire! {:seon.sci.eval/ctx (:seon.sci.eval/ctx cluster)
+                             :seon.db/db @connection})
+          (doseq [agent-id ["agent-a" "s3-peer"]]
+            (let [ctx (agent/acquire-context! cluster agent-id)]
+              (is (identical? @(ns-resolve 'seon.eval.drive 'uuid-text)
+                              @(sci.core/resolve ctx 'seon.eval.drive/uuid-text))
+                  "core restoration reaches both the author and the existing peer")))))))))
 
 (deftest another-agent-sees-a-flat-contract-violation-after-live-install
   (with-cluster
@@ -1485,8 +1512,10 @@
             (db/transact!
              connection
              [{:seon.ns/name 'authored.target
+               :seon.schema.admission/source :agent
                :seon.ns/source "(ns authored.target)"}
               {:seon.ns/name 'authored.consumer
+               :seon.schema.admission/source :agent
                :seon.ns/source "(ns authored.consumer)"
                :seon.ns/requires [[:seon.ns/name 'authored.target]]
                :seon.ns/aliases
@@ -1497,6 +1526,7 @@
                  :seon.ns.refer/target-ns 'authored.target
                  :seon.ns.refer/target-name 'increment}]}
               {:seon.ns/name 'alias.cycle-a
+               :seon.schema.admission/source :agent
                :seon.ns/source "(ns alias.cycle-a)"
                :seon.ns/aliases
                [{:seon.ns.alias/local 'b
@@ -1504,6 +1534,7 @@
                 {:seon.ns.alias/local 'ghost
                  :seon.ns.alias/target-ns 'not.loaded}]}
               {:seon.ns/name 'alias.cycle-b
+               :seon.schema.admission/source :agent
                :seon.ns/source "(ns alias.cycle-b)"
                :seon.ns/aliases
                [{:seon.ns.alias/local 'a
@@ -1526,7 +1557,7 @@
                :seon.fn/private? false
                :seon.fn/spec "[:=> [:cat :int] :int]"}])
             database (db/db connection)
-            ctx (sci.eval/build-base-ctx)
+            ctx (sci.eval/build-base-ctx (seon.schema/handed-projection))
             acquired
             (sci.eval/acquire!
              {:seon.sci.eval/ctx ctx

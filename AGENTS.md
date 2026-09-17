@@ -28,12 +28,11 @@ exact verification boundary when reporting.
    and uses the worker's same contract arming in one JVM. With concurrent
    editors, use `bin/test-fast --paths <your files…> -- <namespaces…>`:
    it shares the gate's HEAD-plus-paths snapshot, without worker copies or
-   base publication. Plain namespaces use the working tree. **Gate a commit with
-   `bin/test --paths <your own files…> -- <namespaces…>`** — it
-   snapshots HEAD and overlays ONLY the paths you name, so no other lane's
-   in-flight edit can block you; bare `bin/test`
-   selects by `:seon.fn/calls` reach when you are alone; **plus
-   `bin/test --platform` green.** Foreign breakage is never a reason to
+   base publication. Plain namespaces use the working tree. **The orchestrator
+   gates a commit with `bin/test --paths <owned files…> -- <namespaces…>`
+   and `bin/test --platform`. Lanes use `bin/test-fast`, never cold gates.**
+   `bin/test` refuses a gate carrying `SEON_CODEX_LANE`; its shared `--fast`
+   snapshot path remains available. Foreign breakage is never a reason to
    stop unless the assignment explicitly requires it. NEVER
    `--all` or `--full` in a lane — full suites are the orchestrator's
    integration checkpoints only.
@@ -194,7 +193,7 @@ ordinary clusters are never synchronized. `bin/seon init --dev NAME` adopts
 the publication on an explicitly selected development cluster in its
 hosting JVM; the edit hook's `:current-source` root and cluster select that target.
 Its adoption commit is recorded only after schema and program reconciliation,
-loaded definitions, SCI acquisition, and JVM instrumentation succeed. Publication
+loaded definitions, JVM instrumentation, and SCI acquisition succeed. Publication
 re-arms wrappers when their contract or a transitively referenced declaration
 changes; unrelated wrappers retain identity (`src/seon/instrument.clj:593`).
 The wrapper captures the canonical dependency definitions and their contract
@@ -219,10 +218,14 @@ Any design where channel loss breaks recovery is wrong by definition.
 is implemented by boot recovery (`src/seon/turn.clj:1680`): close open turns and
 mark unfinished evaluations interrupted.
 The agent adapts from stored shown text. Private defs, atoms, and result objects
-disappear with the JVM; they are neither serialized nor restored. Each agent
-owns one persistent SCI context, forked once from the program base and updated
-with accepted base diffs before later turns (`src/seon/sci/eval.clj:1709`,
-`src/seon/cluster/agent.clj:636`).
+disappear with the JVM; they are neither serialized nor restored. The cluster's program-only SCI base derives from one database value through
+`seon.sci.eval/base-ctx`: current core admission copies the loaded JVM root;
+current agent admission interprets the stored source in every namespace, with
+an explicit typed JVM fallback if SCI cannot evaluate it. Before later turns,
+`fork-for-turn` regenerates the agent fork and reapplies its private objects
+in memory, preserving the agent's context handle. Accepted-row installation
+is the measured optimization of base regeneration, checked against it by the
+canonical acquisition regression.
 
 **Waking and the loop.** Schema-declared listened
 attributes identify wake datoms; answering derives from their `:t` and a
@@ -664,7 +667,7 @@ writing.
 | namespace page | one namespace's web surface: route → namespace → owner agent → walk in `/html` (`src/seon/render/route.clj`) | page, screen, dashboard |
 | **[TARGET]** block | One entity rendered through its schema pair, covering a whole concern. Scalars share its own block; components and declared derived queries supply their blocks. The identified output is the HTML morph target ([turn PRD §13–§15](docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md); `src/seon/render/block.clj:61`) | widget, component, panel, scalar block |
 | package, keyframe, delta | the delivery units: one revisioned package per change; a revision gap snaps to keyframe | frame, bundle |
-| base SCI context / agent SCI context / prompt | The cluster's acquired program-only context; each agent's persistent context forked once and receiving base diffs; the ordered rendering of its stored evaluations. Neither private objects nor prompt visibility gates callability ([turn PRD §13–§15](docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md); `src/seon/sci/eval.clj:1709`; SCI `init`: `reference-code/sci/src/sci/core.cljc:331`, `fork`: `reference-code/sci/src/sci/core.cljc:345`, `intern`: `reference-code/sci/src/sci/core.cljc:260`) | turn fork, "the context" for all three |
+| base SCI context / agent SCI context / prompt | The cluster's program-only context derived by `seon.sci.eval/base-ctx` from one database value; each agent's retained handle receives a new fork with its private objects reapplied before later turns; the ordered rendering of its stored evaluations. Neither private objects nor prompt visibility gates callability ([turn PRD §13–§15](docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md); `src/seon/sci/eval.clj:1709`; SCI `init`: `reference-code/sci/src/sci/core.cljc:331`, `fork`: `reference-code/sci/src/sci/core.cljc:345`, `intern`: `reference-code/sci/src/sci/core.cljc:260`) | turn fork, "the context" for all three |
 | candidate context | a built context used to test a definition before installing it; `sci/fork` is admissible (copy-on-write Vars) | sandbox ctx, scratch fork |
 | compaction | Wipe the agent's evaluations; the next system turn regenerates the opening from current record facts using the same algorithm. There is no manual curation path ([turn PRD §13–§15](docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md); `src/seon/turn.clj:2207`) | editor, revision, proof, curation, supersession |
 | render profile | The presentation policy applied by the value renderer once at evaluation time; the evaluation stores the resulting shown text. History never clips again; HTML renders the live object without presentation clipping, or saved text after restart ([turn PRD §13–§15](docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md); `resources/seon/schemas/seon.render.profile.edn`) | cap, window, separate result storage bound |
@@ -843,9 +846,12 @@ class updates both in the same commit.
 
 ### The gate and what a proof is
 
-Iterate with `bin/test-fast <namespaces…>`; gate a commit with
-`bin/test --paths <your files…> -- <namespaces…>`; run `bin/test --platform`
-before reporting. The fast loop loads the complete program and uses the
+Lanes iterate with `bin/test-fast <namespaces…>`; the orchestrator gates a
+commit with `bin/test --paths <owned files…> -- <namespaces…>` and
+`bin/test --platform`. `bin/test` refuses cold gates when `SEON_CODEX_LANE`
+names a lane, before taking a slot or creating a run root, and prints the
+`bin/test-fast --paths <your files> -- <namespaces>` replacement. An
+orchestrator flag does not override lane identity. The fast loop uses the
 worker's same contract arming in one JVM, with the canonical in-memory
 fixture base built once on demand. Plain namespaces use the working tree;
 `bin/test-fast --paths <your files…> -- <namespaces…>` reuses the gate's
@@ -869,13 +875,12 @@ adds tests reaching code changed since the recorded green basis (derived
 from `:seon.fn/calls` edges, never mtimes) — deliberately widening to every
 eligible test when the basis is missing, a file was removed, or a changed
 gate input sits outside the program graph; `--all` adds every
-non-long test; explicit namespaces run complete. A lane with concurrent neighbours gates with `bin/test --paths <its own
-files…> -- <namespaces…>`, which snapshots HEAD and overlays only those paths,
-so another lane's in-flight edit never blocks it. A LANE NEVER RUNS `--all`
-OR `--full` (owner, 2026-09-08: "It's a waste of time to run the entire test
-suite for every change") — bare `bin/test` plus its subject's namespaces
-plus `--platform` is a lane's whole gate; full suites are the orchestrator's
-integration checkpoints. The runner enforces the
+non-long test; explicit namespaces run complete. A lane with concurrent
+neighbours uses `bin/test-fast --paths <its own files…> -- <namespaces…>`,
+which snapshots HEAD and overlays only those paths. A LANE NEVER RUNS
+`bin/test` gates, `--all`, OR `--full`; the orchestrator owns cold gates and
+integration checkpoints. `bin/test --fast` is the shared implementation of
+the fast snapshot, not a cold gate. The runner enforces the
 bounded-execution law: a liveness watchdog dumps coordinator AND worker
 JVMs, and the tally is total — unlaunchable or unconfirmed work is typed,
 never silent. By default, every canonical gate records the tests it ran on `:current-src`
@@ -1080,17 +1085,19 @@ has done its job.
   development cluster's prepl at once, the peer session's gate included;
   research lanes run from files, `git`, and gate logs with at most one
   read-only evaluation.
-- **A slice is not proven until its cold gate.** An in-process run
+- **The orchestrator owns the cold gate.** An in-process run
   (`seon.test/run` from the development JVM) and `bin/test-fast` are
   ITERATION: they share the worker's arming but not its isolation, retained
   run roots, platform tier, or recorded result facts. Landing evidence is
-  `bin/test --paths <your files…> -- <namespaces…>` plus `--platform`. A
-  lane that reports green from an in-process run has reported nothing.
-- **The `orchestrator-only` test mode is gone** (`fa971495f`): it refused
-  every lane invocation including `bin/test-fast`, so lanes committed
-  untested. Lanes gate their own slices; the two-slot bound
-  (`bin/_test-slot`) remains the load cap. Do not reintroduce the marker and
-  do not repeat it in a spec.
+  the orchestrator's `bin/test --paths <owned files…> -- <namespaces…>` plus
+  `--platform`. Lanes report their fast tally and the cold proof still owed.
+- **Lane identity is declared by the launcher.** `bin/codex-agent` exports
+  `SEON_CODEX_LANE=<name>` on both run and resume. `bin/test` refuses cold
+  gates with that identity and directs the lane to `bin/test-fast`; both
+  ordinary fast iteration and its shared `bin/test --fast --paths` path
+  remain admitted. Claude Agent subagents supply no launcher identity:
+  only the orchestrator's instruction bounds their gate use. Do not infer
+  lane identity from a model name, worker count, or ephemeral-owner PID.
 - **Resets are the recovery for schema breakage, not an event.** Eight
   resets on 2026-09-17, each under two minutes, took the store from 21 GB to
   102 MB; none lost anything a reseed did not restore. Database data is

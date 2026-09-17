@@ -17,6 +17,44 @@
    :seon.fn.file/relative-path :seon.lint/id])
 
 #?(:clj
+   (defn overrides
+     "Return current agent-admitted function identities in indexed src namespaces.
+
+      Namespace membership follows recorded declaration/file relations, including
+      history: replacing a declaration removes its file coordinates, and replacing
+      the last indexed function must not make its namespace cease to be first-party.
+      Both current facts and history derive from the supplied database value.
+      An empty vector means this database has no overrides. JVM callers continue
+      running their compiled definitions until write-back and reload.
+
+      Example:
+      (seon.program/overrides (seon.db/db connection))"
+     {:malli/schema [:=> [:cat :seon.db/database-value]
+                     [:or [:vector :seon.fn/sym] :seon.error/value]]}
+     [database]
+     ; seon.db requires this declaration owner; resolve its read functions late.
+     (let [history ((requiring-resolve 'seon.db/history) database)]
+       (if (:seon.error/kind history)
+         history
+         (let [result
+               ((requiring-resolve 'seon.db/q)
+                '[:find [?symbol ...]
+                  :in $ $history
+                  :where
+                  [$ ?function :seon.schema.admission/source :agent]
+                  [$ ?function :seon.fn/sym ?symbol]
+                  [$ ?function :seon.fn/ns ?namespace]
+                  [$ ?namespace :seon.ns/name ?name]
+                  [$history ?indexed-namespace :seon.ns/name ?name]
+                  [$history ?member :seon.fn/ns ?indexed-namespace]
+                  [$history ?member :seon.fn/file ?file]
+                  [$ ?file :seon.fn.file/relative-root "src"]]
+                database history)]
+           (if (:seon.error/kind result)
+             result
+             (vec (sort result))))))))
+
+#?(:clj
    (defn base-context-injected-symbols
      "Interpreter bindings declared with their reason in the schema population."
      {:malli/schema [:function

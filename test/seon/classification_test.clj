@@ -61,7 +61,7 @@
 (deftest ordinary-callables-are-acquired-without-bootstrap-membership
   (test-support/with-database
     (fn [connection]
-      (let [ctx (sci.eval/build-base-ctx)
+      (let [ctx (sci.eval/build-base-ctx (seon.schema/handed-projection))
             acquired (sci.eval/acquire! {:seon.sci.eval/ctx ctx
                                         :seon.db/db @connection})]
         (is (not (:seon.error/kind acquired)) (pr-str acquired))

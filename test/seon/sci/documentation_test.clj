@@ -153,7 +153,7 @@
                                  [{:seon.agent/id "bare-tests"
                                    :seon.agent/namespace
                                    {:seon.ns/name 'fixture.bare-tests}}])))
-     (doseq [ctx [(evaluation/build-base-ctx)
+     (doseq [ctx [(evaluation/build-base-ctx (seon.schema/handed-projection))
                  (support/fork-cluster-ctx connection)]]
        (sci/add-namespace! ctx 'fixture.bare-tests {})
        (sci/binding [sci/ns (sci/create-ns 'fixture.bare-tests)]

@@ -55,7 +55,7 @@ model=${LANE_MODEL:-gpt-6-astra}
 # which starved the owner's page. Three workers per lane gate.
 export SEON_TEST_WORKERS=${SEON_TEST_WORKERS:-3}
 effort=${LANE_EFFORT:-low}
-lane_rule="Another lane's in-flight breakage is never a reason to stop (owner, 2026-09-08): gate with bin/test --paths <your files> -- <namespaces> (HEAD plus only your paths) and iterate with bin/test-fast; when the shared tree cannot load, snapshot it (git worktree add tmp/<lane>-wt HEAD, link reference-code, apply your diff) and continue. Name the foreign boundary in your landing note; never resume, message, or edit another lane's session or files."
+lane_rule="Another lane's in-flight breakage is never a reason to stop: iterate with bin/test-fast --paths <your files> -- <namespaces> (HEAD plus only your paths). Lanes never run bin/test gates; the orchestrator owns the cold gate and platform proof. When the shared tree cannot load, snapshot it (git worktree add tmp/<lane>-wt HEAD, link reference-code, apply your diff) and continue. Name the foreign boundary in your landing note; never resume, message, or edit another lane's session or files."
 
 usage() { sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 64; }
 
@@ -348,6 +348,9 @@ case "$command" in
       echo "bin/codex-agent: invalid lane name '$name'" >&2
       exit 64
     }
+    # Declared lane identity for every descendant, on run and resume. The
+    # ephemeral-owner PID serves resource custody, not lane classification.
+    export SEON_CODEX_LANE="$name"
     mkdir -p "$dir" "$lanes_dir" "$sessions_dir"
     log=$dir/$name-stdout.log
     summary=$dir/$name-summary.txt
@@ -388,7 +391,7 @@ case "$command" in
         echo "bin/codex-agent: empty followup" >&2
         exit 64
       }
-      atomic_lines "$state/prompt" "$prompt"
+      atomic_lines "$state/prompt" "$prompt" "" "$lane_rule"
       write_launch_marker
       # resume must name the lane model too: without -m it falls back to
       # ~/.codex/config.toml's default, which the installed CLI may reject.

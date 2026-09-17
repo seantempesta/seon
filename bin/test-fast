@@ -6,8 +6,8 @@
 # Canonical database fixtures build their in-memory base once per JVM. Tests
 # explicitly exercising file-backed boot still own their fixture publication.
 # Limits: no per-worker isolation, retained run roots, or automatic platform
-# tier; no persisted result facts or green basis. Gate a commit with
-# bin/test --paths <files...> -- <namespaces...>; --platform before reporting.
+# tier; no persisted result facts or green basis. The orchestrator gates a
+# commit with bin/test --paths <files...> -- <namespaces...> and --platform.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 if [ "${1-}" = --paths ]; then
