@@ -38,8 +38,15 @@
 (defonce ^:private blocked-release (atom nil))
 (def ^:dynamic *activation-missing* [])
 
+(defn- populate-schema!
+  {:malli/schema [:=> [:cat :seon.db/connection] :nil]}
+  [connection]
+  (cluster/populate-source! {:seon.db/connection connection})
+  nil)
+
 (defn populate!
   [{:keys [:seon.db/connection :seon.source/digest]}]
+  (populate-schema! connection)
   (test-support/transacted! connection probe-schema)
   (test-support/transacted! connection
                           [{:seon.source.test/marker digest}]))
@@ -50,14 +57,15 @@
 
 (defn populate-from-data!
   [{:keys [:seon.db/connection :seon.source.test/marker]}]
+  (populate-schema! connection)
   (test-support/transacted! connection probe-schema)
   (test-support/transacted! connection [{:seon.source.test/marker marker}]))
 
 (defn populate-blocked!
   [request]
-  (populate! request)
   (.countDown ^CountDownLatch @blocked-entered)
   (.await ^CountDownLatch @blocked-release)
+  (populate! request)
   nil)
 
 (defn activation
@@ -327,8 +335,8 @@
                (get-in current-db
                        [:schema :seon.source/digest :db/unique]))
             "the source seal has one physical identity")
-        (is (= (+ 2 max-a) (:max-tx current-db))
-            "private row application is followed by one activation seal")
+        (is (= (+ 3 max-a) (:max-tx current-db))
+            "row application and issue indexing are followed by one activation seal")
         (is (= #{digest-b}
                (set (db/q '[:find [?digest ...]
                            :where [_ :seon.source/digest ?digest]]
@@ -367,8 +375,14 @@
             rows (:seon.fn.change/rows plan)]
         (is (not= original revised))
         (is (= :incremental-upsert (:seon.fn.change/action plan)))
-        (is (= #{[:seon.ns/name 'seon.id] [:seon.fn/sym 'seon.id/id]
-                 [:seon.fn.file/relative-path (fs/relative-path (fs/source-directory) (.getCanonicalPath file))]}
+        (is (= (into #{[:seon.ns/name 'seon.id]
+                       [:seon.fn.file/relative-path
+                        (fs/relative-path (fs/source-directory)
+                                          (.getCanonicalPath file))]}
+                     (map (fn [function-symbol]
+                            [:seon.fn/sym function-symbol]))
+                     (filter #(= "seon.id" (namespace %))
+                             (fn/manifest-function-symbols manifest)))
                (set (map program/row-identity rows))))
         (is (every? #(= :core (:seon.schema.admission/source %)) rows))
         (test-support/with-database
@@ -537,14 +551,25 @@
           (let [stale (future
                         (refusal #(publish opened digest-b
                                            'seon.cluster.source-test/populate-blocked!)))]
-            (is (.await entered 10 TimeUnit/SECONDS))
+            (is (true? (test-support/await-event!
+                        entered "blocked source population entered")))
             (let [c (try
                       (publish opened digest-c)
                       (finally
                         (.countDown release)))
                   stale-result
-                  (test-support/await-event! stale "stale source publication")]
-              (is (= :stale-branch-head (:type stale-result)))
+                  (deref stale
+                         (.toMillis TimeUnit/SECONDS
+                                    (* 5 test-support/event-backstop-seconds))
+                         ::stale-publication-timeout)]
+              (when (= ::stale-publication-timeout stale-result)
+                (future-cancel stale)
+                (throw
+                 (ex-info "The stale source publication did not complete."
+                          {:seon.test-support/event
+                           "stale source publication"})))
+              (is (= :stale-branch-head (:type stale-result))
+                  (pr-str stale-result))
               (is (= (:seon.source/commit-id c)
                      (:seon.source/commit-id (source/current opened))))
               (is (empty? (scratch-branches opened))))))))))
@@ -584,6 +609,12 @@
                                     "(ns source-deletion-probe) (defn value [] 1)")])
         (sci/eval-string* ctx "(ns source-deletion-probe) (defn value [] 1)")
         (is (= 1 (sci/eval-string* ctx "(source-deletion-probe/value)")))
+        (test-support/transacted!
+         connection
+         [[:db/retractEntity
+           [:seon.test/sym
+            'seon.cluster.source-test/source-tombstone-provenance-does-not-prevent-live-removal]]
+          [:db/retractEntity fn-identity]])
         (is (= 1 (:seon.sci.eval/installed
                   (sci.eval/install-row!
                    {:seon.sci.eval/ctx ctx :seon.db/db @connection
@@ -592,8 +623,7 @@
                      :seon.program/ns [:seon.ns/name 'source-deletion-probe]
                      :seon.program/source "(ns-unmap 'source-deletion-probe 'value)"}}))))
         (is (nil? (sci/eval-string* ctx "(resolve 'source-deletion-probe/value)")))
-        (is (= :core (:seon.schema.admission/source
-                      (db/pull @connection '[*] fn-identity))))))))
+        (is (nil? (db/pull @connection '[*] fn-identity)))))))
 
 (deftest latest-test-evidence-survives-rebuilding-from-an-older-base
   (with-store

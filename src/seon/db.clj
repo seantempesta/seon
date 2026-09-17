@@ -32,6 +32,7 @@
             [seon.print :as print]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
+            [seon.schema.edn :as schema.edn]
             [seon.schema.form :as schema.form])
   (:import [datahike.db AsOfDB DB]
            [java.util.concurrent TimeoutException]
@@ -255,8 +256,15 @@
   [database]
   (if (:seon.schema/projection (meta database))
     database
-    (vary-meta database assoc :seon.schema/projection
-               (schema/projection-from-database database))))
+    (let [runtime-projection
+          (schema/build-projection (schema.edn/packaged-forms))
+          database-projection (schema/projection-from-database database)
+          database-delta
+          (schema/projection-delta runtime-projection database-projection)
+          projection
+          (schema/materialize-projection
+           (schema/compose-projection-data runtime-projection database-delta))]
+      (vary-meta database assoc :seon.schema/projection projection))))
 
 (defn- resolve-database-value
   [connection]
