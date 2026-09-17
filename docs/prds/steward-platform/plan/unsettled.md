@@ -3370,3 +3370,14 @@ as orchestrator/astra lanes, easy pool as the first live-agent slice).
   groups with their constructors, batched into the one reset;
   `:seon.error/result` omitted (1q). Lane resumed on that. PRD §6 row 1 and
   the issue note updated by the lane in the same commits.
+- Gate 7 (bare, main root, HEAD `1c8e9d8fa`): 101 tests, 695 assertions,
+  3F/13E — identical family to gate 6 (source-test derived projection +
+  fixtures + arm cascade); publication lane still on it.
+- `one-error-predicate` landed `2ac456463` (eight of nine copies onto
+  `seon.error/error?`; recorder and message existence reads preserve
+  errors) and stopped at held `db.clj` (ninth copy, `transact-call`
+  verbatim arm, the armed nine-site regression). Its fast run launched no
+  tests (no published base at this HEAD) — landed on namespace loads only;
+  orchestrator preparing the base and cold-gating its namespaces
+  (`predicate-paths-gate.log`). Resume when the publication lane releases
+  db.clj.
