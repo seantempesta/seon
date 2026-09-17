@@ -3,6 +3,9 @@
             [clojure.test :refer [deftest is testing use-fixtures]]
             [datahike.api :as d]
             [datahike.pull-api :as pull-api]
+            [datahike.tools :as datahike.tools]
+            [datahike.writer :as datahike.writer]
+            [datahike.writing :as datahike.writing]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
             [seon.cluster.message :as message]
@@ -20,7 +23,8 @@
             [seon.sci.eval :as sci.eval]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
-            [seon.test-support :as test-support]))
+            [seon.test-support :as test-support])
+  (:import [java.util.concurrent CountDownLatch TimeUnit]))
 
 (def ^:private schema-delta (schema/begin-registration-delta))
 
@@ -296,7 +300,11 @@
                             refusal
                             (ex-info "transaction wrapper"
                                      {:seon.turn/id nil}))]
-       (with-redefs [d/transact (fn [& _] (throw wrapped))]
+       (with-redefs [d/transact!
+                     (fn [& _]
+                       (let [result (datahike.tools/throwable-promise)]
+                         (result wrapped)
+                         result))]
          (is (= (assoc refusal :seon.error/message "classified transition refusal")
                 (db/transact! connection []))
              "the classified exception supplies its message; a deeper wrapper cannot replace it")))
@@ -1120,6 +1128,75 @@
                :new "db-cas-replacement"}
               (select-keys data [:error :expected :new])))
        (is (instance? datahike.datom.Datom (:old data)))))))
+
+(deftest a-writer-that-does-not-deliver-refuses-at-the-declared-bound
+  (test-support/with-database
+   (fn [connection]
+     (let [cluster-name "bounded-write-deref"
+           write-time-limit-ms 25
+           started (CountDownLatch. 1)
+           release (CountDownLatch. 1)
+           old-writer (:writer @connection)]
+       (test-support/apply-config!
+        connection cluster-name
+        {:seon.config.db/write-time-limit-ms write-time-limit-ms})
+       (test-support/await-event!
+        (datahike.writer/shutdown old-writer)
+        "the canonical fixture writer to stop before replacement")
+       (let [blocked-writer
+             (datahike.writer/create-writer
+              {:backend :self
+               :write-fn-map
+               {'transact!
+                (fn [database request]
+                  (.countDown started)
+                  (when-not (.await release
+                                    test-support/event-backstop-seconds
+                                    TimeUnit/SECONDS)
+                    (throw
+                     (ex-info "The test did not release its blocked writer."
+                              {:seon.test/event :blocked-writer-release})))
+                  (datahike.writing/transact! database request))}}
+              connection)]
+         (swap! (:wrapped-atom connection) assoc :writer blocked-writer)
+         (try
+           (let [before (db/basis-t @connection)
+                 outcome (future
+                           (db/transact!
+                            connection
+                            [{:seon.agent/id "bounded-write-deref-agent"}]))]
+             (test-support/await-event!
+              started "the real Datahike writer to enter the blocked transaction")
+             (let [refusal
+                   (test-support/await-event!
+                    outcome "the declared database write bound to fire")
+                   data (:seon.error/data refusal)]
+               (is (= :seon.db/write-bound-exceeded
+                      (:seon.error/kind refusal)))
+               (is (true? (:seon.db/transaction-outcome-unknown refusal)))
+               (is (= write-time-limit-ms
+                      (:seon.config.db/write-time-limit-ms data)))
+               (is (<= write-time-limit-ms
+                       (:seon.db/write-wait-elapsed-ms data)
+                       (* 1000 test-support/event-backstop-seconds)))
+               (is (= (db/connection-identity connection)
+                      (:seon.db/connection-identity data)))
+               (is (= (:branch (:config @connection))
+                      (:seon.store/branch data)))
+               (is (= before (db/basis-t @connection))
+                   "the writer is still blocked when the caller's bound fires"))
+             (.countDown release)
+             (test-support/await-event!
+              connection "the timed-out transaction to settle later"
+              #(> (db/basis-t %) before))
+             (is (= "bounded-write-deref-agent"
+                    (:seon.agent/id
+                     (db/pull @connection
+                              [:seon.agent/id]
+                              [:seon.agent/id "bounded-write-deref-agent"])))
+                 "the unknown transaction may commit after the caller stops waiting"))
+           (finally
+             (.countDown release))))))))
 
 (deftest temporal-reads-use-explicit-and-ambient-database-values
   (test-support/with-database

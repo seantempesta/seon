@@ -33,6 +33,7 @@
             [seon.schema.datahike :as schema.datahike]
             [seon.schema.form :as schema.form])
   (:import [datahike.db AsOfDB DB]
+           [java.util.concurrent TimeoutException]
            [datalog.parser.type And BindColl BindTuple BindScalar Constant FindColl FindRel FindScalar
             FindTuple Not Or Pattern Pull Variable]))
 
@@ -3733,28 +3734,86 @@
                 (let [failure (projection-fallback 'seon.db/transact!)]
                   (throw (ex-info (:seon.error/message failure) failure))))]
         (or (write-error database projection transaction)
-            (let [report (d/transact connection
-                    (retain-transaction projection
-                     (schema.datahike/encode-transaction-in
-                      projection
-                      (jdk-integers->long
-                       (let [request (stamp-receipt transaction)
-                             request (if (map? request) request {:tx-data request})]
-                         (assoc-in request [:tx-meta :datahike/validate-report]
-                                   (write-report-validator projection)))))))
-                  state (or (when (identical? projection
-                                               (:seon.schema/projection
-                                                (some-> carried-state deref)))
-                              carried-state)
-                            (env/environment-state
-                         (env/environment
-                          {:seon.db/connection connection
-                           :seon.boot/cluster-name
-                           (name (:branch (:config database)))
-                           :seon.schema/projection projection})))]
-              (-> report
-                  (update :db-before carry-projection-state state)
-                  (update :db-after carry-projection-state state)))))
+            (let [bound-attribute :seon.config.db/write-time-limit-ms
+                  configured-bounds
+                  (when (get (dbi/-schema database) bound-attribute)
+                    (map :v (d/datoms database :aevt bound-attribute)))
+                  declared-bound
+                  (:seon.config/default
+                   (schema.form/attr-form-properties
+                    (get (:seon.schema.projection/forms projection)
+                         bound-attribute)))
+                  write-time-limit-ms
+                  (if (seq configured-bounds)
+                    (apply min configured-bounds)
+                    declared-bound)
+                  request
+                  (retain-transaction
+                   projection
+                   (schema.datahike/encode-transaction-in
+                    projection
+                    (jdk-integers->long
+                     (let [request (stamp-receipt transaction)
+                           request (if (map? request) request {:tx-data request})]
+                       (assoc-in request [:tx-meta :datahike/validate-report]
+                                 (write-report-validator projection))))))
+                  pending (d/transact! connection request)
+                  timeout (Object.)
+                  started (System/nanoTime)
+                  report
+                  (try
+                    (deref pending write-time-limit-ms timeout)
+                    (catch Throwable throwable
+                      ;; Datahike's throwable-promise wraps the JDK timeout in
+                      ;; ExceptionInfo. Preserve every delivered writer error.
+                      (if (or (instance? TimeoutException throwable)
+                              (instance? TimeoutException (ex-cause throwable)))
+                        timeout
+                        (throw throwable))))]
+              (if (identical? timeout report)
+                (let [elapsed-ms
+                      (quot (+ (- (System/nanoTime) started) 999999) 1000000)
+                      evidence
+                      {:seon.db/connection-identity
+                       (connection-identity connection)
+                       :seon.store/branch (:branch (:config database))
+                       :seon.config.db/write-time-limit-ms write-time-limit-ms
+                       :seon.db/write-wait-elapsed-ms elapsed-ms
+                       :seon.db/transaction-outcome-unknown true}]
+                  (diagnostic
+                   {:seon.error/kind ::write-bound-exceeded
+                    :seon.error/message
+                    (str "seon.db/transact! stopped waiting after " elapsed-ms
+                         " ms (bound " write-time-limit-ms
+                         " ms). Datahike may still commit the queued transaction; "
+                         "its outcome is unknown.")
+                    :seon.error/diagnostic-layer :database-write
+                    :seon.error/diagnostic-operation 'seon.db/transact!
+                    :seon.error/diagnostic-member bound-attribute
+                    :seon.error/diagnostic-expected
+                    {:seon.config.db/write-time-limit-ms write-time-limit-ms}
+                    :seon.error/diagnostic-offending
+                    (select-keys evidence
+                                 [:seon.db/connection-identity
+                                  :seon.store/branch])
+                    :seon.error/diagnostic-cause ::write-bound-exceeded
+                    :seon.error/diagnostic-evidence evidence
+                    :seon.error/data evidence
+                    :seon.db/transaction-outcome-unknown true}))
+                (let [state
+                      (or (when (identical? projection
+                                             (:seon.schema/projection
+                                              (some-> carried-state deref)))
+                            carried-state)
+                          (env/environment-state
+                           (env/environment
+                            {:seon.db/connection connection
+                             :seon.boot/cluster-name
+                             (name (:branch (:config database)))
+                             :seon.schema/projection projection})))]
+                  (-> report
+                      (update :db-before carry-projection-state state)
+                      (update :db-after carry-projection-state state)))))))
       (catch Throwable throwable
         (let [data (error.refusal/refusal throwable)]
           (cond
@@ -3935,6 +3994,12 @@
   lookup refs when available, including identities removed by this transaction.
   Tempids are resolved. The next read observes the changed database.
   Explicit-connection system callers retain Datahike's full report.
+
+  Waiting for the Datahike writer is bounded by the branch's declared
+  :seon.config.db/write-time-limit-ms fact. If that bound fires, this returns
+  :seon.db/write-bound-exceeded with :seon.db/transaction-outcome-unknown
+  true. The queued transaction is not cancelled and may still commit, so the
+  caller must not assume rollback or retry it blindly.
 
   When `*conn*` is bound, an explicit connection must have the same Datahike
   connection ID. An absent binding means the caller is outside an agent

@@ -3,6 +3,14 @@
  ; isolated scratch and eval roots may explicitly choose false at creation.
  :seon.config.db/keep-history? true
 
+ ; Unit: milliseconds waiting for one Datahike writer result.
+ ; Provenance: AGENTS.md §2.3 and the 2026-09-17 fast-runner jstack showed an
+ ; unbounded seon.db/transact! parked for 134 s. Datahike does not cancel a
+ ; queued transaction when this caller's wait ends, so a firing bound reports
+ ; the transaction outcome as unknown rather than claiming a rollback.
+ :seon.config.db/write-time-limit-ms 30000
+ :seon.config.db/validation-node-limit 250000
+
  ; Unit: queued compute submissions.
  ; Provenance: core.async.flow alpha3 uses a fixed buffer of 10 per channel;
  ; the scheduling testbed preserved it because a full channel parks the
