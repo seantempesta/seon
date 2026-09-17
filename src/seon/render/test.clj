@@ -28,7 +28,7 @@
   (cond
     (pos? (get entity :seon.test/error-count 0)) "error"
     (pos? (get entity :seon.test/fail-count 0)) "fail"
-    (and (pos? (get entity :seon.test/pass-count 0))
+    (and (or (:seon.test/unchanged entity) (pos? (get entity :seon.test/pass-count 0)))
          (= 0 (:seon.test/fail-count entity))
          (= 0 (:seon.test/error-count entity))) "pass"
     :else "unrun or incomplete"))
@@ -50,7 +50,12 @@
                     (str "\n" (str/join "\n\n" (map test/failure-text (failures entity))))
                     (when-let [legacy (:seon.test/failure-message entity)] (str "\n" legacy)))
                   (when-let [unknown (:seon.test/reach-unknown entity)] (str "\n" unknown)))]
-    (str (repl/source-text (list 'clojure.core/identity text)) "\n"
+    (str (when (:seon.test/unchanged entity)
+           (str (repl/source-text
+                 (list 'clojure.core/identity
+                       (select-keys entity [:seon.test/unchanged :seon.test/recorded-basis-t
+                                            :seon.test/run-basis-t]))) "\n"))
+         (repl/source-text (list 'clojure.core/identity text)) "\n"
          (repl/source-text (list 'seon.db/pull (list 'quote evidence-selector)
                                 [:seon.test/sym test-name])) "\n"
          (repl/source-text (list 'seon.test/changed-since-green (list 'seon.db/db) test-name)) "\n"
@@ -91,6 +96,10 @@
   (let [entity (evidence unit) test-name (:seon.test/sym entity)]
     [:section {:class "seon-family-entry seon-test"}
      [:h3 (function-link test-name) " — " (state entity)]
+     (when (:seon.test/unchanged entity)
+       [:p "Unchanged; reused the result recorded at :t "
+        (or (:seon.test/recorded-basis-t entity) "unavailable")
+        ", tested basis :t " (or (:seon.test/run-basis-t entity) "unavailable") "."])
      (when (and (:seon.db/db unit) (string? test-name) (seq test-name))
        [:p {:class "seon-test-host"} (test/host-text (:seon.db/db unit) test-name)])
      (into [:div {:class "seon-test-failures"}]

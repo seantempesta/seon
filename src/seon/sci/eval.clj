@@ -963,8 +963,14 @@
       (let [namespace-name (symbol (namespace qualified))]
         (when-not (sci/find-ns ctx namespace-name)
           (sci/add-namespace! ctx namespace-name {}))
-        (sci/intern ctx namespace-name
-                    (with-meta (symbol (name qualified)) metadata) value)))))
+        (let [installed (sci/intern ctx namespace-name
+                                    (with-meta (symbol (name qualified)) metadata) value)]
+          ;; SCI intern replaces an existing root without adopting symbol
+          ;; metadata. The evaluated :test body and contract belong to the
+          ;; replacement too; retain only the destination's generation/ns.
+          (reset-meta! installed
+                       (merge metadata (select-keys (meta installed)
+                                                    [:sci/generation :ns]))))))))
 
 (declare base-bindings)
 

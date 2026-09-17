@@ -236,6 +236,17 @@ and the coordinator. The run entity is written with its members **before**
 execution, on the named cluster. `bin/test` calls it through one prepl
 evaluation and reads the members back; it no longer computes a set itself.
 
+**Unchanged-request refinement (Stage 1–3 design):** platform members precede
+changed work, outstanding obligations, first runs and explicit
+named/all/full/platform requests. An unchanged, previously green bare request
+returns the recorded result and selects zero members, including zero platform
+members. Bare `run-owned` requests use the last green program basis; an
+explicit `:seon.test/run-basis-t` requires that exact recorded basis or the
+current basis for fresh execution. Reuse returns `:seon.test/unchanged true`
+and `:seon.test/recorded-basis-t` alongside the original tested basis. Red or
+unknown evidence never qualifies. The single-test entry can implement this
+before reset; shell and full selection integration still belong to Stage 1.
+
 **Regression.** `seon.test.runner-test/selection-is-one-function-on-both-hosts`:
 the in-process `check` and a worker's run request over the same database
 value and change produce the same members and reasons; a first run on a
@@ -247,9 +258,9 @@ request naming no cluster is refused by name.
 ### Stage 2 — One resolution by identity, from facts
 
 **Change.** `seon.test/resolve-test` resolves a test identity to a runnable
-from the cluster's facts: an indexed test (has `:seon.fn/file`) to its Var
-on the worker's classpath; an agent-authored test (no file, provenance
-`:agent`) by evaluating its stored source in the cluster's base SCI context
+from the cluster's facts: a core-admitted indexed test to its Var
+through the host's loader; an agent-admitted test, including an override
+retaining a file coordinate, by evaluating its stored source in the base SCI context
 (acquired as agents acquire it) and taking the resulting Var. The worker uses
 only this. The classpath both hosts load from derives from the `:test` alias
 (stage 0 item 3).

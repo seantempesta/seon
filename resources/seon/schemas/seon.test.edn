@@ -30,6 +30,8 @@
             :error-count [:int {:min 0}],
             :run-basis-t :seon.db/basis-t,
             :run-at :inst,
+            :unchanged [:= true],
+            :recorded-basis-t [:and {:description "Transaction basis at which the reused result facts were recorded; distinct from the program basis they tested."} :seon.db/basis-t],
             :run :seon.db/ref,
             :failure-identity
             [:string {:min 64, :max 64}],
@@ -71,6 +73,8 @@
              [:seon.test/reach-unknown {:optional true} :seon.test/reach-unknown]
              [:seon.test/run-basis-t :seon.test/run-basis-t]
              [:seon.test/run-at :seon.test/run-at]
+             [:seon.test/unchanged {:optional true} :seon.test/unchanged]
+             [:seon.test/recorded-basis-t {:optional true} :seon.test/recorded-basis-t]
              [:seon.test/run {:optional true} :seon.test/run]
              [:seon.test/failing-assertions
               {:optional true}
@@ -204,10 +208,17 @@
   [:seon.test/remaining-ms [:int {:min 1}]]]
  :seon.test/run-owned-request
  [:map {:description "One of the calling agent's own declared tests, with the connection call preparation supplies from its environment."}
+  [:seon.test/run-basis-t {:optional true} :seon.test/run-basis-t]
   [:seon.db/connection :seon.db/connection]
   [:my.program/context :my.program/context]
   [:seon.test/class-loader {:optional true} :seon.test/class-loader]
   [:seon.test/var :seon.test/var]]
+ :seon.test/reuse-request
+ [:map [:seon.db/db :seon.db/database-value]
+  [:seon.test/identity :seon.test/identity]
+  [:seon.test/run-basis-t {:optional true} :seon.test/run-basis-t]]
+ :seon.test/reuse-result
+ [:or :seon.test/result [:= :seon.test/execution-required] :seon.error/value]
  :seon.test/declared-root
  [:string {:min 1
            :description "The operator root the caller genuinely holds; absent means this JVM's own declaration is read."}]

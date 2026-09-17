@@ -508,31 +508,40 @@
   affordance inside an evaluation, AGENTS §3).
 
   `run` itself hands nothing: a host REPL running the same Var is not any
-  cluster's own work, and its body's elided arities refuse and say so."
+  cluster's own work, and its body's elided arities refuse and say so.
+
+  An unchanged, previously green bare request returns its recorded result
+  without execution. The result names :seon.test/unchanged and the recording
+  basis. Supply :seon.test/run-basis-t to request a specific basis; a newer
+  current basis deliberately reruns, even when the program is unchanged."
   {:malli/schema [:=> [:cat :seon.test/run-owned-request]
                   [:or :seon.test/result :seon.error/value]]}
   [{connection :seon.db/connection test-var :seon.test/var :as request}]
   (let [database (db/db connection)]
     (if (:seon.error/kind database)
       database
-      (let [provenance (runner/provenance database)
-            prepared (prepare-tests! database connection request)
-            resolved (if (:seon.error/kind prepared)
-                       prepared
-                       (resolve-test
-                        (assoc prepared :seon.test/identity
-                               (symbol (str (:ns (meta test-var)))
-                                       (str (:name (meta test-var)))))))]
-        (cond
-          (:seon.error/kind provenance) provenance
-          (:seon.error/kind resolved) resolved
-          :else
-          (run resolved connection
-               {:seon.db/db database
-                :seon.db/connection connection
-                :seon.sci.eval/ctx (:seon.sci.eval/ctx prepared)
-                :seon.test.run/provenance provenance
-                :seon.test/remaining-ms (event-backstop-ms)}))))))
+      (let [test-symbol (symbol (str (:ns (meta test-var))) (str (:name (meta test-var))))
+            reused (runner/reusable-result
+                    (merge {:seon.db/db database :seon.test/identity test-symbol}
+                           (select-keys request [:seon.test/run-basis-t])))]
+        (if (not= :seon.test/execution-required reused)
+          reused
+          (let [provenance (runner/provenance database)
+                prepared (prepare-tests! database connection request)
+                resolved (if (:seon.error/kind prepared)
+                           prepared
+                           (resolve-test
+                            (assoc prepared :seon.test/identity test-symbol)))]
+            (cond
+              (:seon.error/kind provenance) provenance
+              (:seon.error/kind resolved) resolved
+              :else
+              (run resolved connection
+                   {:seon.db/db database
+                    :seon.db/connection connection
+                    :seon.sci.eval/ctx (:seon.sci.eval/ctx prepared)
+                    :seon.test.run/provenance provenance
+                    :seon.test/remaining-ms (event-backstop-ms)}))))))))
 
 (defn- identity-tests [database changed]
   (let [[attribute value :as program-identity]

@@ -7,6 +7,96 @@ tags: [test, database, admission, stage-2]
 
 # Test recording and pre-execution admission
 
+## Unchanged-request continuation
+
+Resolution landed as `a0c69cfd9`; pure claim/completion landed as
+`163367a9a`. This third slice wires the recorded-result read into
+`seon.test/run-owned`, before resolution or execution. `my.test/run` forwards
+the request's optional basis. A hit returns `:seon.test/unchanged true`,
+`:seon.test/recorded-basis-t` (the recording transaction), and the existing
+`:seon.test/run-basis-t` (the tested basis). The AI renderer presents those
+fields as data; HTML names both bases.
+
+The implemented bare-request interpretation is the design's last-green
+program basis, not every intervening physical transaction: completing a REPL
+evaluation itself advances physical `:t`. This interpretation was stated
+during implementation; no reply to the optional clarification was received.
+An explicit current basis forces fresh execution; repeating that exact basis
+reuses its green result. A noncurrent basis without matching green evidence
+refuses `:seon.test/invalid-basis`, rather than executing today's program
+while claiming to have tested history.
+
+Reuse compares the whole program digest, branch, original singleton selection
+and tested basis. It requires complete nonnegative counts and zero fail/error.
+Selection comes from recorded history: overwriting another batch member's
+latest result cannot turn an old batch into an identical singleton request.
+No new stored cache family or selection integration was introduced. This
+uses the existing latest-result recording path; migrating callers to admitted
+run members and routing claims across independent branches remain later work.
+
+The canonical agent regression evaluates and admits this exact source:
+
+```clojure
+(clojure.test/deftest my-cluster-is-reachable
+  (clojure.test/is
+   (= "own-tests"
+      (:seon.cluster/name
+       (seon.db/pull (seon.db/db) [:seon.cluster/name]
+                     [:seon.cluster/name "own-tests"])))))
+(my.test/check {:seon.test/changed ['my.agents.owner/my-cluster-is-reachable]})
+(my.test/run)
+```
+
+The check executes through `runner/run-vars!`; subsequent green requests
+return recorded evidence without another invocation or database transaction.
+After an intervening transaction, a bare request still reuses; a request with
+the new current `:seon.test/run-basis-t` executes once. Redefining the test to
+`(clojure.test/deftest my-cluster-is-reachable (clojure.test/is false))`
+must execute its new body on both following requests. These are exact fixture
+SCI forms, **not a new live-default proof**.
+
+The red redefinition exposed an existing installation defect: SCI's
+`sci-intern` replaces an existing root but retains metadata. The transfer owner
+now installs evaluated metadata, including the new `:test` function, retaining
+the destination SCI generation and namespace. Dependency grounding and the
+recurring regression are in
+[the issue note](../../../seon/issues/evaluated-root-transfer-retains-the-previous-test-metadata.md).
+
+Iteration evidence:
+
+- `tmp/stage2-reuse-first-fast.log`: 56 tests, 404 assertions, 0 failures,
+  1 error; the fixture attempted an undeclared agent attribute. Replaced by
+  an ordinary empty transaction to advance the physical basis.
+- `tmp/stage2-reuse-second-fast.log`: 58 tests, 428 assertions, 4 failures,
+  0 errors; the old SCI test metadata caused a fresh request to execute the
+  old passing body. The shared transfer owner correction addresses this.
+
+The final iteration command (one foreground invocation, no test environment
+overrides) is:
+
+```bash
+timeout 2400 bin/test-fast --paths \
+  resources/seon/schemas/seon.test.edn src/seon/test/runner.clj \
+  src/seon/test.clj src/my/test.clj test/my/test_test.clj \
+  src/seon/render/test.clj test/seon/test_reaching_test.clj \
+  test/seon/test_test.clj src/seon/sci/eval.clj -- \
+  my.test-test seon.test-test seon.test.runner-test seon.test-reaching-test
+```
+
+Output is `tmp/stage2-reuse-third-fast.log`: **58 tests, 428 assertions,
+0 failures, 0 errors**, exit 0, final test event 2026-09-17T08:48:00.913926Z.
+A later indentation-only edit
+to `run-owned` leaves the tested forms unchanged.
+
+Verification boundaries remain explicit: no default start/stop/adopt command
+was issued, and no new live-default proof is claimed. The configured edit hook
+still queues publication automatically. Cold/platform proof belongs to the
+orchestrator. Earlier operator/root-launcher fast runs ended with unattributed
+TERM and still have no completed tally. Markdown hooks report 31 stale
+gitlink citations in the unrelated AGENTS audit; no full documentation-lint
+pass is claimed. The owned scratch worktree was removed after observing its
+root had zero live clusters and no orphan JVMs; reference-code remains intact.
+
 ## Claim/completion continuation
 
 Resolution landed in `a0c69cfd9`. The following transaction work is a separate

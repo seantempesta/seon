@@ -924,6 +924,18 @@ never silent. By default, every canonical gate records the tests it ran on `:cur
 through `seon.test.runner/commit-results!` (`src/seon/test/runner.clj:1435`);
 recording failure fails the gate. Fast iterations do not persist that evidence.
 
+**Shared request policy (Stage 1–3 target):** platform members run first for
+changed work, an outstanding obligation, a first run, or an explicit
+named/all/full/platform request. An unchanged, previously green bare request
+returns recorded evidence and executes zero tests, including zero platform
+tests. `seon.test/run-owned` implements single-test reuse through
+`seon.test.runner/reusable-result`: program digest, exact recorded selection
+and requested basis must match. Bare requests use their last green program
+basis; `:seon.test/run-basis-t` can explicitly request the current database
+basis to rerun. `:seon.test/unchanged` and `:seon.test/recorded-basis-t` name
+reuse and its recording transaction. The shell/selection integration remains
+the post-reset Stage 1 work; this paragraph does not claim it has migrated.
+
 Tests find design issues; structure dissolves them: when a failure class
 appears, move the invariant to one choke point and keep ONE regression per
 class asserting the WANTED behavior. A smaller suite is a desired outcome;

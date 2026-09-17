@@ -11,6 +11,33 @@
             [seon.test.runner :as runner]
             [seon.test-support :as test-support]))
 
+(deftest recorded-reuse-requires-the-original-selection
+  (test-support/with-database
+   (fn [connection]
+     (let [passing 'seon.test-runner-failure-fixture/passing-example
+           empty-test 'seon.test-runner-failure-fixture/assertionless-example
+           execute! (fn [symbols]
+                      (let [provenance (runner/provenance (db/db connection))
+                            results (runner/run-vars! (mapv requiring-resolve symbols) {})
+                            recorded (runner/commit-results!
+                                      connection {:seon.test.run/provenance provenance
+                                                  :seon.test/run-basis-t (:seon.test.run/basis-t provenance)
+                                                  :seon.test/run-at (:seon.test.run/at provenance)
+                                                  :seon.test.runner/results results})]
+                        (is (vector? recorded) (pr-str recorded))))
+           reuse #(runner/reusable-result {:seon.db/db (db/db connection) :seon.test/identity passing})]
+       (execute! [passing empty-test])
+       (is (= :seon.test/execution-required (reuse)))
+       (execute! [empty-test])
+       (is (= :seon.test/execution-required (reuse))
+           "Overwriting another test's latest result cannot shrink the old batch's selection.")
+       (execute! [passing])
+       (is (true? (:seon.test/unchanged (reuse))))
+       (is (= :seon.test/invalid-basis
+              (:seon.error/kind
+               (runner/reusable-result {:seon.db/db (db/db connection) :seon.test/identity passing
+                                        :seon.test/run-basis-t (inc (db/basis-t (db/db connection)))}))))))))
+
 (deftest interpreted-test-bodies-use-the-sci-interrupt-bound
   (test-support/with-database
    (fn [connection]

@@ -38,16 +38,20 @@
   My tests run as MY cluster's work: `seon.test/run-owned` receives my
   connection from call preparation and hands it to the test body, so a
   `seon.db` call my test elides inside reaches my cluster exactly as the rest
-  of my evaluation does.
+  of my evaluation does. Unchanged green requests return the recorded result
+  with :seon.test/unchanged and :seon.test/recorded-basis-t. An explicit
+  :seon.test/run-basis-t requests that basis; use the current database basis
+  to deliberately rerun an unchanged program.
 
   Example:
   (my.test/run)"
   ([] (list 'my.test/run {}))
   ([request]
-   `(let [symbols# (seon.test/owned-symbols ~request)]
+   `(let [request# ~request
+          symbols# (seon.test/owned-symbols request#)]
       (if (:seon.error/kind symbols#)
         symbols#
         (mapv (fn [test-symbol#]
                 (seon.test/run-owned
-                 {:seon.test/var (resolve (symbol test-symbol#))}))
+                 (assoc request# :seon.test/var (resolve (symbol test-symbol#)))))
               symbols#)))))

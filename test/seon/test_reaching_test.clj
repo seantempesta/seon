@@ -645,6 +645,20 @@
                                              :seon.render/value {:seon.test/sym cheap}})]
               (is (.contains ai "runs: in the cluster process") ai))))))))
 
+(deftest reused-results-render-the-recording-basis-as-data
+  (let [unit {:seon.render/value
+              {:seon.test/sym "seon.test-reaching-test/reused-results-render-the-recording-basis-as-data"
+               :seon.test/pass-count 1 :seon.test/fail-count 0 :seon.test/error-count 0
+               :seon.test/run-basis-t 42 :seon.test/recorded-basis-t 43
+               :seon.test/unchanged true}}
+        ai (render.test/render-ai unit)
+        html (pr-str (render.test/render-html unit))]
+    (is (.contains ai ":seon.test/unchanged true"))
+    (is (.contains ai ":seon.test/recorded-basis-t 43"))
+    (is (.contains ai ":seon.test/run-basis-t 42"))
+    (is (.contains html "Unchanged; reused the result recorded at :t "))
+    (is (.contains html "43"))))
+
 ;;; ---------------------------------------------------------------------------
 ;;; An in-process check excludes a declared-long test and reports what expired
 ;;; ---------------------------------------------------------------------------
