@@ -492,6 +492,16 @@ boolean domain marker; "kinds are a code smell"):
    document; it supersedes the "kind" spellings of
    `research/error-and-data-model-design-2026-09-17.md`).
 
+### 1p. Owner approval 2026-09-18 ~00:30Z — render pairs stay schema properties; composition approved
+
+Asked whether declaring render pairs as Malli properties on the entity
+schema declaration was a bad earlier decision that ships unneeded data: no.
+The pair is declared once in the resource, derived into the registry and
+into the schema entity's property datoms; values carry data only; a facet
+without a pair falls to the default printer. The one cost is that a
+renderer rename changes the schema digest (left as is unless it churns).
+Owner: "okay fine. approved."
+
 ## 2. What exists today, with the seams named
 
 Verified on `steward-platform` at `a36d55c3b`/`849bbce0b` on 2026-09-17.
