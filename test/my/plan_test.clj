@@ -543,7 +543,8 @@
                            [{:seon.agent/id "juniper"}
                             {:db/id [:seon.agent/id "juniper"]
                              :seon.agent/plan
-                             {:my.plan/objective "Improve Juniper context inspection"
+                             {:my.plan/agent [:seon.agent/id "juniper"]
+                              :my.plan/objective "Improve Juniper context inspection"
                               :my.plan/current-step "step-render-plan"
                               :my.plan/steps juniper-fixture-steps}}])
       (let [current (plan/plan {:seon.db/db @connection
