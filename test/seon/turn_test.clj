@@ -1495,22 +1495,23 @@
             agent-ref (fn [agent-id]
                         [:seon.agent/id agent-id])
             function-row
-            (fn [result]
-              (let [source
-                    (str "(defn ^{:malli/schema [:=> [:cat] :int]} "
-                         "scratch [] " result ")")
-                    preliminary-row
-                    {:seon.fn/sym qualified-id
-                     :seon.fn/ns [:seon.ns/name namespace-name]
-                     :seon.fn/source source
-                     :seon.fn/arglists "([])"
-                     :seon.fn/private? false
-                     :seon.fn/spec "[:=> [:cat] :int]"
-                     :seon.schema.admission/source :agent}]
-                (second
-                 (seon.fn/analyze-form
-                  @connection source (:seon.fn/ns preliminary-row)
-                  preliminary-row))))
+            (memoize
+             (fn [result]
+               (let [source
+                     (str "(defn ^{:malli/schema [:=> [:cat] :int]} "
+                          "scratch [] " result ")")
+                     preliminary-row
+                     {:seon.fn/sym qualified-id
+                      :seon.fn/ns [:seon.ns/name namespace-name]
+                      :seon.fn/source source
+                      :seon.fn/arglists "([])"
+                      :seon.fn/private? false
+                      :seon.fn/spec "[:=> [:cat] :int]"
+                      :seon.schema.admission/source :agent}]
+                 (second
+                  (seon.fn/analyze-form
+                   @connection source (:seon.fn/ns preliminary-row)
+                   preliminary-row)))))
             start!
             (fn [run-id ordinal]
               (db/transact!
