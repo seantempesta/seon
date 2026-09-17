@@ -49,10 +49,15 @@ dependency closure once: **57,424 ms**, 372 namespaces.
 ## The class, not the instance
 
 A tool classpath that load-files a first-party namespace inherits that
-namespace's whole require closure, and nothing checks the two agree. The
-durable form of this check is a regression that loads
-`seon.test.selection` on the `:dev-cache` basis alone; this note is filed
-rather than that regression being written here, because the gate's own
-`dependency-cache-and-classpath` phase is the surface that should report it
-by name — see
-[test preparation costs](../../prds/steward-platform/research/test-preparation-costs-2026-09-16.md).
+namespace's whole require closure. The first fix left that invariant without
+a regression. It recurred at `6f80d1a4d` with Edamame, blocking batch 121's
+explicit preparation as well as its gates (`tmp/orchestrator/gate-results/batch-121.log`).
+
+The selector now reads source forms with Clojure's own non-evaluating reader;
+there is no parser dependency to repeat in the tool alias. The canonical
+`seon.test-runner-test/dependency-tool-loads-selection` regression launches
+the actual `clojure -T:dev-cache` tool classpath, loads the selector and
+enumerates its input digests. Future require/classpath drift fails this
+recurring platform regression instead of relying on a test-classpath load.
+Verification is recorded in
+[the guardrails landing note](../../prds/steward-platform/research/lane-guardrails-2026-09-17.md).

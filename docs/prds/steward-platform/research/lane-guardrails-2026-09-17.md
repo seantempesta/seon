@@ -627,3 +627,94 @@ stale-gitlink findings already recorded above. Owned paths in this slice:
 `test/seon/test_runner_test.clj`, AGENTS.md's overlay paragraphs and this note.
 Item 3's finding-name correction was separately accepted at `4155deef4`;
 the slot exhaust correction landed at `56b8a1cd8`.
+
+## Batch 121 corrections — 2026-09-17
+
+Read the complete batch 121 log and the existing
+`dev-cache-tool-classpath-omits-the-selectors-dependencies` issue end to end.
+The log proves two defects in `6f80d1a4d`: cold gates refused before their
+own preparation, and the explicit preparation then failed loading Edamame
+on the `-T:dev-cache` classpath. The issue was already marked resolved after
+the same class recurred with `babashka.process`; its promised regression
+had never been added. This correction adds it.
+
+`selection/source-forms` now uses Clojure's own `read` with `*read-eval*`
+false and bounded finite source input. No Edamame dependency, delayed require,
+or extra tool-alias dependency remains. Clojure's reader entry point and
+options are in `reference-code/clojure/src/clj/clojure/core.clj:3789` and
+`reference-code/clojure/src/jvm/clojure/lang/LispReader.java:218`.
+When a source form requires an unavailable reader alias, comparison
+conservatively selects the file's public declarations rather than treating
+the unreadable form as unchanged. The actual
+`clojure -T:dev-cache dev-cache-probe/verify` regression loads selection and
+enumerates its inputs in a disposable canonical launcher checkout. It uses
+the repository's exact `deps.edn`, not a second test classpath declaration.
+
+Graph admission no longer records or compares Git SHAs. The existing cache
+digest also hashes documentation (`dev_cache.clj:471`), so changing that full
+digest to exclude docs would change cache semantics beyond graph admission.
+Instead, admission compares the program-source portion of the cache's
+already recorded `:seon.test.cache/inputs` with the immutable HEAD snapshot's
+inputs, using selection's existing declared `graph-roots`. The matching base
+retains its existing digest and directory; no new aggregate digest, identity
+record, or stored graph was introduced. `record-head!` and its Git-SHA
+metadata are deleted. Documentation commits retain matching source inputs.
+Missing or different source inputs cannot establish a match.
+
+Only fast admission requires that matching base in advance. A cold overlay
+gate with no match runs the same `--prepare-head-base` preparation command
+under its existing supervised child lifecycle and publication bound, then
+checks the overlay against the prepared graph. The parent has not acquired
+a slot yet, so preparation cannot deadlock waiting for the parent's slot.
+It then proceeds with ordinary selected-snapshot preparation and tests.
+The explicit preparation command remains available to the orchestrator for
+lanes. Fast admission never invokes it. These rules supersede the earlier
+blanket pre-JVM refusal and exact-HEAD-commit requirement in this note.
+
+The canonical regression now exercises both batch 121 forms (named cold
+gate and `--platform --paths`) with no ready base: both prepare and reach
+the runner. On the same source snapshot, fast mode refuses without a base,
+names the preparation command, and launches no JVM. An actual docs-only
+Git commit then reuses the recorded source graph. Stale source inputs and
+missing dirty callers still refuse. The cache preparation endpoint in this
+shell fixture receives a manifest from the real program indexer and the
+actual `dev-cache/test-inputs` producer; no hand-authored call graph is used.
+
+Verification: **2 tests / 37 assertions / 0 failures / 0 errors**, exit
+**0**, ending `2026-09-17T06:06:48.270755Z`. Slot wait **0 seconds**.
+The first pass exposed a missing `tmp` directory for the source-input value;
+that setup defect was fixed before the green run. The tool-classpath
+regression passed on both runs. Shell syntax and owned whitespace checks pass.
+The source hook reports the pre-existing redundant-let warning in selection;
+Markdown feedback still reports the same 31 foreign stale-gitlink findings.
+
+The owned detached worktree `tmp/lane-cold-correction-wt` was created at
+then-HEAD `fd27cb911`; the source/test overlay excludes the concurrently
+dirty `src/seon/fn.clj` and `test/seon/program_test.clj` observed at entry.
+As in the previous checkpoint, the existing pre-guard fast launcher from
+`56b8a1cd8` bootstraps verification; the candidate launcher is installed only
+inside its disposable snapshot and exercised by the canonical fixtures.
+No host cold gate, lane environment override, or default operation was run.
+
+```sh
+timeout 2400 bin/test-fast --paths src/seon/test/cache.clj src/seon/test/selection.clj test/seon/test_runner_test.clj tmp/lane_cold_probe.clj tmp/candidate-test -- tmp.lane-cold-probe
+```
+
+Exact focused probe, with `tmp/candidate-test` containing candidate launcher
+bytes:
+
+```clojure
+(ns tmp.lane-cold-probe
+  (:require [clojure.test :refer [deftest]] [seon.test-runner-test]))
+(deftest overlay-admission
+  (spit "bin/test" (slurp "tmp/candidate-test"))
+  ((:test (meta #'seon.test-runner-test/selected-overlays-require-a-current-graph-and-every-changed-caller))))
+(deftest tool-classpath
+  ((:test (meta #'seon.test-runner-test/dependency-tool-loads-selection))))
+```
+
+All owned verification processes exited and fast snapshots were removed;
+the detached worktree is removed before reporting. Cold/platform proof
+remains with the orchestrator. Owned paths are `bin/test`, selection and
+cache, `test/seon/test_runner_test.clj`, AGENTS.md, the existing tool-classpath
+issue and this note.

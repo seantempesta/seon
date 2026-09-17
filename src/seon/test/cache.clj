@@ -206,41 +206,23 @@
       (throw (ex-info "The published test base has no program manifest."
                       {::base base}))))
 
-(defn record-head!
-  "Record the Git identity of a HEAD-only publication beside its cached base."
-  {:malli/schema [:=> [:cat :string :string :string] :nil]}
-  [source digest git-sha]
-  (let [directory (io/file source "target/test-published-bases" digest)
-        ready (io/file directory "ready.edn")
-        record (read-edn ready)
-        temporary (io/file directory (str "head-" (random-uuid) ".edn"))]
-    (manifest (str (io/file directory "base")))
-    (when-not (= digest (::digest record))
-      (throw (ex-info "HEAD publication has no matching cache record." {::digest digest})))
-    (spit temporary (pr-str (assoc record ::git-sha git-sha)))
-    (when-not (.renameTo temporary ready)
-      (throw (ex-info "Could not record HEAD publication." {::git-sha git-sha})))
-    nil))
-
 (defn head-manifest
-  "Read a published program graph for exactly the requested Git commit."
-  {:malli/schema [:=> [:cat :string :string] :seon.fn.manifest/manifest]}
-  [source git-sha]
+  "Read a published base whose recorded program-source inputs match the snapshot."
+  {:malli/schema [:=> [:cat :string [:map-of :string :string]] :seon.fn.manifest/manifest]}
+  [source source-inputs]
   (or (some (fn [directory]
               (let [ready (read-edn (io/file directory "ready.edn"))
+                    inputs (first (::inputs ready))
                     graph (io/file directory "base/manifest.edn")]
-                (when (and (= git-sha (::git-sha ready))
+                (when (and (map? inputs)
+                           (= source-inputs (selection/source-inputs inputs))
                            (= (.getName directory) (::digest ready))
                            (.isFile graph))
-                  (let [value (read-edn graph)]
-                    (when-not (vector? (:seon.fn.manifest/artifacts value))
-                      (throw (ex-info "Published HEAD graph has no artifacts." {::git-sha git-sha})))
-                    value))))
+                  (manifest (str (io/file directory "base"))))))
             (sort-by #(.getName %) (.listFiles (io/file source "target/test-published-bases"))))
       (throw (ex-info
-              (str "No published program graph matches HEAD " git-sha
-                   "; orchestrator must run: bin/test --prepare-head-base")
-              {::git-sha git-sha}))))
+              "No published program graph matches the source snapshot; orchestrator must run: bin/test --prepare-head-base"
+              {::source-inputs source-inputs}))))
 
 (defn -main
   "Prepare the selected snapshot's base; retain it while its launcher lives."

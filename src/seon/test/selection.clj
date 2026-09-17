@@ -16,7 +16,6 @@
   (:require [babashka.process :as process]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
-            [edamame.core :as reader]
             [clojure.string :as str])
   (:import (java.io File)
            (java.nio.file Files)
@@ -74,6 +73,15 @@
              [(relative-path root-file file)
               (sha-256 (Files/readAllBytes (.toPath file)))])))
      (input-paths root-file))))
+
+(defn source-inputs
+  "The program-source part of a gate's recorded input digests."
+  {:malli/schema [:=> [:cat [:map-of :string :string]] [:map-of :string :string]]}
+  [digests]
+  (into (sorted-map)
+        (filter (fn [[path _]]
+                  (some #(str/starts-with? path (str % "/")) graph-roots)))
+        digests))
 
 (defn changed-inputs
   "Repository-relative paths whose bytes differ from a recorded basis."
@@ -177,9 +185,17 @@
            distinct sort vec))))
 
 (defn- source-forms [source]
-  (reader/parse-string-all
-   source {:all true :auto-resolve name :read-cond :allow :features #{:clj}
-           :regex #(list 're-pattern %)}))
+  ;; Selection also loads in the dependency tool's minimal JVM. Use its own
+  ;; non-evaluating reader, without adding another parser to that classpath.
+  ;; Unresolvable reader aliases conservatively select every declaration in
+  ;; this file; they never make an uncertain declaration appear unchanged.
+  (try
+    (binding [*read-eval* false]
+      (with-open [input (java.io.PushbackReader. (java.io.StringReader. source))]
+        (loop [forms []]
+          (let [form (read {:eof ::eof :read-cond :allow :features #{:clj}} input)]
+            (if (= ::eof form) forms (recur (conj forms form)))))))
+    (catch Exception _ nil)))
 
 (defn missing-overlay-callers
   "Changed caller files omitted from an overlay of changed public declarations."

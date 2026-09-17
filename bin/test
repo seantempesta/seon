@@ -732,6 +732,14 @@ begin_phase snapshot
 git archive "$git_sha" | tar -x -C "$run_root"
 rm -rf "$run_root/reference-code"
 ln -s "$source_root/reference-code" "$run_root/reference-code"
+ln -s "$source_root/.git" "$run_root/.git"
+if [ ${#snapshot_paths[@]} -gt 0 ]; then
+  mkdir -p "$run_root/tmp"
+  bb --config "$source_root/bb.edn" -e '
+    (require (quote [seon.test.selection :as selection]))
+    (prn (selection/source-inputs (selection/input-digests (first *command-line-args*))))' \
+    "$run_root" >"$run_root/tmp/head-inputs.edn"
+fi
 overlay_paths=()
 if [ "$prepare_head_base" -eq 1 ]; then
   echo "bin/test: preparing the program graph for HEAD $git_sha"
@@ -762,7 +770,6 @@ if [ ${#overlay_paths[@]} -gt 0 ]; then
     fi
   done
 fi
-ln -s "$source_root/.git" "$run_root/.git"
 if [ -e "$source_root/.env" ] && [ ! -e "$run_root/.env" ]; then
   ln -s "$source_root/.env" "$run_root/.env"
 fi
@@ -782,13 +789,33 @@ echo "bin/test: end snapshot differences"
 record_phase snapshot
 
 if [ ${#snapshot_paths[@]} -gt 0 ]; then
+  # Cold gates own publication. Reuse the HEAD-only preparation command when
+  # its graph is absent; fast iterations may never start this preparation.
+  if [ "$fast_iteration" -ne 1 ] && ! bb --config "$source_root/bb.edn" -e '
+    (require (quote [seon.test.cache :as cache]))
+    (require (quote [clojure.edn :as edn]))
+    (let [[source inputs] *command-line-args*]
+      (try (cache/head-manifest source (edn/read-string (slurp inputs)))
+           (catch Exception _ (System/exit 64))))' "$source_root" "$run_root/tmp/head-inputs.edn"; then
+    begin_phase published-base
+    launch_runner "$source_root/bin/test" --prepare-head-base
+    if await_runner; then
+      record_phase published-base
+    else
+      status=$?
+      announce_phase_failure published-base "HEAD preparation exited $status"
+      exit "$status"
+    fi
+  fi
   if ! bb --config "$source_root/bb.edn" -e '
     (require (quote [seon.test.cache :as cache])
-             (quote [seon.test.selection :as selection]))
-    (let [[source snapshot git-sha & paths] *command-line-args*]
+             (quote [seon.test.selection :as selection])
+             (quote [clojure.edn :as edn]))
+    (let [[source snapshot git-sha & paths] *command-line-args*
+          inputs (edn/read-string (slurp (str snapshot "/tmp/head-inputs.edn")))]
       (try
         (selection/assert-complete-overlay!
-         (cache/head-manifest source git-sha) source snapshot git-sha paths)
+         (cache/head-manifest source inputs) source snapshot git-sha paths)
         (catch Exception failure
           (binding [*out* *err*] (println "bin/test:" (ex-message failure)))
           (System/exit 64))))' "$source_root" "$run_root" "$git_sha" "${snapshot_paths[@]}"; then
@@ -1009,12 +1036,7 @@ if [ "$prepare_head_base" -eq 1 ]; then
     echo 'bin/test: HEAD preparation requires the cached-base protocol' >&2
     exit 1
   fi
-  if ! bb --config "$source_root/bb.edn" -e '
-    (require (quote [seon.test.cache :as cache]))
-    (apply cache/record-head! *command-line-args*)' "$source_root" "$snapshot_digest" "$git_sha"; then
-    exit 1
-  fi
-  echo "bin/test: published overlay baseline for HEAD $git_sha"
+  echo "bin/test: published overlay baseline $snapshot_digest for HEAD $git_sha"
   cd "$source_root"
   remove_run_root
   exit 0

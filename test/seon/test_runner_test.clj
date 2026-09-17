@@ -1166,25 +1166,15 @@
 
 (defn- publish-fixture-head! [checkout]
   (let [directory (io/file checkout "target/test-published-bases" fake-cache-digest)
-        base (doto (io/file directory "base") .mkdirs)
-        log (io/file checkout "tmp/head.txt")
-        _ (io/make-parents log)
-        child (.start (doto (ProcessBuilder. ^java.util.List
-                                             ["git" "-C" (.getPath checkout) "rev-parse" "HEAD"])
-                        (.redirectOutput log)))]
-    (try
-      (when-not (and (.waitFor child test-support/event-backstop-seconds TimeUnit/SECONDS)
-                     (zero? (.exitValue child)))
-        (throw (ex-info "Fixture HEAD was not readable." {})))
-      (spit (io/file base "manifest.edn")
-            (pr-str (functions/build-manifest
-                     {:seon.fn/root (.getCanonicalPath checkout)
-                      :seon.fn/roots ["src" "test"]})))
-      (spit (io/file directory "ready.edn")
-            (pr-str {:seon.test.cache/digest fake-cache-digest}))
-      (cache/record-head! (.getCanonicalPath checkout) fake-cache-digest
-                          (str/trim (slurp log)))
-      (finally (stop-process-tree! child)))))
+        base (doto (io/file directory "base") .mkdirs)]
+    (io/copy (io/file project-root "dev_cache.clj") (io/file checkout "dev_cache.clj"))
+    (spit (io/file base "manifest.edn")
+          (pr-str (functions/build-manifest
+                   {:seon.fn/root (.getCanonicalPath checkout)
+                    :seon.fn/roots ["src" "test"]})))
+    (spit (io/file directory "ready.edn")
+          (pr-str {:seon.test.cache/digest fake-cache-digest
+                   :seon.test.cache/inputs (#'dev-cache/test-inputs (.getCanonicalPath checkout) fake-cache-digest)}))))
 
 (defn- launcher-checkout!
   "Give a launcher fixture its own cache authority as well as its own run roots."
@@ -1272,11 +1262,50 @@
             (is (= 64 status) output)
             (is (str/includes? output "orchestrator must run: bin/test --prepare-head-base") output)
             (is (not (.exists marker)) "absent baseline refuses before a JVM"))
-          (spit ready (pr-str (assoc (edn/read-string record) :seon.test.cache/git-sha "stale")))
+          (let [fast-source (slurp executable)]
+            (io/copy (io/file checkout "target/test-published-bases" fake-cache-digest "base/manifest.edn")
+                     (io/file checkout "tmp/head-manifest.edn"))
+            (spit (io/file checkout "tmp/inputs.edn")
+                  (pr-str (:seon.test.cache/inputs (edn/read-string record))))
+            (spit executable
+                  (str "#!/bin/bash\nset -euo pipefail\n"
+                       "mkdir -p target/test-classpaths\n"
+                       "cp \"$SEON_FAKE_CACHE_PATH/../../inputs.edn\" target/test-classpaths/" fake-cache-digest ".inputs.edn\n"
+                       fake-dev-cache-prologue
+                       "for argument in \"$@\"; do\n"
+                       "  if [ \"$argument\" = --prepare-base ]; then\n"
+                       "    mkdir -p \"${!#}/data/store\"\n"
+                       "    cp \"$SEON_FAKE_CACHE_PATH/../../head-manifest.edn\" \"${!#}/manifest.edn\"\n"
+                       "    echo HEAD_PREPARED\n    exit 0\n  fi\ndone\n"
+                       "echo COLD_RAN\n"))
+            (doseq [selection ["--paths src/probe/api.clj -- seon.fixture-test"
+                               "--platform --paths src/probe/api.clj"]]
+              (io/delete-file ready true)
+              (let [[status output]
+                    (fixture-command!
+                     checkout
+                     ["bash" "-c"
+                      (str "mkdir -p tmp/cache/" fake-cache-digest "\n"
+                           "export PATH=\"$PWD/tmp/fake-bin:$PATH\"\n"
+                           "export SEON_FAKE_CACHE_PATH=\"$PWD/tmp/cache/" fake-cache-digest "\"\n"
+                           "export SEON_FAKE_CACHE_DIGEST=" fake-cache-digest "\n"
+                           "exec bin/test " selection)] true)]
+                (is (zero? status) output)
+                (is (str/includes? output "HEAD_PREPARED") output)
+                (is (str/includes? output "COLD_RAN") output)))
+            (spit executable fast-source))
+          (spit ready (pr-str (assoc-in (edn/read-string record) [:seon.test.cache/inputs 0 "src/probe/api.clj"] "stale")))
           (let [[status output] (command ["src/probe/api.clj"])]
             (is (= 64 status) output)
             (is (not (.exists marker)) "a stale graph is never accepted"))
           (spit ready record)
+          (spit (io/file checkout "docs/fixture") "documentation-only commit\n")
+          (is (zero? (first (fixture-command! checkout ["git" "add" "docs/fixture"]))))
+          (is (zero? (first (fixture-command! checkout ["git" "commit" "-qm" "documentation only"]))))
+          (let [[status output] (command ["src/probe/api.clj"])]
+            (is (zero? status) output)
+            (is (.exists marker) "documentation commits reuse the same published source inputs"))
+          (io/delete-file marker true)
           (let [[status output] (command ["src//probe/api.clj"])]
             (is (= 64 status) output)
             (is (not (.exists marker)) "path aliases cannot evade graph identity matching"))
@@ -1311,7 +1340,7 @@
           (spit (io/file checkout "tmp/expected-api")
                 "(ns probe.api)\n(defn value [x] x)\n(defn unchanged [x] x)\n")
           (.mkdirs (io/file checkout "target/test-published-bases" fake-cache-digest "base/data/store"))
-          (spit ready (pr-str (dissoc (edn/read-string record) :seon.test.cache/git-sha)))
+          (spit ready (pr-str (edn/read-string record)))
           (spit executable
                 (str "#!/bin/bash\nset -euo pipefail\n"
                      "cmp src/probe/api.clj \"$SEON_FAKE_CACHE_PATH/../../expected-api\"\n"
@@ -1329,13 +1358,31 @@
                        "exec bin/test --prepare-head-base")]
                  true)]
             (is (zero? status) output)
-            (is (str/includes? output "published overlay baseline for HEAD") output)
-            (is (= (:seon.test.cache/git-sha (edn/read-string record))
-                   (:seon.test.cache/git-sha (edn/read-string (slurp ready)))))
+            (is (str/includes? output "published overlay baseline") output)
+            (is (= (:seon.test.cache/inputs (edn/read-string record))
+                   (:seon.test.cache/inputs (edn/read-string (slurp ready)))))
             (is (= roots-before
                    (set (map #(.getName %) (.listFiles (io/file checkout "tmp/test-runs")))))
                 "successful preparation removes its disposable run root")
             (is (not (str/includes? output "UNEXPECTED_RUNNER")) output))))
+      (finally (test-support/delete-recursively! root)))))
+
+(deftest ^{:seon.test/platform "The dependency tool loads the selector on its actual tool classpath."}
+  dependency-tool-loads-selection
+  (let [root (doto (io/file project-root "tmp" (str "tool-selection-" (random-uuid))) .mkdirs)]
+    (try
+      (let [checkout (launcher-checkout! root)]
+        (io/copy (io/file project-root "deps.edn") (io/file checkout "deps.edn"))
+        (spit (io/file checkout "dev_cache_probe.clj")
+              (str "(ns dev-cache-probe)\n"
+                   "(defn verify [_]\n"
+                   "  (load-file \"src/seon/test/selection.clj\")\n"
+                   "  (assert (seq ((resolve 'seon.test.selection/input-digests) \".\")))\n"
+                   "  (println \"TOOL_SELECTION_LOADED\"))\n"))
+        (let [[status output]
+              (fixture-command! checkout ["clojure" "-T:dev-cache" "dev-cache-probe/verify"])]
+          (is (zero? status) output)
+          (is (str/includes? output "TOOL_SELECTION_LOADED") output)))
       (finally (test-support/delete-recursively! root)))))
 
 (deftest ^{:seon.test/platform "Selected overlays refuse missing changed callers before launching a JVM."}
