@@ -1755,6 +1755,18 @@ average 160 — honest firing, slice unproven until one drill reaches a live
 adopted scratch cluster; lane resumed to run it once load < 20 and to print
 per-phase elapsed ms.
 
+**Hook shell route CLOSED** (`ad1d33bb3`, `8aa6e28d1`): both hook matchers
+(`.claude/settings.json`, `.codex/hooks.json`) are `.*`; for a tool whose
+payload names no path the changed Clojure files are derived from per-session
+SHA-256 content digests of every file under the declared roots (553 files,
+112 ms; whole hook 167–197 ms per event; `git status` measured 25× slower
+because of tmp/ and the submodules, so the complete scan is the cheap
+option); a syntax error left on disk blocks at once naming path and tool; a
+scan that throws blocks. Shell writes are caught PostToolUse (bytes land,
+block fires immediately); payload writes before the write. 16/141/0/0 fast.
+Cost: ~170 ms per tool call for every agent. Shell writes are checked, not
+published (`init --dev --changed` stays the rule).
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
