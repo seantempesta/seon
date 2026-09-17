@@ -1164,6 +1164,11 @@
                     "cp -R \"$origin/bin/.\" bin/\n"
                     "cp \"$origin/src/seon/fs.clj\" src/seon/fs.clj\n"
                     "cp \"$origin/src/seon/test/cache.clj\" src/seon/test/cache.clj\n"
+                    ;; `seon.test.cache` requires `seon.test.selection`; the
+                    ;; babashka base that loads it here has only what this
+                    ;; checkout carries, so a missing require is a launch
+                    ;; failure in every launcher fixture, not a slow path.
+                    "cp \"$origin/src/seon/test/selection.clj\" src/seon/test/selection.clj\n"
                     "printf '{:paths [\"src\"]}\\n' > bb.edn\n"
                     "printf 'tmp/\\ntarget/\\n' > .gitignore\n"
                     "touch docs/fixture test/fixture_test.clj .agents/skills/fixture .clj-kondo/fixture\n"
@@ -1575,6 +1580,85 @@
       (finally
         (when (.exists fixture-root)
           (test-support/delete-recursively! fixture-root))))))
+
+(deftest a-preparation-phase-that-outruns-its-declared-bound-fails-loudly
+  (testing "The preparation phases had no bound: on 2026-09-17 every gate
+            refused inside `dependency-cache-and-classpath` for about an hour
+            while four invocations sat at `phase=snapshot`, and the wedge read
+            as an ordinary slot queue. A phase that outruns its declared bound
+            now fails the gate with one line naming the phase, the elapsed
+            seconds, the bound, and where that phase's own output is."
+    (let [fixture-root
+          (io/file project-root "tmp" "test-runner-phase-bound"
+                   (str (random-uuid)))
+          checkout (launcher-checkout! fixture-root)
+          fake-bin (io/file fixture-root "bin")
+          fake-clojure (io/file fake-bin "clojure")
+          run-parent (io/file fixture-root "runs")
+          ;; The dev-cache tool JVM never returns. Nothing else in this gate
+          ;; is reached, so the phase name in the refusal is the whole report.
+          wedged-runner
+          (str "#!/usr/bin/env bash\n"
+               "set -euo pipefail\n"
+               "if [ \"${1-}\" = \"-T:dev-cache\" ]; then\n"
+               "  sleep 600\n"
+               "fi\n"
+               "exit 0\n")
+          process (atom nil)]
+      (try
+        (.mkdirs fake-bin)
+        (.mkdirs run-parent)
+        (install-single-worker-getconf! fake-bin)
+        (spit fake-clojure wedged-runner)
+        (is (.setExecutable fake-clojure true false))
+        (let [builder
+              (doto
+               (ProcessBuilder.
+                ^java.util.List
+                [(str (io/file checkout "bin" "test"))
+                 "--paths" "bin/test" "--" "seon.test-runner-test"])
+                (.directory checkout)
+                (.redirectErrorStream true))
+              _ (.put (.environment builder)
+                      "SEON_TEST_RUN_PARENT" (.getCanonicalPath run-parent))
+              _ (.put (.environment builder)
+                      "SEON_TEST_DEPENDENCY_CACHE_SECONDS" "1")
+              _ (.put (.environment builder)
+                      "PATH"
+                      (str (.getCanonicalPath fake-bin)
+                           java.io.File/pathSeparator
+                           (System/getenv "PATH")))
+              launched (.start builder)
+              _ (reset! process launched)
+              output (slurp (.getInputStream launched))]
+          (is (.waitFor launched test-support/event-backstop-seconds
+                        TimeUnit/SECONDS)
+              "the wedged phase is bounded, not awaited forever")
+          (is (pos? (.exitValue launched)) output)
+          (is (str/includes?
+               output
+               "PHASE dependency-cache-and-classpath EXCEEDED ITS BOUND")
+              output)
+          (is (str/includes? output "bound-seconds=1") output)
+          (is (re-find #"elapsed-seconds=\d+" output) output)
+          (is (str/includes?
+               output "dependency-cache-and-classpath.log")
+              "the one line names where that phase's own output is")
+          (let [retained (vec (.listFiles run-parent))
+                transcript (some (fn [^java.io.File root]
+                                   (let [ledger (io/file root "test-run.txt")]
+                                     (when (.isFile ledger) (slurp ledger))))
+                                 retained)]
+            (is (str/includes?
+                 (str transcript)
+                 "phase=dependency-cache-and-classpath exceeded-bound-seconds=1")
+                (str transcript))))
+        (finally
+          (when-let [^Process launched @process]
+            (when (.isAlive launched)
+              (stop-process-tree! launched)))
+          (when (.exists fixture-root)
+            (test-support/delete-recursively! fixture-root)))))))
 
 (deftest a-fresh-run-root-is-claimed-before-population-and-sweep
   (let [fixture-root
@@ -2074,6 +2158,9 @@
              "cp \"$origin/src/seon/fs.clj\" src/seon/fs.clj\n"
              "mkdir -p src/seon/test\n"
              "cp \"$origin/src/seon/test/cache.clj\" src/seon/test/cache.clj\n"
+             ;; `seon.test.cache` requires `seon.test.selection`: a checkout
+             ;; without it fails the published-base child at load.
+             "cp \"$origin/src/seon/test/selection.clj\" src/seon/test/selection.clj\n"
              "printf '{:paths [\"src\"]}\\n' > bb.edn\n"
              "printf 'tmp/\\ntarget/\\n' > .gitignore\n"
              "printf 'base\\n' > src/owned.txt\n"

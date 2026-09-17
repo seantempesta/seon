@@ -10,14 +10,33 @@
 # failure naming the holders, never a silent hang. Slots are project-local
 # directories whose mkdir is atomic; a slot whose holder pid is dead is
 # reclaimed. SEON_TEST_SLOTS overrides the count; SEON_TEST_SLOT_WAIT_SECONDS
-# the bound.
+# the bound; SEON_TEST_SLOT_ANNOUNCE_SECONDS the progress interval.
 test_slot_count=${SEON_TEST_SLOTS:-3}
 test_slot_wait_seconds=${SEON_TEST_SLOT_WAIT_SECONDS:-1800}
+test_slot_announce_seconds=${SEON_TEST_SLOT_ANNOUNCE_SECONDS:-60}
 test_slot_parent="${source_root:-$PWD}/tmp/test-slots"
 held_test_slot=
 
+# Each held slot, its holder pid, that holder's own elapsed time, and the run
+# root it is working in: enough to decide whether to keep waiting or to look at
+# the holder.
+announce_test_slot_holders() {
+  local slot holder holder_elapsed
+  for slot in $(seq 1 "$test_slot_count"); do
+    holder=$(cat "$test_slot_parent/slot-$slot/pid" 2>/dev/null || echo none)
+    holder_elapsed=none
+    if [ "$holder" != none ]; then
+      holder_elapsed=$(ps -p "$holder" -o etime= 2>/dev/null | tr -d ' ')
+      holder_elapsed=${holder_elapsed:-gone}
+    fi
+    printf 'bin/test:   slot-%s pid=%s elapsed=%s run-root=%s\n' "$slot" \
+      "$holder" "$holder_elapsed" \
+      "$(cat "$test_slot_parent/slot-$slot/run-root" 2>/dev/null || echo none)" >&2
+  done
+}
+
 acquire_test_slot() {
-  local waited=0 slot holder announced=0
+  local waited=0 slot holder announced=0 announced_at=0
   mkdir -p "$test_slot_parent"
   while :; do
     for slot in $(seq 1 "$test_slot_count"); do
@@ -41,16 +60,22 @@ acquire_test_slot() {
     done
     if [ "$waited" -ge "$test_slot_wait_seconds" ]; then
       echo "bin/test: no test JVM slot free after ${test_slot_wait_seconds}s; holders:" >&2
-      for slot in $(seq 1 "$test_slot_count"); do
-        printf 'bin/test:   slot-%s pid=%s run-root=%s\n' "$slot" \
-          "$(cat "$test_slot_parent/slot-$slot/pid" 2>/dev/null || echo none)" \
-          "$(cat "$test_slot_parent/slot-$slot/run-root" 2>/dev/null || echo none)" >&2
-      done
+      announce_test_slot_holders
       return 75
     fi
-    if [ "$announced" -eq 0 ]; then
-      echo "bin/test: all $test_slot_count test JVM slots busy; waiting up to ${test_slot_wait_seconds}s (SEON_TEST_SLOTS / SEON_TEST_SLOT_WAIT_SECONDS)"
-      announced=1
+    # A wait must stay visibly a wait. A silent 25-minute block reads as a
+    # hang, and on 2026-09-17 four queued gates behind a wedged phase looked
+    # exactly like an ordinary queue. Announce on entry, then every
+    # test_slot_announce_seconds, always naming the holders and their age.
+    if [ "$announced" -eq 0 ] || [ $((waited - announced_at)) -ge "$test_slot_announce_seconds" ]; then
+      if [ "$announced" -eq 0 ]; then
+        echo "bin/test: all $test_slot_count test JVM slots busy; waiting up to ${test_slot_wait_seconds}s (SEON_TEST_SLOTS / SEON_TEST_SLOT_WAIT_SECONDS)" >&2
+        announced=1
+      else
+        echo "bin/test: still waiting for a test JVM slot after ${waited}s of ${test_slot_wait_seconds}s; holders:" >&2
+      fi
+      announced_at=$waited
+      announce_test_slot_holders
     fi
     sleep 5
     waited=$((waited + 5))

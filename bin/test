@@ -41,6 +41,45 @@ source_root=$PWD
 
 source bin/_java-home-resolver
 
+# ---------------------------------------------------------------------------
+# Declared bounds. §2.3: every execution surface carries its bound at the seam
+# that admits the work, and a bound firing is a bug report naming what never
+# arrived — never a silent retry, never a hang.
+#
+# The test phase has the suite liveness watchdog (SEON_TEST_SILENCE_SECONDS,
+# `seon.test.runner/silence-seconds`). The PREPARATION phases had none: on
+# 2026-09-17 every gate refused inside `dependency-cache-and-classpath` for
+# about an hour while four invocations sat at `phase=snapshot`, and the slot
+# wait's own bound made the wedge read as an ordinary queue
+# (docs/seon/issues/dev-cache-tool-classpath-omits-the-selectors-dependencies.md).
+# Each bound below names the observable it stands in for, measured in
+# docs/prds/steward-platform/research/test-preparation-costs-2026-09-16.md and
+# the retained `tmp/test-runs/*/test-run.txt` ledgers of 2026-09-16. A bound of
+# 0 declares that this phase's bound is owned elsewhere.
+
+# Copying HEAD plus the overlaid working bytes into the run root: measured 3-6 s
+# warm, 21 s with five gates competing for the disk.
+snapshot_phase_seconds=${SEON_TEST_SNAPSHOT_SECONDS:-300}
+# Waiting for a test JVM slot: bin/_test-slot declares and reports that wait
+# itself. This backstop only catches a slot loop that stops looping.
+test_slot_phase_seconds=${SEON_TEST_SLOT_PHASE_SECONDS:-$((${SEON_TEST_SLOT_WAIT_SECONDS:-1800} + 60))}
+# The -T:dev-cache tool JVM plus classpath reads: 3-6 s against a warm
+# dependency closure, 57 s for the one cold immutable rebuild a deps.edn change
+# forces (issue note above).
+dependency_cache_phase_seconds=${SEON_TEST_DEPENDENCY_CACHE_SECONDS:-300}
+# Copy-on-write worker checkouts: measured 2-5 s.
+worker_checkouts_phase_seconds=${SEON_TEST_WORKER_CHECKOUTS_SECONDS:-300}
+# Publishing or reusing the shared test base: 0 s on an exact cache hit,
+# 107-131 s cold, 171 s cold under concurrent gates. A 60 s bound would fail
+# every cold publication; this one stands for a publication that never returns.
+published_base_phase_seconds=${SEON_TEST_PUBLISHED_BASE_SECONDS:-600}
+# The coordinator and its workers: bounded by the suite liveness watchdog and
+# the runner's own declared exchange bounds, not from out here.
+coordinator_phase_seconds=${SEON_TEST_COORDINATOR_PHASE_SECONDS:-0}
+# How long a signalled runner has to exit before it is forced.
+runner_reap_backstop_seconds=${SEON_TEST_RUNNER_REAP_SECONDS:-10}
+# ---------------------------------------------------------------------------
+
 usage() {
   cat <<'USAGE'
 Usage: bin/test [--all|--full|--platform|--changed PATH]...
@@ -370,7 +409,6 @@ remove_run_root() {
 }
 
 suite_pid=
-runner_reap_backstop_seconds=10
 
 reap_runner() {
   local requested_signal=$1
@@ -440,8 +478,14 @@ retain_run_root() {
   local caught_signal=$1
   local status=$2
   trap - HUP INT TERM
+  end_phase_watchdog
   reap_runner TERM
   release_test_slot
+  if [ -f "${phase_bound_marker:-/nonexistent}" ]; then
+    printf 'retained-reason=phase-bound-exceeded\n' >>"$run_root/test-run.txt"
+    echo "bin/test: preparation bound fired; retained isolated operator root $run_root" >&2
+    exit 70
+  fi
   printf 'retained-reason=signal-%s\n' "$caught_signal" >>"$run_root/test-run.txt"
   if [ "$fast_iteration" -eq 1 ]; then
     echo "bin/test-fast: interrupted by $caught_signal; removing snapshot $run_root" >&2
@@ -454,6 +498,7 @@ retain_run_root() {
 reap_runner_on_launcher_exit() {
   local status=$?
   trap - EXIT HUP INT TERM
+  end_phase_watchdog
   if [ -n "$suite_pid" ]; then
     reap_runner TERM
     printf 'retained-reason=launcher-exit-%s\n' "$status" \
@@ -473,12 +518,149 @@ trap 'retain_run_root TERM 143' TERM
 trap reap_runner_on_launcher_exit EXIT
 
 phase_started=$SECONDS
+phase_watchdog_pid=
+phase_bound_marker="$run_root/logs/phase-bound-exceeded"
+current_phase=
+
+# A bound stands in for a child that never returns. A child that RETURNS
+# non-zero must be reported the instant it does, never at the bound: "waiting
+# minutes to find out a problem we should know immediately is a bug" (owner,
+# 2026-09-17). Every explicit refusal below calls `announce_phase_failure`
+# directly; this trap covers the rest, because `set -euo pipefail` otherwise
+# ends the gate with whatever the failing command happened to print and no
+# phase named. It stays out of the way wherever errexit is deliberately off.
+phase_failed_on_error() {
+  local status=$?
+  case $- in
+    *e*) ;;
+    *) return 0 ;;
+  esac
+  trap - ERR
+  if [ -n "$current_phase" ]; then
+    announce_phase_failure "$current_phase" \
+      "a command in this phase exited $status at bin/test line ${BASH_LINENO[0]:-unknown}"
+  fi
+  exit "$status"
+}
+trap phase_failed_on_error ERR
+
+# Where a phase's own output landed, so the one loud line tells a human and an
+# orchestrator tailing a file the same thing.
+phase_output_location() {
+  case "$1" in
+    dependency-cache-and-classpath)
+      printf '%s\n' "$run_root/logs/dependency-cache-and-classpath.log" ;;
+    *) printf '%s\n' "$run_root/test-run.txt" ;;
+  esac
+}
+
+# A phase blocked in a foreground child does not run a pending trap until that
+# child returns, so the watchdog terminates the launcher's descendants before
+# signalling the launcher itself. `pgrep -P` walks recorded parentage; it never
+# matches this script's own command line.
+phase_bound_seconds() {
+  case "$1" in
+    snapshot) printf '%s\n' "$snapshot_phase_seconds" ;;
+    test-slot) printf '%s\n' "$test_slot_phase_seconds" ;;
+    dependency-cache-and-classpath) printf '%s\n' "$dependency_cache_phase_seconds" ;;
+    worker-checkouts) printf '%s\n' "$worker_checkouts_phase_seconds" ;;
+    published-base) printf '%s\n' "$published_base_phase_seconds" ;;
+    coordinator-and-tests) printf '%s\n' "$coordinator_phase_seconds" ;;
+    *) printf '0\n' ;;
+  esac
+}
+
+begin_phase() {
+  local phase=$1 bound launcher=$$ started output
+  bound=$(phase_bound_seconds "$phase")
+  phase_started=$SECONDS
+  phase_watchdog_pid=
+  current_phase=$phase
+  if [ "$bound" -le 0 ]; then
+    return 0
+  fi
+  output=$(phase_output_location "$phase")
+  started=$(date +%s)
+  (
+    # The timer is a background child waited on, never a foreground one: `wait`
+    # is interruptible by a trap, so ending this watchdog ends its timer too. A
+    # foreground `sleep` outlives the subshell that is killed above it, is
+    # reparented to init, and keeps the launcher's inherited stdout pipe open —
+    # a reader slurping that pipe then blocks for the whole bound after the
+    # gate has exited (observed as a 300 s suite-liveness kill on 2026-09-17).
+    trap 'kill $timer_pid 2>/dev/null; exit 0' TERM INT HUP
+    sleep "$bound" &
+    timer_pid=$!
+    wait "$timer_pid" || exit 0
+    # This machine's /usr/bin/env bash is 3.2, which has no BASHPID. A
+    # command substitution that `exec`s its command makes that child's PPID
+    # this subshell's own pid, which is the portable equivalent and needs no
+    # file, no publication, and no race with the launcher.
+    watchdog=$(exec sh -c 'echo $PPID')
+    printf 'bin/test: PHASE %s EXCEEDED ITS BOUND: elapsed-seconds=%s bound-seconds=%s output=%s\n' \
+      "$phase" "$(( $(date +%s) - started ))" "$bound" "$output" >&2
+    printf 'phase=%s exceeded-bound-seconds=%s\n' "$phase" "$bound" \
+      >>"$run_root/test-run.txt" 2>/dev/null || true
+    mkdir -p "$(dirname "$phase_bound_marker")" 2>/dev/null || true
+    printf '%s\n' "$phase" >"$phase_bound_marker" 2>/dev/null || true
+    # A phase blocked in a foreground child does not run a pending trap until
+    # that child returns, so the launcher's descendants go first and the
+    # launcher itself last. `pgrep -P` walks recorded parentage; it never
+    # matches this script's own command line.
+    terminate_descendants() {
+      local parent=$1 child
+      for child in $(pgrep -P "$parent" 2>/dev/null || true); do
+        if [ "$child" = "$watchdog" ]; then
+          continue
+        fi
+        terminate_descendants "$child"
+        kill -TERM "$child" 2>/dev/null || true
+      done
+    }
+    terminate_descendants "$launcher"
+    kill -TERM "$launcher" 2>/dev/null || true
+  ) &
+  phase_watchdog_pid=$!
+}
+
+end_phase_watchdog() {
+  if [ -n "$phase_watchdog_pid" ]; then
+    kill "$phase_watchdog_pid" 2>/dev/null || true
+    wait "$phase_watchdog_pid" 2>/dev/null || true
+    phase_watchdog_pid=
+  fi
+}
+
 record_phase() {
   local phase=$1
   local elapsed=$((SECONDS - phase_started))
+  end_phase_watchdog
+  current_phase=
   printf 'bin/test: PHASE %s elapsed-seconds=%s\n' "$phase" "$elapsed"
   printf 'phase=%s elapsed-seconds=%s\n' "$phase" "$elapsed" >>"$run_root/test-run.txt"
   phase_started=$SECONDS
+}
+
+# A phase that refuses names itself to the caller's stderr, not only to its log:
+# an hour of gate-wide refusals was invisible because the child's first line was
+# written into a file nobody was reading.
+announce_phase_failure() {
+  local phase=$1 detail=$2 line printed=0
+  while IFS= read -r line; do
+    case "$line" in
+      ''|[[:space:]]*'') continue ;;
+    esac
+    printf 'bin/test: PHASE %s FAILED: %s\n' "$phase" "$line" >&2
+    printed=$((printed + 1))
+    if [ "$printed" -ge 5 ]; then
+      break
+    fi
+  done <<<"$detail"
+  if [ "$printed" -eq 0 ]; then
+    printf 'bin/test: PHASE %s FAILED\n' "$phase" >&2
+  fi
+  printf 'bin/test: PHASE %s output: %s\n' "$phase" "$(phase_output_location "$phase")" >&2
+  printf 'phase=%s failed=true\n' "$phase" >>"$run_root/test-run.txt" 2>/dev/null || true
 }
 
 populate_checkout_root() {
@@ -515,6 +697,8 @@ populate_checkout_root() {
     ln -s "$source_root/.env" "$target_root/.env"
   fi
 }
+
+begin_phase snapshot
 
 # One snapshot mechanism: HEAD plus the selected working bytes. Without
 # --paths, overlay every tracked change and every non-ignored new file.
@@ -568,7 +752,9 @@ git -C "$source_root" --work-tree="$run_root" ls-files --others --exclude-standa
 echo "bin/test: end snapshot differences"
 record_phase snapshot
 
+begin_phase test-slot
 if ! acquire_test_slot; then
+  announce_phase_failure test-slot "no test JVM slot free within its declared wait"
   exit 75
 fi
 record_phase test-slot
@@ -584,15 +770,19 @@ if [ "$fast_iteration" -eq 1 ]; then
 fi
 
 # The dependency preparation and all workers consume this same snapshot.
+begin_phase dependency-cache-and-classpath
 rmdir "$run_root/target"
 mkdir -p "$source_root/target"
 ln -s "$source_root/target" "$run_root/target"
 cd "$run_root"
+mkdir -p "$run_root/logs"
+dependency_cache_log=$(phase_output_location dependency-cache-and-classpath)
 if ! dev_cache_output=$(clojure -T:dev-cache ensure-cache :test? true :pid "$$" 2>&1); then
-  printf '%s\n' "$dev_cache_output" >&2
-  echo "bin/test: dependency cache freshness check failed" >&2
+  printf '%s\n' "$dev_cache_output" >"$dependency_cache_log"
+  announce_phase_failure dependency-cache-and-classpath "$dev_cache_output"
   exit 1
 fi
+printf '%s\n' "$dev_cache_output" >"$dependency_cache_log"
 printf '%s\n' "$dev_cache_output"
 dev_cache_result=$(printf '%s\n' "$dev_cache_output" | tail -n 1)
 if ! dev_cache_digest=$(bb -e \
@@ -605,13 +795,15 @@ if ! dev_cache_digest=$(bb -e \
    (print (:seon.dev-cache/path
            (edn/read-string (first *command-line-args*))))' \
   "$dev_cache_result"); then
-  echo "bin/test: dependency cache returned no readable selection" >&2
+  announce_phase_failure dependency-cache-and-classpath \
+    "the dependency cache returned no readable selection: $dev_cache_result"
   exit 1
 fi
 if ! [[ "$dev_cache_digest" =~ ^[0-9a-f]{64}$ ]] ||
    [ ! -d "$dev_cache_path" ] ||
    [ "${dev_cache_path##*/}" != "$dev_cache_digest" ]; then
-  echo "bin/test: dependency cache digest mismatch: digest=$dev_cache_digest path=$dev_cache_path" >&2
+  announce_phase_failure dependency-cache-and-classpath \
+    "dependency cache digest mismatch: digest=$dev_cache_digest path=$dev_cache_path"
   exit 1
 fi
 
@@ -627,7 +819,8 @@ if [ -n "$test_classpath_file" ]; then
     (require (quote [clojure.edn :as edn]))
     (print (:seon.dev-cache/test-digest (edn/read-string (first *command-line-args*))))' "$dev_cache_result")
   if [ -z "$test_classpath" ] || [ ${#snapshot_digest} -ne 64 ]; then
-    echo "bin/test: test cache returned no classpath or snapshot digest" >&2
+    announce_phase_failure dependency-cache-and-classpath \
+      "the test cache returned no classpath or snapshot digest"
     exit 1
   fi
 else
@@ -665,12 +858,13 @@ populate_cache_links "$run_root"
 cd "$source_root"
 
 if [ "$explicit_selection" -eq 1 ] && [ ${#namespaces[@]} -eq 0 ]; then
-  echo "bin/test: no test namespaces selected" >&2
+  announce_phase_failure dependency-cache-and-classpath "no test namespaces selected"
   exit 1
 fi
 
 record_phase dependency-cache-and-classpath
 
+begin_phase worker-checkouts
 logical_processors=$(getconf _NPROCESSORS_ONLN 2>/dev/null || true)
 if ! [[ "$logical_processors" =~ ^[1-9][0-9]*$ ]]; then
   logical_processors=2
@@ -737,6 +931,7 @@ else
   : >"$changed_paths_file"
 fi
 
+begin_phase published-base
 echo "bin/test: preparing or reusing published test base $snapshot_digest"
 if [ -n "$snapshot_digest" ]; then
   launch_runner bb --config "$run_root/bb.edn" -m seon.test.cache \
@@ -756,12 +951,14 @@ fi
 if [ "$base_status" -ne 0 ]; then
   status=$base_status
   cd "$source_root"
-  echo "bin/test: shared published base preparation failed; retained isolated operator root $run_root" >&2
+  announce_phase_failure published-base \
+    "the shared published base child exited $base_status; retained isolated operator root $run_root"
   exit "$status"
 fi
 
 record_phase published-base
 
+begin_phase coordinator-and-tests
 coordinator_jvm_arguments=(
   "-J-Dseon.test.confirm=$confirm_symbols"
   "-J-Dseon.operator.root=$coordinator_operator_root"
