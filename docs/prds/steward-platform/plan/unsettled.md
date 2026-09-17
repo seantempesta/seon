@@ -1668,6 +1668,20 @@ RESET NEEDED from `79c106925`); `stop --force; init default --force`
 analyzed; retry" (lanes editing) — JVM booted from the tree, only the
 recorded commit lags; retry running. Juniper reseed issued via MCP.
 
+**OWNER ~01:20Z: "if you need to update it stop all the agents and fully
+delete and regenerate the entire database. do it right."** All three codex
+lanes stopped (sessions preserved: reset-batch-integration,
+repl-program-operations, acquisition-by-provenance-s3) and all four Opus
+agents killed mid-work (no-default-cluster: queued on a slot; fault-path:
+writing the class regression in error_test.clj; bin/test bounds: writing
+its landing note with the regression passing; seal triage: had only begun).
+Their hunks stay in the tree. `bin/seon reset --force` running (log
+`tmp/orchestrator/refork/reset-2026-09-17T0120Z.log`): store 4.5 GB
+destroyed, republish, refork, start, `init --dev`, then Juniper reseed;
+`target/test-published-bases` (1.5 GB) and `tmp/test-basis` deleted so
+gates rebuild against the regenerated store. Relaunch after: the three
+codex resumes and the four continuations from their transcripts.
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
