@@ -3455,3 +3455,19 @@ as orchestrator/astra lanes, easy pool as the first live-agent slice).
   the doubling is a finding to measure properly). Integration onto
   `steward-platform` waits on the held `seon.fn.edn` (stage-1 lane).
   RESET NEEDED. Slice 2 (wrapper enforcement) launches after integration.
+
+## 2026-09-18 ~03:20Z — the writer hang: one proven never-ending wait, one cost
+
+- `cfc67bd07` [writer-hang-root-cause-2026-09-18.md](../research/writer-hang-root-cause-2026-09-18.md):
+  the historical dump is incomplete, so the original wedge is unproven;
+  measured on an isolated store, a population transaction is 26.0 s
+  application (11.4 s our final-report validator) + 7.3 s commit — 30 s
+  was genuinely too small; and a REAL Datahike defect reproduced with a
+  finite witness: a throwing listener escapes at `writer.cljc:415` and the
+  result promise at `:416` is never delivered while later writes commit
+  (`merge-db!` :440-443 same). Konserve holds no global lock. Three
+  options; recommendation = settle the result independently of listeners
+  in the fork. Launched sol `datahike-listener-completion` (fork fix +
+  fork regression + gitlink + Seon regression; push is the owner's).
+  Option 2 (validator cost on the writer, 11.4 s) is the next performance
+  lane after the platform is green.
