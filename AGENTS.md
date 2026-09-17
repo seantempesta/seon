@@ -347,8 +347,10 @@ not an option; unbounded work should be unconstructable.
 ### 2.4 Total, honest, bounded boundaries
 
 Every failure at an agent or runtime boundary is a flat `:seon.error`
-value — nothing throws into the loop. All public functions carry complete
-Malli contracts and are instrumented from the program graph; a function
+value — nothing throws into the loop. EVERY function carries a complete
+Malli contract, private included (owner ruling 2026-09-17, program-facts PRD
+§1j; public-only was the previous rule and left 352 private database-read
+consumers unchecked), and is instrumented from the program graph; a function
 whose declared contract fails does not run — the violation is a typed value
 naming the function and the offending argument. A refusal names what was
 missing: the layer, the member, the expected shape, the offending value

@@ -2829,3 +2829,18 @@ working tree, never Sonnet.
   open allocation bound). RESET NEEDED (two new attributes) — folds into
   the one reset. **Stage 2 item 1 LANDED** (`a0c69cfd9`: admitted tests
   resolve through the shared host and SCI owner); items 2–3 in flight.
+
+## 2026-09-17 16:35Z — morning: the checking chain has 352 holes (owner ruling §1j)
+
+- Stage 2 COMPLETE overnight (`a0c69cfd9` resolution through one owner,
+  `163367a9a` claim/completion, `b80e7f615` unchanged-green reuse in
+  `run-owned`; 58/428 green fast). The orchestrator idled 08:50Z–16:07Z
+  (recorded honestly); the merge/reset did not run.
+- Owner ruling §1j: every function carries a contract, private included;
+  errors stay values; private read-consumers without contracts (352 by
+  query) are the first mined issue class; fix the critical ones now and
+  welcome the breakage. Open design question: issue triage by namespace
+  steward agents launching sub-agents.
+- Sequencing: integrator rebases `reset-batch` on current HEAD → ff-merge
+  → message-wake's cold-worker arming patch → `bin/seon reset --force` →
+  reseed → serial gates → then the contract wave on a clean base.

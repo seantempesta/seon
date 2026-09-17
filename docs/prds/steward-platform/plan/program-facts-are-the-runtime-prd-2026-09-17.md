@@ -349,6 +349,32 @@ reset batch follows where it corrects G1–G6, 1g, 1h or the reset plan; the
 integrator rebases `reset-batch` on its corrections before the reset; every
 override is written into this PRD with the Datahike line that decided it.
 
+### 1j. Every function carries a contract, private included (owner, 2026-09-17 16:30Z)
+
+Evidence (one Datalog query on default, pid 94566): 5,191 functions, 3,161
+private, 16 private with a contract; 520 functions call a `seon.db` read
+directly, 354 of them private, 352 with no contract; 69 public contracts
+declare a bare `:map` output. The three overnight "error read as a row"
+instances were two uncontracted private consumers and one in-body misuse.
+
+Rulings:
+- **All private functions can and should have contracts.** The public-only
+  rule in AGENTS §2.4 is retired; instrumentation arms every function that
+  declares a contract, private included.
+- **Errors stay values.** A failed database read is an error describing
+  what the caller did wrong; it is allowed at every boundary without being
+  listed, and a contracted consumer refuses it by shape (the wrapper's
+  buried-error propagation). No throwing.
+- **First mined issue class for live agents:** private read-consumers
+  without a contract (352), then every private function without one, then
+  the 69 bare-`:map` outputs. Fix the critical ones now (db operations,
+  anything that can return an error, orchestrator's judgement), expecting
+  and welcoming breakage: every new red is a finding about a wrong
+  understanding, filed as an issue.
+- **Open design question (owner):** how issues are triaged — a namespace
+  steward agent triaging and launching sub-agents to write contracts and
+  sanity-check data in and out. Design note requested before Phase 4.
+
 ## 2. What exists today, with the seams named
 
 Verified on `steward-platform` at `a36d55c3b`/`849bbce0b` on 2026-09-17.
