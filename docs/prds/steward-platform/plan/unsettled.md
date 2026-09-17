@@ -1985,6 +1985,19 @@ admission source → blocker filed, folded into the stage-2 lane; the
 two-gates test concealed the other reds by eating the silence bound →
 raised to blocker.
 
+**Baseline reds triage LANDED half** (`acce89d57`): both traced to
+`6312fcef0` (S1). `bare-test-macros…`: a bare `deftest` produced NO row —
+the analysis namespace form lacked the interpreter's own `clojure.core`
+bindings of deftest/is; fixed by declaring `clojure.test/deftest`/`is` in
+the `:seon.sci.binding/target` grammar and folding interpreter refers into
+the analysed namespace row (derived, not a list); 67/532 green fast.
+`declared-row-…-delta`: the `(quote user)` diff was a print artifact; the
+real diff is stale `:seon.schema/shape` accretion PLUS a WRITER REGRESSION
+— sci/eval.clj:303 dropped `:seon.schema/ns`, so an agent-declared schema
+records no declaring namespace (consumers render/ns.clj:893, my/program.clj
+:264, one cluster.turn-test predicted red) — exact hunks in the note; FOR
+THE S3 LANE (holds sci/eval.clj) at its next stop.
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
