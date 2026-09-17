@@ -7,9 +7,9 @@ tags: [reset, datahike, schema, integration]
 
 # Reset edge integration — worktree checkpoint
 
-**G5 ready for review. RESET NEEDED.** The implementation checkpoint is retained in
+**G5 reviewed; final rebase verification. RESET NEEDED.** The implementation checkpoint is retained in
 `tmp/reset-batch-wt`, branch `reset-batch`. The current base is
-`5dd6ef7cc`; the G5 checkpoint has been rebased onto it. The
+`64d6a85cd`; the rebased implementation head is `d122b8590`. The
 orchestrator owns merge, the cold gate, platform proof and the reset. Default
 was not restarted, reset, adopted or otherwise mutated by this lane.
 
@@ -491,3 +491,50 @@ A	docs/prds/context-generation/research/reset-g5-fast-10-2026-09-17.txt
 A	docs/prds/context-generation/research/reset-g5-fast-11-2026-09-17.txt
 A	docs/prds/context-generation/research/reset-g5-fast-12-2026-09-17.txt
 ```
+
+## Final integration rebase — 2026-09-17
+
+Read `git log 5dd6ef7cc..steward-platform --oneline` in the main checkout and
+reviewed the overlapping landed changes. Rebased onto `64d6a85cd`; code head
+`d122b8590`. All landed resources remain, including stage 2 acquisition,
+claim completion and reuse declarations, instrument `actual` / `actual-size`,
+message/wake changes and the source progress callback's complete contract.
+AGENTS §2.4 retains every-function contracts, including private functions;
+the subsequent private-contract audit and its instrument regression are retained.
+The newest-published-base fast-overlay policy remains beside the exact-HEAD
+snapshot shortcut. No upstream production changes arrived between the two
+rebases; only documentation, skills and the private-contract regression did.
+
+Conflicts were confined to the lane's schema/edge reader overlaps. Stage 2's
+new resolver and reuse reader now use symbol lookups. Analysis provenance is
+an exact analyzed-input digest (including resolver context), so resolution
+requires the admitted evidence and compares the acquired whole-program digest;
+it does not incorrectly rehash declaration text alone. Result recording retains
+existing admission and refuses to reconstruct a deleted definition. The schema
+reference-grammar fixture now visits inherited `:and` map arms, including the
+new claim-completion declaration, instead of manufacturing an incomplete row.
+
+Serial worktree fast results (all with `bin/test-fast --paths`, no overrides):
+
+- [Rebase fast 1](reset-rebase-fast-1-2026-09-17.txt), code `6ca147b40`:
+  `seon.owned-value-test seon.db-test seon.fn-test seon.program-test
+  seon.schema-test seon.maintenance-schema-test seon.reset-edges-test`:
+  **191 tests / 1,673 assertions / 1 failure / 0 errors**. The sole failure was
+  the conjunction fixture omission described above; all six other namespaces
+  passed. Ten carried queries: raw 561,249 ns, wrapped 2,538,667 ns, measured
+  ratio 4.52324547571577; each query passed the absolute 5 ms contract.
+- [Rebase fast 2](reset-rebase-fast-2-2026-09-17.txt), code `acc23af0b`:
+  `seon.schema-test seon.test-test`: **32 tests / 495 assertions / 0 failures /
+  0 errors**, exit 0. Nested bounded-test and assertionless fixture diagnostics
+  are intentional tested results, not failures of this namespace run.
+
+Foreign boundary: a hook briefly rejected one read-only tool invocation naming
+`bin/hook_probe_1.clj`; that file was absent from this worktree and the next read
+succeeded. No foreign file or session was changed. The isolated fast snapshots
+continued unaffected. Default was never accessed. Cold/platform and reset-live
+proofs remain the orchestrator's work after the ff-only merge and ONE reset.
+
+Final G5 run at rebased code `d122b8590`:
+[Rebase fast 3](reset-rebase-fast-3-2026-09-17.txt),
+`bin/test-fast --paths src/seon/db.clj test/seon/owned_value_test.clj -- seon.owned-value-test`:
+**5 tests / 68 assertions / 0 failures / 0 errors**, exit 0.

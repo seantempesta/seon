@@ -14,9 +14,10 @@ never restarts or resets default. The explicit step-2 restriction overrides
 the assignment's later generic cold-gate paragraph. The orchestrator runs the
 cold gates after the one reset. No migration or compatibility population.
 
-## Current checkpoint — G5 ready for review
+## Current checkpoint — G5 approved; final rebase
 
-Branch `reset-batch` is rebased through `5dd6ef7cc`. G5 is implemented at
+Branch `reset-batch` is rebased through `64d6a85cd`, with implementation head
+`d122b8590`. The final rebase evidence is in the landing note. G5 was implemented at
 `1d9dc7c1f`; the corrected G5/database/schema/maintenance fast run passed
 **89 tests / 948 assertions**, and the final integrated-launcher G5 run passed
 **5 tests / 68 assertions**, both with zero failures/errors. The absolute 5 ms

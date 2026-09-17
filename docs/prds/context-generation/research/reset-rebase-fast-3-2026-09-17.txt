@@ -1,0 +1,34 @@
+bin/test: snapshot differences from HEAD d122b8590284cd90239828a57a831c699d3a0394:
+bin/test: end snapshot differences
+bin/test: PHASE snapshot elapsed-seconds=3
+bin/test: PHASE test-slot elapsed-seconds=0
+bin/test-fast: selected snapshot /Users/sean/src/seon/tmp/reset-batch-wt/tmp/test-runs/run.7TRxfh
+WARNING: Using incubator modules: jdk.incubator.vector
+bin/test: PACKAGED TEST PROJECTION ACQUIRED at= 2026-09-17T16:34:00.934233Z pid= 46266 role= test-fast
+bin/test: CONTRACTS ARMED at= 2026-09-17T16:34:08.047711Z worker= test-fast mode= :panic namespaces= 1 program-namespaces= 109 registered= 1143 instrumented= 1143 program-armable= 1138
+bin/test: 2026-09-17T16:34:08.128484Z BEGIN namespace seon.owned-value-test
+
+Testing seon.owned-value-test
+bin/test: 2026-09-17T16:34:08.159918Z BEGIN test seon.owned-value-test/the-projection-carries-the-declared-work-bound
+WARNING: reset! already refers to: #'clojure.core/reset! in namespace: seon.fresh-operator, being replaced by: #'seon.fresh-operator/reset!
+2026-09-17T16:34:58.310539Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :transaction/validation-rejected, :cause "Transaction report validation rejected."}
+bin/test: 2026-09-17T16:34:58.313190Z END test seon.owned-value-test/the-projection-carries-the-declared-work-bound
+bin/test: 2026-09-17T16:34:58.313370Z BEGIN test seon.owned-value-test/every-canonical-owned-relation-declares-its-child-schema
+bin/test: 2026-09-17T16:34:58.317049Z END test seon.owned-value-test/every-canonical-owned-relation-declares-its-child-schema
+bin/test: 2026-09-17T16:34:58.317130Z BEGIN test seon.owned-value-test/complete-values-include-the-1001st-child
+2026-09-17T16:34:59.237529Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :transaction/validation-rejected, :cause "Transaction report validation rejected."}
+bin/test: 2026-09-17T16:34:59.239115Z END test seon.owned-value-test/complete-values-include-the-1001st-child
+bin/test: 2026-09-17T16:34:59.239202Z BEGIN test seon.owned-value-test/incomplete-unowned-cyclic-and-shared-components-refuse
+2026-09-17T16:34:59.806227Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :transaction/validation-rejected, :cause "Transaction report validation rejected."}
+2026-09-17T16:34:59.816591Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :transaction/validation-rejected, :cause "Transaction report validation rejected."}
+2026-09-17T16:34:59.825061Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :transaction/validation-rejected, :cause "Transaction report validation rejected."}
+2026-09-17T16:34:59.826900Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :transaction/validation-rejected, :cause "Transaction report validation rejected."}
+bin/test: 2026-09-17T16:34:59.827642Z END test seon.owned-value-test/incomplete-unowned-cyclic-and-shared-components-refuse
+bin/test: 2026-09-17T16:34:59.827703Z BEGIN test seon.owned-value-test/owned-values-validate-child-only-writes-and-before-owners
+2026-09-17T16:35:00.462346Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :transaction/validation-rejected, :cause "Transaction report validation rejected."}
+2026-09-17T16:35:00.465080Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :transaction/validation-rejected, :cause "Transaction report validation rejected."}
+bin/test: 2026-09-17T16:35:00.757656Z END test seon.owned-value-test/owned-values-validate-child-only-writes-and-before-owners
+bin/test: 2026-09-17T16:35:00.757772Z END namespace seon.owned-value-test
+
+Ran 5 tests containing 68 assertions.
+0 failures, 0 errors.

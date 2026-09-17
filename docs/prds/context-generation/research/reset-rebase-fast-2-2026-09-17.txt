@@ -1,0 +1,144 @@
+bin/test: snapshot differences from HEAD acc23af0b741b98dd463ab5e497bd6d5438b8a40:
+bin/test: end snapshot differences
+bin/test: PHASE snapshot elapsed-seconds=3
+bin/test: PHASE test-slot elapsed-seconds=0
+bin/test-fast: selected snapshot /Users/sean/src/seon/tmp/reset-batch-wt/tmp/test-runs/run.INLQta
+WARNING: Using incubator modules: jdk.incubator.vector
+bin/test: PACKAGED TEST PROJECTION ACQUIRED at= 2026-09-17T16:31:31.175188Z pid= 44431 role= test-fast
+bin/test: CONTRACTS ARMED at= 2026-09-17T16:31:38.042468Z worker= test-fast mode= :panic namespaces= 2 program-namespaces= 109 registered= 1144 instrumented= 1144 program-armable= 1138
+bin/test: 2026-09-17T16:31:38.120606Z BEGIN namespace seon.schema-test
+
+Testing seon.schema-test
+bin/test: 2026-09-17T16:31:38.152213Z BEGIN test seon.schema-test/agent-authored-function-input-maps-accrete
+bin/test: 2026-09-17T16:31:38.159636Z END test seon.schema-test/agent-authored-function-input-maps-accrete
+bin/test: 2026-09-17T16:31:38.159877Z BEGIN test seon.schema-test/every-predicate-schema-declares-what-it-accepts
+bin/test: 2026-09-17T16:31:38.167215Z END test seon.schema-test/every-predicate-schema-declares-what-it-accepts
+bin/test: 2026-09-17T16:31:38.167319Z BEGIN test seon.schema-test/two-projections-never-exchange-a-compiled-validator
+bin/test: 2026-09-17T16:31:39.384981Z END test seon.schema-test/two-projections-never-exchange-a-compiled-validator
+bin/test: 2026-09-17T16:31:39.388080Z BEGIN test seon.schema-test/a-projection-with-no-bound-predicates-compiles-every-declared-shape
+WARNING: reset! already refers to: #'clojure.core/reset! in namespace: seon.fresh-operator, being replaced by: #'seon.fresh-operator/reset!
+bin/test: 2026-09-17T16:32:34.571653Z END test seon.schema-test/a-projection-with-no-bound-predicates-compiles-every-declared-shape
+bin/test: 2026-09-17T16:32:34.571768Z BEGIN test seon.schema-test/one-declaration-validates-only-its-dependency-closure
+bin/test: 2026-09-17T16:32:34.636276Z END test seon.schema-test/one-declaration-validates-only-its-dependency-closure
+bin/test: 2026-09-17T16:32:34.636371Z BEGIN test seon.schema-test/one-derivation-owns-the-projection-predicate-bindings
+bin/test: 2026-09-17T16:32:34.647391Z END test seon.schema-test/one-derivation-owns-the-projection-predicate-bindings
+bin/test: 2026-09-17T16:32:34.647486Z BEGIN test seon.schema-test/canonical-rows-carry-arbitrary-namespaced-properties
+bin/test: 2026-09-17T16:32:34.650565Z END test seon.schema-test/canonical-rows-carry-arbitrary-namespaced-properties
+bin/test: 2026-09-17T16:32:34.650638Z BEGIN test seon.schema-test/an-incremental-build-resolves-against-the-projection-in-hand
+bin/test: 2026-09-17T16:32:34.652393Z END test seon.schema-test/an-incremental-build-resolves-against-the-projection-in-hand
+bin/test: 2026-09-17T16:32:34.652438Z BEGIN test seon.schema-test/canonical-reference-values-use-the-pull-collection-grammar
+Canonical populated reference attributes: 31 declared: 163
+bin/test: 2026-09-17T16:32:34.675205Z END test seon.schema-test/canonical-reference-values-use-the-pull-collection-grammar
+bin/test: 2026-09-17T16:32:34.675293Z BEGIN test seon.schema-test/canonical-mutual-recursion-refuses-but-local-recursion-is-supported
+bin/test: 2026-09-17T16:32:35.143751Z END test seon.schema-test/canonical-mutual-recursion-refuses-but-local-recursion-is-supported
+bin/test: 2026-09-17T16:32:35.143847Z BEGIN test seon.schema-test/acquired-projection-owns-schema-introspection
+bin/test: 2026-09-17T16:32:35.143919Z END test seon.schema-test/acquired-projection-owns-schema-introspection
+bin/test: 2026-09-17T16:32:35.143947Z BEGIN test seon.schema-test/a-component-bearing-row-validates-its-own-declared-shape
+bin/test: 2026-09-17T16:32:35.647431Z END test seon.schema-test/a-component-bearing-row-validates-its-own-declared-shape
+bin/test: 2026-09-17T16:32:35.647532Z BEGIN test seon.schema-test/one-predicate-symbol-cannot-name-two-environments-callables
+bin/test: 2026-09-17T16:32:37.522591Z END test seon.schema-test/one-predicate-symbol-cannot-name-two-environments-callables
+bin/test: 2026-09-17T16:32:37.522695Z BEGIN test seon.schema-test/canonical-self-references-refuse-at-registration
+bin/test: 2026-09-17T16:32:38.429494Z END test seon.schema-test/canonical-self-references-refuse-at-registration
+bin/test: 2026-09-17T16:32:38.429610Z BEGIN test seon.schema-test/equal-packaged-populations-reuse-the-shape-projection
+bin/test: 2026-09-17T16:32:38.435489Z END test seon.schema-test/equal-packaged-populations-reuse-the-shape-projection
+bin/test: 2026-09-17T16:32:38.435590Z BEGIN test seon.schema-test/canonical-definition-keeps-admitted-predicate-symbols
+bin/test: 2026-09-17T16:32:38.440511Z END test seon.schema-test/canonical-definition-keeps-admitted-predicate-symbols
+bin/test: 2026-09-17T16:32:38.441592Z BEGIN test seon.schema-test/database-projections-reuse-only-the-handed-value
+bin/test: 2026-09-17T16:32:41.491585Z END test seon.schema-test/database-projections-reuse-only-the-handed-value
+bin/test: 2026-09-17T16:32:41.491694Z BEGIN test seon.schema-test/declared-reference-maps-accept-the-pull-reference-grammar
+Pulled-reference map contracts: 83 storable: 48
+bin/test: 2026-09-17T16:32:42.815436Z END test seon.schema-test/declared-reference-maps-accept-the-pull-reference-grammar
+bin/test: 2026-09-17T16:32:42.815892Z BEGIN test seon.schema-test/matching-shapes-derive-required-attributes-through-and-refs
+bin/test: 2026-09-17T16:32:42.817323Z END test seon.schema-test/matching-shapes-derive-required-attributes-through-and-refs
+bin/test: 2026-09-17T16:32:42.817380Z BEGIN test seon.schema-test/render-declarations-require-a-contract-that-accepts-their-shape
+bin/test: 2026-09-17T16:32:42.824974Z END test seon.schema-test/render-declarations-require-a-contract-that-accepts-their-shape
+bin/test: 2026-09-17T16:32:42.825044Z BEGIN test seon.schema-test/named-predicate-violations-humanize-to-the-declared-requirement
+bin/test: 2026-09-17T16:32:42.827530Z END test seon.schema-test/named-predicate-violations-humanize-to-the-declared-requirement
+bin/test: 2026-09-17T16:32:42.827571Z BEGIN test seon.schema-test/function-input-fit-is-total-for-an-absent-contract
+bin/test: 2026-09-17T16:32:43.291708Z END test seon.schema-test/function-input-fit-is-total-for-an-absent-contract
+bin/test: 2026-09-17T16:32:43.291812Z BEGIN test seon.schema-test/map-shapes-accrete-additional-top-level-attributes
+bin/test: 2026-09-17T16:32:43.743584Z END test seon.schema-test/map-shapes-accrete-additional-top-level-attributes
+bin/test: 2026-09-17T16:32:43.743702Z BEGIN test seon.schema-test/a-declaration-compiles-against-a-predicate-its-loaded-owner-lacks
+bin/test: 2026-09-17T16:32:43.751081Z END test seon.schema-test/a-declaration-compiles-against-a-predicate-its-loaded-owner-lacks
+bin/test: 2026-09-17T16:32:43.751174Z BEGIN test seon.schema-test/function-input-and-output-fit-belong-to-one-arity
+bin/test: 2026-09-17T16:32:44.204170Z END test seon.schema-test/function-input-and-output-fit-belong-to-one-arity
+bin/test: 2026-09-17T16:32:44.204617Z END namespace seon.schema-test
+bin/test: 2026-09-17T16:32:44.204937Z BEGIN namespace seon.test-test
+
+Testing seon.test-test
+bin/test: 2026-09-17T16:32:44.226529Z BEGIN test seon.test-test/admission-refuses-stale-program-and-records-empty-selection
+2026-09-17T16:32:45.045492Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.test/program-mismatch, :cause "Test run admission refused inconsistent evidence."}
+bin/test: 2026-09-17T16:32:45.215364Z END test seon.test-test/admission-refuses-stale-program-and-records-empty-selection
+bin/test: 2026-09-17T16:32:45.215470Z BEGIN test seon.test-test/overlapping-admissions-reserve-complementary-memberships
+2026-09-17T16:32:46.261842Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.test.run/immutable, :cause "Test run admission refused inconsistent evidence."}
+bin/test: 2026-09-17T16:32:46.263773Z END test seon.test-test/overlapping-admissions-reserve-complementary-memberships
+bin/test: 2026-09-17T16:32:46.263859Z BEGIN test seon.test-test/resolution-follows-admitted-source-and-acquisition
+bin/test: 2026-09-17T16:32:53.857735Z END test seon.test-test/resolution-follows-admitted-source-and-acquisition
+bin/test: 2026-09-17T16:32:53.857855Z BEGIN test seon.test-test/recording-distinguishes-run-replay-from-a-new-event
+2026-09-17T16:32:58.059725Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.db/invalid-read, :cause "seon.db/pull received 42 for :seon.test.run/id, whose installed value type is :db.type/string."}
+2026-09-17T16:32:59.082850Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.test.run/immutable, :cause "A test run's provenance is immutable."}
+bin/test: 2026-09-17T16:32:59.084282Z END test seon.test-test/recording-distinguishes-run-replay-from-a-new-event
+bin/test: 2026-09-17T16:32:59.084373Z BEGIN test seon.test-test/interpreted-test-bodies-use-the-sci-interrupt-bound
+
+ERROR in (bounded-test) (interrupt.cljc:42)
+Uncaught exception, not in assertion.
+expected: nil
+actual: clojure.lang.ExceptionInfo: time-limit
+    at [sci.interrupt$interrupt_BANG_ invokeStatic interrupt.cljc 42]
+    at [sci.interrupt$interrupt_BANG_ invoke interrupt.cljc 32]
+    at [sci.interrupt$interrupt_BANG_ invokeStatic interrupt.cljc 40]
+    at [sci.interrupt$interrupt_BANG_ invoke interrupt.cljc 32]
+    at [seon.sci.kernel$new_guard$interrupt_fn__90335 invoke kernel.clj 71]
+    at [sci.impl.fns$fun$arity_0__81860 invoke fns.cljc 129]
+    at [clojure.lang.AFn applyToHelper AFn.java 152]
+    at [clojure.lang.AFn applyTo AFn.java 144]
+    at [clojure.lang.AFunction$1 doInvoke AFunction.java 33]
+    at [clojure.lang.RestFn invoke RestFn.java 400]
+    at [sci.impl.analyzer$return_call$reify__88750 eval analyzer.cljc 1818]
+    at [sci.impl.analyzer$analyze_let_STAR_$reify__88484 eval analyzer.cljc 726]
+    at [sci.impl.fns$fun$arity_0__81860 invoke fns.cljc 129]
+    at [clojure.lang.AFn applyToHelper AFn.java 152]
+    at [clojure.lang.AFn applyTo AFn.java 144]
+    at [clojure.lang.AFunction$1 doInvoke AFunction.java 33]
+    at [clojure.lang.RestFn invoke RestFn.java 400]
+    at [clojure.test$test_var$fn__9898 invoke test.clj 717]
+    at [clojure.test$test_var invokeStatic test.clj 717]
+    at [clojure.test$test_var invoke test.clj 708]
+    at [clojure.test$test_vars$fn__9924$fn__9929 invoke test.clj 735]
+    at [clojure.test$default_fixture invokeStatic test.clj 687]
+    at [clojure.test$default_fixture invoke test.clj 683]
+    at [clojure.test$test_vars$fn__9924 invoke test.clj 735]
+    at [clojure.test$default_fixture invokeStatic test.clj 687]
+    at [clojure.test$default_fixture invoke test.clj 683]
+    at [clojure.test$test_vars invokeStatic test.clj 731]
+    at [clojure.test$test_vars invoke test.clj 723]
+    at [seon.test.runner$run_selected_tests invokeStatic runner.clj 1203]
+    at [seon.test.runner$run_selected_tests invoke runner.clj 1180]
+    at [seon.test.runner$run_vars_BANG_$fn__108885$fn__108886 invoke runner.clj 646]
+    at [seon.db$call_with_custody invokeStatic db.clj 308]
+bin/test: 2026-09-17T16:32:59.243556Z END test seon.test-test/interpreted-test-bodies-use-the-sci-interrupt-bound
+bin/test: 2026-09-17T16:32:59.243647Z BEGIN test seon.test-test/recording-preserves-admission-and-refuses-a-deleted-definition
+2026-09-17T16:33:03.694772Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.test.runner/test-definition-absent, :cause "Test completion has no surviving test definition."}
+bin/test: 2026-09-17T16:33:03.696203Z END test seon.test-test/recording-preserves-admission-and-refuses-a-deleted-definition
+bin/test: 2026-09-17T16:33:03.696263Z BEGIN test seon.test-test/recorded-reuse-requires-the-original-selection
+
+Testing seon.test-runner-failure-fixture
+
+FAIL in (assertionless-example) (:)
+Test seon.test-runner-failure-fixture/assertionless-example completed without assertion evidence.
+expected: (pos? assertion-count)
+actual: 0
+
+Testing seon.test-runner-failure-fixture
+
+FAIL in (assertionless-example) (:)
+Test seon.test-runner-failure-fixture/assertionless-example completed without assertion evidence.
+expected: (pos? assertion-count)
+actual: 0
+
+Testing seon.test-runner-failure-fixture
+bin/test: 2026-09-17T16:33:11.135260Z END test seon.test-test/recorded-reuse-requires-the-original-selection
+bin/test: 2026-09-17T16:33:11.135430Z END namespace seon.test-test
+
+Ran 32 tests containing 495 assertions.
+0 failures, 0 errors.
