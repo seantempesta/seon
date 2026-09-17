@@ -3236,3 +3236,15 @@ as orchestrator/astra lanes, easy pool as the first live-agent slice).
 - Owner rulings 1o recorded; design lane redirected to write
   `plan/error-entities-prd-2026-09-17.md`; an astra review lane (reads all
   research + guidance, REPL probes) follows the PRD.
+
+## 2026-09-17 ~23:05Z — three landings; the contract-findings census
+
+- Landed: `b60fc26d2` (runner resolves `:seon.test/long-ms` like the reason,
+  Var then namespace; 22 tests green; gate 6 running from the worktree),
+  `958b75634` (`seon.fn/contract-findings`: findings over program facts,
+  ranked by callers; schema `seon.fn.contract.edn`; 61 tests green; fixture
+  census **3,660 findings: 3,225 missing specs, 304 bare maps, 123 maybes,
+  8 unguarded variadics** — the owner's "schemas not doing their job" list is
+  now a query), `eb8db3503` (bounded Datahike writer waits), `940f4b426`
+  (refusals keep their cause). Launched `attribute-aware-tempid-rewrite`
+  (boot note fix #4, fn.clj free again).
