@@ -2830,7 +2830,11 @@
                                             (conj values portable-member))))
                                  values))
                              (reference value))
-                           value)]
+                           (if (= :db.cardinality/many
+                                  (get-in (:schema database)
+                                          [attribute :db/cardinality]))
+                             (set value)
+                             value))]
                      (if (error/error? portable)
                        (reduced portable)
                        (assoc result attribute portable)))))
