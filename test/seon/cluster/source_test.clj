@@ -13,7 +13,6 @@
             [seon.fn :as fn]
             [seon.fs :as fs]
             [seon.program :as program]
-            [seon.schema]
             [seon.schema.datahike]
             [sci.core :as sci]
             [seon.sci.eval :as sci.eval]
@@ -172,7 +171,7 @@
             {:seon.activation/lookup-attribute :missing/identity
              :seon.activation/lookup-value "absent"}]
            [:program-symbol
-            {:seon.activation/executable-symbol "missing/function"}]]]
+            {:seon.activation/executable-symbol 'missing/function}]]]
     (testing (name prerequisite)
       (with-store
         (fn [opened]
@@ -191,7 +190,7 @@
   (let [missing
         (mapv (fn [ordinal]
                 {:seon.activation/executable-symbol
-                 (str "missing/function-" ordinal)})
+                 (symbol "missing" (str "function-" ordinal))})
               (range 12))
         face (source/activation-refusal missing)
         elision (:seon.activation/missing-elision face)]
@@ -324,18 +323,18 @@
             rows (:seon.fn.change/rows plan)]
         (is (not= original revised))
         (is (= :incremental-upsert (:seon.fn.change/action plan)))
-        (is (= #{[:seon.ns/name 'seon.id] [:seon.fn/sym "seon.id/id"]
+        (is (= #{[:seon.ns/name 'seon.id] [:seon.fn/sym 'seon.id/id]
                  [:seon.fn.file/relative-path (fs/relative-path (fs/source-directory) (.getCanonicalPath file))]}
                (set (map program/row-identity rows))))
         (is (every? #(= :core (:seon.schema.admission/source %)) rows))
         (test-support/with-database
           (fn [connection]
-            (let [existing (db/pull (db/db connection) '[*] [:seon.fn/sym "seon.id/id"])
-                  sparse [{:seon.fn/sym "seon.id/id" :seon.fn/doc "updated documentation"}]
+            (let [existing (db/pull (db/db connection) '[*] [:seon.fn/sym 'seon.id/id])
+                  sparse [{:seon.fn/sym 'seon.id/id :seon.fn/doc "updated documentation"}]
                   updated (db/transact! connection sparse)
                   basis (db/basis-t (db/db connection))
                   refused (db/transact! connection
-                                       [{:seon.fn/sym "seon.source.test/incomplete"
+                                       [{:seon.fn/sym 'seon.source.test/incomplete
                                          :seon.fn/doc "incomplete"}])]
               (is (some? (:db/id existing)) "the sparse write updates a complete fixture row")
               (is (some? (:db-after updated)) (pr-str updated))
@@ -516,24 +515,25 @@
   (test-support/with-database
     (fn [connection]
       (let [ctx (sci.eval/build-base-ctx (schema/handed-projection))
-            identity [:seon.fn/sym "source-deletion-probe/value"]]
+            function-symbol 'source-deletion-probe/value
+            fn-identity [:seon.fn/sym function-symbol]]
         (test-support/transacted! connection
                                   [{:seon.ns/name 'source-deletion-probe}
-                                   {:seon.fn/sym (second identity)
-                                    :seon.fn/ns [:seon.ns/name 'source-deletion-probe]
-                                    :seon.schema.admission/source :core}])
+                                   (test-support/program-fn-row
+                                    connection function-symbol
+                                    "(ns source-deletion-probe) (defn value [] 1)")])
         (sci/eval-string* ctx "(ns source-deletion-probe) (defn value [] 1)")
         (is (= 1 (sci/eval-string* ctx "(source-deletion-probe/value)")))
         (is (= 1 (:seon.sci.eval/installed
                   (sci.eval/install-row!
                    {:seon.sci.eval/ctx ctx :seon.db/db @connection
                     :seon.program/row
-                    {:seon.program/delete-identities [identity]
+                    {:seon.program/delete-identities [fn-identity]
                      :seon.program/ns [:seon.ns/name 'source-deletion-probe]
                      :seon.program/source "(ns-unmap 'source-deletion-probe 'value)"}}))))
         (is (nil? (sci/eval-string* ctx "(resolve 'source-deletion-probe/value)")))
         (is (= :core (:seon.schema.admission/source
-                      (db/pull @connection '[*] identity))))))))
+                      (db/pull @connection '[*] fn-identity))))))))
 
 (deftest latest-test-evidence-survives-rebuilding-from-an-older-base
   (with-store

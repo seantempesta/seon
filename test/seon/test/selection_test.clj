@@ -27,60 +27,60 @@
   [{:seon.fn.file/relative-path "src/example/leaf.clj"
     :seon.fn.file/rows
     [{:seon.ns/name 'example.leaf}
-     {:seon.fn/sym "example.leaf/leaf"}]}
+     {:seon.fn/sym 'example.leaf/leaf}]}
    {:seon.fn.file/relative-path "src/example/middle.clj"
     :seon.fn.file/rows
     [{:seon.ns/name 'example.middle}
-     {:seon.fn/sym "example.middle/middle"
-      :seon.fn/calls [[:seon.fn/sym "example.leaf/leaf"]]}]}
+     {:seon.fn/sym 'example.middle/middle
+      :seon.fn/calls ['example.leaf/leaf]}]}
    {:seon.fn.file/relative-path "src/example/stranger.clj"
     :seon.fn.file/rows
     [{:seon.ns/name 'example.stranger}
-     {:seon.fn/sym "example.stranger/stranger"}]}
+     {:seon.fn/sym 'example.stranger/stranger}]}
    {:seon.fn.file/relative-path "test/example/leaf_test.clj"
     :seon.fn.file/rows
     [{:seon.ns/name 'example.leaf-test}
-     {:seon.test/sym "example.leaf-test/leaf-test"
-      :seon.fn/calls [[:seon.fn/sym "example.leaf/leaf"]]}]}
+     {:seon.test/sym 'example.leaf-test/leaf-test
+      :seon.fn/calls ['example.leaf/leaf]}]}
    {:seon.fn.file/relative-path "test/example/far_test.clj"
     :seon.fn.file/rows
     [{:seon.ns/name 'example.far-test}
-     {:seon.test/sym "example.far-test/far-test"
-      :seon.fn/calls [[:seon.fn/sym "example.middle/middle"]]}]}
+     {:seon.test/sym 'example.far-test/far-test
+      :seon.fn/calls ['example.middle/middle]}]}
    {:seon.fn.file/relative-path "test/example/subject_test.clj"
     :seon.fn.file/rows
     [{:seon.ns/name 'example.subject-test}
-     {:seon.test/sym "example.subject-test/subject-test"
-      :seon.test/subject [:seon.fn/sym "example.middle/middle"]}]}
+     {:seon.test/sym 'example.subject-test/subject-test
+      :seon.test/subject 'example.middle/middle}]}
    {:seon.fn.file/relative-path "test/example/stranger_test.clj"
     :seon.fn.file/rows
     [{:seon.ns/name 'example.stranger-test}
-     {:seon.test/sym "example.stranger-test/stranger-test"
-      :seon.fn/calls [[:seon.fn/sym "example.stranger/stranger"]]}]}])
+     {:seon.test/sym 'example.stranger-test/stranger-test
+      :seon.fn/calls ['example.stranger/stranger]}]}])
 
 (deftest a-changed-file-selects-exactly-the-tests-that-reach-it
   (testing "a directly called leaf selects its caller and every transitive one"
-    (is (= ["example.far-test/far-test"
-            "example.leaf-test/leaf-test"
-            "example.subject-test/subject-test"]
+    (is (= ['example.far-test/far-test
+            'example.leaf-test/leaf-test
+            'example.subject-test/subject-test]
            (selection/reaching-tests artifacts ["src/example/leaf.clj"]))
         "far-test reaches leaf only through middle; subject-test only through
          its declared subject; both must be selected"))
 
   (testing "an unrelated change selects only its own dependents"
-    (is (= ["example.stranger-test/stranger-test"]
+    (is (= ['example.stranger-test/stranger-test]
            (selection/reaching-tests artifacts ["src/example/stranger.clj"]))
         "the leaf tests must be ABSENT — a selector that returns everything
          is vacuously safe and defeats the tier"))
 
   (testing "an intermediate change selects its callers, not the leaf's other
             dependents"
-    (is (= ["example.far-test/far-test"
-            "example.subject-test/subject-test"]
+    (is (= ['example.far-test/far-test
+            'example.subject-test/subject-test]
            (selection/reaching-tests artifacts ["src/example/middle.clj"]))))
 
   (testing "a changed test file selects its own tests"
-    (is (= ["example.leaf-test/leaf-test"]
+    (is (= ['example.leaf-test/leaf-test]
            (selection/reaching-tests artifacts ["test/example/leaf_test.clj"]))))
 
   (testing "an unchanged tree selects nothing"

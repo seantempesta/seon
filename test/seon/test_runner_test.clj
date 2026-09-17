@@ -1265,9 +1265,15 @@
           (.setExecutable executable true)
           (io/delete-file ready)
           (let [[status output] (command ["src/probe/api.clj"])]
+            (is (zero? status) output)
+            (is (.exists marker) "an exact HEAD snapshot needs no overlay graph"))
+          (io/delete-file marker true)
+          (spit api "(ns probe.api)\n(defn value [x] x)\n(defn unchanged [x] x)\n;; dirty overlay\n")
+          (let [[status output] (command ["src/probe/api.clj"])]
             (is (= 64 status) output)
             (is (str/includes? output "orchestrator must run: bin/test --prepare-head-base") output)
             (is (not (.exists marker)) "absent baseline refuses before a JVM"))
+          (spit api "(ns probe.api)\n(defn value [x] x)\n(defn unchanged [x] x)\n")
           (let [fast-source (slurp executable)]
             (io/copy (io/file checkout "target/test-published-bases" fake-cache-digest "base/manifest.edn")
                      (io/file checkout "tmp/head-manifest.edn"))

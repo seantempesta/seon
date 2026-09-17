@@ -58,7 +58,7 @@
                    (seon.schema/canonical-schema-rows forms))]
     (loop [needed (set probe-keys)]
       (let [expanded (into needed
-                           (mapcat #(map second (:seon.schema/references (get rows %))))
+                           (mapcat #(get-in rows [% :seon.schema/references]))
                            needed)]
         (if (= needed expanded)
           (mapv rows (sort expanded))
