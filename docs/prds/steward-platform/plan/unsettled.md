@@ -2988,3 +2988,58 @@ working tree, never Sonnet.
   merged base and updated its post-reset regressions (`f26330a56`,
   30/266 green). Message-wake lane COMPLETE. The cold-only contract reds
   should vanish in the first post-reset gates.
+
+## RESUME HERE (2026-09-17 19:05Z — owner stopped everything)
+
+**Nothing is running.** No codex lanes, no Claude agents, no gates. All
+codex lanes died at once with SIGTERM at ~18:55Z (cause not established);
+their sessions are preserved and resumable by name.
+
+**Tree:** branch `steward-platform` at `925affcd3`, pushed. Four UNCOMMITTED
+files belong to the `test-system-stage1` lane (its selection-function
+draft, 269 insertions): `src/seon/fn.clj`, `src/seon/test.clj`,
+`src/seon/test/runner.clj`, `test/seon/test/selection_test.clj`. Do not
+revert them; resume that lane and it continues from them. No worktrees.
+
+**Default:** DOWN (0/0 clusters). The one reset refused at republish: the
+activation closure names `seon.cluster/derive-activation` and
+`seon.cluster/populate-source!` as strings while `:seon.fn/sym` is now a
+symbol (log `data/operator/operations/reset-republish-50177.log`). The
+integrator committed part of the symbols fix before dying (`925affcd3` and
+the two below it); the scratch-root proof was not reached.
+
+**Resume commands (one per shell, quoted heredoc, confirm with
+`bin/codex-agent status`):**
+1. `bin/codex-agent resume reset-batch-integration` — finish the symbols
+   seam: every function-naming attribute a symbol (activation's
+   `executable-symbol` first), the `seon.db/q` codec (symbol literal in
+   value position; collection bindings return the declared type), then
+   `bin/seon --root tmp/reset-scratch-root reset --force` must converge;
+   then the orchestrator runs `bin/seon reset --force` on the main root,
+   reseeds Juniper, runs the seven serial gates in
+   `plan/reset-batch-2026-09-17.md` §"Reset procedure", the live proofs,
+   and merges `steward-platform` into `main`.
+2. `bin/codex-agent resume test-system-stage1` — continue from its dirty
+   files: the one selection function over symbol edges, callers switched,
+   superseded paths deleted, four regressions; stop when green fast.
+3. `bin/codex-agent resume error-and-data-model-design` — the §1l design
+   note (error value family, the shapes from the four audits, the checks,
+   the campaign order); design only. Its note was not yet written.
+4. After the design lands: `bin/codex-agent resume private-contracts`
+   (the one predicate `seon.error/error?` + the throw-or-record helper on
+   `:seon.config/on-core-error`, database errors to the durable log, then
+   contracts in the audits' order), `bin/codex-agent resume audit2-blockers`
+   (turn: `require-open-run` on a refused read, `opening-deferred?`,
+   fail-open shapes, env refusal schemas, the MCP requery issue),
+   `bin/codex-agent resume audit3-blockers` (detector fabricating issues,
+   fault recorder fail-open, gate set shrinking — its fn.clj hunk was
+   committed/shelved per its note).
+5. Queued, not started: sol lane for the dead-turn-proc silence (live
+   trial 1's blocker); stage 3 after stage 1; the operator outside the
+   program graph (audit 4); rerun live trial 1 on the fresh cluster; merge
+   to `main` at the first green checkpoint.
+
+**Rules in force:** ≤4 editing lanes; astra for design/hardest, sol for
+implementation, luna for probes (`codex-lanes` skill); lanes never
+`bin/test`; the orchestrator gates cold and merges to main; every landing
+written here in the same beat.
