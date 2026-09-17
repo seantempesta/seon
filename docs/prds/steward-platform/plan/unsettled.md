@@ -2489,3 +2489,17 @@ working tree, never Sonnet.
   Everything else in S3, stage 2, hook, config, db, schema, error, wake:
   GREEN cold. **Batch 118 launched** (platform + 18 namespaces covering the
   memo-test fix, invalid-input fix, small fixes, seam 4, guardrails item 2).
+- **Stage 2 LANDED** `e58a27c86` (reviewed, approved): the recorder read a
+  REFUSED provenance pull as an existing run → the `:seon.test.run/immutable`
+  refusal that failed batch 116 A's recording; now the read's refusal is
+  preserved and a genuine conflict reports both values; 52/362 green.
+  THIRD instance of one class tonight → class issue filed with three owner
+  options (`a-database-reads-error-value-is-read-as-a-row-by-its-caller`;
+  recommendation: internal reads throw, one conversion at the agent
+  boundary). Stage 2 resumed on resolution / claims / unchanged-result reuse.
+- **Message-wake seam 1 LANDED** `a50424f6b` (46 files; reviewed the schema
+  and writer hunks: `:seon.message/to` is the listened routing edge, inbox
+  and read-tx deleted, `:seon.turn/handled` claim set at settlement,
+  duplicate opens decided as writer no-ops — the run-exists fault
+  dissolves). Lane continues to the `about` split and origin; cold gate
+  after its fast verification (batch 119).
