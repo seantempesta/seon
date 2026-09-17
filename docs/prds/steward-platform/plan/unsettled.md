@@ -3673,3 +3673,15 @@ as orchestrator/astra lanes, easy pool as the first live-agent slice).
   two findings on `pull`/`transact-call` (1q unions), `pull`'s derived
   pulled-form output (C1b #2), B4 #18/#19/#20, and ruling 1r's provenance-
   derived write bound. Editing: wrapper (SCI), namespace-page, arm-leak, db.
+- `namespace-page-fanout` COMPLETE (`b2f62f288` `f5bbecde0` `2b07ec7e8`):
+  root cause — namespace traversal resolved symbol-valued `:seon.ns/requires`
+  into entity maps and leaked the resolved graph into the render value, so
+  schema matching failed and the structural renderer rendered the whole
+  namespace population; `/` was the same class. Requirement symbols are
+  restored before rendering; the selected namespace renders full, others as
+  links; no HTML clipping. 3 tests / 62 assertions green isolated. NOT yet
+  live: the lane's two adoption attempts failed because the clj-kondo
+  preflight exceeded its deadline (the new full-kondo preflight under load)
+  — default still serves the old Var (`/ns/seon.id` 33 s / 27.5 MB at
+  08:40Z). Orchestrator adopting now (`adopt-ns-page.log`); the preflight
+  bound is the next platform defect if it fails again.
