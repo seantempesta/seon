@@ -2308,3 +2308,70 @@ working tree, never Sonnet.
 - Plan README updated: Phase 0 rows for the two default blockers, the
   refuted create-path item, batch 116, the load cap; tonight's ordered plan
   as its own section.
+
+## 2026-09-17 03:45Z — default's "config loss" was a broken pull, root-caused and repaired live
+
+- **Root cause** (issue `the-default-clusters-effective-configuration-lost-
+  every-required-fact` → resolved, full chain in the note): no fact was lost;
+  the small-fixes lane's uncommitted `total-pull-arguments` hunk was
+  hot-reloaded in a seq-returning intermediate form, `append-pull-evidence!`
+  threw on `assoc`, every `seon.db/pull` returned an error value, and two
+  config seams read that value as a row / as absence. The disk already had
+  the vector fix; adoption refused tree-wide (S3 seam) kept it out of the
+  JVM. Hot-loaded by hand: pull 80 keys, effective 77 dials, `config apply`
+  converged. Owner: "keep trying to find the root cause ... solving them
+  dissolves many issues" — this one dissolved the debug-page screenshot
+  block and the modeling study's rendering failures too. Queued Opus fix
+  (fully specified, launch when an editing slot frees): `effective-in`
+  and `population-transaction-data` return the pull's error; regression via
+  a refusing pull. The small-fixes agent was told to land its hunk.
+- **Worktrees are not the cause** (owner asked): the reset-only
+  `reset-batch-wt` is deliberate (schema resources are read live from disk);
+  the four holderless lane baselines were swept with patches saved.
+- **Datahike modeling study LANDED** (`bd5923a8c`, astra high, 549 lines,
+  read end to end): ten dependency truths with `file:line`; a correction
+  table for the reset batch (keep symbol edges but INDEX ordinary
+  reverse-read edges; widen strict-deletion detection to identity
+  retraction/rename on a surviving eid; G4 digest scoped to the exact
+  analyzed input; the 19 required-many keys → optional with positive
+  construction facts, no marker booleans; G5 must visit owning roots before
+  AND after under a declared bound incl. >1,000 children; archived agents =
+  positive `archived-tx`, delete the co-deletion proof; capability-fn ref
+  deleted; §1h applied in one publication; the inbox-move pattern deleted;
+  origin → issue/id value; refreshes deleted; fn.ast Q2 → A recommended
+  (~1 day); "required when present" rejected as a deletion guarantee; issue
+  status kept until positive writers cover imported notes; `-at`→`-tx` only
+  for recording time). Two owner questions: Q2 AST (A recommended, taken,
+  vetoable) and message subject grammar (A: existing token grammar,
+  recommended, taken, vetoable). Corrections of earlier claims: G2 "touches
+  only its own datoms" false globally (components cascade, refs sweep); G3's
+  lookup-ref refusal does not cover numeric refs; component flag is
+  parent→child (skills had it reversed). Both skills corrected in the same
+  commit. Integrator to be stopped and resumed on this table (§1i).
+- **Guardrails item 2 reviewed** (`89802502a` on branch
+  `lane-guardrails-bounds-2026-09-17`, 10 files): `seon.test.bounds` derives
+  silence/exchange bounds from `:seon.test/long-ms` plus measured fixture
+  priming (worker READY reports it; a 19,760 ms measured constant is the
+  fallback); `SEON_TEST_SILENCE_SECONDS`/`SEON_TEST_SLOTS` admitted only with
+  `SEON_TEST_ORCHESTRATOR=1` and no lane identity; refused in `bin/_test-slot`
+  before a slot. Approved with one note: the priming constant should give
+  way to the reported value everywhere. Integration blocked: runner.clj is
+  foreign-dirty in the main tree (stage 2 lane) — cherry-pick when it frees.
+- **Batch 116 A (platform, HEAD d65cc688c): 96 tests / 681 assertions /
+  2F / 0E, exit 1.** Both reds are one class: `seon.schema.declaration-
+  population-test` and `seon.sci.admit.declaration-population-test` measure
+  resource reads of one explicit packaged resolution and now see 0 — the
+  R4 memo (`5e54c9ae1`, packaged population memoised on declaration stamp)
+  serves them from the memo. Fix (Opus, queued): the tests invalidate
+  through the memo's own declared seam before measuring; the memo is the
+  ruled design. Also: results NOT recorded — `:seon.test.run/immutable`
+  (runner.clj:2486: a run row already exists with different provenance for
+  the same run id) → fold into stage 2 (owns the recorder) with the retained
+  root `tmp/test-runs/run.jHOFSg`. B (25 namespaces) running.
+- Hook agent LANDED (`db0c51fa6`, `8952da44f`): codex was firing hooks all
+  along (trust hash unaffected by matcher edits) but DROPS a PostToolUse
+  block — a shell heredoc write was blocked and the lane saw "NO FEEDBACK";
+  now every refusal exits 2 with its reason on stderr, the derived scan runs
+  on every PostToolUse including apply_patch, `agent_id`/`agent_type`
+  recorded; loophole inventory in its note. Create-path agent: premise
+  refuted, regression `770cf35d3`. Guide: `ec350ece0`.

@@ -1,6 +1,6 @@
 ---
 type: defect
-status: open
+status: resolved
 severity: blocker
 tags: [config, cluster, platform, mcp, render]
 created: 2026-09-17
@@ -94,3 +94,41 @@ reset/refork, batching the schema changes other lanes have pending.
 Observed through `mcp__seon__runtime_status`, `mcp__seon__eval_clj`,
 `bin/seon status`, and `curl` against `http://127.0.0.1:7994`. No write, no
 repair attempt, and no reset was performed.
+
+## Root cause (2026-09-17 03:40Z, orchestrator, live probes `tmp/orchestrator/config-loss-probe-{1..6}.edn`)
+
+No fact was ever lost. The config entity holds all 79 attributes, asserted in
+one transaction (536870922) and never retracted (history count 79 = current
+count 79). Every read failed instead:
+
+1. An uncommitted `src/seon/db.clj` hunk (`total-pull-arguments`, the
+   small-fixes lane's pull-cap work) was hot-reloaded into the JVM by the edit
+   hook in an intermediate form that returned a seq. `append-pull-evidence!`
+   (db.clj:719) does `(assoc arguments 0 selector)`, which throws
+   `ClassCastException: Cons cannot be cast to Associative` — inside
+   `pull-call`'s catch, so EVERY `seon.db/pull` returned a flat
+   `:seon.db/invalid-read` value instead of a row.
+2. `seon.config/effective-in` (config.clj:579) bound that error map as `row`
+   and computed `missing` from its keys — 68 "missing" facts; absence read
+   as health at a reader.
+3. `seon.config/population-transaction-data` (config.clj:452) read the same
+   error as "no such entity", minted a tempid for an existing identity, and
+   Datahike refused the conflicting upsert — the `config apply` refusal.
+4. The on-disk hunk already carried the vector fix (its docstring names this
+   exact throw), but adoption was refused tree-wide by the S3 lane's seam, so
+   the JVM never received it.
+
+Repair: the on-disk definition was evaluated into the JVM by hand
+(`seon.db` namespace, MCP jvm mode); `seon.db/pull` answers 80 keys,
+`seon.config/effective` answers 77 dials, `bin/seon config apply` converged
+(4 operations). No restart, no reset.
+
+## What remains open (routed)
+
+- `effective-in` and `population-transaction-data` must return the pull's
+  error value instead of reading it as a row — two guard clauses and one
+  regression (queued as an Opus fix, spec in the plan).
+- The class: an intermediate hot-reload from a lane's in-tree edit while
+  adoption is refused leaves the JVM on a broken definition with no signal.
+  The hook's post-edit adoption is the seam that should have re-applied the
+  fixed bytes; when adoption refuses, the JVM silently keeps whatever loaded.
