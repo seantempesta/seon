@@ -2503,3 +2503,6 @@ working tree, never Sonnet.
   duplicate opens decided as writer no-ops — the run-exists fault
   dissolves). Lane continues to the `about` split and origin; cold gate
   after its fast verification (batch 119).
+- Stage 2 stopped at held `src/seon/sci/eval.clj` + `eval_test.clj` (the
+  over-bound Opus fix holds them) after recording its acquisition-evidence
+  gap (`497b36122`); resume the moment that fix lands.
