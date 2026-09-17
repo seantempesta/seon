@@ -2166,6 +2166,9 @@ context. Owed: the hook-arm hunk (sci/eval.clj held by S3; its regression
 red by design until then) and the AGENTS.md vocabulary rows (file held by
 S3). Live proof deferred: adoption refused tree-wide (S3's seam).
 
+**Guardrails** `e1d2347f4`: resume records backfill from the log's first
+valid session header for pre-record lanes; resumed on items 2–4.
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
