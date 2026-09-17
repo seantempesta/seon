@@ -1,0 +1,6 @@
+bin/test: snapshot differences from HEAD 1b6fb159829ae302d16efd9c0c42b7f973134ed7:
+bin/test:   M	src/my/message.clj
+bin/test:   M	test/seon/sci/documentation_test.clj
+bin/test: end snapshot differences
+bin/test: PHASE snapshot elapsed-seconds=9
+bin/test: No published program graph matches the source snapshot; orchestrator must run: bin/test --prepare-head-base

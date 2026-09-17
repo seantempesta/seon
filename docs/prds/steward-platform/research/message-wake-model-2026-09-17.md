@@ -488,3 +488,62 @@ Git status was clean before this evidence-only slice. No foreign session
 or file was touched. No test JVM or cold gate was run. This proves the
 adopted pre-reset cluster above, not any subsequent reset's new store.
 Stopped for review.
+
+
+## Batch 122 B — message documentation, 2026-09-17
+
+The attributed failure in `tmp/orchestrator/gate-results/batch-122.log`
+(lines 3567–3581, reported HEAD `5dd6ef7cc`) compares documentation of two
+*different functions*: `doc` returns `my.message/send`, but the invalid
+recipient reaches the JVM owner `seon.cluster.message/send!`, whose contract
+refuses it and whose documentation is correctly attached to that refusal.
+Copying the public docstring onto that owner would conceal the fixture defect
+and duplicate its source of truth.
+
+The owning docstring now states the §1h grammar: optional nonempty string
+subject token stored verbatim without resolution; independent evaluation
+assignment token; sender supplied from agent identity, with `from` alone
+marking an inside wake. Both `doc` and mistake documentation still use the
+existing `function-doc-map` / `docstring-parts` projection of that one
+indexed docstring (`src/seon/sci/eval.clj:1250`, `:1319`, `:2240`).
+No second documentation text or alternate error projection was added.
+
+The regression now seeds the canonical cluster with `:on-core-error :panic`
+before acquiring its SCI context and supplies explicit connection/agent
+custody. Previously the request's panic dial did not configure the database
+used by `install-function-contract!`: `instrumentation-config` falls back
+to `:record` without cluster config, and `wrap-interpreted` then returns the
+unwrapped function (`src/seon/sci/eval.clj:661–685`,
+`src/seon/instrument.clj:492–532`). The armed JVM owner consequently caught
+what the unarmed interpreted surface missed. The test additionally asserts
+that the refusal names `my.message/send`, verifies all three grammar terms,
+and retains whole-document equality, example equality, and no-message-write
+assertions. Malli's wrapper contract was read at
+`reference-code/malli/src/malli/core.cljc:3119–3142`.
+
+The current message owner, schema and relevant evaluator/instrumentation
+seams, program-facts §1h, and canonical testing skill were read for this fix.
+The diagnosis and outstanding verification are recorded in
+[the fixture issue](../../../seon/issues/documentation-fixture-omits-interpreted-contract-configuration.md).
+
+**Verification blocked before any JVM, not a passing test:**
+
+```sh
+timeout 2400 bin/test-fast --paths src/my/message.clj test/seon/sci/documentation_test.clj -- seon.sci.documentation-test
+```
+
+At snapshot HEAD **1b6fb159829ae302d16efd9c0c42b7f973134ed7**, the command
+exited **64** with: `No published program graph matches the source snapshot;
+orchestrator must run: bin/test --prepare-head-base`.
+[Exact launcher output](message-documentation-fast-2026-09-17.txt).
+AGENTS §5/§7 reserves baseline preparation to the orchestrator; no lane
+publication, unisolated fast run, or cold gate was used to bypass it.
+The proposed fix and regression are committed for review, **not yet verified**.
+
+`git status` confirmed both owned code paths free at entry. Foreign changes
+in operator state, store, filesystem, operator tests and program tests were
+preserved. A transient shared-tree syntax refusal named only the foreign
+`test/seon/operator_test.clj:654–684`; no edits were made there. The actual
+fast verification boundary is the absent source-matching published graph,
+not that foreign syntax. No default connection, evaluation, adoption or
+lifecycle operation was performed. The prior live wake proof remains complete.

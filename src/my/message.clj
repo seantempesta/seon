@@ -33,7 +33,12 @@
 
   Returns the stored :seon.message/id, :seon.message/content and endpoint refs.
   Sending inside let or do delivers even when its return value is discarded.
-  Supply :my.message/about to name its subject. Handling is recorded when the turn settles.
+  Optional :my.message/about is a nonempty string subject identity token, stored
+  verbatim without looking up a target; omit it when there is no subject.
+  Optional :my.message/assignment names the evaluation assigned for repair,
+  independently of the subject. The sender is supplied from my agent identity:
+  :seon.message/from alone marks an inside wake, never the subject or assignment.
+  Handling is recorded when the turn settles.
 
   Example:
   (my.message/send {:my.message/to \"root\" :my.message/content \"The verification passed.\"})"
