@@ -674,7 +674,7 @@
 (defn- install-function-contract!
   [ctx committed projection db]
   (when-let [spec-edn (:seon.fn/spec committed)]
-    (let [function-symbol (symbol (:seon.fn/sym committed))
+    (let [function-symbol (:seon.fn/sym committed)
           sci-var (sci/resolve ctx function-symbol)
           {:keys [:seon.config/on-core-error :seon.sci.admit/caps]}
           (instrumentation-config db)]
@@ -848,7 +848,7 @@
          :seon.sci.eval/installed 1})
 
       :seon.fn/sym
-      (let [function-symbol (symbol (:seon.fn/sym committed))
+      (let [function-symbol (:seon.fn/sym committed)
             namespace-name (symbol (namespace function-symbol))
             admission (:seon.schema.admission/source committed)
             next-projection (or prepared-projection
@@ -1085,7 +1085,7 @@
                 (:seon.fn/spec program-row)
                 (schema/projection-with-function-contract
                  projection
-                 (symbol (:seon.fn/sym program-row))
+                 (:seon.fn/sym program-row)
                  (edn/read-string (:seon.fn/spec program-row))
                  {:seon.schema.admission/source :agent})
 
@@ -1474,7 +1474,7 @@
                                 (edn/read-string (:seon.schema/form row))]))
                         (:seon.schema/_ns namespace-row))
          :functions (mapv (fn [row]
-                            (merge {:sym (symbol (:seon.fn/sym row))
+                            (merge {:sym (:seon.fn/sym row)
                                     :arglists (if-let [arglists (:seon.fn/arglists row)]
                                                 (edn/read-string arglists)
                                                 (declaration-absent :seon.fn/arglists))
@@ -2526,7 +2526,7 @@
              :seon.eval/shown (pr-str value)
              :seon.cluster.eval/error (failure-text value)
              :seon.cluster.eval/ns namespace-ref
-             :seon.sci.eval/ending-ns (symbol (str (second namespace-ref)))
+             :seon.sci.eval/ending-ns (second namespace-ref)
              :seon.print/options {}
              :seon.sci.admit/record record}
       interrupted? (assoc :seon.cluster.eval/interrupted-at interrupted-at))))
@@ -2908,7 +2908,7 @@
 
 (defn- install-candidate-function!
   [ctx database row]
-  (let [function-symbol (symbol (:seon.fn/sym row))
+  (let [function-symbol (:seon.fn/sym row)
         definition (edn/read-string (:seon.fn/spec row))
         projection (context-projection ctx)
         next-projection
@@ -2966,7 +2966,7 @@
      ctx [{:seon.program/row row :seon.sci.eval/evaluation evaluation}])
     (install-candidate-function! ctx database row)
     (assoc evaluation :seon.sci.admit/value
-           (sci/resolve ctx (symbol (:seon.fn/sym row))))))
+           (sci/resolve ctx (:seon.fn/sym row)))))
 
 (defn refuse-install
   "Project the flat refusal as the evaluation result, discarding candidate roots."

@@ -1300,7 +1300,7 @@
               :seon.fn/sym
               (when (:seon.fn/spec row)
               (schema/projection-with-function-contract
-               current-projection (symbol identity-value)
+               current-projection identity-value
                (edn/read-string (:seon.fn/spec row))
                {:seon.schema.admission/source :agent}))
 

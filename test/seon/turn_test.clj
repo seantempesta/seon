@@ -51,7 +51,7 @@
                             :seon.issue/title "Bound a refused ordinary call"
                             :seon.issue/problem "A call that closes before a provider still spends an issue turn."
                             :seon.issue/status :open :seon.issue/severity :cleanup
-                            :seon.issue/detector [:seon.fn/sym "seon.issue.detect/public-without-doc"]
+                            :seon.issue/detector [:seon.fn/sym 'seon.issue.detect/public-without-doc]
                             :seon.issue/agent [:seon.agent/id "issue-close-worker"]
                             :seon.issue/budget 2}])
      (doseq [aid ["issue-close-worker" "conversation-close-worker"]]
@@ -731,82 +731,63 @@
 (defn- with-model-database [body]
   (support/with-database body))
 
-(deftest test-first-subjects-resolve-when-the-function-arrives
+(deftest unresolved-test-subjects-remain-symbol-values
   (with-model-database
     (fn [connection]
       (let [namespace-name 'fixture.pending
-            test-symbol "fixture.pending/target-test"
-            function-symbol "fixture.pending/target"
+            test-symbol 'fixture.pending/target-test
+            function-symbol 'fixture.pending/target
             now (java.util.Date. 1785000000000)
-            settle-row!
-            (fn [run-id agent-id row]
-              (support/transacted!
-                      connection
-                      [{:seon.agent/id agent-id}
-                       {:seon.turn/id run-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}])
-              (support/transacted!
-                      connection
-                      (turn/receipt-start-tx
-                       {::turn/id run-id
-                        :seon.cluster.eval/ordinal 0
-                        :seon.cluster.eval/at now}))
-              (db/transact!
-               connection
-               (turn/receipt-settle-tx
-                {::turn/id run-id
-                 :seon.cluster.eval/ordinal 0
-                 :seon.eval/shown "nil"
-                 :seon.program/row row})))]
+            settle-source!
+            (fn [run-id agent-id source]
+              (let [[_ row] (seon.fn/analyze-form
+                             @connection source
+                             [:seon.ns/name namespace-name] nil)]
+                (support/transacted!
+                        connection
+                        [{:seon.agent/id agent-id}
+                         {:seon.turn/id run-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}])
+                (support/transacted!
+                        connection
+                        (turn/receipt-start-tx
+                         {::turn/id run-id
+                          :seon.cluster.eval/ordinal 0
+                          :seon.cluster.eval/at now}))
+                (support/transacted!
+                        connection
+                        (turn/receipt-settle-tx
+                         {::turn/id run-id
+                          :seon.cluster.eval/ordinal 0
+                          :seon.eval/shown "nil"
+                          :seon.program/row row}))))]
         (support/transacted! connection [{:seon.ns/name namespace-name}])
-        (settle-row!
+        (settle-source!
          "pending-test-run" "pending-test-agent"
-         {:seon.test/sym test-symbol
-          :seon.test/ns [:seon.ns/name namespace-name]
-          :seon.test/source "(clojure.test/deftest target-test)"
-          :seon.schema.admission/source :agent
-          :seon.test/subject [:seon.fn/sym function-symbol]})
+         (str "(clojure.test/deftest ^{:seon.test/subject " function-symbol
+              "} target-test (clojure.test/is true))"))
         (let [pending (db/pull @connection '[*]
                                [:seon.test/sym test-symbol])]
-          (is (= function-symbol (:seon.test/pending-subject pending)))
-          (is (nil? (:seon.test/subject pending)))
-          (is (= [test-symbol]
-                 (seon.fn/gate-set @connection function-symbol))))
-        (settle-row!
+          (is (= function-symbol (:seon.test/subject pending))
+              "the observed subject name is stored before a function row exists")
+          (is (nil? (:db/id (db/pull @connection [:db/id]
+                                     [:seon.fn/sym function-symbol])))
+              "settlement does not fabricate a function row for the name")
+          (is (some #{test-symbol}
+                    (seon.fn/gate-set @connection function-symbol))))
+        (settle-source!
          "pending-function-run" "pending-function-agent"
-         {:seon.fn/sym function-symbol
-          :seon.schema.admission/source :agent
-          :seon.fn/ns [:seon.ns/name namespace-name]
-          :seon.fn/source
-          "(defn ^{:malli/schema [:=> [:cat] :int]} target [] 1)"
-          :seon.fn/arglists "([])"
-          :seon.fn/private? false
-          :seon.fn/spec "[:=> [:cat] :int]"})
-        (let [resolved (db/pull @connection
-                                '[:seon.test/pending-subject
-                                  {:seon.test/subject [:seon.fn/sym]}]
+         "(defn ^{:malli/schema [:=> [:cat] :int]} target [] 1)")
+        (let [resolved (db/pull @connection '[:seon.test/subject]
                                 [:seon.test/sym test-symbol])]
-          (is (nil? (:seon.test/pending-subject resolved)))
-          (is (= function-symbol
-                 (get-in resolved [:seon.test/subject :seon.fn/sym])))
-          (is (= [test-symbol]
-                 (seon.fn/gate-set @connection function-symbol))))))))
+          (is (= function-symbol (:seon.test/subject resolved))
+              "the value edge needs no repair when the function arrives")
+          (is (some #{test-symbol}
+                    (seon.fn/gate-set @connection function-symbol))))))))
 
 (deftest batch-settlement-preserves-declaration-order
   (support/with-database
    (fn [connection]
-     (let [now (java.util.Date.)
-           rows [{:seon.test/sym "fixture.batch/target-test"
-                  :seon.test/ns [:seon.ns/name 'fixture.batch]
-                  :seon.test/source "(clojure.test/deftest target-test)"
-                  :seon.schema.admission/source :agent
-                  :seon.test/subject [:seon.fn/sym "fixture.batch/target"]}
-                 {:seon.fn/sym "fixture.batch/target"
-                  :seon.fn/ns [:seon.ns/name 'fixture.batch]
-                  :seon.fn/source "(defn target [] 1)"
-                  :seon.schema.admission/source :agent
-                  :seon.fn/arglists "([])"
-                  :seon.fn/private? false
-                  :seon.fn/spec "[:=> [:cat] :int]"}]]
+     (let [now (java.util.Date.)]
        (support/transacted! connection
                             [{:seon.ns/name 'fixture.batch}
                              {:seon.agent/id "batch"}
@@ -816,21 +797,27 @@
                               (turn/receipt-start-tx
                                {::turn/id "batch" :seon.cluster.eval/ordinal ordinal
                                 :seon.cluster.eval/at now})))
-       (let [result (db/transact!
+       (let [sources [(str "(clojure.test/deftest "
+                           "^{:seon.test/subject fixture.batch/target} "
+                           "target-test (clojure.test/is true))")
+                      "(defn ^{:malli/schema [:=> [:cat] :int]} target [] 1)"]
+             rows (mapv (fn [source]
+                          (second
+                           (seon.fn/analyze-form
+                            @connection source
+                            [:seon.ns/name 'fixture.batch] nil)))
+                        sources)
+             result (db/transact!
                      connection
                      (turn/receipt-settle-batch-tx
                       (mapv (fn [ordinal row]
                               {::turn/id "batch" :seon.cluster.eval/ordinal ordinal
                                :seon.eval/shown "nil" :seon.program/row row})
                             (range 2) rows)))
-             saved (db/pull @connection
-                            '[:seon.test/pending-subject
-                              {:seon.test/subject [:seon.fn/sym]}]
-                            [:seon.test/sym "fixture.batch/target-test"])]
+             saved (db/pull @connection '[:seon.test/subject]
+                            [:seon.test/sym 'fixture.batch/target-test])]
          (is (nil? (:seon.error/kind result)) (pr-str result))
-         (is (nil? (:seon.test/pending-subject saved)))
-         (is (= "fixture.batch/target"
-                (get-in saved [:seon.test/subject :seon.fn/sym]))))))))
+         (is (= 'fixture.batch/target (:seon.test/subject saved))))))))
 
 ;; Deterministic clock: every generated time is an offset from t0.
 (def ^:private t0-ms 1785000000000)
@@ -1254,9 +1241,9 @@
         (is (nil? (db/pull @connection [:db/id]
                            [::turn/id "moving-run"])))))))
 
-(deftest settlement-mints-rows-for-unindexed-call-targets
-  ;; Resolvable calls point only at the complete program population.
-  ;; Unresolvable mentions settle as errors without inventing graph edges.
+(deftest settlement-keeps-unresolved-call-and-require-names-as-values
+  ;; Source observations survive independently of whether a declaration row
+  ;; currently exists. Resolution is a query; settlement never fabricates it.
   (support/with-database
     (fn [connection]
       (support/transacted!
@@ -1271,11 +1258,13 @@
                {:seon.agent/id "macro-caller" ::turn/id "macro-call-run" :seon.db.process/id "macro-call-process" :seon.turn/opened-tx "datomic.tx" ::turn/starting-ns [:seon.ns/name 'my.macro-caller] ::turn/sources [{:seon.cluster.eval/source "(seon.bootstrap/help)"}
                  {:seon.cluster.eval/source "(missing.target/nope)"}
                  {:seon.cluster.eval/source
-                  "(require 'unindexed.required)"}]}))
+                  "(require 'unindexed.required)"}
+                 {:seon.cluster.eval/source
+                  "(defn unresolved-caller [] (missing.target/nope))"}]}))
       (let [macro-row
             (db/pull @connection
                      [:db/id :seon.fn/source :seon.fn/macro?]
-                     [:seon.fn/sym "seon.bootstrap/help"])]
+                     [:seon.fn/sym 'seon.bootstrap/help])]
         (is (:db/id macro-row) "publication supplies the macro identity")
         (is (string? (:seon.fn/source macro-row)))
         (is (true? (:seon.fn/macro? macro-row))))
@@ -1290,12 +1279,12 @@
         (is (not (:seon.error/kind result))
             "the settlement transaction commits"))
       (let [form (db/pull @connection
-                          [{:seon.fn/calls [:seon.fn/sym]}]
+                          [:seon.fn/calls]
                           [:seon.cluster.eval/id
                            (turn/receipt-identity "macro-call-run" 0)])]
-        (is (= [{:seon.fn/sym "seon.bootstrap/help"}]
-               (:seon.fn/calls form))
-            "the evaluation records its resolved call against the published identity"))
+        (is (= #{'seon.bootstrap/help}
+               (set (:seon.fn/calls form)))
+            "the evaluation records the observed call as a symbol value"))
       (let [result
             (db/transact!
              connection
@@ -1306,15 +1295,18 @@
                :seon.cluster.eval/error "Could not resolve missing.target/nope"}))]
         (is (not (:seon.error/kind result))
             "the error settlement commits without a dangling lookup ref"))
-      (is (empty?
-           (db/q '[:find ?target
-                   :in $ ?form-id
-                   :where
-                   [?form :seon.cluster.eval/id ?form-id]
-                   [?form :seon.fn/calls ?target]]
-                 @connection
-                 (turn/receipt-identity "macro-call-run" 1)))
-          "an unresolvable mention is not a call edge")
+      (is (= #{['missing.target/nope]}
+             (db/q '[:find ?target
+                     :in $ ?form-id
+                     :where
+                     [?form :seon.cluster.eval/id ?form-id]
+                     [?form :seon.fn/calls ?target]]
+                   @connection
+                   (turn/receipt-identity "macro-call-run" 1)))
+          "an unresolved mention remains an honest symbol edge")
+      (is (nil? (:db/id (db/pull @connection [:db/id]
+                                 [:seon.fn/sym 'missing.target/nope])))
+          "the observed call does not mint its target")
       (is (nil? (:db/id (db/pull @connection [:db/id]
                                  [:seon.ns/name 'unindexed.required]))))
       (let [result
@@ -1329,12 +1321,35 @@
                {:seon.ns/name 'my.macro-caller
                 :seon.ns/source "(require 'unindexed.required)"
                 :seon.ns/requires
-                #{[:seon.ns/name 'unindexed.required]}}}))]
+                #{'unindexed.required}}}))]
         (is (not (:seon.error/kind result))
-            "the required namespace identity precedes its lookup ref"))
-      (is (:db/id (db/pull @connection [:db/id]
-                           [:seon.ns/name 'unindexed.required]))
-          "settlement mints the required namespace identity"))))
+            "an unresolved required namespace stores as a symbol value"))
+      (is (nil? (:db/id (db/pull @connection [:db/id]
+                                 [:seon.ns/name 'unindexed.required])))
+          "settlement does not mint the required namespace identity")
+      (is (= #{'unindexed.required}
+             (set (:seon.ns/requires
+                   (db/pull @connection [:seon.ns/requires]
+                            [:seon.ns/name 'my.macro-caller])))))
+      (let [source (str "(defn ^{:malli/schema [:=> [:cat] :int]} "
+                        "unresolved-caller [] (missing.target/nope))")
+            [_ row] (seon.fn/analyze-form
+                     @connection source
+                     [:seon.ns/name 'my.macro-caller] nil)
+            result (db/transact!
+                    connection
+                    (turn/receipt-settle-tx
+                     {::turn/id "macro-call-run"
+                      :seon.cluster.eval/ordinal 3
+                      :seon.eval/shown "nil"
+                      :seon.program/row row}))
+            report (seon.fn/unresolved-callers @connection)]
+        (is (not (:seon.error/kind result)) (pr-str result))
+        (is (some #{{:seon.program/identity
+                     [:seon.fn/sym
+                      'my.macro-caller/unresolved-caller]
+                     :seon.fn/callee 'missing.target/nope}}
+                  (:seon.program/unresolved-callers report)))))))
 
 (deftest receipt-transitions-preserve-one-terminal-outcome
   (let [start-tx (ns-resolve 'seon.turn 'receipt-start-tx)
@@ -1440,22 +1455,17 @@
             agent-b "def-agent-b"
             run-a "defs-run-a"
             run-b "defs-run-b"
-            qualified-id "my.defs.shared/scratch"
+            qualified-id 'my.defs.shared/scratch
             agent-ref (fn [agent-id]
                         [:seon.agent/id agent-id])
             function-row
             (fn [result]
-              ;; `:seon.fn/fn` declares its admission source, so a row that
-              ;; omits it is a shape the declared contract forbids.
-              {:seon.fn/sym qualified-id
-               :seon.schema.admission/source :agent
-               :seon.fn/ns [:seon.ns/name namespace-name]
-               :seon.fn/source
-               (str "(defn ^{:malli/schema [:=> [:cat] :int]} "
-                    "scratch [] " result ")")
-               :seon.fn/arglists "([])"
-               :seon.fn/private? false
-               :seon.fn/spec "[:=> [:cat] :int]"})
+              (second
+               (seon.fn/analyze-form
+                @connection
+                (str "(defn ^{:malli/schema [:=> [:cat] :int]} "
+                     "scratch [] " result ")")
+                [:seon.ns/name namespace-name] nil)))
             start!
             (fn [run-id ordinal]
               (db/transact!
