@@ -1308,3 +1308,28 @@ reset is performed by this lane. After green review and rebase onto
 `steward-platform`, the orchestrator merges with `git merge --ff-only reset-batch`
 and runs the reset procedure above. The message/wake resource boundary is a
 publication dependency, not permission to weaken or separately publish §1h.
+
+### Integration evidence — 2026-09-17, reset-batch worktree
+
+The complete modeling study has been read end to end. The correction ledger
+above governs this branch. Implementation remains **uncommitted and incomplete**;
+this is not a merge authorization or a green reset group. Fast iteration 16
+(`tmp/reset-edge-fast-16.log`) ran 38 tests / 288 assertions with one parity
+failure and no errors; the eleven reset-edge regressions passed. Broader fast
+iteration 15 ran 187 tests / 1,766 assertions with 148 failures / 24 errors,
+including old ref-valued fixture edges and incomplete synthetic definitions.
+Those results must not be represented as cold-gate proof.
+
+The implementation now detects identity removal/rename, stores indexed edge
+values, refuses agent identity retraction, and derives archive state from the
+positive archive transaction. AST writers/resources have been removed in the
+worktree and arity input/return shape links retain their shared ownership.
+The outstanding G5 owning-root traversal and completeness regressions remain
+required; attribute validation and identity-selected entity validation alone do
+not close the identity-less child hole. The message/wake resources remain the
+foreign message-wake-model lane's boundary; merge its landing in the same reset
+publication. No default process operation or live schema adoption was performed.
+
+**RESET NEEDED.** Preserve this worktree until the group is green and reviewed;
+the orchestrator then runs `git merge --ff-only reset-batch` from
+`steward-platform` and owns the reset and cold proof.
