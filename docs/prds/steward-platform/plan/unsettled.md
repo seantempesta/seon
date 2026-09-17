@@ -2850,3 +2850,9 @@ working tree, never Sonnet.
   steward-triage question, design only). Integrator rebasing `reset-batch`
   on HEAD for the ff-merge. Editing: integrator, private-contracts;
   design: issue-triage-design.
+- **Owner's priority order (16:45Z)**: serious bugs are ours; easy ones are
+  the agents' first issues; live agents need the FULL test system, so
+  after the reset: stage 1 then stage 3 come first. Plan README's "Today"
+  section rewritten to that order. Four read-only Opus audits launched (one
+  per domain) for the critical private functions: facts, contract
+  candidates, breakage, triage order, easy-first list.
