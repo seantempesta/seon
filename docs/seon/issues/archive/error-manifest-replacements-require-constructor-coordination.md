@@ -17,7 +17,7 @@ promise that contract. A duplicate declaration cannot preserve both shapes.
 
 ## Evidence
 
-The [slice-1 dependency note](../../prds/steward-platform/research/error-declaration-manifest-2026-09-18.md)
+The [slice-1 dependency note](../../../prds/steward-platform/research/error-declaration-manifest-2026-09-18.md)
 records the static EDN comparison (280 changed existing keys), exact source
 consumers, and a 6 ms live wrong-arity probe missing all three required new
 base members. No production edits or test success are claimed.
@@ -45,3 +45,7 @@ groups. Each group lands its replacements together with constructors and
 recorder changes, all in the one reset. Omit `:seon.error/result` under §1q.
 The sequencing dependency is resolved by this explicit assignment; no runtime
 implementation proof is implied. The additive implementation continues.
+
+Resolution commit: `989a2d4b2`. Proof of this sequencing resolution is the
+explicit additive/constructor ownership split in PRD §6; runtime proof belongs
+to those implementation slices, not this issue.
