@@ -26,7 +26,8 @@
                components (mapv :db/id (:seon.issue/files row))
                file-ids (mapv #(get-in % [:seon.issue.citation/file :db/id])
                               (:seon.issue/files row))
-               rows [(#'issue/identity-row before [:seon.issue/id "deletion-kept"])]
+               rows (filterv #(= "deletion-kept" (:seon.issue/id %))
+                             (#'issue/identity-rows before))
                operation (case writer
                            :index [:db.fn/call issue/index-tx [kept]]
                            :adopt [:db.fn/call issue/adopt-tx rows])

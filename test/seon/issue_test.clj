@@ -101,8 +101,7 @@
               (clojure.test/is (seq (get row attribute)) (str "Missing adoption subject " attribute))))
           (let [again (seon.issue/index! {:seon.db/connection source-connection :seon.issue/notes notes})
                 source (seon.db/db source-connection)
-                rows (mapv #(#'seon.issue/identity-row source %)
-                           (seon.db/q '[:find [?e ...] :where [?e :seon.issue/path]] source))
+                rows (#'seon.issue/identity-rows source)
                 delta (seon.issue/adopt-tx (seon.db/db connection) rows)
                 report (seon.test-support/transacted! connection [[:db.fn/call #'seon.issue/adopt-tx rows]])]
             (clojure.test/is (nil? (:seon.error/kind again)) (pr-str again))

@@ -758,8 +758,9 @@
               :when (not= :seon.issue/files attribute)]
           {attribute [identity-attribute]})))
 
-(defn- identity-row [database issue]
-  (db/pull database (citation-pattern (citation-attributes database)) issue))
+(defn- identity-rows [database]
+  (db/pull-many database (citation-pattern (citation-attributes database))
+                (db/q '[:find [?e ...] :where [?e :seon.issue/path]] database)))
 
 (defn adopt-tx
   "Reconcile the published issue facts by identity into a development database."
@@ -813,9 +814,10 @@
   {:malli/schema [:=> [:cat :seon.db/connection :seon.db/database-value]
                   [:or :seon.db/transaction-report :seon.error/value]]}
   [connection source]
-  (let [rows (mapv #(identity-row source %)
-                   (db/q '[:find [?e ...] :where [?e :seon.issue/path]] source))]
-    (db/transact! connection [[:db.fn/call #'adopt-tx rows]])))
+  (let [rows (identity-rows source)]
+    (if (:seon.error/kind rows)
+      rows
+      (db/transact! connection [[:db.fn/call #'adopt-tx rows]]))))
 
 (def ^:private tests-done-query
   "Nonempty tests all have positive green results on their current reach digest."
