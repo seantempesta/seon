@@ -2524,3 +2524,17 @@ working tree, never Sonnet.
   Everything in the memo-test fix, invalid-input fix, small fixes, seam 4
   (rereads' other test, db, message, transcript), guardrails bounds: GREEN
   cold. Swept `run.jppcnC`, `run.kgYuqX` (1.4 GB).
+- **Evaluator contract fault FIXED** (`e1de7c75d`, Opus) — my premise
+  REFUTED with evidence: `:over-bound` in the fault was the bounded-evidence
+  placeholder for the recorded argument (the request map holds the SCI
+  ctx), not an admission outcome; the real cause: `shown-result`,
+  `failed-evaluation`, `unrun-evaluation` copied `:seon.error/message` off
+  the value the agent's form RETURNED into a `:string` key — any returned
+  map with `:seon.error/kind` and a non-string message broke `evaluate`'s
+  own contract; now one `failure-text` derives the declared string, value
+  retained in `:seon.sci.admit/value`. Regression reproduced the diagnostic
+  character for character. 73/381/1F fast (the open allocation-bound
+  issue). Second finding recorded on the issue: a contract-violation fault
+  keeps NO copy of the offending return value (no `:seon.instrument/actual`)
+  and prints a 2.2 MB projection only to measure it — queue a small lane.
+  Stage 2 resumed (its files are free).
