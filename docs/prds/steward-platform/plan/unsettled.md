@@ -1563,6 +1563,20 @@ shape `seon.issue/start!` launches (identity-deduplicated issues with their
 tests), Malli signatures per operation. Implementation lane (astra) after
 the note and the tier-2 deletion contract.
 
+**Tier-0 cleanup LANDED** (`d6659f21a` selection read-basis typed refusal —
+selection.clj FREE, integrator unblocked; `58e5372b9` instrument catch-alls
+carry cause; `b2530c886` search catch-all removed; `fa8be4e5f` the two
+production regexes → reader + form walk with the class regression;
+`a421df301`/`160e80b10` note, the preserved gym patch, two issues). 44/236
+fast, green on its namespaces; cold gate owed. Deferred with hunks: env-var
+deletions and the silence-seconds accessor (bin/test, runner.clj held by
+the bin/test-bounds agent). Reds found, neither its own: `seon.bootstrap-
+drive-test/one-fake-o1-drive-grades-on-its-ending-commit` red at HEAD
+(issue filed, causes marked unverified); the liveness backstop exit 124
+class refined (main WAITING in `seon.eval.drive/await-fact!`). Editors now:
+no-default, environment, fault-path, bin/test bounds + codex integrator
+(tier 1, then the edge retype now that selection.clj is free).
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
