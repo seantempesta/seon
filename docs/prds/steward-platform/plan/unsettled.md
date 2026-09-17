@@ -3717,3 +3717,20 @@ as orchestrator/astra lanes, easy pool as the first live-agent slice).
 - Launched sol `acquisition-by-digest` (ruling 1s; eval.clj free).
   Editing: arm-leak, db, stage 1, acquisition-by-digest; Opus ×2
   (preflight deadline; render.value union).
+
+## 2026-09-18 ~09:45Z — CODEX USAGE LIMIT: every codex lane died; implementation moves to Opus
+
+- "You've hit your usage limit … try again at Sep 23rd, 2026 4:44 PM."
+  Died mid-work: `db-contracts-and-read-seams` (item 1 landed `1695b43b2`;
+  items 2/3 partial in the tree), `sci-arm-leak` (serial-worker fix not
+  landed), `test-system-stage1` (publisher digest partial in the tree),
+  `acquisition-by-digest` (just started). Partial edits saved as patches
+  under `tmp/orchestrator/worktree-patches/` (`db-contracts-…-partial`,
+  `test-system-stage1-partial`) and left in the working tree for the
+  continuation agents. Owner decision: buy Codex credits or run on Opus
+  until the 23rd. Meanwhile implementation runs as Opus subagents under the
+  same rules (one file owner each, fast run on a prepared base, path-limited
+  commits, cold gate by the orchestrator): serial-worker dispatch (Opus,
+  launched), preflight deadline (Opus, running), render.value union (Opus,
+  running); db items 2/3 and stage 1 continue as Opus agents when a slot
+  frees.
