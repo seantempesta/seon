@@ -32,6 +32,32 @@ A thread dump during `/ns/seon.db` showed the request thread inside
 `seon.render/project-node` → `invoke-selected` → `seon.sci.kernel/invoke`
 (`src/seon/render/value.clj:311-429`, `src/seon/render.clj:990-1218`).
 
+## Where the bytes are (measured on the saved page, 27,590,915 B, 28.8 s)
+
+Section counts in the HTML for `/ns/seon.id`:
+
+```text
+<h3>Referenced schemas</h3>   503 sections
+<summary>namespace source      1,168
+<summary>member definition sources  1,014
+<details>                     19,874
+<pre>                         17,846
+function identities named     1,523
+test identities named           394
+schema keys named               602
+```
+
+A namespace with a handful of functions renders 503 "Referenced schemas"
+blocks, each carrying whole namespace sources and member definition
+sources: the schema reference closure fans out to most of the program and
+every node renders its source in full. The page is the population, not the
+namespace. The 503 "Referenced schemas" headings are one per rendered
+namespace entry (`seon.render.ns/full-html-view`, `src/seon/render/ns.clj:679`,
+emits the section through `referenced-schema-html` at `:653`), so the
+route for one namespace renders `full-html-view` for hundreds of namespaces
+(`seon-family-entry` ×503). The question for the owner is which walk or
+concern on the namespace route expands to every namespace.
+
 ## What is not known
 
 Whether the bytes are one entity rendered without a bound (HTML has no
