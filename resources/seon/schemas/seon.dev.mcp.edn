@@ -7,4 +7,25 @@
  :seon.dev.mcp/nil-deref [:= true]
  :seon.dev.mcp/nil-deref-error [:map {:seon.error/class true :seon.render/ai seon.error/mcp-prose :seon.render/html seon.error/render-html :error/message "must mark a development evaluation that dereferenced nil"} [:seon.dev.mcp/nil-deref :seon.dev.mcp/nil-deref] [:seon.error/message :seon.error/message]]
  :seon.dev.mcp/jvm-exception [:= true]
- :seon.dev.mcp/jvm-exception-error [:map {:seon.error/class true :seon.render/ai seon.error/mcp-prose :seon.render/html seon.error/render-html :error/message "must mark a development evaluation that threw on the JVM"} [:seon.dev.mcp/jvm-exception :seon.dev.mcp/jvm-exception] [:seon.error/message :seon.error/message]]}
+ :seon.dev.mcp/jvm-exception-error [:map {:seon.error/class true :seon.render/ai seon.error/mcp-prose :seon.render/html seon.error/render-html :error/message "must mark a development evaluation that threw on the JVM"} [:seon.dev.mcp/jvm-exception :seon.dev.mcp/jvm-exception] [:seon.error/message :seon.error/message]]
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :seon.dev.mcp/error
+ [:and
+ {:seon.db/attributes true}
+ :seon.error/base
+ [:map
+  {:seon.db/attributes true}
+  [:seon.dev.mcp/error-cluster :seon.dev.mcp/error-cluster]
+  [:seon.dev.mcp/request-observation
+   :seon.dev.mcp/request-observation]]]
+
+ :seon.dev.mcp/error-cluster
+ [:string {:min 1}]
+
+ :seon.dev.mcp/request-observation
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.evidence/entity}
+ :seon.db/ref]
+}

@@ -172,4 +172,28 @@
                          :seon.render/html seon.error/render-html}
                    [:seon.render.web/invalid-context-action :seon.render.web/invalid-context-action]
                    [:seon.error/message :seon.error/message]]
+
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :seon.render.web/error
+ [:and
+ {:seon.db/attributes true}
+ :seon.error/base
+ [:map
+  {:seon.db/attributes true}
+  [:seon.render.web/error-request :seon.render.web/error-request]
+  [:seon.render.web/owner-observation
+   :seon.render.web/owner-observation]]]
+
+ :seon.render.web/error-request
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.projection/entity}
+ :seon.db/ref]
+
+ :seon.render.web/owner-observation
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.evidence/entity}
+ :seon.db/ref]
 }

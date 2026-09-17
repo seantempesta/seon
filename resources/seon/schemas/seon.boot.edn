@@ -153,4 +153,21 @@
               :seon.config/manifest]],
             :store-dir [:string {:min 1}],
             :refused [:= true]
-            :refused-error [:and {:seon.error/class true :seon.error/refusal true :seon.error/refusal-shape :seon.error/refusal-value :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :gen/schema [:map [:seon.boot/refused :seon.boot/refused] [:seon.error/message :seon.error/message]] :error/message "must mark a refused boot transition"} :seon.error/refusal-value [:map [:seon.boot/refused :seon.boot/refused]]]}
+            :refused-error [:and {:seon.error/class true :seon.error/refusal true :seon.error/refusal-shape :seon.error/refusal-value :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :gen/schema [:map [:seon.boot/refused :seon.boot/refused] [:seon.error/message :seon.error/message]] :error/message "must mark a refused boot transition"} :seon.error/refusal-value [:map [:seon.boot/refused :seon.boot/refused]]]
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :seon.boot/error
+ [:and
+ {:seon.db/attributes true}
+ :seon.error/base
+ [:map
+  {:seon.db/attributes true}
+  [:seon.boot/failed-phase :seon.boot/failed-phase]
+  [:seon.boot/process-root :seon.boot/process-root]]]
+
+ :seon.boot/failed-phase
+ :qualified-keyword
+
+ :seon.boot/process-root
+ [:string {:min 1}]
+}

@@ -164,4 +164,20 @@
                 [:seon.message/unknown-recipient
                  :seon.message/unknown-recipient]
                 [:seon.error/message :seon.error/message]],
-               :limit [:int {:min 0}]}
+               :limit [:int {:min 0}]
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :seon.message/error
+ [:and
+ {:seon.db/attributes true}
+ :seon.error/base
+ [:map
+  {:seon.db/attributes true}
+  [:seon.message/error-request :seon.message/error-request]]]
+
+ :seon.message/error-request
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.projection/entity}
+ :seon.db/ref]
+}

@@ -53,4 +53,24 @@
               :response
               [:or :seon.search/results :seon.search/unavailable-error]
  :seon.search/missing-resource [:= true]
- :seon.search/missing-resource-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.search/missing-resource class marker"} [:seon.search/missing-resource :seon.search/missing-resource] [:seon.error/message :seon.error/message]]}
+ :seon.search/missing-resource-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.search/missing-resource class marker"} [:seon.search/missing-resource :seon.search/missing-resource] [:seon.error/message :seon.error/message]]
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :seon.search/error
+ [:and
+ {:seon.db/attributes true}
+ :seon.error/base
+ [:map
+  {:seon.db/attributes true}
+  [:seon.search/error-resource :seon.search/error-resource]
+  [:seon.search/index-observation :seon.search/index-observation]]]
+
+ :seon.search/error-resource
+ [:string {:min 1}]
+
+ :seon.search/index-observation
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.evidence/entity}
+ :seon.db/ref]
+}

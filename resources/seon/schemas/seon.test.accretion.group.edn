@@ -1,0 +1,34 @@
+{
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :seon.test.accretion.group/count
+ [:int {:min 0}]
+
+ :seon.test.accretion.group/entity
+ [:and
+ [:map
+  {:seon.db/attributes true}
+  [:seon.test.accretion.group/ordinal
+   :seon.test.accretion.group/ordinal]
+  [:seon.test.accretion.group/shape :seon.test.accretion.group/shape]
+  [:seon.test.accretion.group/count :seon.test.accretion.group/count]
+  [:seon.test.accretion.group/failures
+   {:optional true}
+   :seon.test.accretion.group/failures]]
+ [:fn
+  {:error/message "ordered-failures?",
+   :gen/gen seon.error/ordered-failures-generator}
+  seon.error/ordered-failures?]]
+
+ :seon.test.accretion.group/failures
+ [:set
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.test.accretion.failure/entity}
+ :seon.db/ref]
+
+ :seon.test.accretion.group/ordinal
+ [:int {:min 0}]
+
+ :seon.test.accretion.group/shape
+ :string
+}

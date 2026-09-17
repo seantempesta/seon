@@ -12,4 +12,27 @@
                :instructions [:set :seon.db/ref],
                :name [:string {:min 1, :seon.db/identity true}],
                :toolkit [:set :seon.db/ref],
-               :toolkit-namespaces [:vector :seon.ns/name]}
+               :toolkit-namespaces [:vector :seon.ns/name]
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :seon.cluster/error
+ [:and
+ {:seon.db/attributes true}
+ :seon.error/base
+ [:map
+  {:seon.db/attributes true}
+  [:seon.cluster/error-cluster-name :seon.cluster/error-cluster-name]
+  [:seon.cluster/graph-operation :seon.cluster/graph-operation]]]
+
+ :seon.cluster/error-cluster-name
+ [:string {:min 1}]
+
+ :seon.cluster/failure
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.failure/entity}
+ :seon.db/ref]
+
+ :seon.cluster/graph-operation
+ [:qualified-symbol {:seon.db/index true}]
+}

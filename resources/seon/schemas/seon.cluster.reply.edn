@@ -15,4 +15,21 @@
                      :unreadable :seon.cluster.reply/text
                      :unreadable-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the reply text that the reader could not parse"} [:seon.cluster.reply/unreadable :seon.cluster.reply/unreadable] [:seon.error/message :seon.error/message]]
                      :no-forms [:= true]
-                     :no-forms-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark an agent reply containing no forms"} [:seon.cluster.reply/no-forms :seon.cluster.reply/no-forms] [:seon.error/message :seon.error/message]]}
+                     :no-forms-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark an agent reply containing no forms"} [:seon.cluster.reply/no-forms :seon.cluster.reply/no-forms] [:seon.error/message :seon.error/message]]
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :seon.cluster.reply/authored-reply
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.projection/entity}
+ :seon.db/ref]
+
+ :seon.cluster.reply/error
+ [:and
+ {:seon.db/attributes true}
+ :seon.error/base
+ [:map
+  {:seon.db/attributes true}
+  [:seon.cluster.reply/authored-reply
+   :seon.cluster.reply/authored-reply]]]
+}

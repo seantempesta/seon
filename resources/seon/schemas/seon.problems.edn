@@ -122,4 +122,25 @@
                   :seon.problems/occurrences]
                  [:seon.error/fact :seon.error/fact]],
                 :occurrences [:int {:min 1}],
-                :author :seon.agent/id}
+                :author :seon.agent/id
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :seon.problems/detector-observation
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.evidence/entity}
+ :seon.db/ref]
+
+ :seon.problems/error
+ [:and
+ {:seon.db/attributes true}
+ :seon.error/base
+ [:map
+  {:seon.db/attributes true}
+  [:seon.problems/error-detector :seon.problems/error-detector]
+  [:seon.problems/detector-observation
+   :seon.problems/detector-observation]]]
+
+ :seon.problems/error-detector
+ [:qualified-symbol {:seon.db/index true}]
+}

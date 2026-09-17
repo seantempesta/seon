@@ -1,0 +1,46 @@
+{
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :seon.test.accretion.auto/capabilities
+ [:set :qualified-symbol]
+
+ :seon.test.accretion.auto/case-count
+ [:int {:min 0}]
+
+ :seon.test.accretion.auto/entity
+ [:map
+ {:seon.db/attributes true}
+ [:seon.test.accretion.auto/seed :seon.test.accretion.auto/seed]
+ [:seon.test.accretion.auto/case-count
+  :seon.test.accretion.auto/case-count]
+ [:seon.test.accretion.auto/executed-count
+  :seon.test.accretion.auto/executed-count]
+ [:seon.test.accretion.auto/status :seon.test.accretion.auto/status]
+ [:seon.test.accretion.auto/capabilities
+  {:optional true}
+  :seon.test.accretion.auto/capabilities]
+ [:seon.test.accretion.auto/skip-reason
+  {:optional true}
+  :seon.test.accretion.auto/skip-reason]
+ [:seon.test.accretion.auto/failure
+  {:optional true}
+  :seon.test.accretion.auto/failure]]
+
+ :seon.test.accretion.auto/executed-count
+ [:int {:min 0}]
+
+ :seon.test.accretion.auto/failure
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.projection/entity}
+ :seon.db/ref]
+
+ :seon.test.accretion.auto/seed
+ :int
+
+ :seon.test.accretion.auto/skip-reason
+ :string
+
+ :seon.test.accretion.auto/status
+ :seon.test.accretion/status
+}

@@ -53,4 +53,28 @@
                     :window-realization-failed [:= true]
                     :window-realization-failed-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark an ordinary value whose display window could not be realized"} [:seon.render.value/window-realization-failed :seon.render.value/window-realization-failed] [:seon.error/message :seon.error/message]]
  :seon.render.value/missing-root-identity [:= true]
- :seon.render.value/missing-root-identity-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.render.value/missing-root-identity class marker"} [:seon.render.value/missing-root-identity :seon.render.value/missing-root-identity] [:seon.error/message :seon.error/message]]}
+ :seon.render.value/missing-root-identity-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.render.value/missing-root-identity class marker"} [:seon.render.value/missing-root-identity :seon.render.value/missing-root-identity] [:seon.error/message :seon.error/message]]
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :seon.render.value/error
+ [:and
+ {:seon.db/attributes true}
+ :seon.error/base
+ [:map
+  {:seon.db/attributes true}
+  [:seon.render.value/error-window :seon.render.value/error-window]
+  [:seon.render.value/projection-observation
+   :seon.render.value/projection-observation]]]
+
+ :seon.render.value/error-window
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.projection/entity}
+ :seon.db/ref]
+
+ :seon.render.value/projection-observation
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.evidence/entity}
+ :seon.db/ref]
+}

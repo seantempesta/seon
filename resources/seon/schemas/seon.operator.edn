@@ -124,4 +124,25 @@
  :seon.operator/process-census-incomplete [:= true]
  :seon.operator/process-census-incomplete-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.operator/process-census-incomplete class marker"} [:seon.operator/process-census-incomplete :seon.operator/process-census-incomplete] [:seon.error/message :seon.error/message]]
  :seon.operator/reap-incomplete [:= true]
- :seon.operator/reap-incomplete-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.operator/reap-incomplete class marker"} [:seon.operator/reap-incomplete :seon.operator/reap-incomplete] [:seon.error/message :seon.error/message]]}
+ :seon.operator/reap-incomplete-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.operator/reap-incomplete class marker"} [:seon.operator/reap-incomplete :seon.operator/reap-incomplete] [:seon.error/message :seon.error/message]]
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :seon.operator/error
+ [:and
+ {:seon.db/attributes true}
+ :seon.error/base
+ [:map
+  {:seon.db/attributes true}
+  [:seon.operator/error-root :seon.operator/error-root]
+  [:seon.operator/operation-observation
+   :seon.operator/operation-observation]]]
+
+ :seon.operator/error-root
+ [:string {:min 1}]
+
+ :seon.operator/operation-observation
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.evidence/entity}
+ :seon.db/ref]
+}

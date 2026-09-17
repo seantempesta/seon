@@ -22,4 +22,21 @@
                   :time-limit :seon.fn/sym
                   :time-limit-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the invocation cut by its time limit"} [:seon.sci.kernel/time-limit :seon.sci.kernel/time-limit] [:seon.error/message :seon.error/message]]
                   :invocation-failed :seon.fn/sym
-                  :invocation-failed-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the invocation that failed before returning a value"} [:seon.sci.kernel/invocation-failed :seon.sci.kernel/invocation-failed] [:seon.error/message :seon.error/message]]}
+                  :invocation-failed-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the invocation that failed before returning a value"} [:seon.sci.kernel/invocation-failed :seon.sci.kernel/invocation-failed] [:seon.error/message :seon.error/message]]
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :seon.sci.kernel/error
+ [:and
+ {:seon.db/attributes true}
+ :seon.error/base
+ [:map
+  {:seon.db/attributes true}
+  [:seon.sci.kernel/guard-observation
+   :seon.sci.kernel/guard-observation]]]
+
+ :seon.sci.kernel/guard-observation
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.evidence/entity}
+ :seon.db/ref]
+}

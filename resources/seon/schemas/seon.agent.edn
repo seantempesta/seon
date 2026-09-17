@@ -158,4 +158,23 @@
              :seon.render/html seon.plan/render-plan-html} :seon.db/ref]
              :settings [:and {:seon.db/component true :seon.db/component-schema :seon.config/settings
                               :seon.render/ai seon.agent/render-settings-ai
-                              :seon.render/html seon.agent/render-settings-html} :seon.db/ref]}
+                              :seon.render/html seon.agent/render-settings-html} :seon.db/ref]
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :seon.agent/error
+ [:and
+ {:seon.db/attributes true}
+ :seon.error/base
+ [:map
+  {:seon.db/attributes true}
+  [:seon.agent/error-agent-id :seon.agent/error-agent-id]]]
+
+ :seon.agent/error-agent-id
+ [:string {:min 1}]
+
+ :seon.agent/failure
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.failure/entity}
+ :seon.db/ref]
+}

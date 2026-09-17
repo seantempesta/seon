@@ -279,4 +279,47 @@
                   :seon.flow/commit-fault!]
                  [:seon.schema/projection
                   {:optional true}
-                  :seon.schema/projection]]}
+                  :seon.schema/projection]]
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :seon.sci.eval/acquisition-error
+ [:and
+ {:seon.db/attributes true}
+ :seon.error/base
+ [:map
+  {:seon.db/attributes true}
+  [:seon.sci.eval/requested-program :seon.sci.eval/requested-program]
+  [:seon.sci.eval/acquisition-member :seon.sci.eval/acquisition-member]
+  [:seon.sci.eval/acquisition-observation
+   :seon.sci.eval/acquisition-observation]]]
+
+ :seon.sci.eval/acquisition-member
+ [:or :qualified-symbol :qualified-keyword]
+
+ :seon.sci.eval/acquisition-observation
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.evidence/entity}
+ :seon.db/ref]
+
+ :seon.sci.eval/evaluation-error
+ [:and
+ {:seon.db/attributes true}
+ :seon.error/base
+ [:map
+  {:seon.db/attributes true}
+  [:seon.sci.eval/evaluation-id :seon.sci.eval/evaluation-id]
+  [:seon.sci.eval/source-projection :seon.sci.eval/source-projection]]]
+
+ :seon.sci.eval/evaluation-id
+ [:string {:min 1}]
+
+ :seon.sci.eval/requested-program
+ [:string {:min 64, :max 64}]
+
+ :seon.sci.eval/source-projection
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.projection/entity}
+ :seon.db/ref]
+}

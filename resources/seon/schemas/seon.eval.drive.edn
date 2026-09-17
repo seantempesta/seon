@@ -54,4 +54,25 @@
  [:map
   [:seon.eval.drive/outcome :seon.eval.drive/outcome]
   [:seon.eval.drive/run-ids :seon.eval.drive/run-ids]]
- :seon.eval.drive/absent-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark an absent evaluation-drive result"} [:seon.eval.drive/absent :seon.eval.drive/absent] [:seon.error/message :seon.error/message]]}
+ :seon.eval.drive/absent-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark an absent evaluation-drive result"} [:seon.eval.drive/absent :seon.eval.drive/absent] [:seon.error/message :seon.error/message]]
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :seon.eval.drive/driver-observation
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.evidence/entity}
+ :seon.db/ref]
+
+ :seon.eval.drive/error
+ [:and
+ {:seon.db/attributes true}
+ :seon.error/base
+ [:map
+  {:seon.db/attributes true}
+  [:seon.eval.drive/error-evaluation :seon.eval.drive/error-evaluation]
+  [:seon.eval.drive/driver-observation
+   :seon.eval.drive/driver-observation]]]
+
+ :seon.eval.drive/error-evaluation
+ [:string {:min 1}]
+}

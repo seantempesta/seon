@@ -12,4 +12,25 @@
  :seon.cluster.source/unsafe-incremental-rows [:= true]
  :seon.cluster.source/unsafe-incremental-rows-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the unsafe incremental source-row count"} [:seon.cluster.source/unsafe-incremental-rows :seon.cluster.source/unsafe-incremental-rows] [:seon.error/message :seon.error/message]]
  :seon.cluster.source/refused :seon.cluster.source/rule
- :seon.cluster.source/refused-error [:and {:seon.error/class true :seon.error/refusal true :seon.error/refusal-shape :seon.error/refusal-value :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :gen/schema [:map [:seon.cluster.source/refused :seon.cluster.source/refused] [:seon.error/message :seon.error/message]] :error/message "must mark a refused source-publication transition"} :seon.error/refusal-value [:map [:seon.cluster.source/refused :seon.cluster.source/refused]]]}
+ :seon.cluster.source/refused-error [:and {:seon.error/class true :seon.error/refusal true :seon.error/refusal-shape :seon.error/refusal-value :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :gen/schema [:map [:seon.cluster.source/refused :seon.cluster.source/refused] [:seon.error/message :seon.error/message]] :error/message "must mark a refused source-publication transition"} :seon.error/refusal-value [:map [:seon.cluster.source/refused :seon.cluster.source/refused]]]
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :seon.cluster.source/error
+ [:and
+ {:seon.db/attributes true}
+ :seon.error/base
+ [:map
+  {:seon.db/attributes true}
+  [:seon.cluster.source/error-source :seon.cluster.source/error-source]
+  [:seon.cluster.source/publication-observation
+   :seon.cluster.source/publication-observation]]]
+
+ :seon.cluster.source/error-source
+ [:string {:min 64, :max 64}]
+
+ :seon.cluster.source/publication-observation
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.evidence/entity}
+ :seon.db/ref]
+}
