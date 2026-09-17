@@ -3381,3 +3381,25 @@ as orchestrator/astra lanes, easy pool as the first live-agent slice).
   orchestrator preparing the base and cold-gating its namespaces
   (`predicate-paths-gate.log`). Resume when the publication lane releases
   db.clj.
+
+## 2026-09-18 ~01:50Z — the predicate consolidation regressed and is reverted
+
+- Cold gate of `2ac456463` (`predicate-paths-gate-2.log`, HEAD + its files,
+  120 tests): 25F/5E in `my.plan-test`, `seon.cluster.message-test`,
+  `seon.instrument-test`. Not old reds: plan renders now print a refused
+  read as a row (`{:seon.agent/id nil …}` instead of "Plan unavailable …
+  plan read failed :seon.db/invalid-read"), the inbox returns `[{} {} {} {}]`,
+  instrument's refusal projection loses the offending object. Cause: the
+  consolidated `seon.error/error?` asks the PROJECTION for declared classes,
+  and at those sites none is in hand, so it answers false where the private
+  copies (which checked `:seon.error/kind`) answered true — the exact
+  fetch-at-call-time class (2.1). The lane landed on namespace loads only
+  (no published base at that HEAD). Reverted; re-gating the same
+  namespaces (`predicate-revert-gate.log`).
+- Consequence for the plan: B1 moves BEHIND the manifest's base schema —
+  once "is an error" is "satisfies `:seon.error/base`" (structural, no
+  registry lookup), the nine copies collapse onto it safely. The PRD §6
+  already orders B1 after the constructor groups; the owner's "alongside"
+  is honoured as "as soon as the base exists". Rule reaffirmed: no lane
+  commits without a fast run on a prepared base; the orchestrator prepares
+  the base before every launch.
