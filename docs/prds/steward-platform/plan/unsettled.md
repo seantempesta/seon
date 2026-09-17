@@ -1998,6 +1998,25 @@ records no declaring namespace (consumers render/ns.clj:893, my/program.clj
 :264, one cluster.turn-test predicted red) — exact hunks in the note; FOR
 THE S3 LANE (holds sci/eval.clj) at its next stop.
 
+## RESUME HERE (2026-09-17 ~05:40Z)
+
+Read [plan/README.md](README.md) "Long-term plan and schedule" first — it
+is the complete roster (owners, status, queued triggers, decisions answered
+and still to ask). Then: `bin/codex-agent status` (six astra lanes:
+reset-batch-integration on worktree branch `reset-batch`, repl-program-
+operations, acquisition-by-provenance-s3, reset-is-total, lane-guardrails,
+test-system-stage2), `git status --short` (the tree carries their hunks;
+never revert), `bin/seon status` (default pid 33583 on the regenerated
+store; Juniper reseeded). Opus agents in flight: hook loophole inventory,
+create-path validator fix, message/wake modeling research, debug-page
+outline, small fixes. Gate mechanics: `bin/test --platform --paths
+src/seon/schedule.clj` then `bin/test --paths src/seon/schedule.clj -- <ns…>`
+(a named selection takes no tier flag); logs under
+`tmp/orchestrator/gate-results/`. Platform tier is RED (batch 115 A) until
+reset-is-total lands. A hook config change requires restarting codex
+lanes. Owner's last words: "keep finding bugs and fixing them"; "keep the
+plan up to date".
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
