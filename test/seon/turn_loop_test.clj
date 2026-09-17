@@ -413,13 +413,8 @@
                       {:seon.agent/id agent-id
                        :seon.ns/name starting-ns
                        :seon.cluster/name cluster-name}))
-        ;; THE POPULATION INVARIANT: every name the SCI context can resolve
-        ;; has a program row, minted where the context learns it. This test
-        ;; settles through `receipt-settle-tx` directly instead of through the
-        ;; loop that mints, so it supplies the row the loop would have — the
-        ;; settle carries `:seon.sci.eval/ending-ns` as a lookup, and the
-        ;; writer refuses a lookup that resolves to nothing.
-        (test-support/transacted! connection [{:seon.ns/name ending-ns}])
+        ;; An ending namespace is an observed symbol value. Resuming a fold
+        ;; does not require a fabricated namespace row.
         (test-support/transacted!
                      connection
                      (turn/open-tx {:seon.turn/id run-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}))
@@ -463,7 +458,8 @@
                                (select-keys first-evaluation
                                             [:seon.eval/shown
                                              :seon.cluster.eval/ns
-                                             :seon.sci.eval/ending-ns]))))
+                                             :seon.sci.eval/ending-ns
+                                             :seon.program/row]))))
           (is (= ending-ns
                  (:seon.sci.eval/ending-ns
                   (db/pull @connection
@@ -507,7 +503,7 @@
             (is (= ending-ns resumed-namespace))
             (is (= [:seon.ns/name ending-ns]
                    (:seon.cluster.eval/ns form)))
-            (is (= "my.generated.after-resume/attributed-after-resume"
+            (is (= 'my.generated.after-resume/attributed-after-resume
                    (get-in evaluation
                            [:seon.program/row :seon.fn/sym])))))))))
 
