@@ -502,6 +502,19 @@ without a pair falls to the default printer. The one cost is that a
 renderer rename changes the schema digest (left as is unless it churns).
 Owner: "okay fine. approved."
 
+### 1q. Owner ruling 2026-09-18 ~01:00Z — every function lists the errors it can return
+
+On the error-entities PRD §8 (how generic pass-through helpers declare
+their errors): "We want to be clear that this function could return these
+errors." Ruling: explicit enumeration everywhere — every function's output
+contract lists, as an `:or` union, the error facets it can return; generic
+helpers enumerate too (the full facet list when they genuinely pass any
+through). The declared union is checked against the body-derived set by the
+program graph (`seon.fn/contract-findings` gains the "undeclared facet" /
+"declared but unreachable facet" finding kinds), so a hand-listed union
+cannot drift silently. The projection-derived union `:seon.error/result`
+is NOT adopted as a contract spelling.
+
 ## 2. What exists today, with the seams named
 
 Verified on `steward-platform` at `a36d55c3b`/`849bbce0b` on 2026-09-17.
