@@ -1768,6 +1768,76 @@
     (:eid (first arguments))
     (second arguments)))
 
+(def ^:private pull-limit-operators #{'limit :limit "limit"})
+
+(defn- limit-bearing-expression?
+  [expression]
+  (and (sequential? expression)
+       (or (contains? pull-limit-operators (first expression))
+           (boolean (some pull-limit-operators (take-nth 2 (rest expression)))))))
+
+(declare total-pull-selector)
+
+(defn- total-attribute-expression
+  "One pull attribute expression carrying Datahike's own no-limit spelling.
+
+  A wildcard names no attribute and a `:db/id` clause reads no datoms, so
+  neither is widened; a caller that spelled its own `:limit` keeps it."
+  [expression]
+  (cond
+    (#{'* "*" :db/id} expression) expression
+    (keyword? expression) [expression :limit nil]
+    (limit-bearing-expression? expression) expression
+    (sequential? expression) (conj (vec expression) :limit nil)
+    :else expression))
+
+(defn- total-pull-selector
+  "The selector with every attribute the caller named read in full.
+
+  Datahike's pull cuts a cardinality-many attribute at 1 000 members and
+  reports nothing about the cut: the limit defaults to `+default-limit+`
+  and the surplus datoms are simply dropped
+  (`reference-code/datahike/src/datahike/pull_api.cljc:16`, `:315`, `:323`).
+  A read that reports a short answer as a complete one is this project's
+  named failure class, so every named attribute is read with the
+  dependency's no-limit spelling (`:limit nil`) unless the caller asked for
+  a limit itself. A wildcard clause names no attribute and cannot be
+  widened here — a wildcard pull of a row with more than 1 000 members in
+  one attribute is still cut."
+  [selector]
+  (if-not (vector? selector)
+    selector
+    (mapv (fn [clause]
+            (if (map? clause)
+              (into (empty clause)
+                    (map (fn [[attribute nested]]
+                           [(total-attribute-expression attribute)
+                            (if (or (sequential? nested) (set? nested))
+                              (total-pull-selector (vec nested))
+                              nested)]))
+                    clause)
+              (total-attribute-expression clause)))
+          selector)))
+
+(defn- total-pull-arguments
+  "Pull arguments whose selector reads every named attribute in full.
+
+  A VECTOR, always: `append-pull-evidence!` replays these arguments with
+  `(assoc arguments 0 selector)`, which throws on a seq — and the throw is
+  inside `pull-call`'s `catch`, so every positional pull would have returned
+  a flat dependency error and its caller would have read that as absence."
+  [arguments]
+  (let [head (first arguments)]
+    (cond
+      (and (map? head) (not (contains? head :datahike.pull/plan))
+           (vector? (:selector head)))
+      (assoc (vec arguments) 0 (update head :selector total-pull-selector))
+
+      (vector? head)
+      (assoc (vec arguments) 0 (total-pull-selector head))
+
+      :else arguments)))
+
 (defn- pull-call
   [database arguments operation operation-key result-key public-operation]
   (if (error-value? database)
@@ -1802,7 +1872,8 @@
           (lookup-ref-error public-operation database
                             (pull-entity-id arguments)))
         (try
-      (let [response (apply operation database arguments)
+      (let [arguments (total-pull-arguments arguments)
+            response (apply operation database arguments)
             result (decode-pull-result
                     (read-declarations database public-operation)
                     (:datahike.pull/plan response)

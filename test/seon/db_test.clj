@@ -35,7 +35,13 @@
    (schema/register! ::row-id [:string {:seon.db/identity true}])
    (schema/register! ::component-root-id [:string {:seon.db/identity true}])
    (schema/register! ::component-child [:and {:seon.db/component true} :seon.db/ref])
-   (schema/register! ::component-value :string)))
+   (schema/register! ::component-value :string)
+   (schema/register! ::wide-id [:string {:seon.db/identity true}])
+   (schema/register! ::wide-member-tag [:string {:seon.db/identity true}])
+   (schema/register! ::wide-members
+                     [:vector {:seon.db/cardinality :many} :keyword])
+   (schema/register! ::wide-refs
+                     [:vector {:seon.db/cardinality :many} :seon.db/ref])))
 
 (def ^:private fixture-projection
   (schema/build-projection
@@ -918,7 +924,13 @@
                     result))
              (is (= 3 (count result))))))
        (is (= 1 (count @calls)))
-       (is (= [[database schema-pattern entity-ids]] @calls))
+       ;; The selector that reaches the dependency is the TOTALIZED one:
+       ;; `seon.db` gives every attribute a caller names Datahike's own
+       ;; `:limit nil`, because pull's default cuts a cardinality-many
+       ;; attribute at 1 000 members and says nothing. Input alignment and
+       ;; the one shared plan are what this test owns.
+       (is (= [[database (#'db/total-pull-selector schema-pattern) entity-ids]]
+              @calls))
        (is (= 1 (count @entries)))
        (is (= (:datahike.read/dependency-plan
                (pull-many-with-evidence database schema-pattern entity-ids))
@@ -1767,3 +1779,65 @@
          [:db/retractEntity [:seon.fn/sym (str renderer)]]])
        (is (nil? (:db/id (db/pull (db/db connection) [:db/id]
                                  [:seon.fn/sym (str renderer)]))))))))
+
+(def ^:private wide-attribute-count 1001)
+
+(deftest a-pull-reads-every-member-of-a-cardinality-many-attribute
+  (with-codec-database
+   {:seon.test-support/extra-schema
+    (schema.datahike/malli->datahike-schema-in
+     fixture-projection
+     [::wide-id ::wide-member-tag ::wide-members ::wide-refs])}
+   (fn [connection]
+     (let [members (mapv #(keyword "seon.db-test.member" (str "m" %))
+                         (range wide-attribute-count))
+           targets (mapv #(hash-map ::wide-member-tag (str "target-" %))
+                         (range wide-attribute-count))]
+       (is (contains? (db/transact! connection targets) :db-after))
+       (is (contains?
+            (db/transact!
+             connection
+             [{::wide-id "wide"
+               ::wide-members members
+               ::wide-refs (mapv (fn [row] [::wide-member-tag
+                                            (::wide-member-tag row)])
+                                 targets)}])
+            :db-after))
+       (let [database @connection
+             eid (:db/id (db/pull database [:db/id] [::wide-id "wide"]))]
+         (testing "the dependency's own default truncates without a signal"
+           (is (= 1000
+                  (count (::wide-members
+                          (d/pull database [::wide-members] eid))))
+               "this is the cut seon.db/pull exists to remove; if Datahike's
+                default ever changes, the totalization below is still the
+                contract"))
+         (testing "a named scalar-valued attribute reads every member"
+           (is (= wide-attribute-count
+                  (count (::wide-members
+                          (db/pull database [::wide-members] eid))))))
+         (testing "a named ref attribute under a subpattern reads every member"
+           (is (= wide-attribute-count
+                  (count (::wide-refs
+                          (db/pull database
+                                   [{::wide-refs [:db/id ::wide-member-tag]}]
+                                   eid))))))
+         (testing "an unexpanded ref attribute reads every member"
+           (is (= wide-attribute-count
+                  (count (::wide-refs (db/pull database [::wide-refs] eid))))))
+         (testing "pull-many reads every member of every entity"
+           (is (= [wide-attribute-count]
+                  (mapv #(count (::wide-members %))
+                        (db/pull-many database [::wide-members] [eid])))))
+         (testing "a Datalog read over the attribute agrees"
+           (is (= wide-attribute-count
+                  (count (db/q '[:find [?member ...]
+                                 :in $ ?entity
+                                 :where [?entity ::wide-members ?member]]
+                               database eid)))))
+         (testing "a caller that spells its own limit keeps it"
+           (is (= 10
+                  (count (::wide-members
+                          (db/pull database
+                                   [[::wide-members :limit 10]]
+                                   eid)))))))))))
