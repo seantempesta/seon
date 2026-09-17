@@ -1830,7 +1830,7 @@
 (defn q
   "Run a Datalog query over explicit inputs or the current database value."
   {:malli/schema
-   [:=> [:catn [:seon.db/query-or-database [:or :seon.db/database-value :seon.error/value :seon.db/query :seon.db/query-args]] [:seon.db/arguments [:* {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Datahike Datalog bindings carry arbitrary values. The function guard derives input count and database source positions from the parsed query.", :gen/elements [[]]} :seon.schema/value]]] [:or :seon.schema/value :seon.error/value] [:fn #:error{:message "The supplied arguments must match the query's :in (default [$]); every source input must be a database value. Use (seon.db/q query input ...) with $ elided, or (seon.db/q database query input ...) with the database first.", :fn seon.db/query-guard-message} seon.db/query-call-valid?]]}
+   [:=> [:catn [:seon.db/query-or-database [:or :seon.db/database-value :seon.error/value :seon.db/query :seon.db/query-args]] [:seon.db/arguments [:* {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Datahike Datalog bindings carry arbitrary values. The function guard derives input count and database source positions from the parsed query.", :gen/elements [[]]} :seon.schema/value]]] [:or :seon.schema/value :seon.db/error-result] [:fn #:error{:message "The supplied arguments must match the query's :in (default [$]); every source input must be a database value. Use (seon.db/q query input ...) with $ elided, or (seon.db/q database query input ...) with the database first.", :fn seon.db/query-guard-message} seon.db/query-call-valid?]]}
   [query-or-database & arguments]
   (if (error-value? query-or-database)
     query-or-database
@@ -2034,19 +2034,19 @@
   {:malli/schema
    [:function
     [:=> [:cat :seon.db/pull-options]
-     [:or :nil :map :seon.error/value]
+     [:or :nil :map :seon.db/error-result]
      [:fn {:error/message "Use (seon.db/pull selector eid), (seon.db/pull database selector eid), or one {:selector selector :eid eid} argument map."} seon.db/pull-call-valid?]]
     [:=> [:cat
           [:or :seon.db/database-value :seon.error/value
            :seon.db/pull-selector]
           [:or :seon.db/pull-options :seon.db/entity-id]]
-     [:or :nil :map :seon.error/value]
+     [:or :nil :map :seon.db/error-result]
      [:fn {:error/message "Use (seon.db/pull selector eid), (seon.db/pull database selector eid), or one {:selector selector :eid eid} argument map."} seon.db/pull-call-valid?]]
     [:=>
      [:cat [:or :seon.db/database-value :seon.error/value]
       :seon.db/pull-selector
       :seon.db/entity-id]
-     [:or :nil :map :seon.error/value]
+     [:or :nil :map :seon.db/error-result]
      [:fn {:error/message "Use (seon.db/pull selector eid), (seon.db/pull database selector eid), or one {:selector selector :eid eid} argument map."} seon.db/pull-call-valid?]]]}
   ([options]
    (pull-call (current-database-value)
@@ -2083,7 +2083,7 @@
   {:malli/schema
    [:function
     [:=> [:cat :seon.db/pull-many-options]
-     [:or [:vector [:or :nil :map]] :seon.error/value]
+     [:or [:vector [:or :nil :map]] :seon.db/error-result]
      [:fn {:error/message "Use (seon.db/pull-many selector eids), (seon.db/pull-many database selector eids), or one {:selector selector :eids eids} argument map."} seon.db/pull-call-valid?]]
     [:=>
      [:cat
@@ -2091,13 +2091,13 @@
        :seon.db/pull-selector]
       [:or :seon.db/pull-many-options
        [:sequential :seon.db/entity-id]]]
-     [:or [:vector [:or :nil :map]] :seon.error/value]
+     [:or [:vector [:or :nil :map]] :seon.db/error-result]
      [:fn {:error/message "Use (seon.db/pull-many selector eids), (seon.db/pull-many database selector eids), or one {:selector selector :eids eids} argument map."} seon.db/pull-call-valid?]]
     [:=>
      [:cat [:or :seon.db/database-value :seon.error/value]
       :seon.db/pull-selector
       [:sequential :seon.db/entity-id]]
-     [:or [:vector [:or :nil :map]] :seon.error/value]
+     [:or [:vector [:or :nil :map]] :seon.db/error-result]
      [:fn {:error/message "Use (seon.db/pull-many selector eids), (seon.db/pull-many database selector eids), or one {:selector selector :eids eids} argument map."} seon.db/pull-call-valid?]]]}
   ([options]
    (pull-call (current-database-value)
@@ -3758,7 +3758,7 @@
   {:malli/schema
    [:=> [:cat [:or :seon.db/connection :seon.error/value]
          :seon.store/transaction]
-    [:or :seon.db/transaction-report :seon.error/value]]}
+    [:or :seon.db/transaction-report :seon.db/error-result]]}
   [connection transaction]
   (if (error-value? connection)
     connection
@@ -3994,8 +3994,8 @@
 
 (defn- transaction-result
   {:malli/schema
-   [:=> [:cat [:or :seon.db/transaction-report :seon.error/value]]
-    [:or :seon.db/transaction-result :seon.error/value]]}
+   [:=> [:cat [:or :seon.db/transaction-report :seon.db/error-result]]
+    [:or :seon.db/transaction-result :seon.db/error-result]]}
   [report]
   (if (error-value? report)
     report
@@ -4048,9 +4048,9 @@
   {:malli/schema
   [:function
     [:=> [:cat :seon.store/transaction]
-     [:or :seon.db/transaction-result :seon.error/value]]
+     [:or :seon.db/transaction-result :seon.db/error-result]]
     [:=> [:cat [:or :seon.db/connection :seon.error/value] :seon.store/transaction]
-     [:or :seon.db/transaction-report :seon.error/value]]]}
+     [:or :seon.db/transaction-report :seon.db/error-result]]]}
   ([transaction]
    (or (missing-transaction-data-error transaction)
        (transaction-result (transact-call (current-connection) transaction))))
