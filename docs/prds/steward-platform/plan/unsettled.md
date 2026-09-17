@@ -1782,6 +1782,27 @@ inherited reds). Reds not its own: agent-fork-callable (admission/source),
 `concurrent-bin-test-invocations…` killed by the silence bound while
 driving two gates (issue filed). Cold gate owed.
 
+**Seal refusal FIXED** (`543f03258`, seal triage): the cause was G4's own
+class — `:seon.activation/closure` (a stored entity) declared six
+cardinality-many attributes REQUIRED, and the final-report validator
+rebuilds the entity from resulting datoms where an empty set has none, so
+an honest empty closure could never seal; the old submission-time check saw
+the supplied `#{}` (the pre-read). Fix: the six collections optional,
+non-emptiness decided at `activation-seal-tx` from the supplied value;
+regression asserts an empty collection stores no datom. 17/146, 1F/0E
+(was 1F/9E). FOR THE INTEGRATOR at its next stop (its files): (a) the same
+unsatisfiable declaration in EIGHT more schemas, 19 keys (`:seon.cluster/
+cluster`, `:seon.fn.arity/row`, four `:seon.maintenance.result/*`,
+`:seon.test/adoption`) — issue `a-stored-entity-schema-requires-a-
+cardinality-many-key-that-empty-cannot-satisfy` (blocker; reset batch);
+(b) BLOCKER `final-report-validation-runs-unbounded-on-the-writer-thread`:
+a complete publication validates ~39,458 affected entities with Malli ON
+THE DATAHIKE WRITER THREAD (196 s under a light slot; wedged a gate at the
+300 s bound under load) — three priced options in the issue; (c) the
+remaining source_test.clj:334 red: a sparse program upsert now admitted
+where the test expects a refusal — stale expectation vs validator gap, one
+probe decides. Cold gate owed.
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
