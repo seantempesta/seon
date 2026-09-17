@@ -867,7 +867,16 @@
                             declared (get declarations test-symbol)
                             metadata (meta test-var)
                             var-reason (marker-reason test-var :seon.test/long)
-                            var-allowance (:seon.test/long-ms metadata)]
+                            ;; The allowance resolves exactly as its reason
+                            ;; does — Var metadata, then the namespace's —
+                            ;; through the same rule both indexing seams
+                            ;; read. Reading the Var alone made a
+                            ;; namespace-level allowance look like drift
+                            ;; against the row that lifted it.
+                            var-allowance
+                            (:seon.test/long-ms
+                             (program/test-markers metadata
+                                                   (meta (:ns metadata))))]
                         ;; Only the dangerous direction refuses: a Var that
                         ;; declares while the row does not would run a long
                         ;; test under the ordinary bound. A row that declares

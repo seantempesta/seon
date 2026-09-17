@@ -733,6 +733,62 @@
       (finally
         (test-support/delete-recursively! root)))))
 
+(deftest a-namespace-declared-allowance-is-not-declaration-drift
+  ;; The cold platform gate refused eight seon.dev.fresh-operator-reset-test
+  ;; tests: the namespace form declares :seon.test/long AND
+  ;; :seon.test/long-ms, both lifted onto every row, while the drift check
+  ;; resolved the REASON through the Var-then-namespace rule and the
+  ;; ALLOWANCE from Var metadata alone. The row was exactly what the source
+  ;; declared, so the refusal named a drift that did not exist. Both halves
+  ;; resolve the same way now, and a genuinely unindexed allowance still
+  ;; refuses.
+  (let [root (doto (io/file "tmp" (str "ns-allowance-" (id/id))) .mkdirs)
+        file (io/file root "declarations.clj")
+        namespace-name (symbol (str "seon.fixture.ns-allowance-" (id/id)))
+        namespace-reason "Every test here boots a real isolated operator root."
+        allowance-ms 600000
+        symbol-for (fn [n] (symbol (str namespace-name) (str n)))]
+    (try
+      (spit file
+            (str "(ns ^{:seon.test/long " (pr-str namespace-reason)
+                 " :seon.test/long-ms " allowance-ms "} " namespace-name
+                 " (:require [clojure.test :refer [deftest is]]))\n"
+                 "(deftest inherits (is true))\n"))
+      (load-file (str file))
+      (let [manifest {:seon.fn.manifest/artifacts
+                      [(program-fn/build-artifact
+                        {:seon.fn/source-path (str file)
+                         :seon.fn.file/first-party-functions []})]}
+            declarations (#'runner/long-declarations manifest)
+            all-vars [(ns-resolve namespace-name 'inherits)]
+            drifted (fn [rows]
+                      (mapv :seon.test/sym
+                            (:seon.test.runner/drifted-long-declarations
+                             (ex-data
+                              (try (#'runner/verify-long-declarations-indexed!
+                                    rows all-vars)
+                                   nil
+                                   (catch clojure.lang.ExceptionInfo failure
+                                     failure))))))]
+        (is (= {(symbol-for 'inherits)
+                {:seon.test/long namespace-reason
+                 :seon.test/long-ms allowance-ms}}
+               declarations)
+            "the namespace declaration reaches the row whole")
+        (is (nil? (#'runner/verify-long-declarations-indexed! declarations
+                                                             all-vars))
+            "a namespace-level allowance agrees with the row that lifted it")
+        (is (= [(symbol-for 'inherits)]
+               (drifted (update declarations (symbol-for 'inherits)
+                                dissoc :seon.test/long-ms)))
+            "a declared allowance missing from the row still refuses by name")
+        (is (= [(symbol-for 'inherits)]
+               (drifted (dissoc declarations (symbol-for 'inherits))))
+            "an unindexed declaration still refuses by name"))
+      (finally
+        (remove-ns namespace-name)
+        (test-support/delete-recursively! root)))))
+
 (deftest one-rule-answers-both-lifting-seams
   ;; The static indexer and the loaded-Var indexer must not be able to
   ;; disagree about what a test declared.
