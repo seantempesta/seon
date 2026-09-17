@@ -2038,6 +2038,19 @@ eval/refreshes` 0 datoms, writer `refresh-call` has no src caller, the
 since-diff already answers supersession per PRD §14 → delete attribute +
 both functions. Four policy choices → owner (questions tool).
 
+**~05:50Z OWNER RULINGS on message/wake/provenance** (PRD §1h): split
+`about` three ways; `from` the inside marker; origin → `:seon.issue/id`
+value; `refreshes` + `refresh-call` deleted; inbox-retraction drift repaired
+(handled = claim ref, ruling 70). Astra lane `message-wake-model` (high)
+launching. **Owner to bed (~05:55Z): "Stay vigilant and keep working through
+the night as long as you are making progress. Try and reason your way
+through things and not just doing the fastest thing. Launch agents to
+learn deeper truths like datahike and how to best model things. Astra and
+the skills are important to bounce ideas off."** Overnight rules: no owner
+decisions taken — the ten open ones stay open with options written; every
+landing reviewed and recorded; gates when the platform tier is green;
+astra design reviews at high effort for modeling questions.
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
