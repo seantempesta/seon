@@ -476,14 +476,51 @@
                     (str frame-ns "/" simple))))))
           (.getStackTrace failure))))
 
-(defn- projected-instrument-data
+(defn- contract-violation-data
+  "One contract violation's own data, from a source in any of its shapes."
   [source]
-  (let [projected-error (if (map? (::flow/ex source))
-                          (:data (::flow/ex source))
-                          source)]
+  (let [error-value (if (map? (::flow/ex source))
+                      (:data (::flow/ex source))
+                      source)]
     (when (= :seon.instrument/contract-violated
-             (:seon.error/kind projected-error))
-      (:seon.error/data projected-error))))
+             (:seon.error/kind error-value))
+      (:seon.error/data error-value))))
+
+(defn- offending-entry
+  "The map entry holding the value that actually broke the contract, if any.
+
+  WHAT BROKE THE CONTRACT IS A QUERY, NOT A RECONSTRUCTION.
+  `:seon.error/diagnostic-offending` is what the ARM checked — the caller's
+  whole argument vector, or the whole returned value — so for a function whose
+  argument carries an SCI context it is megabytes, becomes the over-bound
+  marker, and the fault then names the violation's PATH with no copy of the
+  value at it (measured 2026-09-17: fault `7710efbc…` on `default` recorded
+  `:seon.instrument/args` as `#:seon.sci.admit{:reason :over-bound}` and no
+  offending value at all,
+  `docs/prds/steward-platform/research/over-bound-evaluation-contract-2026-09-17.md`).
+  The first problem's leaf IS the value at the violation path, and it is
+  bounded by what that value is rather than by the request it rode in. This
+  reads the SOURCE, never its projection: the leaf sits four levels down and
+  a depth cap would silently drop exactly the evidence being recorded.
+
+  A map entry, not the value: an offending `nil` or `false` is still a value
+  that broke a contract, and absence here means the violation carried no
+  problems — two different answers."
+  [error-value]
+  (find (get-in (contract-violation-data error-value) [:seon.error/problems 0])
+        :seon.error/offending))
+
+(defn- admitted-size
+  "One value's own size, measured by the same admission that stores it.
+
+  Over the bound the marker reports the bytes it refused, so the number is
+  the value's and never the substitute's — the same rule `prepare` applies to
+  `:seon.error/data-size`."
+  [value caps]
+  (let [admitted (bounded-admission value caps)]
+    (if-some [marker (::marker admitted)]
+      (:seon.sci.admit/bytes marker)
+      (utf8-size (:seon.sci.admit/edn admitted)))))
 
 (defn- fit-fact-payload
   "Bound every payload field of one fact so the WHOLE fact fits inline.
@@ -493,12 +530,12 @@
   a field's bytes are measured on the admitted value while the fact stores it
   as an escaped string; it terminates at one byte, where every field is the
   marker."
-  [base-fact source message-value instrument-data caps inline-limit]
+  [base-fact source message-value instrument-data actual caps inline-limit]
   (let [expected (or (:seon.instrument/schema instrument-data)
                      (:seon.error/diagnostic-expected instrument-data))
         arguments (or (:seon.instrument/args instrument-data)
                       (:seon.error/diagnostic-offending instrument-data))
-        payload-count (+ 2 (if expected 1 0) (if arguments 1 0))
+        payload-count (+ 2 (if expected 1 0) (if arguments 1 0) (if actual 1 0))
         available (max 1 (- inline-limit (utf8-size (pr-str base-fact))))]
     (loop [field-limit (max 1 (quot available payload-count))]
       (let [field-caps (evidence-caps caps field-limit)
@@ -514,7 +551,10 @@
                      (bounded-text expected field-caps))
               arguments
               (assoc :seon.instrument/args
-                     (bounded-text arguments field-caps)))]
+                     (bounded-text arguments field-caps))
+              actual
+              (assoc :seon.instrument/actual
+                     (bounded-text (val actual) field-caps)))]
         (if (or (<= (utf8-size (pr-str fact)) inline-limit)
                 (= 1 field-limit))
           fact
@@ -545,9 +585,10 @@
         ;; ordinary path, which is a defect even while it is right.
         inline-limit evidence-bytes
         projected-source (:seon.sci.admit/value admitted)
-        instrument-data (projected-instrument-data projected-source)
+        instrument-data (contract-violation-data projected-source)
         flow? (map? source)
-        operation (get-in (if failure (refusal failure) source)
+        error-value (if failure (refusal failure) source)
+        operation (get-in error-value
                           [:seon.error/data :seon.error/diagnostic-operation])
         function (or (when (qualified-symbol? operation) operation)
                      (:seon.instrument/fn instrument-data)
@@ -561,6 +602,11 @@
         ;; `:unserializable` marker measured NOTHING — there is no size to
         ;; report — so the fact carries no `data-size` at all rather than the
         ;; substitute's, and the marker's own reason is what says why.
+        ;; THE OFFENDING VALUE IS READ FROM THE SOURCE, NOT ITS PROJECTION:
+        ;; the leaf sits four levels down and a depth cap would drop exactly
+        ;; the evidence being recorded.
+        actual (offending-entry error-value)
+        actual-size (when actual (admitted-size (val actual) caps))
         marker (::marker admitted)
         data-size (if marker
                     (:seon.sci.admit/bytes marker)
@@ -593,13 +639,19 @@
                      (stack-failing-function failure)))
           (:seon.instrument/arm instrument-data)
           (assoc :seon.instrument/arm (:seon.instrument/arm instrument-data))
+          ;; MEASURE THE OFFENDING VALUE, NOT THE REQUEST IT RODE IN. The
+          ;; fact already reports the whole source's size; this one answers
+          ;; how much of the value that broke the contract the inline field
+          ;; kept.
+          (int? actual-size)
+          (assoc :seon.instrument/actual-size (long actual-size))
           basis-t (assoc :seon.error/basis-t basis-t)
           run-id (assoc :seon.error/run [:seon.turn/id run-id])
           agent-id (assoc :seon.error/agent
                           [:seon.agent/id agent-id]))
         fact (fit-fact-payload
               base-fact source
-              (message source failure) instrument-data caps inline-limit)
+              (message source failure) instrument-data actual caps inline-limit)
         fact (assoc fact :seon.error/capped?
                     ;; HONEST WHEN EVERYTHING WAS DROPPED. Comparing the two
                     ;; EDN strings alone reported "nothing omitted" for the
@@ -1379,7 +1431,9 @@
                                    :seon.error/data-edn :seon.error/data-size :seon.error/capped?
                                    :seon.error/dropped-fault-count :seon.error/dropped-fault-digest
                                    :seon.instrument/fn :seon.instrument/arm
-                                   :seon.instrument/expected :seon.instrument/args])
+                                   :seon.instrument/expected :seon.instrument/args
+                                   :seon.instrument/actual
+                                   :seon.instrument/actual-size])
         digest (:seon.error/data-blob fact)
         occurrence (cond-> (merge evidence
                                  {:seon.error.occurrence/id occurrence-id
@@ -1545,7 +1599,9 @@
                                             :seon.error/throwable-class :seon.error/proc
                                             :seon.error/op :seon.error/cid
                                             :seon.instrument/fn :seon.instrument/arm
-                                            :seon.instrument/expected :seon.instrument/args])
+                                            :seon.instrument/expected :seon.instrument/args
+                                            :seon.instrument/actual
+                                            :seon.instrument/actual-size])
                    {:seon.error/at (:seon.error.occurrence/last-at occurrence)
                     :seon.error/message (:seon.error.occurrence/message occurrence)
                     :seon.error/occurrence-count

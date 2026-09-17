@@ -5,6 +5,18 @@
                    [:seon.instrument/instrumented
                     :seon.instrument/instrumented]],
                   :args :string,
+                  ;; The value at the violation's own path, bounded by the
+                  ;; fault family's evidence bound. `:args` is what the ARM
+                  ;; checked (the whole argument vector or returned value) and
+                  ;; becomes the over-bound marker for any function carrying a
+                  ;; context; this answers "what value broke the contract".
+                  :actual :string,
+                  ;; That value's OWN size in admitted-projection bytes,
+                  ;; measured exactly the way `:seon.error/data-size` measures
+                  ;; the whole source — so the two numbers are comparable and
+                  ;; a reader can see how small the offending leaf was against
+                  ;; the value it rode in. Never the request's size.
+                  :actual-size [:int {:min 0}],
                   :arm [:enum :input :output],
                   :expected [:string {:min 1}],
                   :fn [:string {:min 1}],

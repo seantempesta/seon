@@ -159,7 +159,13 @@
                :seon.instrument/expected]
               [:seon.instrument/args
                {:optional true}
-               :seon.instrument/args]],
+               :seon.instrument/args]
+              [:seon.instrument/actual
+               {:optional true}
+               :seon.instrument/actual]
+              [:seon.instrument/actual-size
+               {:optional true}
+               :seon.instrument/actual-size]],
              :commit-tx-request
              [:map
               [:seon.error/source :seon.error/source]

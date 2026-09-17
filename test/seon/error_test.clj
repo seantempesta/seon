@@ -38,6 +38,7 @@
             [clojure.test.check.properties :as prop]
             [seon.config :as config]
             [seon.error :as error]
+            [seon.instrument :as instrument]
             [seon.problems]
             [seon.cluster.status]
             [seon.render.transcript]
@@ -486,6 +487,53 @@
         "a source that fits is not reported as capped")
     (is (true? (:seon.error/capped? wide))
         "a source wider than the caps says so")))
+
+(defn ^{:malli/schema [:=> [:cat :int]
+                       [:map
+                        [:seon.error-test/payload [:vector :string]]
+                        [:seon.error-test/id :string]]]}
+  wide-return-narrow-violation
+  "A real armed function whose RETURN breaks its contract at one small leaf.
+
+  The live fault this reproduces (`7710efbc…` on `default`, 2026-09-17) was
+  `seon.sci.eval/evaluate` refusing its own return at
+  `[:seon.cluster.eval/error]`: the arm's value is the whole evaluation, which
+  carries a context and does not fit the fault's evidence bound, while the
+  value that actually broke the contract is a two-element vector."
+  [_]
+  {:seon.error-test/payload (vec (repeat 20000 "wide evidence"))
+   :seon.error-test/id [:seon.ns/name 'user]})
+
+(deftest a-contract-violations-fault-keeps-the-value-that-broke-it
+  ;; WHAT BROKE THE CONTRACT IS A QUERY. Before this the fault named the
+  ;; violation's path and kept NO copy of the value at it: the arm's whole
+  ;; value went over the evidence bound and became the marker, so the repair
+  ;; was reached by reproducing the diagnostic instead of reading the fact
+  ;; (`docs/prds/steward-platform/research/over-bound-evaluation-contract-2026-09-17.md`,
+  ;; "Second finding").
+  (test-support/with-database
+   (fn [_connection]
+     (try
+       (instrument/apply! {:seon.config/on-core-error :panic})
+       (let [thrown (try (wide-return-narrow-violation 1)
+                         (catch Throwable throwable throwable))
+             prepared (error/prepare (request thrown))
+             fact (:seon.error/fact prepared)
+             fact-bytes (alength (.getBytes (pr-str fact) "UTF-8"))]
+         (is (= :seon.instrument/contract-violated (:seon.error/kind fact))
+             (pr-str fact))
+         (is (str/includes? (:seon.instrument/actual fact) ":seon.ns/name")
+             "the value at the violation path is kept, bounded by what it is")
+         (is (not (str/includes? (:seon.instrument/actual fact) "wide evidence"))
+             "the offending value is the leaf, never the request it rode in")
+         (is (pos? (:seon.instrument/actual-size fact))
+             "the offending value's own size is recorded")
+         (is (< (:seon.instrument/actual-size fact)
+                (:seon.error/data-size fact))
+             "the offending value is measured, never the source it rode in")
+         (is (<= fact-bytes evidence-bytes)
+             (str "stored fault fact was " fact-bytes " UTF-8 bytes")))
+       (finally (instrument/remove!))))))
 
 (deftest fault-preparation-bounds-the-fact-and-omits-disposable-flow-state
   ;; THE CLASS PROOF for B1. A fault's evidence is a STORED value and goes

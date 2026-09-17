@@ -38,4 +38,6 @@
   [:seon.error/dropped-fault-digest {:optional true} :seon.error/dropped-fault-digest]
   [:seon.instrument/arm {:optional true} :seon.instrument/arm]
   [:seon.instrument/expected {:optional true} :seon.instrument/expected]
-  [:seon.instrument/args {:optional true} :seon.instrument/args]]}
+  [:seon.instrument/args {:optional true} :seon.instrument/args]
+  [:seon.instrument/actual {:optional true} :seon.instrument/actual]
+  [:seon.instrument/actual-size {:optional true} :seon.instrument/actual-size]]}
