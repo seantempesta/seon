@@ -554,12 +554,26 @@
         (instrument/remove!)))))
 
 (deftest refusal-value-projection-obeys-the-profile-and-html-keeps-the-whole-value
-  (let [raw (concat (range 8) ["candidate-final"])
+  ;; THE OFFENDING VALUE IS THE FAILING LEAF, not the container it sat in
+  ;; (error-entities PRD 2026-09-17, "Offending value": the fault retains the
+  ;; independently bounded projection of its own LEAF; AGENTS.md 2.4, a
+  ;; refusal names "the offending value"). `940f4b426` moved the wording and
+  ;; the leaf together, so the member schema and the member value are what a
+  ;; collection violation now reports. The whole checked value is not lost:
+  ;; it stays beside the leaf as the diagnostic's own offending value.
+  ;;
+  ;; The leaf is therefore what both faces are measured on: the AI projection
+  ;; bounds it under the profile and says what it omitted and how to requery
+  ;; it, and the HTML face keeps every member of it.
+  (let [member (vec (range 100 140))
+        raw (concat (range 8) [member])
         wrapped (instrument/wrap-interpreted
                  'my.agents.audit/vector-input "[:=> [:cat [:vector :int]] :int]"
                  (schema/handed-projection) :panic
                  (config/result-caps (test-support/effective-config)) (constantly 1))
         refusal (try (wrapped raw) (catch Exception failure (ex-data failure)))
+        offending (get-in refusal [:seon.error/data :seon.error/problems 0 :seon.error/offending])
+        checked (get-in refusal [:seon.error/data :seon.error/diagnostic-offending])
         unit {:seon.render/value refusal
               :seon.repl/handle 'result/eaudit
               :seon.render/profile
@@ -571,12 +585,22 @@
                :seon.render.profile/composition :multiline}}
         ai (error/render-ai unit)
         html (pr-str (error/render-html unit))]
-    (is (identical? raw (get-in refusal [:seon.error/data :seon.error/problems 0 :seon.error/offending])))
-    (is (str/includes? ai "expected a vector") ai)
-    (is (str/includes? ai ":seon.print/omitted") ai)
-    (is (str/includes? ai "(get-in result/eaudit [:seon.error/data :seon.error/problems 0 :seon.error/offending])") ai)
-    (is (not (str/includes? ai "candidate-final")) ai)
-    (is (str/includes? html "candidate-final") html)))
+    (is (identical? member offending)
+        "the refusal names the failing member, and retains the actual object")
+    (is (identical? raw (first checked))
+        "the whole checked argument survives beside the leaf, unprojected")
+    (is (str/includes? ai "expected a collection member satisfying an integer") ai)
+    (is (str/includes? ai "100") ai)
+    (is (not (str/includes? ai "139"))
+        "the AI projection stops at the profile's child bound")
+    (is (str/includes? ai ":seon.print/bound-by :seon.render.profile/max-children") ai)
+    (is (str/includes? ai ":seon.print/omitted 37") ai)
+    (is (str/includes? ai ":seon.render.data/total 40")
+        "the elision counts what it omitted and what was there")
+    (is (str/includes? ai "(get-in result/eaudit [:seon.error/data :seon.error/problems 0 :seon.error/offending])")
+        "and it hands back the form that requeries the leaf it elided")
+    (is (= [] (remove #(str/includes? html (str %)) member))
+        "the HTML face keeps every member of the whole offending value")))
 
 (deftest registry-sized-contract-evidence-retains-the-offending-object
   (let [caps (config/result-caps (test-support/effective-config))
