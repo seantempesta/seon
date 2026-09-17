@@ -1731,6 +1731,20 @@ duplicate reset-drill test-fast run. Rule re-asserted: ≤4 editing lanes; no
 new launches until under the cap; seal triage first to hold if needed.
 Owner: "stay on top of things and keep the agents productive and effective."
 
+**Hook fix LANDED** (`05de39b1d`, `6e644b72e`): the prefix-loss hypothesis
+REFUTED from the codex rollout — the model first wrote a patch naming
+`/Users/sean/src/seon/db.clj` (nonexistent; the hook passed it, apply_patch
+failed), then re-issued it as a SHELL heredoc `apply_patch` via
+exec_command, which the hook's tool matcher never saw. Deeper: no codex
+apply_patch had EVER been syntax-checked before its bytes landed
+(`reconstruct-file-content` had no apply_patch branch, wrapped in when-let).
+Fixed: all four patch header forms parsed exactly; the prospective file is
+reconstructed and linted PreToolUse; every reconstruction failure is a typed
+block; PostToolUse blocks on a syntax error left on disk. 15/121/0/0 fast.
+DECIDED (F8): close the shell route — the hook fires on every tool and
+derives changed Clojure files from per-session content digests of the tree;
+shell writes are caught PostToolUse and block at once. Same agent resumed.
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
