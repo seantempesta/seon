@@ -68,7 +68,9 @@
   (:import [java.nio.charset StandardCharsets]
            [java.nio.file CopyOption Files InvalidPathException LinkOption Paths
             StandardCopyOption]
-           [java.util.concurrent Executor]))
+           [java.util Date]
+           [java.util.concurrent Executor TimeUnit]
+           [java.util.concurrent.locks ReentrantLock]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Bootstrap configuration — the CLOSED pre-store key set.
@@ -83,8 +85,21 @@
 (def ^:dynamic ^:private *source-progress!*
   (constantly nil))
 
+(def ^:dynamic ^:private *source-refresh-holder-token*
+  nil)
+
+(declare source-refresh-holder)
+
 (defn- report-source-progress!
   [phase]
+  (when *source-refresh-holder-token*
+    (swap! source-refresh-holder
+           (fn [holder]
+             (if (identical? *source-refresh-holder-token* (::holder-token holder))
+               (assoc holder
+                      :seon.operator.lock/phase phase
+                      :seon.operator.lock/progress-at (Date.))
+               holder))))
   (*source-progress!* phase)
   ;; Clojure prepl writes through PrintWriter, which records an IOException
   ;; instead of throwing it. A departed observer must not leave queued
@@ -1719,7 +1734,66 @@
   ;; One JVM may receive overlapping editor events. Serialize analysis,
   ;; publication, and artifact replacement as one operation; the Datahike
   ;; expected-head guard remains the cross-plan correctness fence.
-  (Object.))
+  (ReentrantLock.))
+
+(defonce ^:private source-refresh-holder
+  (atom nil))
+
+(defn- source-refresh-acquisition-bound-ms
+  []
+  (operator.state/event-silence-backstop-ms (fs/source-directory) {}))
+
+(defn- source-refresh-holder-view
+  [holder]
+  (some-> holder (dissoc ::holder-token)))
+
+(defn- with-source-refresh-monitor!
+  [transition]
+  (if (.isHeldByCurrentThread ^ReentrantLock source-refresh-monitor)
+    (transition)
+    (let [bound-ms (source-refresh-acquisition-bound-ms)
+          started-ms (System/currentTimeMillis)
+          waiter (assoc (operator.state/current-process-identity)
+                        :seon.operator.lock/command "source publication"
+                        :seon.operator.lock/waiting-since (Date. started-ms)
+                        :seon.operator.lock/acquisition-timeout-ms bound-ms)]
+      (if-not (.tryLock ^ReentrantLock source-refresh-monitor
+                        bound-ms TimeUnit/MILLISECONDS)
+        (let [waited-ms (- (System/currentTimeMillis) started-ms)
+              holder (source-refresh-holder-view @source-refresh-holder)]
+          (throw
+           (ex-info
+            (str "Timed out after " waited-ms
+                 " ms waiting for source publication held in phase "
+                 (pr-str (:seon.operator.lock/phase holder)) ".")
+            {:seon.error/kind ::source-refresh-acquisition-timeout
+             :seon.error/message
+             (str "Source publication waited " waited-ms " ms, exceeding the "
+                  bound-ms " ms acquisition bound while the holder was in phase "
+                  (pr-str (:seon.operator.lock/phase holder)) ".")
+             :seon.source/source-refresh-acquisition-timeout true
+             :seon.operator.lock/waited-ms waited-ms
+             :seon.operator.lock/acquisition-timeout-ms bound-ms
+             :seon.operator.lock/holder holder
+             :seon.operator.lock/waiter waiter})))
+        (let [token (Object.)
+              acquired-at (Date.)
+              holder (assoc (operator.state/current-process-identity)
+                            ::holder-token token
+                            :seon.operator.lock/command "source publication"
+                            :seon.operator.lock/phase "request accepted"
+                            :seon.operator.lock/acquired-at acquired-at
+                            :seon.operator.lock/acquisition-timeout-ms bound-ms)]
+          (reset! source-refresh-holder holder)
+          (try
+            (binding [*source-refresh-holder-token* token]
+              (transition))
+            (finally
+              (.unlock ^ReentrantLock source-refresh-monitor)
+              (swap! source-refresh-holder
+                     (fn [current]
+                       (when-not (identical? token (::holder-token current))
+                         current))))))))))
 
 (defonce ^:private source-analysis-cache
   ;; A source snapshot determines the complete static projection. Scratch
@@ -2462,7 +2536,8 @@
    (refresh-source! root changed-paths nil))
   ([root changed-paths development-cluster]
    (report-source-progress! "request accepted")
-   (locking source-refresh-monitor
+   (with-source-refresh-monitor!
+    (fn []
      (report-source-progress! "bootstrap configuration")
      (let [instance (when development-cluster
                       (get @running-instances development-cluster))
@@ -2495,7 +2570,7 @@
                  (dissoc published :seon.source/upsert-rows
                          :seon.source/relative-file-digests))))))
          (finally
-           (release-root-store! store-dir)))))))
+           (release-root-store! store-dir))))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Recovery — the pass that runs before anything resumes
