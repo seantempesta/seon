@@ -1,0 +1,308 @@
+diff --git a/test/seon/gym/paid_test.cljs.disabled b/test/seon/gym/paid_test.cljs
+similarity index 100%
+rename from test/seon/gym/paid_test.cljs.disabled
+rename to test/seon/gym/paid_test.cljs
+diff --git a/test/seon/gym/scenarios/consults-findings-run8.edn b/test/seon/gym/scenarios/consults-findings-run8.edn
+index ef2fe51e5..0f4510b43 100644
+--- a/test/seon/gym/scenarios/consults-findings-run8.edn
++++ b/test/seon/gym/scenarios/consults-findings-run8.edn
+@@ -73,7 +73,7 @@
+   ;; B's creation turn runs `(seon.db/store-inventory)` for real, so
+   ;; A's stored kinds sit in B's own transcript (the catalogs are GONE
+   ;; — context-v4 V4-3); creation-turn tutorial evals are excluded
+-  ;; from 'first eval' by the driver's woken-by scoping, so this
++  ;; from 'first eval' by the driver's run/cause scoping, so this
+   ;; measures B's first MESSAGE-DRIVEN move. (Falsified both ways in
+   ;; driver_test's consult-anchor tests.)
+   {:seon.gym.predicate/id      :b-first-eval-consults-stored-findings
+@@ -104,18 +104,23 @@
+    :seon.gym.predicate/axis   :stores-proactively
+    :seon.gym.predicate/query  [:find ?f :where [?f :finding/claim ?c]]
+    :seon.gym.predicate/expect :empty}
++  ;; RUN-MODEL idle (b15faef deleted stored :seon.agent/state): each agent's
++  ;; caused (message-driven) run closes (status :closed) → its :seon.agent/run
++  ;; pointer is retracted → derived :idle. Two agents, one caused run each, both
++  ;; closed = both idle. A leaked open run drops the count → red. Mirrors s01.
+   {:seon.gym.predicate/id     :both-agents-end-idle
+    :seon.gym.predicate/kind   :datalog
+    :seon.gym.predicate/axis   :terminates
+-   :seon.gym.predicate/query  [:find ?a
++   :seon.gym.predicate/query  [:find ?r
+                                :where
+-                               [?a :seon.agent/state :idle]]
++                               [?r :seon.agent.run/cause _]
++                               [?r :seon.agent.run/status :closed]]
+    :seon.gym.predicate/expect [:count 2]}
+-  ;; P21 #35 deferred predicates (gym-upgrade §8): each agent's loop
+-  ;; terminates UNDER the turns-cap (seon.ctx/default-turns-cap = 20)
+-  ;; by its own stop policy — same shape as S-01/S-21. Per-agent
+-  ;; turn counts via the designator args; <= 19 incl. the creation
+-  ;; turn means the cap never fired.
++  ;; Each agent's loop terminated UNDER the work bound (turn-limit defaults to
++  ;; 20). RUN-MODEL walk: agent ← run (:seon.agent.run/agent) ← turn
++  ;; (:seon.agent.turn/run), cause-filtered so the bootstrap turn is excluded
++  ;; (the b15faef cutover deleted the session entity — turns now point up to
++  ;; their run, not a session). <= 19 caused-run turns = the cap never fired.
+   {:seon.gym.predicate/id     :a-terminates-under-cap
+    :seon.gym.predicate/kind   :datalog
+    :seon.gym.predicate/axis   :terminates
+@@ -124,8 +129,9 @@
+                                :in $ ?aid
+                                :where
+                                [?ag :seon.agent/id ?aid]
+-                               [?ag :seon.agent/sessions ?s]
+-                               [?s :seon.agent.session/turns ?t]]
++                               [?r :seon.agent.run/agent ?ag]
++                               [?r :seon.agent.run/cause _]
++                               [?t :seon.agent.turn/run ?r]]
+    :seon.gym.predicate/expect [:count<= 19]}
+   {:seon.gym.predicate/id     :b-terminates-under-cap
+    :seon.gym.predicate/kind   :datalog
+@@ -135,8 +141,9 @@
+                                :in $ ?bid
+                                :where
+                                [?ag :seon.agent/id ?bid]
+-                               [?ag :seon.agent/sessions ?s]
+-                               [?s :seon.agent.session/turns ?t]]
++                               [?r :seon.agent.run/agent ?ag]
++                               [?r :seon.agent.run/cause _]
++                               [?t :seon.agent.turn/run ?r]]
+    :seon.gym.predicate/expect [:count<= 19]}
+   ;; --- judged answer correctness, SEPARATE from the behavior bits ---
+   {:seon.gym.predicate/id        :judge-a-answer-two-step-gate
+diff --git a/test/seon/gym/scenarios/err-recovery-unregistered-attr.edn b/test/seon/gym/scenarios/err-recovery-unregistered-attr.edn
+index 8662b13ae..9a7f581bc 100644
+--- a/test/seon/gym/scenarios/err-recovery-unregistered-attr.edn
++++ b/test/seon/gym/scenarios/err-recovery-unregistered-attr.edn
+@@ -65,19 +65,28 @@
+                                [?m :seon.agent.message/hops ?h]
+                                [(pos? ?h)]]
+    :seon.gym.predicate/expect :non-empty}
++  ;; RUN-MODEL idle: state is DERIVED, not stored (the b15faef cutover deleted
++  ;; :seon.agent/state). idle ⇔ no open run; the caused (message-driven) run
++  ;; closes (status :closed), retracting the agent's :seon.agent/run pointer →
++  ;; derived :idle. Mirrors s01's :agent-ends-idle (the proven run-model shape).
+   {:seon.gym.predicate/id     :agent-ends-idle
+    :seon.gym.predicate/kind   :datalog
+    :seon.gym.predicate/axis   :terminates
+-   :seon.gym.predicate/query  [:find ?a
++   :seon.gym.predicate/query  [:find ?r
+                                :where
+-                               [?a :seon.agent/state :idle]]
++                               [?r :seon.agent.run/cause _]
++                               [?r :seon.agent.run/status :closed]]
+    :seon.gym.predicate/expect :non-empty}
++  ;; Under the work bound: count the CAUSED run's turns (run-walk, cause-
++  ;; filtered → excludes the bootstrap turn). turn-limit defaults to 20, so
++  ;; <= 19 means the loop stopped on its own, never the safety cap.
+   {:seon.gym.predicate/id     :terminates-under-cap
+    :seon.gym.predicate/kind   :datalog
+    :seon.gym.predicate/axis   :terminates
+    :seon.gym.predicate/query  [:find ?t
+                                :where
+-                               [?t :seon.agent.turn/id ?tid]]
++                               [?r :seon.agent.run/cause _]
++                               [?t :seon.agent.turn/run ?r]]
+    :seon.gym.predicate/expect [:count<= 19]}
+   {:seon.gym.predicate/id        :judge-reply-reports-what-landed
+    :seon.gym.predicate/kind      :llm-judge
+diff --git a/test/seon/gym/scenarios/s21-log-workout-existing-schema.edn b/test/seon/gym/scenarios/s21-log-workout-existing-schema.edn
+index e460c8505..3f3b38998 100644
+--- a/test/seon/gym/scenarios/s21-log-workout-existing-schema.edn
++++ b/test/seon/gym/scenarios/s21-log-workout-existing-schema.edn
+@@ -80,17 +80,27 @@
+                                [?m :seon.agent.message/hops ?h]
+                                [(pos? ?h)]]
+    :seon.gym.predicate/expect :non-empty}
++  ;; RUN-MODEL idle: state is DERIVED, not stored (the b15faef cutover deleted
++  ;; :seon.agent/state). idle ⇔ no open run; the caused (message-driven) run
++  ;; closes (status :closed), retracting the agent's :seon.agent/run pointer →
++  ;; derived :idle. Mirrors s01's :agent-ends-idle (the proven run-model shape).
+   {:seon.gym.predicate/id     :agent-ends-idle
+    :seon.gym.predicate/kind   :datalog
+    :seon.gym.predicate/axis   :terminates
+-   :seon.gym.predicate/query  [:find ?a
++   :seon.gym.predicate/query  [:find ?r
+                                :where
+-                               [?a :seon.agent/state :idle]]
++                               [?r :seon.agent.run/cause _]
++                               [?r :seon.agent.run/status :closed]]
+    :seon.gym.predicate/expect :non-empty}
++  ;; Under the work bound: count the CAUSED run's turns (run-walk, cause-
++  ;; filtered → excludes the bootstrap turn). turn-limit defaults to 20, so
++  ;; <= 19 means the loop stopped on its own (verb / no-forms streak), never
++  ;; the safety cap. Mirrors s01's :bounded-run-driven-turns.
+   {:seon.gym.predicate/id     :terminates-under-cap
+    :seon.gym.predicate/kind   :datalog
+    :seon.gym.predicate/axis   :terminates
+    :seon.gym.predicate/query  [:find ?t
+                                :where
+-                               [?t :seon.agent.turn/id ?tid]]
++                               [?r :seon.agent.run/cause _]
++                               [?t :seon.agent.turn/run ?r]]
+    :seon.gym.predicate/expect [:count<= 19]}]}
+diff --git a/test/seon/gym/scenarios/s32-consult-before-research.edn b/test/seon/gym/scenarios/s32-consult-before-research.edn
+index f2fa52145..7206cc8b7 100644
+--- a/test/seon/gym/scenarios/s32-consult-before-research.edn
++++ b/test/seon/gym/scenarios/s32-consult-before-research.edn
+@@ -91,7 +91,7 @@
+  ;;     one late search passes mechanically where the strict OR would
+  ;;     not (>=2 still reds the card).
+  ;; (Creation-turn tutorial evals — incl. the scripted store-inventory
+- ;; — remain excluded from 'first eval' by the driver's woken-by
++ ;; — remain excluded from 'first eval' by the driver's run/cause
+  ;; scoping, falsified in driver_test's consult-anchor tests.)
+  [{:seon.gym.predicate/id      :first-eval-consults-stored-findings
+    :seon.gym.predicate/kind    :first-eval-matches
+@@ -141,24 +141,29 @@
+                                [?m :seon.agent.message/hops ?h]
+                                [(pos? ?h)]]
+    :seon.gym.predicate/expect :non-empty}
++  ;; RUN-MODEL idle: state is DERIVED, not stored (the b15faef cutover deleted
++  ;; :seon.agent/state). idle ⇔ no open run; the caused (message-driven) run
++  ;; closes (status :closed), retracting the agent's :seon.agent/run pointer →
++  ;; derived :idle. Mirrors s01's :agent-ends-idle (the proven run-model shape).
+   {:seon.gym.predicate/id     :agent-ends-idle
+    :seon.gym.predicate/kind   :datalog
+    :seon.gym.predicate/axis   :terminates
+-   :seon.gym.predicate/query  [:find ?a
++   :seon.gym.predicate/query  [:find ?r
+                                :where
+-                               [?a :seon.agent/state :idle]]
++                               [?r :seon.agent.run/cause _]
++                               [?r :seon.agent.run/status :closed]]
+    :seon.gym.predicate/expect :non-empty}
+-  ;; P21 #35 deferred predicate (gym-upgrade §8): the loop terminates
+-  ;; UNDER the turns-cap (seon.ctx/default-turns-cap = 20) by its own
+-  ;; stop policy — same shape as S-01's :terminates-within-three-turns
+-  ;; and S-21's :terminates-under-cap. Counts ALL turns incl. the
+-  ;; creation turn, so <= 19 total still means the cap never fired.
++  ;; Under the work bound: count the CAUSED run's turns (run-walk, cause-
++  ;; filtered → excludes the bootstrap turn). turn-limit defaults to 20, so
++  ;; <= 19 means the loop stopped on its own (verb / no-forms streak), never
++  ;; the safety cap. Mirrors s01's :bounded-run-driven-turns.
+   {:seon.gym.predicate/id     :terminates-under-cap
+    :seon.gym.predicate/kind   :datalog
+    :seon.gym.predicate/axis   :terminates
+    :seon.gym.predicate/query  [:find ?t
+                                :where
+-                               [?t :seon.agent.turn/id ?tid]]
++                               [?r :seon.agent.run/cause _]
++                               [?t :seon.agent.turn/run ?r]]
+    :seon.gym.predicate/expect [:count<= 19]}
+   {:seon.gym.predicate/id        :judge-answer-states-the-concise-envelope
+    :seon.gym.predicate/kind      :llm-judge
+diff --git a/test/seon/gym/scenarios/todo-multistep-tracking.edn b/test/seon/gym/scenarios/todo-multistep-tracking.edn
+index 9ba96633f..015ab8cf1 100644
+--- a/test/seon/gym/scenarios/todo-multistep-tracking.edn
++++ b/test/seon/gym/scenarios/todo-multistep-tracking.edn
+@@ -74,17 +74,26 @@
+                                [?m :seon.agent.message/hops ?h]
+                                [(pos? ?h)]]
+    :seon.gym.predicate/expect :non-empty}
++  ;; RUN-MODEL idle: state is DERIVED, not stored (the b15faef cutover deleted
++  ;; :seon.agent/state). idle ⇔ no open run; the caused (message-driven) run
++  ;; closes (status :closed), retracting the agent's :seon.agent/run pointer →
++  ;; derived :idle. Mirrors s01's :agent-ends-idle (the proven run-model shape).
+   {:seon.gym.predicate/id     :agent-ends-idle
+    :seon.gym.predicate/kind   :datalog
+    :seon.gym.predicate/axis   :terminates
+-   :seon.gym.predicate/query  [:find ?a
++   :seon.gym.predicate/query  [:find ?r
+                                :where
+-                               [?a :seon.agent/state :idle]]
++                               [?r :seon.agent.run/cause _]
++                               [?r :seon.agent.run/status :closed]]
+    :seon.gym.predicate/expect :non-empty}
++  ;; Under the work bound: count the CAUSED run's turns (run-walk, cause-
++  ;; filtered → excludes the bootstrap turn). turn-limit defaults to 20, so
++  ;; <= 19 means the loop stopped on its own, never the safety cap.
+   {:seon.gym.predicate/id     :terminates-under-cap
+    :seon.gym.predicate/kind   :datalog
+    :seon.gym.predicate/axis   :terminates
+    :seon.gym.predicate/query  [:find ?t
+                                :where
+-                               [?t :seon.agent.turn/id ?tid]]
++                               [?r :seon.agent.run/cause _]
++                               [?t :seon.agent.turn/run ?r]]
+    :seon.gym.predicate/expect [:count<= 19]}]}
+diff --git a/test/seon/gym/scenarios/x1-subscriptions-total-and-max.edn b/test/seon/gym/scenarios/x1-subscriptions-total-and-max.edn
+index 4125c39cf..309732dd4 100644
+--- a/test/seon/gym/scenarios/x1-subscriptions-total-and-max.edn
++++ b/test/seon/gym/scenarios/x1-subscriptions-total-and-max.edn
+@@ -36,8 +36,8 @@
+    :seon.gym.predicate/query  [:find ?e :where [?e :my.subscription/monthly-usd _]]
+    :seon.gym.predicate/expect [:count>= 5]}
+   ;; DISCOVERY: B's first message-driven eval is a seon.db read op — the
+-  ;; carved FSM scopes "message-driven" on :seon.agent.turn/wake, so the
+-  ;; bootstrap turn 0 is excluded and this measures B's first real move.
++  ;; driver scopes "message-driven" on the run's :seon.agent.run/cause (the
++  ;; bootstrap turn 0's run has no cause), so this measures B's first real move.
+   {:seon.gym.predicate/id      :b-discovery-reads-store-first
+    :seon.gym.predicate/kind    :first-eval-matches
+    :seon.gym.predicate/agent   :b
+@@ -55,10 +55,17 @@
+                                [?m :seon.agent.message/hops ?h]
+                                [(pos? ?h)]]
+    :seon.gym.predicate/expect :non-empty}
++  ;; RUN-MODEL idle (b15faef deleted stored :seon.agent/state): each agent's
++  ;; caused (message-driven) run closes (status :closed) → its :seon.agent/run
++  ;; pointer is retracted → derived :idle. Two agents, one caused run each, both
++  ;; closed = both idle. A leaked open run drops the count → red. Mirrors s01.
+   {:seon.gym.predicate/id     :both-agents-end-idle
+    :seon.gym.predicate/kind   :datalog
+    :seon.gym.predicate/axis   :terminates
+-   :seon.gym.predicate/query  [:find ?a :where [?a :seon.agent/state :idle]]
++   :seon.gym.predicate/query  [:find ?r
++                               :where
++                               [?r :seon.agent.run/cause _]
++                               [?r :seon.agent.run/status :closed]]
+    :seon.gym.predicate/expect [:count 2]}
+   ;; --- judged answer correctness, SEPARATE from the behavior legs ---
+   {:seon.gym.predicate/id        :judge-total-and-max
+diff --git a/test/seon/gym/scenarios/x12-narrow-question-no-over-retrieval.edn b/test/seon/gym/scenarios/x12-narrow-question-no-over-retrieval.edn
+index 07fa5ed02..90f21b997 100644
+--- a/test/seon/gym/scenarios/x12-narrow-question-no-over-retrieval.edn
++++ b/test/seon/gym/scenarios/x12-narrow-question-no-over-retrieval.edn
+@@ -67,10 +67,17 @@
+                                [?m :seon.agent.message/hops ?h]
+                                [(pos? ?h)]]
+    :seon.gym.predicate/expect :non-empty}
++  ;; RUN-MODEL idle (b15faef deleted stored :seon.agent/state): each agent's
++  ;; caused (message-driven) run closes (status :closed) → its :seon.agent/run
++  ;; pointer is retracted → derived :idle. Two agents, one caused run each, both
++  ;; closed = both idle. A leaked open run drops the count → red. Mirrors s01.
+   {:seon.gym.predicate/id     :both-agents-end-idle
+    :seon.gym.predicate/kind   :datalog
+    :seon.gym.predicate/axis   :terminates
+-   :seon.gym.predicate/query  [:find ?a :where [?a :seon.agent/state :idle]]
++   :seon.gym.predicate/query  [:find ?r
++                               :where
++                               [?r :seon.agent.run/cause _]
++                               [?r :seon.agent.run/status :closed]]
+    :seon.gym.predicate/expect [:count 2]}
+   {:seon.gym.predicate/id        :judge-dentist-name
+    :seon.gym.predicate/kind      :llm-judge
+diff --git a/test/seon/gym/scenarios/x3-expense-reuse-and-category-total.edn b/test/seon/gym/scenarios/x3-expense-reuse-and-category-total.edn
+index d1b90e268..295fadc65 100644
+--- a/test/seon/gym/scenarios/x3-expense-reuse-and-category-total.edn
++++ b/test/seon/gym/scenarios/x3-expense-reuse-and-category-total.edn
+@@ -61,10 +61,17 @@
+                                [?m :seon.agent.message/hops ?h]
+                                [(pos? ?h)]]
+    :seon.gym.predicate/expect :non-empty}
++  ;; RUN-MODEL idle (b15faef deleted stored :seon.agent/state): each agent's
++  ;; caused (message-driven) run closes (status :closed) → its :seon.agent/run
++  ;; pointer is retracted → derived :idle. Two agents, one caused run each, both
++  ;; closed = both idle. A leaked open run drops the count → red. Mirrors s01.
+   {:seon.gym.predicate/id     :both-agents-end-idle
+    :seon.gym.predicate/kind   :datalog
+    :seon.gym.predicate/axis   :terminates
+-   :seon.gym.predicate/query  [:find ?a :where [?a :seon.agent/state :idle]]
++   :seon.gym.predicate/query  [:find ?r
++                               :where
++                               [?r :seon.agent.run/cause _]
++                               [?r :seon.agent.run/status :closed]]
+    :seon.gym.predicate/expect [:count 2]}
+   {:seon.gym.predicate/id        :judge-dining-total
+    :seon.gym.predicate/kind      :llm-judge

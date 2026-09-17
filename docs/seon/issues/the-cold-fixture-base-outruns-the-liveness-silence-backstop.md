@@ -40,6 +40,43 @@ Two lanes were already working around it: their live command lines carry
 `SEON_TEST_SILENCE_SECONDS=900`. A workaround spreading by copy between lanes
 is the signal that the bound is wrong, not the machine.
 
+## Second observation, 2026-09-16 23:45 — the drive itself, not only the base
+
+A fifth firing, pid 78404, diagnostic log
+`tmp/test-runs/run.e59PbD/tmp/test-liveness/78404-1789602345875.log`, same
+last progress as row 20238 above:
+`BEGIN test seon.bootstrap-drive-test/one-fake-o1-drive-grades-on-its-ending-commit`.
+
+Its thread dump refines what the silence is for THAT row. `main` is not in
+the fixture base: it is `WAITING` on a `CountDownLatch` inside
+`seon.eval.drive/await-fact!` (`src/seon/eval/drive.clj:71`, called from
+`run-episode!` at `:337`), below `seon.bootstrap_drive/one-drive!`
+(`src/seon/bootstrap_drive.clj:382`) and `run-drives!` (`:458`). The test had
+already got past its base — the log carries the drive's own cluster line,
+`seon bootstrap-drive-57c34ffd view: http://127.0.0.1:7841` — and was waiting
+on the episode's terminal fact while the drive's agent loop ran.
+
+So this issue has two silent surfaces, not one. The cold base is the surface
+in the other rows; for the bootstrap drive it is the episode wait. Both are
+the same defect shape — a real execution surface that publishes no progress
+the backstop can see — and both are fixed the same way, by feeding the
+surface's own events to the `progress` atom `start-liveness-backstop!`
+watches. `seon.eval.drive/await-fact!` already takes a description string for
+each wait (`"bootstrap <id>"`, `"objective <id>"`), so it already has the
+event; it just does not publish it.
+
+One further note on this row specifically: the test declares its own duration,
+`^{:seon.test/long "171.859 s pool: ..."}`. That declared 171.9 s sits inside
+the 300 s silence horizon with only 128 s of margin, which three concurrent
+test JVM slots consume. `exchange-bound-seconds`
+(`src/seon/test/runner.clj:547-555`) already derives the per-exchange bound
+FROM `silence-seconds` for exactly this reason; a declared `:seon.test/long`
+duration is the same kind of fact and is not consulted anywhere.
+
+Working around it once more to get a verdict: this lane's re-run used
+`SEON_TEST_SILENCE_SECONDS=1800`, which is the third distinct lane observed
+carrying that variable on its command line.
+
 ## Why this is the absence-reads-as-health class
 
 The backstop is correct to exist (AGENTS.md §2.3), but it is watching the
