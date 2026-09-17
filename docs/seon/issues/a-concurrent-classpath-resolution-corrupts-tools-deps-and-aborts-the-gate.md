@@ -42,3 +42,13 @@ from `DefaultModelBuilder.importDependencyManagement`; batch 107 proceeded.
 Log retained at `tmp/orchestrator/gate-results/batch-106-deps-race.log`.
 The relaunch a minute later ran normally. Same class, same fix: one file
 lock around the checkout's classpath resolution.
+
+## Sighting 2026-09-17 ~22:05Z
+
+`bin/test --prepare-head-base` on HEAD `f9eab9e31` failed in
+`dependency-cache-and-classpath` with `java.util.HashMap$Node cannot be cast
+to java.util.HashMap$TreeNode` (retained root `tmp/test-runs/run.QZ6Ffg`)
+while a lane's `bin/test-fast --paths` run was building the same cache in the
+same second. The chained `bin/test --platform` that followed built the cache
+and prepared the base itself. The launcher still does not serialize cache
+construction across invocations.
