@@ -1204,6 +1204,7 @@
 
 (def ^:private program-documentation-selector
   [:seon.fn/sym :seon.fn/doc :seon.fn/doc-order :seon.fn/arglists :seon.fn/spec
+   :seon.schema.admission/source
    {:seon.fn/arities
     [:seon.fn.arity/order :seon.fn.arity/arity
      {:seon.fn.arity/input-refs [:seon.schema/key :seon.schema/form]}
@@ -1313,7 +1314,8 @@
 
 (defn- function-doc-map
   ([database row]
-   (let [overrides (program/overrides database)]
+   (let [overrides (when (= :agent (:seon.schema.admission/source row))
+                     (program/overrides database))]
      (if (:seon.error/kind overrides)
        overrides
        (function-doc-map database row
@@ -1370,7 +1372,8 @@
     (let [row (db/pull database
                        (conj program-documentation-selector :seon.fn/private?)
                        [:seon.fn/sym (str qualified)])
-          overrides (program/overrides database)
+          overrides (when (= :agent (:seon.schema.admission/source row))
+                      (program/overrides database))
           overridden? (boolean (some #{(str qualified)} overrides))]
       (cond
         (:seon.error/kind row) row

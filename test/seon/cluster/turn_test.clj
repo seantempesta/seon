@@ -101,13 +101,6 @@
       (throw (ex-info "The evaluation observation was refused." rows)))
     (mapv #(nth % 2) (sort-by #(subvec % 0 2) rows))))
 
-(defn- stable-program-identity-row?
-  [row identity-attribute identity-value namespace-attribute]
-  (and (= identity-value (get row identity-attribute))
-       (every? (cond-> #{:db/id identity-attribute}
-                 namespace-attribute (conj namespace-attribute))
-               (keys row))))
-
 ;;; THE REAL EVALUATOR, injected through the same seam. The one thing it
 ;;; adds is the deadline: `turn` passes source + caps only, so the time
 ;;; limit — the ONE limit — has nowhere to come from at that call site.
@@ -577,11 +570,10 @@
           (is (= 4 (count evaluations)))
           (is (= "nil" (:seon.eval/shown (nth evaluations 2))))
           (is (every? #(nil? (:seon.cluster.eval/error %)) evaluations)))
-        (is (stable-program-identity-row?
-             (db/pull (db/db connection) '[*] identity)
-             :seon.fn/sym (second identity) :seon.fn/ns))
+        (is (nil? (db/pull (db/db connection) '[*] identity))
+            "program-facts section 1f G1 retracts the owned entity")
         (is (true? (sci.eval/committed-row? (db/db connection) deletion))
-            "a tombstone and an absent sibling identity both verify as deleted")))))
+            "the retracted function and absent sibling test both verify as deleted")))))
 
 (deftest reply-reading-follows-evaluated-alias-and-dynamic-require-state
   (with-cluster
@@ -616,9 +608,13 @@
                               "(clojure.core/ns-unmap (find-ns 'my.agents.agent-a) (symbol \"dynamic-obsolete\"))\n"
                               "(seon.run/complete \"deleted\")")})]
           (drive-agent! cluster "agent-a" 2)
-          (is (stable-program-identity-row?
-               (db/pull (db/db connection) '[*] [:seon.fn/sym function-sym])
-               :seon.fn/sym function-sym :seon.fn/ns))
+          (is (nil? (db/pull (db/db connection) '[*] [:seon.fn/sym function-sym]))
+              "program-facts section 1f G1 retracts the entity, not only its definition")
+          (is (string? (db/q '[:find ?source . :in $ ?symbol :where
+                              [?function :seon.fn/sym ?symbol]
+                              [?function :seon.fn/source ?source]]
+                            (db/history (db/db connection)) function-sym))
+              "the historical declaration proves this is deletion, not failed creation")
           (let [database (db/db connection)
                 fresh (sci.eval/cluster-ctx
                        database connection
@@ -1145,11 +1141,12 @@
                 evaluations (agent-evaluations db)]
             (is (= (pr-str schema-key) (:seon.eval/shown (nth evaluations 2)))
                 "unregister has ordinary REPL return semantics")
-            ;; Ruling 47 keeps the ctx-resolvable schema identity row while
-            ;; unregister retracts its definition and installed DB schema.
-            (is (stable-program-identity-row?
-                 (db/pull db '[*] [:seon.schema/key schema-key])
-                 :seon.schema/key schema-key nil))
+            (is (nil? (db/pull db '[*] [:seon.schema/key schema-key]))
+                "program-facts section 1f G1 supersedes ruling 47's retained identity")
+            (is (string? (db/q '[:find ?form . :in $ ?key :where
+                                [?schema :seon.schema/key ?key]
+                                [?schema :seon.schema/form ?form]]
+                              (db/history db) schema-key)))
             (is (not (contains? (:schema db) schema-key)))
             (is (not (contains?
                       (:seon.schema.projection/forms
@@ -1263,9 +1260,12 @@
             (is (= ":v2" (:seon.eval/shown (nth evaluations 4))))
             (is (= "nil" (:seon.eval/shown (nth evaluations 6))))
             (is (every? #(nil? (:seon.cluster.eval/error %)) evaluations))
-            (is (stable-program-identity-row?
-                 (db/pull (db/db connection) '[*] [:seon.test/sym test-sym])
-                 :seon.test/sym test-sym :seon.test/ns))))))))
+            (is (nil? (db/pull (db/db connection) '[*] [:seon.test/sym test-sym]))
+                "program-facts section 1f G1 retracts deleted tests too")
+            (is (string? (db/q '[:find ?source . :in $ ?symbol :where
+                                [?test :seon.test/sym ?symbol]
+                                [?test :seon.test/source ?source]]
+                              (db/history (db/db connection)) test-sym)))))))))
 
 (deftest incompatible-clusters-alternate-runtime-schema-validation-without-bleed
   (with-cluster

@@ -51,3 +51,16 @@ The isolated HEAD-plus-owned-paths fast run at base `8dff32220` measures
 That test and the measured installation owner are unchanged in the slice.
 No cause is inferred from this shared-machine measurement. See the
 [landing evidence](../../prds/steward-platform/research/message-wake-model-2026-09-17.md).
+
+## S3 residue observation — 2026-09-17
+
+The canonical fast snapshot at `a5516ca62` plus the residue paths measured
+**472.133 ms** for `seon.turn/gate-function-install` against the unchanged
+**300 ms** assertion. The semantic assertions passed. This is the existing
+installation-cost class, not a new delimiter repair failure. The residue
+does not change this owner or its bound. Raw iteration:
+`tmp/s3-residue-corrected.log`; [landing](../../prds/steward-platform/research/acquisition-s3-residue-2026-09-17.md).
+
+The final worktree rerun at `56b8a1cd8` plus the S3 residue paths measured
+**427.760417 ms**. This was the only failure in **143 tests / 980 assertions**;
+there were zero errors. The 300 ms assertion remains unchanged.

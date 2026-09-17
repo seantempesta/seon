@@ -393,3 +393,12 @@ disarmed; cleanup returned no remaining armed scratch agents, current admission
 JVM probe bindings were removed. No default lifecycle operation was performed.
 This is the first coherent implementation seam, submitted for review with the
 explicit integration and documentation boundaries above.
+
+## Approved seam and cold residue — 2026-09-17
+
+The owner approved `684f185f8`; its AGENTS description landed in `e706884cd`.
+The follow-up [cold residue landing](acquisition-s3-residue-2026-09-17.md)
+records the declaration-retraction, pre-provider turn-bound and documentation
+read-evidence repairs, including governing rulings for changed expectations.
+Fresh-cluster measurements remain pending adoption convergence of default;
+the original PID 33583 measurements above are not observations of PID 94566.

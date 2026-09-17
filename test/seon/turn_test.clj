@@ -60,7 +60,8 @@
                                            :seon.turn/opened-tx "datomic.tx"}))
        (support/transacted! connection (turn/close-tx {:seon.turn/id aid})))
      (is (= 1 (turn/episode-runs (db/db connection) "issue-close-worker")))
-     (is (zero? (turn/episode-runs (db/db connection) "conversation-close-worker")))
+     (is (= 1 (turn/episode-runs (db/db connection) "conversation-close-worker"))
+         "the turn PRD's outside-wake bound also counts pre-provider ordinary failures")
      (support/transacted! connection
                           (into (turn/open-tx {:seon.turn/id "same-transaction-system"
                                               :seon.turn/agent [:seon.agent/id "issue-close-worker"]

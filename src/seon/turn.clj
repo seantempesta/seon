@@ -1259,11 +1259,9 @@
                           [identity-attribute identity-value declaration])))
                 deleted-identities)]
       (into schema-tx
-            (mapcat
-             (fn [[identity-attribute identity-value declaration]]
-               (program/exact-replacement-tx
-                declaration
-                {identity-attribute identity-value})))
+            (map
+             (fn [[_ _ declaration]]
+               [:db/retractEntity (:db/id declaration)]))
             declarations))
     (let [row (or (program/declaration-row row :all :agent)
                   (refuse! `receipt-settle-call
@@ -2695,7 +2693,7 @@
 (defn episode-runs
   "Count ordinary turns since issue assignment, or the latest outside wake.
   Provider attempts and replies accepted after opening consume the bound.
-  An issue also spends a turn when an ordinary call closes before a provider
+  An agent also spends a turn when an ordinary call closes before a provider
   attempt. Generated openings and same-transaction system turns remain free.
   Issue budgets are total across resumes; messages do not refill them."
   {:malli/schema [:=> [:cat :seon.db/database-value
@@ -2715,16 +2713,14 @@
                            [?run :seon.turn/attempts _]
                            (and [?run :seon.turn/reply-size _ ?reply-tx]
                                 [(> ?reply-tx ?tx)]))] db agent-id since)
-        closed (if issue-t
-                 (db/q '[:find [?run ...] :in $ ?agent-id ?since :where
+        closed (db/q '[:find [?run ...] :in $ ?agent-id ?since :where
                           [?agent :seon.agent/id ?agent-id]
                           [?run :seon.turn/agent ?agent]
                           [?run :seon.turn/id _ ?tx]
                           [(>= ?tx ?since)]
                           [?run :seon.turn.work/situation :call]
                           [?run :seon.turn/closed-tx ?closed]
-                          [(> ?closed ?tx)]] db agent-id since)
-                 [])]
+                          [(> ?closed ?tx)]] db agent-id since)]
     (or (some #(when (:seon.error/kind %) %) [issue-t replies closed])
         (count (into (set replies) closed)))))
 

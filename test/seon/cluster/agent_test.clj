@@ -13,6 +13,7 @@
             [clojure.core.async.impl.protocols :as async.impl]
             [clojure.core.async.flow :as flow]
             [clojure.string :as str]
+            [clojure.edn :as edn]
             [clojure.test :refer [deftest is testing]]
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
@@ -1110,7 +1111,8 @@
                     diagnostic
                     (db/q '[:find (pull ?error [*]) .
                             :where
-                            [?error :seon.error/message "install gate broke mid-opening"]]
+                            [?error :seon.error/occurrences ?occurrence]
+                            [?occurrence :seon.error.occurrence/message "install gate broke mid-opening"]]
                           database)
                     evaluation (db/pull database '[*]
                                         [:seon.cluster.eval/id
@@ -1118,8 +1120,9 @@
                 (is (some? diagnostic))
                 (is (= :seon.turn.loop/phase-failed (:seon.error/kind diagnostic)))
                 (is (some? evaluation))
-                (is (nil? (:seon.eval/shown evaluation))
-                    "a core failure does not impersonate an evaluated result")
+                (is (= :seon.turn.loop/phase-failed
+                       (:seon.error/kind (edn/read-string (:seon.eval/shown evaluation))))
+                    "turn PRD section 15 retains the shown refusal on the started evaluation")
                 (is (some? (:seon.turn/closed-tx
                             (db/pull database [:seon.turn/closed-tx]
                                      [:seon.turn/id run-id]))))

@@ -57,3 +57,12 @@ it is tracked in
 [the residual](../runtime-schema-unregister-retains-installed-attribute.md).
 Exact commits and recorded runs are in
 [the landing](../../../prds/context-generation/research/turn-test-reds-2026-09-16.md).
+
+## Superseding deletion ruling — 2026-09-17
+
+Program-facts PRD section 1f G1–G3 supersedes ruling 47: deletion retracts
+the entity, and history retains the former definition. The old `row-tx`
+identity-only replacement now correctly fails required admission validation.
+The writer emits `retractEntity`; all four named regressions assert entity
+absence instead of tombstones. Schema attribute removal and fresh-context
+absence remain required. See [the S3 residue evidence](../../../prds/steward-platform/research/acquisition-s3-residue-2026-09-17.md).

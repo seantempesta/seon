@@ -48,3 +48,12 @@ list, new counter, or clock, and reuses the original trigger only below the
 existing episode cap. The integrated regression deliberately removes the
 otherwise-live fixture channel and proves three configured episode runs,
 three flat refusals, zero attempts, zero provider calls, and no fourth turn.
+
+## Recurrence — 2026-09-17
+
+The current `seon.turn/episode-runs` counted closed pre-provider calls only
+for issue agents. Conversation agents therefore could not spend their
+outside-wake turn bound. Count those closed ordinary calls for both classes;
+same-transaction system turns remain free. The canonical prompt-refusal
+regression now reaches its terminal fact without answering the wake or
+calling the provider. See [the S3 residue evidence](../../../prds/steward-platform/research/acquisition-s3-residue-2026-09-17.md).
