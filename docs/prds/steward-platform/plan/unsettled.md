@@ -3110,3 +3110,38 @@ nothing; its gate-set draft must be re-derived on the rewritten `gate-sets`.
 the seven serial gates → resume `test-system-stage1` with its patch → the
 structured plan to the owner (test system stages 1–3, critical classes 1–5
 as orchestrator/astra lanes, easy pool as the first live-agent slice).
+
+## 2026-09-17 ~20:50Z — gate 2, second reset, five lanes
+
+- Lanes landed: `fabricated-symbol-edges` (`edd212afc` `2a30b98b8` `ec13ec814`:
+  the analyzer drops unknown-namespace usages, the shared
+  `:seon.program/edge-symbol` schema refuses non-round-tripping members,
+  fabricated members 50 → 0 on a full source analysis) and
+  `post-reset-stale-fixtures-2` (`27b429f61` `81237ea84`: registry helper,
+  symbol fixtures, canonical-arity assertions, overlay test).
+- **Platform gate 2** (HEAD `d584f5498`, `post-reset-platform-2.log`): 100
+  tests, 654 assertions, 4F/14E. Registry (11) and test-support (2) reds are
+  GONE. Remaining: 11 `seon.cluster.source-test` (8 = `publish!` embedding a
+  refused read as its unresolved report — root cause: `seon.cluster.source/database`
+  returns a raw `commit-as-db` with no carried projection, law 2.1; lane
+  `publication-report-projection` on it; 3 = fixtures landed after this gate in
+  `81237ea84`), 4 SCI arm errors in the same worker after the source-test
+  refusals (cascade until the re-gate says otherwise), and
+  `selected-overlays-require-a-current-graph-and-every-changed-caller` at
+  `test_runner_test.clj:1327` (its 27b429f61 update did not hold cold).
+- **Second reset FAILED at start** (`reset-2026-09-17-second.log`): boot loads the
+  working tree and a lane's shell write to `test/seon/test_support_test.clj`
+  used an unrequired alias (`d/listen!`); the preflight lints syntax only and
+  ran minutes earlier. Store destroyed, republished and reforked; recovered
+  with `bin/seon start default` + `init --dev default` once the lane fixed its
+  file. Owner: "We should have a predictable reset that always works" → lane
+  `predictable-reset` (preflight lints unresolved vars/namespaces with the
+  hook's kondo config; re-lint before start and adopt; continuation commands
+  printed after any post-destroy failure; three options on whether a broken
+  test namespace should refuse boot). Rule added to the plan README.
+- Also launched: `schema-reconciliation-idempotence` (max-tx advances on an
+  unchanged population); `error-and-data-model-design` resumed with the
+  triage note. Owner decisions 19:55Z recorded in the plan README.
+- Fast runs under load 12 hung twice in fixture setup for lanes (290 s bound):
+  once in a Datahike transaction in the registry fixture, once in repeated
+  schema canonicalization. Treated as load until reproduced on a quiet machine.
