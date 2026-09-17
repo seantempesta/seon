@@ -2538,3 +2538,19 @@ working tree, never Sonnet.
   keeps NO copy of the offending return value (no `:seon.instrument/actual`)
   and prints a 2.2 MB projection only to measure it — queue a small lane.
   Stage 2 resumed (its files are free).
+- **Message-wake model LANDED, all three seams** (`a50424f6b` routing +
+  settlement claims + duplicate-open as a writer no-op; `57581f12f` subject
+  / sender / protocol split — `:seon.message/about` is the supplied
+  identity token (a value), `:seon.message/assignment` the protocol edge
+  (`:seon.cluster.eval/id`), `from` the sole inside marker, `resolve-about`
+  and the ambiguous/unknown-about errors deleted; `31ac4c05d`
+  `:seon.eval/origin` → `:seon.issue/id` value carried through since-diff).
+  Reviewed the schema hunks against §1h and the study's two message rows:
+  conformant. Lane tallies: 225/2,037/16F (the retraction-provenance class,
+  foreign) then 91/1,207/0F/4E, focused 4/19 green. **RESET NEEDED and
+  done**: adoption refused "`:seon.eval/origin` changed :db/valueType from
+  ref to string" → default reforked from current-src
+  (`tmp/orchestrator/refork/refork-2026-09-17T0515Z.log`). Cold gate =
+  batch 119 (17 namespaces + platform). S3 resumed on its cold reds and
+  the live proof after the refork. Editing lanes at the cap: integrator,
+  guardrails, stage 2, S3.
