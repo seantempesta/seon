@@ -1,0 +1,67 @@
+bin/test: snapshot differences from HEAD 846d75e9c37637249122a9c7b4c3a9a8aefe45d7:
+bin/test:   M	resources/seon/schemas/seon.sci.eval.edn
+bin/test:   M	src/seon/cluster.clj
+bin/test:   M	src/seon/program.cljc
+bin/test:   M	src/seon/schema.clj
+bin/test:   M	src/seon/sci/eval.clj
+bin/test:   M	src/seon/turn.clj
+bin/test:   M	test/seon/adoption_rows_test.clj
+bin/test:   M	test/seon/classification_test.clj
+bin/test:   M	test/seon/cluster/agent_test.clj
+bin/test:   M	test/seon/cluster/source_test.clj
+bin/test:   M	test/seon/cluster/turn_test.clj
+bin/test:   M	test/seon/effect_test.clj
+bin/test:   M	test/seon/env_test.clj
+bin/test:   M	test/seon/sci/documentation_test.clj
+bin/test:   M	test/seon/sci/eval_test.clj
+bin/test:   M	test/seon/sci/kernel_arm_carriage_test.clj
+bin/test:   M	test/seon/shell/jvm_test.clj
+bin/test: end snapshot differences
+bin/test: PHASE snapshot elapsed-seconds=2
+bin/test: all 3 test JVM slots busy; waiting up to 1800s (SEON_TEST_SLOTS / SEON_TEST_SLOT_WAIT_SECONDS)
+bin/test:   slot-1 pid=36527 elapsed=02:04 run-root=/Users/sean/src/seon/tmp/reset-batch-wt/tmp/test-runs/run.2WHywU
+bin/test:   slot-2 pid=30787 elapsed=07:09 run-root=/Users/sean/src/seon/tmp/test-runs/run.7hmmso
+bin/test:   slot-3 pid=12580 elapsed=20:37 run-root=/Users/sean/src/seon/tmp/test-runs/run.cbn3Fo
+bin/test: still waiting for a test JVM slot after 60s of 1800s; holders:
+bin/test:   slot-1 pid=36527 elapsed=03:05 run-root=/Users/sean/src/seon/tmp/reset-batch-wt/tmp/test-runs/run.2WHywU
+bin/test:   slot-2 pid=30787 elapsed=08:10 run-root=/Users/sean/src/seon/tmp/test-runs/run.7hmmso
+bin/test:   slot-3 pid=12580 elapsed=21:38 run-root=/Users/sean/src/seon/tmp/test-runs/run.cbn3Fo
+bin/test: still waiting for a test JVM slot after 120s of 1800s; holders:
+bin/test:   slot-1 pid=36527 elapsed=04:05 run-root=/Users/sean/src/seon/tmp/reset-batch-wt/tmp/test-runs/run.2WHywU
+bin/test:   slot-2 pid=30787 elapsed=09:10 run-root=/Users/sean/src/seon/tmp/test-runs/run.7hmmso
+bin/test:   slot-3 pid=12580 elapsed=22:38 run-root=/Users/sean/src/seon/tmp/test-runs/run.cbn3Fo
+bin/test: still waiting for a test JVM slot after 180s of 1800s; holders:
+bin/test:   slot-1 pid=38437 elapsed=03:08 run-root=/Users/sean/src/seon/tmp/test-runs/run.LcS7YB
+bin/test:   slot-2 pid=30787 elapsed=10:11 run-root=/Users/sean/src/seon/tmp/test-runs/run.7hmmso
+bin/test:   slot-3 pid=12580 elapsed=23:39 run-root=/Users/sean/src/seon/tmp/test-runs/run.cbn3Fo
+bin/test: PHASE test-slot elapsed-seconds=227
+bin/test-fast: selected snapshot /Users/sean/src/seon/tmp/test-runs/run.JORyGo
+WARNING: Using incubator modules: jdk.incubator.vector
+bin/test: PACKAGED TEST PROJECTION ACQUIRED at= 2026-09-17T03:40:11.827936Z pid= 41527 role= test-fast
+bin/test: CONTRACTS ARMED at= 2026-09-17T03:40:19.777613Z worker= test-fast mode= :panic namespaces= 1 program-namespaces= 108 registered= 1121 instrumented= 1121 program-armable= 1116
+bin/test: 2026-09-17T03:40:19.851906Z BEGIN namespace seon.sci.documentation-test
+
+Testing seon.sci.documentation-test
+bin/test: 2026-09-17T03:40:19.872741Z BEGIN test seon.sci.documentation-test/retained-context-receives-new-bare-test-referrals
+WARNING: reset! already refers to: #'clojure.core/reset! in namespace: seon.fresh-operator, being replaced by: #'seon.fresh-operator/reset!
+bin/test: 2026-09-17T03:41:03.958259Z END test seon.sci.documentation-test/retained-context-receives-new-bare-test-referrals
+bin/test: 2026-09-17T03:41:03.958404Z BEGIN test seon.sci.documentation-test/documentation-is-returned-data-without-a-second-printed-copy
+bin/test: 2026-09-17T03:41:04.480221Z END test seon.sci.documentation-test/documentation-is-returned-data-without-a-second-printed-copy
+bin/test: 2026-09-17T03:41:04.480691Z BEGIN test seon.sci.documentation-test/bare-test-macros-resolve-without-namespace-referrals
+bin/test: 2026-09-17T03:41:05.264877Z END test seon.sci.documentation-test/bare-test-macros-resolve-without-namespace-referrals
+bin/test: 2026-09-17T03:41:05.264957Z BEGIN test seon.sci.documentation-test/retained-context-receives-the-current-repl-macro-through-its-core-alias
+bin/test: 2026-09-17T03:41:05.281800Z END test seon.sci.documentation-test/retained-context-receives-the-current-repl-macro-through-its-core-alias
+bin/test: 2026-09-17T03:41:05.281888Z BEGIN test seon.sci.documentation-test/directory-observes-a-function-installed-after-context-acquisition
+bin/test: 2026-09-17T03:41:06.247529Z END test seon.sci.documentation-test/directory-observes-a-function-installed-after-context-acquisition
+bin/test: 2026-09-17T03:41:06.247624Z BEGIN test seon.sci.documentation-test/a-named-private-override-documents-the-jvm-boundary
+bin/test: 2026-09-17T03:41:07.011414Z END test seon.sci.documentation-test/a-named-private-override-documents-the-jvm-boundary
+bin/test: 2026-09-17T03:41:07.011498Z BEGIN test seon.sci.documentation-test/an-absent-declaration-is-a-typed-statement-not-an-empty-one
+bin/test: 2026-09-17T03:41:07.388688Z END test seon.sci.documentation-test/an-absent-declaration-is-a-typed-statement-not-an-empty-one
+bin/test: 2026-09-17T03:41:07.388818Z BEGIN test seon.sci.documentation-test/documentation-keeps-named-contracts-and-guarded-result-shapes
+bin/test: 2026-09-17T03:41:07.399490Z END test seon.sci.documentation-test/documentation-keeps-named-contracts-and-guarded-result-shapes
+bin/test: 2026-09-17T03:41:07.399570Z BEGIN test seon.sci.documentation-test/a-contract-mistake-carries-the-same-documentation-as-doc
+bin/test: 2026-09-17T03:41:08.793911Z END test seon.sci.documentation-test/a-contract-mistake-carries-the-same-documentation-as-doc
+bin/test: 2026-09-17T03:41:08.794004Z END namespace seon.sci.documentation-test
+
+Ran 9 tests containing 100 assertions.
+0 failures, 0 errors.

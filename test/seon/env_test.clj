@@ -8,7 +8,7 @@
   — into the one place a runner sees them. Each proves a CLASS: that
   code which crossed a thread can name its own cluster, and that a
   crossing which names none is refused where it is built."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [seon.schema] [clojure.test :refer [deftest is testing]]
             [sci.core :as sci]
             [seon.db :as db]
             [seon.effect :as effect]
@@ -240,7 +240,7 @@
         launcher (flow/start-work-launcher!
                   {:seon.env/environment environment
                    :seon.flow/configuration launcher-configuration})
-        ctx (eval/build-base-ctx)]
+        ctx (eval/build-base-ctx (seon.schema/handed-projection))]
     (try
       (testing "an armed submitter's arm reaches the awaited compute worker"
         (let [observed (promise)

@@ -17,6 +17,7 @@
             [seon.schema.datahike]
             [sci.core :as sci]
             [seon.sci.eval :as sci.eval]
+            [seon.schema :as schema]
             [seon.test.runner :as runner]
             [seon.test-support :as test-support])
   (:import [java.util.concurrent CountDownLatch TimeUnit]))
@@ -504,7 +505,7 @@
 (deftest source-tombstone-provenance-does-not-prevent-live-removal
   (test-support/with-database
     (fn [connection]
-      (let [ctx (sci.eval/build-base-ctx)
+      (let [ctx (sci.eval/build-base-ctx (schema/handed-projection))
             identity [:seon.fn/sym "source-deletion-probe/value"]]
         (test-support/transacted! connection
                                   [{:seon.ns/name 'source-deletion-probe}

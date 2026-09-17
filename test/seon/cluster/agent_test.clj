@@ -447,12 +447,13 @@
                                :where [?run :seon.turn/id]]
                              @connection))
                 "the writer rolls back the complete source run"))
+          (is (nil? (agent/armed routing "source-agent"))
+              "the source agent is unarmed before the armer starts")
           (flow/start armer-graph)
           (flow/resume armer-graph)
           (try
             (let [events (database-events connection)]
               (try
-                (is (nil? (agent/armed routing "source-agent")))
                 (let [submission
                       (agent/submit-source!
                        {:seon.turn.loop/cluster cluster-handle

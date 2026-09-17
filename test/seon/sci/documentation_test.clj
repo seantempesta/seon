@@ -9,6 +9,33 @@
             [seon.schema :as schema]
             [seon.test-support :as support]))
 
+(deftest a-named-private-override-documents-the-jvm-boundary
+  (support/with-database
+   (fn [connection]
+     (let [function-symbol (symbol "seon.eval.drive/uuid-text")]
+       (support/transacted!
+        connection
+        [(assoc (support/program-fn-row function-symbol)
+                :seon.schema.admission/source :agent
+                :seon.fn/private? true
+                :seon.fn/source
+                "(defn- uuid-text {:malli/schema [:=> [:cat] :string]} [] \"private override\")"
+                :seon.fn/spec "[:=> [:cat] :string]")])
+       (let [database (db/db connection)
+             doc (evaluation/documentation-value database function-symbol function-symbol)
+             directory (evaluation/directory-value database 'seon.eval.drive true)]
+         (is (str/includes? (:seon.schema.admission/note doc)
+                            "JVM callers retain the compiled definition"))
+         (is (not-any? #(= function-symbol (:sym %)) (:functions directory))))
+       (support/transacted!
+        connection
+        [[:db/add [:seon.fn/sym (str function-symbol)]
+          :seon.schema.admission/source :core]])
+       (is (= :seon.sci.eval/documentation-unavailable
+              (:seon.error/kind
+               (evaluation/documentation-value
+                (db/db connection) function-symbol function-symbol))))))))
+
 (deftest documentation-keeps-named-contracts-and-guarded-result-shapes
   (support/with-database
     (fn [connection]
@@ -153,7 +180,7 @@
                                  [{:seon.agent/id "bare-tests"
                                    :seon.agent/namespace
                                    {:seon.ns/name 'fixture.bare-tests}}])))
-     (doseq [ctx [(evaluation/build-base-ctx)
+     (doseq [ctx [(evaluation/build-base-ctx (seon.schema/handed-projection))
                  (support/fork-cluster-ctx connection)]]
        (sci/add-namespace! ctx 'fixture.bare-tests {})
        (sci/binding [sci/ns (sci/create-ns 'fixture.bare-tests)]

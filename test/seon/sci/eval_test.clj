@@ -28,6 +28,7 @@
             [seon.error :as error]
             [seon.fn :as seon.fn]
             [seon.instrument :as instrument]
+            [seon.id]
             [seon.program :as program]
             [sci.addons.future :as sci.future]
             [sci.core :as sci]
@@ -35,6 +36,7 @@
             [seon.render.walk :as render.walk]
             [seon.render.web :as render.web]
             [seon.schema :as schema]
+            [seon.schema.edn :as schema.edn]
             [seon.sci.admit :as admit]
             [seon.sci.eval :as eval]
             [seon.sci.kernel :as kernel]
@@ -43,8 +45,53 @@
 (def ^:private caps
   (config/result-caps (config/defaults)))
 
+(deftest overrides-follow-current-admission-and-survive-lost-file-coordinates
+  (test-support/with-database
+   (fn [connection]
+     (let [before (db/db connection)
+           target (test-support/program-fn-row 'seon.id/symbol-in)
+           test-definition (test-support/program-fn-row
+                            'seon.sci.eval-test/compiled-runtime-victim)
+           target-name (:seon.fn/sym target)
+           indexed-members
+           (db/q '[:find ?function ?file
+                   :in $ ?name
+                   :where [?namespace :seon.ns/name ?name]
+                          [?function :seon.fn/ns ?namespace]
+                          [?function :seon.fn/file ?file]]
+                 before 'seon.id)]
+       (is (seq indexed-members) "the canonical population supplies indexed src declarations")
+       (is (not (some #{target-name} (program/overrides before))))
+       (test-support/transacted!
+        connection
+        (into [(assoc target :seon.schema.admission/source :agent)
+               (assoc test-definition :seon.schema.admission/source :agent)]
+              (map (fn [[function file]] [:db/retract function :seon.fn/file file]))
+              indexed-members))
+       (let [overridden (db/db connection)
+             projection (schema/projection-from-database overridden)]
+         (is (= :agent (get-in projection
+                              [:seon.schema.projection/function-admissions
+                               'seon.id/symbol-in :seon.schema.admission/source])))
+         (is (= :core (get-in projection
+                             [:seon.schema.projection/function-admissions
+                              'seon.id/valid? :seon.schema.admission/source]))
+             "an unrelated core declaration cannot inherit another identity's agent provenance")
+         (is (some #{target-name} (program/overrides overridden))
+             "the last lost file coordinate does not hide an accepted override")
+         (is (not (some #{(:seon.fn/sym test-definition)}
+                        (program/overrides overridden)))
+             "an agent-admitted definition under the test root is not a src override")
+         (is (not (some #{target-name} (program/overrides before)))
+             "a supplied older database keeps its own answer")
+         (test-support/transacted! connection [target])
+         (is (not (some #{target-name} (program/overrides (db/db connection))))
+             "restoring core provenance removes the identity from the override set")
+         (is (some #{target-name} (program/overrides overridden))
+             "restoration does not change a previously supplied database value"))))))
+
 (deftest absent-program-function-is-reported-before-namespace-lookup
-  (let [ctx (eval/build-base-ctx)
+  (let [ctx (eval/build-base-ctx (seon.schema/handed-projection))
         function-symbol 'missing.program/function
         failure
         (with-redefs [kernel/program-namespace
@@ -65,7 +112,7 @@
 
 (defn- compiled-runtime-ctx
   []
-  (let [ctx (eval/build-base-ctx)]
+  (let [ctx (eval/build-base-ctx (seon.schema/handed-projection))]
     (sci/add-namespace!
      ctx
      'stability.host
@@ -94,13 +141,129 @@
 (defn- run-in
   [ctx source time-limit-ms]
   (eval/evaluate
-   (cond-> {:seon.cluster.eval/source source
+   (cond-> {:seon.schema/projection (schema/handed-projection)
+            :seon.cluster.eval/source source
             :seon.sci.admit/caps caps
             :seon.sci.eval/time-limit-ms time-limit-ms
             ;; development disposition: a codec hole must be loud
             ;; here of all places
             :seon.config/on-core-error :panic}
      ctx (assoc :seon.sci.eval/ctx ctx))))
+
+(deftest database-provenance-regenerates-the-base-and-reverts-for-retained-forks
+  (test-support/with-database
+   (fn [connection]
+     (test-support/transacted!
+      connection
+      (agent/creation-tx {:seon.cluster/name "default"
+                          :seon.agent/id "s3-fixture"
+                          :seon.ns/name 'my.agents.s3-fixture}))
+     (let [before (db/db connection)
+           original (merge (db/pull before '[*] [:seon.fn/sym "seon.id/valid?"])
+                           (test-support/program-fn-row 'seon.id/valid?))
+           _ (with-redefs [schema.edn/packaged-forms
+                           (fn [] (throw (ex-info "A database-derived base must not read schema files." {})))]
+               (eval/base-ctx before))
+           initial (eval/base-ctx before)
+           fork (fn [base previous database]
+                  (:seon.sci.eval/ctx
+                   (eval/fork-for-turn
+                    (cond-> {:seon.sci.eval/ctx base :seon.db/db database
+                             :seon.agent/id "s3-fixture"}
+                      previous (assoc :seon.sci.eval/agent-ctx previous)))))
+           b (fork initial nil before)
+           private-result (run-in b "(def s3-private (atom 7))" 2000)
+           private-var (sci/resolve b 'user/s3-private)
+           private-object @private-var
+           private-reader (run-in b "(do (def s3-private-value 1) (def s3-private-reader (fn [] s3-private-value)))" 2000)
+           result-handle (seon.id/symbol-in "result" \e
+                                           (seon.id/evaluation "s3-fixture" 0))
+           _ (eval/bind-result! b result-handle private-object)
+           _ (is (not (:seon.cluster.eval/error private-result)))
+           _ (is (not (:seon.cluster.eval/error private-reader)))
+           _ (is (identical? @#'seon.id/valid? @(sci/resolve initial 'seon.id/valid?)))
+           _ (is (identical? @#'eval/absent-intern
+                              (some-> (sci/resolve initial 'seon.sci.eval/absent-intern) deref))
+                 "a core identity without stored source still copies its JVM root")
+           admitted (assoc original :seon.schema.admission/source :agent
+                           :seon.fn/source
+                           "(defn valid? {:malli/schema [:=> [:cat [:int {:min 1}] :string] :boolean]} [length id] true)")]
+       (test-support/transacted! connection [admitted])
+       (let [after (db/db connection)
+             regenerated (eval/base-ctx after)
+             installed (eval/install-row! {:seon.sci.eval/ctx initial
+                                            :seon.db/db after
+                                            :seon.program/row
+                                            (assoc (test-support/program-fn-row 'seon.id/valid?)
+                                                   :seon.schema.admission/source :agent
+                                                   :seon.fn/source (:seon.fn/source admitted))})
+             b-next (fork initial b after)
+             c (fork regenerated nil after)
+             private-regenerated (#'eval/regenerate-agent-context! b regenerated)]
+         (is (= :interpreted (:seon.sci.eval/load-state installed)))
+         (is (str/includes?
+              (:seon.schema.admission/note
+               (eval/documentation-value after 'seon.id/valid? 'seon.id/valid?))
+              "Accepted database override"))
+         (is (= (set (keys (#'eval/base-bindings regenerated)))
+                (set (keys (#'eval/base-bindings initial))))
+             "incremental installation and regeneration resolve the same names")
+         (let [core-symbols
+               (db/q '[:find [?sym ...] :where
+                       [?f :seon.fn/sym ?sym]
+                       [?f :seon.schema.admission/source :core]
+                       [?f :seon.fn/file ?file]
+                       [?file :seon.fn.file/relative-root "src"]] after)]
+           (is (seq core-symbols))
+           (is (empty? (filterv (fn [name]
+                                 (let [left (sci/resolve initial (symbol name))
+                                       right (sci/resolve regenerated (symbol name))]
+                                   (not (and left right (identical? @left @right)))))
+                               core-symbols))
+               "all src core roots agree between incremental installation and regeneration"))
+         (doseq [ctx [initial b-next c private-regenerated]]
+           (is (true? (:seon.sci.admit/value
+                       (run-in ctx "(seon.id/valid? 8 \"s3-probe\")" 2000)))))
+         (is (identical? private-var (sci/resolve b-next 'user/s3-private)))
+         (is (identical? private-object @(sci/resolve b-next 'user/s3-private)))
+         (is (= 2 (:seon.sci.admit/value
+                   (run-in b-next "(do (def s3-private-value 2) (s3-private-reader))" 2000)))
+             "a preserved private closure still reads its continuing private Var")
+         (is (identical? private-object @(sci/resolve private-regenerated 'user/s3-private)))
+         (is (nil? (sci/resolve c 'user/s3-private)))
+         (is (identical? private-object @(sci/resolve b-next result-handle)))
+         (is (identical? private-object @(sci/resolve private-regenerated result-handle)))
+         (is (nil? (sci/resolve c result-handle)))
+         (is (= (:seon.fn/source admitted)
+                (:seon.sci.eval/function-source
+                 (kernel/program-function regenerated 'seon.id/valid?)))))
+       (test-support/transacted! connection [original])
+       (let [restored (db/db connection)
+             regenerated (eval/base-ctx restored)]
+         (eval/install-row! {:seon.sci.eval/ctx initial :seon.db/db restored
+                             :seon.program/row
+                             (assoc (test-support/program-fn-row 'seon.id/valid?)
+                                    :seon.fn/source (:seon.fn/source original))})
+         (is (nil? (:seon.schema.admission/note
+                    (eval/documentation-value restored 'seon.id/valid? 'seon.id/valid?))))
+         (doseq [ctx [initial (fork initial b restored) regenerated]]
+           (is (identical? @#'seon.id/valid? @(sci/resolve ctx 'seon.id/valid?)))))))))
+
+(deftest non-evaluable-agent-source-reports-its-jvm-fallback
+  (test-support/with-database
+   (fn [connection]
+     (test-support/transacted!
+      connection
+      [(assoc (test-support/program-fn-row 'seon.id/valid?)
+              :seon.schema.admission/source :agent
+              :seon.fn/source
+              "(defn valid? [length id] (s3.missing/function length id))")])
+     (let [ctx (eval/base-ctx (db/db connection))
+           results (get-in ctx [:seon.sci.eval/acquisition :seon.sci.eval/load-results])]
+       (is (some #(and (= "seon.id/valid?" (:seon.fn/sym %))
+                       (= :jvm-fallback (:seon.sci.eval/load-state %))
+                       (seq (:seon.error/message %))) results))
+       (is (identical? @#'seon.id/valid? @(sci/resolve ctx 'seon.id/valid?)))))))
 
 (defn- run
   ([source] (run source 2000))
@@ -245,7 +408,8 @@
   (test-support/preserving-instrumentation-state
     (fn []
       (let [projection (schema/handed-projection)
-            request {:seon.cluster.eval/source "(+ 1 2)"
+            request {:seon.schema/projection projection
+                     :seon.cluster.eval/source "(+ 1 2)"
                      :seon.sci.admit/caps caps
                      :seon.sci.eval/time-limit-ms 10000
                      :seon.config/on-core-error :panic}
@@ -275,7 +439,7 @@
            (:seon.error/kind (:seon.sci.admit/value evaluation))))))
 
 (deftest a-live-context-preserves-definition-value-class-and-metadata
-  (let [ctx (eval/build-base-ctx)
+  (let [ctx (eval/build-base-ctx (seon.schema/handed-projection))
         definition
         (run-in ctx
                 (str "(def kept "
@@ -290,8 +454,8 @@
     (is (= 2 (first value)))))
 
 (deftest cluster-contexts-share-no-writable-sci-stock-vars
-  (let [ctx-a (eval/build-base-ctx)
-        ctx-b (eval/build-base-ctx)
+  (let [ctx-a (eval/build-base-ctx (seon.schema/handed-projection))
+        ctx-b (eval/build-base-ctx (seon.schema/handed-projection))
         shared-writable
         (for [[ns-sym ns-map] (:namespaces @(:env ctx-a))
               [sym var-a] ns-map
@@ -372,7 +536,7 @@
             "a sibling must not skip installation because another fork installed the symbol")))))
 
 (deftest agent-context-exposes-no-concurrency-capability
-  (let [ctx (eval/build-base-ctx)
+  (let [ctx (eval/build-base-ctx (seon.schema/handed-projection))
         env @(:env ctx)
         future-addon-symbols
         (set (keys (get-in (sci.future/install {})
@@ -451,7 +615,7 @@
         (reset-meta! #'compiled-runtime-victim before)))))
 
 (deftest agent-owned-sci-var-metadata-remains-mutable
-  (let [ctx (eval/build-base-ctx)
+  (let [ctx (eval/build-base-ctx (seon.schema/handed-projection))
         altered
         (run-in
          ctx
@@ -476,7 +640,7 @@
            (:seon.sci.admit/value reset)))))
 
 (deftest sci-fork-copies-existing-var-roots-on-write
-  (let [parent (eval/build-base-ctx)
+  (let [parent (eval/build-base-ctx (seon.schema/handed-projection))
         _ (sci/eval-string* parent
                             "(def shared :parent) (def bound :parent) (def untouched :parent)")
         forked (sci/fork parent)
@@ -524,7 +688,7 @@
 (deftest contract-installation-in-a-fork-leaves-the-parent-var-unchanged
   (test-support/with-database
     (fn [connection]
-      (let [parent (eval/build-base-ctx)
+      (let [parent (eval/build-base-ctx (seon.schema/handed-projection))
             _ (sci/eval-string*
                parent
                "(defn contracted [x] x)")
@@ -576,7 +740,7 @@
         (is (= :seon.config.eval.result/max-bytes
                (:seon.config/key (:seon.error/data caps)))
             "and the key it names is the one a caller has to supply")
-        (let [ctx (eval/build-base-ctx)]
+        (let [ctx (eval/build-base-ctx (seon.schema/handed-projection))]
           (sci/eval-string* ctx "(defn configless-contracted [x] x)")
           (#'eval/install-function-contract!
            ctx
@@ -589,7 +753,7 @@
                installer's own contract"))))))
 
 (deftest require-context-rows-persist-namespace-lookup-refs
-  (let [ctx (eval/build-base-ctx)
+  (let [ctx (eval/build-base-ctx (seon.schema/handed-projection))
         evaluation (run-in ctx "(require 'clojure.set)" 2000)]
     (is (ok? evaluation))
     (is (= #{[:seon.ns/name 'clojure.set]}
@@ -602,7 +766,7 @@
         rows (#'seon.fn/desired-rows
               {:seon.fn/roots ["src" "test"]} nil)
         published (set (keep :seon.fn/sym rows))
-        ctx (eval/build-base-ctx)]
+        ctx (eval/build-base-ctx (seon.schema/handed-projection))]
     (is (empty? (set/difference injected published))
         "the context declaration is the population's binding authority")
     (is (every? #(sci/resolve ctx %) (program/base-context-injected-symbols))
@@ -825,7 +989,7 @@
 (deftest evaluate-invokes-eval-form-exactly-once-on-every-path
   (test-support/with-database
     (fn [connection]
-      (let [ctx (eval/build-base-ctx)
+      (let [ctx (eval/build-base-ctx (seon.schema/handed-projection))
         _ (eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db (db/db connection)})
         eval-form sci/eval-form
         call-with-registration-delta
@@ -967,7 +1131,7 @@
                       (fn [operation]
                         (swap! missing conj operation)
                         (fallback operation))]
-          (let [ctx (eval/build-base-ctx)]
+          (let [ctx (eval/build-base-ctx (seon.schema/handed-projection))]
             (is (identical? projection (#'eval/evaluation-projection
                                        {:seon.sci.eval/ctx ctx})))
             (is (identical? projection (#'eval/evaluation-projection
@@ -985,7 +1149,7 @@
  unmap-row-carries-the-exact-forked-namespace-state
  (let
   [ctx
-   (eval/build-base-ctx)
+   (eval/build-base-ctx (seon.schema/handed-projection))
    _
    (sci/eval-string*
     ctx
@@ -1048,7 +1212,7 @@
   (is (nil? (:seon.sci.eval/context-row result)))))
 
 (deftest declared-row-evaluates-a-schema-once-inside-its-delta
-  (let [ctx (eval/build-base-ctx)
+  (let [ctx (eval/build-base-ctx (seon.schema/handed-projection))
         source "(seon.schema/register! :user/direct-schema [:int {:min 0}])"
         event (#'eval/one-event source 'user ctx (count source))
         projection
@@ -1064,12 +1228,21 @@
             (seon.schema/register! :user/direct-schema [:int {:min 0}]))
           :seon.schema/projection projection})]
     (is (= 1 @calls))
-    (is (= {:seon.schema/key :user/direct-schema
-            :seon.schema/ns [:seon.ns/name 'user]
-            :seon.schema/form "[:int {:min 0}]"
-            :seon.schema.admission/source :agent
-            :seon.schema/generatable? true}
-           (:seon.sci.eval/base-declared-row result)))
+    (let [row (:seon.sci.eval/base-declared-row result)]
+      (is (= {:seon.schema/key :user/direct-schema
+              :seon.schema/ns [:seon.ns/name 'user]
+              :seon.schema/form "[:int {:min 0}]"
+              :seon.schema.admission/source :agent
+              :seon.schema/generatable? true}
+             (dissoc row :seon.schema/shape)))
+      (is (= {:seon.schema.shape/type :int
+              :seon.schema.shape/form "[:int {:min 0}]"
+              :seon.schema.shape/properties "{:min 0}"
+              :seon.schema.shape/comparison :exact}
+             (select-keys (:seon.schema/shape row)
+                          [:seon.schema.shape/type :seon.schema.shape/form
+                           :seon.schema.shape/properties
+                           :seon.schema.shape/comparison]))))
     (is (= :user/direct-schema (:seon.sci.eval/schema-value result)))
     (is (false? (:seon.sci.eval/live-declaration? result)))
     (is (= before (seon.schema/registered-schemas))
@@ -1226,7 +1399,7 @@
     (is (not= :swallowed (:seon.sci.admit/value evaluation)))))
 
 (deftest a-previously-defined-function-uses-the-current-evaluation-limit
-  (let [ctx (eval/build-base-ctx)
+  (let [ctx (eval/build-base-ctx (seon.schema/handed-projection))
         definition
         (run-in ctx
                 "(defn spin [] (loop [i 0] (recur (inc i))))"
@@ -1246,7 +1419,7 @@
   ;; capture the base's interrupt-fn when SCI creates them. Create this one on
   ;; the test thread, then invoke it through a fork on another thread: arming
   ;; must follow the invoking thread, not the thread that created the function.
-  (let [base (eval/build-base-ctx)
+  (let [base (eval/build-base-ctx (seon.schema/handed-projection))
         definition
         (sci/eval-string*
          base
@@ -1288,13 +1461,14 @@
                     :seon.fn/private? false,
                     :seon.fn/spec "[:=> [:cat] :int]"}])
      ctx
-     (eval/build-base-ctx)
+     (eval/build-base-ctx (seon.schema/handed-projection))
      acquired
      (eval/acquire!
       {:seon.sci.eval/ctx ctx, :seon.db/db (db/db connection)})
      evaluation
      (deadlined-in ctx "(authored.interrupt/spin)" 300)]
-    (is (= 2 (:seon.sci.eval/installed acquired)))
+    (is (= 1 (:seon.sci.eval/installed acquired))
+        "only the function has explicit agent admission; the namespace has none")
     (is (not= :seon.sci.eval-test/hung evaluation))
     (is (cut? evaluation))
     (is
@@ -1341,7 +1515,7 @@
     (let
      [ctx
       (assoc
-       (eval/build-base-ctx)
+       (eval/build-base-ctx (seon.schema/handed-projection))
        :seon.sci.eval/custody
        #:seon.db{:connection connection})
       acquired
@@ -1426,7 +1600,7 @@
            [:seon.error/data :seon.error/diagnostic-operation]))
          moment)))
       acquired-ctx
-      (eval/build-base-ctx)]
+      (eval/build-base-ctx (seon.schema/handed-projection))]
      (eval/acquire!
       {:seon.sci.eval/ctx acquired-ctx,
        :seon.db/db (db/db connection)})
@@ -1449,7 +1623,7 @@
               #(instrument/apply!
                 {:seon.config/on-core-error :panic
                  :seon.schema/projection projection}))
-            (let [ctx (eval/build-base-ctx)
+            (let [ctx (eval/build-base-ctx (seon.schema/handed-projection))
                   acquired (eval/acquire! {:seon.sci.eval/ctx ctx
                                            :seon.db/db database
                                            :seon.schema/projection projection})]
@@ -1490,8 +1664,8 @@
         (let [installed
               (get-in (sci/namespace-state ctx)
                       ['seon.sci.eval 'agent-namespace])]
-          (is (identical? #'eval/agent-namespace @installed)
-              "the installed SCI Var forwards to the live compiled Var"))
+          (is (identical? @#'eval/agent-namespace @installed)
+              "the installed SCI Var copies the current compiled root"))
         (is (ok? evaluation))
         (is (= assigned-namespace (:seon.sci.admit/value evaluation)))
         (is (= assigned-namespace
@@ -1543,7 +1717,7 @@
         (fn [connection-b]
           (test-support/seed-cluster! connection-a "ambient-a")
           (test-support/seed-cluster! connection-b "ambient-b")
-          (let [uncustodied-ctx (eval/build-base-ctx)
+          (let [uncustodied-ctx (eval/build-base-ctx (seon.schema/handed-projection))
                 _ (eval/acquire!
                     {:seon.sci.eval/ctx uncustodied-ctx, :seon.db/db (db/db connection-a)})
                 ctx-a (eval/cluster-ctx (db/db connection-a) connection-a)
@@ -1701,7 +1875,7 @@
   ;; after that interrupt is observed does its still-armed sibling call the
   ;; shared interrupt function. A process-wide arm or context-wide arm makes
   ;; the sibling observe the cut. A ThreadLocal arm cannot.
-  (let [ctx (eval/build-base-ctx)
+  (let [ctx (eval/build-base-ctx (seon.schema/handed-projection))
         ready (java.util.concurrent.CountDownLatch. 2)
         begin (java.util.concurrent.CountDownLatch. 1)
         cut-observed (java.util.concurrent.CountDownLatch. 1)
@@ -1755,7 +1929,7 @@
           "arming and interrupting one thread never cuts its sibling"))))
 
 (deftest disarm-clears-the-current-threads-flag-exactly
-  (let [ctx (eval/build-base-ctx)
+  (let [ctx (eval/build-base-ctx (seon.schema/handed-projection))
         {stop! :seon.sci.kernel/stop!} (kernel/arm ctx 30)
         interrupt-fn (:interrupt-fn ctx)
         backstop (+ (System/nanoTime) 1000000000)
@@ -1911,7 +2085,7 @@
   ;; Before the merge this threw :seon.sci.kernel/already-armed straight out
   ;; of `evaluate`, contradicting this namespace's own "nothing throws"
   ;; contract, while `invoke` on the identical situation returned a value.
-  (let [ctx (eval/build-base-ctx)
+  (let [ctx (eval/build-base-ctx (seon.schema/handed-projection))
         {stop! :seon.sci.kernel/stop!} (kernel/arm ctx 30000)]
     (try
       (let [evaluation (run-in ctx "(+ 1 2)" 1000)]
@@ -1928,7 +2102,7 @@
   ;; construction. The future is only the suite's backstop: if the deadline
   ;; ever stops governing nested work, this FAILS rather than hangs.
   (let [task (future
-               (let [ctx (eval/build-base-ctx)
+               (let [ctx (eval/build-base-ctx (seon.schema/handed-projection))
                      {stop! :seon.sci.kernel/stop!} (kernel/arm ctx 50)]
                  (try
                    (run-in ctx "(loop [i 0] (recur (inc i)))" 600000)
@@ -2001,8 +2175,8 @@
           "nested render work keeps the outer 50ms time limit")))))
 
 (deftest a-foreign-armed-context-is-refused-as-a-value
-  (let [armed-ctx (eval/build-base-ctx)
-        other-ctx (eval/build-base-ctx)
+  (let [armed-ctx (eval/build-base-ctx (seon.schema/handed-projection))
+        other-ctx (eval/build-base-ctx (seon.schema/handed-projection))
         {stop! :seon.sci.kernel/stop!} (kernel/arm armed-ctx 30000)]
     (try
       (let [evaluation (run-in other-ctx "(+ 1 2)" 1000)]
@@ -2026,7 +2200,7 @@
   (test-support/with-database
    (fn [connection]
      (let [database (db/db connection)
-           ctx (eval/build-base-ctx)
+           ctx (eval/build-base-ctx (seon.schema/handed-projection))
            _ (is (ok? (run-in ctx (str "(defn probe-throw [x]"
                                        " (throw (ex-info \"boom\" {:a x})))")
                               2000)))
@@ -2119,7 +2293,7 @@
      (let [evaluated (:seon.sci.admit/value (run "(+ 1 2) (+ 3 4)"))
            invoked (:seon.sci.admit/value
                     (kernel/invoke
-                     {:seon.sci.eval/ctx (eval/build-base-ctx)
+                     {:seon.sci.eval/ctx (eval/build-base-ctx (seon.schema/handed-projection))
                       :seon.db/db (db/db connection)
                       :seon.fn/sym "user/never-defined"
                       :seon.sci.eval/args []

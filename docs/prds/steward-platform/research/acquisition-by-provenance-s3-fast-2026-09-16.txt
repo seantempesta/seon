@@ -1,0 +1,517 @@
+bin/test: snapshot differences from HEAD affac56726f2d7af9119949ebda5b39b53376c05:
+bin/test:   D	docs/seon/issues/a-sparse-program-upsert-is-now-admitted-where-the-test-expects-a-refusal.md
+bin/test:   M	resources/seon/schemas/seon.sci.eval.edn
+bin/test:   M	src/seon/cluster.clj
+bin/test:   M	src/seon/program.cljc
+bin/test:   M	src/seon/schema.clj
+bin/test:   M	src/seon/sci/eval.clj
+bin/test:   M	src/seon/turn.clj
+bin/test:   M	test/seon/adoption_rows_test.clj
+bin/test:   M	test/seon/classification_test.clj
+bin/test:   M	test/seon/cluster/agent_test.clj
+bin/test:   M	test/seon/cluster/source_test.clj
+bin/test:   M	test/seon/cluster/turn_test.clj
+bin/test:   M	test/seon/effect_test.clj
+bin/test:   M	test/seon/env_test.clj
+bin/test:   M	test/seon/sci/documentation_test.clj
+bin/test:   M	test/seon/sci/eval_test.clj
+bin/test:   M	test/seon/sci/kernel_arm_carriage_test.clj
+bin/test:   M	test/seon/shell/jvm_test.clj
+bin/test:   A docs/seon/issues/a-sparse-program-upsert-is-now-admitted-where-the-test-expects-a-refusal.md
+bin/test: end snapshot differences
+bin/test: PHASE snapshot elapsed-seconds=11
+bin/test: all 3 test JVM slots busy; waiting up to 1800s (SEON_TEST_SLOTS / SEON_TEST_SLOT_WAIT_SECONDS)
+bin/test:   slot-1 pid=74291 elapsed=18:59 run-root=/Users/sean/src/seon/tmp/test-runs/run.zV4sco
+bin/test:   slot-2 pid=71307 elapsed=20:19 run-root=/Users/sean/src/seon/tmp/test-runs/run.jHOFSg
+bin/test:   slot-3 pid=96629 elapsed=08:30 run-root=/Users/sean/src/seon/tmp/test-runs/run.fCErlL
+bin/test: still waiting for a test JVM slot after 60s of 1800s; holders:
+bin/test:   slot-1 pid=74291 elapsed=20:00 run-root=/Users/sean/src/seon/tmp/test-runs/run.zV4sco
+bin/test:   slot-2 pid=71307 elapsed=21:20 run-root=/Users/sean/src/seon/tmp/test-runs/run.jHOFSg
+bin/test:   slot-3 pid=96629 elapsed=09:31 run-root=/Users/sean/src/seon/tmp/test-runs/run.fCErlL
+bin/test: still waiting for a test JVM slot after 120s of 1800s; holders:
+bin/test:   slot-1 pid=74291 elapsed=21:01 run-root=/Users/sean/src/seon/tmp/test-runs/run.zV4sco
+bin/test:   slot-2 pid=71307 elapsed=22:22 run-root=/Users/sean/src/seon/tmp/test-runs/run.jHOFSg
+bin/test:   slot-3 pid=96629 elapsed=10:33 run-root=/Users/sean/src/seon/tmp/test-runs/run.fCErlL
+bin/test: still waiting for a test JVM slot after 180s of 1800s; holders:
+bin/test:   slot-1 pid=74291 elapsed=22:03 run-root=/Users/sean/src/seon/tmp/test-runs/run.zV4sco
+bin/test:   slot-2 pid=71307 elapsed=23:23 run-root=/Users/sean/src/seon/tmp/test-runs/run.jHOFSg
+bin/test:   slot-3 pid=96629 elapsed=11:34 run-root=/Users/sean/src/seon/tmp/test-runs/run.fCErlL
+bin/test: still waiting for a test JVM slot after 240s of 1800s; holders:
+bin/test:   slot-1 pid=80014 elapsed=19:52 run-root=/Users/sean/src/seon/tmp/message-wake-model-wt/tmp/test-runs/run.T1BV4x
+bin/test:   slot-2 pid=71307 elapsed=24:24 run-root=/Users/sean/src/seon/tmp/test-runs/run.jHOFSg
+bin/test:   slot-3 pid=96629 elapsed=12:35 run-root=/Users/sean/src/seon/tmp/test-runs/run.fCErlL
+bin/test: still waiting for a test JVM slot after 300s of 1800s; holders:
+bin/test:   slot-1 pid=80014 elapsed=20:53 run-root=/Users/sean/src/seon/tmp/message-wake-model-wt/tmp/test-runs/run.T1BV4x
+bin/test:   slot-2 pid=71307 elapsed=25:25 run-root=/Users/sean/src/seon/tmp/test-runs/run.jHOFSg
+bin/test:   slot-3 pid=6609 elapsed=08:56 run-root=/Users/sean/src/seon
+bin/test: still waiting for a test JVM slot after 360s of 1800s; holders:
+bin/test:   slot-1 pid=80014 elapsed=21:53 run-root=/Users/sean/src/seon/tmp/message-wake-model-wt/tmp/test-runs/run.T1BV4x
+bin/test:   slot-2 pid=71307 elapsed=26:25 run-root=/Users/sean/src/seon/tmp/test-runs/run.jHOFSg
+bin/test:   slot-3 pid=6609 elapsed=09:56 run-root=/Users/sean/src/seon
+bin/test: still waiting for a test JVM slot after 420s of 1800s; holders:
+bin/test:   slot-1 pid=80014 elapsed=22:54 run-root=/Users/sean/src/seon/tmp/message-wake-model-wt/tmp/test-runs/run.T1BV4x
+bin/test:   slot-2 pid=19958 elapsed=01:48 run-root=/Users/sean/src/seon/tmp/reset-batch-wt/tmp/test-runs/run.CLB9Be
+bin/test:   slot-3 pid=21016 elapsed=01:25 run-root=/Users/sean/src/seon/tmp/test-runs/run.ghX0j4
+bin/test: still waiting for a test JVM slot after 480s of 1800s; holders:
+bin/test:   slot-1 pid=80014 elapsed=23:54 run-root=/Users/sean/src/seon/tmp/message-wake-model-wt/tmp/test-runs/run.T1BV4x
+bin/test:   slot-2 pid=22588 elapsed=01:10 run-root=/Users/sean/src/seon/tmp/test-runs/run.E1VALh
+bin/test:   slot-3 pid=21016 elapsed=02:25 run-root=/Users/sean/src/seon/tmp/test-runs/run.ghX0j4
+bin/test: still waiting for a test JVM slot after 540s of 1800s; holders:
+bin/test:   slot-1 pid=80014 elapsed=24:55 run-root=/Users/sean/src/seon/tmp/message-wake-model-wt/tmp/test-runs/run.T1BV4x
+bin/test:   slot-2 pid=24732 elapsed=00:10 run-root=/Users/sean/src/seon/tmp/reset-batch-wt/tmp/test-runs/run.PwXVuc
+bin/test:   slot-3 pid=21016 elapsed=03:26 run-root=/Users/sean/src/seon/tmp/test-runs/run.ghX0j4
+bin/test: still waiting for a test JVM slot after 600s of 1800s; holders:
+bin/test:   slot-1 pid=80014 elapsed=25:55 run-root=/Users/sean/src/seon/tmp/message-wake-model-wt/tmp/test-runs/run.T1BV4x
+bin/test:   slot-2 pid=10551 elapsed=11:43 run-root=/Users/sean/src/seon/tmp/test-runs/run.KjgTxV
+bin/test:   slot-3 pid=21016 elapsed=04:26 run-root=/Users/sean/src/seon/tmp/test-runs/run.ghX0j4
+bin/test: still waiting for a test JVM slot after 660s of 1800s; holders:
+bin/test:   slot-1 pid=80014 elapsed=26:55 run-root=/Users/sean/src/seon/tmp/message-wake-model-wt/tmp/test-runs/run.T1BV4x
+bin/test:   slot-2 pid=10551 elapsed=12:43 run-root=/Users/sean/src/seon/tmp/test-runs/run.KjgTxV
+bin/test:   slot-3 pid=21016 elapsed=05:26 run-root=/Users/sean/src/seon/tmp/test-runs/run.ghX0j4
+bin/test: PHASE test-slot elapsed-seconds=678
+bin/test-fast: selected snapshot /Users/sean/src/seon/tmp/test-runs/run.cbn3Fo
+WARNING: Using incubator modules: jdk.incubator.vector
+bin/test: PACKAGED TEST PROJECTION ACQUIRED at= 2026-09-17T03:27:15.896271Z pid= 28277 role= test-fast
+bin/test: CONTRACTS ARMED at= 2026-09-17T03:27:24.804204Z worker= test-fast mode= :panic namespaces= 4 program-namespaces= 108 registered= 1121 instrumented= 1121 program-armable= 1116
+bin/test: 2026-09-17T03:27:24.874405Z BEGIN namespace seon.cluster.turn-test
+
+Testing seon.cluster.turn-test
+bin/test: 2026-09-17T03:27:24.894740Z BEGIN test seon.cluster.turn-test/generated-fixed-point-closes-the-run
+WARNING: reset! already refers to: #'clojure.core/reset! in namespace: seon.fresh-operator, being replaced by: #'seon.fresh-operator/reset!
+bin/test: 2026-09-17T03:28:16.798341Z END test seon.cluster.turn-test/generated-fixed-point-closes-the-run
+bin/test: 2026-09-17T03:28:16.798705Z BEGIN test seon.cluster.turn-test/import-only-ns-unmap-installs-exactly-after-its-context-commit
+bin/test: 2026-09-17T03:28:22.036550Z END test seon.cluster.turn-test/import-only-ns-unmap-installs-exactly-after-its-context-commit
+bin/test: 2026-09-17T03:28:22.039492Z BEGIN test seon.cluster.turn-test/runtime-tests-install-run-redefine-and-delete-exactly
+2026-09-17T03:28:25.491542Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :transaction/validation-rejected, :cause "Transaction report validation rejected."}
+
+FAIL in (runtime-tests-install-run-redefine-and-delete-exactly) (turn_test.clj:1262)
+expected: (= ":v1" (:seon.eval/shown (nth evaluations 2)))
+actual: (not (= ":v1" "#:seon.error{:kind :seon.db/invalid-write, :message \"seon.db/transact! refused transaction data at [45119 :seon.schema.admission/source]: expected the required key :seon.schema.admission/source with either :core or :agent, got a map missing :seon.schema.admission/source. Fix: Supply :seon.schema.admission/source with either :core or :agent. Entity: #:seon.test{:sym \\\"my.agents.agent-a/versioned-test\\\"}.\", :data #:seon.error{:id \"205c2a41d773a0ba973efb62375d4f9d23b020d24a0da95d6741102ba394a74f\"}}"))
+
+FAIL in (runtime-tests-install-run-redefine-and-delete-exactly) (turn_test.clj:1263)
+expected: (= ":v2" (:seon.eval/shown (nth evaluations 4)))
+actual: (not (= ":v2" "#:seon.error{:kind :seon.db/invalid-write, :message \"seon.db/transact! refused transaction data at [45119 :seon.schema.admission/source]: expected the required key :seon.schema.admission/source with either :core or :agent, got a map missing :seon.schema.admission/source. Fix: Supply :seon.schema.admission/source with either :core or :agent. Entity: #:seon.test{:sym \\\"my.agents.agent-a/versioned-test\\\"}.\", :data #:seon.error{:id \"205c2a41d773a0ba973efb62375d4f9d23b020d24a0da95d6741102ba394a74f\"}}"))
+
+FAIL in (runtime-tests-install-run-redefine-and-delete-exactly) (turn_test.clj:1264)
+expected: (= "nil" (:seon.eval/shown (nth evaluations 6)))
+actual: (not (= "nil" "#:seon.error{:kind :seon.db/invalid-write, :message \"seon.db/transact! refused transaction data at [45119 :seon.schema.admission/source]: expected the required key :seon.schema.admission/source with either :core or :agent, got a map missing :seon.schema.admission/source. Fix: Supply :seon.schema.admission/source with either :core or :agent. Entity: #:seon.test{:sym \\\"my.agents.agent-a/versioned-test\\\"}.\", :data #:seon.error{:id \"205c2a41d773a0ba973efb62375d4f9d23b020d24a0da95d6741102ba394a74f\"}}"))
+
+FAIL in (runtime-tests-install-run-redefine-and-delete-exactly) (turn_test.clj:1265)
+expected: (every? (fn* [p1__125029#] (nil? (:seon.cluster.eval/error p1__125029#))) evaluations)
+actual: (not (every? #object[seon.cluster.turn_test$fn__125030$fn__125031$fn__125034$fn__125051$fn__125052] [{:db/id 45096, :seon.cluster.eval/at #inst "2026-09-17T03:28:24.079-00:00", :seon.cluster.eval/author :agent, :seon.cluster.eval/error "seon.db/transact! refused transaction data at [45119 :seon.schema.admission/source]: expected the required key :seon.schema.admission/source with either :core or :agent, got a map missing :seon.schema.admission/source. Fix: Supply :seon.schema.admission/source with either :core or :agent. Entity: #:seon.test{:sym \"my.agents.agent-a/versioned-test\"}.", :seon.cluster.eval/id "a14e72a4b526", :seon.cluster.eval/ns #:seon.ns{:name my.agents.agent-a}, :seon.cluster.eval/ordinal 0, :seon.cluster.eval/read-basis-transaction 536870927, :seon.print/elision {:seon.print/bound-by :seon.render.profile/token-budget, :seon.print/elision-unit :children, :seon.print/omitted 7, :seon.print/requery-refusal "the value has no result handle", :seon.render.data/next-offset 8, :seon.render.data/path [1 2 0], :seon.render.data/total 15}} {:db/id 45097, :seon.cluster.eval/at #inst "2026-09-17T03:28:24.079-00:00", :seon.cluster.eval/author :agent, :seon.cluster.eval/error "seon.db/transact! refused transaction data at [45119 :seon.schema.admission/source]: expected the required key :seon.schema.admission/source with either :core or :agent, got a map missing :seon.schema.admission/source. Fix: Supply :seon.schema.admission/source with either :core or :agent. Entity: #:seon.test{:sym \"my.agents.agent-a/versioned-test\"}.", :seon.cluster.eval/id "7bb274010d2c", :seon.cluster.eval/ns #:seon.ns{:name my.agents.agent-a}, :seon.cluster.eval/ordinal 1, :seon.cluster.eval/read-basis-transaction 536870927, :seon.print/elision {:seon.print/bound-by :seon.render.profile/token-budget, :seon.print/elision-unit :children, :seon.print/omitted 7, :seon.print/requery-refusal "the value has no result handle", :seon.render.data/next-offset 8, :seon.render.data/path [1 2 1], :seon.render.data/total 15}} {:db/id 45098, :seon.cluster.eval/at #inst "2026-09-17T03:28:24.079-00:00", :seon.cluster.eval/author :agent, :seon.cluster.eval/error "seon.db/transact! refused transaction data at [45119 :seon.schema.admission/source]: expected the required key :seon.schema.admission/source with either :core or :agent, got a map missing :seon.schema.admission/source. Fix: Supply :seon.schema.admission/source with either :core or :agent. Entity: #:seon.test{:sym \"my.agents.agent-a/versioned-test\"}.", :seon.cluster.eval/id "63c02dd2ec12", :seon.cluster.eval/ns #:seon.ns{:name my.agents.agent-a}, :seon.cluster.eval/ordinal 2, :seon.cluster.eval/read-basis-transaction 536870927, :seon.print/elision {:seon.print/bound-by :seon.render.profile/token-budget, :seon.print/elision-unit :children, :seon.print/omitted 6, :seon.print/requery-refusal "the value has no result handle", :seon.render.data/next-offset 8, :seon.render.data/path [1 2 2], :seon.render.data/total 14}} {:db/id 45099, :seon.cluster.eval/at #inst "2026-09-17T03:28:24.079-00:00", :seon.cluster.eval/author :agent, :seon.cluster.eval/error "seon.db/transact! refused transaction data at [45119 :seon.schema.admission/source]: expected the required key :seon.schema.admission/source with either :core or :agent, got a map missing :seon.schema.admission/source. Fix: Supply :seon.schema.admission/source with either :core or :agent. Entity: #:seon.test{:sym \"my.agents.agent-a/versioned-test\"}.", :seon.cluster.eval/id "9cc8fee1add8", :seon.cluster.eval/ns #:seon.ns{:name my.agents.agent-a}, :seon.cluster.eval/ordinal 3, :seon.cluster.eval/read-basis-transaction 536870927, :seon.print/elision {:seon.print/bound-by :seon.render.profile/token-budget, :seon.print/elision-unit :children, :seon.print/omitted 7, :seon.print/requery-refusal "the value has no result handle", :seon.render.data/next-offset 8, :seon.render.data/path [1 2 3], :seon.render.data/total 15}} {:db/id 45100, :seon.cluster.eval/at #inst "2026-09-17T03:28:24.079-00:00", :seon.cluster.eval/author :agent, :seon.cluster.eval/error "seon.db/transact! refused transaction data at [45119 :seon.schema.admission/source]: expected the required key :seon.schema.admission/source with either :core or :agent, got a map missing :seon.schema.admission/source. Fix: Supply :seon.schema.admission/source with either :core or :agent. Entity: #:seon.test{:sym \"my.agents.agent-a/versioned-test\"}.", :seon.cluster.eval/id "9cb2754de652", :seon.cluster.eval/ns #:seon.ns{:name my.agents.agent-a}, :seon.cluster.eval/ordinal 4, :seon.cluster.eval/read-basis-transaction 536870927, :seon.print/elision {:seon.print/bound-by :seon.render.profile/token-budget, :seon.print/elision-unit :children, :seon.print/omitted 6, :seon.print/requery-refusal "the value has no result handle", :seon.render.data/next-offset 8, :seon.render.data/path [1 2 4], :seon.render.data/total 14}} {:db/id 45101, :seon.cluster.eval/at #inst "2026-09-17T03:28:24.079-00:00", :seon.cluster.eval/author :agent, :seon.cluster.eval/error "seon.db/transact! refused transaction data at [45119 :seon.schema.admission/source]: expected the required key :seon.schema.admission/source with either :core or :agent, got a map missing :seon.schema.admission/source. Fix: Supply :seon.schema.admission/source with either :core or :agent. Entity: #:seon.test{:sym \"my.agents.agent-a/versioned-test\"}.", :seon.cluster.eval/id "611877158f0b", :seon.cluster.eval/ns #:seon.ns{:name my.agents.agent-a}, :seon.cluster.eval/ordinal 5, :seon.cluster.eval/read-basis-transaction 536870927, :seon.print/elision {:seon.print/bound-by :seon.render.profile/token-budget, :seon.print/elision-unit :children, :seon.print/omitted 6, :seon.print/requery-refusal "the value has no result handle", :seon.render.data/next-offset 8, :seon.render.data/path [1 2 5], :seon.render.data/total 14}} {:db/id 45102, :seon.cluster.eval/at #inst "2026-09-17T03:28:24.079-00:00", :seon.cluster.eval/author :agent, :seon.cluster.eval/error "seon.db/transact! refused transaction data at [45119 :seon.schema.admission/source]: expected the required key :seon.schema.admission/source with either :core or :agent, got a map missing :seon.schema.admission/source. Fix: Supply :seon.schema.admission/source with either :core or :agent. Entity: #:seon.test{:sym \"my.agents.agent-a/versioned-test\"}.", :seon.cluster.eval/id "c9b2aecef618", :seon.cluster.eval/ns #:seon.ns{:name my.agents.agent-a}, :seon.cluster.eval/ordinal 6, :seon.cluster.eval/read-basis-transaction 536870927, :seon.print/elision {:seon.print/bound-by :seon.render.profile/token-budget, :seon.print/elision-unit :children, :seon.print/omitted 6, :seon.print/requery-refusal "the value has no result handle", :seon.render.data/next-offset 8, :seon.render.data/path [1 2 6], :seon.render.data/total 14}}]))
+
+FAIL in (runtime-tests-install-run-redefine-and-delete-exactly) (turn_test.clj:1266)
+expected: (stable-program-identity-row? (db/pull (db/db connection) (quote [*]) [:seon.test/sym test-sym]) :seon.test/sym test-sym :seon.test/ns)
+actual: (not (stable-program-identity-row? nil :seon.test/sym "my.agents.agent-a/versioned-test" :seon.test/ns))
+bin/test: 2026-09-17T03:28:25.972702Z END test seon.cluster.turn-test/runtime-tests-install-run-redefine-and-delete-exactly
+bin/test: 2026-09-17T03:28:25.972806Z BEGIN test seon.cluster.turn-test/agent-code-with-defn-and-println-folds-green-without-in-ns
+bin/test: 2026-09-17T03:28:29.574824Z END test seon.cluster.turn-test/agent-code-with-defn-and-println-folds-green-without-in-ns
+bin/test: 2026-09-17T03:28:29.574926Z BEGIN test seon.cluster.turn-test/mixed-plan-publishes-only-the-contracted-function
+bin/test: 2026-09-17T03:28:32.901114Z END test seon.cluster.turn-test/mixed-plan-publishes-only-the-contracted-function
+bin/test: 2026-09-17T03:28:32.901219Z BEGIN test seon.cluster.turn-test/reasoning-only-time-limit-persists-its-flat-diagnostic
+bin/test: 2026-09-17T03:28:34.586150Z END test seon.cluster.turn-test/reasoning-only-time-limit-persists-its-flat-diagnostic
+bin/test: 2026-09-17T03:28:34.586272Z BEGIN test seon.cluster.turn-test/a-whole-turn-runs-a-REAL-sci-evaluation-end-to-end
+bin/test: 2026-09-17T03:28:37.057637Z END test seon.cluster.turn-test/a-whole-turn-runs-a-REAL-sci-evaluation-end-to-end
+bin/test: 2026-09-17T03:28:37.057731Z BEGIN test seon.cluster.turn-test/a-turn-hands-its-clusters-projection-to-every-database-call
+bin/test: 2026-09-17T03:28:38.485931Z END test seon.cluster.turn-test/a-turn-hands-its-clusters-projection-to-every-database-call
+bin/test: 2026-09-17T03:28:38.486110Z BEGIN test seon.cluster.turn-test/runtime-schema-key-changes-pass-the-one-usage-guarded-decision
+bin/test: 2026-09-17T03:28:46.484989Z END test seon.cluster.turn-test/runtime-schema-key-changes-pass-the-one-usage-guarded-decision
+bin/test: 2026-09-17T03:28:46.485383Z BEGIN test seon.cluster.turn-test/refused-import-only-ns-unmap-leaves-the-run-sci-ctx-unchanged
+bin/test: 2026-09-17T03:28:56.849679Z END test seon.cluster.turn-test/refused-import-only-ns-unmap-leaves-the-run-sci-ctx-unchanged
+bin/test: 2026-09-17T03:28:56.849803Z BEGIN test seon.cluster.turn-test/a-partial-stream-truncation-is-a-durable-nonfailure-attempt-fact
+bin/test: 2026-09-17T03:28:59.348307Z END test seon.cluster.turn-test/a-partial-stream-truncation-is-a-durable-nonfailure-attempt-fact
+bin/test: 2026-09-17T03:28:59.348425Z BEGIN test seon.cluster.turn-test/a-run-prompts-from-its-opening-database-value
+bin/test: 2026-09-17T03:29:03.702258Z END test seon.cluster.turn-test/a-run-prompts-from-its-opening-database-value
+bin/test: 2026-09-17T03:29:03.702400Z BEGIN test seon.cluster.turn-test/contracted-redefinition-exactly-replaces-the-row
+bin/test: 2026-09-17T03:29:08.872039Z END test seon.cluster.turn-test/contracted-redefinition-exactly-replaces-the-row
+bin/test: 2026-09-17T03:29:08.872145Z BEGIN test seon.cluster.turn-test/one-successful-call-leaves-exactly-one-attempt-fact
+bin/test: 2026-09-17T03:29:10.856601Z END test seon.cluster.turn-test/one-successful-call-leaves-exactly-one-attempt-fact
+bin/test: 2026-09-17T03:29:10.856718Z BEGIN test seon.cluster.turn-test/generated-opening-preserves-one-provider-turn-budget
+bin/test: 2026-09-17T03:29:19.923917Z END test seon.cluster.turn-test/generated-opening-preserves-one-provider-turn-budget
+bin/test: 2026-09-17T03:29:19.924029Z BEGIN test seon.cluster.turn-test/streaming-writes-zero-datoms-test
+bin/test: 2026-09-17T03:29:22.438353Z END test seon.cluster.turn-test/streaming-writes-zero-datoms-test
+bin/test: 2026-09-17T03:29:22.438514Z BEGIN test seon.cluster.turn-test/a-refused-definition-stays-in-its-agents-defs
+bin/test: 2026-09-17T03:29:27.512757Z END test seon.cluster.turn-test/a-refused-definition-stays-in-its-agents-defs
+bin/test: 2026-09-17T03:29:27.512866Z BEGIN test seon.cluster.turn-test/runtime-declarations-install-only-from-a-successful-terminal-db-after
+bin/test: 2026-09-17T03:29:37.883533Z END test seon.cluster.turn-test/runtime-declarations-install-only-from-a-successful-terminal-db-after
+bin/test: 2026-09-17T03:29:37.883641Z BEGIN test seon.cluster.turn-test/a-held-runs-paid-call-is-never-duplicated
+bin/test: 2026-09-17T03:29:39.599900Z END test seon.cluster.turn-test/a-held-runs-paid-call-is-never-duplicated
+bin/test: 2026-09-17T03:29:39.599997Z BEGIN test seon.cluster.turn-test/qualified-dynamic-ns-unmap-is-durable-in-a-fresh-context
+2026-09-17T03:29:42.873175Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :transaction/validation-rejected, :cause "Transaction report validation rejected."}
+
+FAIL in (qualified-dynamic-ns-unmap-is-durable-in-a-fresh-context) (turn_test.clj:620)
+expected: (stable-program-identity-row? (db/pull (db/db connection) (quote [*]) [:seon.fn/sym function-sym]) :seon.fn/sym function-sym :seon.fn/ns)
+actual: (not (stable-program-identity-row? nil :seon.fn/sym "my.agents.agent-a/dynamic-obsolete" :seon.fn/ns))
+bin/test: 2026-09-17T03:29:43.859226Z END test seon.cluster.turn-test/qualified-dynamic-ns-unmap-is-durable-in-a-fresh-context
+bin/test: 2026-09-17T03:29:43.859327Z BEGIN test seon.cluster.turn-test/acquisition-orders-agent-authored-refer-targets-and-ignores-alias-cycles
+bin/test: 2026-09-17T03:29:45.622995Z END test seon.cluster.turn-test/acquisition-orders-agent-authored-refer-targets-and-ignores-alias-cycles
+bin/test: 2026-09-17T03:29:45.623110Z BEGIN test seon.cluster.turn-test/runtime-schema-unregister-removes-one-unused-global-schema
+2026-09-17T03:29:53.190537Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :transaction/validation-rejected, :cause "Transaction report validation rejected."}
+2026-09-17T03:30:00.280759Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :transaction/validation-rejected, :cause "Transaction report validation rejected."}
+2026-09-17T03:30:08.704261Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :transaction/validation-rejected, :cause "Transaction report validation rejected."}
+2026-09-17T03:30:16.249871Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :transaction/validation-rejected, :cause "Transaction report validation rejected."}
+2026-09-17T03:30:25.376256Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :transaction/validation-rejected, :cause "Transaction report validation rejected."}
+
+FAIL in (runtime-schema-unregister-removes-one-unused-global-schema) (turn_test.clj:1146)
+unregister has ordinary REPL return semantics
+expected: (= (pr-str schema-key) (:seon.eval/shown (nth evaluations 2)))
+actual: (not (= ":shared.runtime/unregister-me" "#:seon.error{:kind :seon.db/invalid-write, :message \"seon.db/transact! refused transaction data at [45117 :seon.schema.admission/source]: expected the required key :seon.schema.admission/source with either :core or :agent, got a map missing :seon.schema.admission/source. Fix: Supply :seon.schema.admission/source with either :core or :agent. Entity: #:seon.schema{:key :shared.runtime/unregister-me}.\", :data #:seon.error{:id \"205c2a41d773a0ba973efb62375d4f9d23b020d24a0da95d6741102ba394a74f\"}}"))
+
+FAIL in (runtime-schema-unregister-removes-one-unused-global-schema) (turn_test.clj:1150)
+expected: (stable-program-identity-row? (db/pull db (quote [*]) [:seon.schema/key schema-key]) :seon.schema/key schema-key nil)
+actual: (not (stable-program-identity-row? nil :seon.schema/key :shared.runtime/unregister-me nil))
+bin/test: 2026-09-17T03:30:27.312583Z END test seon.cluster.turn-test/runtime-schema-unregister-removes-one-unused-global-schema
+bin/test: 2026-09-17T03:30:27.312713Z BEGIN test seon.cluster.turn-test/an-unpaid-failure-with-a-backup-makes-exactly-two-calls
+bin/test: 2026-09-17T03:30:29.486584Z END test seon.cluster.turn-test/an-unpaid-failure-with-a-backup-makes-exactly-two-calls
+bin/test: 2026-09-17T03:30:29.486691Z BEGIN test seon.cluster.turn-test/refused-terminal-program-transactions-settle-and-do-not-refire
+bin/test: 2026-09-17T03:30:41.644611Z END test seon.cluster.turn-test/refused-terminal-program-transactions-settle-and-do-not-refire
+bin/test: 2026-09-17T03:30:41.644719Z BEGIN test seon.cluster.turn-test/a-completing-disposition-closes-in-the-terminal-transaction
+bin/test: 2026-09-17T03:30:43.477986Z END test seon.cluster.turn-test/a-completing-disposition-closes-in-the-terminal-transaction
+bin/test: 2026-09-17T03:30:43.478080Z BEGIN test seon.cluster.turn-test/reasoning-starvation-persists-usage-finish-and-the-named-error
+bin/test: 2026-09-17T03:30:48.089094Z END test seon.cluster.turn-test/reasoning-starvation-persists-usage-finish-and-the-named-error
+bin/test: 2026-09-17T03:30:48.089200Z BEGIN test seon.cluster.turn-test/a-prompt-refusal-is-a-recorded-error-value-never-a-throw
+bin/test: 2026-09-17T03:30:49.723693Z END test seon.cluster.turn-test/a-prompt-refusal-is-a-recorded-error-value-never-a-throw
+bin/test: 2026-09-17T03:30:49.724617Z BEGIN test seon.cluster.turn-test/generated-model-attempt-traces-preserve-presence-and-episode-laws
+bin/test: 2026-09-17T03:32:40.777194Z END test seon.cluster.turn-test/generated-model-attempt-traces-preserve-presence-and-episode-laws
+bin/test: 2026-09-17T03:32:40.777302Z BEGIN test seon.cluster.turn-test/function-install-reads-the-case-count-from-cluster-facts
+bin/test: 2026-09-17T03:32:44.171760Z END test seon.cluster.turn-test/function-install-reads-the-case-count-from-cluster-facts
+bin/test: 2026-09-17T03:32:44.171852Z BEGIN test seon.cluster.turn-test/refused-runtime-schema-registration-mutates-neither-row-nor-projection
+bin/test: 2026-09-17T03:32:50.708127Z END test seon.cluster.turn-test/refused-runtime-schema-registration-mutates-neither-row-nor-projection
+bin/test: 2026-09-17T03:32:50.708221Z BEGIN test seon.cluster.turn-test/a-turn-delivers-what-a-form-asks-to-send-and-still-finishes
+bin/test: 2026-09-17T03:32:57.136315Z END test seon.cluster.turn-test/a-turn-delivers-what-a-form-asks-to-send-and-still-finishes
+bin/test: 2026-09-17T03:32:57.136422Z BEGIN test seon.cluster.turn-test/runtime-schema-registration-commits-the-evaluated-form-and-attribute
+bin/test: 2026-09-17T03:33:03.172037Z END test seon.cluster.turn-test/runtime-schema-registration-commits-the-evaluated-form-and-attribute
+bin/test: 2026-09-17T03:33:03.172150Z BEGIN test seon.cluster.turn-test/a-refused-delivery-becomes-a-durable-error-fact
+2026-09-17T03:33:05.753690Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.message/unknown-recipient, :cause "There is no agent named \"missing-agent\"."}
+bin/test: 2026-09-17T03:33:05.954199Z END test seon.cluster.turn-test/a-refused-delivery-becomes-a-durable-error-fact
+bin/test: 2026-09-17T03:33:05.954312Z BEGIN test seon.cluster.turn-test/accepted-first-party-definition-reaches-an-existing-agent-next-turn
+bin/test: 2026-09-17T03:33:14.854213Z END test seon.cluster.turn-test/accepted-first-party-definition-reaches-an-existing-agent-next-turn
+bin/test: 2026-09-17T03:33:14.854318Z BEGIN test seon.cluster.turn-test/ns-unmap-retracts-the-owned-function-after-the-terminal-commit
+bin/test: 2026-09-17T03:33:19.836906Z END test seon.cluster.turn-test/ns-unmap-retracts-the-owned-function-after-the-terminal-commit
+bin/test: 2026-09-17T03:33:19.836994Z BEGIN test seon.cluster.turn-test/singleton-enum-uses-are-members-of-their-declared-enums
+bin/test: 2026-09-17T03:33:19.846228Z END test seon.cluster.turn-test/singleton-enum-uses-are-members-of-their-declared-enums
+bin/test: 2026-09-17T03:33:19.846319Z BEGIN test seon.cluster.turn-test/delimiter-repair-is-span-local-and-precedes-intent
+
+FAIL in (delimiter-repair-is-span-local-and-precedes-intent) (turn_test.clj:2907)
+one missing defn closer is fixed, evaluated, and stored as the history form
+definition installation took 446.021499 ms
+expected: (< install-ms 300.0)
+actual: (not (< 446.021499 300.0))
+bin/test: 2026-09-17T03:33:27.316825Z END test seon.cluster.turn-test/delimiter-repair-is-span-local-and-precedes-intent
+bin/test: 2026-09-17T03:33:27.316925Z BEGIN test seon.cluster.turn-test/evaluation-follows-the-readers-parse-time-namespace
+bin/test: 2026-09-17T03:33:29.972561Z END test seon.cluster.turn-test/evaluation-follows-the-readers-parse-time-namespace
+bin/test: 2026-09-17T03:33:29.974969Z BEGIN test seon.cluster.turn-test/an-unreadable-reply-is-a-settled-form-with-paid-attempt-evidence
+bin/test: 2026-09-17T03:33:34.574465Z END test seon.cluster.turn-test/an-unreadable-reply-is-a-settled-form-with-paid-attempt-evidence
+bin/test: 2026-09-17T03:33:34.574669Z BEGIN test seon.cluster.turn-test/generated-membership-failure-never-advances-the-run-to-call
+bin/test: 2026-09-17T03:33:35.343543Z END test seon.cluster.turn-test/generated-membership-failure-never-advances-the-run-to-call
+bin/test: 2026-09-17T03:33:35.343697Z BEGIN test seon.cluster.turn-test/reply-reading-follows-evaluated-alias-and-dynamic-require-state
+bin/test: 2026-09-17T03:33:37.977127Z END test seon.cluster.turn-test/reply-reading-follows-evaluated-alias-and-dynamic-require-state
+bin/test: 2026-09-17T03:33:37.977236Z BEGIN test seon.cluster.turn-test/a-combined-evaluation-projects-every-terminal-receipt-datom
+bin/test: 2026-09-17T03:33:41.815821Z END test seon.cluster.turn-test/a-combined-evaluation-projects-every-terminal-receipt-datom
+bin/test: 2026-09-17T03:33:41.815957Z BEGIN test seon.cluster.turn-test/successful-call-persists-the-providers-open-usage-document
+bin/test: 2026-09-17T03:33:46.874772Z END test seon.cluster.turn-test/successful-call-persists-the-providers-open-usage-document
+bin/test: 2026-09-17T03:33:46.874897Z BEGIN test seon.cluster.turn-test/a-lost-model-call-leaves-a-durable-readable-reason
+bin/test: 2026-09-17T03:33:51.319102Z END test seon.cluster.turn-test/a-lost-model-call-leaves-a-durable-readable-reason
+bin/test: 2026-09-17T03:33:51.319217Z BEGIN test seon.cluster.turn-test/generated-phase-failures-converge-through-one-terminal-exit
+bin/test: 2026-09-17T03:33:56.022186Z END test seon.cluster.turn-test/generated-phase-failures-converge-through-one-terminal-exit
+bin/test: 2026-09-17T03:33:56.022280Z BEGIN test seon.cluster.turn-test/a-red-form-routes-to-its-namespace-owner-and-the-fold-continues
+bin/test: 2026-09-17T03:33:58.391175Z END test seon.cluster.turn-test/a-red-form-routes-to-its-namespace-owner-and-the-fold-continues
+bin/test: 2026-09-17T03:33:58.391257Z BEGIN test seon.cluster.turn-test/turn-intent-is-the-complete-crash-falsifier
+bin/test: 2026-09-17T03:34:03.369570Z END test seon.cluster.turn-test/turn-intent-is-the-complete-crash-falsifier
+bin/test: 2026-09-17T03:34:03.369680Z BEGIN test seon.cluster.turn-test/a-real-evaluation-that-runs-away-is-stopped-and-recorded
+bin/test: 2026-09-17T03:34:06.597103Z END test seon.cluster.turn-test/a-real-evaluation-that-runs-away-is-stopped-and-recorded
+bin/test: 2026-09-17T03:34:06.597229Z BEGIN test seon.cluster.turn-test/another-agent-sees-a-flat-contract-violation-after-live-install
+bin/test: 2026-09-17T03:34:11.848768Z END test seon.cluster.turn-test/another-agent-sees-a-flat-contract-violation-after-live-install
+bin/test: 2026-09-17T03:34:11.848885Z BEGIN test seon.cluster.turn-test/a-prose-prefixed-contracted-defn-settles-and-doc-answers
+bin/test: 2026-09-17T03:34:15.054711Z END test seon.cluster.turn-test/a-prose-prefixed-contracted-defn-settles-and-doc-answers
+bin/test: 2026-09-17T03:34:15.054814Z BEGIN test seon.cluster.turn-test/a-refused-contract-commits-a-receipt-and-no-row
+bin/test: 2026-09-17T03:34:25.887638Z END test seon.cluster.turn-test/a-refused-contract-commits-a-receipt-and-no-row
+bin/test: 2026-09-17T03:34:25.887752Z BEGIN test seon.cluster.turn-test/absent-foreign-ns-unmap-commits-and-mutates-the-run-sci-ctx
+bin/test: 2026-09-17T03:34:28.284240Z END test seon.cluster.turn-test/absent-foreign-ns-unmap-commits-and-mutates-the-run-sci-ctx
+bin/test: 2026-09-17T03:34:28.284339Z BEGIN test seon.cluster.turn-test/concurrent-streams-share-one-conn-test
+bin/test: 2026-09-17T03:34:32.180524Z END test seon.cluster.turn-test/concurrent-streams-share-one-conn-test
+bin/test: 2026-09-17T03:34:32.180623Z BEGIN test seon.cluster.turn-test/a-whole-turn-runs-from-trigger-to-closed-run
+bin/test: 2026-09-17T03:34:34.441112Z END test seon.cluster.turn-test/a-whole-turn-runs-from-trigger-to-closed-run
+bin/test: 2026-09-17T03:34:34.441224Z BEGIN test seon.cluster.turn-test/a-batched-turn-commits-only-queryable-definition-facts
+bin/test: 2026-09-17T03:34:41.414770Z END test seon.cluster.turn-test/a-batched-turn-commits-only-queryable-definition-facts
+bin/test: 2026-09-17T03:34:41.414858Z BEGIN test seon.cluster.turn-test/a-waiting-disposition-frees-the-agent-and-keeps-its-note
+bin/test: 2026-09-17T03:34:43.122913Z END test seon.cluster.turn-test/a-waiting-disposition-frees-the-agent-and-keeps-its-note
+bin/test: 2026-09-17T03:34:43.123029Z BEGIN test seon.cluster.turn-test/import-addition-is-ordinary-data-and-reacquires-exactly
+bin/test: 2026-09-17T03:34:51.711036Z END test seon.cluster.turn-test/import-addition-is-ordinary-data-and-reacquires-exactly
+bin/test: 2026-09-17T03:34:51.711178Z BEGIN test seon.cluster.turn-test/incompatible-clusters-alternate-runtime-schema-validation-without-bleed
+bin/test: 2026-09-17T03:35:05.811135Z END test seon.cluster.turn-test/incompatible-clusters-alternate-runtime-schema-validation-without-bleed
+bin/test: 2026-09-17T03:35:05.811261Z BEGIN test seon.cluster.turn-test/a-settling-declaration-uses-the-projection-its-database-carries
+bin/test: 2026-09-17T03:35:06.367198Z END test seon.cluster.turn-test/a-settling-declaration-uses-the-projection-its-database-carries
+bin/test: 2026-09-17T03:35:06.367734Z END namespace seon.cluster.turn-test
+bin/test: 2026-09-17T03:35:06.367977Z BEGIN namespace seon.sci.eval-test
+
+Testing seon.sci.eval-test
+bin/test: 2026-09-17T03:35:06.391991Z BEGIN test seon.sci.eval-test/agent-context-exposes-no-concurrency-capability
+bin/test: 2026-09-17T03:35:06.395289Z END test seon.sci.eval-test/agent-context-exposes-no-concurrency-capability
+bin/test: 2026-09-17T03:35:06.395360Z BEGIN test seon.sci.eval-test/an-agent-cannot-catch-the-interrupt
+bin/test: 2026-09-17T03:35:06.717067Z END test seon.sci.eval-test/an-agent-cannot-catch-the-interrupt
+bin/test: 2026-09-17T03:35:06.717166Z BEGIN test seon.sci.eval-test/call-preparation-receives-the-form-scoped-environment
+bin/test: 2026-09-17T03:35:07.633152Z END test seon.sci.eval-test/call-preparation-receives-the-form-scoped-environment
+bin/test: 2026-09-17T03:35:07.633262Z BEGIN test seon.sci.eval-test/database-provenance-regenerates-the-base-and-reverts-for-retained-forks
+bin/test: 2026-09-17T03:35:14.792654Z END test seon.sci.eval-test/database-provenance-regenerates-the-base-and-reverts-for-retained-forks
+bin/test: 2026-09-17T03:35:14.792779Z BEGIN test seon.sci.eval-test/success-evaluation-assembles-every-optional-projection
+bin/test: 2026-09-17T03:35:14.792980Z END test seon.sci.eval-test/success-evaluation-assembles-every-optional-projection
+bin/test: 2026-09-17T03:35:14.793051Z BEGIN test seon.sci.eval-test/schema-and-contract-declarations-have-bounded-allocation
+bin/test: 2026-09-17T03:35:15.940485Z END test seon.sci.eval-test/schema-and-contract-declarations-have-bounded-allocation
+bin/test: 2026-09-17T03:35:15.940593Z BEGIN test seon.sci.eval-test/interrupted?-recognises-only-the-real-marker
+bin/test: 2026-09-17T03:35:15.941485Z END test seon.sci.eval-test/interrupted?-recognises-only-the-real-marker
+bin/test: 2026-09-17T03:35:15.941539Z BEGIN test seon.sci.eval-test/a-blocking-host-call-is-NOT-stopped-by-the-time-limit
+bin/test: 2026-09-17T03:35:17.452426Z END test seon.sci.eval-test/a-blocking-host-call-is-NOT-stopped-by-the-time-limit
+bin/test: 2026-09-17T03:35:17.452540Z BEGIN test seon.sci.eval-test/acquisition-uses-the-effective-config-projection-when-instrumented
+bin/test: 2026-09-17T03:35:19.309899Z END test seon.sci.eval-test/acquisition-uses-the-effective-config-projection-when-instrumented
+bin/test: 2026-09-17T03:35:19.309998Z BEGIN test seon.sci.eval-test/a-configless-database-refuses-caps-by-name-and-still-installs
+bin/test: 2026-09-17T03:35:21.410654Z END test seon.sci.eval-test/a-configless-database-refuses-caps-by-name-and-still-installs
+bin/test: 2026-09-17T03:35:21.410773Z BEGIN test seon.sci.eval-test/a-refusal-keeps-its-own-kind-at-both-entrances
+bin/test: 2026-09-17T03:35:21.425111Z END test seon.sci.eval-test/a-refusal-keeps-its-own-kind-at-both-entrances
+bin/test: 2026-09-17T03:35:21.425232Z BEGIN test seon.sci.eval-test/a-previously-defined-function-uses-the-current-evaluation-limit
+bin/test: 2026-09-17T03:35:21.747831Z END test seon.sci.eval-test/a-previously-defined-function-uses-the-current-evaluation-limit
+bin/test: 2026-09-17T03:35:21.747936Z BEGIN test seon.sci.eval-test/acquired-source-context-forks-own-their-lazy-program-state
+bin/test: 2026-09-17T03:35:21.752503Z END test seon.sci.eval-test/acquired-source-context-forks-own-their-lazy-program-state
+bin/test: 2026-09-17T03:35:21.752618Z BEGIN test seon.sci.eval-test/unmap-row-carries-the-exact-forked-namespace-state
+bin/test: 2026-09-17T03:35:21.758508Z END test seon.sci.eval-test/unmap-row-carries-the-exact-forked-namespace-state
+bin/test: 2026-09-17T03:35:21.758581Z BEGIN test seon.sci.eval-test/one-unloadable-row-cannot-prevent-cold-acquisition
+bin/test: 2026-09-17T03:35:24.128659Z END test seon.sci.eval-test/one-unloadable-row-cannot-prevent-cold-acquisition
+bin/test: 2026-09-17T03:35:24.128756Z BEGIN test seon.sci.eval-test/acquisition-binds-loaded-first-party-compiled-vars
+bin/test: 2026-09-17T03:35:27.290151Z END test seon.sci.eval-test/acquisition-binds-loaded-first-party-compiled-vars
+bin/test: 2026-09-17T03:35:27.290247Z BEGIN test seon.sci.eval-test/a-storable-declarations-committed-row-is-recognised-by-its-value
+bin/test: 2026-09-17T03:35:28.279365Z END test seon.sci.eval-test/a-storable-declarations-committed-row-is-recognised-by-its-value
+bin/test: 2026-09-17T03:35:28.279466Z BEGIN test seon.sci.eval-test/evaluate-invokes-eval-form-exactly-once-on-every-path
+bin/test: 2026-09-17T03:35:29.316603Z END test seon.sci.eval-test/evaluate-invokes-eval-form-exactly-once-on-every-path
+bin/test: 2026-09-17T03:35:29.316728Z BEGIN test seon.sci.eval-test/evaluation-projection-prefers-the-live-context
+WARN seon.db/projection-fallback caller= seon.sci.eval/evaluate missing-projection count=1; supply the operation's projection.
+bin/test: 2026-09-17T03:35:29.327534Z END test seon.sci.eval-test/evaluation-projection-prefers-the-live-context
+bin/test: 2026-09-17T03:35:29.327649Z BEGIN test seon.sci.eval-test/an-unbound-var-remains-structured-after-production-admission
+bin/test: 2026-09-17T03:35:29.340312Z END test seon.sci.eval-test/an-unbound-var-remains-structured-after-production-admission
+bin/test: 2026-09-17T03:35:29.340412Z BEGIN test seon.sci.eval-test/static-and-runtime-contracted-definitions-publish-identical-facts
+bin/test: 2026-09-17T03:35:57.154287Z END test seon.sci.eval-test/static-and-runtime-contracted-definitions-publish-identical-facts
+bin/test: 2026-09-17T03:35:57.157385Z BEGIN test seon.sci.eval-test/an-interpreted-infinite-loop-dies-at-the-limit
+bin/test: 2026-09-17T03:35:57.469711Z END test seon.sci.eval-test/an-interpreted-infinite-loop-dies-at-the-limit
+bin/test: 2026-09-17T03:35:57.473361Z BEGIN test seon.sci.eval-test/an-existing-refusal-is-not-wrapped-or-duplicated
+bin/test: 2026-09-17T03:35:57.474249Z END test seon.sci.eval-test/an-existing-refusal-is-not-wrapped-or-duplicated
+bin/test: 2026-09-17T03:35:57.474309Z BEGIN test seon.sci.eval-test/failed-evaluation-assembles-failure-presence-facts
+bin/test: 2026-09-17T03:35:57.474465Z END test seon.sci.eval-test/failed-evaluation-assembles-failure-presence-facts
+bin/test: 2026-09-17T03:35:57.474511Z BEGIN test seon.sci.eval-test/process-membership-ignores-a-thread-context-classloader
+bin/test: 2026-09-17T03:35:57.483898Z END test seon.sci.eval-test/process-membership-ignores-a-thread-context-classloader
+bin/test: 2026-09-17T03:35:57.484006Z BEGIN test seon.sci.eval-test/base-context-injections-have-program-rows
+bin/test: 2026-09-17T03:36:27.155829Z END test seon.sci.eval-test/base-context-injections-have-program-rows
+bin/test: 2026-09-17T03:36:27.155976Z BEGIN test seon.sci.eval-test/the-context-binds-only-the-graph-this-process-can-serve
+bin/test: 2026-09-17T03:36:27.157014Z END test seon.sci.eval-test/the-context-binds-only-the-graph-this-process-can-serve
+bin/test: 2026-09-17T03:36:27.157053Z BEGIN test seon.sci.eval-test/analysis-failure-exposes-scis-unresolved-symbol-as-data
+bin/test: 2026-09-17T03:36:27.168513Z END test seon.sci.eval-test/analysis-failure-exposes-scis-unresolved-symbol-as-data
+bin/test: 2026-09-17T03:36:27.168582Z BEGIN test seon.sci.eval-test/compiled-runtime-metadata-cannot-be-changed-by-agent-code
+bin/test: 2026-09-17T03:36:27.186376Z END test seon.sci.eval-test/compiled-runtime-metadata-cannot-be-changed-by-agent-code
+bin/test: 2026-09-17T03:36:27.186442Z BEGIN test seon.sci.eval-test/an-instrumented-multi-arity-miss-reads-like-clojure
+bin/test: 2026-09-17T03:36:27.240402Z END test seon.sci.eval-test/an-instrumented-multi-arity-miss-reads-like-clojure
+bin/test: 2026-09-17T03:36:27.240469Z BEGIN test seon.sci.eval-test/an-acquired-function-uses-the-current-evaluation-limit
+bin/test: 2026-09-17T03:36:29.345620Z END test seon.sci.eval-test/an-acquired-function-uses-the-current-evaluation-limit
+bin/test: 2026-09-17T03:36:29.345709Z BEGIN test seon.sci.eval-test/both-entrances-classify-one-failure-identically
+bin/test: 2026-09-17T03:36:29.482432Z END test seon.sci.eval-test/both-entrances-classify-one-failure-identically
+bin/test: 2026-09-17T03:36:29.482524Z BEGIN test seon.sci.eval-test/isolated-one-off-evaluations-do-not-share-definitions
+bin/test: 2026-09-17T03:36:29.492822Z END test seon.sci.eval-test/isolated-one-off-evaluations-do-not-share-definitions
+bin/test: 2026-09-17T03:36:29.492897Z BEGIN test seon.sci.eval-test/cluster-contexts-share-no-writable-sci-stock-vars
+bin/test: 2026-09-17T03:36:29.500809Z END test seon.sci.eval-test/cluster-contexts-share-no-writable-sci-stock-vars
+bin/test: 2026-09-17T03:36:29.500859Z BEGIN test seon.sci.eval-test/sci-fork-preserves-compiled-var-hot-reload
+bin/test: 2026-09-17T03:36:29.503842Z END test seon.sci.eval-test/sci-fork-preserves-compiled-var-hot-reload
+bin/test: 2026-09-17T03:36:29.503906Z BEGIN test seon.sci.eval-test/instrumented-generated-form-does-not-advise-an-absent-program-row
+bin/test: 2026-09-17T03:36:29.678194Z END test seon.sci.eval-test/instrumented-generated-form-does-not-advise-an-absent-program-row
+bin/test: 2026-09-17T03:36:29.678314Z BEGIN test seon.sci.eval-test/a-set-print-length-survives-to-the-turns-next-form
+bin/test: 2026-09-17T03:36:29.766589Z END test seon.sci.eval-test/a-set-print-length-survives-to-the-turns-next-form
+bin/test: 2026-09-17T03:36:29.766676Z BEGIN test seon.sci.eval-test/runtime-function-rows-carry-parsed-contract-facts
+bin/test: 2026-09-17T03:36:29.836790Z END test seon.sci.eval-test/runtime-function-rows-carry-parsed-contract-facts
+bin/test: 2026-09-17T03:36:29.836877Z BEGIN test seon.sci.eval-test/a-failed-evaluation-records-reconstructable-throwable-data
+bin/test: 2026-09-17T03:36:29.844953Z END test seon.sci.eval-test/a-failed-evaluation-records-reconstructable-throwable-data
+bin/test: 2026-09-17T03:36:29.845024Z BEGIN test seon.sci.eval-test/every-public-capability-function-in-the-graph-resolves-in-the-ctx
+bin/test: 2026-09-17T03:36:30.718189Z END test seon.sci.eval-test/every-public-capability-function-in-the-graph-resolves-in-the-ctx
+bin/test: 2026-09-17T03:36:30.718295Z BEGIN test seon.sci.eval-test/a-foreign-armed-context-is-refused-as-a-value
+bin/test: 2026-09-17T03:36:30.731586Z END test seon.sci.eval-test/a-foreign-armed-context-is-refused-as-a-value
+bin/test: 2026-09-17T03:36:30.731671Z BEGIN test seon.sci.eval-test/a-base-created-function-uses-the-invoking-threads-arm
+bin/test: 2026-09-17T03:36:31.049082Z END test seon.sci.eval-test/a-base-created-function-uses-the-invoking-threads-arm
+bin/test: 2026-09-17T03:36:31.049175Z BEGIN test seon.sci.eval-test/the-dispositions-are-callable-and-come-back-as-values
+bin/test: 2026-09-17T03:36:31.082596Z END test seon.sci.eval-test/the-dispositions-are-callable-and-come-back-as-values
+bin/test: 2026-09-17T03:36:31.082686Z BEGIN test seon.sci.eval-test/a-re-entrant-evaluation-inherits-the-governing-arm
+bin/test: 2026-09-17T03:36:31.087870Z END test seon.sci.eval-test/a-re-entrant-evaluation-inherits-the-governing-arm
+bin/test: 2026-09-17T03:36:31.087959Z BEGIN test seon.sci.eval-test/disarm-clears-the-current-threads-flag-exactly
+bin/test: 2026-09-17T03:36:31.130334Z END test seon.sci.eval-test/disarm-clears-the-current-threads-flag-exactly
+bin/test: 2026-09-17T03:36:31.130424Z BEGIN test seon.sci.eval-test/evaluation-custody-is-derived-only-from-the-cluster-context
+bin/test: 2026-09-17T03:36:34.406748Z END test seon.sci.eval-test/evaluation-custody-is-derived-only-from-the-cluster-context
+bin/test: 2026-09-17T03:36:34.406833Z BEGIN test seon.sci.eval-test/contracted-defn-renders-the-var-it-declared
+bin/test: 2026-09-17T03:36:34.414958Z END test seon.sci.eval-test/contracted-defn-renders-the-var-it-declared
+bin/test: 2026-09-17T03:36:34.415043Z BEGIN test seon.sci.eval-test/declared-row-evaluates-a-schema-once-inside-its-delta
+bin/test: 2026-09-17T03:36:34.709233Z END test seon.sci.eval-test/declared-row-evaluates-a-schema-once-inside-its-delta
+bin/test: 2026-09-17T03:36:34.709335Z BEGIN test seon.sci.eval-test/an-inherited-arm-keeps-the-governing-deadline
+bin/test: 2026-09-17T03:36:34.778643Z END test seon.sci.eval-test/an-inherited-arm-keeps-the-governing-deadline
+bin/test: 2026-09-17T03:36:34.778745Z BEGIN test seon.sci.eval-test/acquired-source-context-forks-have-branch-custody-and-private-defs
+bin/test: 2026-09-17T03:36:35.871232Z END test seon.sci.eval-test/acquired-source-context-forks-have-branch-custody-and-private-defs
+bin/test: 2026-09-17T03:36:35.871315Z BEGIN test seon.sci.eval-test/agent-owned-sci-var-metadata-remains-mutable
+bin/test: 2026-09-17T03:36:35.877307Z END test seon.sci.eval-test/agent-owned-sci-var-metadata-remains-mutable
+bin/test: 2026-09-17T03:36:35.877400Z BEGIN test seon.sci.eval-test/one-context-arms-concurrent-threads-independently
+bin/test: 2026-09-17T03:36:35.920276Z END test seon.sci.eval-test/one-context-arms-concurrent-threads-independently
+bin/test: 2026-09-17T03:36:35.920381Z BEGIN test seon.sci.eval-test/a-turn-fork-registers-an-empty-assigned-agent-namespace
+bin/test: 2026-09-17T03:36:36.879661Z END test seon.sci.eval-test/a-turn-fork-registers-an-empty-assigned-agent-namespace
+bin/test: 2026-09-17T03:36:36.879751Z BEGIN test seon.sci.eval-test/the-request-is-what-the-contract-says-it-is
+bin/test: 2026-09-17T03:36:36.881840Z END test seon.sci.eval-test/the-request-is-what-the-contract-says-it-is
+bin/test: 2026-09-17T03:36:36.881920Z BEGIN test seon.sci.eval-test/non-evaluable-agent-source-reports-its-jvm-fallback
+bin/test: 2026-09-17T03:36:38.649635Z END test seon.sci.eval-test/non-evaluable-agent-source-reports-its-jvm-fallback
+bin/test: 2026-09-17T03:36:38.649726Z BEGIN test seon.sci.eval-test/overrides-follow-current-admission-and-survive-lost-file-coordinates
+bin/test: 2026-09-17T03:36:40.276131Z END test seon.sci.eval-test/overrides-follow-current-admission-and-survive-lost-file-coordinates
+bin/test: 2026-09-17T03:36:40.276275Z BEGIN test seon.sci.eval-test/the-evaluator-remains-live-after-its-namespace-reloads
+bin/test: 2026-09-17T03:36:41.501265Z END test seon.sci.eval-test/the-evaluator-remains-live-after-its-namespace-reloads
+bin/test: 2026-09-17T03:36:41.501460Z BEGIN test seon.sci.eval-test/host-interop-is-observed-during-analysis
+bin/test: 2026-09-17T03:36:41.515499Z END test seon.sci.eval-test/host-interop-is-observed-during-analysis
+bin/test: 2026-09-17T03:36:41.515608Z BEGIN test seon.sci.eval-test/bare-dir-and-program-derived-doc-are-repl-native
+bin/test: 2026-09-17T03:36:41.639386Z END test seon.sci.eval-test/bare-dir-and-program-derived-doc-are-repl-native
+bin/test: 2026-09-17T03:36:41.639490Z BEGIN test seon.sci.eval-test/compiled-runtime-roots-cannot-be-redefined-by-agent-code
+bin/test: 2026-09-17T03:36:41.671218Z END test seon.sci.eval-test/compiled-runtime-roots-cannot-be-redefined-by-agent-code
+bin/test: 2026-09-17T03:36:41.671316Z BEGIN test seon.sci.eval-test/the-diagnostics-are-recorded-and-are-not-limits
+bin/test: 2026-09-17T03:36:41.676287Z END test seon.sci.eval-test/the-diagnostics-are-recorded-and-are-not-limits
+bin/test: 2026-09-17T03:36:41.676392Z BEGIN test seon.sci.eval-test/a-selected-render-inherits-the-live-arm-or-owns-one-when-unarmed
+bin/test: 2026-09-17T03:36:42.598916Z END test seon.sci.eval-test/a-selected-render-inherits-the-live-arm-or-owns-one-when-unarmed
+bin/test: 2026-09-17T03:36:42.599008Z BEGIN test seon.sci.eval-test/agent-contracts-apply-on-acquire-and-cold-recovery
+bin/test: 2026-09-17T03:36:45.851499Z END test seon.sci.eval-test/agent-contracts-apply-on-acquire-and-cold-recovery
+bin/test: 2026-09-17T03:36:45.851685Z BEGIN test seon.sci.eval-test/absent-program-function-is-reported-before-namespace-lookup
+bin/test: 2026-09-17T03:36:45.854657Z END test seon.sci.eval-test/absent-program-function-is-reported-before-namespace-lookup
+bin/test: 2026-09-17T03:36:45.854764Z BEGIN test seon.sci.eval-test/public-walk-is-callable-through-an-agent-sci-eval
+bin/test: 2026-09-17T03:36:47.300064Z END test seon.sci.eval-test/public-walk-is-callable-through-an-agent-sci-eval
+bin/test: 2026-09-17T03:36:47.300166Z BEGIN test seon.sci.eval-test/require-context-rows-persist-namespace-lookup-refs
+bin/test: 2026-09-17T03:36:47.305715Z END test seon.sci.eval-test/require-context-rows-persist-namespace-lookup-refs
+bin/test: 2026-09-17T03:36:47.305787Z BEGIN test seon.sci.eval-test/store-faithful-is-class-metadata-and-value-exact
+bin/test: 2026-09-17T03:36:47.307852Z END test seon.sci.eval-test/store-faithful-is-class-metadata-and-value-exact
+bin/test: 2026-09-17T03:36:47.307926Z BEGIN test seon.sci.eval-test/contract-installation-in-a-fork-leaves-the-parent-var-unchanged
+bin/test: 2026-09-17T03:36:48.752793Z END test seon.sci.eval-test/contract-installation-in-a-fork-leaves-the-parent-var-unchanged
+bin/test: 2026-09-17T03:36:48.753491Z BEGIN test seon.sci.eval-test/a-live-context-preserves-definition-value-class-and-metadata
+bin/test: 2026-09-17T03:36:48.757901Z END test seon.sci.eval-test/a-live-context-preserves-definition-value-class-and-metadata
+bin/test: 2026-09-17T03:36:48.757952Z BEGIN test seon.sci.eval-test/generated-sources-compose-fork-guard-and-admission
+bin/test: 2026-09-17T03:36:52.985240Z END test seon.sci.eval-test/generated-sources-compose-fork-guard-and-admission
+bin/test: 2026-09-17T03:36:52.985333Z BEGIN test seon.sci.eval-test/agent-print-vars-are-captured-before-sci-bindings-unwind
+bin/test: 2026-09-17T03:36:52.989131Z END test seon.sci.eval-test/agent-print-vars-are-captured-before-sci-bindings-unwind
+bin/test: 2026-09-17T03:36:52.989173Z BEGIN test seon.sci.eval-test/sci-fork-copies-existing-var-roots-on-write
+bin/test: 2026-09-17T03:36:52.992693Z END test seon.sci.eval-test/sci-fork-copies-existing-var-roots-on-write
+bin/test: 2026-09-17T03:36:52.992880Z END namespace seon.sci.eval-test
+bin/test: 2026-09-17T03:36:52.992987Z BEGIN namespace seon.cluster.agent-test
+
+Testing seon.cluster.agent-test
+bin/test: 2026-09-17T03:36:53.017897Z BEGIN test seon.cluster.agent-test/n-agent-parallel-turns-property
+bin/test: 2026-09-17T03:37:22.850952Z END test seon.cluster.agent-test/n-agent-parallel-turns-property
+bin/test: 2026-09-17T03:37:22.851036Z BEGIN test seon.cluster.agent-test/disarm-waits-for-the-turn-proc-stop-transition
+bin/test: 2026-09-17T03:37:23.186989Z END test seon.cluster.agent-test/disarm-waits-for-the-turn-proc-stop-transition
+bin/test: 2026-09-17T03:37:23.187050Z BEGIN test seon.cluster.agent-test/canonical-agent-handle-supplies-declared-producer-outputs
+bin/test: 2026-09-17T03:37:23.589865Z END test seon.cluster.agent-test/canonical-agent-handle-supplies-declared-producer-outputs
+bin/test: 2026-09-17T03:37:23.589948Z BEGIN test seon.cluster.agent-test/a-function-without-a-contract-never-enters-the-program
+bin/test: 2026-09-17T03:37:24.280326Z END test seon.cluster.agent-test/a-function-without-a-contract-never-enters-the-program
+bin/test: 2026-09-17T03:37:24.287948Z BEGIN test seon.cluster.agent-test/routing-conservation-waits-for-terminal-evidence
+bin/test: 2026-09-17T03:37:29.554412Z END test seon.cluster.agent-test/routing-conservation-waits-for-terminal-evidence
+bin/test: 2026-09-17T03:37:29.554487Z BEGIN test seon.cluster.agent-test/wake-routing-conservation-property
+bin/test: 2026-09-17T03:39:03.697105Z END test seon.cluster.agent-test/wake-routing-conservation-property
+bin/test: 2026-09-17T03:39:03.697524Z BEGIN test seon.cluster.agent-test/failed-turn-transform-keeps-a-live-backstop-after-releasing-its-permit
+bin/test: 2026-09-17T03:39:04.286881Z END test seon.cluster.agent-test/failed-turn-transform-keeps-a-live-backstop-after-releasing-its-permit
+bin/test: 2026-09-17T03:39:04.286991Z BEGIN test seon.cluster.agent-test/graph-definition-inherits-the-cluster-io-executor
+bin/test: 2026-09-17T03:39:04.757331Z END test seon.cluster.agent-test/graph-definition-inherits-the-cluster-io-executor
+bin/test: 2026-09-17T03:39:04.757430Z BEGIN test seon.cluster.agent-test/wait-closes-in-terminal-tx-test
+bin/test: 2026-09-17T03:39:08.792010Z END test seon.cluster.agent-test/wait-closes-in-terminal-tx-test
+bin/test: 2026-09-17T03:39:08.792119Z BEGIN test seon.cluster.agent-test/hot-reload-var-test
+bin/test: 2026-09-17T03:39:09.427615Z END test seon.cluster.agent-test/hot-reload-var-test
+bin/test: 2026-09-17T03:39:09.427719Z BEGIN test seon.cluster.agent-test/system-source-submission-uses-the-ordinary-durable-run
+2026-09-17T03:39:09.980396Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: starting-namespace-changed"}
+2026-09-17T03:39:10.477492Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: agent-already-running"}
+bin/test: 2026-09-17T03:39:10.478467Z END test seon.cluster.agent-test/system-source-submission-uses-the-ordinary-durable-run
+bin/test: 2026-09-17T03:39:10.478549Z BEGIN test seon.cluster.agent-test/pause-during-in-flight-call-test
+bin/test: 2026-09-17T03:39:14.281305Z END test seon.cluster.agent-test/pause-during-in-flight-call-test
+bin/test: 2026-09-17T03:39:14.281408Z BEGIN test seon.cluster.agent-test/park-wake-test
+bin/test: 2026-09-17T03:39:16.355990Z END test seon.cluster.agent-test/park-wake-test
+bin/test: 2026-09-17T03:39:16.356159Z BEGIN test seon.cluster.agent-test/prompt-refusal-closes-without-answering-and-stops-at-the-agent-bound
+
+ERROR in (prompt-refusal-closes-without-answering-and-stops-at-the-agent-bound) (agent_test.clj:271)
+Uncaught exception, not in assertion.
+expected: nil
+actual: clojure.lang.ExceptionInfo: The expected terminal database fact did not arrive.
+    at [seon.cluster.agent_test$await_database_state_BANG_ invokeStatic agent_test.clj 271]
+    at [seon.cluster.agent_test$await_database_state_BANG_ invoke agent_test.clj 256]
+    at [seon.cluster.agent_test$fn__129307$fn__129308$fn__129311 invoke agent_test.clj 593]
+    at [clojure.core$with_redefs_fn invokeStatic core.clj 7710]
+    at [clojure.core$with_redefs_fn invoke core.clj 7694]
+    at [seon.cluster.agent_test$fn__129307$fn__129308 invoke agent_test.clj 579]
+    at [seon.cluster.agent_test$with_connection$fn__128937$fn__129163 invoke agent_test.clj 163]
+    at [clojure.core$with_redefs_fn invokeStatic core.clj 7710]
+    at [clojure.core$with_redefs_fn invoke core.clj 7694]
+    at [seon.cluster.agent_test$with_connection$fn__128937 invoke agent_test.clj 158]
+    at [seon.test_support$run_database_body$fn__123951 invoke test_support.clj 946]
+    at [seon.schema$call_with_projection_state invokeStatic schema.clj 1039]
+    at [seon.schema$call_with_projection_state invoke schema.clj 1032]
+    at [clojure.lang.AFn applyToHelper AFn.java 156]
+    at [clojure.lang.AFn applyTo AFn.java 144]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [malli.core$__EQ__GT$reify$reify__3936$fn__3968 doInvoke core.cljc 2216]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$arm_var_BANG_$fn__91188$fn__91191 doInvoke instrument.clj 666]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.lang.AFunction$1 doInvoke AFunction.java 33]
+    at [clojure.lang.RestFn invoke RestFn.java 424]
+    at [seon.test_support$run_database_body invokeStatic test_support.clj 941]
+    at [seon.test_support$run_database_body invoke test_support.clj 938]
+    at [seon.test_support$with_branched_database invokeStatic test_support.clj 1013]
+    at [seon.test_support$with_branched_database invoke test_support.clj 982]
+    at [seon.test_support$with_database invokeStatic test_support.clj 1033]
+    at [seon.test_support$with_database invoke test_support.clj 1027]
+    at [seon.test_support$with_database invokeStatic test_support.clj 1029]
+bin/test: 2026-09-17T03:39:37.359274Z END test seon.cluster.agent-test/prompt-refusal-closes-without-answering-and-stops-at-the-agent-bound
+bin/test: 2026-09-17T03:39:37.359364Z BEGIN test seon.cluster.agent-test/disarm-has-a-declared-loud-turn-completion-backstop
+bin/test: 2026-09-17T03:39:39.377325Z END test seon.cluster.agent-test/disarm-has-a-declared-loud-turn-completion-backstop
+bin/test: 2026-09-17T03:39:39.377433Z BEGIN test seon.cluster.agent-test/restamp-recovery-test
+bin/test: 2026-09-17T03:39:42.693636Z END test seon.cluster.agent-test/restamp-recovery-test
+bin/test: 2026-09-17T03:39:42.693736Z BEGIN test seon.cluster.agent-test/episode-cap-refusal-test
+bin/test: 2026-09-17T03:39:44.141447Z END test seon.cluster.agent-test/episode-cap-refusal-test
+bin/test: 2026-09-17T03:39:44.141537Z BEGIN test seon.cluster.agent-test/fenced-is-the-derived-quarantine-state
+bin/test: 2026-09-17T03:39:44.464908Z END test seon.cluster.agent-test/fenced-is-the-derived-quarantine-state
+bin/test: 2026-09-17T03:39:44.465019Z BEGIN test seon.cluster.agent-test/turn-start-has-the-same-declared-loud-completion-backstop
+bin/test: 2026-09-17T03:39:44.920100Z END test seon.cluster.agent-test/turn-start-has-the-same-declared-loud-completion-backstop
+bin/test: 2026-09-17T03:39:44.920165Z BEGIN test seon.cluster.agent-test/disarm-drops-the-route-before-closing-it
+bin/test: 2026-09-17T03:39:45.290052Z END test seon.cluster.agent-test/disarm-drops-the-route-before-closing-it
+bin/test: 2026-09-17T03:39:45.290145Z BEGIN test seon.cluster.agent-test/routing-proof-rejects-an-empty-production-subject
+bin/test: 2026-09-17T03:39:46.094196Z END test seon.cluster.agent-test/routing-proof-rejects-an-empty-production-subject
+bin/test: 2026-09-17T03:39:46.094286Z BEGIN test seon.cluster.agent-test/install-gate-failure-closes-with-a-durable-diagnostic
+
+FAIL in (install-gate-failure-closes-with-a-durable-diagnostic) (agent_test.clj:1118)
+expected: (some? diagnostic)
+actual: (not (some? nil))
+
+FAIL in (install-gate-failure-closes-with-a-durable-diagnostic) (agent_test.clj:1119)
+expected: (= :seon.turn.loop/phase-failed (:seon.error/kind diagnostic))
+actual: (not (= :seon.turn.loop/phase-failed nil))
+
+FAIL in (install-gate-failure-closes-with-a-durable-diagnostic) (agent_test.clj:1121)
+a core failure does not impersonate an evaluated result
+expected: (nil? (:seon.eval/shown evaluation))
+actual: (not (nil? "{:seon.error/kind :seon.turn.loop/phase-failed, :seon.error/message \"install gate broke mid-opening\", :seon.error/data {:seon.error/id \"32195f57a3277988aa8dc58a807960792f8c96269ac6d8f75b2e6a31b78b305d\"}}"))
+bin/test: 2026-09-17T03:39:46.851191Z END test seon.cluster.agent-test/install-gate-failure-closes-with-a-durable-diagnostic
+bin/test: 2026-09-17T03:39:46.851280Z END namespace seon.cluster.agent-test
+bin/test: 2026-09-17T03:39:46.851306Z BEGIN namespace seon.sci.documentation-test
+
+Testing seon.sci.documentation-test
+bin/test: 2026-09-17T03:39:46.879501Z BEGIN test seon.sci.documentation-test/retained-context-receives-new-bare-test-referrals
+bin/test: 2026-09-17T03:39:46.961024Z END test seon.sci.documentation-test/retained-context-receives-new-bare-test-referrals
+bin/test: 2026-09-17T03:39:46.961116Z BEGIN test seon.sci.documentation-test/documentation-is-returned-data-without-a-second-printed-copy
+bin/test: 2026-09-17T03:39:47.537941Z END test seon.sci.documentation-test/documentation-is-returned-data-without-a-second-printed-copy
+bin/test: 2026-09-17T03:39:47.538028Z BEGIN test seon.sci.documentation-test/bare-test-macros-resolve-without-namespace-referrals
+bin/test: 2026-09-17T03:39:47.748950Z END test seon.sci.documentation-test/bare-test-macros-resolve-without-namespace-referrals
+bin/test: 2026-09-17T03:39:47.749029Z BEGIN test seon.sci.documentation-test/retained-context-receives-the-current-repl-macro-through-its-core-alias
+bin/test: 2026-09-17T03:39:47.774238Z END test seon.sci.documentation-test/retained-context-receives-the-current-repl-macro-through-its-core-alias
+bin/test: 2026-09-17T03:39:47.774292Z BEGIN test seon.sci.documentation-test/directory-observes-a-function-installed-after-context-acquisition
+bin/test: 2026-09-17T03:39:48.113889Z END test seon.sci.documentation-test/directory-observes-a-function-installed-after-context-acquisition
+bin/test: 2026-09-17T03:39:48.113966Z BEGIN test seon.sci.documentation-test/an-absent-declaration-is-a-typed-statement-not-an-empty-one
+bin/test: 2026-09-17T03:39:48.227610Z END test seon.sci.documentation-test/an-absent-declaration-is-a-typed-statement-not-an-empty-one
+bin/test: 2026-09-17T03:39:48.227687Z BEGIN test seon.sci.documentation-test/documentation-keeps-named-contracts-and-guarded-result-shapes
+bin/test: 2026-09-17T03:39:48.256324Z END test seon.sci.documentation-test/documentation-keeps-named-contracts-and-guarded-result-shapes
+bin/test: 2026-09-17T03:39:48.256384Z BEGIN test seon.sci.documentation-test/a-contract-mistake-carries-the-same-documentation-as-doc
+bin/test: 2026-09-17T03:39:49.935393Z END test seon.sci.documentation-test/a-contract-mistake-carries-the-same-documentation-as-doc
+bin/test: 2026-09-17T03:39:49.935474Z END namespace seon.sci.documentation-test
+
+Ran 161 tests containing 1052 assertions.
+12 failures, 1 errors.

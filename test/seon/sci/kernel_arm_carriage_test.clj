@@ -19,7 +19,7 @@
   green vacuously: the detached loop is genuinely unbounded, so only the time
   limit can end it, and the test asserts the loop reported SCI's own
   interrupt rather than any flag the test could set."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [seon.schema] [clojure.test :refer [deftest is testing]]
             [sci.core :as sci]
             [seon.sci.eval :as eval]
             [seon.sci.kernel :as kernel])
@@ -62,7 +62,7 @@
 (defn- crossing-ctx
   "A base ctx whose host surface can hand interpreted work to another thread."
   []
-  (let [ctx (eval/build-base-ctx)]
+  (let [ctx (eval/build-base-ctx (seon.schema/handed-projection))]
     (sci/add-namespace!
      ctx 'crossing
      {'await (sci/new-var 'await

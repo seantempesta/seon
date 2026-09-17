@@ -4885,6 +4885,7 @@
               (do
                 (sci.eval/install-evaluated-rows!
                  {:seon.sci.eval/ctx base-ctx
+                  :seon.sci.eval/agent-ctx ctx
                   :seon.db/db (:db-after outcome)
                   :seon.sci.eval/installations
                   (into []

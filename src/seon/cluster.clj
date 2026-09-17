@@ -2381,8 +2381,6 @@
                                  [:seon.ns/name namespace-name])))]
       (report-source-progress! (str "development reload " namespace-name))
       (require namespace-name :reload))
-    (report-source-progress! "development SCI acquisition")
-    (acquire-development! connection cluster-name ctx projection)
     (env/advance-projection! (get ctx env/state-carrier)
                              (db/basis-t database) projection)
     (report-source-progress! "development JVM instrumentation")
@@ -2403,6 +2401,10 @@
                         (not (pos? (or (:seon.instrument/instrumented result) 0)))))
            (refused! "Development JVM instrumentation did not restore contracts."
                      result)))))
+    ;; copy-var* captures the current root. Acquire after arming so copied
+    ;; core functions carry the same contracts as their loaded JVM Vars.
+    (report-source-progress! "development SCI acquisition")
+    (acquire-development! connection cluster-name ctx projection)
     (when-not (= (:seon.source/digest published)
                  (:seon.source/digest (current-source-snapshot roots)))
       (refused! "Source changed during development adoption; the next edit must converge it."
