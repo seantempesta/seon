@@ -57,14 +57,24 @@ PostToolUse now returns `:decision "block"` for syntax errors left on disk
 and for a named Clojure path that is absent afterwards without the patch
 having deleted it.
 
-## What the hook still cannot guarantee
+## The shell route, closed
 
-The hook is bound to tool names. A file written by a shell command —
-`apply_patch` from a heredoc, `python`, `sed`, `cat >` — fires no hook at
-all, before or after. AGENTS.md §5 already states this; ordinal 947 is what
-it costs. Closing it needs a decision the owner owns: widening the matcher
-to every tool and deriving the changed paths from the working tree rather
-than from the payload.
+Decided by the coordinator under the "don't wait" ruling; the owner may
+veto. The matcher is now `.*` in both `.claude/settings.json` and
+`.codex/hooks.json`, and a tool whose payload names no path has its changed
+Clojure files DERIVED — declared roots walked, content digests compared with
+this session's previously recorded digests, never a modification time. A
+syntax error blocks immediately, naming the path and the tool.
+
+A shell write is caught POST-write (the bytes land, the block fires at
+once); a tool-payload write is caught BEFORE the write. Measured cost:
+167-197 ms per non-edit tool event for the complete scan of 553 files, where
+scoping by `git status --porcelain` would have cost 2.7 s warm and 9.6 s
+cold in this tree. Evidence and the full table:
+[the landing note](../../prds/steward-platform/research/hook-passes-unlinted-paths-2026-09-17.md).
+
+Still open by design: a shell write is checked for readability, not
+published — `bin/seon init --dev default --changed PATH` remains the rule.
 
 ## Regressions
 
@@ -73,4 +83,5 @@ than from the payload.
 `pre-edit-refuses-a-patch-path-that-does-not-exist`,
 `pre-edit-blocks-a-patch-that-writes-unreadable-clojure`,
 `pre-edit-refuses-an-edit-payload-that-names-no-file`,
-`post-edit-refuses-unreadable-clojure-and-still-reports-siblings`.
+`post-edit-refuses-unreadable-clojure-and-still-reports-siblings`,
+`a-shell-write-the-hook-was-never-handed-is-derived-and-refused`.

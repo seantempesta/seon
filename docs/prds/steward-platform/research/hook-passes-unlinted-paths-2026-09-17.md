@@ -99,6 +99,69 @@ All in `bin/seon-hook`:
   disk. The refusal is now loud, which is the most a post-write check can
   honestly offer.
 
+## Closing the shell route (coordinator decision, same lane)
+
+The owner question above was decided by the coordinator under the "don't
+wait" ruling and is implemented here; the owner may veto it.
+
+`.claude/settings.json` and `.codex/hooks.json` now match `.*` — the hook
+fires on EVERY tool event. For a tool whose payload names no path, the
+changed files are DERIVED: every declared root is walked and each Clojure
+file's content digest compared with the digest recorded at this session's
+previous event (`tmp/session-digests/<session>.edn`, pruned after a day).
+Never a modification time — a write that restores an old mtime, or two
+writes inside one clock tick, are exactly the cases a digest still sees.
+The first event of a session seeds the map from the tree and reports
+nothing. A syntax error in a changed file blocks immediately, naming the
+path and the tool that wrote it. A payload-named edit folds its own paths
+into the map so the next derived scan does not re-report what the edit hook
+already checked.
+
+**When each check fires, plainly:**
+
+- A **tool-payload write** (`apply_patch`, `Edit`, `Write`) is caught
+  **before the write**: the hook builds the prospective file and refuses at
+  PreToolUse, so broken bytes never reach disk.
+- A **shell write** cannot be caught before the write — at PreToolUse the
+  bytes do not exist and no payload names the file. It is caught
+  **PostToolUse**: the bytes land, the block fires the moment the tool
+  returns, and the agent cannot proceed until it repairs them. That is the
+  most a derived check can honestly offer, and it is strictly better than
+  the silence that broke the tree.
+- A derived scan that throws blocks too. A scan that checked nothing must
+  not answer "fine" — that is the disease this lane exists to kill.
+
+**The bound, measured in this checkout on 2026-09-17.** The scan is
+complete, not scoped, because the complete scan is the cheap option here:
+
+| operation | cost |
+| --- | --- |
+| walk five roots + SHA-256 of all 553 Clojure files (9 MB), in bb | 112 ms |
+| `git ls-files` over the same roots | 21 ms |
+| **whole hook process, real roots, per non-edit event** | **167–197 ms** |
+| `git status --porcelain` (warm) | 2.7 s |
+| `git status --porcelain` (cold) | 9.6 s |
+
+Scoping by `git status` — the fallback the decision offered — is **25x more
+expensive** than scanning everything, because this working tree carries
+`tmp/` run roots and the `reference-code/` submodules. So the roots are
+declared data in `.claude/seon-hook.edn` (`:shell-writes {:roots …}`), the
+walk is a plain `file-seq` with no git subprocess and no ignore semantics to
+get wrong, and an untracked new file is covered by construction. The scan
+runs at PostToolUse only, not at both events: "the digest recorded at the
+previous event" is the same baseline for half the cost. One session's digest
+map is 57 KB.
+
+**What this costs everyone:** every tool call — a Read, a grep, a Bash —
+now pays ~170 ms of hook. That is the price of the guarantee, and it is
+stated here rather than discovered later.
+
+**Still not covered:** a shell write is checked for READABILITY, not
+published. `bin/seon init --dev default --changed PATH` after a shell source
+write remains AGENTS.md §5's rule; wiring derived writes into publication is
+a separate decision, because the queue would then carry writes from any
+command that touches the roots.
+
 ## Verification boundary
 
 `bin/test-fast seon.dev.edit-feedback-test seon.dev.hook-test` — iteration,
