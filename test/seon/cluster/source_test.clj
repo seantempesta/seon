@@ -213,7 +213,10 @@
                          (test-support/await-event!
                           first-refresh "first source refresh released"))))))))))))
 
-(deftest publication-refuses-each-missing-activation-prerequisite-before-fork
+(deftest ^{:seon.test/long
+           "Five complete publications verify every activation prerequisite."
+           :seon.test/long-ms 1200000}
+  publication-refuses-each-missing-activation-prerequisite-before-fork
   (doseq [[prerequisite missing]
           [[:schema {:seon.activation/schema-key :missing/schema}]
            [:attribute
@@ -253,7 +256,10 @@
     (is (= 10 (:seon.render.data/next-offset elision)))
     (is (< (count (:seon.error/message face)) 1000))))
 
-(deftest publication-advances-one-branch-and-retires-scratch
+(deftest ^{:seon.test/long
+           "Multiple complete publications verify branch advancement and retirement."
+           :seon.test/long-ms 600000}
+  publication-advances-one-branch-and-retires-scratch
   (with-store
     (fn [opened]
       (let [a (publish opened digest-a
@@ -534,7 +540,10 @@
                 (finally
                   (d/release connection))))))))))
 
-(deftest failed-and-stale-builds-preserve-the-published-head
+(deftest ^{:seon.test/long
+           "Three complete source publications exercise the stale branch-head decision."
+           :seon.test/long-ms 600000}
+  failed-and-stale-builds-preserve-the-published-head
   (with-store
     (fn [opened]
       (let [a (publish opened digest-a)
@@ -560,7 +569,7 @@
                   stale-result
                   (deref stale
                          (.toMillis TimeUnit/SECONDS
-                                    (* 5 test-support/event-backstop-seconds))
+                                    (* 10 test-support/event-backstop-seconds))
                          ::stale-publication-timeout)]
               (when (= ::stale-publication-timeout stale-result)
                 (future-cancel stale)

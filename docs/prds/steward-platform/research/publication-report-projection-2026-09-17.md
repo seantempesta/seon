@@ -1,6 +1,6 @@
 ---
 type: research
-status: open
+status: landed
 created: 2026-09-17
 tags: [publication, projection, seon.db]
 ---
@@ -204,3 +204,26 @@ The foreign boundary is the shared main worktree's uncommitted `src/seon/db.clj`
 edits outside this seam. Verification and edits were isolated from them in
 `tmp/publication-report-projection-followup-wt`; no other lane's file or session
 was operated.
+
+## 2026-09-17 follow-up: dependency resolved and final tally
+
+The named 30-second writer dependency was independently resolved at
+`02cb1b2b7` and refined at `a671832f1`: complete system publication now carries
+its own declared operation bound instead of inheriting the agent/turn write
+bound. A clean worktree at `a671832f1` plus this lane's timing declarations then
+completed `seon.cluster.source-test`: 18 tests, 166 assertions, 0 failures, 0
+errors. All eight publication-report regressions are green.
+
+Canonical complete publication measured 70–97 seconds in the final runs. Three
+tests whose bodies intentionally perform several complete publications now
+declare their measured liveness allowances: stale-build preservation (600,000
+ms), branch advancement and scratch retirement (600,000 ms), and the five-case
+activation-prerequisite matrix (1,200,000 ms). The stale future itself remains
+bounded and loud at ten canonical event-backstop intervals (200 seconds).
+
+The earlier required one-JVM run established that all four
+`seon.sci.kernel-arm-carriage-test` tests and all five `seon.env-test` tests are
+green after source publication; none reported a different SCI context already
+armed on the thread. The final source-only run supplies the green source tally
+after the fixture timing declarations. Cold platform proof remains the
+orchestrator's responsibility.
