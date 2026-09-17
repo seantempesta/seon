@@ -102,7 +102,7 @@ bin/test-fast --paths src/seon/fn.clj src/seon/program.cljc resources/seon/schem
 Required combined iteration:
 
 ```text
-94 tests, 647 assertions, 8 failures, 11 errors
+94 tests, 652 assertions, 4 failures, 10 errors
 ```
 
 `seon.fn-test` was green. In `seon.test-support-test`, both named regressions
@@ -117,29 +117,33 @@ before this lane in
 program-edge seam.
 
 The remaining `seon.cluster.source-test` reds are the protected foreign
-boundary owned by the stale-fixture lane. Their first lines/classes were:
+boundary in `test/seon/cluster/source_test.clj`. Their first lines/classes on
+the integrated HEAD were:
 
 - `stale-incremental-upsert-preserves-the-newer-publication`,
   `incremental-publication-does-not-change-an-existing-cluster`,
   `incremental-upsert-seals-one-activation-on-the-expected-commit`,
   `failed-and-stale-builds-preserve-the-published-head`,
   `existing-clusters-remain-on-their-chosen-source-commit`,
+  `publication-advances-one-branch-and-retires-scratch`,
   `incremental-upsert-derives-scalar-safety-from-installed-schema`, and
   `an-activation-closure-with-empty-member-collections-seals`: published
   `:seon.program/unresolved-report` missing required `:seon.db/basis-t`.
 - `incremental-first-party-publication-retains-complete-scalar-rows`:
-  stale string function identities, removed `:seon.fn/ast`, and missing
-  components.
-- `source-tombstone-provenance-does-not-prevent-live-removal`: string
-  function identity refused by the symbol schema.
-- `activation-refusal-bounds-the-operator-face`: missing required
-  `:seon.activation/schema-key`.
+  expected only `seon.id/id` but received all functions in the file; its
+  component checks still queried removed `:seon.fn/ast` and observed missing
+  namespace aliases and arities.
+- `source-tombstone-provenance-does-not-prevent-live-removal`:
+  `program-fn-row` received a Datahike connection where
+  `seon.db/carried-projection` requires an immutable database value.
 - `latest-test-evidence-survives-rebuilding-from-an-older-base`: string test
   symbols in `reach-digests` were refused. The former fabricated
   `:seon.fn/references` member refusal is gone.
-- `publication-refuses-each-missing-activation-prerequisite-before-fork`:
-  the stale fixture expected an activation-incomplete program symbol but
-  observed nil.
+
+`activation-refusal-bounds-the-operator-face` and
+`publication-refuses-each-missing-activation-prerequisite-before-fork`, which
+were red in the isolated pre-integration snapshot, were green after the
+foreign fixture commit landed.
 
 No cold gate was run; the orchestrator still owes the isolated cold and
 platform proof.
