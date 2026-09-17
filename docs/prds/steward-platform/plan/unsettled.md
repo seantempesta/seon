@@ -2471,3 +2471,21 @@ working tree, never Sonnet.
   `run-exists` at open-call → message-wake lane at resume. The two "failed
   tests" on the fresh cluster are batch 117 A's recorded declaration-
   population reds (fixed at `b5cabe732`, gate 118).
+- **Batch 117 B (HEAD b8dc9d008, 18 namespaces): 454 tests / 3,629
+  assertions / 11 F / 3 E, results recorded.** By class: (1) runner-test
+  launcher fixtures copy a HAND-MAINTAINED file list into their scratch
+  checkouts and lack `src/seon/test/bounds.clj` (guardrails item 2's new
+  namespace, required by cache.clj under bb) — `selected-paths-overlay…`,
+  `stale-dependency-cache…` (3F+1E), `interrupted-launcher…` (1E): the
+  derive-or-die class (the list was patched for selection.clj before) → the
+  guardrails lane at its resume derives the copied set from the namespace's
+  requires; (2) S3's own residue in agent_test: `install-gate-failure-closes-
+  with-a-durable-diagnostic` (3F), `prompt-refusal-closes…` (1E), and the
+  `wake-routing-conservation-property` (terminal database fact never
+  arrived at agent_test.clj:271) → S3 lane at its resume with the lines;
+  (3) `sci-evaluation-has-one-first-party-owning-namespace` names
+  `my.program/native!` → program-ops hook-arm hunk (queued lane); (4)
+  `indexed-issues-replace-facts…` → the open requery-form render issue.
+  Everything else in S3, stage 2, hook, config, db, schema, error, wake:
+  GREEN cold. **Batch 118 launched** (platform + 18 namespaces covering the
+  memo-test fix, invalid-input fix, small fixes, seam 4, guardrails item 2).
