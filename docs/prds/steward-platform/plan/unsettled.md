@@ -2689,3 +2689,17 @@ working tree, never Sonnet.
   adoption-margin, stage 2). S3 resumed for its live proof on the adopted
   default + a scratch cluster. Editing: integrator, stage 2, S3, Opus
   arity triage.
+- **Reset batch MERGE-READY on `reset-batch` (`d0352f665`, rebased on
+  `5dd6ef7cc`, force-pushed):** G5 landed (`1d9dc7c1f`: owned values
+  validated whole under the projection-carried writer budget; owners found
+  via AVET before AND after; cycles, multiple owners, missing children,
+  missing component schemas and the budget each a named refusal; the
+  identity-less-entity issue resolved); 5 ms query contract retained;
+  89/948 then 5/68 green fast. Reviewed the validator's shape: conformant
+  to the study's G5 row. **The one reset, procedure written by the
+  integrator (plan/reset-batch §"Reset procedure"): ff-merge the branch
+  from the main checkout → `bin/seon reset --force` → Juniper reseed →
+  converge checks → seven SERIAL cold gates → live proofs.** Sequencing:
+  the merge touches runner.clj/eval.clj which stage 2 and S3 are editing,
+  and the reset destroys the default S3 is probing — execute when both
+  stop for review (both are on their last items). Batch 122 pending.
