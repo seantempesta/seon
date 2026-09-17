@@ -1607,6 +1607,18 @@ AGENTS.md); items 5–7 wait for the reset; 8–9 for write-back. Open probe
 first: a predicate clause over `:seon.fn/sym` returned empty where pull
 answered.
 
+**Owner ~02:00Z:** "If an agent has updated a function and we've accepted
+it (it's passed our checks) other agents in the sci cluster should be using
+the definition in the database NOT the base system." = R4/S3, UNSTARTED
+(the note: `build-base-ctx` injects every first-party symbol by `copy-var*`
+of the JVM Var regardless of provenance; an accepted override lives in the
+base only until the base is rebuilt at adoption/refork/restart; 3 `:agent`
+rows live). Astra lane `acquisition-by-provenance-s3` (high) launched: live
+before-proof first, then acquisition by provenance per identity for every
+first-party namespace (C3), override set as a query, base diffs carry it,
+rebuilt base keeps it, `doc` states the JVM-still-runs-compiled line,
+revert restores the JVM Var.
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
