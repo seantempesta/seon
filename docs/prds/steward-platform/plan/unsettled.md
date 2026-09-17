@@ -2820,3 +2820,12 @@ working tree, never Sonnet.
   follow-up queued: `seon.instrument/violation` must re-raise
   `kernel/interrupted?` throwables instead of converting a bound firing
   into a contract sentence.
+- **Bound firings + fault evidence LANDED** (Opus: `325fd0e6b`
+  `instrument/violation` re-raises kernel interrupts unchanged — a bound
+  firing is reported as itself; `e08749712` a contract-violation fault
+  keeps the OFFENDING value at the violation's own path as
+  `:seon.instrument/actual` + `/actual-size` under the fault family's
+  bound, read from the source not its projection; 140/725/1F fast — the
+  open allocation bound). RESET NEEDED (two new attributes) — folds into
+  the one reset. **Stage 2 item 1 LANDED** (`a0c69cfd9`: admitted tests
+  resolve through the shared host and SCI owner); items 2–3 in flight.
