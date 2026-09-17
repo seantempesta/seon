@@ -327,7 +327,7 @@
                        [:or :seon.db/database-value :seon.error/value]
                        :qualified-symbol
                        [:map [::id ::id]]]
-                  :seon.turn/turn]}
+                  [:map [::id ::id]]]}
   [database operation request]
   (let [turn (current-run database (::id request))]
     (cond
