@@ -3287,3 +3287,10 @@ as orchestrator/astra lanes, easy pool as the first live-agent slice).
 - Running: `predictable-reset` (no test classpath; HEAD-exact snapshot),
   `attribute-aware-tempid-rewrite`, `transaction-report-schema`,
   `boot-load-bounds` (note), `error-entities-prd-review` (astra).
+- `boot-load-bounds` COMPLETE (`c8776fafe` `940f4b426` `dc63e6ebf` `ead80ec22`):
+  bounded publication monitor with holder/phase evidence; namespace compile
+  causes and member-level collection diagnostics preserved; canonical
+  encoding byte-identical and 9.4× faster (full projection fingerprint
+  348 ms → 37 ms over 2,877 schemas + 1,193 contracts); schema suite 27
+  tests green. Its combined-run reds (18F/16E) are the source-test family
+  the publication lane owns.
