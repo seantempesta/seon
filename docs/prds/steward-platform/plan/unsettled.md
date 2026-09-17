@@ -1542,6 +1542,18 @@ contract!` (gate-function-install already the strongest gate), and
 typed: dynamic dispatch, apply, macros, defmethod/protocol bodies, var
 quotes; argument SHAPES are never checkable (count only).
 
+**Owner ~01:10Z:** "Agents can actually rewrite functions by just
+redefining them, same with schema changes and overwriting tests. We do need
+ways to retract them that are REPL friendly. ... Everything should be able
+to be done within a repl env that the agent is controlling." Research pass
+`repl-native-retraction-and-refactoring` launched: what redefinition already
+does from the REPL (fn/schema/test, ns-unmap), the gaps (retract a schema
+key or test, rename, move, breaks/who-calls/which-tests-reach, retract an
+override), the proposal in Clojure's own names first (`ns-unmap`,
+`remove-ns`, re-evaluated `deftest`) and one `my.*` function per operation
+returning data or the refusal with the affected set; same-transaction fix
+spelled from the REPL; durable vs private; ordering.
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
