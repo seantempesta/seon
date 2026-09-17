@@ -850,6 +850,31 @@ the groundwork so S4 remains a bounded addition later, not a refactor:
 
 ---
 
+
+### S12 — REPL-native refactoring vocabulary (owner, 2026-09-16 ~01:20Z)
+
+Owner, verbatim: "Agents can actually rewrite functions by just redefining
+them, same with schema changes and overwriting tests. We do need ways to
+retract them that are REPL friendly. ... Everything should be able to be
+done within a repl env that the agent is controlling." and "we need to come
+up with a full vocab and code them up so they work perfectly with our
+system. properly rejecting problems and suggesting solutions and even
+returning refactoring plans we can just launch."
+
+Slice: the full vocabulary of program operations an agent performs from its
+REPL, in Clojure's own names where Clojure has them (`defn` re-evaluation,
+`ns-unmap`, `remove-ns`, a re-evaluated `deftest`) and one `my.*` function
+per operation Clojure does not name (rename, move, change-contract, breaks,
+who-calls, tests-reaching, revert an override). Every operation returns
+data: the changed entity, or a flat refusal carrying the affected set AND a
+refactoring plan in exactly the shape `seon.issue/start!` launches (one
+issue per affected caller or namespace, identity-deduplicated, each with the
+tests that must stay green), so the retraction applies when the plan's
+tests are green. Spec: [repl-native-retraction-and-refactoring-2026-09-16.md](../research/repl-native-retraction-and-refactoring-2026-09-16.md)
+(research running); implementation on astra after the deletion contract
+(tier 2) lands; the vocabulary rows land in AGENTS.md in the same commit as
+the functions.
+
 ## 4b. Lane rules for every slice in this document (owner, 2026-09-17)
 
 These are in addition to AGENTS.md §0–§10 and §7's launching rules.

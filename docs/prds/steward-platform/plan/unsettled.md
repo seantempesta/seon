@@ -1554,6 +1554,15 @@ override), the proposal in Clojure's own names first (`ns-unmap`,
 returning data or the refusal with the affected set; same-transaction fix
 spelled from the REPL; durable vs private; ordering.
 
+**Owner ~01:20Z:** "we need to come up with a full vocab and code them up
+so they work perfectly with our system. properly rejecting problems and
+suggesting solutions and even returning refactoring plans we can just
+launch." → PRD slice S12 written; the running research pass extended: full
+vocabulary table, every refusal carries the affected set AND a plan in the
+shape `seon.issue/start!` launches (identity-deduplicated issues with their
+tests), Malli signatures per operation. Implementation lane (astra) after
+the note and the tier-2 deletion contract.
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
