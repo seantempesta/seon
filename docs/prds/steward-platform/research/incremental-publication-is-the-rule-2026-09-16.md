@@ -231,3 +231,33 @@ hook cannot.
 - No `bin/test` gate was launched. `--platform` was not run: this lane's
   slice touches no declared platform regression, and the two remaining
   slots were held by other lanes throughout.
+
+## Batch 115 attribution — `incremental-first-party-publication-retains-complete-scalar-rows`
+
+Cold gate batch 115 reported this test red and routed it here as the last
+slice to touch that path. It is not this slice, proven in both directions
+with the same `--paths` overlay mechanism:
+
+| snapshot | source overlay | `seon.cluster.source-test` |
+|---|---|---|
+| HEAD `6a2201f29`, 23 min BEFORE `2dd9a4970` | none — one untracked Markdown note | 1 failure, 9 errors, including this exact assertion |
+| HEAD after `2dd9a4970` + `5e54c9ae1` | this lane's seven files | **18 tests, 170 assertions, 1 failure, 0 errors** — this assertion and nothing else |
+
+The nine errors between the two runs were another lane's source seal
+refusal, since repaired. This slice added nothing and removed nothing here.
+
+Reading the failing test resolved the open question in
+[the filed note](../../../seon/issues/a-sparse-program-upsert-is-now-admitted-where-the-test-expects-a-refusal.md),
+which had recorded the wrong transaction. The `refused` binding is
+`test/seon/cluster/source_test.clj:336-338`, a NEW identity
+`seon.source.test/incomplete` carrying only `:seon.fn/sym` and
+`:seon.fn/doc` — an incomplete CREATE, not the partial upsert of an existing
+row that `35c5d2fa8` deliberately admitted. That upsert is the separate,
+passing assertion at `:340`, and `:332`/`:339` do establish the existing row.
+So the expectation is not stale: the whole-entity validator's create path
+returns `nil` where `:seon.fn/fn`'s required `:seon.fn/ns` and
+`:seon.schema.admission/source` are absent — the recurring class, read from
+the write side. The note now carries that correction and names
+`src/seon/db.clj:2703-3031` as the owner. This lane did not edit
+`src/seon/db.clj`: it is outside its owned paths and another lane landed it
+hours earlier.
