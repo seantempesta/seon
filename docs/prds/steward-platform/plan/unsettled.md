@@ -2933,3 +2933,12 @@ working tree, never Sonnet.
   reset-batch integrator at its next stop (it owns the symbol retype); the
   operator-outside-the-graph finding → an issue + the publication owner
   after the reset. Design lane also reads all four audits.
+- **FROZEN-TREE CHECKPOINT for the one reset (18:40Z):** `reset-batch`
+  rebased and pushed at `5f45e486c` (on c314408c0; HEAD has two docs
+  commits beyond it — the orchestrator rebases the branch once more).
+  Stopped private-contracts, audit2-blockers, audit3-blockers (sessions
+  preserved; audit3 asked to commit or shelve its fn.clj hunk). Order: rebase
+  → `git merge --ff-only reset-batch` → message-wake's cold-worker arming
+  patch on the merged base → `bin/seon reset --force` → Juniper reseed → the
+  seven serial gates → live proofs → resume the three lanes on the new base
+  (plus the `seon.db/q` symbol-codec blocker for the integrator).
