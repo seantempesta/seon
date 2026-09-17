@@ -179,6 +179,12 @@
   (select-keys entity (into [:db/id] id-attributes)))
 
 (defn- shallow-entity
+  "Restore stored values after traversal temporarily resolves connections.
+
+  Namespace requirements are symbol observations, not refs. Traversal resolves
+  them to namespace entities, but a render value must carry the original
+  symbols or it stops matching the namespace schema and recursively renders
+  the resolved program graph through the structural floor."
   [entity ref-attributes id-attributes]
   (let [connected-attributes
         (cond-> ref-attributes
