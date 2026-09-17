@@ -157,3 +157,41 @@
         (clojure.test/is (not (contains? contract sibling)) sibling)
         (clojure.test/is (contains? contract uncontracted-fn)
                          "a declaration owning its own form is still a subject")))))
+
+(clojure.test/deftest the-contract-standard-excludes-a-var-no-author-gave-a-body
+  ;; A `deftype`/`defrecord` positional constructor and a `defprotocol` method
+  ;; signature are vars nobody wrote a body for: there is no `defn` to hang
+  ;; `:malli/schema` on and nothing for instrumentation to arm, so a missing
+  ;; contract is not a defect there. The exclusion reads clj-kondo's own
+  ;; `:seon.fn/defined-by` fact the indexer records, never the symbol's shape.
+  (seon.test-support/with-database
+    (fn [connection]
+      (seed! connection)
+      (let [source-file "src/seon/detect_fixture.clj"
+            constructor (sym-in source-ns "->Bodiless")
+            method (sym-in source-ns "bodiless-method")
+            defined (sym-in source-ns "defined-by-defn")
+            report (seon.db/transact!
+                    connection
+                    [(function-row constructor source-ns source-file
+                                   {:seon.fn/defined-by 'clojure.core/deftype
+                                    :seon.fn/form-span [30 40]})
+                     (function-row method source-ns source-file
+                                   {:seon.fn/defined-by 'clojure.core/defprotocol
+                                    :seon.fn/form-span [50 60]})
+                     (function-row defined source-ns source-file
+                                   {:seon.fn/defined-by 'clojure.core/defn
+                                    :seon.fn/form-span [70 80]})])
+            _ (clojure.test/is (nil? (:seon.error/kind report)) (pr-str report))
+            database (seon.db/db connection)
+            contract (into #{} (map :seon.fn/sym)
+                           (seon.issue.detect/public-without-contract
+                            database {:seon.fn.file/relative-root "src"}))]
+        (clojure.test/is (not (contains? contract constructor))
+                         "a deftype constructor has no body to contract")
+        (clojure.test/is (not (contains? contract method))
+                         "a defprotocol method signature has no body to contract")
+        (clojure.test/is (contains? contract defined)
+                         "a defn the author wrote is still a subject")
+        (clojure.test/is (contains? contract uncontracted-fn)
+                         "and so is a declaration with no defined-by fact")))))

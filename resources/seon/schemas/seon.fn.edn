@@ -18,6 +18,19 @@
           [:boolean
            {:description
             "Asserts clj-kondo's ::analyzer/macro fact at indexing; absent means the function is not a macro."}],
+          :defined-by
+          [:qualified-symbol
+           {:seon.db/index true
+            :description
+            "The form that interned this var, exactly as clj-kondo's analysis reports it (`clojure.core/defn`, `clojure.core/deftype`, `clojure.core/defprotocol`, a first-party `def`-ing macro).
+
+  THE FACT BEHIND \"who wrote this body\". A `deftype`/`defrecord` positional
+  constructor and a `defprotocol` method signature are vars the author never
+  gave a body to, so there is nowhere to hang a `:malli/schema` and no
+  contract to arm; without this fact they read as uncontracted public
+  functions and a detector must guess from their names. The indexer already
+  had the fact from `:seon.fn.analyzer/defined-by` — the row simply keeps
+  it, so the question is a Datalog clause."}],
           :arities [:vector #:seon.db{:component true} :seon.db/ref],
           :ast [:and #:seon.db{:component true} :seon.db/ref],
           :calls [:set :seon.db/ref],
@@ -131,6 +144,7 @@
            [:seon.fn/internal? {:optional true} :seon.fn/internal?]
            [:seon.fn/doc-order {:optional true} :seon.fn/doc-order]
            [:seon.fn/macro? {:optional true} :seon.fn/macro?]
+           [:seon.fn/defined-by {:optional true} :seon.fn/defined-by]
            [:seon.fn/spec {:optional true} :seon.fn/spec]
            [:seon.fn/calls {:optional true} :seon.fn/calls]
            [:seon.fn/destroys {:optional true} :seon.fn/destroys]

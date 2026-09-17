@@ -113,6 +113,26 @@
                    database attribute)]
     (if (:seon.error/kind rows) rows (set rows))))
 
+(def ^:private bodiless-defining-forms
+  "Clojure's own var-interning forms that write no body for the author.
+
+  A `deftype`/`defrecord` positional constructor and a `defprotocol` or
+  `definterface` method signature are vars nobody gave a body to: there is no
+  `defn` to hang `:malli/schema` on and nothing for instrumentation to arm, so
+  a missing contract is not a defect there. These are Clojure's names, read
+  from the `:seon.fn/defined-by` fact the indexer records, never a roster of
+  our own symbols."
+  #{'clojure.core/deftype 'clojure.core/defrecord
+    'clojure.core/defprotocol 'clojure.core/definterface})
+
+(defn- bodiless-symbols
+  "Declarations interned by a form that writes no body."
+  [database]
+  (let [rows (db/q '[:find [?sym ...] :in $ [?form ...] :where
+                     [?f :seon.fn/sym ?sym] [?f :seon.fn/defined-by ?form]]
+                   database (vec bodiless-defining-forms))]
+    (if (:seon.error/kind rows) rows (set rows))))
+
 (defn- declarations
   "Public source-bearing declarations as sorted `[symbol namespace-name]` rows.
 
@@ -198,9 +218,12 @@
 
   Excluded by fact, never by name: a declaration the indexer recorded as a
   macro (`:seon.fn/macro?` — a macro is handed forms, and no macro in the
-  population carries `:seon.fn/spec`), and a declaration that does not own its
+  population carries `:seon.fn/spec`), a declaration that does not own its
   defining form (several symbols sharing one `:seon.fn/form-span`, which is how
-  a `defrecord`'s constructors are interned).
+  a `defrecord`'s constructors are interned), and a declaration whose
+  `:seon.fn/defined-by` names one of Clojure's bodiless interning forms — a
+  `deftype` constructor or a `defprotocol` method signature has no body to
+  carry a contract and nothing for instrumentation to arm.
 
   The one-argument arity is the whole population, test helpers included: an
   honest over-report. Given `{:seon.fn.file/relative-root \"src\"}` it yields the
@@ -218,10 +241,13 @@
    (let [subjects (declarations database (:seon.fn.file/relative-root request))
          contracted (carrying database :seon.fn/spec)
          macros (carrying database :seon.fn/macro?)
+         bodiless (bodiless-symbols database)
          shared (shared-form-symbols database)]
-     (or (some #(when (:seon.error/kind %) %) [subjects contracted macros shared])
+     (or (some #(when (:seon.error/kind %) %)
+               [subjects contracted macros bodiless shared])
          (into []
-               (comp (remove (fn [[sym _]] (or (contracted sym) (macros sym) (shared sym))))
+               (comp (remove (fn [[sym _]] (or (contracted sym) (macros sym)
+                                               (bodiless sym) (shared sym))))
                      (map contract-subject))
                subjects)))))
 

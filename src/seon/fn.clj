@@ -650,6 +650,13 @@
                :seon.fn/private? (boolean (::analyzer/private entry))}
         (true? (:seon.fn/internal? metadata)) (assoc :seon.fn/internal? true)
         (::analyzer/macro entry) (assoc :seon.fn/macro? true)
+        ;; WHO WROTE THIS BODY IS A FACT, NOT A NAME. clj-kondo already tells
+        ;; the indexer which form interned the var; keeping it means a
+        ;; `deftype` constructor and a `defprotocol` method — vars with no
+        ;; body to carry a contract — are excluded by query instead of by
+        ;; guessing from their symbols.
+        (qualified-symbol? (::analyzer/defined-by entry))
+        (assoc :seon.fn/defined-by (::analyzer/defined-by entry))
         (:seon.fn/doc-order metadata) (assoc :seon.fn/doc-order (:seon.fn/doc-order metadata))
         (::analyzer/doc entry) (assoc :seon.fn/doc (::analyzer/doc entry))
         (:malli/schema metadata)
