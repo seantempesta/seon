@@ -1880,6 +1880,60 @@
   the same seam `index!` itself calls with the shapes it derived once."
   @#'seon.fn/reconcile-tx-in)
 
+(deftest refused-index-reads-never-become-publication-rows
+  (test-support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           refusal
+           (error/diagnostic
+            {:seon.db/invalid-read true
+             :seon.error/kind :seon.db/invalid-read
+             :seon.error/message "The program index read was refused."
+             :seon.error/diagnostic-layer :database-read
+             :seon.error/diagnostic-operation 'seon.db/q
+             :seon.error/diagnostic-member :seon.fn/sym
+             :seon.error/diagnostic-expected :seon.db/readable-database
+             :seon.error/diagnostic-offending :seon.fn/sym
+             :seon.error/diagnostic-cause :seon.db/invalid-read
+             :seon.error/diagnostic-evidence
+             {:seon.fn/index-phase :seon.fn/published-rows}})
+           row (test-support/program-fn-row
+                database 'sample.refused-index/read
+                "(defn read [] true)")
+           shapes (program/shapes-in (schema.edn/packaged-forms))
+           query db/q
+           pull db/pull
+           transact! db/transact!
+           submitted (atom [])
+           index-result
+           (with-redefs [db/q (fn [& arguments]
+                                (if (identical? database (second arguments))
+                                  refusal
+                                  (apply query arguments)))
+                         db/transact! (fn [& arguments]
+                                        (swap! submitted conj (last arguments))
+                                        (apply transact! arguments))]
+             (seon.fn/index!
+              {:seon.db/connection connection
+               :seon.source/database database
+               :seon.source/previous-database database}))
+           reconcile-result
+           (with-redefs [db/pull (fn [& arguments]
+                                   (if (identical? database (first arguments))
+                                     refusal
+                                     (apply pull arguments)))]
+             (reconcile-in shapes database [row] []))]
+       (is (= refusal index-result)
+           "the published-row query refusal is the publication result")
+       (is (= refusal reconcile-result)
+           "the exact-replacement read refusal is the reconciliation result")
+       (is (empty? @submitted)
+           "a refused publication read submits no transaction data")
+       (doseq [result [index-result reconcile-result]]
+         (is (error/error? result))
+         (is (not (vector? result))
+             "error keys are never presented as a vector of program rows"))))))
+
 (deftest incremental-tempid-rewrite-follows-the-installed-attribute-type
   (let [target-namespace 'sample.attribute-aware.target
         owner-namespace 'sample.attribute-aware.owner
