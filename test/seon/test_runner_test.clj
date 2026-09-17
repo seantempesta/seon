@@ -255,6 +255,14 @@
     (.get (.onExit (.toHandle process))
           test-support/event-backstop-seconds TimeUnit/SECONDS)))
 
+(defn- as-orchestrator
+  "Give an isolated launcher fixture its declared caller role. The lane
+  admission regression separately verifies inherited lane identity."
+  [^ProcessBuilder builder]
+  (.remove (.environment builder) "SEON_CODEX_LANE")
+  (.put (.environment builder) "SEON_TEST_ORCHESTRATOR" "1")
+  builder)
+
 (def ^:private fake-dev-cache-prologue
   (str
    "if [ \"${1-}\" = \"-T:dev-cache\" ]; then\n"
@@ -1236,6 +1244,7 @@
               ^java.util.List
               [(str (io/file checkout "bin" "test"))
                "--paths" "bin/test" "--" "seon.test-runner-test"])
+              (as-orchestrator)
               (.directory checkout)
               (.redirectErrorStream true))
             _ (.put (.environment builder)
@@ -1525,6 +1534,7 @@
               ^java.util.List
               [(str (io/file checkout "bin" "test"))
                "--paths" "bin/test" "--" "seon.test-runner-test"])
+              (as-orchestrator)
               (.directory checkout)
               (.redirectErrorStream true))
             _ (.put (.environment builder)
@@ -1553,6 +1563,7 @@
               ^java.util.List
               [(str (io/file checkout "bin" "test"))
                "--paths" "bin/test" "--" "seon.test-runner-test"])
+              (as-orchestrator)
               (.directory checkout)
               (.redirectErrorStream true))
             _ (.put (.environment builder)
@@ -1617,6 +1628,7 @@
                 ^java.util.List
                 [(str (io/file checkout "bin" "test"))
                  "--paths" "bin/test" "--" "seon.test-runner-test"])
+                (as-orchestrator)
                 (.directory checkout)
                 (.redirectErrorStream true))
               _ (.put (.environment builder)
@@ -1713,6 +1725,7 @@
               ^java.util.List
               [(str (io/file checkout "bin" "test"))
                "--paths" "bin/test" "--" "seon.fs-test"])
+              (as-orchestrator)
               (.directory checkout)
               (.redirectErrorStream true))
             environment (.environment builder)
@@ -1789,6 +1802,7 @@
                       [(str (io/file project-root "bin" "test"))
                        "--result-cluster" "evidence"
                        "--result-root" (str result-root) "seon.fs-test"])
+                      (as-orchestrator)
                       (.directory project-root)
                       (.redirectErrorStream true))
                     environment (.environment builder)]
@@ -2210,6 +2224,7 @@
       (let [process (.start (doto (ProcessBuilder. ^java.util.List
                                  ["/bin/bash" (.getPath script)
                                   (.getPath project-root) (.getPath (io/file root "checkout"))])
+                             (as-orchestrator)
                              (.redirectErrorStream true)
                              (.redirectOutput log)))]
         (reset! child process)
@@ -2228,6 +2243,85 @@
         (when-let [process @child] (stop-process-tree! process))
         (test-support/delete-recursively! root)))))
 
+
+(deftest codex-lanes-refuse-cold-gates-before-acquiring-resources
+  (let [root (doto (io/file project-root "tmp" (str "lane-gate-" (random-uuid))) .mkdirs)
+        script (io/file root "probe.sh")
+        log (io/file root "output.txt")
+        child (atom nil)]
+    (try
+      ;; The real launchers and their environment inheritance are the subject.
+      ;; Only the paid Codex executable is replaced with a child that invokes
+      ;; the real gate; no Clojure, database, or contract harness is imitated.
+      (spit script
+            (str "set -euo pipefail\n"
+                 "origin=$1\nfixture=$2\n"
+                 "unset LANE_SID\n"
+                 "mkdir -p \"$fixture/bin\" \"$fixture/.agents/skills\" \"$fixture/.claude\" \"$fixture/tmp/commands\"\n"
+                 "cd \"$fixture\"\n"
+                 "cp \"$origin/bin/codex-agent\" \"$origin/bin/test\" bin/\n"
+                 "ln -s .agents/skills seon-skills\nln -s ../.agents/skills .claude/skills\n"
+                 "cat > tmp/commands/codex <<'SH'\n"
+                 "#!/usr/bin/env bash\nset -euo pipefail\n"
+                 "test \"$SEON_CODEX_LANE\" = lane-fixture\n"
+                 "test -n \"$SEON_OPERATOR_EPHEMERAL_OWNER_PID\"\n"
+                 "case \" $* \" in *' --dangerously-bypass-hook-trust '*) ;; *) exit 1 ;; esac\n"
+                 "if [ \"${2:-}\" = resume ]; then\n"
+                 "  case \" $* \" in *\" $SEON_FIXTURE_SID \"*) ;; *) exit 1 ;; esac\n"
+                 "fi\n"
+                 "cat > tmp/received-prompt\n"
+                 "grep -F 'Lanes never run bin/test gates' tmp/received-prompt\n"
+                 "printf 'session id: %s\\n' \"$SEON_FIXTURE_SID\"\n"
+                 "printf 'session id: %s\\n' \"$SEON_FIXTURE_QUOTED_SID\"\n"
+                 "refused() {\n"
+                 "  local status=0\n"
+                 "  bin/test \"$@\" > tmp/refusal 2>&1 || status=$?\n"
+                 "  test \"$status\" = 64\n"
+                 "  grep -F 'refusing gate from Codex lane lane-fixture; use bin/test-fast --paths' tmp/refusal\n"
+                 "  test ! -e tmp/test-runs\ntest ! -e tmp/test-slots\n"
+                 "}\n"
+                 "refused\nrefused --all\nrefused --full\nrefused --platform\n"
+                 "refused --paths bin/test -- seon.db-test\n"
+                 "SEON_TEST_FULL=1 refused\nSEON_TEST_ORCHESTRATOR=1 refused\n"
+                 ;; Reaching fast-mode validation proves the shared snapshot
+                 ;; arm is admitted; the next regression runs that arm armed.
+                 "status=0\nbin/test --fast > tmp/fast 2>&1 || status=$?\n"
+                 "test \"$status\" = 64\n"
+                 "grep -F -- '--fast requires --paths FILE... -- NAMESPACE...' tmp/fast\n"
+                 "echo LANE_IDENTITY_VERIFIED\nSH\n"
+                 "chmod +x tmp/commands/codex\nexport PATH=\"$fixture/tmp/commands:$PATH\"\n"
+                 "export SEON_FIXTURE_SID=$(uuidgen | tr '[:upper:]' '[:lower:]')\n"
+                 "export SEON_FIXTURE_QUOTED_SID=$(uuidgen | tr '[:upper:]' '[:lower:]')\n"
+                 "mkdir -p tmp/orchestrator\n"
+                 "printf 'session id: %s\\n' \"$SEON_FIXTURE_QUOTED_SID\" > tmp/orchestrator/lane-fixture-stdout.log\n"
+                 "bin/codex-agent run lane-fixture 'Verify lane admission.'\n"
+                 "test \"$(cat tmp/orchestrator/lanes/lane-fixture/sid)\" = \"$SEON_FIXTURE_SID\"\n"
+                 "test ! -d tmp/orchestrator/lanes/lane-fixture/active\n"
+                 "bin/codex-agent resume lane-fixture 'Verify resumed lane admission.'\n"
+                 "test \"$(cat tmp/orchestrator/lanes/lane-fixture/sid)\" = \"$SEON_FIXTURE_SID\"\n"
+                 "rm tmp/orchestrator/lanes/lane-fixture/sid\n"
+                 "status=0\nbin/codex-agent resume lane-fixture 'No record.' > tmp/missing 2>&1 || status=$?\n"
+                 "test \"$status\" = 65\ngrep -F 'no valid session identity' tmp/missing\n"
+                 "printf 'invalid\\n' > tmp/orchestrator/lanes/lane-fixture/sid\n"
+                 "status=0\nbin/codex-agent resume lane-fixture 'Invalid record.' > tmp/invalid 2>&1 || status=$?\n"
+                 "test \"$status\" = 65\ngrep -F 'no valid session identity' tmp/invalid\n"))
+      (let [process (.start (doto (ProcessBuilder. ^java.util.List
+                                                 ["/bin/bash" (.getPath script)
+                                                  (.getPath project-root)
+                                                  (.getPath (io/file root "checkout"))])
+                             (.redirectErrorStream true)
+                             (.redirectOutput log)))]
+        (reset! child process)
+        (is (.waitFor process test-support/event-backstop-seconds TimeUnit/SECONDS)
+            "both lane launch modes must settle within the event bound")
+        (when-not (.isAlive process)
+          (let [output (slurp log)]
+            (is (zero? (.exitValue process)) output)
+            (is (= 2 (count (filter #{"LANE_IDENTITY_VERIFIED"}
+                                    (str/split-lines output)))) output))))
+      (finally
+        (when-let [process @child] (stop-process-tree! process))
+        (test-support/delete-recursively! root)))))
 
 (deftest fast-selected-paths-exclude-a-broken-foreign-file
   (let [root (doto (io/file project-root "tmp" (str "fast-paths-" (random-uuid))) .mkdirs)
@@ -2252,7 +2346,7 @@
                  "(ns seon.fast-paths-fixture-test (:require [clojure.test :refer [deftest is]] [seon.instrument :as instrument]))\n"
                  "(deftest selected-working-bytes (is (= :selected (identity :selected))) (is (seq (instrument/instrumented))))\n"
                  "CLJ\n"
-                 "SEON_TEST_RUN_PARENT=\"$fixture/tmp/test-runs\" bin/test --fast --paths test/seon/fast_paths_fixture_test.clj -- seon.fast-paths-fixture-test\n"
+                 "SEON_CODEX_LANE=fast-fixture SEON_TEST_RUN_PARENT=\"$fixture/tmp/test-runs\" bin/test-fast --paths test/seon/fast_paths_fixture_test.clj -- seon.fast-paths-fixture-test\n"
                  "test \"$(cat src/seon/repl.clj)\" = '('\n"
                  "test -z \"$(find tmp/test-runs -name 'run.*' -type d -print)\"\n"))
       (let [process (.start

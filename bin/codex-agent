@@ -14,7 +14,7 @@
 #   bin/codex-agent resume <name> [followup]
 #                                   continue a lane with full prior
 #                                   context (session id auto-read from
-#                                   the lane's log; or pass it via
+#                                   the launcher's retained record; or pass it via
 #                                   LANE_SID). Followup as argument or
 #                                   stdin.
 #   bin/codex-agent stop <name>            stop a lane's codex process,
@@ -24,6 +24,9 @@
 #   bin/codex-agent status                 running lanes + landed summaries.
 #
 # Dials (env): LANE_MODEL (gpt-6-astra), LANE_EFFORT (low — astra "light"; also medium|high|xhigh|max|ultra).
+# Codex snapshots .codex/hooks.json at process start. After changing it, the
+# orchestrator must stop and resume running lanes; editing the hook script
+# itself takes effect on its next invocation. See the verified hook reference.
 #
 # NEVER SANDBOX A LANE (owner ruling 2026-07-26). There is no sandbox dial and
 # there must not be one. A sandboxed lane cannot write its own report: a
@@ -86,10 +89,11 @@ atomic_lines() {
 clear_lane_state() {
   clear_state=$1
   rm -f "$clear_state/wrapper.pid" "$clear_state/codex.pid" \
-    "$clear_state/tee.pid" "$clear_state/monitor.pid" "$clear_state/sid" \
+    "$clear_state/tee.pid" "$clear_state/monitor.pid" \
     "$clear_state/command" "$clear_state/prompt" "$clear_state/output.fifo" \
     "$clear_state/summary.out"
-  rmdir "$clear_state" 2>/dev/null || true
+  rmdir "$clear_state/active" 2>/dev/null || true
+  # sid is the retained resume authority, not part of the live-process claim.
 }
 
 legacy_lane_holder() {
@@ -130,7 +134,7 @@ lane_holder() {
       fi
     fi
     clear_lane_state "$holder_state"
-  elif [ -d "$holder_state" ]; then
+  elif [ -d "$holder_state/active" ]; then
     echo "bin/codex-agent: lane '$1' has an incomplete ownership record" >&2
     return 2
   fi
@@ -152,7 +156,8 @@ acquire_lane() {
     holder_status=$?
     [ "$holder_status" -ne 2 ] || return 1
   fi
-  if ! mkdir "$state" 2>/dev/null; then
+  mkdir -p "$state"
+  if ! mkdir "$state/active" 2>/dev/null; then
     echo "bin/codex-agent: lane '$name' acquired concurrently; refusing second instance" >&2
     return 1
   fi
@@ -260,10 +265,27 @@ cleanup_launch() {
   exit "$cleanup_status"
 }
 
+read_launch_session() {
+  # The CLI's first header establishes identity once. Later model/tool output
+  # may quote other sessions and must never replace the launcher's record.
+  [ -f "$log" ] || return 1
+  while IFS= read -r header_line; do
+    case "$header_line" in
+      'session id: '*)
+        header_sid=${header_line#'session id: '}
+        if valid_sid "$header_sid"; then
+          printf '%s\n' "$header_sid"
+          return 0
+        fi
+        ;;
+    esac
+  done < "$log"
+  return 1
+}
+
 capture_run_session() {
   while pid_is_live "$$"; do
-    captured_sid=$(grep -o 'session id: [0-9a-f][0-9a-f-]\{7,\}' \
-      "$log" 2>/dev/null | tail -1 | cut -d' ' -f3)
+    captured_sid=$(read_launch_session || true)
     if [ -n "$captured_sid" ]; then
       atomic_lines "$state/sid" "$captured_sid"
       sid=$captured_sid
@@ -275,6 +297,10 @@ capture_run_session() {
         kill "$$" 2>/dev/null || true
       fi
       return
+    fi
+    if ! pid_is_live "$codex_pid" && ! pid_is_live "$tee_pid"; then
+      echo "bin/codex-agent: launch exited without a session identity; resume is unavailable" >&2
+      return 1
     fi
     sleep 0.05
   done
@@ -306,6 +332,9 @@ start_stream() {
   if [ "$log_mode" = append ]; then
     tee -a "$log" < "$fifo" &
   else
+    # Clear the previous launch before the monitor can inspect the log; tee
+    # may still be blocked opening the FIFO when the monitor first runs.
+    : > "$log"
     tee "$log" < "$fifo" &
   fi
   tee_pid=$!
@@ -326,12 +355,16 @@ start_stream() {
 
   if wait "$codex_pid"; then codex_status=0; else codex_status=$?; fi
   if wait "$tee_pid"; then tee_status=0; else tee_status=$?; fi
-  [ -n "${monitor_pid:-}" ] && wait "$monitor_pid" 2>/dev/null || true
+  monitor_status=0
+  if [ -n "${monitor_pid:-}" ]; then
+    wait "$monitor_pid" 2>/dev/null || monitor_status=$?
+  fi
 
   if [ -s "$summary_output" ]; then
     mv -f "$summary_output" "$summary"
   fi
   [ "$codex_status" -eq 0 ] || return "$codex_status"
+  [ "$monitor_status" -eq 0 ] || return 65
   return "$tee_status"
 }
 
@@ -362,10 +395,9 @@ case "$command" in
     monitor_pid=
 
     if [ "$command" = resume ]; then
-      sid=${LANE_SID:-$(grep -o 'session id: [0-9a-f][0-9a-f-]\{7,\}' \
-        "$log" 2>/dev/null | tail -1 | cut -d' ' -f3)}
+      sid=${LANE_SID:-$(sed -n '1p' "$lanes_dir/$name/sid" 2>/dev/null || true)}
       valid_sid "$sid" || {
-        echo "bin/codex-agent: no session id in $log; pass LANE_SID=<uuid>" >&2
+        echo "bin/codex-agent: no valid session identity in $lanes_dir/$name/sid; pass LANE_SID=<uuid>" >&2
         exit 65
       }
       if session_pid=$(session_holder "$sid"); then
@@ -382,6 +414,8 @@ case "$command" in
     trap 'exit 129' HUP
     trap 'exit 130' INT
     trap 'exit 143' TERM
+
+    echo "bin/codex-agent: hooks are snapshotted at launch; after .codex/hooks.json changes, the orchestrator must stop and resume running lanes." >&2
 
     if [ "$command" = resume ]; then
       claim_session "$sid" || exit 1
@@ -400,6 +434,7 @@ case "$command" in
         -o "$state/summary.out" \
         "$sid" --dangerously-bypass-approvals-and-sandbox -
     else
+      rm -f "$state/sid"
       if [ $# -ge 1 ]; then prompt=$1; else prompt=$(cat); fi
       [ -n "$prompt" ] || {
         echo "bin/codex-agent: empty spec" >&2

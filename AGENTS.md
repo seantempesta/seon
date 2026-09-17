@@ -28,12 +28,11 @@ exact verification boundary when reporting.
    and uses the worker's same contract arming in one JVM. With concurrent
    editors, use `bin/test-fast --paths <your files…> -- <namespaces…>`:
    it shares the gate's HEAD-plus-paths snapshot, without worker copies or
-   base publication. Plain namespaces use the working tree. **Gate a commit with
-   `bin/test --paths <your own files…> -- <namespaces…>`** — it
-   snapshots HEAD and overlays ONLY the paths you name, so no other lane's
-   in-flight edit can block you; bare `bin/test`
-   selects by `:seon.fn/calls` reach when you are alone; **plus
-   `bin/test --platform` green.** Foreign breakage is never a reason to
+   base publication. Plain namespaces use the working tree. **The orchestrator
+   gates a commit with `bin/test --paths <owned files…> -- <namespaces…>`
+   and `bin/test --platform`. Lanes use `bin/test-fast`, never cold gates.**
+   `bin/test` refuses a gate carrying `SEON_CODEX_LANE`; its shared `--fast`
+   snapshot path remains available. Foreign breakage is never a reason to
    stop unless the assignment explicitly requires it. NEVER
    `--all` or `--full` in a lane — full suites are the orchestrator's
    integration checkpoints only.
@@ -843,9 +842,12 @@ class updates both in the same commit.
 
 ### The gate and what a proof is
 
-Iterate with `bin/test-fast <namespaces…>`; gate a commit with
-`bin/test --paths <your files…> -- <namespaces…>`; run `bin/test --platform`
-before reporting. The fast loop loads the complete program and uses the
+Lanes iterate with `bin/test-fast <namespaces…>`; the orchestrator gates a
+commit with `bin/test --paths <owned files…> -- <namespaces…>` and
+`bin/test --platform`. `bin/test` refuses cold gates when `SEON_CODEX_LANE`
+names a lane, before taking a slot or creating a run root, and prints the
+`bin/test-fast --paths <your files> -- <namespaces>` replacement. An
+orchestrator flag does not override lane identity. The fast loop uses the
 worker's same contract arming in one JVM, with the canonical in-memory
 fixture base built once on demand. Plain namespaces use the working tree;
 `bin/test-fast --paths <your files…> -- <namespaces…>` reuses the gate's
@@ -857,9 +859,9 @@ create their own fixture roots. These are iteration results, not the
 isolated gate's proof.
 
 Both entry points acquire a slot through `bin/_test-slot:14` before launching
-test JVMs and release it on exit. The default is two concurrent invocations
-per source checkout, shared by its lanes; separate checkouts have separate
-slot directories. `SEON_TEST_SLOTS` sets the count and
+test JVMs and release it on exit. That shell declaration owns the default
+count per source checkout, shared by its lanes; separate checkouts have
+separate slot directories. `SEON_TEST_SLOTS` sets the count and
 `SEON_TEST_SLOT_WAIT_SECONDS` bounds the wait. A slot bounds invocations,
 not the number of worker JVMs inside one gate.
 
@@ -869,13 +871,12 @@ adds tests reaching code changed since the recorded green basis (derived
 from `:seon.fn/calls` edges, never mtimes) — deliberately widening to every
 eligible test when the basis is missing, a file was removed, or a changed
 gate input sits outside the program graph; `--all` adds every
-non-long test; explicit namespaces run complete. A lane with concurrent neighbours gates with `bin/test --paths <its own
-files…> -- <namespaces…>`, which snapshots HEAD and overlays only those paths,
-so another lane's in-flight edit never blocks it. A LANE NEVER RUNS `--all`
-OR `--full` (owner, 2026-09-08: "It's a waste of time to run the entire test
-suite for every change") — bare `bin/test` plus its subject's namespaces
-plus `--platform` is a lane's whole gate; full suites are the orchestrator's
-integration checkpoints. The runner enforces the
+non-long test; explicit namespaces run complete. A lane with concurrent
+neighbours uses `bin/test-fast --paths <its own files…> -- <namespaces…>`,
+which snapshots HEAD and overlays only those paths. A LANE NEVER RUNS
+`bin/test` gates, `--all`, OR `--full`; the orchestrator owns cold gates and
+integration checkpoints. `bin/test --fast` is the shared implementation of
+the fast snapshot, not a cold gate. The runner enforces the
 bounded-execution law: a liveness watchdog dumps coordinator AND worker
 JVMs, and the tally is total — unlaunchable or unconfirmed work is typed,
 never silent. By default, every canonical gate records the tests it ran on `:current-src`
@@ -1080,17 +1081,27 @@ has done its job.
   development cluster's prepl at once, the peer session's gate included;
   research lanes run from files, `git`, and gate logs with at most one
   read-only evaluation.
-- **A slice is not proven until its cold gate.** An in-process run
+- **The orchestrator owns the cold gate.** An in-process run
   (`seon.test/run` from the development JVM) and `bin/test-fast` are
   ITERATION: they share the worker's arming but not its isolation, retained
   run roots, platform tier, or recorded result facts. Landing evidence is
-  `bin/test --paths <your files…> -- <namespaces…>` plus `--platform`. A
-  lane that reports green from an in-process run has reported nothing.
-- **The `orchestrator-only` test mode is gone** (`fa971495f`): it refused
-  every lane invocation including `bin/test-fast`, so lanes committed
-  untested. Lanes gate their own slices; the two-slot bound
-  (`bin/_test-slot`) remains the load cap. Do not reintroduce the marker and
-  do not repeat it in a spec.
+  the orchestrator's `bin/test --paths <owned files…> -- <namespaces…>` plus
+  `--platform`. Lanes report their fast tally and the cold proof still owed.
+- **Lane identity is declared by the launcher.** `bin/codex-agent` exports
+  `SEON_CODEX_LANE=<name>` on both run and resume. `bin/test` refuses cold
+  gates with that identity and directs the lane to `bin/test-fast`; both
+  ordinary fast iteration and its shared `bin/test --fast --paths` path
+  remain admitted. Claude Agent subagents supply no launcher identity:
+  their hook payload supplies `agent_id`/`agent_type`, so the hook can
+  identify them; the shell launcher does not receive those payload fields.
+  Until hook-side admission is installed, instructions bound their gate use.
+  Do not infer
+  lane identity from a model name, worker count, or ephemeral-owner PID.
+  Codex snapshots hook configuration at process start: after changing
+  `.codex/hooks.json`, the orchestrator stops and resumes running lanes.
+  `bin/codex-agent` enables the vetted project hooks explicitly and resumes
+  from its retained `lanes/<name>/sid` record, never from quoted transcript
+  text. See [the verified reference](docs/seon/reference/codex-cli-hooks-2026-09-17.md).
 - **Resets are the recovery for schema breakage, not an event.** Eight
   resets on 2026-09-17, each under two minutes, took the store from 21 GB to
   102 MB; none lost anything a reseed did not restore. Database data is

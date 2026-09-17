@@ -7,6 +7,17 @@ tags: [issue, runtime, operator, class/n3, wave/general]
 
 # Partial hot reload leaves a live JVM running mixed old and new code
 
+## September 17 lane-guardrails observation
+
+The read-only adoption comparison on default (PID 33583 at entry) returned
+`:seon.config/missing-effective` for 68 required configuration keys through
+MCP's result projection. Publication convergence was therefore unavailable,
+not green. No default lifecycle operation or configuration write was made.
+The shell-launcher regression continued in its HEAD-plus-owned-paths test
+snapshot. This matches the observation below without establishing its cause;
+see [the guardrail landing note](../../prds/steward-platform/research/lane-guardrails-2026-09-17.md).
+
+
 ## September 15 live verification boundary, 19:45Z
 
 During the four-namespace repair, default PID 69622 answered an MCP JVM
