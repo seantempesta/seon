@@ -156,12 +156,59 @@
    structural questions about them, so a loading resolver would let an
    arbitrary namespace be required by writing its name into a schema. The
    load-time `register-core-predicate!` assertion is what makes this
-   sufficient — a predicate's owner is loaded before anything can declare
-   against it, and `clojure.core` is always loaded."
+   sufficient for a valid declaration — a predicate's owner is loaded before
+   anything can declare against it, and `clojure.core` is always loaded. The
+   one case it is NOT sufficient for is a predicate added to a namespace this
+   process already loaded, which resolves here as nothing and reaches
+   [[converged-predicate-var]] instead of refusing."
   [predicate]
   (when (qualified-symbol? predicate)
     (some-> (find-ns (symbol (namespace predicate)))
             (ns-resolve (symbol (name predicate))))))
+
+(defn- converged-predicate-var
+  "Resolve `predicate` against its SOURCE after [[loaded-predicate-var]] missed.
+
+   The JVM's var table is a MIRROR of first-party source that a publication
+   is about to re-decide, and a long-lived process holds the copy it loaded
+   at boot. A declaration naming a predicate added since then resolves to
+   nothing, so every publication is refused — including the one whose own
+   adoption would have reloaded the owner. That is the pre-read the owner
+   law forbids, and it wedged `default` on 2026-09-16 for
+   `seon.search/handle?` (filed as
+   `docs/seon/issues/a-new-core-predicate-and-its-schema-cannot-be-adopted-in-place.md`).
+
+   So the resolver converges instead of refusing: a namespace this process
+   ALREADY LOADED, whose source declares a predicate its loaded copy does not
+   have, is RELOADED — the only thing that replays its
+   `register-core-predicate!` forms, since `require` on a loaded namespace is
+   a no-op. An UNLOADED namespace is left alone and still refuses, so
+   [[loaded-predicate-var]]'s guarantee is intact where it matters: an
+   authored `[:fn ...]` naming a namespace nothing has loaded cannot make
+   this process require code (`seon.schema-test/canonical-definition-keeps-admitted-predicate-symbols`
+   asserts exactly that, and it is the stale MIRROR, not an absent one, that
+   wedged the machine).
+
+   This runs only where the alternative is the refusal itself — a predicate
+   that already resolves is never reloaded — so it can turn a wedge into a
+   success and can never change a working compile.
+
+   It deliberately remembers NOTHING. A memo of attempted convergences would
+   be exactly the process-global state named for predicates that
+   `seon.schema-test/one-predicate-symbol-cannot-name-two-environments-callables`
+   forbids, and that regression caught a first draft of this function holding
+   one. It is not needed: a successful reload makes the predicate resolve, so
+   convergence never runs for it again, and a predicate that survives its own
+   reload throws out of [[compilable-form]], ending the walk. The cost is
+   paid only in an already-broken state, by a caller that swallows the
+   refusal and keeps asking."
+  [predicate]
+  (let [namespace-name (symbol (namespace predicate))]
+    (when (find-ns namespace-name)
+      (try
+        (require namespace-name :reload)
+        (catch Throwable _ nil)))
+    (loaded-predicate-var predicate)))
 
 (defn compilable-form
   "Prepare one authored declaration for Malli compilation.
@@ -187,8 +234,11 @@
    projection carries its own callables. Anything absent from it resolves
    through [[loaded-predicate-var]], which never loads a namespace: there is
    no process-global cache to consult, so there is nothing a second
-   environment can overwrite, and examining a declaration still cannot make
-   the process require code."
+   environment can overwrite, and examining a valid declaration cannot make
+   the process require code. Only a declaration that would otherwise be
+   REFUSED reaches [[converged-predicate-var]], which loads the predicate's
+   own source rather than wedging every publication behind this JVM's stale
+   copy of it."
   {:malli/schema
    [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema.", :gen/elements [nil false 0 "" :k [] {}]}] :map] :seon.schema/value]}
   [form predicate-functions]
@@ -206,7 +256,8 @@
              bound
              (when (qualified-symbol? predicate)
                (or (get predicate-functions predicate)
-                   (loaded-predicate-var predicate)))]
+                   (loaded-predicate-var predicate)
+                   (converged-predicate-var predicate)))]
          (cond
            (and (ifn? predicate)
                 (not (or (symbol? predicate)
@@ -222,10 +273,17 @@
             (ex-info
              (str "Predicate " (pr-str predicate)
                   " has no admitted callable in the corpus projection.")
-             {:seon.schema/error :seon.schema/unresolved-predicate
-              :seon.schema/unresolved-predicate predicate
-              :seon.schema/predicate predicate
-              :seon.error/kind :user-input}))))
+             (cond-> {:seon.schema/error :seon.schema/unresolved-predicate
+                      :seon.schema/unresolved-predicate predicate
+                      :seon.schema/predicate predicate
+                      :seon.error/kind :user-input}
+               ;; Name the namespace that must define it: after
+               ;; `converged-predicate-var` has loaded and reloaded that
+               ;; source, an unresolved predicate is a declaration naming a
+               ;; definition its own source does not have.
+               (qualified-symbol? predicate)
+               (assoc :seon.schema/predicate-namespace
+                      (symbol (namespace predicate))))))))
 
        :else value))
    (form/widen-component-children form)))

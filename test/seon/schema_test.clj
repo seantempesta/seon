@@ -967,3 +967,67 @@
                  @connection))
            "the derivation has callers: an empty answer would be the check
             reporting health from an absent subject")))))
+
+;;; ---------------------------------------------------------------------------
+;;; A declaration is compiled against its predicate's SOURCE
+;;; ---------------------------------------------------------------------------
+
+(deftest a-declaration-compiles-against-a-predicate-its-loaded-owner-lacks
+  ;; CLASS: a long-lived JVM holds the copy of a namespace it loaded at boot.
+  ;; A source edit that adds a predicate AND the schema resource declaring it
+  ;; lands on disk together, but the publication that would adopt the edit
+  ;; compiles the resource BEFORE its adoption reloads the owner — so the
+  ;; predicate resolves to nothing and EVERY publication and adoption in that
+  ;; process is refused, including the one that would have fixed it. Measured
+  ;; 2026-09-16 on `default` for `seon.search/handle?`, which wedged every
+  ;; agent (`logs/current-source-failure.log`); filed as
+  ;; `docs/seon/issues/a-new-core-predicate-and-its-schema-cannot-be-adopted-in-place.md`.
+  ;;
+  ;; The wedge is a pre-read the authority re-decides: the var table is a
+  ;; MIRROR of the source the publication is about to publish. Compilation
+  ;; therefore converges on the source instead of refusing to it.
+  (require 'seon.schema.predicate-owner-probe)
+  (let [owner 'seon.schema.predicate-owner-probe
+        predicate 'seon.schema.predicate-owner-probe/probe-handle?
+        form [:fn {:error/message "must be the probe handle"} predicate]
+        compiled #(schema/compilable-form form {})]
+    (is (var? (get (compiled) 2))
+        "a loaded owner supplies its predicate Var without any convergence")
+    (testing "a loaded owner whose copy lacks the declared predicate"
+      ;; Exactly the live state: the namespace IS loaded, so `require` is a
+      ;; no-op, and only a reload replays its registration forms.
+      (ns-unmap (find-ns owner) 'probe-handle?)
+      (is (nil? (ns-resolve (find-ns owner) 'probe-handle?))
+          "the probe reproduces the stale-owner state before compiling")
+      (require owner)
+      (is (nil? (ns-resolve (find-ns owner) 'probe-handle?))
+          "and a plain require cannot leave it — this is why it wedged")
+      (let [bound (get (compiled) 2)]
+        (is (var? bound)
+            "compilation converges on the predicate's source rather than
+             refusing the declaration")
+        (is (true? (bound :seon.schema.predicate-owner-probe/handle)))
+        (is (false? (bound :something-else)))
+        (is (some? (ns-resolve (find-ns owner) 'probe-handle?))
+            "and the owner is left loaded from its own source")))
+    (testing "an unloaded namespace is still never loaded — the stale MIRROR
+              is the case, and `canonical-definition-keeps-admitted-predicate-symbols`
+              owns the guarantee this must not weaken"
+      (is (nil? (find-ns 'seon.schema-test.no-such-probe)))
+      (is (instance? clojure.lang.ExceptionInfo
+                     (refusal
+                      #(schema/compilable-form
+                        [:fn 'seon.schema-test.no-such-probe/probe-predicate?]
+                        {}))))
+      (is (nil? (find-ns 'seon.schema-test.no-such-probe))
+          "compilation did not require an unloaded predicate namespace"))
+    (testing "a predicate its source genuinely does not define still refuses,
+              naming both the predicate and the namespace that must define it"
+      (let [absent 'seon.schema.predicate-owner-probe/never-declared?
+            refused (refusal
+                     #(schema/compilable-form [:fn absent] {}))
+            data (ex-data refused)]
+        (is (= :seon.schema/unresolved-predicate (:seon.schema/error data)))
+        (is (= absent (:seon.schema/unresolved-predicate data)))
+        (is (= 'seon.schema.predicate-owner-probe
+               (:seon.schema/predicate-namespace data)))))))
