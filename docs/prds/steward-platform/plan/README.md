@@ -57,7 +57,13 @@ boot, cluster, store, runner or the indexer; `steward-platform` merges to
 `main` at each green platform checkpoint; a lane that meets a held file
 stops at that item and continues with the rest (per item, not per lane);
 sol at capacity falls back to astra low (owner, 19:55Z); every lane spec cites
-the triage note's row and carries raw evidence, never an attribution.
+the triage note's row and carries raw evidence, never an attribution;
+**a reset or start of `default` runs only on a tree with no uncommitted
+`src/`/`test/` edits** — boot loads the working tree, and on 2026-09-17
+20:25Z a lane's half-written shell edit to `test/seon/test_support_test.clj`
+(an unrequired alias) refused the reset's start phase, so the orchestrator
+checks `git status --short -- src test` and waits for lanes to commit or
+stops them before the command.
 
 **Tracks** (serial inside a track, parallel across tracks; file ownership is
 the scheduling constraint, named per lane):
