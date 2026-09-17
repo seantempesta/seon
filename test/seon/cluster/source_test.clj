@@ -361,15 +361,31 @@
                                        (/ (- (System/nanoTime) started) 1e6))
                               result)
                   database-before (source/database opened (:seon.source/commit-id published))
-                  selector [:seon.ns/aliases :seon.ns/imports :seon.ns/refers
-                            :seon.fn/arities :seon.fn/ast]
-                  identities [[:seon.ns/name 'seon.id] [:seon.fn/sym "seon.id/id"]]
+                  selector [{:seon.ns/aliases [:seon.ns.alias/local
+                                               :seon.ns.alias/target-ns]}
+                            {:seon.ns/imports [:seon.ns.import/local
+                                               :seon.ns.import/target-class]}
+                            {:seon.fn/arities [:seon.fn.arity/order
+                                               :seon.fn.arity/input-schema
+                                               :seon.fn.arity/return-schema]}]
+                  expected-function-symbols
+                  #{'seon.id/sha-256 'seon.id/id 'seon.id/digest
+                    'seon.id/symbol-in 'seon.id/evaluation 'seon.id/valid?}
+                  identities [[:seon.ns/name 'seon.id] [:seon.fn/sym 'seon.id/id]]
                   components #(mapv (fn [program-identity]
                                       (db/pull % selector program-identity)) identities)
                   published-after (upsert opened (:seon.source/commit-id published)
                                           digest-b rows)
                   database-after (source/database opened (:seon.source/commit-id published-after))]
-              (is (seq (:seon.ns/aliases (first (components database-before)))))
+              (is (= expected-function-symbols
+                     (set (db/q '[:find [?symbol ...]
+                                  :where [?function :seon.fn/sym ?symbol]
+                                         [?function :seon.fn/ns ?namespace]
+                                         [?namespace :seon.ns/name seon.id]]
+                                database-before))))
+              (is (= #{'str}
+                     (set (map :seon.ns.alias/local
+                               (:seon.ns/aliases (first (components database-before)))))))
               (is (seq (:seon.fn/arities (second (components database-before)))))
               (is (= (:seon.source/commit-id published-after)
                      (:seon.source/commit-id (source/current opened))))
@@ -520,7 +536,7 @@
         (test-support/transacted! connection
                                   [{:seon.ns/name 'source-deletion-probe}
                                    (test-support/program-fn-row
-                                    connection function-symbol
+                                    (db/db connection) function-symbol
                                     "(ns source-deletion-probe) (defn value [] 1)")])
         (sci/eval-string* ctx "(ns source-deletion-probe) (defn value [] 1)")
         (is (= 1 (sci/eval-string* ctx "(source-deletion-probe/value)")))
@@ -543,7 +559,7 @@
             first-publication (publish opened digest-a population
                                        {:seon.fn/manifest manifest})
             first-db (source/database opened (:seon.source/commit-id first-publication))
-            test-symbol "seon.id-test/data-shape-and-explicit-length-determine-identity"
+            test-symbol 'seon.id-test/data-shape-and-explicit-length-determine-identity
             run (assoc (runner/provenance first-db)
                        :seon.test.run/git-sha (apply str (repeat 40 "a")))
             completion {:seon.test/reach-digests (runner/reach-digests first-db [test-symbol])

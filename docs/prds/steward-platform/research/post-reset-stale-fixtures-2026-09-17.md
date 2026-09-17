@@ -64,3 +64,37 @@ foreign canonical-base boundary owned by `fabricated-symbol-edges`, whose
 `src/seon/fn.clj` repair is explicitly outside this lane.
 
 Remaining red: `seon.cluster.source-test/stale-incremental-upsert-preserves-the-newer-publication` first reports `seon.cluster.source/publish! refused return value at [:seon.program/unresolved-report :seon.db/basis-t]`; its source return shape is outside the stale-fixture changes above. The cold platform proof remains owed to the orchestrator.
+
+## 2026-09-17 — post-edge-fixture follow-up
+
+After `fabricated-symbol-edges` landed (`edd212afc`, `2a30b98b8`,
+`ec13ec814`), the source fixture no longer assumes a single function row for
+`seon.id`. `incremental-first-party-publication-retains-complete-scalar-rows`
+now positively asserts the six declarations in `src/seon/id.clj`, the `str`
+namespace alias, and canonical `:seon.fn/arities` components with their input
+and return schema refs (`test/seon/cluster/source_test.clj:361-393`; schema
+ownership: `resources/seon/schemas/seon.fn.edn:27` and
+`resources/seon/schemas/seon.fn.arity.edn:15-40`). It no longer queries the
+deleted `:seon.fn/ast` family.
+
+`source-tombstone-provenance-does-not-prevent-live-removal` now hands
+`program-fn-row` `(db/db connection)`, the immutable database value its
+carried-projection read requires (`test/seon/cluster/source_test.clj:536-542`).
+`latest-test-evidence-survives-rebuilding-from-an-older-base` now uses the
+qualified test symbol in `reach-digests` and every test identity lookup
+(`test/seon/cluster/source_test.clj:559-604`).
+
+The requested source-only fast invocation started, acquired its projection,
+but did not reach a test after more than its 290-second bound. Two JVM stacks
+placed its main thread in repeated `seon.schema/canonical-value-string`
+work during test setup, so the exact runner was terminated. Therefore this
+turn has no honest post-edit test tally. The eight known foreign publication
+reds remain separately classified: `stale-incremental-upsert-preserves-the-newer-publication`,
+`incremental-publication-does-not-change-an-existing-cluster`,
+`incremental-upsert-seals-one-activation-on-the-expected-commit`,
+`failed-and-stale-builds-preserve-the-published-head`,
+`existing-clusters-remain-on-their-chosen-source-commit`,
+`publication-advances-one-branch-and-retires-scratch`,
+`incremental-upsert-derives-scalar-safety-from-installed-schema`, and
+`an-activation-closure-with-empty-member-collections-seals`; each first
+reports `:seon.program/unresolved-report` missing `:seon.db/basis-t`.
