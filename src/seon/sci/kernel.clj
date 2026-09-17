@@ -214,6 +214,11 @@
   [ctx]
   (let [allocated-at-start (allocated-bytes)]
     {::ctx ctx
+     ::arm-token (Object.)
+     ::armed-at (->> (.getStackTrace (Thread/currentThread))
+                     (drop 2)
+                     (take 12)
+                     (mapv str))
      ::entries (AtomicLong. 0)
      ::sampled (long-array 1)
      ::host-interop-observations (AtomicLong. 0)
@@ -273,6 +278,48 @@
   [armed ctx]
   (identical? (:env (::ctx armed)) (:env ctx)))
 
+(defn- context-evidence
+  [ctx]
+  {::context-id (System/identityHashCode ctx)
+   ::interpreter-id (System/identityHashCode (:env ctx))})
+
+(defn- arm-evidence
+  [armed]
+  (merge {::arm-id (System/identityHashCode (::arm-token armed))
+          ::owner-thread-id (::owner-thread-id armed)
+          ::armed-at (::armed-at armed)}
+         (context-evidence (::ctx armed))))
+
+(defn- acquire-arm
+  [ctx time-limit-ms]
+  (let [guard (::guard ctx)]
+    (when-not guard
+      (throw
+       (ex-info "SCI context has no stable interrupt guard."
+                {:seon.error/kind ::missing-interrupt-guard
+                 ::missing-interrupt-guard true})))
+    (if-let [armed (current-thread-arm guard)]
+      (do
+        (when-not (same-interpreter? armed ctx)
+          (let [existing (arm-evidence armed)
+                requested (context-evidence ctx)]
+            (throw
+             (ex-info
+              (str "A different SCI context is already armed on this thread. "
+                   "Existing arm " (::arm-id existing)
+                   " for interpreter " (::interpreter-id existing)
+                   " was armed at " (first (::armed-at existing))
+                   "; requested interpreter " (::interpreter-id requested) ".")
+              {:seon.error/kind ::already-armed
+               ::already-armed true
+               ::existing-arm existing
+               ::requested-context requested}))))
+        {:interrupt-fn (::interrupt-fn guard)
+         ::built-in-calls (fn [] @(::built-in-calls armed))
+         ::stop! (constantly nil)
+         ::record #(record armed %)})
+      (own-arm ctx guard time-limit-ms))))
+
 (defn arm
   "Arm `ctx` on this thread and return its stop, record, and observers.
 
@@ -298,22 +345,32 @@
                        :seon.sci.eval/time-limit-ms]
                   :map]}
   [ctx time-limit-ms]
-  (let [guard (::guard ctx)]
-    (when-not guard
-      (throw
-       (ex-info "SCI context has no stable interrupt guard."
-                {:seon.error/kind ::missing-interrupt-guard :seon.sci.kernel/missing-interrupt-guard true})))
-    (if-let [armed (current-thread-arm guard)]
-      (do
-        (when-not (same-interpreter? armed ctx)
-          (throw
-           (ex-info "A different SCI context is already armed on this thread."
-                    {:seon.error/kind ::already-armed :seon.sci.kernel/already-armed true})))
-        {:interrupt-fn (::interrupt-fn guard)
-         ::built-in-calls (fn [] @(::built-in-calls armed))
-         ::stop! (constantly nil)
-         ::record #(record armed %)})
-      (own-arm ctx guard time-limit-ms))))
+  (acquire-arm ctx time-limit-ms))
+
+(defn with-arm
+  "Run `work` under one arm and release it on every exit path.
+
+  Acquisition happens inside this function's instrumented boundary and the
+  arm is released before output validation can run. This closes the gap where
+  an instrumented `arm` call could install thread state and then fail while
+  validating its returned map, before the caller had received `stop!`.
+  `work` receives the acquired arm so it can read the diagnostic record and
+  built-in observations. Nested work in the same interpreter inherits the
+  governing arm and its inert stop remains safe."
+  {:malli/schema
+   [:=> [:cat :seon.sci.eval/ctx
+         :seon.sci.eval/time-limit-ms
+         [:fn clojure.core/ifn?]]
+    [:any {:seon.schema.admission/exemption
+           :seon.schema.admission/polymorphic-boundary
+           :seon.schema.admission/reason
+           "The caller's body determines its return type; with-arm preserves that exact result."}]]}
+  [ctx time-limit-ms work]
+  (let [armed (acquire-arm ctx time-limit-ms)]
+    (try
+      (work armed)
+      (finally
+        ((::stop! armed))))))
 
 (defn arm?
   "True for a live arm value as handed out by `current-arm`."
@@ -555,11 +612,12 @@
   (let [started-at (System/nanoTime)
         arm-state (volatile! nil)]
     (try
-      (let [{:keys [interrupt-fn] record-fn ::record :as armed}
-            (arm ctx time-limit-ms)]
-        (vreset! arm-state armed)
-        (ensure-function! ctx database function-symbol)
-        (binding [db/*conn*
+      (with-arm
+       ctx time-limit-ms
+       (fn [{:keys [interrupt-fn] record-fn ::record :as armed}]
+         (vreset! arm-state armed)
+         (ensure-function! ctx database function-symbol)
+         (binding [db/*conn*
                   (get-in ctx
                           [:seon.sci.eval/custody
                            :seon.db/connection])
@@ -595,7 +653,7 @@
                  :seon.config/on-core-error on-core-error
                  :seon.sci.admit/record invocation-record}
                  unbounded?
-                 (assoc :seon.sci.admit/unbounded? true)))))))
+                 (assoc :seon.sci.admit/unbounded? true))))))))
       (catch Throwable throwable
         (let [record-value
               (if-let [record-fn (::record @arm-state)]
@@ -626,7 +684,4 @@
                 :seon.error/data
                 {:seon.sci.eval/throwable
                  (.getName (class admission-failure))} :seon.sci.kernel/failure-admission-failed true}
-               :seon.sci.admit/record record-value}))))
-      (finally
-        (when-let [stop! (::stop! @arm-state)]
-          (try (stop!) (catch Throwable _ nil)))))))
+               :seon.sci.admit/record record-value})))))))

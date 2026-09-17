@@ -2544,7 +2544,7 @@
      that same custody when run and form identities are present;
   2. use the SUPPLIED live cluster ctx, or make a fresh guarded base for
      an isolated one-off when none was given;
-  3. arm through `kernel/arm` with `::time-limit-ms`, the ONLY limit —
+  3. arm through `kernel/with-arm` with `::time-limit-ms`, the ONLY limit —
      or INHERIT this context's active arm when one already governs this
      thread, so nested work never restarts the clock;
   4. consume THE ONE reader event; source is never reparsed;
@@ -2613,7 +2613,7 @@
                              (env/environment-state turn-environment)))
           base-evaluation-ctx)
         ;; ARMING HAPPENS INSIDE THE BOUNDARY, and these reach it through
-        ;; one volatile. `kernel/arm` refuses a DIFFERENT context already
+        ;; one volatile. `kernel/with-arm` refuses a DIFFERENT context already
         ;; armed on this thread, and a refusal at an agent-facing operation
         ;; is a VALUE like every other failure here — binding the arm before
         ;; the try would let that refusal escape as a throw and contradict
@@ -2631,9 +2631,6 @@
                          (if-let [observed (::kernel/built-in-calls @arm-state)]
                            (observed)
                            #{}))
-        stop! (fn []
-                (when-let [disarm (::kernel/stop! @arm-state)]
-                  (disarm)))
         printed (java.io.StringWriter.)
         ;; A turn's fork carries the session's print options; a host caller
         ;; that forked nothing gets a carrier of its own for its own forms.
@@ -2696,9 +2693,12 @@
                           ;; later failure in the JVM.
                           :seon.sci.eval/projection-state projection-state
                           :seon.effect/counter (atom -1)})}
-      (try
-        (let [_ (vreset! arm-state (kernel/arm evaluation-ctx time-limit-ms))
-            before-reader-context
+      (kernel/with-arm
+       evaluation-ctx time-limit-ms
+       (fn [armed]
+        (vreset! arm-state armed)
+        (try
+          (let [before-reader-context
             (reader-context evaluation-ctx namespace-name)
             event (or (:seon.sci.eval/event request)
                       (one-event
@@ -2893,8 +2893,7 @@
              (= :time (:seon.eval/outcome record))
              (assoc :seon.cluster.eval/interrupted-at
                     (java.util.Date.))))))
-        (finally
-          (stop!))))))))
+          ))))))))
 
 (defn fork-candidate-ctx
   "Fork one candidate through the generation-aware turn path.
@@ -3003,10 +3002,10 @@
     [:or :seon.test.runner/captured-results :seon.test/not-runnable-error]]}
   [{ctx :seon.sci.eval/ctx test-vars :seon.test/vars
     limit :seon.sci.eval/time-limit-ms :as request}]
-  (let [armed (kernel/arm ctx limit)]
-    (try
-      (test.runner/run-vars! test-vars request)
-      (finally ((::kernel/stop! armed))))))
+  (kernel/with-arm
+   ctx limit
+   (fn [_]
+     (test.runner/run-vars! test-vars request))))
 
 (defn run-test
   "Invoke one Var through the selected-Var capture owner under the SCI bound."

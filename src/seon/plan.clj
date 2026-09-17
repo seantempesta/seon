@@ -663,9 +663,9 @@
                                                  {:seon.test/sym test-symbol})))
                                (if (var? test-var)
                                  ((:test metadata))
-                                 (let [armed (sci.kernel/arm ctx remaining)]
-                                   (try ((:test metadata))
-                                        (finally ((:seon.sci.kernel/stop! armed))))))))))]
+                                 (sci.kernel/with-arm
+                                  ctx remaining
+                                  (fn [_] ((:test metadata)))))))))]
                     (seon.test/run
                      runnable connection
                      {:seon.db/db database

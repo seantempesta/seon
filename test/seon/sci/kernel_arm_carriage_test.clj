@@ -21,6 +21,7 @@
   interrupt rather than any flag the test could set."
   (:require [seon.schema] [clojure.test :refer [deftest is testing]]
             [sci.core :as sci]
+            [sci.interrupt :as interrupt]
             [seon.sci.eval :as eval]
             [seon.sci.kernel :as kernel])
   (:import [java.util.concurrent Callable ExecutorService Executors Future
@@ -90,17 +91,68 @@
 (defn- armed
   "Arm `ctx`, run `body`, and return `[outcome diagnostic-record]`."
   [ctx time-limit-ms body]
-  (let [arm (kernel/arm ctx time-limit-ms)
-        outcome (try {::value (body)}
-                     (catch Throwable failure
-                       {::interrupted? (kernel/interrupted? failure)}))
-        record ((:seon.sci.kernel/record arm) :ok)]
-    ((:seon.sci.kernel/stop! arm))
-    [outcome record]))
+  (kernel/with-arm
+   ctx time-limit-ms
+   (fn [arm]
+     (let [outcome (try {::value (body)}
+                        (catch Throwable failure
+                          {::interrupted? (kernel/interrupted? failure)}))
+           record ((:seon.sci.kernel/record arm) :ok)]
+       [outcome record]))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The regression
 ;;; ---------------------------------------------------------------------------
+
+(deftest every-evaluation-exit-releases-the-thread-arm
+  (let [next-arm-succeeds
+        (fn []
+          (is (= :next
+                 (kernel/with-arm
+                  (crossing-ctx) 1000 (fn [_] :next)))
+              "a different ctx can arm immediately on the same worker thread"))]
+    (testing "ordinary evaluation failure"
+      (let [ctx (crossing-ctx)
+            [outcome _]
+            (armed ctx 1000
+                   #(sci/eval-form ctx '(throw (ex-info "boom" {}))))]
+        (is (false? (::interrupted? outcome))))
+      (next-arm-succeeds))
+
+    (testing "explicit SCI interrupt"
+      (let [[outcome _]
+            (armed (crossing-ctx) 1000 interrupt/interrupt!)]
+        (is (true? (::interrupted? outcome))))
+      (next-arm-succeeds))
+
+    (testing "time-limit"
+      (let [ctx (crossing-ctx)
+            [outcome record]
+            (armed ctx 1 #(sci/eval-form ctx (list unbounded)))]
+        (is (true? (::interrupted? outcome)))
+        (is (= :time (:seon.eval/outcome record))))
+      (next-arm-succeeds))))
+
+(deftest a-foreign-arm-refusal-identifies-the-existing-arm-and-site
+  (let [ctx (crossing-ctx)
+        arm (kernel/arm ctx 1000)]
+    (try
+      (let [failure (try
+                      (kernel/arm (crossing-ctx) 1000)
+                      (catch Throwable throwable throwable))
+            data (ex-data failure)]
+        (is (= :seon.sci.kernel/already-armed (:seon.error/kind data)))
+        (is (int? (get-in data
+                          [:seon.sci.kernel/existing-arm
+                           :seon.sci.kernel/arm-id])))
+        (is (seq (get-in data
+                         [:seon.sci.kernel/existing-arm
+                          :seon.sci.kernel/armed-at])))
+        (is (int? (get-in data
+                          [:seon.sci.kernel/requested-context
+                           :seon.sci.kernel/interpreter-id]))))
+      (finally
+        ((:seon.sci.kernel/stop! arm))))))
 
 (deftest entrances-on-another-thread-reach-the-governing-arm
   (let [ctx (crossing-ctx)]
