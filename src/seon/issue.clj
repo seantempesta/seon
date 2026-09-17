@@ -445,6 +445,17 @@
   [reason message]
   (throw (ex-info message {:seon.error/kind reason :seon.error/message message})))
 
+(defn subject-id
+  "The detected issue identity shared by generation and a prospective plan.
+
+  The detector and the subject's installed identity value determine it;
+  entity ids, titles and the proposed retraction do not participate."
+  {:malli/schema
+   [:=> [:cat :qualified-symbol
+         [:tuple :qualified-keyword :seon.schema/value]] :seon.issue/id]}
+  [detector [attribute value]]
+  (id/id (into (sorted-map) {:seon.issue/detector detector attribute value})))
+
 (defn- subject-row
   "The facts one detector subject asserts, on the identity the detector gives it.
   The identity is the detector plus the subject's own identity value, so two
@@ -466,8 +477,7 @@
                    (refuse! :seon.issue/subject-absent
                             (str "No entity holds " attribute " " (pr-str value) ".")))
         cited (into #{} (keep namespaces) (:seon.issue/namespaces subject))]
-    (cond-> {:seon.issue/id (id/id (into (sorted-map)
-                                         {:seon.issue/detector (symbol detector) attribute value}))
+    (cond-> {:seon.issue/id (subject-id (symbol detector) [attribute value])
              :seon.issue/detector program
              :seon.issue/severity severity
              :seon.issue/status :open

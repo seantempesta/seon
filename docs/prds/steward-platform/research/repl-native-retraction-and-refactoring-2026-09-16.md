@@ -926,6 +926,15 @@ the correct outcome (deletion-semantics §2.6 row (b)).
   encoding boundary in `seon.db/q` or the query is wrong; it is one probe and it
   must be settled before any implementation writes a predicate-filtered
   program-graph query. Reported as a boundary, not as a finding about the data.
+  **Settled by the canonical fixture, 2026-09-17 00:37Z:** the query is
+  wrong. Predicate arguments are not recursively evaluated: `(str ?s)` is
+  passed as a list, and Datahike treats the resulting type exception as a
+  false predicate. `[(str ?s) ?text]` followed by
+  `[(clojure.string/starts-with? ?text "my.")]` returns 58 declarations,
+  exactly the direct-string predicate's set, including the pulled
+  `my.note/forget!`. The nested form returns `[]`. Regression:
+  `test/my/program_query_test.clj`; source and result evidence:
+  [repl-program-operations-2026-09-16.md](repl-program-operations-2026-09-16.md).
 - **Argument shapes are not checkable** (C3b), and nothing here promises they
   are. The reachable guarantee for a contract change is the test gate.
 - **Protocol and multimethod implementations have no row** (C13), so every

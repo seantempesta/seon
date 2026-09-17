@@ -80,4 +80,119 @@
         :seon.render/html seon.error/render-html
         :error/message "must mark a program declaration refused by canonical admission"}
   [:seon.program/declaration-refused :seon.program/declaration-refused]
+  [:seon.error/message :seon.error/message]]
+ :seon.program/subject
+ [:or {:description "A function or test symbol, namespace symbol, or schema key."}
+  :symbol :qualified-keyword]
+ :seon.program/kind
+ [:and {:description "The identity attribute that answered this read; never a stored entity discriminator."}
+  :seon.program/identity-attribute]
+ :seon.program/contract :seon.fn/spec
+ :seon.program/callers [:set :qualified-symbol]
+ :seon.program/references [:set :qualified-symbol]
+ :seon.program/subject-of [:set :qualified-symbol]
+ :seon.program/stale-reach [:set :qualified-symbol]
+ :seon.program/gating [:vector :qualified-symbol]
+ :seon.program/call-sites
+ [:vector
+  [:map
+   [:seon.fn/sym :qualified-symbol]
+   [:seon.fn/form-span {:optional true} :seon.fn/form-span]
+   [:seon.fn/call-arity {:optional true} :seon.fn/call-arity]
+   [:seon.fn/declared-arities {:optional true} :seon.fn/declared-arities]]]
+ :seon.program/render-declared-by
+ [:set [:map [:seon.schema/key :seon.schema/key]
+        [:seon.schema/property [:enum :seon.render/ai :seon.render/html]]]]
+ :seon.program/capability-of [:set :qualified-symbol]
+ :seon.program/schedule-tasks [:set :seon.schedule.task/id]
+ :seon.program/writes-of [:set :qualified-symbol]
+ :seon.program/contract-refs [:set :qualified-symbol]
+ :seon.program/schema-references [:set :qualified-keyword]
+ :seon.program/requiring-namespaces [:set :symbol]
+ :seon.program/owned-declarations [:set :seon.program/subject]
+ :seon.program/mentions
+ [:set {:description "Literal keyword membership; neither a read claim nor a refusal input."}
+  :qualified-symbol]
+ :seon.program/data-in-use
+ [:map [:seon.schema/key :seon.schema/key]
+  [:seon.schema/datoms [:int {:min 1}]]]
+ :seon.program/gap
+ [:enum {:description "Closed diagnostic categories for limitations of this program read, not entity kinds."}
+  :dispatch-not-modelled :arity-unknown-sites :macro-mediated
+  :unresolvable-callers :keyword-mentions :outside-graph
+  :launch-unavailable :contract-shapes-unknown :provenance-unavailable]
+ :seon.program/unknown
+ [:vector {:min 1}
+  [:map
+   [:seon.program/gap :seon.program/gap]
+   [:seon.program/message :string]
+   [:seon.program/count {:optional true} [:int {:min 0}]]
+   [:seon.program/macros {:optional true} [:set :qualified-symbol]]
+   [:seon.program/subjects {:optional true} [:set :qualified-symbol]]]]
+ :seon.program/plan
+ [:map
+  [:seon.program/issues [:vector :seon.issue/issue]]
+  [:seon.program/launch
+   [:sequential {:description "Unevaluated launch form. The read's unknowns state why launch is unavailable before value-edge admission."}
+    :seon.schema/value]]]
+ :seon.program/breakage
+ [:map {:description "Pure program-fact read. Empty relation groups are absent; unknown coverage is always explicit."
+        :seon.render/ai seon.render.value/render-ai
+        :seon.render/html seon.render.value/render-html}
+  [:seon.program/subject :seon.program/subject]
+  [:seon.program/kind :seon.program/kind]
+  [:seon.db/basis-t :seon.db/basis-t]
+  [:seon.program/unknown :seon.program/unknown]
+  [:seon.program/callers {:optional true} :seon.program/callers]
+  [:seon.program/references {:optional true} :seon.program/references]
+  [:seon.program/call-sites {:optional true} :seon.program/call-sites]
+  [:seon.program/subject-of {:optional true} :seon.program/subject-of]
+  [:seon.program/stale-reach {:optional true} :seon.program/stale-reach]
+  [:seon.program/gating {:optional true} :seon.program/gating]
+  [:seon.program/render-declared-by {:optional true} :seon.program/render-declared-by]
+  [:seon.program/capability-of {:optional true} :seon.program/capability-of]
+  [:seon.program/schedule-tasks {:optional true} :seon.program/schedule-tasks]
+  [:seon.program/writes-of {:optional true} :seon.program/writes-of]
+  [:seon.program/contract-refs {:optional true} :seon.program/contract-refs]
+  [:seon.program/schema-references {:optional true} :seon.program/schema-references]
+  [:seon.program/requiring-namespaces {:optional true} :seon.program/requiring-namespaces]
+  [:seon.program/owned-declarations {:optional true} :seon.program/owned-declarations]
+  [:seon.program/data-in-use {:optional true} :seon.program/data-in-use]
+  [:seon.program/mentions {:optional true} :seon.program/mentions]
+  [:seon.program/plan {:optional true} :seon.program/plan]]
+ :seon.program/definition
+ [:map-of {:description "A program row's exact attribute values at one basis. Families and authored contracts are polymorphic; refs remain datom entity ids."}
+  :qualified-keyword :seon.schema/value]
+ :seon.program/history-entry
+ [:map
+  [:seon.db/tx :seon.db/tx]
+  [:seon.db/added? :boolean]
+  [:seon.program/source :seon.program/source]
+  [:seon.program/definition :seon.program/definition]
+  [:seon.db/user {:optional true} :seon.db/ref]
+  [:seon.db/process {:optional true} :seon.db/ref]]
+ :seon.program/history [:vector :seon.program/history-entry]
+ :seon.program/history-report
+ [:map
+  [:seon.program/subject :seon.program/subject]
+  [:seon.program/kind :seon.program/kind]
+  [:seon.db/basis-t :seon.db/basis-t]
+  [:seon.db/tx {:optional true} :seon.db/tx]
+  [:seon.program/unknown :seon.program/unknown]
+  [:seon.program/history :seon.program/history]]
+ :seon.program/read-refused [:= true]
+ :seon.program/read-refused-error
+ [:map {:seon.error/class true
+        :seon.render/ai seon.error/render-ai
+        :seon.render/html seon.error/render-html
+        :error/message "must identify a program read that could not complete"}
+  [:seon.program/read-refused :seon.program/read-refused]
+  [:seon.error/message :seon.error/message]]
+ :seon.program/not-found :seon.program/subject
+ :seon.program/not-found-error
+ [:map {:seon.error/class true
+        :seon.render/ai seon.error/render-ai
+        :seon.render/html seon.error/render-html
+        :error/message "must identify the absent program subject"}
+  [:seon.program/not-found :seon.program/not-found]
   [:seon.error/message :seon.error/message]]}

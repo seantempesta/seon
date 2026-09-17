@@ -1,0 +1,14 @@
+{:my.program/subject-request
+ [:map [:seon.db/db :seon.db/database-value]
+  [:seon.program/subject :seon.program/subject]]
+ :my.program/breaks-request
+ [:map [:seon.db/db :seon.db/database-value]
+  [:seon.program/subject :seon.program/subject]
+  [:seon.program/contract {:optional true} :seon.program/contract]]
+ :my.program/key-request
+ [:map [:seon.db/db :seon.db/database-value]
+  [:seon.schema/key :seon.schema/key]]
+ :my.program/history-request
+ [:map [:seon.db/db :seon.db/database-value]
+  [:seon.program/subject :seon.program/subject]
+  [:seon.db/tx {:optional true} :seon.db/tx]]}
