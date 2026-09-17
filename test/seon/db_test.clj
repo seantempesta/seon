@@ -2,6 +2,7 @@
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [datahike.api :as d]
+            [datahike.core :as datahike]
             [datahike.pull-api :as pull-api]
             [datahike.tools :as datahike.tools]
             [datahike.writer :as datahike.writer]
@@ -25,7 +26,8 @@
             [seon.sci.eval :as sci.eval]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
-            [seon.test-support :as test-support])
+            [seon.test-support :as test-support]
+            [taoensso.trove :as trove])
   (:import [java.util.concurrent CountDownLatch TimeUnit]))
 
 (def ^:private schema-delta (schema/begin-registration-delta))
@@ -1229,6 +1231,58 @@
                  "the unknown transaction may commit after the caller stops waiting"))
            (finally
              (.countDown release))))))))
+
+(deftest a-throwing-datahike-listener-cannot-strand-a-committed-write
+  (test-support/with-database
+   (fn [connection]
+     (let [cluster-name "throwing-listener-completion"
+           listener-key ::throwing-listener
+           listener-error (ex-info "synthetic listener failure"
+                                   {:seon.test/failure :throwing-listener})
+           diagnostic (atom nil)
+           log-fn
+           (fn [_logger-ns _coordinates level id lazy-data]
+             (let [data (force (force lazy-data))
+                   payload (or (:msg data) (:data data))]
+               (when (= :datahike/listener-error id)
+                 (reset! diagnostic {:seon.test/level level
+                                     :seon.test/payload payload}))))]
+       (test-support/apply-config!
+        connection cluster-name
+        {:seon.config.db/write-time-limit-ms 250})
+       (datahike/listen! connection listener-key
+                         (fn [_] (throw listener-error)))
+       (try
+         (binding [trove/*log-fn* log-fn]
+           (let [report (db/transact!
+                         connection
+                         [{:seon.agent/id "throwing-listener-agent"}])
+                 logged
+                 (test-support/await-event!
+                  diagnostic
+                  "Datahike's throwing-listener diagnostic"
+                  some?)]
+             (is (contains? report :db-after)
+                 (str "the committed report must win the 250 ms write bound: "
+                      (pr-str report)))
+             (is (not= :seon.db/write-bound-exceeded
+                       (:seon.error/kind report))
+                 "the write bound does not fire after the commit is durable")
+             (is (= :error (:seon.test/level logged)))
+             (is (= listener-key
+                    (get-in logged
+                            [:seon.test/payload :listener-key])))
+             (is (identical? listener-error
+                             (get-in logged
+                                     [:seon.test/payload :exception])))
+             (is (= "throwing-listener-agent"
+                    (:seon.agent/id
+                     (db/pull @connection
+                              [:seon.agent/id]
+                              [:seon.agent/id "throwing-listener-agent"])))
+                 "the report and durable fact describe the same commit")))
+         (finally
+           (datahike/unlisten! connection listener-key)))))))
 
 (deftest temporal-reads-use-explicit-and-ambient-database-values
   (test-support/with-database
