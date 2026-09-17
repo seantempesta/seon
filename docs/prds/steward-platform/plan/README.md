@@ -95,7 +95,6 @@ Owner: "We'll need to fix the serious bugs but the easier ones are good initial 
 ### Phase 3 — progressive testing
 | Item | Owner | Status |
 |---|---|---|
-| Stage 2: recorder provenance + pure admission landed `7795e54f4`; resolution from the admitted identity, claim/completion, unchanged-result reuse | astra `test-system-stage2` | resumed 04:55Z with the batch-116 `:seon.test.run/immutable` recording refusal |
 | Stage 1: one selection function over symbol edges | astra | NEXT after the reset — priority per the owner (live agents need it) |
 | Stage 3: workers claim from the run entity; `bin/test` a launcher; old runner paths deleted | astra | right after stage 1 — priority |
 | Stage 2: resolution through one owner, claim/completion, unchanged-green reuse in `run-owned` | astra `test-system-stage2` | landed `a0c69cfd9` `163367a9a` `b80e7f615`; cold proof in the post-reset serial gates |
