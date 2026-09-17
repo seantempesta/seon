@@ -16,6 +16,13 @@
   (when (.isFile (io/file file))
     (edn/read-string (slurp file))))
 
+(defn- snapshot-git-sha [snapshot]
+  (let [ledger (io/file snapshot "test-run.txt")]
+    (when (.isFile ledger)
+      (with-open [reader (io/reader ledger)]
+        (some #(when (.startsWith ^String % "git=") (.substring ^String % 4))
+              (enumeration-seq (java.util.StringTokenizer. (or (.readLine reader) ""))))))))
+
 (defn- child! [directory arguments]
   (let [seconds (bounds/silence-seconds (into {} (System/getenv)))
         child (process/process arguments
@@ -187,6 +194,7 @@
               (throw (ex-info "Publication exited without its store and manifest."
                               {::base (str base)})))
             (spit ready (pr-str (cond-> {::digest digest ::prepared-at (str (Instant/now))}
+                                 (snapshot-git-sha snapshot) (assoc ::git-sha (snapshot-git-sha snapshot))
                                  inputs (assoc ::inputs inputs))))))
         (.mkdirs (.getParentFile reference))
         (spit reference (pr-str {::pid (Long/parseLong pid)
@@ -223,6 +231,38 @@
       (throw (ex-info
               "No published program graph matches the source snapshot; orchestrator must run: bin/test --prepare-head-base"
               {::source-inputs source-inputs}))))
+
+(defn newest-manifest
+  "Read the newest published graph and announce its digest and commit age."
+  {:malli/schema [:=> [:cat :string :string] :seon.fn.manifest/manifest]}
+  [source git-sha]
+  (let [candidate
+        (->> (.listFiles (io/file source "target/test-published-bases"))
+             (keep (fn [directory]
+                     (let [file (io/file directory "ready.edn")
+                           ready (read-edn file)]
+                       (when (and (= (.getName directory) (::digest ready))
+                                  (.isFile (io/file directory "base/manifest.edn")))
+                         [directory ready (if-let [at (::prepared-at ready)]
+                                            (Instant/parse at)
+                                            (Instant/ofEpochMilli (.lastModified file)))]))))
+             (sort-by (juxt #(nth % 2) #(-> % second ::digest)))
+             last)]
+    (when-not candidate
+      (throw (ex-info "No published program graph exists; orchestrator must run: bin/test --prepare-head-base" {})))
+    (let [[directory ready] candidate
+          age (if-let [base-sha (::git-sha ready)]
+                (let [child (process/process ["git" "rev-list" "--count" (str base-sha ".." git-sha)]
+                                             {:dir source :out :string :err :string})]
+                  (try
+                    (let [result (deref child (* 1000 (bounds/silence-seconds (into {} (System/getenv)))) ::expired)]
+                      (if (and (map? result) (zero? (:exit result)))
+                        (.trim ^String (:out result))
+                        "unknown (commit unavailable)"))
+                    (finally (process/destroy-tree child))))
+                "unknown (legacy base has no Git provenance)")]
+      (println "bin/test: overlay graph" (::digest ready) "age=" age "commits behind HEAD")
+      (manifest (str (io/file directory "base"))))))
 
 (defn -main
   "Prepare the selected snapshot's base; retain it while its launcher lives."

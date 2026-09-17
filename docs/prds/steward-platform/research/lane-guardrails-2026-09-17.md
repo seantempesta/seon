@@ -718,3 +718,63 @@ the detached worktree is removed before reporting. Cold/platform proof
 remains with the orchestrator. Owned paths are `bin/test`, selection and
 cache, `test/seon/test_runner_test.clj`, AGENTS.md, the existing tool-classpath
 issue and this note.
+
+## Fast iteration uses the newest publication — 2026-09-17
+
+The owner accepted `d88837ddd`'s cold behavior (batch 122 A prepared and
+passed), then revised fast admission after message-wake's source commit
+invalidated its matching baseline. Fast admission now selects the newest
+published base by `:seon.test.cache/prepared-at`, with a deterministic digest
+tie-break. Reusing an older cache does not make it newer: the access-time
+refresh is not used when publication time exists. Cold admission still
+requires exact recorded source inputs and prepares them when absent.
+
+The fast preamble prints `overlay graph <digest> age= N commits behind HEAD`
+before deriving omitted callers from that graph. Each new cached publication
+records the snapshot's captured Git identity from its existing run ledger;
+the age is a bounded `git rev-list --count <base>..<HEAD>` read. That identity
+is diagnostic provenance only and never gates fast admission. Legacy bases
+with no recorded commit remain admitted and explicitly print
+`unknown (legacy base has no Git provenance)` rather than inventing an age.
+An unavailable historical commit also prints unknown. No published base
+still refuses before a JVM and names `bin/test --prepare-head-base`.
+
+The canonical launcher regression now commits a new source file, retains an
+older graph, and verifies admission plus its exact digest and one-commit age.
+It supplies two publications and proves the newer one wins. Both cold-gate
+fixture forms also assert that real cache preparation records the captured
+Git identity. Missing-base refusal and missing-caller checks remain covered.
+The owning cache compatibility namespace passed **1 test / 27 assertions /
+0 failures / 0 errors**, ending `2026-09-17T06:40:04.366313Z`.
+
+Verification uses the current launchers in the main checkout, without the
+earlier bootstrap worktree. The real cached publication selected at admission
+was `43b5b8b95f5041b4266bc5c1d17c1f4c6d5810165de5cf6d56d91343b8e35810`;
+its legacy age was reported unknown. HEAD-plus-paths excludes concurrent
+edits in `src/seon/fs.clj`, `src/seon/cluster/store.clj`,
+`resources/seon/operator/state.clj`, `test/seon/operator_test.clj` and
+`test/seon/program_test.clj`. Default remains untouched.
+
+```sh
+timeout 2400 bin/test-fast --paths bin/test src/seon/test/cache.clj test/seon/test_runner_test.clj tmp/lane_newest_probe.clj -- tmp.lane-newest-probe
+```
+
+Exact disposable probe:
+
+```clojure
+(ns tmp.lane-newest-probe
+  (:require [clojure.test :refer [deftest]] [seon.test-runner-test]))
+(deftest newest-base-admission
+  ((:test (meta #'seon.test-runner-test/selected-overlays-require-a-current-graph-and-every-changed-caller))))
+```
+
+Final focused result: **1 test / 41 assertions / 0 failures / 0 errors**,
+exit **0**, ending `2026-09-17T06:42:31.614388Z` at snapshot HEAD
+`fbb4a205b`. Slot wait **0 seconds**. The prior admission run passed 39
+assertions before adding the two publication-provenance assertions. All owned
+processes exited, snapshots were removed, and the probe is deleted before
+reporting. Shell syntax and owned-path whitespace checks pass. The Markdown
+hook still reports the previously recorded 31 foreign stale-gitlink findings.
+Owned paths: `bin/test`, `src/seon/test/cache.clj`,
+`test/seon/test_runner_test.clj`, AGENTS.md and this note. No cold host gate or
+`SEON_TEST_*` override was used; cold/platform proof remains the orchestrator's.

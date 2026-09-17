@@ -811,14 +811,15 @@ if [ ${#snapshot_paths[@]} -gt 0 ]; then
     (require (quote [seon.test.cache :as cache])
              (quote [seon.test.selection :as selection])
              (quote [clojure.edn :as edn]))
-    (let [[source snapshot git-sha & paths] *command-line-args*
+    (let [[source snapshot git-sha fast & paths] *command-line-args*
           inputs (edn/read-string (slurp (str snapshot "/tmp/head-inputs.edn")))]
       (try
         (selection/assert-complete-overlay!
-         (cache/head-manifest source inputs) source snapshot git-sha paths)
+         (if (= "1" fast) (cache/newest-manifest source git-sha)
+             (cache/head-manifest source inputs)) source snapshot git-sha paths)
         (catch Exception failure
           (binding [*out* *err*] (println "bin/test:" (ex-message failure)))
-          (System/exit 64))))' "$source_root" "$run_root" "$git_sha" "${snapshot_paths[@]}"; then
+          (System/exit 64))))' "$source_root" "$run_root" "$git_sha" "$fast_iteration" "${snapshot_paths[@]}"; then
     exit 64
   fi
 fi

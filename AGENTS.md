@@ -873,12 +873,15 @@ recorded result facts; tests explicitly exercising file-backed boot still
 create their own fixture roots. These are iteration results, not the
 isolated gate's proof.
 
-Every `--paths` overlay checks a published graph against the snapshot's
+Cold `--paths` admission checks a published graph against the snapshot's
 program-source input digests, using the existing base cache's recorded inputs;
 documentation-only commits do not invalidate it. A cold gate prepares a missing
 baseline itself through `bin/test --prepare-head-base`, then checks its overlay
-before running tests. A `--fast --paths` invocation cannot publish: it refuses
-before any JVM and names that orchestrator command when the baseline is absent.
+before running tests. A `--fast --paths` invocation uses the newest published
+base even when source has advanced, announcing its digest and commits behind
+HEAD (explicitly unknown for legacy records without Git provenance). It cannot
+publish: only absence of every published base causes the pre-JVM baseline
+refusal naming that orchestrator command.
 The explicit preparation uses HEAD alone, without workers or tests. The check follows
 published `:seon.fn/calls` edges from changed public declarations and refuses
 dirty caller files omitted from the overlay, naming the paths to add. A caller
@@ -1138,7 +1141,7 @@ has done its job.
   Lanes cannot set `SEON_TEST_SILENCE_SECONDS` or `SEON_TEST_SLOTS`, even
   alongside an orchestrator flag; declare test duration with
   `:seon.test/long` and `:seon.test/long-ms` instead.
-  When fast overlay admission has no source-matching graph, the orchestrator runs
+  When fast overlay admission has no published graph, the orchestrator runs
   `bin/test --prepare-head-base` before lanes resume `--paths` iteration.
   Codex snapshots hook configuration at process start: after changing
   `.codex/hooks.json`, the orchestrator stops and resumes running lanes.
