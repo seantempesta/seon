@@ -9,7 +9,7 @@ tags: [reset, datahike, schema, integration]
 
 **G5 reviewed; final rebase verification. RESET NEEDED.** The implementation checkpoint is retained in
 `tmp/reset-batch-wt`, branch `reset-batch`. The current base is
-`64d6a85cd`; the rebased implementation head is `d122b8590`. The
+`c314408c0`; the final rebased checkpoint is `a7ec23fff`. The
 orchestrator owns merge, the cold gate, platform proof and the reset. Default
 was not restarted, reset, adopted or otherwise mutated by this lane.
 
@@ -538,3 +538,9 @@ Final G5 run at rebased code `d122b8590`:
 [Rebase fast 3](reset-rebase-fast-3-2026-09-17.txt),
 `bin/test-fast --paths src/seon/db.clj test/seon/owned_value_test.clj -- seon.owned-value-test`:
 **5 tests / 68 assertions / 0 failures / 0 errors**, exit 0.
+
+Final documentation-only upstream catch-up: base `c314408c0`, rebased checkpoint
+`a7ec23fff`. `git diff d122b8590 HEAD -- src resources bin test` is empty:
+the tested implementation bytes are unchanged. Merge with
+`git merge --ff-only reset-batch` from `steward-platform`; then the orchestrator
+performs the single reset procedure in the plan. RESET NEEDED.
