@@ -2844,3 +2844,9 @@ working tree, never Sonnet.
 - Sequencing: integrator rebases `reset-batch` on current HEAD → ff-merge
   → message-wake's cold-worker arming patch → `bin/seon reset --force` →
   reseed → serial gates → then the contract wave on a clean base.
+- Launched: astra `private-contracts` (arm private functions; contracts on
+  the critical private read-consumers and error-returning functions; every
+  new red filed as a finding) and astra `issue-triage-design` (the owner's
+  steward-triage question, design only). Integrator rebasing `reset-batch`
+  on HEAD for the ff-merge. Editing: integrator, private-contracts;
+  design: issue-triage-design.

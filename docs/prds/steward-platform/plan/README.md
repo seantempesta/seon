@@ -103,6 +103,8 @@ lanes is the cap and was exceeded all night — expect load; lanes never run
 ### Phase 4 — live agents
 | Item | Owner | Status |
 |---|---|---|
+| **Ruling §1j (2026-09-17 morning): every function carries a contract, private included; instrumentation arms every contracted function** — slice 1 arm private functions; slice 2 contracts on the critical private read-consumers (352 by query) and error-returning functions, welcoming the breakage as findings | astra `private-contracts` (high) | in flight |
+| Issue triage design: namespace steward agents triaging and launching sub-agents to write contracts and sanity-check data in/out; the `private-function-without-contract` detector (3,145 today) as the first mined class | astra `issue-triage-design` (high, design only) | in flight |
 | Generate `public-without-contract` (79) and `public-without-reaching-test` (1,693) issues; start three with budget 8 (paid, cheapest model) | orchestrator | after Phase 0 green |
 | Owner inspects a prepped agent's context on the debug outline | owner | with the outline |
 
