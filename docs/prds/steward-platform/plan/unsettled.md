@@ -3685,3 +3685,16 @@ as orchestrator/astra lanes, easy pool as the first live-agent slice).
   — default still serves the old Var (`/ns/seon.id` 33 s / 27.5 MB at
   08:40Z). Orchestrator adopting now (`adopt-ns-page.log`); the preflight
   bound is the next platform defect if it fails again.
+
+## 2026-09-18 ~08:50Z — BLOCKER: development adoption refuses on the preflight deadline
+
+- `bin/seon init --dev default --changed …` (`adopt-ns-page.log`,
+  `init-preflight-83199.log`): preflight elapsed 5,319 ms, "A foreign process
+  exceeded its declared deadline" — the full-kondo preflight from 8e952be28
+  runs `ensure-dependency-cache!` on every preflight inside the hard-coded
+  5,000 ms `syntax-preflight-bound-ms`. The edit hook runs this on every
+  edit → NO adoption lands on default (the namespace-page fix is committed
+  but not live: `/ns/seon.id` still 27.5 MB). Opus agent: cache ensured once
+  per dependency digest (reusing dev_cache's), the bound declared where the
+  operator's other bounds live and sized from measurements, regression, then
+  the pending adoption run and the page re-measured.
