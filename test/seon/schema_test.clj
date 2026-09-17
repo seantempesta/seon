@@ -156,18 +156,6 @@
           value))
       (:seon.schema.projection/forms projection)))))
 
-(defn- conjunctive-map-entries
-  "Include map entries inherited through every named conjunction arm."
-  {:malli/schema [:=> [:cat :seon.schema/projection :seon.schema/value]
-                  [:vector :seon.schema/value]]}
-  [projection form]
-  (let [resolved (schema.datahike/resolve-malli-form-in projection form)]
-    (case (schema.datahike/form-head resolved)
-      :map (schema.form/map-entries resolved)
-      :and (into [] (mapcat #(conjunctive-map-entries projection %))
-                 (schema.datahike/form-children resolved))
-      [])))
-
 (deftest declared-reference-maps-accept-the-pull-reference-grammar
   (test-support/with-database
    (fn [connection]
@@ -186,7 +174,7 @@
            subjects (into (sorted-map)
                           (keep (fn [[schema-key form]]
                                   (when (schema.form/map-shape? form)
-                                   (let [entries (conjunctive-map-entries projection form)]
+                                   (let [entries (schema.form/map-entries forms form)]
                                     (when (some #(reference-entry? projection %) entries)
                                       [schema-key entries])))))
                           forms)
@@ -215,11 +203,14 @@
                                              {:db/id (if stored? target 1)}))
                                           (required-entry-value generation (last entry) stored?))]))))
                            entries)
-                 _ (is ((schema/projection-validator projection schema-key) row)
+                 structural (m/schema (into [:map] entries)
+                                      (:seon.schema.projection/compile-options projection))
+                 _ (is (m/validate structural row)
                        (pr-str {:schema schema-key
-                                :errors (mapv :in (:errors ((schema/projection-explainer projection schema-key) row)))}))]
-             ;; This checks reference grammar, not whether generated refs describe
-             ;; valid ownership. Real component values are covered below and by G5.
+                                :errors (mapv :in (:errors (m/explain structural row)))}))]
+             ;; Reference grammar is independent of whole-parent count and domain
+             ;; constraints. Complete owning values are proved separately through
+             ;; the canonical writer; an id-only child cannot prove those constraints.
              (is (map? row)))
            (catch Throwable failure
              (is false (str schema-key ": " (ex-message failure)))))))))
@@ -1210,3 +1201,82 @@
         (is (= absent (:seon.schema/unresolved-predicate data)))
         (is (= 'seon.schema.predicate-owner-probe
                (:seon.schema/predicate-namespace data)))))))
+
+(deftest declaration-manifest-projection-build-cost
+  (test-support/with-database
+   (fn [connection]
+     (let [projection (schema/projection-from-database (seon.db/db connection))
+           forms (:seon.schema.projection/forms projection)
+           started (System/nanoTime)
+           rebuilt (schema/build-projection forms)
+           elapsed-ms (/ (- (System/nanoTime) started) 1e6)]
+       (is (= (set (keys forms))
+              (set (keys (:seon.schema.projection/forms rebuilt)))))
+       (println "ERROR-MANIFEST projection-build"
+                {:schemas (count forms) :elapsed-ms elapsed-ms})))))
+
+
+(deftest error-declarations-expand-all-inherited-members
+  (test-support/with-database
+   (fn [connection]
+     (let [projection (schema/projection-from-database (seon.db/db connection))
+           forms (:seon.schema.projection/forms projection)
+           turn (set (map first (schema.form/map-entries forms :seon.turn/error)))
+           base (set (map first (schema.form/map-entries forms :seon.error/base)))]
+       (is (every? turn base))
+       (is (turn :seon.agent/error-agent-id))
+       (is (turn :seon.turn/error-turn-id))
+       (is (= #{:seon.error/at :seon.error/layer :seon.error/operation
+                :seon.agent/error-agent-id :seon.turn/error-turn-id}
+              (set (schema.internal/map-required-attrs forms :seon.turn/error))))
+       (doseq [definition
+               [[:and :seon.error/base [:map [:seon.error/at {:optional true} :seon.error/at]]]
+                [:and :seon.error/base [:map [:seon.error/at :string]]]
+                [:and :seon.error/base [:map]]
+                [:and :seon.error/base [:map [::domain-marker ::domain-marker]]]
+                [:and :seon.error/base [:map [::raw-payload ::raw-payload]]]]]
+         (let [refusal (try (schema/build-projection
+                            (assoc forms ::domain-marker :boolean ::raw-payload :map
+                                   ::invalid-facet definition))
+                           nil (catch clojure.lang.ExceptionInfo e (ex-data e)))]
+           (is (map? refusal) (str "Declaration must refuse: " definition))))))))
+
+(deftest error-facets-and-their-owned-members-are-storable
+  (test-support/with-database
+   (fn [connection]
+     (let [projection (schema/projection-from-database (seon.db/db connection))
+           forms (:seon.schema.projection/forms projection)
+           facets (into #{:seon.error/base}
+                        (keep (fn [[k definition]]
+                                (when (and (vector? definition)
+                                           (schema.form/extends-schema? forms definition :seon.error/base)) k)))
+                        forms)
+           declarations
+           (loop [pending (seq (conj facets :seon.failure/entity
+                                      :seon.error.disposition/observation)) seen #{}]
+             (if-let [k (first pending)]
+               (if (seen k) (recur (next pending) seen)
+                   (let [members (map first (schema.form/map-entries forms (get forms k)))
+                         targets (keep #(-> (get forms %) schema.form/attr-form-properties
+                                            :seon.db/component-schema) members)]
+                     (recur (concat (next pending) targets) (conj seen k)))) seen))]
+       (is (facets :seon.db.read/error))
+       (is (declarations :seon.instrument.arity/bounds))
+       (is (declarations :seon.error.key/entity))
+       (doseq [k declarations
+               :let [entries (schema.form/map-entries forms (get forms k))]]
+         (is (seq entries) (str "Owned declaration must exist: " k))
+         (doseq [[attribute] entries]
+           (is (schema.datahike/storable-attribute-in? projection attribute) (str k " " attribute))
+           (is (nil? (:db/unique (schema.datahike/malli->datahike-attr-in projection attribute)))
+               (str "An observation cannot upsert its domain subject: " attribute))))
+       (println "ERROR-MANIFEST declarations" {:facets (count facets) :owned-closure (count declarations)})
+       (doseq [k declarations
+               :let [symbols (into #{} (keep #(when (map? %) (:gen/gen %)))
+                                   (tree-seq coll? seq (get forms k)))]
+               generator-symbol symbols]
+         (let [generator @(requiring-resolve generator-symbol)
+               validate (schema/projection-validator projection k)]
+           (test-support/assert-check!
+            (tc/quick-check 20 (prop/for-all [value generator] (validate value)) :seed 20260918)
+            (str "Whole-parent generator " k " " generator-symbol))))))))

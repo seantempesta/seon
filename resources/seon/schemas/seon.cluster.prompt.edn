@@ -35,4 +35,26 @@
                       :budget-exceeded :seon.ai/tokens
                       :budget-exceeded-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the prompt token budget that was exceeded"} [:seon.cluster.prompt/budget-exceeded :seon.cluster.prompt/budget-exceeded] [:seon.error/message :seon.error/message]]
  :seon.cluster.prompt/missing-config :seon.agent/id
- :seon.cluster.prompt/missing-config-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the agent whose effective prompt configuration is absent"} [:seon.cluster.prompt/missing-config :seon.cluster.prompt/missing-config] [:seon.error/message :seon.error/message]]}
+ :seon.cluster.prompt/missing-config-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the agent whose effective prompt configuration is absent"} [:seon.cluster.prompt/missing-config :seon.cluster.prompt/missing-config] [:seon.error/message :seon.error/message]]
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :seon.cluster.prompt/derivation-observation
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.evidence/entity}
+ :seon.db/ref]
+
+ :seon.cluster.prompt/error
+ [:and
+ {:seon.db/attributes true}
+ :seon.error/base
+ [:map
+  {:seon.db/attributes true}
+  [:seon.cluster.prompt/error-agent-id
+   :seon.cluster.prompt/error-agent-id]
+  [:seon.cluster.prompt/derivation-observation
+   :seon.cluster.prompt/derivation-observation]]]
+
+ :seon.cluster.prompt/error-agent-id
+ [:string {:min 1}]
+}

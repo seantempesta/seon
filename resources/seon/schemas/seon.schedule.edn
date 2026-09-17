@@ -51,4 +51,28 @@
  :seon.schedule/missing-receipt [:= true]
  :seon.schedule/missing-receipt-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.schedule/missing-receipt class marker"} [:seon.schedule/missing-receipt :seon.schedule/missing-receipt] [:seon.error/message :seon.error/message]]
  :seon.schedule/unresolved-handler [:= true]
- :seon.schedule/unresolved-handler-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.schedule/unresolved-handler class marker"} [:seon.schedule/unresolved-handler :seon.schedule/unresolved-handler] [:seon.error/message :seon.error/message]]}
+ :seon.schedule/unresolved-handler-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.schedule/unresolved-handler class marker"} [:seon.schedule/unresolved-handler :seon.schedule/unresolved-handler] [:seon.error/message :seon.error/message]]
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :seon.schedule/error
+ [:and
+ {:seon.db/attributes true}
+ :seon.error/base
+ [:map
+  {:seon.db/attributes true}
+  [:seon.schedule/error-task :seon.schedule/error-task]
+  [:seon.schedule/settlement-observation
+   :seon.schedule/settlement-observation]]]
+
+ :seon.schedule/error-task
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.projection/entity}
+ :seon.db/ref]
+
+ :seon.schedule/settlement-observation
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.evidence/entity}
+ :seon.db/ref]
+}

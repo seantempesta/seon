@@ -17,4 +17,26 @@
  :seon.schema.datahike/malformed-edn :qualified-keyword
  :seon.schema.datahike/malformed-edn-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify an EDN-backed attribute containing unreadable data"} [:seon.schema.datahike/malformed-edn :seon.schema.datahike/malformed-edn] [:seon.error/message :seon.error/message]]
  :seon.schema.datahike/noncanonical-edn :qualified-keyword
- :seon.schema.datahike/noncanonical-edn-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify an EDN-backed attribute containing a noncanonical value"} [:seon.schema.datahike/noncanonical-edn :seon.schema.datahike/noncanonical-edn] [:seon.error/message :seon.error/message]]}
+ :seon.schema.datahike/noncanonical-edn-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify an EDN-backed attribute containing a noncanonical value"} [:seon.schema.datahike/noncanonical-edn :seon.schema.datahike/noncanonical-edn] [:seon.error/message :seon.error/message]]
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :seon.schema.datahike/declared-form
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.projection/entity}
+ :seon.db/ref]
+
+ :seon.schema.datahike/error
+ [:and
+ {:seon.db/attributes true}
+ :seon.error/base
+ [:map
+  {:seon.db/attributes true}
+  [:seon.schema.datahike/error-attribute
+   :seon.schema.datahike/error-attribute]
+  [:seon.schema.datahike/declared-form
+   :seon.schema.datahike/declared-form]]]
+
+ :seon.schema.datahike/error-attribute
+ :qualified-keyword
+}

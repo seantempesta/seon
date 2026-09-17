@@ -285,4 +285,24 @@
  [:map {:seon.db/attributes true}
   [:seon.test/adoption-cluster :seon.test/adoption-cluster]
   [:seon.test/adoption-identities {:optional true} :seon.test/adoption-identities]
-  [:seon.test/adoption-inputs {:optional true} :seon.test/adoption-inputs]]}
+  [:seon.test/adoption-inputs {:optional true} :seon.test/adoption-inputs]]
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :seon.test/error
+ [:and
+ {:seon.db/attributes true}
+ :seon.error/base
+ [:map
+  {:seon.db/attributes true}
+  [:seon.test/error-test-symbol :seon.test/error-test-symbol]
+  [:seon.test/execution-observation :seon.test/execution-observation]]]
+
+ :seon.test/error-test-symbol
+ [:qualified-symbol {:seon.db/index true}]
+
+ :seon.test/execution-observation
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.evidence/entity}
+ :seon.db/ref]
+}

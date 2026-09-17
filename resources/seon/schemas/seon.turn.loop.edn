@@ -292,4 +292,17 @@
                    :seon.turn.loop/commit-outcome]
                   [:seon.turn.loop/refused-outcome
                    {:optional true}
-                   :seon.error/value]]}
+                   :seon.error/value]]
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :seon.turn.loop/error
+ [:and
+ {:seon.db/attributes true}
+ :seon.turn/error
+ [:map
+  {:seon.db/attributes true}
+  [:seon.turn.loop/failed-step :seon.turn.loop/failed-step]]]
+
+ :seon.turn.loop/failed-step
+ [:qualified-symbol {:seon.db/index true}]
+}

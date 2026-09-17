@@ -79,4 +79,28 @@
   [:seon.render.data/identities :seon.render.data/identities]
   [:seon.render.data/identities-complete? :seon.render.data/identities-complete?]
   [:seon.render.data/ref-attributes-probed :seon.render.data/ref-attributes-probed]]
+
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :seon.render.data/error
+ [:and
+ {:seon.db/attributes true}
+ :seon.error/base
+ [:map
+  {:seon.db/attributes true}
+  [:seon.render.data/error-root :seon.render.data/error-root]
+  [:seon.render.data/requested-location
+   :seon.render.data/requested-location]]]
+
+ :seon.render.data/error-root
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.projection/entity}
+ :seon.db/ref]
+
+ :seon.render.data/requested-location
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.location/entity}
+ :seon.db/ref]
 }

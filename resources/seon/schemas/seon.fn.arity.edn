@@ -37,4 +37,12 @@
                   :seon.fn.arity/output-refs]
                  [:seon.fn.arity/guard-refs
                   {:optional true}
-                  :seon.fn.arity/guard-refs]]}
+                  :seon.fn.arity/guard-refs]]
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :seon.fn.arity/error-facet-digest
+ [:string {:min 64, :max 64}]
+
+ :seon.fn.arity/error-facets
+ [:set {:seon.db/index true} :qualified-keyword]
+}

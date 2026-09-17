@@ -1,0 +1,34 @@
+{
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :seon.instrument.explanations/count
+ [:int {:min 1}]
+
+ :seon.instrument.explanations/entity
+ [:and
+ [:map
+  {:seon.db/attributes true}
+  [:seon.instrument.explanations/count
+   :seon.instrument.explanations/count]
+  [:seon.instrument.explanations/items
+   :seon.instrument.explanations/items]
+  [:seon.instrument.explanations/omission
+   {:optional true}
+   :seon.instrument.explanations/omission]]
+ [:fn
+  {:error/message "ordered-explanations?",
+   :gen/gen seon.error/ordered-explanations-generator}
+  seon.error/ordered-explanations?]]
+
+ :seon.instrument.explanations/items
+ [:set
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.instrument.explanation/entity}
+ :seon.db/ref]
+
+ :seon.instrument.explanations/omission
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.omission/entity}
+ :seon.db/ref]
+}

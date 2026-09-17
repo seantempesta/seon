@@ -96,4 +96,20 @@
                  [:seon.test.run/covered-by {:optional true} :seon.test.run/covered-by]
                  [:seon.test.run/selection-tx {:optional true} :seon.test.run/selection-tx]
                  [:seon.test.run/deadline {:optional true} :seon.test.run/deadline]
-                 [:seon.test.run/branch {:optional true} :seon.test.run/branch]]}
+                 [:seon.test.run/branch {:optional true} :seon.test.run/branch]]
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :seon.test.run/error
+ [:and
+ {:seon.db/attributes true}
+ :seon.error/base
+ [:map
+  {:seon.db/attributes true}
+  [:seon.test.run/error-request :seon.test.run/error-request]]]
+
+ :seon.test.run/error-request
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.projection/entity}
+ :seon.db/ref]
+}

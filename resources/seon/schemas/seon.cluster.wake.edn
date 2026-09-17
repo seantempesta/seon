@@ -34,4 +34,26 @@
                       :seon.db/connection]
                      [:seon.cluster.wake/key :seon.cluster.wake/key]],
                     :undeliverable-wake :seon.agent/id
-                    :undeliverable-wake-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the agent whose wake could not be delivered"} [:seon.cluster.wake/undeliverable-wake :seon.cluster.wake/undeliverable-wake] [:seon.error/message :seon.error/message]]}
+                    :undeliverable-wake-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the agent whose wake could not be delivered"} [:seon.cluster.wake/undeliverable-wake :seon.cluster.wake/undeliverable-wake] [:seon.error/message :seon.error/message]]
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :seon.cluster.wake/error
+ [:and
+ {:seon.db/attributes true}
+ :seon.error/base
+ [:map
+  {:seon.db/attributes true}
+  [:seon.cluster.wake/error-recipient
+   :seon.cluster.wake/error-recipient]
+  [:seon.cluster.wake/offer-observation
+   :seon.cluster.wake/offer-observation]]]
+
+ :seon.cluster.wake/error-recipient
+ [:string {:min 1}]
+
+ :seon.cluster.wake/offer-observation
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.evidence/entity}
+ :seon.db/ref]
+}

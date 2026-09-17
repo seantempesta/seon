@@ -19,4 +19,25 @@
                    "must mark a generated opening whose settled prefix drifted"}
                   [:seon.bootstrap/prefix-drift
                    :seon.bootstrap/prefix-drift]
-                  [:seon.error/message :seon.error/message]]}
+                  [:seon.error/message :seon.error/message]]
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :seon.bootstrap/error
+ [:and
+ {:seon.db/attributes true}
+ :seon.error/base
+ [:map
+  {:seon.db/attributes true}
+  [:seon.bootstrap/error-member :seon.bootstrap/error-member]
+  [:seon.bootstrap/prefix-observation
+   :seon.bootstrap/prefix-observation]]]
+
+ :seon.bootstrap/error-member
+ :qualified-keyword
+
+ :seon.bootstrap/prefix-observation
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.projection/entity}
+ :seon.db/ref]
+}

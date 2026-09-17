@@ -1,0 +1,22 @@
+{
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :seon.agent.graph/control-observation
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.evidence/entity}
+ :seon.db/ref]
+
+ :seon.agent.graph/error
+ [:and
+ {:seon.db/attributes true}
+ :seon.error/base
+ [:map
+  {:seon.db/attributes true}
+  [:seon.agent.graph/proc :seon.agent.graph/proc]
+  [:seon.agent.graph/control-observation
+   :seon.agent.graph/control-observation]]]
+
+ :seon.agent.graph/proc
+ [:qualified-symbol {:seon.db/index true}]
+}

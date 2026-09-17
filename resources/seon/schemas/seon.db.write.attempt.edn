@@ -1,0 +1,56 @@
+{
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :seon.db.write.attempt/bound-ms
+ [:int {:min 1}]
+
+ :seon.db.write.attempt/completion-unavailable
+ [:string {:min 1}]
+
+ :seon.db.write.attempt/entity
+ [:map
+ {:seon.db/attributes true}
+ [:seon.db.write.attempt/request-id :seon.db.write.attempt/request-id]
+ [:seon.db.write.attempt/observed-at
+  :seon.db.write.attempt/observed-at]
+ [:seon.db.write.attempt/operations :seon.db.write.attempt/operations]
+ [:seon.db.write.attempt/submitted-at
+  {:optional true}
+  :seon.db.write.attempt/submitted-at]
+ [:seon.db.write.attempt/rejection
+  {:optional true}
+  :seon.db.write.attempt/rejection]
+ [:seon.db.write.attempt/waited-ms
+  {:optional true}
+  :seon.db.write.attempt/waited-ms]
+ [:seon.db.write.attempt/bound-ms
+  {:optional true}
+  :seon.db.write.attempt/bound-ms]
+ [:seon.db.write.attempt/completion-unavailable
+  {:optional true}
+  :seon.db.write.attempt/completion-unavailable]]
+
+ :seon.db.write.attempt/observed-at
+ :inst
+
+ :seon.db.write.attempt/operations
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.projection/entity}
+ :seon.db/ref]
+
+ :seon.db.write.attempt/rejection
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.evidence/entity}
+ :seon.db/ref]
+
+ :seon.db.write.attempt/request-id
+ [:string {:min 1}]
+
+ :seon.db.write.attempt/submitted-at
+ :inst
+
+ :seon.db.write.attempt/waited-ms
+ [:int {:min 0}]
+}

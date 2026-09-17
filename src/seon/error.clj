@@ -2015,3 +2015,351 @@
                      (pr-str (second marker)) "."))
               (evidence-text evidence)
               "Repair the named source or declaration evidence, then rerun initialization."]))))
+
+;;; Complete owned error observations; constructors remain on their old contracts.
+
+(defn- exclusive-members?
+  "Exactly one of the supplied attributes is present on a candidate map."
+  {:malli/schema [:=> [:cat :seon.schema/value [:vector :qualified-keyword]] :boolean]}
+  [value attributes]
+  (and (map? value) (= 1 (count (filter #(contains? value %) attributes)))))
+
+(defn omission-complete?
+  "An omission reports a positive omitted count or why that count is unavailable."
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  [value]
+  (and (exclusive-members? value [:seon.error.omission/omitted-count
+                                  :seon.error.omission/unavailable-count-reason])
+       (if-let [entry (find value :seon.error.omission/omitted-count)]
+         (pos-int? (val entry))
+         (let [reason (:seon.error.omission/unavailable-count-reason value)]
+           (and (string? reason) (not (empty? reason)))))))
+
+(defn- ordered-members?
+  "Counts describe retained children, with contiguous unique ordinals and honest omissions."
+  {:malli/schema [:=> [:cat :seon.schema/value :qualified-keyword :qualified-keyword
+                       :qualified-keyword [:or :nil :qualified-keyword]] :boolean]}
+  [value count-key children-key ordinal-key omission-key]
+  (and (map? value)
+       (let [n (get value count-key)
+             children (get value children-key)
+             omission (get value omission-key)]
+         (and (nat-int? n)
+              (if (zero? n)
+                (not (contains? value children-key))
+                (and (coll? children) (= n (count children))
+                     (every? map? children)
+                     (= (set (range n)) (set (map ordinal-key children)))))
+              (or (not (contains? value omission-key))
+                  (and (map? omission) (omission-complete? omission)
+                       (= n (:seon.error.omission/retained-count omission))))))))
+
+(defn ordered-location?
+  "The retained path has precisely its declared ordered segments."
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  [value]
+  (ordered-members? value :seon.error.location/length :seon.error.location/segments
+                    :seon.error.location.segment/ordinal :seon.error.location/omission))
+
+(defn ordered-messages?
+  "The retained humanization has precisely its declared ordered messages."
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  [value]
+  (ordered-members? value :seon.instrument.humanized/message-count
+                    :seon.instrument.humanized/messages
+                    :seon.instrument.humanized.message/ordinal
+                    :seon.instrument.humanized/omission))
+
+(defn ordered-explanations?
+  "An explanation collection retains a positive, ordered number of problems."
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  [value]
+  (and (map? value) (pos-int? (:seon.instrument.explanations/count value))
+       (ordered-members? value :seon.instrument.explanations/count
+                         :seon.instrument.explanations/items
+                         :seon.instrument.explanation/ordinal
+                         :seon.instrument.explanations/omission)))
+
+(defn ordered-failures?
+  "An accretion group retains exactly its counted failures in ordinal order."
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  [value]
+  (ordered-members? value :seon.test.accretion.group/count
+                    :seon.test.accretion.group/failures
+                    :seon.test.accretion.failure/ordinal nil))
+
+(defn ordered-groups?
+  "Optional accretion groups and their count are supplied together."
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  [value]
+  (and (map? value)
+       (if (contains? value :seon.test.accretion/error-group-count)
+         (ordered-members? value :seon.test.accretion/error-group-count
+                           :seon.test.accretion/error-groups
+                           :seon.test.accretion.group/ordinal nil)
+         (not (contains? value :seon.test.accretion/error-groups)))))
+
+(defn projection-complete?
+  "A leaf observation contains text or an observed missing key, never both."
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  [value]
+  (exclusive-members? value [:seon.instrument/actual :seon.error.projection/missing-member]))
+
+(defn evidence-complete?
+  "Evidence contains one exact scalar or one admitted projection."
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  [value]
+  (exclusive-members? value [:seon.error.evidence/value :seon.error.evidence/projection]))
+
+(defn explanation-complete?
+  "A problem has humanized evidence or an explicit failed humanization observation."
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  [value]
+  (exclusive-members? value [:seon.instrument.explanation/humanized
+                             :seon.instrument.explanation/humanization-unavailable]))
+
+(defn arity-bounds-valid?
+  "A declared invocation interval has nonnegative, ordered endpoints."
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  [value]
+  (and (map? value)
+       (nat-int? (:seon.instrument.arity/min value))
+       (or (not (contains? value :seon.instrument.arity/max))
+           (and (nat-int? (:seon.instrument.arity/max value))
+                (<= (:seon.instrument.arity/min value) (:seon.instrument.arity/max value))))))
+
+(defn arity-refusal-valid?
+  "Every recorded declared interval excludes the actual invocation count."
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  [value]
+  (and (map? value) (nat-int? (:seon.instrument/arity value))
+       (pos-int? (:seon.instrument/declared-arity-count value))
+       (ordered-members? value :seon.instrument/declared-arity-count
+                         :seon.instrument/declared-arities :seon.instrument.arity/ordinal nil)
+       (every? (fn [bounds]
+                 (and (arity-bounds-valid? bounds)
+                      (let [n (:seon.instrument/arity value)]
+                        (or (< n (:seon.instrument.arity/min bounds))
+                            (when-let [maximum (:seon.instrument.arity/max bounds)]
+                              (> n maximum))))))
+               (:seon.instrument/declared-arities value))))
+
+(defn facet-counts-agree?
+  "Declared and actual facet counts each describe their own optional sets."
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  [value]
+  (and (map? value)
+       (every? (fn [[count-key set-key]]
+                 (let [n (get value count-key)]
+                   (and (nat-int? n)
+                        (if (zero? n) (not (contains? value set-key))
+                            (and (set? (get value set-key))
+                                 (= n (count (get value set-key))))))))
+               [[:seon.instrument/declared-facet-count :seon.instrument/declared-facets]
+                [:seon.instrument/actual-facet-count :seon.instrument/actual-facets]])))
+
+(defn config-expectation-present?
+  "A config refusal identifies at least one actual expected constraint."
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  [value]
+  (and (map? value)
+       (boolean (or (find value :seon.error/expected-key)
+                    (find value :seon.error/expected-shape)))))
+
+(defn stop-target-present?
+  "A stop observation names the graph it asks to stop."
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  [value]
+  (and (map? value)
+       (or (not= :stop-graph (:seon.error.disposition/action value))
+           (let [graph (:seon.error.disposition/graph-id value)]
+             (and (string? graph) (not (empty? graph)))))))
+
+(defn- read-target-group
+  "Derive the read grammar from exactly the observed target members."
+  {:malli/schema [:=> [:cat :seon.schema/value] [:or :nil :keyword]]}
+  [value]
+  (when (map? value)
+    (let [members (set (filter #(contains? value %)
+                              [:seon.db.read.target/query :seon.db.read.target/arguments
+                               :seon.db.read.target/selector :seon.db.read.target/entity-projection
+                               :seon.db.read.target/index :seon.db.read.target/index-request]))]
+      (cond
+        (= members #{:seon.db.read.target/query :seon.db.read.target/arguments})
+        (when-not (contains? value :seon.db.read.target/attribute) :q)
+        (= members #{:seon.db.read.target/selector :seon.db.read.target/entity-projection})
+        (when-not (contains? value :seon.db.read.target/attribute) :pull)
+        (= members #{:seon.db.read.target/index :seon.db.read.target/index-request}) :index-page))))
+
+(defn read-target-complete?
+  "A read target supplies exactly one complete query, pull or index request."
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  [value]
+  (boolean (read-target-group value)))
+
+(defn read-operation-agrees?
+  "The read operation agrees with the complete owned target's request grammar."
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  [value]
+  (and (map? value)
+       (let [operation (:seon.db/read-operation value)
+             group (read-target-group (:seon.db.read/target value))]
+         (and (some? group)
+              (= group (if (= :pull-many operation) :pull operation))))))
+
+(def ^:private error-base-generator
+  (gen/fmap (fn [millis]
+              {:seon.error/at (java.util.Date. (long millis))
+               :seon.error/layer :seon.instrument/invocation
+               :seon.error/operation 'seon.id/valid?})
+            gen/nat))
+
+(def ^:private observed-key-generator
+  (gen/fmap (fn [scalar]
+              (cond-> {:seon.error.key/projection (pr-str scalar)
+                       :seon.error.key/capped? false :seon.error.key/bound-bytes 256}
+                (some? scalar) (assoc :seon.error.key/scalar scalar)))
+            (gen/elements [nil false :plain :my.example/key 'plain 'my.example/fn "key" 0])))
+
+(def omission-complete-generator
+  (gen/let [retained gen/nat omitted gen/s-pos-int known? gen/boolean]
+    (cond-> {:seon.error.omission/bound-key :seon.config.error/max-evidence-bytes
+             :seon.error.omission/bound 256 :seon.error.omission/retained-count retained}
+      known? (assoc :seon.error.omission/omitted-count omitted)
+      (not known?) (assoc :seon.error.omission/unavailable-count-reason "Dependency did not count omitted members."))))
+
+(def projection-complete-generator
+  (gen/one-of
+   [(gen/fmap (fn [text]
+                {:seon.error/capped? false :seon.error.projection/bound-bytes 256
+                 :seon.instrument/actual text}) gen/string-alphanumeric)
+    (gen/fmap (fn [key]
+                {:seon.error/capped? false :seon.error.projection/bound-bytes 256
+                 :seon.error.projection/missing-member key}) observed-key-generator)]))
+
+(def evidence-complete-generator
+  (gen/one-of
+   [(gen/fmap (fn [scalar] {:seon.error.evidence/attribute :seon.instrument/arity
+                            :seon.error.evidence/value scalar})
+              (gen/elements [false 0 2 "observed" :my.example/member 'my.example/fn]))
+    (gen/fmap (fn [projection] {:seon.error.evidence/attribute :seon.instrument/actual
+                                :seon.error.evidence/projection projection})
+              projection-complete-generator)]))
+
+(def ordered-location-generator
+  (gen/fmap (fn [keys]
+              (cond-> {:seon.error.location/length (count keys)}
+                (seq keys) (assoc :seon.error.location/segments
+                                 (set (map-indexed (fn [n key]
+                                                     {:seon.error.location.segment/ordinal n
+                                                      :seon.error.location.segment/key key}) keys)))))
+            (gen/vector observed-key-generator 0 4)))
+
+(def ordered-messages-generator
+  (gen/fmap (fn [messages]
+              (cond-> {:seon.instrument.humanized/message-count (count messages)}
+                (seq messages)
+                (assoc :seon.instrument.humanized/messages
+                       (set (map-indexed (fn [n [text location]]
+                                           {:seon.instrument.humanized.message/ordinal n
+                                            :seon.instrument.humanized.message/text text
+                                            :seon.instrument.humanized.message/location location}) messages)))))
+            (gen/vector (gen/tuple gen/string-alphanumeric ordered-location-generator) 0 4)))
+
+(def explanation-complete-generator
+  (gen/let [ordinal gen/nat schema-location ordered-location-generator
+            value-location ordered-location-generator humanized ordered-messages-generator
+            known? gen/boolean]
+    (cond-> {:seon.instrument.explanation/ordinal ordinal
+             :seon.instrument.explanation/schema-location schema-location
+             :seon.instrument.explanation/value-location value-location
+             :seon.instrument.explanation/expected-shape (apply str (repeat 64 "0"))}
+      known? (assoc :seon.instrument.explanation/humanized humanized)
+      (not known?) (assoc :seon.instrument.explanation/humanization-unavailable "No dependency message."))))
+
+(def ordered-explanations-generator
+  (gen/fmap (fn [items]
+              {:seon.instrument.explanations/count (count items)
+               :seon.instrument.explanations/items
+               (set (map-indexed #(assoc %2 :seon.instrument.explanation/ordinal %1) items))})
+            (gen/vector explanation-complete-generator 1 4)))
+
+(def arity-bounds-valid-generator
+  (gen/let [minimum gen/nat additional gen/nat bounded? gen/boolean ordinal gen/nat]
+    (cond-> {:seon.instrument.arity/ordinal ordinal :seon.instrument.arity/min minimum}
+      bounded? (assoc :seon.instrument.arity/max (+ minimum additional)))))
+
+(def arity-refusal-valid-generator
+  (gen/let [base error-base-generator actual gen/nat intervals (gen/vector arity-bounds-valid-generator 1 4)]
+    (assoc base :seon.instrument/fn 'seon.id/valid? :seon.instrument/arity actual
+           :seon.instrument/declared-arity-count (count intervals)
+           :seon.instrument/declared-arities
+           (set (map-indexed
+                 (fn [ordinal bounds]
+                   (cond-> (assoc bounds :seon.instrument.arity/ordinal ordinal
+                                  :seon.instrument.arity/min (+ actual 1 (:seon.instrument.arity/min bounds)))
+                     (:seon.instrument.arity/max bounds)
+                     (update :seon.instrument.arity/max + actual 1))) intervals)))))
+
+(def config-expectation-present-generator
+  (gen/let [base error-base-generator key? gen/boolean]
+    (assoc base :seon.config/error-key :seon.config/on-core-error
+           (if key? :seon.error/expected-key :seon.error/expected-shape)
+           (if key? :seon.config/on-core-error (apply str (repeat 64 "0"))))))
+
+(def stop-target-present-generator
+  (gen/let [action (gen/elements [:return :abort-operation :stop-graph]) evidence evidence-complete-generator]
+    (cond-> {:seon.error.disposition/action action :seon.error.disposition/observer 'seon.id/valid?
+             :seon.error.disposition/evidence evidence}
+      (= :stop-graph action) (assoc :seon.error.disposition/graph-id "generated-graph"))))
+
+(def read-target-complete-generator
+  (gen/let [operation (gen/elements [:q :pull :index-page])
+            a projection-complete-generator b projection-complete-generator]
+    (case operation
+      :q {:seon.db.read.target/query a :seon.db.read.target/arguments b}
+      :pull {:seon.db.read.target/selector a :seon.db.read.target/entity-projection b}
+      :index-page {:seon.db.read.target/index :eavt :seon.db.read.target/index-request a})))
+
+(def read-operation-agrees-generator
+  (gen/let [base error-base-generator target read-target-complete-generator many? gen/boolean]
+    (let [group (read-target-group target)]
+      (assoc base :seon.db/read-operation (if (and (= :pull group) many?) :pull-many group)
+             :seon.db.read/target target
+             :seon.error/basis {:seon.error.basis/store #uuid "00000000-0000-0000-0000-000000000001"
+                                :seon.error.basis/branch :generated
+                                :seon.error.basis/commit #uuid "00000000-0000-0000-0000-000000000002"
+                                :seon.error.basis/t 1}))))
+
+(def facet-counts-agree-generator
+  (gen/let [base error-base-generator projection projection-complete-generator
+            declared (gen/set (gen/elements [:seon.agent/error :seon.turn/error]))
+            actual (gen/set (gen/elements [:seon.db.read/error :seon.config/error]))]
+    (cond-> (assoc base :seon.instrument/fn 'seon.id/valid? :seon.instrument/arity 2
+                   :seon.instrument/returned-error projection
+                   :seon.instrument/declared-facet-digest (apply str (repeat 64 "0"))
+                   :seon.instrument/declared-facet-count (count declared)
+                   :seon.instrument/actual-facet-count (count actual))
+      (seq declared) (assoc :seon.instrument/declared-facets declared)
+      (seq actual) (assoc :seon.instrument/actual-facets actual))))
+
+(def ordered-failures-generator
+  (gen/fmap (fn [items]
+              (cond-> {:seon.test.accretion.group/ordinal 0 :seon.test.accretion.group/shape "observed"
+                       :seon.test.accretion.group/count (count items)}
+                (seq items) (assoc :seon.test.accretion.group/failures
+                                  (set (map-indexed (fn [n evidence]
+                                                      {:seon.test.accretion.failure/ordinal n
+                                                       :seon.test.accretion.failure/source :test
+                                                       :seon.test.accretion.failure/evidence evidence}) items)))))
+            (gen/vector projection-complete-generator 0 4)))
+
+(def ordered-groups-generator
+  (gen/let [base error-base-generator projection projection-complete-generator
+            groups (gen/vector ordered-failures-generator 0 4)]
+    (cond-> (assoc base :seon.instrument/fn 'seon.id/valid?
+                   :seon.error/expected-shape (apply str (repeat 64 "0"))
+                   :seon.error/offending-projection projection
+                   :seon.test.accretion/error-group-count (count groups))
+      (seq groups) (assoc :seon.test.accretion/error-groups
+                          (set (map-indexed #(assoc %2 :seon.test.accretion.group/ordinal %1) groups))))))

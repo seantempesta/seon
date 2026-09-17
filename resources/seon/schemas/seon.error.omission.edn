@@ -1,0 +1,37 @@
+{
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :seon.error.omission/bound
+ [:int {:min 0}]
+
+ :seon.error.omission/bound-key
+ :qualified-keyword
+
+ :seon.error.omission/entity
+ [:and
+ [:map
+  {:seon.db/attributes true}
+  [:seon.error.omission/bound-key :seon.error.omission/bound-key]
+  [:seon.error.omission/bound :seon.error.omission/bound]
+  [:seon.error.omission/retained-count
+   :seon.error.omission/retained-count]
+  [:seon.error.omission/omitted-count
+   {:optional true}
+   :seon.error.omission/omitted-count]
+  [:seon.error.omission/unavailable-count-reason
+   {:optional true}
+   :seon.error.omission/unavailable-count-reason]]
+ [:fn
+  {:error/message "omission-complete?",
+   :gen/gen seon.error/omission-complete-generator}
+  seon.error/omission-complete?]]
+
+ :seon.error.omission/omitted-count
+ [:int {:min 1}]
+
+ :seon.error.omission/retained-count
+ [:int {:min 0}]
+
+ :seon.error.omission/unavailable-count-reason
+ [:string {:min 1}]
+}

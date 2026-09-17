@@ -170,4 +170,12 @@
           [:my.web/unparseable-response :my.web/unparseable-response]
           [:seon.error/message :seon.error/message]
           [:my.web/query {:optional true} :my.web/query]]
-         :url [:string {:min 1}]}
+         :url [:string {:min 1}]
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :my.web/error-request
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.projection/entity}
+ :seon.db/ref]
+}

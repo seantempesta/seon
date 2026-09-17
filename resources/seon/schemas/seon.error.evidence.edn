@@ -1,0 +1,38 @@
+{
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :seon.error.evidence/attribute
+ :qualified-keyword
+
+ :seon.error.evidence/entity
+ [:and
+ [:map
+  {:seon.db/attributes true}
+  [:seon.error.evidence/attribute :seon.error.evidence/attribute]
+  [:seon.error.evidence/value
+   {:optional true}
+   :seon.error.evidence/value]
+  [:seon.error.evidence/projection
+   {:optional true}
+   :seon.error.evidence/projection]]
+ [:fn
+  {:error/message "evidence-complete?",
+   :gen/gen seon.error/evidence-complete-generator}
+  seon.error/evidence-complete?]]
+
+ :seon.error.evidence/projection
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.projection/entity}
+ :seon.db/ref]
+
+ :seon.error.evidence/value
+ [:or
+ :string
+ :int
+ :double
+ :boolean
+ :qualified-keyword
+ :qualified-symbol
+ :inst]
+}

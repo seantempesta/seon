@@ -30,4 +30,29 @@
                  :identity-outside-scope [:= true]
                  :identity-outside-scope-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a reconciled identity outside the declared scope"} [:seon.reconcile/identity-outside-scope :seon.reconcile/identity-outside-scope] [:seon.error/message :seon.error/message]]
  :seon.reconcile/missing-declarations [:= true]
- :seon.reconcile/missing-declarations-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.reconcile/missing-declarations class marker"} [:seon.reconcile/missing-declarations :seon.reconcile/missing-declarations] [:seon.error/message :seon.error/message]]}
+ :seon.reconcile/missing-declarations-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.reconcile/missing-declarations class marker"} [:seon.reconcile/missing-declarations :seon.reconcile/missing-declarations] [:seon.error/message :seon.error/message]]
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :seon.reconcile/constraint-observation
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.evidence/entity}
+ :seon.db/ref]
+
+ :seon.reconcile/error
+ [:and
+ {:seon.db/attributes true}
+ :seon.error/base
+ [:map
+  {:seon.db/attributes true}
+  [:seon.reconcile/requested-identity
+   :seon.reconcile/requested-identity]
+  [:seon.reconcile/constraint-observation
+   :seon.reconcile/constraint-observation]]]
+
+ :seon.reconcile/requested-identity
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.projection/entity}
+ :seon.db/ref]
+}

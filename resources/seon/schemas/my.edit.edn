@@ -71,4 +71,24 @@
  :my.edit/stale-source :my.edit/path
  :my.edit/stale-source-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the path whose source is stale"} [:my.edit/stale-source :my.edit/stale-source] [:seon.error/message :seon.error/message]]
  :my.edit/not-utf8 :my.edit/path
- :my.edit/not-utf8-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the path whose source is not strict UTF-8"} [:my.edit/not-utf8 :my.edit/not-utf8] [:seon.error/message :seon.error/message]]}
+ :my.edit/not-utf8-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the path whose source is not strict UTF-8"} [:my.edit/not-utf8 :my.edit/not-utf8] [:seon.error/message :seon.error/message]]
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :my.edit/edit-observation
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.evidence/entity}
+ :seon.db/ref]
+
+ :my.edit/error
+ [:and
+ {:seon.db/attributes true}
+ :seon.error/base
+ [:map
+  {:seon.db/attributes true}
+  [:my.edit/error-path :my.edit/error-path]
+  [:my.edit/edit-observation :my.edit/edit-observation]]]
+
+ :my.edit/error-path
+ [:string {:min 1}]
+}

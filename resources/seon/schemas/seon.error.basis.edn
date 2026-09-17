@@ -1,0 +1,23 @@
+{
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :seon.error.basis/branch
+ :keyword
+
+ :seon.error.basis/commit
+ :uuid
+
+ :seon.error.basis/entity
+ [:map
+ {:seon.db/attributes true}
+ [:seon.error.basis/store :seon.error.basis/store]
+ [:seon.error.basis/branch :seon.error.basis/branch]
+ [:seon.error.basis/commit :seon.error.basis/commit]
+ [:seon.error.basis/t :seon.error.basis/t]]
+
+ :seon.error.basis/store
+ :uuid
+
+ :seon.error.basis/t
+ :int
+}

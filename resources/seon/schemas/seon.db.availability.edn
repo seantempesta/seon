@@ -1,0 +1,22 @@
+{
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :seon.db.availability/connection
+ [:string {:min 1}]
+
+ :seon.db.availability/error
+ [:and
+ {:seon.db/attributes true}
+ :seon.error/base
+ [:map
+  {:seon.db/attributes true}
+  [:seon.db.availability/connection :seon.db.availability/connection]
+  [:seon.db.availability/failed-observation
+   :seon.db.availability/failed-observation]]]
+
+ :seon.db.availability/failed-observation
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.evidence/entity}
+ :seon.db/ref]
+}

@@ -264,4 +264,27 @@
                 [:my.plan.item/subject {:optional true} :my.plan.item/subject]
                   [:seon.db/connection :seon.db/connection]
                   [:seon.agent/id :seon.agent/id]]
+
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :my.plan/constraint-observation
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.evidence/entity}
+ :seon.db/ref]
+
+ :my.plan/error
+ [:and
+ {:seon.db/attributes true}
+ :seon.error/base
+ [:map
+  {:seon.db/attributes true}
+  [:my.plan/error-request :my.plan/error-request]
+  [:my.plan/constraint-observation :my.plan/constraint-observation]]]
+
+ :my.plan/error-request
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.projection/entity}
+ :seon.db/ref]
 }

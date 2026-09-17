@@ -1,0 +1,31 @@
+{
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :seon.test.accretion.failure/entity
+ [:map
+ {:seon.db/attributes true}
+ [:seon.test.accretion.failure/ordinal
+  :seon.test.accretion.failure/ordinal]
+ [:seon.test.accretion.failure/source
+  :seon.test.accretion.failure/source]
+ [:seon.test.accretion.failure/evidence
+  :seon.test.accretion.failure/evidence]
+ [:seon.test.accretion.failure/test-symbol
+  {:optional true}
+  :seon.test.accretion.failure/test-symbol]]
+
+ :seon.test.accretion.failure/evidence
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.projection/entity}
+ :seon.db/ref]
+
+ :seon.test.accretion.failure/ordinal
+ [:int {:min 0}]
+
+ :seon.test.accretion.failure/source
+ :seon.test.accretion/failure-source
+
+ :seon.test.accretion.failure/test-symbol
+ [:qualified-symbol {:seon.db/index true}]
+}

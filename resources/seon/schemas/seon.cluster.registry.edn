@@ -64,4 +64,26 @@
  :seon.cluster.registry/dry-run-barrier-absent [:= true]
  :seon.cluster.registry/dry-run-barrier-absent-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.cluster.registry/dry-run-barrier-absent class marker"} [:seon.cluster.registry/dry-run-barrier-absent :seon.cluster.registry/dry-run-barrier-absent] [:seon.error/message :seon.error/message]]
  :seon.cluster.registry/dry-run-complete [:= true]
- :seon.cluster.registry/dry-run-complete-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.cluster.registry/dry-run-complete class marker"} [:seon.cluster.registry/dry-run-complete :seon.cluster.registry/dry-run-complete] [:seon.error/message :seon.error/message]]}
+ :seon.cluster.registry/dry-run-complete-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.cluster.registry/dry-run-complete class marker"} [:seon.cluster.registry/dry-run-complete :seon.cluster.registry/dry-run-complete] [:seon.error/message :seon.error/message]]
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :seon.cluster.registry/error
+ [:and
+ {:seon.db/attributes true}
+ :seon.error/base
+ [:map
+  {:seon.db/attributes true}
+  [:seon.cluster.registry/target-branch
+   :seon.cluster.registry/target-branch]
+  [:seon.cluster.registry/registry-observation
+   :seon.cluster.registry/registry-observation]]]
+
+ :seon.cluster.registry/registry-observation
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.evidence/entity}
+ :seon.db/ref]
+
+ :seon.cluster.registry/target-branch
+ :keyword
+}

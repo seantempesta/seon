@@ -75,4 +75,30 @@
               :unknown-key :seon.config/key
               :unknown-key-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the unknown configuration key"} [:seon.config/unknown-key :seon.config/unknown-key] [:seon.error/message :seon.error/message]]
  :seon.config/missing-result-cap [:= true]
- :seon.config/missing-result-cap-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.config/missing-result-cap class marker"} [:seon.config/missing-result-cap :seon.config/missing-result-cap] [:seon.error/message :seon.error/message]]}
+ :seon.config/missing-result-cap-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.config/missing-result-cap class marker"} [:seon.config/missing-result-cap :seon.config/missing-result-cap] [:seon.error/message :seon.error/message]]
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :seon.config/error
+ [:and
+ [:and
+  {:seon.db/attributes true}
+  :seon.error/base
+  [:map
+   {:seon.db/attributes true}
+   [:seon.config/error-key :seon.config/error-key]]]
+ [:fn
+  {:error/message "config-expectation-present?",
+   :gen/gen seon.error/config-expectation-present-generator}
+  seon.error/config-expectation-present?]]
+
+ :seon.config/error-key
+ :qualified-keyword
+
+ :seon.config/rule-error
+ [:and
+ {:seon.db/attributes true}
+ :seon.config/error
+ [:map
+  {:seon.db/attributes true}
+  [:seon.config/rule :seon.config/rule]]]
+}

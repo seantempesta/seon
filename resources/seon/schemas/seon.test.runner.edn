@@ -79,4 +79,28 @@
  :seon.test.runner/unresolved-test-var [:= true]
  :seon.test.runner/unresolved-test-var-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.test.runner/unresolved-test-var class marker"} [:seon.test.runner/unresolved-test-var :seon.test.runner/unresolved-test-var] [:seon.error/message :seon.error/message]]
  :seon.test.runner/worker-launch-failure [:= true]
- :seon.test.runner/worker-launch-failure-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.test.runner/worker-launch-failure class marker"} [:seon.test.runner/worker-launch-failure :seon.test.runner/worker-launch-failure] [:seon.error/message :seon.error/message]]}
+ :seon.test.runner/worker-launch-failure-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.test.runner/worker-launch-failure class marker"} [:seon.test.runner/worker-launch-failure :seon.test.runner/worker-launch-failure] [:seon.error/message :seon.error/message]]
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :seon.test.runner/error
+ [:and
+ {:seon.db/attributes true}
+ :seon.error/base
+ [:map
+  {:seon.db/attributes true}
+  [:seon.test.runner/error-selection :seon.test.runner/error-selection]
+  [:seon.test.runner/worker-observation
+   :seon.test.runner/worker-observation]]]
+
+ :seon.test.runner/error-selection
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.projection/entity}
+ :seon.db/ref]
+
+ :seon.test.runner/worker-observation
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.evidence/entity}
+ :seon.db/ref]
+}

@@ -165,4 +165,29 @@
  :seon.effect/already-settled [:= true]
  :seon.effect/already-settled-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.effect/already-settled class marker"} [:seon.effect/already-settled :seon.effect/already-settled] [:seon.error/message :seon.error/message]]
  :seon.effect/missing-receipt [:= true]
- :seon.effect/missing-receipt-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.effect/missing-receipt class marker"} [:seon.effect/missing-receipt :seon.effect/missing-receipt] [:seon.error/message :seon.error/message]]}
+ :seon.effect/missing-receipt-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.effect/missing-receipt class marker"} [:seon.effect/missing-receipt :seon.effect/missing-receipt] [:seon.error/message :seon.error/message]]
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :seon.effect/capability-symbol
+ [:qualified-symbol {:seon.db/index true}]
+
+ :seon.effect/error
+ [:and
+ {:seon.db/attributes true}
+ :seon.error/base
+ [:map
+  {:seon.db/attributes true}
+  [:seon.effect/request-identity :seon.effect/request-identity]
+  [:seon.effect/capability-symbol :seon.effect/capability-symbol]
+  [:seon.effect/execution-observation
+   :seon.effect/execution-observation]]]
+
+ :seon.effect/execution-observation
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.evidence/entity}
+ :seon.db/ref]
+
+ :seon.effect/request-identity
+ [:string {:min 1}]
+}

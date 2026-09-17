@@ -208,4 +208,27 @@
  :seon.fn/index-refused [:= true]
  :seon.fn/index-refused-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.fn/index-refused class marker"} [:seon.fn/index-refused :seon.fn/index-refused] [:seon.error/message :seon.error/message]]
  :seon.fn/signature-refused [:= true]
- :seon.fn/signature-refused-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.fn/signature-refused class marker"} [:seon.fn/signature-refused :seon.fn/signature-refused] [:seon.error/message :seon.error/message]]}
+ :seon.fn/signature-refused-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.fn/signature-refused class marker"} [:seon.fn/signature-refused :seon.fn/signature-refused] [:seon.error/message :seon.error/message]]
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :seon.fn/analysis-phase
+ :qualified-keyword
+
+ :seon.fn/error
+ [:and
+ {:seon.db/attributes true}
+ :seon.error/base
+ [:map
+  {:seon.db/attributes true}
+  [:seon.fn/error-subject :seon.fn/error-subject]
+  [:seon.fn/analysis-phase :seon.fn/analysis-phase]]]
+
+ :seon.fn/error-facets
+ [:set {:seon.db/index true} :qualified-keyword]
+
+ :seon.fn/error-subject
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.projection/entity}
+ :seon.db/ref]
+}

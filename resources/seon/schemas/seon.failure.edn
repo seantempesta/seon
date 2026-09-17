@@ -1,0 +1,19 @@
+{
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :seon.failure/entity
+ [:map
+ {:seon.db/attributes true}
+ [:seon.failure/fault :seon.failure/fault]
+ [:seon.failure/requested-tx :seon.failure/requested-tx]
+ [:seon.failure/stopped-tx {:optional true} :seon.failure/stopped-tx]]
+
+ :seon.failure/fault
+ :seon.db/ref
+
+ :seon.failure/requested-tx
+ :seon.db/ref
+
+ :seon.failure/stopped-tx
+ :seon.db/ref
+}

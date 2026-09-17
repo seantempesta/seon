@@ -41,4 +41,27 @@
  :my.shell/time-limit [:= true]
  :my.shell/time-limit-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a foreign process stopped by its time limit"} [:my.shell/time-limit :my.shell/time-limit] [:seon.error/message :seon.error/message]]
  :my.shell/start-failed [:= true]
- :my.shell/start-failed-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a foreign process that could not start"} [:my.shell/start-failed :my.shell/start-failed] [:seon.error/message :seon.error/message]]}
+ :my.shell/start-failed-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a foreign process that could not start"} [:my.shell/start-failed :my.shell/start-failed] [:seon.error/message :seon.error/message]]
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :my.shell/error
+ [:and
+ {:seon.db/attributes true}
+ :seon.error/base
+ [:map
+  {:seon.db/attributes true}
+  [:my.shell/error-command :my.shell/error-command]
+  [:my.shell/execution-observation :my.shell/execution-observation]]]
+
+ :my.shell/error-command
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.projection/entity}
+ :seon.db/ref]
+
+ :my.shell/execution-observation
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.evidence/entity}
+ :seon.db/ref]
+}

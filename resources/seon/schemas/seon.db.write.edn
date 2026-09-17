@@ -1,0 +1,18 @@
+{
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :seon.db.write/attempt
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.db.write.attempt/entity}
+ :seon.db/ref]
+
+ :seon.db.write/error
+ [:and
+ {:seon.db/attributes true}
+ :seon.error/base
+ [:map
+  {:seon.db/attributes true}
+  [:seon.db.write/attempt :seon.db.write/attempt]
+  [:seon.error/basis :seon.error/basis]]]
+}

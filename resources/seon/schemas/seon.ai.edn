@@ -486,4 +486,24 @@
             :seon.ai/transport-outcome-unknown]
            [:seon.error/message :seon.error/message]],
           :system [:string {:min 1}],
-          :timeout :seon.ai/timeout-ms}
+          :timeout :seon.ai/timeout-ms
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :seon.ai/error-provider
+ [:string {:min 1}]
+
+ :seon.ai/request-error
+ [:and
+ {:seon.db/attributes true}
+ :seon.error/base
+ [:map
+  {:seon.db/attributes true}
+  [:seon.ai/error-provider :seon.ai/error-provider]
+  [:seon.ai/request-observation :seon.ai/request-observation]]]
+
+ :seon.ai/request-observation
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.evidence/entity}
+ :seon.db/ref]
+}

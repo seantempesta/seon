@@ -148,4 +148,24 @@
  :invalid-glob :my.fs/pattern
  :invalid-glob-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the path whose glob expression is invalid"} [:my.fs/invalid-glob :my.fs/invalid-glob] [:seon.error/message :seon.error/message]]
  :blob-unavailable :seon.blob/digest
- :blob-unavailable-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the unavailable blob digest"} [:my.fs/blob-unavailable :my.fs/blob-unavailable] [:seon.error/message :seon.error/message]]}
+ :blob-unavailable-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the unavailable blob digest"} [:my.fs/blob-unavailable :my.fs/blob-unavailable] [:seon.error/message :seon.error/message]]
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :my.fs/error
+ [:and
+ {:seon.db/attributes true}
+ :seon.error/base
+ [:map
+  {:seon.db/attributes true}
+  [:my.fs/error-path :my.fs/error-path]
+  [:my.fs/io-observation :my.fs/io-observation]]]
+
+ :my.fs/error-path
+ [:string {:min 1}]
+
+ :my.fs/io-observation
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.evidence/entity}
+ :seon.db/ref]
+}

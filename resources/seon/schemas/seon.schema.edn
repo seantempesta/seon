@@ -158,4 +158,28 @@
  :seon.schema/missing-projection [:= true]
  :seon.schema/missing-projection-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.schema/missing-projection class marker"} [:seon.schema/missing-projection :seon.schema/missing-projection] [:seon.error/message :seon.error/message]]
  :seon.schema/render-contract-incoherent [:= true]
- :seon.schema/render-contract-incoherent-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.schema/render-contract-incoherent class marker"} [:seon.schema/render-contract-incoherent :seon.schema/render-contract-incoherent] [:seon.error/message :seon.error/message]]}
+ :seon.schema/render-contract-incoherent-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.schema/render-contract-incoherent class marker"} [:seon.schema/render-contract-incoherent :seon.schema/render-contract-incoherent] [:seon.error/message :seon.error/message]]
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :seon.schema/declaration-expectation
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.projection/entity}
+ :seon.db/ref]
+
+ :seon.schema/error
+ [:and
+ {:seon.db/attributes true}
+ :seon.error/base
+ [:map
+  {:seon.db/attributes true}
+  [:seon.schema/error-declaration :seon.schema/error-declaration]
+  [:seon.schema/declaration-expectation
+   :seon.schema/declaration-expectation]]]
+
+ :seon.schema/error-declaration
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.projection/entity}
+ :seon.db/ref]
+}

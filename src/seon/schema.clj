@@ -39,6 +39,8 @@
   (delay (requiring-resolve 'seon.schema.edn/packaged-forms)))
 (defonce ^:private error-diagnostic
   (delay (requiring-resolve 'seon.error/diagnostic)))
+(defonce ^:private schema-datahike-storable-attribute-in?
+  (delay (requiring-resolve 'seon.schema.datahike/storable-attribute-in?)))
 (defonce ^:private schema-datahike-storable-properties-in
   (delay (requiring-resolve 'seon.schema.datahike/storable-properties-in)))
 (defonce ^:private schema-datahike-database-attributes-in
@@ -260,6 +262,16 @@
             (qualified-symbol? (:gen/gen value)))
        (assoc value :gen/gen
               (some-> (:gen/gen value) requiring-resolve deref))
+
+       (and (vector? value) (= :and (first value))
+            (not (and (map? (second value)) (:gen/gen (second value))))
+            (some #(and (vector? %) (= :fn (first %))
+                        (:gen/gen (second %))) (rest value)))
+       (let [generator (some #(when (and (vector? %) (= :fn (first %)))
+                               (:gen/gen (second %))) (rest value))
+             properties (if (map? (second value)) (second value) {})
+             children (if (map? (second value)) (drop 2 value) (rest value))]
+         (into [:and (assoc properties :gen/gen generator)] children))
 
        (and (vector? value) (= :fn (first value)))
        (let [predicate-index (if (map? (second value)) 2 1)
@@ -1325,6 +1337,10 @@
                        row-identity role row-admission)
                       (internal/assert-complete-schema!
                        {:seon.schema/identity row-identity
+                        :seon.schema/forms forms
+                        :seon.schema/storable-attribute?
+                        (fn [attribute] (@schema-datahike-storable-attribute-in?
+                                         {:seon.schema.projection/forms forms} attribute))
                         :seon.schema/definition row-definition
                         :seon.schema/compiled schema
                         :seon.schema/role role
@@ -1756,12 +1772,13 @@
 
 (defn- shape-row-in
   [forms schema-key definition]
-  (let [props (or (form/attr-form-properties definition) {})
+  (let [props (or (form/schema-properties definition)
+                        (form/attr-form-properties definition) {})
         required-attrs
         (some-> (internal/map-required-attrs forms definition) set)]
     (when (or (seq required-attrs)
               (and (:seon.db/attributes props)
-                   (seq (form/map-entries definition))))
+                   (seq (form/map-entries forms definition))))
       (merge
         {:seon.schema/key schema-key
          :seon.schema/required-attrs required-attrs
@@ -1865,6 +1882,10 @@
                  (delay
                    (internal/assert-complete-schema!
                     {:seon.schema/identity reference
+                     :seon.schema/forms forms
+                     :seon.schema/storable-attribute?
+                     (fn [attribute] (@schema-datahike-storable-attribute-in?
+                                      {:seon.schema.projection/forms forms} attribute))
                      :seon.schema/definition (get forms reference)
                      :seon.schema/compiled (get compiled-schemas reference)
                      :seon.schema/role role
@@ -1967,7 +1988,7 @@
                       (update result attr (fnil conj []) schema-key))
                     index
                     (or (seq required-attrs)
-                        (map first (form/map-entries (get forms schema-key))))))
+                        (map first (form/map-entries forms (get forms schema-key))))))
           (sorted-map)
           required-by-key)
         shape-rank
@@ -2073,7 +2094,7 @@
                      (update result attr (fnil conj []) schema-key))
                    index
                    (or (seq required-attrs)
-                       (map first (form/map-entries (get forms schema-key))))))
+                       (map first (form/map-entries forms (get forms schema-key))))))
          (sorted-map)
          required-by-key)
         shape-rank
@@ -2760,7 +2781,7 @@
   (if-let [entity-form
            (get (:seon.schema.projection/forms projection) schema-key)]
     (into {} (map (fn [entry] [(first entry) entry]))
-          (form/map-entries entity-form))
+          (form/map-entries (:seon.schema.projection/forms projection) entity-form))
     {}))
 
 (defn- reverse-target-schema

@@ -1,0 +1,19 @@
+{
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :seon.error.location.segment/entity
+ [:map
+ {:seon.db/attributes true}
+ [:seon.error.location.segment/ordinal
+  :seon.error.location.segment/ordinal]
+ [:seon.error.location.segment/key :seon.error.location.segment/key]]
+
+ :seon.error.location.segment/key
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.key/entity}
+ :seon.db/ref]
+
+ :seon.error.location.segment/ordinal
+ [:int {:min 0}]
+}

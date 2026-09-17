@@ -233,4 +233,60 @@
                          [:seon.test.accretion/results
                           :seon.test.accretion/results]
                          [:seon.test.accretion/auto-check {:optional true}
-                          :seon.test.accretion/auto-check]]}
+                          :seon.test.accretion/auto-check]]
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :seon.test.accretion/error
+ [:and
+ [:and
+  {:seon.db/attributes true}
+  :seon.error/base
+  [:map
+   {:seon.db/attributes true}
+   [:seon.instrument/fn :seon.instrument/fn]
+   [:seon.error/expected-shape :seon.error/expected-shape]
+   [:seon.error/offending-projection :seon.error/offending-projection]
+   [:seon.test.accretion/error-auto-check
+    {:optional true}
+    :seon.test.accretion/error-auto-check]
+   [:seon.test.accretion/error-groups
+    {:optional true}
+    :seon.test.accretion/error-groups]
+   [:seon.test.accretion/error-group-count
+    {:optional true}
+    :seon.test.accretion/error-group-count]
+   [:seon.test.accretion/error-advisories
+    {:optional true}
+    :seon.test.accretion/error-advisories]
+   [:seon.test.accretion/error-arguments
+    {:optional true}
+    :seon.test.accretion/error-arguments]]]
+ [:fn
+  {:error/message "ordered-groups?",
+   :gen/gen seon.error/ordered-groups-generator}
+  seon.error/ordered-groups?]]
+
+ :seon.test.accretion/error-advisories
+ [:set :string]
+
+ :seon.test.accretion/error-arguments
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.projection/entity}
+ :seon.db/ref]
+
+ :seon.test.accretion/error-auto-check
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.test.accretion.auto/entity}
+ :seon.db/ref]
+
+ :seon.test.accretion/error-group-count
+ [:int {:min 0}]
+
+ :seon.test.accretion/error-groups
+ [:set
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.test.accretion.group/entity}
+ :seon.db/ref]
+}

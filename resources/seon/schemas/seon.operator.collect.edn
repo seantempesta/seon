@@ -89,4 +89,23 @@
                           {:optional true}
                           :seon.operator.collect/dry-run?]
                          [:seon.operator.collect/complete?
-                          :seon.operator.collect/complete?]]}
+                          :seon.operator.collect/complete?]]
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :seon.operator.collect/error
+ [:and
+ {:seon.db/attributes true}
+ :seon.error/base
+ [:map
+  {:seon.db/attributes true}
+  [:seon.operator.collect/error-option
+   :seon.operator.collect/error-option]
+  [:seon.operator.collect/expected-option
+   :seon.operator.collect/expected-option]]]
+
+ :seon.operator.collect/error-option
+ :keyword
+
+ :seon.operator.collect/expected-option
+ :qualified-keyword
+}
