@@ -213,7 +213,10 @@
 
 (defn open?
   "True when the run has not closed."
-  {:malli/schema [:=> [:cat :seon.turn/turn]
+  {:malli/schema [:=> [:cat
+                       [:map
+                        [::id ::id]
+                        [::closed-tx {:optional true} ::closed-tx]]]
                   :boolean]}
   [run]
   (not (contains? run ::closed-tx)))
@@ -314,7 +317,7 @@
   {:malli/schema [:=> [:cat
                        [:or :seon.db/database-value :seon.error/value]
                        ::id]
-                  [:or :nil :seon.turn/turn :seon.error/value]]}
+                  [:or :nil [:map [::id ::id]] :seon.error/value]]}
   [db id]
   (db/pull db '[*] [::id id]))
 
