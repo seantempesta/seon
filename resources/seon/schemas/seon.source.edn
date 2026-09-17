@@ -38,12 +38,14 @@
                [:seon.fn/manifest
                 {:optional true}
                 :seon.fn.manifest/manifest]],
+              :progress! [:fn clojure.core/ifn?],
               :publish-request
               [:map
                [:seon.fn/root {:optional true} :seon.fn/root]
                [:seon.store/store :seon.store/store]
                [:seon.source/digest :seon.source/digest]
                [:seon.source/populate :seon.source/populate]
+               [:seon.source/progress! {:optional true} :seon.source/progress!]
                [:seon.source/activation :seon.source/activation]
                [:seon.source/populate-request
                 {:optional true}

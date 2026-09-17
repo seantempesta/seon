@@ -101,7 +101,8 @@
                      :seon.source/populate populate
                      :seon.source/activation
                      'seon.cluster.source-test/activation
-                     :seon.source/populate-request populate-request})))
+                     :seon.source/populate-request populate-request
+                     :seon.source/progress! @#'cluster/*source-progress!*})))
 
 (defn- upsert
   [opened expected-commit digest rows]
@@ -346,8 +347,17 @@
         (with-store
           (fn [opened]
             (let [published (let [started (System/nanoTime)
-                                  result (publish opened digest-a 'seon.cluster/populate-source!
-                                                  {:seon.fn/manifest manifest})]
+                                  clock (volatile! ["publication start" started])
+                                  progress! (fn [phase]
+                                              (let [[previous at] @clock
+                                                    now (System/nanoTime)]
+                                                (println "publication-phase" (pr-str previous)
+                                                         "elapsed-ms" (quot (- now at) 1000000))
+                                                (vreset! clock [phase now])))
+                                  result (binding [cluster/*source-progress!* progress!]
+                                           (publish opened digest-a 'seon.cluster/populate-source!
+                                                    {:seon.fn/manifest manifest}))
+                                  _ (progress! "publication complete")]
                               (println "complete-program-publication-ms"
                                        (/ (- (System/nanoTime) started) 1e6))
                               result)

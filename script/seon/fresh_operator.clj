@@ -97,13 +97,6 @@
         ":seon.config.operator/event-silence-backstop-ms"))
   (flush))
 
-(declare publication-bound-ms)
-
-(defn- source-publication-silence-backstop-ms
-  "Publication progress uses the declared operator silence window."
-  []
-  (operator-silence-backstop-ms {}))
-
 (defn- parse-root
   [arguments]
   (let [[root remaining]
@@ -1708,6 +1701,8 @@
   ([advertisement form timeout-ms]
    (prepl-eval! advertisement form timeout-ms (constantly nil)))
   ([advertisement form timeout-ms observe!]
+   (prepl-eval! advertisement form timeout-ms observe! {}))
+  ([advertisement form timeout-ms observe! request]
    (with-open [socket (Socket.)]
      (try
        (.connect socket
@@ -1778,10 +1773,15 @@
          (catch SocketTimeoutException _
            (report-silence-backstop! "prepl response" timeout-ms)
            (fail! (str "The prepl response went silent for " timeout-ms
-                       " ms.")
+                       " ms in phase "
+                       (pr-str (if-let [progress (:seon.operator.lock/progress request)]
+                                 @progress :prepl-response)) ".")
                   {:seon.error/kind
                    :seon.fresh-operator/prepl-response-silent
                    :seon.fresh-operator/phase :prepl-response
+                   :seon.operator.lock/phase
+                   (if-let [progress (:seon.operator.lock/progress request)]
+                     @progress :prepl-response)
                    :seon.fresh-operator/silence-backstop-ms timeout-ms
                    :seon.config/attribute
                    :seon.config.operator/event-silence-backstop-ms})))))))
@@ -2718,7 +2718,7 @@
              (init-form root name force? changed-paths false
                         publish-before-fork? development-cluster)
              (or (:seon.config.operator/event-silence-backstop-ms request)
-                 (source-publication-silence-backstop-ms))
+                 (publication-bound-ms))
              (fn [event]
                (when (= :out (:tag event))
                  (let [text (:val event)
@@ -2731,7 +2731,8 @@
                          (reset! progress (or (:seon.source/progress evidence)
                                               (str/trim value)))))))
                  (print (:val event))
-                 (flush))))))
+                 (flush)))
+             request)))
 
           (or development-cluster (seq changed-paths))
           (fail! "Incremental source publication requires a live operator advertisement."
@@ -3373,7 +3374,7 @@
   (let [[root arguments] (parse-root raw-arguments)
         command (first arguments)
         command-arguments (vec (rest arguments))
-        request (if (= "init" command)
+        request (if (and (= "init" command) (some #{"--dev"} command-arguments))
                   {:seon.config.operator/event-silence-backstop-ms
                    (operator-silence-backstop-ms {})
                    :seon.operator.lock/progress (atom "init preparation")}

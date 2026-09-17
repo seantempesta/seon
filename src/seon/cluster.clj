@@ -86,6 +86,14 @@
 (defn- report-source-progress!
   [phase]
   (*source-progress!* phase)
+  ;; Clojure prepl writes through PrintWriter, which records an IOException
+  ;; instead of throwing it. A departed observer must not leave queued
+  ;; publications doing work after their lifecycle caller has timed out.
+  (when (and (instance? java.io.PrintWriter *out*)
+             (.checkError ^java.io.PrintWriter *out*))
+    (throw (ex-info (str "Source publication observer closed in phase " phase ".")
+                    {:seon.error/kind ::source-observer-closed
+                     :seon.source/progress phase})))
   nil)
 
 (defn- report-analysis-warnings!
@@ -1773,6 +1781,7 @@
     :seon.fn/root (:seon.fn/root roots)
     :seon.source/digest source-digest
     :seon.source/populate `populate-source!
+    :seon.source/progress! report-source-progress!
     :seon.source/activation `derive-activation
     :seon.source/populate-request {:seon.fn/manifest manifest
                                    :seon.fn/roots (:seon.fn/roots roots)}}))
@@ -2328,6 +2337,7 @@
               :seon.source/database published-database
               :seon.source/previous-database previous-database}
              *source-progress!*))))
+        _ (report-source-progress! "development issue reconciliation")
         _ (require-committed!
            ((requiring-resolve 'seon.issue/adopt!) connection published-database)
            {:seon.boot/population :seon.issue/rows})
@@ -2405,6 +2415,7 @@
     ;; core functions carry the same contracts as their loaded JVM Vars.
     (report-source-progress! "development SCI acquisition")
     (acquire-development! connection cluster-name ctx projection)
+    (report-source-progress! "development source verification")
     (when-not (= (:seon.source/digest published)
                  (:seon.source/digest (current-source-snapshot roots)))
       (refused! "Source changed during development adoption; the next edit must converge it."
@@ -2413,6 +2424,7 @@
     ;; This fact means indexing, reload, SCI acquisition, and instrumentation
     ;; succeeded. A reload or acquisition
     ;; error leaves the old commit, so the next edit retries reconciliation.
+    (report-source-progress! "development adoption record")
     (require-committed!
      (db/transact! connection
                    {:tx-data [{:db/id cluster-ref

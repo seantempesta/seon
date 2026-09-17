@@ -471,7 +471,9 @@
         watch-key (Object.)
         observe! (fn [_ _ _ phase]
                    (locking completion-lock
-                     (when-not (realized? completion)
+                     (when-not (or (realized? completion)
+                                   (:seon.operator.lock/hold-expired-at
+                                    (::holder @observation)))
                        (let [previous @observation
                              now (Date.)
                              next-holder (assoc (::holder previous)
@@ -526,6 +528,7 @@
                   (let [expired-at (Date.)
                         expired (assoc (::holder @observation)
                                        :seon.operator.lock/hold-expired-at expired-at)]
+                    (swap! observation assoc ::holder expired)
                     (write-edn! (lock-holder-path path) expired)
                     (throw
                      (ex-info

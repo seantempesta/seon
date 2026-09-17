@@ -336,6 +336,13 @@
         companion-ref? (conj {:db/id (identity-namespace-tempid namespace-name)
                               :seon.ns/name namespace-name})))))
 
+(defn- identity-rows
+  [database-value identities]
+  (let [rows (db/pull-many database-value [:db/id] identities)]
+    (when (:seon.error/kind rows)
+      (throw (ex-info "Program identity lookup failed during publication." rows)))
+    (zipmap identities rows)))
+
 (defn absent-program-identities
   "The program identities this database value has no row for.
 
@@ -351,10 +358,8 @@
                        [:sequential :seon.program/identity]]
                   [:set :seon.program/identity]]}
   [database-value identities]
-  (into #{}
-        (comp (distinct)
-              (remove #(some? (db/pull database-value [:db/id] %))))
-        identities))
+  (into #{} (keep (fn [[identity row]] (when-not row identity)))
+        (identity-rows database-value (vec (distinct identities)))))
 
 (defn identity-tombstone-rows
   "Mint each absent identity as a tombstone: the identity and nothing else.
@@ -414,10 +419,15 @@
                      (conj {:seon.test/failures
                             ['* {:seon.test.failure/file [:seon.fn.file/relative-path]}
                              {:seon.test.failure/first-run [:seon.test.run/id]}
-                             {:seon.test.failure/last-run [:seon.test.run/id]}]}))]
-      (into (mapv #(dissoc (db/pull previous '[*] %) :db/id) runs)
+                             {:seon.test.failure/last-run [:seon.test.run/id]}]}))
+          run-rows (db/pull-many previous '[*] runs)
+          test-rows (db/pull-many previous selector results)]
+      (doseq [rows [run-rows test-rows]]
+        (when (:seon.error/kind rows)
+          (throw (ex-info "Published test evidence could not be read." rows))))
+      (into (mapv #(dissoc % :db/id) run-rows)
             (map (fn [test]
-                   (let [row (dissoc (db/pull previous selector test) :db/id)]
+                   (let [row (dissoc test :db/id)]
                      (cond-> (assoc row :seon.test/run
                             [:seon.test.run/id
                              (get-in row [:seon.test/run :seon.test.run/id])])
@@ -436,7 +446,7 @@
                                  (:seon.test.failure/file failure)
                                  (assoc :seon.test.failure/file [:seon.fn.file/relative-path (get-in failure [:seon.test.failure/file :seon.fn.file/relative-path])])))
                              failures)))))))
-            results))))
+            test-rows))))
 
 (defn- evidence-identities
   "Every program identity the carried evidence names, as a ref or as a row."
@@ -461,9 +471,16 @@
   path as the typed `:seon.test.failure/reported-file` instead of a dangling
   ref. Either way the rest of the evidence commits."
   [database-value evidence]
-  (let [absent (absent-program-identities database-value (evidence-identities evidence))
+  (let [identities (vec (distinct (evidence-identities evidence)))
+        rows (identity-rows database-value identities)
+        absent (into #{} (keep (fn [[identity row]] (when-not row identity))) rows)
         forms (schema.edn/packaged-forms)
-        ref-of (partial identity-ref forms absent)
+        ;; A reach identity can occur in every test. Resolve its portable ref
+        ;; once against this writer's value, then reuse the derived answer.
+        ref-of (into {} (map (fn [identity]
+                              [identity (or (:db/id (get rows identity))
+                                            (identity-ref forms absent identity))]))
+                     identities)
         reported-path?
         (some? (get (:schema database-value) :seon.test.failure/reported-file))
         portable-failure
@@ -579,7 +596,9 @@
     source-digest :seon.source/digest
     populate :seon.source/populate
     activation :seon.source/activation
-    populate-request :seon.source/populate-request}]
+    populate-request :seon.source/populate-request
+    progress! :seon.source/progress!
+    :or {progress! (constantly nil)}}]
   (let [populate-fn (resolve-population populate source-digest)
           activation-fn (resolve-activation activation source-digest)
           expected-commit (:seon.source/commit-id (current store))
@@ -606,10 +625,13 @@
              (merge populate-request
                     {:seon.db/connection connection
                      :seon.source/digest source-digest}))
+            (progress! "publication issue indexing")
             (index-issues! connection source-digest (or directory (fs/source-directory)))
+            (progress! "publication test evidence")
             (when expected-commit
               (let [evidence (result-preservation-tx
                               (database store expected-commit))]
+                (progress! "publication test evidence transaction")
                 (when (seq evidence)
                   (require-committed!
                    (db/transact!
@@ -620,6 +642,7 @@
                    ::source-seal-refused
                    "The rebuilt source could not preserve test evidence."
                    {:seon.source/digest source-digest}))))
+            (progress! "publication activation seal")
             ;; The source seal is the genesis boundary. Population must first
             ;; install canonical schema/program rows and boot/config process
             ;; facts; the digest and build instant are the final complete fact.
@@ -632,6 +655,7 @@
              ::source-seal-refused
              "the source seal transaction was refused"
              {:seon.source/digest source-digest})
+            (progress! "publication branch head")
             (if expected-commit
               ;; The scratch commit is deliberately NOT a parent. Published
               ;; history follows the prior `current-src` commit, keeping the
