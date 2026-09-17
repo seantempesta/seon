@@ -38,7 +38,7 @@
                [:seon.fn/manifest
                 {:optional true}
                 :seon.fn.manifest/manifest]],
-              :progress! [:fn clojure.core/ifn?],
+              :progress! [:=> [:cat :string] :nil],
               :publish-request
               [:map
                [:seon.fn/root {:optional true} :seon.fn/root]

@@ -7,6 +7,30 @@ tags: [test, database, admission, stage-2]
 
 # Test recording and pre-execution admission
 
+## Continuation after launcher release: callback prerequisite
+
+The preserved draft applies to HEAD `5dd6ef7cc`. Main-tree schema admission
+first refused `:seon.source/progress!` as a dishonest generator. The callback
+now has its actual string-to-nil function contract; details and isolated
+publication evidence are in
+[the resolved issue](../../../seon/issues/archive/source-progress-callback-refuses-schema-admission.md).
+This prerequisite commit does not claim Stage 2 complete.
+
+The next main-tree hook refusal named
+`:seon.cluster.eval/settle-request` (`schema-unresolved-reference`). Work
+continued in `tmp/stage2-wt`, with HEAD and only owned changes. The fast
+overlay refused a missing published baseline; the one explicitly authorized
+`bin/test --prepare-head-base` attempt was refused by the lane guard before
+launch. Logs are `tmp/stage2-resolution-fast-current.log` and
+`tmp/stage2-prepare-head.log`. No override was set and no cold gate ran.
+
+The authorized scratch fallback booted `stage2` at
+`tmp/stage2-wt/tmp/stage2-root`, without Juniper. Its first canonical
+`seon.test/run` iteration reached the fileless interpreted body successfully
+but reported **4 passes, 0 failures, 2 errors**: the draft's missing-row and
+stale-acquisition diagnostics omitted the required cause field. Those draft
+requests are now corrected. Default was not explicitly mutated.
+
 ## Continuation after e1de7c75d: launcher handoff held
 
 The SCI files were released and work resumed. The next encountered hold is
