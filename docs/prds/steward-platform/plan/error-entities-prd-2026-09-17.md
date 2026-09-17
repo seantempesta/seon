@@ -481,7 +481,7 @@ These are engineering estimates in focused hours, not measured runtimes or lane 
 
 | Slice, in dependency order | Exclusive ownership and estimate | Positive class regression / later proof |
 |---|---|---|
-| **1. Declaration manifest** | Only genuinely new §2.5 declarations (316 measured new keys, excluding `:seon.error/result` under owner §1q), in namespace-owned resources, plus `schema/form.cljc`, `schema.clj`, `schema/internal.cljc`, required pure predicate/generator Vars in `error.clj`, and focused schema/error tests. Existing declarations stay unchanged. The 280 measured same-key replacements, including `:seon.error/value`, belong to the constructor groups below. **10–16 h.** | Namespace placement, all references/attributes storable, complete owned children, non-unique observation aliases, base-only accepted, read+turn+agent compose. Root/missing-key/multi-problem/large-evidence cases measure entity and datom counts. Can start immediately on approval in the isolated reset batch. |
+| **1. Declaration manifest** | Only genuinely new §2.5 declarations (315 additions: 316 measured candidates minus `:seon.error/result` under owner §1q), in namespace-owned resources, plus `schema/form.cljc`, `schema.clj`, `schema/internal.cljc`, required pure predicate/generator Vars in `error.clj`, and focused schema/error tests. Existing declarations stay unchanged. New render pairs without implemented functions remain absent under §1p until the render group lands its callable pair. The 280 measured same-key replacements, including `:seon.error/value`, belong to the constructor groups below. **10–16 h.** | Namespace placement, all references/attributes storable, complete owned children, non-unique observation aliases, base-only accepted, read+turn+agent compose. Root/missing-key/multi-problem/large-evidence cases measure entity and datom counts. Can start immediately on approval in the isolated reset batch. |
 | **2. Wrapper-enforcement prerequisite** | `instrument.clj`, host/SCI wrapper integration, focused instrument tests; consumes slice 1’s base/contract/arity/boundary manifest. **8–12 h.** | Real host and SCI, both dials: invalid input/arity never executes; broad output accepting an undeclared facet still refuses; arity two never grants permission to arity one; boundary refusals do not recurse into body contracts. Can start immediately against those specified interfaces; publication waits for dependencies. |
 | Base predicate/constructor/facets and owned-value acquisition | `error.clj`, declaration-projection bindings; **5–8 h** after prior owners release shared files. | Same projection and complete owned value yield exact facet set; partial config evidence is a base error, not a proven config facet. No fake explanation for wrong arity. |
 | Arity-aware analyzer and query integration | `program.cljc`, `fn.clj`, `my/program.clj`, arity/function/query resources; **6–10 h**. | Matrix covers aliases, named alternatives, `:multi` default, inheritance, unsupported/cyclic forms, empty derivation, schema-only recomputation. Wire completed sets into wrapper enforcement before migration. |
@@ -517,10 +517,14 @@ This revision used source/EDN inspection only; the review’s live observations 
 
 ## 8. Owner decisions
 
-**Generic propagation remains the one genuine scope choice.** Domain bodies now declare finite per-arity facet sets, but a generic error normalizer or propagator accepts errors from any domain, including the recording facet when it receives stored occurrences. The boundary/body distinction is settled by the accepted review recommendation; this choice only determines the generic body’s declaration.
+**Resolved by owner §1q:** every function explicitly enumerates the error facets
+it can return in its output `:or`, including generic helpers. The program graph
+checks that declaration against body-derived facets. The earlier proposal for
+`:seon.error/result` is not adopted; omit that spelling from the literal
+manifest's implementation. There is no pending generic-propagation choice.
 
-| Choice, simplest first | Guarantee, cost and tradeoff |
-|---|---|
-| **One projection-derived generic union — recommended** | `:seon.error/result` explicitly expands to base plus every canonical facet; generic helpers have coarse but truthful “all facets” edges. No repeated source list; a new facet invalidates that union and affected analysis. |
-| Explicit enumeration in each generic helper | Literal finite declarations everywhere; repeated updates and a drift check whenever facets change. Gives up concise generic contracts. |
-| Parameterized preserving contracts | Exact caller-specific preservation; requires new contract/analyzer semantics and its own proof. Gives up the bounded implementation available now. |
+**Additive slice-1 resolution:** §6 records the owner's sequencing decision.
+New declarations and checkers land first; all 280 same-key replacements land
+with their constructor/recorder groups in the one reset. The [slice-1 landing
+record](../research/error-declaration-manifest-2026-09-18.md) owns measured bytes,
+projection cost and fast evidence.
