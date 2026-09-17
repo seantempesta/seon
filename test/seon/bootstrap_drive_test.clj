@@ -58,3 +58,27 @@
                         (:seon.bootstrap-drive/transcript report))))
       (is (.isFile (java.io.File.
                     (:seon.bootstrap-drive/report-path report)))))))
+
+(deftest grading-reads-source-into-forms-instead-of-matching-its-characters
+  (testing "a contract attribute is a value in a read form, not a substring"
+    (is (true? (:p2a (#'drive/grade-o2
+                      [{:seon.cluster.eval/source
+                        "(seon.db/q '[:find ?f :where [?f :seon.fn/spec _]])"}]
+                      "no"))))
+    (is (false? (:p2a (#'drive/grade-o2
+                       [{:seon.cluster.eval/source
+                         "(println \"look for :seon.fn/spec in the docs\")"}]
+                       "no"))))
+    (is (false? (:p2a (#'drive/grade-o2
+                       [{:seon.cluster.eval/source
+                         "; :seon.fn.arity/input-refs is what to read\n(+ 1 1)"}]
+                       "no")))))
+  (testing "the defined name comes from the defn form the reader returned"
+    (is (= "total" (#'drive/defined-name "(defn total [rows] (count rows))")))
+    (is (= "total" (#'drive/defined-name
+                    "(comment 1)\n(defn total\n  [rows] (count rows))")))
+    (is (nil? (#'drive/defined-name "(println \"(defn total [rows] 0)\")")))
+    (is (nil? (#'drive/defined-name "(defn- total [rows] (count rows))")))
+    (is (nil? (#'drive/defined-name nil))))
+  (testing "source that does not read contains no forms"
+    (is (nil? (#'drive/defined-name "(defn total [rows]")))))

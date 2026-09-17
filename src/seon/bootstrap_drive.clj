@@ -22,7 +22,8 @@
             [seon.cluster.store :as store]
             [seon.config :as config]
             [seon.eval.drive :as eval.drive]
-            [seon.sci.eval :as sci.eval])
+            [seon.sci.eval :as sci.eval]
+            [seon.sci.reader :as reader])
   (:import [java.util UUID]))
 
 (def ^:private default-run-cap 6)
@@ -182,11 +183,41 @@
      :seon.bootstrap-drive/candidates executions
      :seon.bootstrap-drive/completed-result completed-result}))
 
+(def ^:private contract-attributes
+  "The declaration attributes an agent reads to discover a function's contract."
+  #{:seon.fn/spec :seon.fn.arity/input-refs})
+
+(defn- read-forms
+  "Top-level forms of `source`, read by the one accepted-source reader.
+
+   The bound is the source's own length, so the only refusal this surface can
+   meet is source that genuinely does not read; unreadable source contains no
+   forms. Auto-resolved keywords are deferred because the grader reads an
+   agent's stored source, not source loading into this namespace."
+  [source]
+  (if-not (string? source)
+    []
+    (let [events (reader/read {:seon.sci.reader/text source
+                               :seon.sci.reader/defer-auto-resolve? true
+                               :seon.config.eval.result/max-source (count source)})]
+      (if (vector? events)
+        (into [] (keep :seon.sci.reader/form) events)
+        []))))
+
+(defn- mentions-contract-attributes?
+  "True when a form in `source` names one of `contract-attributes`.
+
+   A walk over the read forms, not a match over the text: the keyword is a
+   value in the form, and the reader is what turns source into values."
+  [source]
+  (boolean
+   (some contract-attributes
+         (mapcat #(tree-seq coll? seq %) (read-forms source)))))
+
 (defn- grade-o2 [receipts completed-result]
   {:p2a
    (boolean
-    (some #(re-find #":seon\.fn(?:\.arity/input-refs|/spec)"
-                    (:seon.cluster.eval/source %))
+    (some #(mentions-contract-attributes? (:seon.cluster.eval/source %))
           receipts))
    :p2b (= "discovered-by-contract" completed-result)})
 
@@ -257,8 +288,19 @@
      :seon.bootstrap-drive/peer-functions (vec (sort peer-functions))
      :seon.bootstrap-drive/called called}))
 
-(defn- defined-name [source]
-  (some->> source (re-find #"\(defn\s+([^\s\[\](){}]+)") second))
+(defn- defined-name
+  "The name a `defn` form in `source` defines, or nil.
+
+   The reader answers this; a match over the text cannot tell a definition
+   from the same characters inside a string or a comment."
+  [source]
+  (some (fn [form]
+          (when (and (seq? form)
+                     (symbol? (first form))
+                     (= "defn" (name (first form)))
+                     (symbol? (second form)))
+            (name (second form))))
+        (mapcat #(tree-seq coll? seq %) (read-forms source))))
 
 (defn- grade-o5 [db agent-id run-ids receipts]
   (let [refused-names
