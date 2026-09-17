@@ -21,7 +21,8 @@ establish and skips that admission only. A changed snapshot retains the existing
 published-graph requirement and caller-completeness check. Slot admission,
 contract arming, tests and cold gates are unchanged. No new bypass flag exists.
 
-This fix is isolated on reset-batch. The main tree's bin/test and selection.clj
-remain another lane's uncommitted boundary; neither was edited. Final reset G5
-fast verification exercises the actual clean-snapshot path. The orchestrator
-must reconcile this narrow condition with the runner lane's landing at merge.
+This fix is isolated on reset-batch. At the first refusal, the main tree's bin/test and selection.clj
+were another lane's uncommitted boundary; neither was edited. Final reset G5
+fast verification exercises the actual clean-snapshot path. The runner lane subsequently landed `d88837ddd`; reset-batch rebased through
+`5dd6ef7cc` and reconciled this condition with its source-matched manifests and
+automatic cold preparation. Fast iterations still never start preparation.

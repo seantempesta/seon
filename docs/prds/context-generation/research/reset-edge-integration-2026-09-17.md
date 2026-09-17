@@ -1,15 +1,15 @@
 ---
 type: research
-status: in-progress
+status: review
 created: 2026-09-17
 tags: [reset, datahike, schema, integration]
 ---
 
 # Reset edge integration — worktree checkpoint
 
-**Not ready to merge. RESET NEEDED.** The implementation checkpoint is retained in
+**G5 ready for review. RESET NEEDED.** The implementation checkpoint is retained in
 `tmp/reset-batch-wt`, branch `reset-batch`. The current base is
-`ad75bab51`; the G5 checkpoint has been rebased onto it. The
+`5dd6ef7cc`; the G5 checkpoint has been rebased onto it. The
 orchestrator owns merge, the cold gate, platform proof and the reset. Default
 was not restarted, reset, adopted or otherwise mutated by this lane.
 
@@ -390,3 +390,104 @@ new upstream `:seon.source/progress!` declaration (`be9c90e2f`). The existing
 `:error/message`; it changes no accepted value or callback behavior. Other
 inline function predicates are outside this registered-schema sweep and are
 not attributed to this failure. The schema namespace is rerun after the patch.
+
+
+### Final corrected proof and integrated launcher
+
+Fast 10 ran **191 tests / 1,665 assertions / one failure / zero errors** on the
+rebased seven-namespace selection. The only failure was the newly introduced
+bare progress predicate described above; all function, program, maintenance,
+G5, database and deletion/publication behavior passed. [Exact log](reset-g5-fast-10-2026-09-17.txt).
+
+After that diagnostic-only resource correction, fast 11 passed **89 tests /
+948 assertions / zero failures / zero errors** across G5, database, schema and
+maintenance. [Exact log](reset-g5-fast-11-2026-09-17.txt). Ten raw queries took
+**691,876 ns**, ten wrapped queries **3,424,418 ns**; ratio
+**4.949467823714076**, with each wrapped sample inside the absolute 5 ms bound.
+The ratio is a measured fact, not a contract.
+
+The final rebase includes `d88837ddd` through main HEAD `5dd6ef7cc`. The runner
+files were rechecked clean on the main tree; their previously named hold is
+released. The rebase preserves source-matched baseline acquisition and cold
+automatic preparation, while fast exact-HEAD snapshots avoid a vacuous overlay
+check. Compared with the fast-11 code snapshot, only the upstream launcher,
+cache, selector and runner regression changed; G5/database/schema production
+and regression bytes are identical. A final `seon.owned-value-test` run checks
+the combined launcher. No default lifecycle, adoption, REPL or cold gate command
+was issued by this lane.
+
+
+Fast 12 passed **5 tests / 68 assertions / zero failures / zero errors** on
+code checkpoint `e27986b03`, with the integrated launcher after the final rebase.
+[Exact log](reset-g5-fast-12-2026-09-17.txt). All own runner sessions have exited.
+The requested `reset-batch` worktree, reference-code link, shared cache link and
+shared slot link remain; no extra cluster or live process was created.
+
+The G5 implementation commit is `1d9dc7c1f`; the narrow launcher fix is
+`35883e11e`; the progress predicate description is `7d975fe5b`. The preceding
+reviewed edge and message integration commits rebased to `5da2295d9` and
+`ca6f6db6b`. The archived identity-less-entity issue is closed in the G5 slice.
+
+**Stop for review.** G5 and the accepted query budget are fast-green; the branch
+is rebased through `5dd6ef7cc`. The orchestrator owns the cold/platform gate and
+reset live proofs. After review, from the main checkout use
+`git merge --ff-only reset-batch`, then ONE `bin/seon reset --force`, followed by
+the canonical Juniper reseed, convergence and cold/live sequence in the reset
+plan. If main advances first, rebase the branch before this final publication.
+**RESET NEEDED; this lane has not reset or restarted default.**
+
+### G5 slice file inventory
+
+Derived from `git diff --name-status ca6f6db6b e27986b03`, plus the final evidence
+files below. R entries name both the previous and archived path. Conflict
+resolutions during the edge rebase additionally touched
+`src/seon/cluster/source.clj`, `src/seon/sci/eval.clj`, `src/seon/turn.clj` and
+`test/seon/program_test.clj`; their preserved upstream behavior is described above.
+
+```text
+M	.agents/skills/data-modeling/SKILL.md
+M	.agents/skills/datahike/SKILL.md
+M	AGENTS.md
+M	bin/test
+M	docs/prds/context-generation/research/reset-edge-integration-2026-09-17.md
+A	docs/prds/context-generation/research/reset-g5-fast-7-2026-09-17.txt
+M	docs/prds/steward-platform/plan/reset-batch-2026-09-17.md
+A	docs/seon/issues/archive/a-clean-fast-snapshot-demands-a-cold-head-publication.md
+R063	docs/seon/issues/an-entity-with-no-identity-attribute-is-never-validated-at-the-writer.md	docs/seon/issues/archive/an-entity-with-no-identity-attribute-is-never-validated-at-the-writer.md
+M	docs/seon/issues/archive/predicate-schema-violations-humanize-to-unknown-error.md
+R066	docs/seon/issues/the-carried-query-ratio-fails-after-symbol-edge-retyping.md	docs/seon/issues/archive/the-carried-query-ratio-fails-after-symbol-edge-retyping.md
+M	resources/seon/schemas/my.plan.edn
+M	resources/seon/schemas/my.plan.item.edn
+M	resources/seon/schemas/seon.activation.edn
+M	resources/seon/schemas/seon.agent.edn
+M	resources/seon/schemas/seon.cluster.eval.edn
+M	resources/seon/schemas/seon.config.db.edn
+M	resources/seon/schemas/seon.context.capture.edn
+M	resources/seon/schemas/seon.db.edn
+M	resources/seon/schemas/seon.error.edn
+M	resources/seon/schemas/seon.fn.argument.edn
+M	resources/seon/schemas/seon.fn.arity.edn
+M	resources/seon/schemas/seon.fn.binding.child.edn
+M	resources/seon/schemas/seon.fn.binding.edn
+M	resources/seon/schemas/seon.fn.binding.entry.edn
+M	resources/seon/schemas/seon.fn.edn
+M	resources/seon/schemas/seon.issue.edn
+M	resources/seon/schemas/seon.maintenance.receipt.edn
+M	resources/seon/schemas/seon.maintenance.result.edn
+M	resources/seon/schemas/seon.ns.edn
+M	resources/seon/schemas/seon.runtime.edn
+M	resources/seon/schemas/seon.schema.shape.edn
+M	resources/seon/schemas/seon.source.edn
+M	resources/seon/schemas/seon.test.edn
+M	resources/seon/schemas/seon.test.run.edn
+M	resources/seon/schemas/seon.turn.edn
+M	src/seon/cluster.clj
+M	src/seon/db.clj
+M	src/seon/schema.clj
+M	test/seon/db_test.clj
+A	test/seon/owned_value_test.clj
+M	test/seon/schema_test.clj
+A	docs/prds/context-generation/research/reset-g5-fast-10-2026-09-17.txt
+A	docs/prds/context-generation/research/reset-g5-fast-11-2026-09-17.txt
+A	docs/prds/context-generation/research/reset-g5-fast-12-2026-09-17.txt
+```

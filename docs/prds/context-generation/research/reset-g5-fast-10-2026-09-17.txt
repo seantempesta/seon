@@ -1,0 +1,483 @@
+bin/test: snapshot differences from HEAD 9495cd01324f5bd1e3260d61e5502e0c5d5e91fc:
+bin/test: end snapshot differences
+bin/test: PHASE snapshot elapsed-seconds=2
+bin/test: PHASE test-slot elapsed-seconds=0
+bin/test-fast: selected snapshot /Users/sean/src/seon/tmp/reset-batch-wt/tmp/test-runs/run.bY0QmW
+WARNING: Using incubator modules: jdk.incubator.vector
+bin/test: PACKAGED TEST PROJECTION ACQUIRED at= 2026-09-17T06:03:47.969430Z pid= 41646 role= test-fast
+bin/test: CONTRACTS ARMED at= 2026-09-17T06:03:54.719990Z worker= test-fast mode= :panic namespaces= 7 program-namespaces= 109 registered= 1128 instrumented= 1128 program-armable= 1123
+bin/test: 2026-09-17T06:03:54.775938Z BEGIN namespace seon.owned-value-test
+
+Testing seon.owned-value-test
+bin/test: 2026-09-17T06:03:54.795212Z BEGIN test seon.owned-value-test/the-projection-carries-the-declared-work-bound
+WARNING: reset! already refers to: #'clojure.core/reset! in namespace: seon.fresh-operator, being replaced by: #'seon.fresh-operator/reset!
+2026-09-17T06:04:42.349360Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :transaction/validation-rejected, :cause "Transaction report validation rejected."}
+bin/test: 2026-09-17T06:04:42.352970Z END test seon.owned-value-test/the-projection-carries-the-declared-work-bound
+bin/test: 2026-09-17T06:04:42.354423Z BEGIN test seon.owned-value-test/every-canonical-owned-relation-declares-its-child-schema
+bin/test: 2026-09-17T06:04:42.358337Z END test seon.owned-value-test/every-canonical-owned-relation-declares-its-child-schema
+bin/test: 2026-09-17T06:04:42.358550Z BEGIN test seon.owned-value-test/complete-values-include-the-1001st-child
+2026-09-17T06:04:43.245646Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :transaction/validation-rejected, :cause "Transaction report validation rejected."}
+bin/test: 2026-09-17T06:04:43.247109Z END test seon.owned-value-test/complete-values-include-the-1001st-child
+bin/test: 2026-09-17T06:04:43.249168Z BEGIN test seon.owned-value-test/incomplete-unowned-cyclic-and-shared-components-refuse
+2026-09-17T06:04:43.840171Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :transaction/validation-rejected, :cause "Transaction report validation rejected."}
+2026-09-17T06:04:43.844704Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :transaction/validation-rejected, :cause "Transaction report validation rejected."}
+2026-09-17T06:04:43.848239Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :transaction/validation-rejected, :cause "Transaction report validation rejected."}
+2026-09-17T06:04:43.852029Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :transaction/validation-rejected, :cause "Transaction report validation rejected."}
+bin/test: 2026-09-17T06:04:43.855045Z END test seon.owned-value-test/incomplete-unowned-cyclic-and-shared-components-refuse
+bin/test: 2026-09-17T06:04:43.855112Z BEGIN test seon.owned-value-test/owned-values-validate-child-only-writes-and-before-owners
+2026-09-17T06:04:44.484556Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :transaction/validation-rejected, :cause "Transaction report validation rejected."}
+2026-09-17T06:04:44.487871Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :transaction/validation-rejected, :cause "Transaction report validation rejected."}
+bin/test: 2026-09-17T06:04:44.730470Z END test seon.owned-value-test/owned-values-validate-child-only-writes-and-before-owners
+bin/test: 2026-09-17T06:04:44.731150Z END namespace seon.owned-value-test
+bin/test: 2026-09-17T06:04:44.731192Z BEGIN namespace seon.db-test
+
+Testing seon.db-test
+bin/test: 2026-09-17T06:04:44.756715Z BEGIN test seon.db-test/supplied-database-pulls-carry-the-projection-across-unbound-reads
+bin/test: 2026-09-17T06:04:44.775756Z END test seon.db-test/supplied-database-pulls-carry-the-projection-across-unbound-reads
+bin/test: 2026-09-17T06:04:44.778300Z BEGIN test seon.db-test/a-pull-reads-every-member-of-a-cardinality-many-attribute
+bin/test: 2026-09-17T06:04:45.178948Z END test seon.db-test/a-pull-reads-every-member-of-a-cardinality-many-attribute
+bin/test: 2026-09-17T06:04:45.179070Z BEGIN test seon.db-test/unbound-current-database-is-a-flat-error
+bin/test: 2026-09-17T06:04:45.180609Z END test seon.db-test/unbound-current-database-is-a-flat-error
+bin/test: 2026-09-17T06:04:45.180692Z BEGIN test seon.db-test/positional-query-acceptance-remains-datahikes-contract
+bin/test: 2026-09-17T06:04:45.187724Z END test seon.db-test/positional-query-acceptance-remains-datahikes-contract
+bin/test: 2026-09-17T06:04:45.187819Z BEGIN test seon.db-test/a-create-is-validated-complete-while-an-upsert-validates-the-merged-row
+2026-09-17T06:04:45.276392Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :transaction/validation-rejected, :cause "Transaction report validation rejected."}
+2026-09-17T06:04:45.279987Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :transaction/validation-rejected, :cause "Transaction report validation rejected."}
+bin/test: 2026-09-17T06:04:45.438648Z END test seon.db-test/a-create-is-validated-complete-while-an-upsert-validates-the-merged-row
+bin/test: 2026-09-17T06:04:45.438747Z BEGIN test seon.db-test/collection-bound-query-evidence-covers-every-input-attribute
+bin/test: 2026-09-17T06:04:46.221441Z END test seon.db-test/collection-bound-query-evidence-covers-every-input-attribute
+bin/test: 2026-09-17T06:04:46.221564Z BEGIN test seon.db-test/invalid-read-identities-are-diagnostics-never-absence
+bin/test: 2026-09-17T06:04:46.281889Z END test seon.db-test/invalid-read-identities-are-diagnostics-never-absence
+bin/test: 2026-09-17T06:04:46.282004Z BEGIN test seon.db-test/handed-family-query-stays-below-five-milliseconds
+bin/test: 2026-09-17T06:04:46.303265Z END test seon.db-test/handed-family-query-stays-below-five-milliseconds
+bin/test: 2026-09-17T06:04:46.303367Z BEGIN test seon.db-test/current-database-resolves-once-per-call
+bin/test: 2026-09-17T06:04:46.329887Z END test seon.db-test/current-database-resolves-once-per-call
+bin/test: 2026-09-17T06:04:46.329971Z BEGIN test seon.db-test/query-and-pull-append-evidence-only-when-captured
+bin/test: 2026-09-17T06:04:49.286015Z END test seon.db-test/query-and-pull-append-evidence-only-when-captured
+bin/test: 2026-09-17T06:04:49.286178Z BEGIN test seon.db-test/an-agent-namespace-is-shared-and-is-not-an-identity
+bin/test: 2026-09-17T06:04:49.416454Z END test seon.db-test/an-agent-namespace-is-shared-and-is-not-an-identity
+bin/test: 2026-09-17T06:04:49.416564Z BEGIN test seon.db-test/arity-components-and-callers-are-checked-in-the-final-state
+2026-09-17T06:04:50.362207Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :transaction/validation-rejected, :cause "Transaction report validation rejected."}
+bin/test: 2026-09-17T06:04:50.615454Z END test seon.db-test/arity-components-and-callers-are-checked-in-the-final-state
+bin/test: 2026-09-17T06:04:50.615636Z BEGIN test seon.db-test/a-write-naming-another-clusters-branch-is-refused-naming-both
+bin/test: 2026-09-17T06:04:50.774464Z END test seon.db-test/a-write-naming-another-clusters-branch-is-refused-naming-both
+bin/test: 2026-09-17T06:04:50.774595Z BEGIN test seon.db-test/every-database-value-reader-answers-for-all-four-view-shapes
+bin/test: 2026-09-17T06:04:51.150439Z END test seon.db-test/every-database-value-reader-answers-for-all-four-view-shapes
+bin/test: 2026-09-17T06:04:51.150544Z BEGIN test seon.db-test/diff-no-change-is-empty
+bin/test: 2026-09-17T06:04:51.482290Z END test seon.db-test/diff-no-change-is-empty
+bin/test: 2026-09-17T06:04:51.482443Z BEGIN test seon.db-test/pull-many-preserves-input-alignment-with-one-shared-plan
+bin/test: 2026-09-17T06:04:51.485586Z END test seon.db-test/pull-many-preserves-input-alignment-with-one-shared-plan
+bin/test: 2026-09-17T06:04:51.485667Z BEGIN test seon.db-test/malformed-public-database-requests-name-the-public-operation
+bin/test: 2026-09-17T06:04:51.510457Z END test seon.db-test/malformed-public-database-requests-name-the-public-operation
+bin/test: 2026-09-17T06:04:51.511814Z BEGIN test seon.db-test/retained-read-evidence-invalidates-only-on-a-depended-attribute
+bin/test: 2026-09-17T06:04:52.193435Z END test seon.db-test/retained-read-evidence-invalidates-only-on-a-depended-attribute
+bin/test: 2026-09-17T06:04:52.193604Z BEGIN test seon.db-test/temporal-reads-use-the-carried-origins-projection
+bin/test: 2026-09-17T06:04:52.200920Z END test seon.db-test/temporal-reads-use-the-carried-origins-projection
+bin/test: 2026-09-17T06:04:52.201070Z BEGIN test seon.db-test/entity-and-datoms-return-eager-ordinary-data
+bin/test: 2026-09-17T06:04:52.210272Z END test seon.db-test/entity-and-datoms-return-eager-ordinary-data
+bin/test: 2026-09-17T06:04:52.210403Z BEGIN test seon.db-test/explicit-and-current-database-forms-are-equivalent
+bin/test: 2026-09-17T06:04:52.261545Z END test seon.db-test/explicit-and-current-database-forms-are-equivalent
+bin/test: 2026-09-17T06:04:52.261654Z BEGIN test seon.db-test/process-local-replay-declines-unbounded-and-opaque-read-results
+bin/test: 2026-09-17T06:04:52.281405Z END test seon.db-test/process-local-replay-declines-unbounded-and-opaque-read-results
+bin/test: 2026-09-17T06:04:52.281509Z BEGIN test seon.db-test/uninstalled-pull-attributes-refuse-without-writing
+2026-09-17T06:04:52.766992Z :error datahike.db.utils [189 11] Bad entity attribute :seon.turn/generated-at at (resolve-datom db 32482 :seon.turn/generated-at nil nil), not defined in current schema 
+  data: {:error :transact/schema, :attribute :seon.turn/generated-at, :context (resolve-datom db 32482 :seon.turn/generated-at nil nil)}
+2026-09-17T06:04:52.767939Z :error datahike.db.utils [189 11] Bad entity attribute :seon.turn/generation-complete-at at (resolve-datom db 32482 :seon.turn/generation-complete-at nil nil), not defined in current schema 
+  data: {:error :transact/schema, :attribute :seon.turn/generation-complete-at, :context (resolve-datom db 32482 :seon.turn/generation-complete-at nil nil)}
+bin/test: 2026-09-17T06:04:52.769861Z END test seon.db-test/uninstalled-pull-attributes-refuse-without-writing
+bin/test: 2026-09-17T06:04:52.769947Z BEGIN test seon.db-test/return-map-queries-preserve-ordering-and-limit
+bin/test: 2026-09-17T06:04:52.904598Z END test seon.db-test/return-map-queries-preserve-ordering-and-limit
+bin/test: 2026-09-17T06:04:52.904697Z BEGIN test seon.db-test/unique-rejection-names-the-existing-owner-as-data
+2026-09-17T06:04:53.447485Z :error datahike.db.transaction [534 9] Cannot add #datahike/Datom [32484 :seon.cluster.eval/id "36d34d5807df" 536870925 true] because of unique constraint: #datahike/Datom [32483 :seon.cluster.eval/id "36d34d5807df" 536870924 true] 
+  data: {:error :transact/unique, :attribute :seon.cluster.eval/id, :datom #datahike/Datom [32484 :seon.cluster.eval/id "36d34d5807df" 536870925 true]}
+2026-09-17T06:04:53.447703Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :transact/unique, :cause "Cannot add #datahike/Datom [32484 :seon.cluster.eval/id \"36d34d5807df\" 536870925 true] because of unique constraint: #datahike/Datom [32483 :seon.cluster.eval/id \"36d34d5807df\" 536870924 true]", :attribute :seon.cluster.eval/id}
+bin/test: 2026-09-17T06:04:53.780889Z END test seon.db-test/unique-rejection-names-the-existing-owner-as-data
+bin/test: 2026-09-17T06:04:53.781024Z BEGIN test seon.db-test/relation-only-queries-need-no-database-schema
+bin/test: 2026-09-17T06:04:53.786201Z END test seon.db-test/relation-only-queries-need-no-database-schema
+bin/test: 2026-09-17T06:04:53.786304Z BEGIN test seon.db-test/uncarried-read-reports-one-projection-fallback-per-call
+bin/test: 2026-09-17T06:04:53.791774Z END test seon.db-test/uncarried-read-reports-one-projection-fallback-per-call
+bin/test: 2026-09-17T06:04:53.791856Z BEGIN test seon.db-test/render-declarations-require-their-final-function-row
+2026-09-17T06:04:53.814813Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :transaction/validation-rejected, :cause "Transaction report validation rejected."}
+2026-09-17T06:04:53.953670Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :transaction/validation-rejected, :cause "Transaction report validation rejected."}
+bin/test: 2026-09-17T06:04:54.038154Z END test seon.db-test/render-declarations-require-their-final-function-row
+bin/test: 2026-09-17T06:04:54.038303Z BEGIN test seon.db-test/diff-replays-one-read-by-derived-identity
+bin/test: 2026-09-17T06:04:54.455697Z END test seon.db-test/diff-replays-one-read-by-derived-identity
+bin/test: 2026-09-17T06:04:54.455837Z BEGIN test seon.db-test/nested-native-reports-admit-bounded-reference-identities
+bin/test: 2026-09-17T06:04:54.596796Z END test seon.db-test/nested-native-reports-admit-bounded-reference-identities
+bin/test: 2026-09-17T06:04:54.596943Z BEGIN test seon.db-test/temporal-reads-use-explicit-and-ambient-database-values
+bin/test: 2026-09-17T06:04:54.701304Z END test seon.db-test/temporal-reads-use-explicit-and-ambient-database-values
+bin/test: 2026-09-17T06:04:54.701482Z BEGIN test seon.db-test/component-expanded-pull-evidence-detects-a-child-only-change
+bin/test: 2026-09-17T06:04:54.981006Z END test seon.db-test/component-expanded-pull-evidence-detects-a-child-only-change
+bin/test: 2026-09-17T06:04:54.982464Z BEGIN test seon.db-test/instrumented-wildcard-pull-keeps-unparsed-database-fields-ordinary
+bin/test: 2026-09-17T06:04:55.279863Z END test seon.db-test/instrumented-wildcard-pull-keeps-unparsed-database-fields-ordinary
+bin/test: 2026-09-17T06:04:55.279999Z BEGIN test seon.db-test/missing-reference-diagnostics-describe-the-declared-value
+2026-09-17T06:04:55.283397Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :transaction/validation-rejected, :cause "Transaction report validation rejected."}
+2026-09-17T06:04:55.285911Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :transaction/validation-rejected, :cause "Transaction report validation rejected."}
+2026-09-17T06:04:55.288363Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :transaction/validation-rejected, :cause "Transaction report validation rejected."}
+bin/test: 2026-09-17T06:04:55.288960Z END test seon.db-test/missing-reference-diagnostics-describe-the-declared-value
+bin/test: 2026-09-17T06:04:55.289021Z BEGIN test seon.db-test/temporal-database-identities-use-the-origin-schema
+bin/test: 2026-09-17T06:04:55.362860Z END test seon.db-test/temporal-database-identities-use-the-origin-schema
+bin/test: 2026-09-17T06:04:55.362958Z BEGIN test seon.db-test/required-program-relations-name-the-surviving-referrer
+2026-09-17T06:04:55.545445Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :transaction/validation-rejected, :cause "Transaction report validation rejected."}
+2026-09-17T06:04:55.549462Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :transaction/validation-rejected, :cause "Transaction report validation rejected."}
+bin/test: 2026-09-17T06:04:55.550364Z END test seon.db-test/required-program-relations-name-the-surviving-referrer
+bin/test: 2026-09-17T06:04:55.550442Z BEGIN test seon.db-test/database-identities-support-explicit-and-current-custody
+bin/test: 2026-09-17T06:04:55.555480Z END test seon.db-test/database-identities-support-explicit-and-current-custody
+bin/test: 2026-09-17T06:04:55.555563Z BEGIN test seon.db-test/semantic-replay-declines-opaque-and-lazy-values-without-realizing
+bin/test: 2026-09-17T06:04:55.557544Z END test seon.db-test/semantic-replay-declines-opaque-and-lazy-values-without-realizing
+bin/test: 2026-09-17T06:04:55.557618Z BEGIN test seon.db-test/every-public-read-preserves-an-upstream-database-error
+bin/test: 2026-09-17T06:04:55.559848Z END test seon.db-test/every-public-read-preserves-an-upstream-database-error
+bin/test: 2026-09-17T06:04:55.559897Z BEGIN test seon.db-test/edn-backed-reads-return-distinguishable-logical-values
+bin/test: 2026-09-17T06:04:55.709311Z END test seon.db-test/edn-backed-reads-return-distinguishable-logical-values
+bin/test: 2026-09-17T06:04:55.709405Z BEGIN test seon.db-test/the-exam-query-returns-the-fixtures-true-count
+bin/test: 2026-09-17T06:04:55.716982Z END test seon.db-test/the-exam-query-returns-the-fixtures-true-count
+bin/test: 2026-09-17T06:04:55.717078Z BEGIN test seon.db-test/diff-refuses-missing-identity-and-external-sinks
+bin/test: 2026-09-17T06:04:56.127314Z END test seon.db-test/diff-refuses-missing-identity-and-external-sinks
+bin/test: 2026-09-17T06:04:56.127430Z BEGIN test seon.db-test/non-temporal-reads-return-one-flat-error-before-datahike
+bin/test: 2026-09-17T06:04:56.145277Z END test seon.db-test/non-temporal-reads-return-one-flat-error-before-datahike
+bin/test: 2026-09-17T06:04:56.145579Z BEGIN test seon.db-test/invalid-edn-backed-storage-is-a-flat-read-error
+bin/test: 2026-09-17T06:04:56.329423Z END test seon.db-test/invalid-edn-backed-storage-is-a-flat-read-error
+bin/test: 2026-09-17T06:04:56.329650Z BEGIN test seon.db-test/non-unique-writer-rejections-retain-their-datahike-data
+2026-09-17T06:04:56.404175Z :error datahike.db.transaction [995 15] :db.fn/cas failed on datom [32475 :seon.agent/id "db-cas-owner"], expected "not-the-current-id" 
+  data: {:error :transact/cas, :old #datahike/Datom [32475 :seon.agent/id "db-cas-owner" 536870920 true], :expected "not-the-current-id", :new "db-cas-replacement"}
+2026-09-17T06:04:56.404413Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :transact/cas, :cause ":db.fn/cas failed on datom [32475 :seon.agent/id \"db-cas-owner\"], expected \"not-the-current-id\""}
+bin/test: 2026-09-17T06:04:56.405683Z END test seon.db-test/non-unique-writer-rejections-retain-their-datahike-data
+bin/test: 2026-09-17T06:04:56.405773Z BEGIN test seon.db-test/an-as-of-view-is-keyed-on-its-own-fixed-point
+bin/test: 2026-09-17T06:04:56.799343Z END test seon.db-test/an-as-of-view-is-keyed-on-its-own-fixed-point
+bin/test: 2026-09-17T06:04:56.800642Z BEGIN test seon.db-test/wildcard-pull-digests-cover-empty-large-and-canonical-results
+bin/test: 2026-09-17T06:04:56.977936Z END test seon.db-test/wildcard-pull-digests-cover-empty-large-and-canonical-results
+bin/test: 2026-09-17T06:04:56.978037Z BEGIN test seon.db-test/all-transaction-grammars-validate-the-resulting-entity
+2026-09-17T06:04:57.135297Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :transaction/validation-rejected, :cause "Transaction report validation rejected."}
+2026-09-17T06:04:57.138767Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :transaction/validation-rejected, :cause "Transaction report validation rejected."}
+2026-09-17T06:04:57.140952Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :transaction/validation-rejected, :cause "Transaction report validation rejected."}
+2026-09-17T06:04:57.142981Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :transaction/validation-rejected, :cause "Transaction report validation rejected."}
+2026-09-17T06:04:57.144723Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :transaction/validation-rejected, :cause "Transaction report validation rejected."}
+bin/test: 2026-09-17T06:04:57.210178Z END test seon.db-test/all-transaction-grammars-validate-the-resulting-entity
+bin/test: 2026-09-17T06:04:57.210290Z BEGIN test seon.db-test/carried-queries-stay-within-the-five-millisecond-budget
+#:seon.db-test{:stage :carried-query-cost, :samples 10, :raw-nanos 695793, :wrapped-nanos 3788167, :wrapped-raw-ratio 5.444387914221615}
+bin/test: 2026-09-17T06:04:57.219207Z END test seon.db-test/carried-queries-stay-within-the-five-millisecond-budget
+bin/test: 2026-09-17T06:04:57.219293Z BEGIN test seon.db-test/final-entity-keyword-sets-are-not-lookup-refs
+bin/test: 2026-09-17T06:04:57.362362Z END test seon.db-test/final-entity-keyword-sets-are-not-lookup-refs
+bin/test: 2026-09-17T06:04:57.362480Z BEGIN test seon.db-test/transaction-wrappers-cannot-hide-a-classified-refusal
+2026-09-17T06:04:57.575106Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-agent"}
+bin/test: 2026-09-17T06:04:57.576510Z END test seon.db-test/transaction-wrappers-cannot-hide-a-classified-refusal
+bin/test: 2026-09-17T06:04:57.576606Z BEGIN test seon.db-test/malformed-reads-return-flat-errors
+bin/test: 2026-09-17T06:04:57.580756Z END test seon.db-test/malformed-reads-return-flat-errors
+bin/test: 2026-09-17T06:04:57.580838Z BEGIN test seon.db-test/durable-pull-digests-replay-without-retaining-read-results
+bin/test: 2026-09-17T06:04:57.725935Z END test seon.db-test/durable-pull-digests-replay-without-retaining-read-results
+bin/test: 2026-09-17T06:04:57.726200Z END namespace seon.db-test
+bin/test: 2026-09-17T06:04:57.726408Z BEGIN namespace seon.fn-test
+
+Testing seon.fn-test
+bin/test: 2026-09-17T06:04:57.749076Z BEGIN test seon.fn-test/malformed-source-preserves-analysis-findings
+bin/test: 2026-09-17T06:04:57.773793Z END test seon.fn-test/malformed-source-preserves-analysis-findings
+bin/test: 2026-09-17T06:04:57.773960Z BEGIN test seon.fn-test/fixture-observations-survive-static-and-runtime-admission
+bin/test: 2026-09-17T06:04:58.569294Z END test seon.fn-test/fixture-observations-survive-static-and-runtime-admission
+bin/test: 2026-09-17T06:04:58.569393Z BEGIN test seon.fn-test/sci-evaluation-has-one-first-party-owning-namespace
+bin/test: 2026-09-17T06:04:58.649794Z END test seon.fn-test/sci-evaluation-has-one-first-party-owning-namespace
+bin/test: 2026-09-17T06:04:58.649901Z BEGIN test seon.fn-test/the-indexer-emits-no-attribute-the-program-row-schema-drops
+bin/test: 2026-09-17T06:04:58.686986Z END test seon.fn-test/the-indexer-emits-no-attribute-the-program-row-schema-drops
+bin/test: 2026-09-17T06:04:58.687070Z BEGIN test seon.fn-test/a-file-changed-after-capture-analyzes-to-the-captured-spans
+bin/test: 2026-09-17T06:04:58.695360Z END test seon.fn-test/a-file-changed-after-capture-analyzes-to-the-captured-spans
+bin/test: 2026-09-17T06:04:58.695427Z BEGIN test seon.fn-test/source-context-is-derived-once-per-file-population
+bin/test: 2026-09-17T06:04:58.716637Z END test seon.fn-test/source-context-is-derived-once-per-file-population
+bin/test: 2026-09-17T06:04:58.716704Z BEGIN test seon.fn-test/defining-forms-share-one-form-local-kondo-batch
+bin/test: 2026-09-17T06:04:58.815811Z END test seon.fn-test/defining-forms-share-one-form-local-kondo-batch
+bin/test: 2026-09-17T06:04:58.815896Z BEGIN test seon.fn-test/indexed-declarations-carry-exact-file-bytes
+bin/test: 2026-09-17T06:04:58.936945Z END test seon.fn-test/indexed-declarations-carry-exact-file-bytes
+bin/test: 2026-09-17T06:04:58.937032Z BEGIN test seon.fn-test/publication-refusals-preserve-the-entity-key-and-value
+2026-09-17T06:04:58.939820Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :transaction/validation-rejected, :cause "Transaction report validation rejected."}
+bin/test: 2026-09-17T06:04:58.941453Z END test seon.fn-test/publication-refusals-preserve-the-entity-key-and-value
+bin/test: 2026-09-17T06:04:58.941517Z BEGIN test seon.fn-test/ordinary-form-analysis-keeps-call-edges-without-a-declaration
+bin/test: 2026-09-17T06:04:59.672496Z END test seon.fn-test/ordinary-form-analysis-keeps-call-edges-without-a-declaration
+bin/test: 2026-09-17T06:04:59.672597Z BEGIN test seon.fn-test/blocking-analysis-keeps-the-fresh-branch-unpublished
+bin/test: 2026-09-17T06:04:59.687075Z END test seon.fn-test/blocking-analysis-keeps-the-fresh-branch-unpublished
+bin/test: 2026-09-17T06:04:59.687149Z BEGIN test seon.fn-test/static-findings-are-replaced-with-their-program-rows
+bin/test: 2026-09-17T06:04:59.926108Z END test seon.fn-test/static-findings-are-replaced-with-their-program-rows
+bin/test: 2026-09-17T06:04:59.926188Z BEGIN test seon.fn-test/call-arities-refine-exactly-the-stored-call-edges
+bin/test: 2026-09-17T06:04:59.950829Z END test seon.fn-test/call-arities-refine-exactly-the-stored-call-edges
+bin/test: 2026-09-17T06:04:59.950917Z BEGIN test seon.fn-test/implementation-bodies-contribute-edges-and-test-reach
+bin/test: 2026-09-17T06:05:00.562988Z END test seon.fn-test/implementation-bodies-contribute-edges-and-test-reach
+bin/test: 2026-09-17T06:05:00.563079Z BEGIN test seon.fn-test/writes-facet-names-every-attribute-a-declaration-transacts
+bin/test: 2026-09-17T06:05:00.596717Z END test seon.fn-test/writes-facet-names-every-attribute-a-declaration-transacts
+bin/test: 2026-09-17T06:05:00.596845Z BEGIN test seon.fn-test/keyword-usage-is-indexed-per-declaration
+bin/test: 2026-09-17T06:05:00.768100Z END test seon.fn-test/keyword-usage-is-indexed-per-declaration
+bin/test: 2026-09-17T06:05:00.771614Z BEGIN test seon.fn-test/static-index-preserves-the-jvm-row-contract
+bin/test: 2026-09-17T06:05:00.822662Z END test seon.fn-test/static-index-preserves-the-jvm-row-contract
+bin/test: 2026-09-17T06:05:00.822765Z BEGIN test seon.fn-test/arity-mismatch-refuses-the-final-write
+2026-09-17T06:05:01.370124Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :transaction/validation-rejected, :cause "Transaction report validation rejected."}
+bin/test: 2026-09-17T06:05:01.554397Z END test seon.fn-test/arity-mismatch-refuses-the-final-write
+bin/test: 2026-09-17T06:05:01.554496Z BEGIN test seon.fn-test/an-attribute-declared-after-this-jvm-started-is-indexed-without-a-restart
+bin/test: 2026-09-17T06:05:01.779835Z END test seon.fn-test/an-attribute-declared-after-this-jvm-started-is-indexed-without-a-restart
+bin/test: 2026-09-17T06:05:01.779917Z BEGIN test seon.fn-test/the-walked-root-travels-with-its-file-relative-to-the-publication
+bin/test: 2026-09-17T06:05:01.856063Z END test seon.fn-test/the-walked-root-travels-with-its-file-relative-to-the-publication
+bin/test: 2026-09-17T06:05:01.856191Z BEGIN test seon.fn-test/retracted-program-identities-leave-no-tombstones
+2026-09-17T06:05:02.002885Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :transaction/validation-rejected, :cause "Transaction report validation rejected."}
+2026-09-17T06:05:02.005130Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :transaction/validation-rejected, :cause "Transaction report validation rejected."}
+bin/test: 2026-09-17T06:05:02.102079Z END test seon.fn-test/retracted-program-identities-leave-no-tombstones
+bin/test: 2026-09-17T06:05:02.102202Z BEGIN test seon.fn-test/indexing-uses-a-prebuilt-manifest-without-analysis
+bin/test: 2026-09-17T06:05:35.146776Z END test seon.fn-test/indexing-uses-a-prebuilt-manifest-without-analysis
+bin/test: 2026-09-17T06:05:35.147106Z BEGIN test seon.fn-test/declared-function-values-contribute-edges-without-arities
+bin/test: 2026-09-17T06:05:37.077188Z END test seon.fn-test/declared-function-values-contribute-edges-without-arities
+bin/test: 2026-09-17T06:05:37.077316Z BEGIN test seon.fn-test/settled-form-records-calls-across-every-program-namespace
+bin/test: 2026-09-17T06:05:38.510135Z END test seon.fn-test/settled-form-records-calls-across-every-program-namespace
+bin/test: 2026-09-17T06:05:38.511764Z BEGIN test seon.fn-test/output-path-report-finds-the-shortest-bypass
+bin/test: 2026-09-17T06:05:40.132896Z END test seon.fn-test/output-path-report-finds-the-shortest-bypass
+bin/test: 2026-09-17T06:05:40.133011Z BEGIN test seon.fn-test/indexing-refuses-an-already-populated-branch
+bin/test: 2026-09-17T06:05:41.616568Z END test seon.fn-test/indexing-refuses-an-already-populated-branch
+bin/test: 2026-09-17T06:05:41.616674Z BEGIN test seon.fn-test/a-span-past-the-captured-source-is-the-typed-refusal
+bin/test: 2026-09-17T06:05:41.623976Z END test seon.fn-test/a-span-past-the-captured-source-is-the-typed-refusal
+bin/test: 2026-09-17T06:05:41.624053Z BEGIN test seon.fn-test/settled-agent-form-has-static-index-edge-parity
+bin/test: 2026-09-17T06:05:42.004096Z END test seon.fn-test/settled-agent-form-has-static-index-edge-parity
+bin/test: 2026-09-17T06:05:42.004214Z BEGIN test seon.fn-test/program-population-store-uses-measured-index-fanout
+bin/test: 2026-09-17T06:05:42.004910Z END test seon.fn-test/program-population-store-uses-measured-index-fanout
+bin/test: 2026-09-17T06:05:42.004951Z BEGIN test seon.fn-test/requires-preserve-namespace-symbols-without-minting-targets
+bin/test: 2026-09-17T06:05:42.013352Z END test seon.fn-test/requires-preserve-namespace-symbols-without-minting-targets
+bin/test: 2026-09-17T06:05:42.013430Z BEGIN test seon.fn-test/parsed-contract-backfill-is-one-transaction-and-idempotent
+bin/test: 2026-09-17T06:05:45.004927Z END test seon.fn-test/parsed-contract-backfill-is-one-transaction-and-idempotent
+bin/test: 2026-09-17T06:05:45.005021Z BEGIN test seon.fn-test/contracted-rows-carry-queryable-facts-in-their-spec-transaction
+bin/test: 2026-09-17T06:05:45.048492Z END test seon.fn-test/contracted-rows-carry-queryable-facts-in-their-spec-transaction
+bin/test: 2026-09-17T06:05:45.048572Z BEGIN test seon.fn-test/indexing-resolves-its-declaration-world-once-per-operation
+bin/test: 2026-09-17T06:05:45.182354Z END test seon.fn-test/indexing-resolves-its-declaration-world-once-per-operation
+bin/test: 2026-09-17T06:05:45.182433Z BEGIN test seon.fn-test/publication-refuses-a-required-artifact-load-finding
+bin/test: 2026-09-17T06:05:45.199176Z END test seon.fn-test/publication-refuses-a-required-artifact-load-finding
+bin/test: 2026-09-17T06:05:45.199252Z BEGIN test seon.fn-test/static-index-and-runtime-admission-agree-on-analysis-facets
+bin/test: 2026-09-17T06:05:45.435385Z END test seon.fn-test/static-index-and-runtime-admission-agree-on-analysis-facets
+bin/test: 2026-09-17T06:05:45.435479Z BEGIN test seon.fn-test/analyze-form-refuses-an-unresolvable-namespace-reference
+bin/test: 2026-09-17T06:05:45.437963Z END test seon.fn-test/analyze-form-refuses-an-unresolvable-namespace-reference
+bin/test: 2026-09-17T06:05:45.438046Z BEGIN test seon.fn-test/publication-veto-is-exactly-the-cant-load-finding-classes
+bin/test: 2026-09-17T06:05:45.466313Z END test seon.fn-test/publication-veto-is-exactly-the-cant-load-finding-classes
+bin/test: 2026-09-17T06:05:45.466405Z BEGIN test seon.fn-test/my-web-cascade-class-warns-without-vetoing-publication
+bin/test: 2026-09-17T06:05:45.490604Z END test seon.fn-test/my-web-cascade-class-warns-without-vetoing-publication
+bin/test: 2026-09-17T06:05:45.490693Z BEGIN test seon.fn-test/tests-reaching-follows-calls-and-explicit-subjects
+bin/test: 2026-09-17T06:05:48.909998Z END test seon.fn-test/tests-reaching-follows-calls-and-explicit-subjects
+bin/test: 2026-09-17T06:05:48.910076Z BEGIN test seon.fn-test/changed-file-planning-is-conservative-and-explicit
+bin/test: 2026-09-17T06:05:48.924793Z END test seon.fn-test/changed-file-planning-is-conservative-and-explicit
+bin/test: 2026-09-17T06:05:48.924861Z BEGIN test seon.fn-test/prepared-source-counts-are-admitted-and-real-mismatches-refuse
+2026-09-17T06:05:49.933150Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :transaction/validation-rejected, :cause "Transaction report validation rejected."}
+bin/test: 2026-09-17T06:05:49.934294Z END test seon.fn-test/prepared-source-counts-are-admitted-and-real-mismatches-refuse
+bin/test: 2026-09-17T06:05:49.934376Z BEGIN test seon.fn-test/file-artifacts-and-manifests-are-byte-digested-and-deterministic
+bin/test: 2026-09-17T06:05:50.011858Z END test seon.fn-test/file-artifacts-and-manifests-are-byte-digested-and-deterministic
+bin/test: 2026-09-17T06:05:50.011959Z BEGIN test seon.fn-test/a-declaration-answers-its-source-root-through-its-file
+bin/test: 2026-09-17T06:05:50.016851Z END test seon.fn-test/a-declaration-answers-its-source-root-through-its-file
+bin/test: 2026-09-17T06:05:50.016931Z BEGIN test seon.fn-test/capability-indexing-refuses-every-malformed-declaration
+bin/test: 2026-09-17T06:05:50.236362Z END test seon.fn-test/capability-indexing-refuses-every-malformed-declaration
+bin/test: 2026-09-17T06:05:50.236446Z BEGIN test seon.fn-test/gate-set-returns-the-shape-its-contract-declares
+bin/test: 2026-09-17T06:05:51.046737Z END test seon.fn-test/gate-set-returns-the-shape-its-contract-declares
+bin/test: 2026-09-17T06:05:51.046844Z BEGIN test seon.fn-test/every-indexed-outward-path-crosses-its-total-render-projection
+bin/test: 2026-09-17T06:05:52.251115Z END test seon.fn-test/every-indexed-outward-path-crosses-its-total-render-projection
+bin/test: 2026-09-17T06:05:52.251217Z BEGIN test seon.fn-test/fixture-analysis-never-writes-the-checkouts-dependency-cache
+bin/test: 2026-09-17T06:05:52.553935Z END test seon.fn-test/fixture-analysis-never-writes-the-checkouts-dependency-cache
+bin/test: 2026-09-17T06:05:52.554017Z BEGIN test seon.fn-test/re-index-replaces-analysis-facets-exactly
+bin/test: 2026-09-17T06:05:52.754595Z END test seon.fn-test/re-index-replaces-analysis-facets-exactly
+bin/test: 2026-09-17T06:05:52.754672Z BEGIN test seon.fn-test/progress-observation-cannot-change-index-transaction-shapes
+bin/test: 2026-09-17T06:05:52.755334Z END test seon.fn-test/progress-observation-cannot-change-index-transaction-shapes
+bin/test: 2026-09-17T06:05:52.755381Z BEGIN test seon.fn-test/every-indexed-file-carries-the-root-the-indexer-walked
+bin/test: 2026-09-17T06:05:52.759670Z END test seon.fn-test/every-indexed-file-carries-the-root-the-indexer-walked
+bin/test: 2026-09-17T06:05:52.759772Z BEGIN test seon.fn-test/reference-selection-includes-resolved-and-reference-only-callers
+bin/test: 2026-09-17T06:05:56.049657Z END test seon.fn-test/reference-selection-includes-resolved-and-reference-only-callers
+bin/test: 2026-09-17T06:05:56.052102Z BEGIN test seon.fn-test/relocated-artifacts-preserve-path-identity
+bin/test: 2026-09-17T06:05:56.137607Z END test seon.fn-test/relocated-artifacts-preserve-path-identity
+bin/test: 2026-09-17T06:05:56.137696Z BEGIN test seon.fn-test/agent-source-reaches-the-evaluator-through-one-visible-path
+bin/test: 2026-09-17T06:05:56.143420Z END test seon.fn-test/agent-source-reaches-the-evaluator-through-one-visible-path
+bin/test: 2026-09-17T06:05:56.146Z BEGIN test seon.fn-test/unresolved-call-shapes-preserve-reference-edges-and-reach
+bin/test: 2026-09-17T06:05:56.785099Z END test seon.fn-test/unresolved-call-shapes-preserve-reference-edges-and-reach
+bin/test: 2026-09-17T06:05:56.785240Z BEGIN test seon.fn-test/capability-metadata-is-one-program-graph-contract
+bin/test: 2026-09-17T06:05:56.831433Z END test seon.fn-test/capability-metadata-is-one-program-graph-contract
+bin/test: 2026-09-17T06:05:56.832844Z BEGIN test seon.fn-test/gate-set-walks-only-indexed-callers-once
+bin/test: 2026-09-17T06:05:58.084070Z END test seon.fn-test/gate-set-walks-only-indexed-callers-once
+bin/test: 2026-09-17T06:05:58.085055Z BEGIN test seon.fn-test/quoted-private-handler-symbol-is-indexed-as-the-runtime-symbol
+bin/test: 2026-09-17T06:05:58.125944Z END test seon.fn-test/quoted-private-handler-symbol-is-indexed-as-the-runtime-symbol
+bin/test: 2026-09-17T06:05:58.129191Z BEGIN test seon.fn-test/publication-is-first-party-only
+bin/test: 2026-09-17T06:05:58.162584Z END test seon.fn-test/publication-is-first-party-only
+bin/test: 2026-09-17T06:05:58.164931Z BEGIN test seon.fn-test/cross-file-implementations-keep-edges-or-widen
+bin/test: 2026-09-17T06:05:59.215990Z END test seon.fn-test/cross-file-implementations-keep-edges-or-widen
+bin/test: 2026-09-17T06:05:59.216062Z END namespace seon.fn-test
+bin/test: 2026-09-17T06:05:59.216090Z BEGIN namespace seon.program-test
+
+Testing seon.program-test
+bin/test: 2026-09-17T06:05:59.238630Z BEGIN test seon.program-test/function-contracts-compile-once-into-complete-query-facts
+bin/test: 2026-09-17T06:05:59.243507Z END test seon.program-test/function-contracts-compile-once-into-complete-query-facts
+bin/test: 2026-09-17T06:05:59.243559Z BEGIN test seon.program-test/optional-attributes-are-replaced-exactly
+bin/test: 2026-09-17T06:05:59.246434Z END test seon.program-test/optional-attributes-are-replaced-exactly
+bin/test: 2026-09-17T06:05:59.246469Z BEGIN test seon.program-test/every-declaration-row-satisfies-its-own-output-contract
+bin/test: 2026-09-17T06:06:01.837042Z END test seon.program-test/every-declaration-row-satisfies-its-own-output-contract
+bin/test: 2026-09-17T06:06:01.837129Z BEGIN test seon.program-test/every-program-row-attribute-is-owned-or-names-another-writer
+bin/test: 2026-09-17T06:06:01.838809Z END test seon.program-test/every-program-row-attribute-is-owned-or-names-another-writer
+bin/test: 2026-09-17T06:06:01.838878Z BEGIN test seon.program-test/runtime-deletion-refuses-surviving-callers-without-changing-the-definition
+2026-09-17T06:06:01.845201Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :transaction/validation-rejected, :cause "Transaction report validation rejected."}
+bin/test: 2026-09-17T06:06:01.846672Z END test seon.program-test/runtime-deletion-refuses-surviving-callers-without-changing-the-definition
+bin/test: 2026-09-17T06:06:01.846732Z BEGIN test seon.program-test/declaring-an-attribute-on-a-program-row-schema-is-sufficient
+bin/test: 2026-09-17T06:06:01.847628Z END test seon.program-test/declaring-an-attribute-on-a-program-row-schema-is-sufficient
+bin/test: 2026-09-17T06:06:01.847676Z BEGIN test seon.program-test/declaration-admission-refuses-ambiguous-or-incomplete-rows
+bin/test: 2026-09-17T06:06:01.852534Z END test seon.program-test/declaration-admission-refuses-ambiguous-or-incomplete-rows
+bin/test: 2026-09-17T06:06:01.852589Z BEGIN test seon.program-test/resolved-shapes-match-the-current-declarations
+bin/test: 2026-09-17T06:06:01.853589Z END test seon.program-test/resolved-shapes-match-the-current-declarations
+bin/test: 2026-09-17T06:06:01.854199Z BEGIN test seon.program-test/typed-cross-namespace-deletion-retracts-function-and-test
+bin/test: 2026-09-17T06:06:02.580518Z END test seon.program-test/typed-cross-namespace-deletion-retracts-function-and-test
+bin/test: 2026-09-17T06:06:02.580599Z BEGIN test seon.program-test/regex-rest-tail-is-complete-and-element-is-only-derived-when-proven
+bin/test: 2026-09-17T06:06:02.582341Z END test seon.program-test/regex-rest-tail-is-complete-and-element-is-only-derived-when-proven
+bin/test: 2026-09-17T06:06:02.582384Z BEGIN test seon.program-test/a-declaration-added-after-the-first-call-is-a-cache-miss
+bin/test: 2026-09-17T06:06:02.587058Z END test seon.program-test/a-declaration-added-after-the-first-call-is-a-cache-miss
+bin/test: 2026-09-17T06:06:02.587109Z BEGIN test seon.program-test/source-contract-join-refuses-disagreement-and-records-overrides
+bin/test: 2026-09-17T06:06:02.588624Z END test seon.program-test/source-contract-join-refuses-disagreement-and-records-overrides
+bin/test: 2026-09-17T06:06:02.588651Z BEGIN test seon.program-test/schema-unregister-is-one-global-typed-deletion
+bin/test: 2026-09-17T06:06:02.589270Z END test seon.program-test/schema-unregister-is-one-global-typed-deletion
+bin/test: 2026-09-17T06:06:02.589309Z BEGIN test seon.program-test/opening-basis-divergence-is-only-claimed-when-it-is-measurable
+bin/test: 2026-09-17T06:06:02.778525Z END test seon.program-test/opening-basis-divergence-is-only-claimed-when-it-is-measurable
+bin/test: 2026-09-17T06:06:02.778586Z BEGIN test seon.program-test/identical-runtime-redeclaration-builds-no-datoms
+bin/test: 2026-09-17T06:06:02.953093Z END test seon.program-test/identical-runtime-redeclaration-builds-no-datoms
+bin/test: 2026-09-17T06:06:02.953167Z BEGIN test seon.program-test/reader-events-have-one-canonical-declaration-row
+bin/test: 2026-09-17T06:06:04.165206Z END test seon.program-test/reader-events-have-one-canonical-declaration-row
+bin/test: 2026-09-17T06:06:04.165286Z BEGIN test seon.program-test/function-contract-role-refs-follow-local-registries
+bin/test: 2026-09-17T06:06:04.166494Z END test seon.program-test/function-contract-role-refs-follow-local-registries
+bin/test: 2026-09-17T06:06:04.166541Z BEGIN test seon.program-test/runtime-schema-declarations-project-namespaced-properties
+bin/test: 2026-09-17T06:06:04.773379Z END test seon.program-test/runtime-schema-declarations-project-namespaced-properties
+bin/test: 2026-09-17T06:06:04.773448Z BEGIN test seon.program-test/indexed-and-evaluated-declarations-are-the-same-entities
+bin/test: 2026-09-17T06:06:17.135141Z END test seon.program-test/indexed-and-evaluated-declarations-are-the-same-entities
+bin/test: 2026-09-17T06:06:17.135228Z BEGIN test seon.program-test/function-contract-redefinition-replaces-component-facts-exactly
+bin/test: 2026-09-17T06:06:17.364293Z END test seon.program-test/function-contract-redefinition-replaces-component-facts-exactly
+bin/test: 2026-09-17T06:06:17.364372Z BEGIN test seon.program-test/exact-source-and-malli-arities-join-generatively
+bin/test: 2026-09-17T06:06:17.433322Z END test seon.program-test/exact-source-and-malli-arities-join-generatively
+bin/test: 2026-09-17T06:06:17.433401Z BEGIN test seon.program-test/positional-and-map-entry-contracts-have-distinct-addresses
+bin/test: 2026-09-17T06:06:17.580475Z END test seon.program-test/positional-and-map-entry-contracts-have-distinct-addresses
+bin/test: 2026-09-17T06:06:17.580554Z BEGIN test seon.program-test/program-identity-attributes-are-exactly-the-declared-row-schemas
+bin/test: 2026-09-17T06:06:17.583992Z END test seon.program-test/program-identity-attributes-are-exactly-the-declared-row-schemas
+bin/test: 2026-09-17T06:06:17.584039Z BEGIN test seon.program-test/empty-composite-schema-shapes-remain-canonical-and-queryable
+bin/test: 2026-09-17T06:06:17.586320Z END test seon.program-test/empty-composite-schema-shapes-remain-canonical-and-queryable
+bin/test: 2026-09-17T06:06:17.586354Z BEGIN test seon.program-test/changed-runtime-redeclaration-builds-a-real-replacement
+bin/test: 2026-09-17T06:06:17.840430Z END test seon.program-test/changed-runtime-redeclaration-builds-a-real-replacement
+bin/test: 2026-09-17T06:06:17.840509Z BEGIN test seon.program-test/schema-row-properties-survive-and-retract-exactly
+bin/test: 2026-09-17T06:06:17.842682Z END test seon.program-test/schema-row-properties-survive-and-retract-exactly
+bin/test: 2026-09-17T06:06:17.842714Z BEGIN test seon.program-test/arbitrary-qualified-deftest-is-not-a-test-declaration
+bin/test: 2026-09-17T06:06:17.843550Z END test seon.program-test/arbitrary-qualified-deftest-is-not-a-test-declaration
+bin/test: 2026-09-17T06:06:17.843677Z END namespace seon.program-test
+bin/test: 2026-09-17T06:06:17.843800Z BEGIN namespace seon.schema-test
+
+Testing seon.schema-test
+bin/test: 2026-09-17T06:06:17.866753Z BEGIN test seon.schema-test/agent-authored-function-input-maps-accrete
+bin/test: 2026-09-17T06:06:17.867160Z END test seon.schema-test/agent-authored-function-input-maps-accrete
+bin/test: 2026-09-17T06:06:17.867181Z BEGIN test seon.schema-test/every-predicate-schema-declares-what-it-accepts
+
+FAIL in (every-predicate-schema-declares-what-it-accepts) (schema_test.clj:226)
+predicate schemas without :error/message: [[:fn clojure.core/ifn?]]
+expected: (empty? (clojure.core/deref missing))
+actual: (not (empty? [[:fn clojure.core/ifn?]]))
+bin/test: 2026-09-17T06:06:17.875032Z END test seon.schema-test/every-predicate-schema-declares-what-it-accepts
+bin/test: 2026-09-17T06:06:17.875064Z BEGIN test seon.schema-test/two-projections-never-exchange-a-compiled-validator
+bin/test: 2026-09-17T06:06:18.856105Z END test seon.schema-test/two-projections-never-exchange-a-compiled-validator
+bin/test: 2026-09-17T06:06:18.856346Z BEGIN test seon.schema-test/a-projection-with-no-bound-predicates-compiles-every-declared-shape
+bin/test: 2026-09-17T06:06:21.460317Z END test seon.schema-test/a-projection-with-no-bound-predicates-compiles-every-declared-shape
+bin/test: 2026-09-17T06:06:21.460393Z BEGIN test seon.schema-test/one-declaration-validates-only-its-dependency-closure
+bin/test: 2026-09-17T06:06:21.532240Z END test seon.schema-test/one-declaration-validates-only-its-dependency-closure
+bin/test: 2026-09-17T06:06:21.532326Z BEGIN test seon.schema-test/one-derivation-owns-the-projection-predicate-bindings
+bin/test: 2026-09-17T06:06:21.539096Z END test seon.schema-test/one-derivation-owns-the-projection-predicate-bindings
+bin/test: 2026-09-17T06:06:21.539171Z BEGIN test seon.schema-test/canonical-rows-carry-arbitrary-namespaced-properties
+bin/test: 2026-09-17T06:06:21.541330Z END test seon.schema-test/canonical-rows-carry-arbitrary-namespaced-properties
+bin/test: 2026-09-17T06:06:21.541377Z BEGIN test seon.schema-test/an-incremental-build-resolves-against-the-projection-in-hand
+bin/test: 2026-09-17T06:06:21.543032Z END test seon.schema-test/an-incremental-build-resolves-against-the-projection-in-hand
+bin/test: 2026-09-17T06:06:21.543067Z BEGIN test seon.schema-test/canonical-reference-values-use-the-pull-collection-grammar
+Canonical populated reference attributes: 31 declared: 157
+bin/test: 2026-09-17T06:06:21.560037Z END test seon.schema-test/canonical-reference-values-use-the-pull-collection-grammar
+bin/test: 2026-09-17T06:06:21.560097Z BEGIN test seon.schema-test/canonical-mutual-recursion-refuses-but-local-recursion-is-supported
+bin/test: 2026-09-17T06:06:22.060673Z END test seon.schema-test/canonical-mutual-recursion-refuses-but-local-recursion-is-supported
+bin/test: 2026-09-17T06:06:22.060753Z BEGIN test seon.schema-test/acquired-projection-owns-schema-introspection
+bin/test: 2026-09-17T06:06:22.060834Z END test seon.schema-test/acquired-projection-owns-schema-introspection
+bin/test: 2026-09-17T06:06:22.060852Z BEGIN test seon.schema-test/a-component-bearing-row-validates-its-own-declared-shape
+bin/test: 2026-09-17T06:06:22.593558Z END test seon.schema-test/a-component-bearing-row-validates-its-own-declared-shape
+bin/test: 2026-09-17T06:06:22.593637Z BEGIN test seon.schema-test/one-predicate-symbol-cannot-name-two-environments-callables
+bin/test: 2026-09-17T06:06:24.501423Z END test seon.schema-test/one-predicate-symbol-cannot-name-two-environments-callables
+bin/test: 2026-09-17T06:06:24.501511Z BEGIN test seon.schema-test/canonical-self-references-refuse-at-registration
+bin/test: 2026-09-17T06:06:25.448462Z END test seon.schema-test/canonical-self-references-refuse-at-registration
+bin/test: 2026-09-17T06:06:25.448544Z BEGIN test seon.schema-test/equal-packaged-populations-reuse-the-shape-projection
+bin/test: 2026-09-17T06:06:25.452893Z END test seon.schema-test/equal-packaged-populations-reuse-the-shape-projection
+bin/test: 2026-09-17T06:06:25.452942Z BEGIN test seon.schema-test/canonical-definition-keeps-admitted-predicate-symbols
+bin/test: 2026-09-17T06:06:25.455535Z END test seon.schema-test/canonical-definition-keeps-admitted-predicate-symbols
+bin/test: 2026-09-17T06:06:25.455566Z BEGIN test seon.schema-test/database-projections-reuse-only-the-handed-value
+bin/test: 2026-09-17T06:06:28.662318Z END test seon.schema-test/database-projections-reuse-only-the-handed-value
+bin/test: 2026-09-17T06:06:28.663421Z BEGIN test seon.schema-test/declared-reference-maps-accept-the-pull-reference-grammar
+Pulled-reference map contracts: 80 storable: 47
+bin/test: 2026-09-17T06:06:30.081078Z END test seon.schema-test/declared-reference-maps-accept-the-pull-reference-grammar
+bin/test: 2026-09-17T06:06:30.081169Z BEGIN test seon.schema-test/matching-shapes-derive-required-attributes-through-and-refs
+bin/test: 2026-09-17T06:06:30.082613Z END test seon.schema-test/matching-shapes-derive-required-attributes-through-and-refs
+bin/test: 2026-09-17T06:06:30.082692Z BEGIN test seon.schema-test/render-declarations-require-a-contract-that-accepts-their-shape
+bin/test: 2026-09-17T06:06:30.090702Z END test seon.schema-test/render-declarations-require-a-contract-that-accepts-their-shape
+bin/test: 2026-09-17T06:06:30.090788Z BEGIN test seon.schema-test/named-predicate-violations-humanize-to-the-declared-requirement
+bin/test: 2026-09-17T06:06:30.093317Z END test seon.schema-test/named-predicate-violations-humanize-to-the-declared-requirement
+bin/test: 2026-09-17T06:06:30.093622Z BEGIN test seon.schema-test/function-input-fit-is-total-for-an-absent-contract
+bin/test: 2026-09-17T06:06:30.623525Z END test seon.schema-test/function-input-fit-is-total-for-an-absent-contract
+bin/test: 2026-09-17T06:06:30.623625Z BEGIN test seon.schema-test/map-shapes-accrete-additional-top-level-attributes
+bin/test: 2026-09-17T06:06:31.158897Z END test seon.schema-test/map-shapes-accrete-additional-top-level-attributes
+bin/test: 2026-09-17T06:06:31.159004Z BEGIN test seon.schema-test/a-declaration-compiles-against-a-predicate-its-loaded-owner-lacks
+bin/test: 2026-09-17T06:06:31.167551Z END test seon.schema-test/a-declaration-compiles-against-a-predicate-its-loaded-owner-lacks
+bin/test: 2026-09-17T06:06:31.167616Z BEGIN test seon.schema-test/function-input-and-output-fit-belong-to-one-arity
+bin/test: 2026-09-17T06:06:31.691898Z END test seon.schema-test/function-input-and-output-fit-belong-to-one-arity
+bin/test: 2026-09-17T06:06:31.692001Z END namespace seon.schema-test
+bin/test: 2026-09-17T06:06:31.692029Z BEGIN namespace seon.maintenance-schema-test
+
+Testing seon.maintenance-schema-test
+bin/test: 2026-09-17T06:06:31.714529Z BEGIN test seon.maintenance-schema-test/declared-operation-results-install-through-the-production-population
+bin/test: 2026-09-17T06:06:31.795165Z END test seon.maintenance-schema-test/declared-operation-results-install-through-the-production-population
+bin/test: 2026-09-17T06:06:31.800344Z BEGIN test seon.maintenance-schema-test/root-owned-portfolio-initializes-as-queryable-schedule-facts
+bin/test: 2026-09-17T06:06:32.110629Z END test seon.maintenance-schema-test/root-owned-portfolio-initializes-as-queryable-schedule-facts
+bin/test: 2026-09-17T06:06:32.110698Z BEGIN test seon.maintenance-schema-test/empty-maintenance-memberships-retain-their-positive-observation
+bin/test: 2026-09-17T06:06:32.449038Z END test seon.maintenance-schema-test/empty-maintenance-memberships-retain-their-positive-observation
+bin/test: 2026-09-17T06:06:32.449103Z BEGIN test seon.maintenance-schema-test/the-cleanup-collection-slot-declares-both-arms-it-can-carry
+bin/test: 2026-09-17T06:06:32.452425Z END test seon.maintenance-schema-test/the-cleanup-collection-slot-declares-both-arms-it-can-carry
+bin/test: 2026-09-17T06:06:32.452471Z BEGIN test seon.maintenance-schema-test/receipt-request-and-operation-result-attributes-are-queryable
+bin/test: 2026-09-17T06:06:32.533504Z END test seon.maintenance-schema-test/receipt-request-and-operation-result-attributes-are-queryable
+bin/test: 2026-09-17T06:06:32.533565Z BEGIN test seon.maintenance-schema-test/maintenance-maps-are-open-and-components-are-owned
+bin/test: 2026-09-17T06:06:32.539941Z END test seon.maintenance-schema-test/maintenance-maps-are-open-and-components-are-owned
+bin/test: 2026-09-17T06:06:32.539981Z END namespace seon.maintenance-schema-test
+bin/test: 2026-09-17T06:06:32.540Z BEGIN namespace seon.reset-edges-test
+
+Testing seon.reset-edges-test
+bin/test: 2026-09-17T06:06:32.562963Z BEGIN test seon.reset-edges-test/refused-notes-do-not-mint-incomplete-issue-identities
+bin/test: 2026-09-17T06:06:32.597602Z END test seon.reset-edges-test/refused-notes-do-not-mint-incomplete-issue-identities
+bin/test: 2026-09-17T06:06:32.597669Z BEGIN test seon.reset-edges-test/agents-archive-without-retraction-or-ownership-loss
+2026-09-17T06:06:33.012660Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :transaction/validation-rejected, :cause "Transaction report validation rejected."}
+bin/test: 2026-09-17T06:06:33.075893Z END test seon.reset-edges-test/agents-archive-without-retraction-or-ownership-loss
+bin/test: 2026-09-17T06:06:33.075954Z BEGIN test seon.reset-edges-test/a-declared-capability-handler-is-a-live-symbol-obligation
+2026-09-17T06:06:33.080043Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :transaction/validation-rejected, :cause "Transaction report validation rejected."}
+bin/test: 2026-09-17T06:06:33.081438Z END test seon.reset-edges-test/a-declared-capability-handler-is-a-live-symbol-obligation
+bin/test: 2026-09-17T06:06:33.081484Z BEGIN test seon.reset-edges-test/recording-a-fault-does-not-mint-a-program-identity
+bin/test: 2026-09-17T06:06:33.224148Z END test seon.reset-edges-test/recording-a-fault-does-not-mint-a-program-identity
+bin/test: 2026-09-17T06:06:33.224208Z BEGIN test seon.reset-edges-test/removing-a-name-from-a-surviving-entity-refuses-its-callers
+2026-09-17T06:06:33.227327Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :transaction/validation-rejected, :cause "Transaction report validation rejected."}
+2026-09-17T06:06:33.229701Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :transaction/validation-rejected, :cause "Transaction report validation rejected."}
+bin/test: 2026-09-17T06:06:33.230261Z END test seon.reset-edges-test/removing-a-name-from-a-surviving-entity-refuses-its-callers
+bin/test: 2026-09-17T06:06:33.230293Z BEGIN test seon.reset-edges-test/a-test-retraction-is-not-a-function-deletion
+bin/test: 2026-09-17T06:06:33.445054Z END test seon.reset-edges-test/a-test-retraction-is-not-a-function-deletion
+bin/test: 2026-09-17T06:06:33.445110Z BEGIN test seon.reset-edges-test/analysis-digest-covers-the-resolver-prelude-and-the-exact-input
+bin/test: 2026-09-17T06:06:33.570583Z END test seon.reset-edges-test/analysis-digest-covers-the-resolver-prelude-and-the-exact-input
+bin/test: 2026-09-17T06:06:33.570636Z BEGIN test seon.reset-edges-test/two-keyword-members-remain-two-values-through-nested-writer-output
+bin/test: 2026-09-17T06:06:33.646984Z END test seon.reset-edges-test/two-keyword-members-remain-two-values-through-nested-writer-output
+bin/test: 2026-09-17T06:06:33.647037Z BEGIN test seon.reset-edges-test/sci-deletion-is-a-flat-refusal-with-no-committed-prefix
+2026-09-17T06:06:34.147109Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :transaction/validation-rejected, :cause "Transaction report validation rejected."}
+bin/test: 2026-09-17T06:06:35.453302Z END test seon.reset-edges-test/sci-deletion-is-a-flat-refusal-with-no-committed-prefix
+bin/test: 2026-09-17T06:06:35.453366Z BEGIN test seon.reset-edges-test/named-edges-refuse-deletion-until-the-final-callers-are-repaired
+2026-09-17T06:06:35.482576Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :transaction/validation-rejected, :cause "Transaction report validation rejected."}
+bin/test: 2026-09-17T06:06:35.994874Z END test seon.reset-edges-test/named-edges-refuse-deletion-until-the-final-callers-are-repaired
+bin/test: 2026-09-17T06:06:35.994955Z BEGIN test seon.reset-edges-test/an-agent-definition-with-only-historical-reach-deletes
+bin/test: 2026-09-17T06:06:38.365677Z END test seon.reset-edges-test/an-agent-definition-with-only-historical-reach-deletes
+bin/test: 2026-09-17T06:06:38.365745Z BEGIN test seon.reset-edges-test/source-publication-refuses-an-outside-caller-and-keeps-its-head
+2026-09-17T06:06:38.490Z seans-m5-macbook-pro WARN [seon.cluster.store:310] - seon recursive deletion: #:seon.cluster.store{:root "/Users/sean/src/seon/tmp/reset-batch-wt/tmp/test-runs/run.bY0QmW/tmp/source-test/72bc03f8-63cb-4932-8538-f02748f0c4c6/store", :targets ["/Users/sean/src/seon/tmp/reset-batch-wt/tmp/test-runs/run.bY0QmW/tmp/source-test/72bc03f8-63cb-4932-8538-f02748f0c4c6/store"], :file-bytes 0, :operation "seon.cluster.store/create-store!", :caller "seon.cluster.source_test$with_store.invokeStatic(source_test.clj:82)", :pid 41646}
+bin/test: 2026-09-17T06:07:56.226309Z END test seon.reset-edges-test/source-publication-refuses-an-outside-caller-and-keeps-its-head
+bin/test: 2026-09-17T06:07:56.226398Z BEGIN test seon.reset-edges-test/analysis-is-a-required-positive-fact
+2026-09-17T06:07:56.231855Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :transaction/validation-rejected, :cause "Transaction report validation rejected."}
+2026-09-17T06:07:56.235937Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :transaction/validation-rejected, :cause "Transaction report validation rejected."}
+bin/test: 2026-09-17T06:07:56.236591Z END test seon.reset-edges-test/analysis-is-a-required-positive-fact
+bin/test: 2026-09-17T06:07:56.236639Z BEGIN test seon.reset-edges-test/an-evaluation-retains-its-issue-origin-after-issue-retraction
+bin/test: 2026-09-17T06:07:56.849587Z END test seon.reset-edges-test/an-evaluation-retains-its-issue-origin-after-issue-retraction
+bin/test: 2026-09-17T06:07:56.849656Z BEGIN test seon.reset-edges-test/stored-many-members-never-stand-in-for-the-producing-fact
+bin/test: 2026-09-17T06:07:56.868429Z END test seon.reset-edges-test/stored-many-members-never-stand-in-for-the-producing-fact
+bin/test: 2026-09-17T06:07:56.868495Z BEGIN test seon.reset-edges-test/namespace-and-schema-retractions-return-every-surviving-value-referrer
+2026-09-17T06:07:56.905033Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :transaction/validation-rejected, :cause "Transaction report validation rejected."}
+#:seon.program{:subject seon.turn, :referrer-count 70}
+2026-09-17T06:07:56.933374Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :transaction/validation-rejected, :cause "Transaction report validation rejected."}
+#:seon.program{:subject :seon.db/connection, :referrer-count 102}
+bin/test: 2026-09-17T06:07:56.935054Z END test seon.reset-edges-test/namespace-and-schema-retractions-return-every-surviving-value-referrer
+bin/test: 2026-09-17T06:07:56.935091Z END namespace seon.reset-edges-test
+
+Ran 191 tests containing 1665 assertions.
+1 failures, 0 errors.

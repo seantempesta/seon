@@ -14,6 +14,20 @@ never restarts or resets default. The explicit step-2 restriction overrides
 the assignment's later generic cold-gate paragraph. The orchestrator runs the
 cold gates after the one reset. No migration or compatibility population.
 
+## Current checkpoint — G5 ready for review
+
+Branch `reset-batch` is rebased through `5dd6ef7cc`. G5 is implemented at
+`1d9dc7c1f`; the corrected G5/database/schema/maintenance fast run passed
+**89 tests / 948 assertions**, and the final integrated-launcher G5 run passed
+**5 tests / 68 assertions**, both with zero failures/errors. The absolute 5 ms
+query budget is retained; the ratio is reported in the
+[landing note](../../context-generation/research/reset-edge-integration-2026-09-17.md).
+The identity-less entity issue is resolved and archived. Earlier checkpoint
+entries below preserve history, not outstanding G5 or query-cost decisions.
+The runner's formerly held files are released and its landing is rebased in.
+Stop for review; the orchestrator owns merge, ONE `bin/seon reset --force`,
+canonical reseed and cold/live proofs. No lane default operation is authorized.
+
 ## Message publication — §1h applied together under §1i
 
 **RESET NEEDED.** The message lane's three integrated seams provide one publication containing permanent
@@ -1491,15 +1505,24 @@ surviving component edge requires them. No wildcard pull, 1,000-member cap,
 id-only placeholder or invented component identity is involved.
 
 The pre-rebase G5 fast proof passed 89 tests / 948 assertions, with zero failures
-and errors. The branch is rebased onto `ad75bab51`; final fast verification
-is in progress. The final landing note records the exact head and result.
+and errors. The corrected four-namespace rerun also passed 89 tests / 948 assertions.
+The branch is rebased through `5dd6ef7cc`; the final landing note records
+the exact code checkpoint, full evidence and integrated launcher smoke proof.
 
 The rebase retained upstream batched evidence lookups, adoption phase reporting,
 agent-only override lookup and immutable reconciliation reads while preserving
 the reset's symbol values and deletion obligations. One foreign verification
-boundary is named explicitly: the main tree's `bin/test` and
-`src/seon/test/selection.clj` are held by the runner lane. This branch alone
-fixes exact-HEAD fast snapshots being refused for a missing cold publication;
-it preserves admission for changed overlays. The orchestrator reconciles that
-narrow launcher condition with the runner lane before the final merge. No
-foreign uncommitted bytes were copied or edited.
+boundary was the main tree's `bin/test` and `src/seon/test/selection.clj`,
+then held by the runner lane. Both were rechecked clean after `d88837ddd`
+landed. Rebase through `5dd6ef7cc` reconciles that landing with this branch's
+exact-HEAD fast-snapshot fix, preserving admission for changed overlays and
+upstream source-matched baseline acquisition. No foreign uncommitted bytes
+were copied or edited. This boundary is resolved, not a remaining hold.
+
+
+Final fast 12: **5 tests / 68 assertions / zero failures / zero errors** after
+rebase through `5dd6ef7cc`, exercising the integrated launcher. Fast 11's
+**89 / 948 / 0 / 0** remains valid for unchanged G5/database/schema bytes.
+The final code checkpoint is `e27986b03`; the landing note retains both exact
+logs, the measured query ratio and the resolved foreign launcher boundary.
+All own test sessions exited. **RESET NEEDED. Stop for review.**
