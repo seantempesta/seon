@@ -2876,3 +2876,14 @@ working tree, never Sonnet.
 - private-contracts slice 1 (`74a389ce1`): arming of contracted private
   functions ALREADY existed (14 armed live); the gap is purely the missing
   contracts. Resumed on slice 2.
+- **Audit 1/4 LANDED** (db/schema/config, `7506b8c59`): 508 functions, 300
+  private, 0 contracted. BLOCKER F1: `seon.db/error-value?` requires a
+  `:seon.error/kind` keyword, but 338 declared error classes across 65
+  schema files carry `:seon.error/class true` and only 10 files mention a
+  kind — marker-class refusals answer false and flow on as ordinary maps;
+  six spellings of "is this an error" exist. F2: `transact-call` relabels
+  such a refusal `:seon.db/unknown-failure`. F3: `seon.config/refuse!`
+  throws a kind with no message. private-contracts stopped and resumed
+  with F1–F3 FIRST (one predicate: `seon.error/error?`), then contracts in
+  the audit's order — contracts on a broken predicate would be a green
+  suite with no protection.
