@@ -3362,3 +3362,11 @@ as orchestrator/astra lanes, easy pool as the first live-agent slice).
   shelved patch (Track A; absorbs triage #14 and the runner-test symbol
   reds). Running with `publication-report-projection` = 4 editing lanes.
   Wrapper enforcement (slice 2) follows the manifest.
+- `error-declaration-manifest` stopped honestly (`107aff7dc`): the literal
+  manifest changes 280 EXISTING keys (incl. `:seon.error/value`) that
+  unchanged constructors still produce; 316 keys are new. Orchestrator
+  decision: slice 1 = additive only (new keys + checkers, old declarations
+  untouched); the 280 same-key replacements land inside the constructor
+  groups with their constructors, batched into the one reset;
+  `:seon.error/result` omitted (1q). Lane resumed on that. PRD §6 row 1 and
+  the issue note updated by the lane in the same commits.
