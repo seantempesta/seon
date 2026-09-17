@@ -1852,6 +1852,16 @@ baseline reds, unowned — queue). Everything else in the 24 namespaces GREEN
 cold: composable-history, wake-matchers, tier-0, hook, seal, no-default,
 schema, config, schedule, sci.eval, documentation, search, selection.
 
+**repl-program-operations LANDED reads** (`a2e16338b`): `my.program/breaks`,
+`callers`, `tests-reaching`, `reads-key`, `history` as pure reads with
+contracts and computed (not launched) plans; vocabulary rows in AGENTS.md;
+live from an agent's REPL: `seon.turn/open?` answers five callers and 1,506
+reaching tests; the §10 predicate-query oddity resolved (a separate
+decoding defect filed). 4/60 fast. Resumed on items 3 (hook arms — eval.clj
+held by S3, hunk + red-by-design regression) and 4 (`ns-unmap!`,
+`remove-ns!`, `ns-unalias!` over existing writers, breaks-first) and
+`overrides`, with a live proof. Cold gate owed.
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
