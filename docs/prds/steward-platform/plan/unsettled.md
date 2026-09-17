@@ -2051,6 +2051,19 @@ decisions taken — the ten open ones stay open with options written; every
 landing reviewed and recorded; gates when the platform tier is green;
 astra design reviews at high effort for modeling questions.
 
+**Platform-tier refusal FIXED** (`d65cc688c`, reset-is-total): the cause was
+artificial FILE grouping in destructive test selection, not the fs delete
+admission — file boundaries preserved, destroyer declarations kept, the one
+genuinely reaching Flow census moved to the ordinary tier, the registry
+schema fixture repaired; the checker admits all 98 declared platform tests;
+31/210 green fast. **Batch 116 launched** (platform on HEAD, then 25
+namespaces of every slice landed since 115; log
+`tmp/orchestrator/gate-results/batch-116.log`). Overnight lanes running:
+message-wake-model (astra, high), datahike-modeling-study (astra, high, the
+second opinion on the reset batch + skill corrections), integrator on
+`reset-batch`, program-ops, S3, guardrails, stage 2; Opus: hook loopholes,
+create-path validator, outline, small fixes.
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
