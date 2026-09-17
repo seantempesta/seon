@@ -1624,6 +1624,23 @@ the database and regenerate". S3 lane stopped and resumed with that shape:
 pure `(base-ctx db)`, fork + private layer per agent, base diffs proven
 equal to regeneration or deleted by measured cost. Recorded in PRD S3.
 
+**Integrator tier-1 boundary** (`132568fb8`): two premises refuted with
+probes — (a) a raw source-count arity check refuses the supported
+`(my.message/inbox)` (source 0, declared 1, preparation accepts 0 or 1) →
+DECIDED: the invariant compares against PREPARED arities derived from the
+call-preparation plans; (b) 802 core function rows have no file (external
+call targets manufactured by `fn/desired-rows`) → DECIDED: `:seon.fn/file`
+required moves into the edge-retype group where the stub minting is
+deleted. Integrator resumed: render-target + prepared-arity checks + the two
+accidental-refusal regressions now, then the retype (selection.clj free).
+**Publication wedge FIXED in source** by the environment continuation
+(`73cb2fafe`: a declaration compiles against its predicate's source, not
+this JVM's copy; `8a507aa8f` note + issue `a-new-core-predicate-and-its-
+schema-cannot-be-adopted-in-place`) — the running JVM could not adopt it
+while wedged, so the orchestrator is RESTARTING default (stop/start, not a
+refork; log `tmp/orchestrator/refork/restart-2026-09-17T0045Z.log`) and
+re-adopting.
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
