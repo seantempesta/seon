@@ -105,3 +105,46 @@ The focused first pass was also green: 6 tests, 27 assertions, 0 failures,
 Implementation delta before this note: 156 insertions and 50 deletions across
 `src/seon/sci/kernel.clj`, `src/seon/sci/eval.clj`, `src/seon/plan.clj`, and
 `test/seon/sci/kernel_arm_carriage_test.clj`.
+
+## Cold-worker follow-up
+
+The cold gate over `0a58c769d` found a second seam that the fast runner does
+not exercise: `seon.test.runner/run-task!` sent every resolved test Var through
+`seon.sci.eval/run-tests`. That function correctly scoped a canonical-base arm
+with `kernel/with-arm`, but core tests resolve to JVM Vars. Consequently the
+arm's dynamic extent deliberately covered the whole host test body. Each task
+created a fresh arm for the same canonical interpreter, and any test evaluating
+an independent ctx met that foreign arm before doing work.
+
+The retained worker evidence is
+`tmp/test-runs/run.2V4cJZ/workers/pool-1/logs/worker-stderr.log`: the worker
+armed contracts before canonical-base construction and again after loading the
+four requested namespaces. The gate then reported nine distinct existing arm
+ids, all for interpreter `846133226`. Distinct ids falsify one arm surviving
+between tasks; the shared interpreter identifies the canonical fixture base,
+and `run-task!`'s unconditional call to `seon.sci.eval/run-tests` explains why
+that base was armed anew around each host body. The original diagnostic logged
+only its first bounded frame, `new_armed`; the refusal now renders the complete
+bounded arming stack while retaining the structured stack in ex-data.
+
+`run-resolved-tests!` now runs an all-host task directly through `run-vars!`
+and reserves the SCI arm for an all-SCI task. A mixed task refuses because one
+namespace fixture cannot honestly have two arm boundaries. The regression
+performs the worker's contract initialization, uses its canonical base, runs a
+host test body that arms an independent ctx, and proves another independent arm
+succeeds on the same pooled thread after the body.
+
+The requested `--paths` verification refused because the shared tree's held
+Stage 1 work also changes `src/seon/test.clj` and
+`test/seon/cluster/source_test.clj`, both callers the overlay graph required.
+The authorized plain fast form ran the final bytes in one JVM:
+
+```text
+bin/test-fast seon.test.runner-test seon.sci.kernel-arm-carriage-test seon.cluster.message-test
+Ran 49 tests containing 259 assertions.
+0 failures, 0 errors.
+```
+
+The foreign verification boundary is that held Stage 1 selection work in
+`src/seon/test/runner.clj` remained uncommitted alongside this lane's two
+localized runner hunks; it was neither edited nor included in this landing.

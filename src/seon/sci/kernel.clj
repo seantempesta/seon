@@ -308,7 +308,7 @@
               (str "A different SCI context is already armed on this thread. "
                    "Existing arm " (::arm-id existing)
                    " for interpreter " (::interpreter-id existing)
-                   " was armed at " (first (::armed-at existing))
+                   " was armed at " (pr-str (::armed-at existing))
                    "; requested interpreter " (::interpreter-id requested) ".")
               {:seon.error/kind ::already-armed
                ::already-armed true

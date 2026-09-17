@@ -15,9 +15,49 @@
             [seon.test.arm :as arm]
             [seon.test.cache :as cache]
             [seon.schema :as schema]
+            [seon.sci.eval :as sci.eval]
+            [seon.sci.kernel :as kernel]
             [seon.test.runner :as runner]
             [seon.test-runner-failure-fixture]
             [seon.test-support :as test-support]))
+
+(deftest a-cold-worker-does-not-arm-its-base-around-host-test-bodies
+  (test-support/preserving-instrumentation-state
+   (fn []
+     (let [projection (#'runner/packaged-test-projection "arm-extent-regression")
+           _base-init (#'runner/initialize-contracts!
+                       "arm-extent-regression" [] projection)
+           base (schema/call-with-projection
+                 projection
+                 #(deref (var-get #'test-support/database-base)))
+           _selected-init (#'runner/initialize-contracts!
+                           "arm-extent-regression"
+                           ['seon.test.runner-test] projection)
+           base-ctx (:seon.sci.eval/ctx base)
+           independent-ctx #(sci.eval/build-base-ctx projection)
+           observed (atom [])
+           probe-ns (create-ns (symbol (str "seon.worker-arm-probe." (id/id))))
+           probe (intern probe-ns 'probe (fn []))]
+       (try
+         (alter-meta!
+          probe assoc :test
+          #(let [value (kernel/with-arm
+                        (independent-ctx) 1000 (fn [_] :inside))]
+             (swap! observed conj value)
+             (is (= :inside value))))
+         (let [result (#'runner/run-resolved-tests!
+                       {:seon.sci.eval/ctx base-ctx}
+                       {::runner/task-symbols [(str (symbol probe))]}
+                       [probe])]
+           (is (= [:inside] @observed)
+               "worker initialization must not leave its base armed across a host test body")
+           (is (= 0 (:seon.test/fail-count (first result))) (pr-str result))
+           (is (= 0 (:seon.test/error-count (first result))) (pr-str result))
+           (is (= :after
+                  (kernel/with-arm (independent-ctx) 1000 (fn [_] :after)))
+               "the pooled worker thread is unarmed after the body returns"))
+         (finally
+           (remove-ns (ns-name probe-ns))))))))
 
 (deftest no-double-execution
   (test-support/with-database

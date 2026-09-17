@@ -1288,6 +1288,37 @@
 (defonce ^:private run-interpreted-tests
   (delay (requiring-resolve 'seon.sci.eval/run-tests)))
 
+(defn- run-resolved-tests!
+  "Run host Vars directly and SCI Vars under their context's arm.
+
+  A cold worker resolves core tests to JVM Vars. Arming the canonical fixture
+  ctx around those host bodies makes the worker's infrastructure arm look like
+  their evaluation: a test that creates or evaluates an independent ctx then
+  meets a foreign arm for the whole duration of its own body. SCI Vars do need
+  their interpreter arm; a task mixing the two kinds has no honest single
+  fixture boundary and is refused."
+  [resolution task test-vars]
+  (let [host-vars (filterv #(instance? clojure.lang.Var %) test-vars)
+        custody (or (:seon.db/custody-request resolution) {})
+        request (merge (select-keys resolution [:seon.sci.eval/ctx])
+                       custody
+                       {:seon.test/vars test-vars
+                        :seon.sci.eval/time-limit-ms
+                        (* 1000 (bounds/exchange-seconds
+                                 (or (::task-long-ms task) 0) 0))})]
+    (cond
+      (= (count host-vars) (count test-vars))
+      (run-vars! test-vars custody)
+
+      (empty? host-vars)
+      (@run-interpreted-tests request)
+
+      :else
+      {:seon.error/kind ::mixed-host-and-sci-task
+       :seon.error/message
+       "One worker task resolved both host and SCI test Vars; their fixture and arm boundaries cannot be shared."
+       ::task-symbols (::task-symbols task)})))
+
 (def ^:private ambient-drift-journal-limit
   "How many recent drifting tasks one worker keeps as attribution evidence."
   20)
@@ -1568,12 +1599,7 @@
             (binding [*out* output
                       *err* output
                       test/*test-out* output]
-              (@run-interpreted-tests
-               (merge (select-keys resolution [:seon.sci.eval/ctx])
-                      (:seon.db/custody-request resolution)
-                      {:seon.test/vars test-vars
-                       :seon.sci.eval/time-limit-ms
-                       (* 1000 (bounds/exchange-seconds (or (::task-long-ms task) 0) 0))})))
+              (run-resolved-tests! resolution task test-vars))
             _ (when (:seon.error/kind results)
                 (throw (ex-info (:seon.error/message results) results)))
             summary {::test-count (count results)
