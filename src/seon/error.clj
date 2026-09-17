@@ -801,6 +801,46 @@
        :else (str "Supply " expected " at " (pr-str (vec path)) "."))}
       check (assoc :seon.error/input (first (:smallest check))))))
 
+(defn problem-sentence
+  "THE ONE refusal sentence for one problem: who refused what, where, the
+  expectation, the offending value, and the fix.
+
+  `expected-text` and `offending-text` are the CALLER'S rendered values — the
+  render pair prints them under its profile, a flat message prints a scalar
+  directly, and nil omits that part. THE DESCRIPTIONS ARE PROSE AND THE VALUE
+  FOLLOWS THEM (`value-description` never prints a value), so a description
+  that names its own value renders it twice: `3e41a5d22` put the count into
+  the arity description to repair the flat message, which had no value to
+  print, and every rendered arity refusal then read \"got an argument count of
+  0 0\" (measured 2026-09-17). One sentence, one composer, one place each
+  value is printed."
+  {:malli/schema
+   [:=> [:cat [:or :symbol :string] :map [:maybe :string] [:maybe :string]]
+    [:string {:min 1}]]}
+  [operation
+   {:seon.error/keys [path argument expected-description actual-description fix]}
+   expected-text offending-text]
+  (str operation " refused " argument " at " (pr-str path)
+       ": expected " expected-description
+       (when expected-text (str " (" expected-text ")"))
+       ", got " actual-description
+       (when offending-text (str " " offending-text))
+       ". Fix: " fix))
+
+(defn scalar-text
+  "The printed form of a value that prints itself, or nil.
+
+  A flat `:seon.error/message` carries no render profile, so it can only
+  print a value whose printed form is bounded by what the value IS: a
+  number, keyword, symbol or boolean. Anything else stays with its prose
+  description until a renderer with a profile prints it."
+  {:malli/schema
+   [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total printer accepts any offending value and answers nil for the ones it cannot bound."}]]
+    [:maybe [:string {:min 1}]]]}
+  [value]
+  (when (or (number? value) (keyword? value) (symbol? value) (boolean? value))
+    (pr-str value)))
+
 (defn- refusal-value-text
   [unit value path]
   (let [root (or (:seon.repl/handle unit) (:seon.render.value/root unit))
@@ -951,16 +991,14 @@
       (str/join
        "\n"
        (map-indexed
-        (fn [index {:seon.error/keys [path argument expected expected-description
-                               offending actual-description fix input result-contract] :as problem}]
+        (fn [index {:seon.error/keys [expected offending input result-contract]
+                    :as problem}]
           (let [location (when stored-problems?
                            [:seon.error/data :seon.error/problems index])]
-          (str operation " refused " argument " at " (pr-str path)
-               ": expected " expected-description " ("
-               (refusal-value-text unit expected (when location (conj location :seon.error/expected)))
-               "), got " actual-description
-               " " (refusal-value-text unit offending (when location (conj location :seon.error/offending)))
-               ". Fix: " fix
+          (str (problem-sentence
+                operation problem
+                (refusal-value-text unit expected (when location (conj location :seon.error/expected)))
+                (refusal-value-text unit offending (when location (conj location :seon.error/offending))))
                (when (find problem :seon.error/input)
                  (str " Input: " (refusal-value-text unit input nil) "."))
                (when result-contract

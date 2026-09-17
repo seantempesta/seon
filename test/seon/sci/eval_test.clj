@@ -1296,7 +1296,17 @@
         (is (= arglists (get-in failure [:seon.error/data :seon.instrument/arglists])))
         (is (= (:seon.error/message failure) (:seon.cluster.eval/error evaluation)))
         (is (str/includes? (:seon.eval/shown evaluation) (pr-str arglists)))
-        (is (not (str/includes? (:seon.eval/shown evaluation) "projection failed")))))))
+        (is (not (str/includes? (:seon.eval/shown evaluation) "projection failed")))
+        ;; ONE composer, so the count appears ONCE in each sentence: the
+        ;; description is prose and `seon.error/problem-sentence` prints the
+        ;; offending value after it. Carrying the count in both rendered
+        ;; "got an argument count of 0 0" (3e41a5d22, measured 2026-09-17).
+        (is (str/includes? (:seon.eval/shown evaluation)
+                           "got an argument count of 0."))
+        (is (not (str/includes? (:seon.eval/shown evaluation)
+                                "an argument count of 0 0")))
+        (is (str/includes? (:seon.error/message failure)
+                           "got an argument count of 0."))))))
 
 (deftest bare-dir-and-program-derived-doc-are-repl-native
   (test-support/with-database

@@ -340,12 +340,12 @@
                :seon.error/expected arglists
                :seon.error/expected-description "the declared arglists"
                :seon.error/offending (:arity data)
-               ;; the count belongs IN the sentence: the message reads
-               ;; "got <actual-description>.", so a bare prefix rendered
-               ;; "got an argument count of." and the reader had to go
-               ;; find the number in the diagnostic's offending field
-               :seon.error/actual-description (str "an argument count of "
-                                                   (:arity data))
+               ;; PROSE ONLY: `seon.error/problem-sentence` prints the
+               ;; offending value after this description. Carrying the count
+               ;; here as well rendered "got an argument count of 0 0"
+               ;; (3e41a5d22, measured 2026-09-17); the flat message below
+               ;; prints the same scalar, so neither sentence dangles.
+               :seon.error/actual-description "an argument count of"
                :seon.error/fix "Call one of the declared arglists."}]
              (mapv
               (fn [problem]
@@ -401,11 +401,9 @@
                             ::missing-supplied-key ::contract-violated)
          :seon.instrument/contract-violated (str function-symbol)
          :seon.error/message
-         (str function-symbol " refused " (:seon.error/argument first-problem)
-              " at " (pr-str (:seon.error/path first-problem))
-              ": expected " (:seon.error/expected-description first-problem)
-              ", got " (:seon.error/actual-description first-problem)
-              ". Fix: " (:seon.error/fix first-problem)
+         (str (error/problem-sentence
+               function-symbol first-problem nil
+               (error/scalar-text (:seon.error/offending first-problem)))
               (when (qualified-keyword? expected)
                 (str " Contract: " expected ".")))
          :seon.error/diagnostic-layer :instrumentation

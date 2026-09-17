@@ -48,6 +48,10 @@
   (delay (requiring-resolve 'seon.error/diagnostic)))
 (defonce ^:private error-explain-problem
   (delay (requiring-resolve 'seon.error/explain-problem)))
+(defonce ^:private error-problem-sentence
+  (delay (requiring-resolve 'seon.error/problem-sentence)))
+(defonce ^:private error-scalar-text
+  (delay (requiring-resolve 'seon.error/scalar-text)))
 (defonce ^:private error-render-ai
   (delay (requiring-resolve 'seon.error/render-ai)))
 (defonce ^:private error-render-html
@@ -2820,10 +2824,9 @@
    (cond->
     {:seon.error/kind ::invalid-write
      :seon.error/message
-     (str "seon.db/transact! refused transaction data at " (pr-str path)
-          ": expected " (:seon.error/expected-description problem)
-          ", got " (:seon.error/actual-description problem)
-          ". Fix: " (:seon.error/fix problem))
+     (@error-problem-sentence
+      'seon.db/transact! problem nil
+      (@error-scalar-text (:seon.error/offending problem)))
      ::transaction-refused true
      ::attribute attribute
      :seon.schema/form form
