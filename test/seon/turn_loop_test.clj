@@ -508,7 +508,11 @@
                    (:seon.cluster.eval/ns form)))
             (is (nil? (:seon.cluster.eval/error evaluation))
                 (pr-str evaluation))
-            (is (= 'my.generated.after-resume/attributed-after-resume
+            ;; Construct the expected name from data: a quoted qualified
+            ;; symbol would declare this regression itself as a gate test for
+            ;; the function it is evaluating, recursively running the fixture
+            ;; under the generated namespace.
+            (is (= (symbol (str ending-ns) "attributed-after-resume")
                    (get-in evaluation
                            [:seon.program/row :seon.fn/sym])))))))))
 
