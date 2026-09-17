@@ -11,7 +11,27 @@
 # directories whose mkdir is atomic; a slot whose holder pid is dead is
 # reclaimed. SEON_TEST_SLOTS overrides the count; SEON_TEST_SLOT_WAIT_SECONDS
 # the bound; SEON_TEST_SLOT_ANNOUNCE_SECONDS the progress interval.
-test_slot_count=${SEON_TEST_SLOTS:-3}
+test_slot_count=3
+for test_override in SEON_TEST_SILENCE_SECONDS SEON_TEST_SLOTS; do
+  if [ "${!test_override+x}" = x ]; then
+    if [ -n "${SEON_CODEX_LANE:-}" ] || [ "${SEON_TEST_ORCHESTRATOR:-}" != 1 ]; then
+      if [ "$test_override" = SEON_TEST_SLOTS ]; then
+        echo "bin/test: SEON_TEST_SLOTS refused: declared slot bound is $test_slot_count; only SEON_TEST_ORCHESTRATOR=1 without lane identity may raise it." >&2
+      else
+        echo 'bin/test: SEON_TEST_SILENCE_SECONDS refused: declared silence bound derives from :seon.test/long with :seon.test/long-ms and measured fixture priming; only SEON_TEST_ORCHESTRATOR=1 without lane identity may override it.' >&2
+      fi
+      exit 64
+    fi
+    case "${!test_override}" in
+      ''|*[!0-9]*|0) echo "bin/test: $test_override must be a positive integer." >&2; exit 64 ;;
+    esac
+    case "${!test_override}" in
+      *[1-9]*) ;;
+      *) echo "bin/test: $test_override must be a positive integer." >&2; exit 64 ;;
+    esac
+  fi
+done
+test_slot_count=${SEON_TEST_SLOTS:-$test_slot_count}
 test_slot_wait_seconds=${SEON_TEST_SLOT_WAIT_SECONDS:-1800}
 test_slot_announce_seconds=${SEON_TEST_SLOT_ANNOUNCE_SECONDS:-60}
 test_slot_parent="${source_root:-$PWD}/tmp/test-slots"
@@ -88,4 +108,3 @@ release_test_slot() {
     held_test_slot=
   fi
 }
-

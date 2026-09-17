@@ -295,6 +295,7 @@ if [ "$result_cluster" = "default" ]; then
   exit 2
 fi
 
+source bin/_test-slot
 source bin/_java-home-resolver
 
 git_sha=$(git rev-parse HEAD)
@@ -476,8 +477,6 @@ await_runner() {
   suite_pid=
   return "$runner_exit"
 }
-
-source bin/_test-slot
 
 retain_run_root() {
   local caught_signal=$1

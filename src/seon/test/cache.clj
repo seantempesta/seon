@@ -4,6 +4,7 @@
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [seon.fs :as fs]
+            [seon.test.bounds :as bounds]
             [seon.test.selection :as selection])
   (:import [java.io RandomAccessFile]
            [java.lang Process ProcessHandle]
@@ -16,14 +17,14 @@
     (edn/read-string (slurp file))))
 
 (defn- child! [directory arguments]
-  (let [child (process/process arguments
+  (let [seconds (bounds/silence-seconds (into {} (System/getenv)))
+        child (process/process arguments
                                {:dir (str directory) :in :inherit :out :inherit :err :inherit
                                 :shutdown (fn [child]
                                             (process/destroy-tree child)
                                             (when-not (.waitFor ^Process (:proc child) 10 TimeUnit/SECONDS)
                                               (.destroyForcibly ^Process (:proc child))
-                                              (.waitFor ^Process (:proc child) 10 TimeUnit/SECONDS)))})
-        seconds (Long/parseLong (or (System/getenv "SEON_TEST_SILENCE_SECONDS") "300"))]
+                                              (.waitFor ^Process (:proc child) 10 TimeUnit/SECONDS)))})]
     (try
       (let [result (deref child (* seconds 1000) ::expired)]
         (when (= ::expired result)
