@@ -3403,3 +3403,10 @@ as orchestrator/astra lanes, easy pool as the first live-agent slice).
   is honoured as "as soon as the base exists". Rule reaffirmed: no lane
   commits without a fast run on a prepared base; the orchestrator prepares
   the base before every launch.
+- The revert gate's base publication died on the new 30 s write bound
+  (`predicate-revert-gate.log:625`): the population transaction runs longer
+  than that under load. Bound raised to 600,000 ms as a declared fact; issue
+  `the-thirty-second-write-bound-fails-program-publication-under-load`
+  (publication needs its own declared bound; validator cost on the writer
+  thread is the root). Gate re-run. B2 landed rows #2, #6, #12, #8
+  (`92d644cdc` `820d0ab60` `da73fcd28` `9d91b2422`), cold gate owed.

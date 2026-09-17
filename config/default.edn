@@ -8,7 +8,7 @@
  ; unbounded seon.db/transact! parked for 134 s. Datahike does not cancel a
  ; queued transaction when this caller's wait ends, so a firing bound reports
  ; the transaction outcome as unknown rather than claiming a rollback.
- :seon.config.db/write-time-limit-ms 30000
+ :seon.config.db/write-time-limit-ms 600000
  :seon.config.db/validation-node-limit 250000
 
  ; Unit: queued compute submissions.
