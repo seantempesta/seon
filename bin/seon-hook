@@ -114,21 +114,67 @@
   (or (get-in event [:tool_input :file_path])
       (get-in event [:tool_input :filePath])))
 
+;; The four headers apply_patch writes, exactly as it writes them. Prefix
+;; matching, not a pattern: the header grammar is fixed text, and a pattern
+;; over it was the seam that let a patch body decide what the hook believed
+;; it was checking.
+(def ^:private patch-directives
+  [["*** Add File: " :seon.patch/add]
+   ["*** Update File: " :seon.patch/update]
+   ["*** Delete File: " :seon.patch/delete]
+   ["*** Move to: " :seon.patch/move]])
+
+(defn- patch-directive
+  "`[operation path]` when `line` is an apply_patch file header."
+  [line]
+  (some (fn [[prefix operation]]
+          (when (str/starts-with? line prefix)
+            [operation (str/trim (str/replace (subs line (count prefix))
+                                              "\r" ""))]))
+        patch-directives))
+
+(defn- parse-patch
+  "The ordered file operations a Codex apply_patch payload declares.
+
+  Each operation carries its declared `:seon.patch/path`, the optional
+  `:seon.patch/destination` a `*** Move to:` header names, and the body
+  lines between its header and the next one."
+  [patch]
+  (when (string? patch)
+    (reduce
+     (fn [operations line]
+       (let [line (str/replace line "\r" "")]
+         (if-let [[operation path] (patch-directive line)]
+           (if (= :seon.patch/move operation)
+             ;; a move renames the operation immediately above it; an
+             ;; orphaned move names no operation and stays unrepresented,
+             ;; which the caller reports as an unreconstructable path
+             (if-let [current (peek operations)]
+               (conj (pop operations)
+                     (assoc current :seon.patch/destination path))
+               operations)
+             (conj operations {:seon.patch/operation operation
+                               :seon.patch/path path
+                               :seon.patch/lines []}))
+           (if-let [current (peek operations)]
+             (if (str/starts-with? line "*** End Patch")
+               operations
+               (conj (pop operations)
+                     (update current :seon.patch/lines conj line)))
+             operations))))
+     []
+     (str/split-lines patch))))
+
 (defn- patch-file-paths
   "Return every source and destination path named by a Codex patch."
   [patch]
-  (when (string? patch)
-    (->> (concat
-           (map second
-                (re-seq
-                  #"(?m)^\*\*\* (?:Add|Update|Delete) File: (.+?)\r?$"
-                  patch))
-           (map second
-                (re-seq #"(?m)^\*\*\* Move to: (.+?)\r?$" patch)))
-         (map str/trim)
-         (remove str/blank?)
-         distinct
-         vec)))
+  (->> (parse-patch patch)
+       (mapcat (juxt :seon.patch/path :seon.patch/destination))
+       (remove nil?)
+       (map str/trim)
+       (remove str/blank?)
+       distinct
+       vec))
 
 (defn- event-file-paths
   "Normalize the complete path set from Codex and Claude edit payloads."
@@ -485,17 +531,194 @@
             {:seon.hook.reconstruction/status :unavailable
              :seon.hook.reconstruction/reason message}))))))
 
+(defn- content-lines
+  "File content as lines, keeping the trailing empty line a final newline makes."
+  [content]
+  (vec (str/split (str/replace (str content) "\r\n" "\n") #"\n" -1)))
+
+(defn- hunk-sections
+  "An Update operation's body split into hunks at each `@@` marker."
+  [lines]
+  (let [sections
+        (reduce (fn [hunks line]
+                  (if (str/starts-with? line "@@")
+                    (conj hunks {:seon.patch/anchor (str/trim (subs line 2))
+                                 :seon.patch/lines []})
+                    (if-let [current (peek hunks)]
+                      (conj (pop hunks) (update current :seon.patch/lines conj line))
+                      hunks)))
+                []
+                lines)]
+    ;; a patch may open its first hunk with context instead of `@@`; the body
+    ;; before any marker is that hunk, never silently discarded
+    (if (and (empty? sections) (seq lines))
+      [{:seon.patch/anchor "" :seon.patch/lines (vec lines)}]
+      sections)))
+
+(defn- hunk-lines
+  "The lines a hunk expects to find and the lines it leaves behind."
+  [lines]
+  (reduce
+   (fn [acc line]
+     (cond
+       (str/starts-with? line "*** End of File") acc
+       (str/starts-with? line "+") (update acc :seon.patch/new conj (subs line 1))
+       (str/starts-with? line "-") (update acc :seon.patch/old conj (subs line 1))
+       (str/starts-with? line " ") (-> acc
+                                       (update :seon.patch/old conj (subs line 1))
+                                       (update :seon.patch/new conj (subs line 1)))
+       ;; apply_patch tolerates an empty context line written without its
+       ;; leading space; every other leading character is unknown grammar
+       (str/blank? line) (-> acc
+                             (update :seon.patch/old conj "")
+                             (update :seon.patch/new conj ""))
+       :else (assoc acc :seon.patch/unexpected line)))
+   {:seon.patch/old [] :seon.patch/new []}
+   lines))
+
+(defn- sublist-index
+  "The first index at or after `from` where `old` occurs in `lines`."
+  [lines old from]
+  (let [total (count lines)
+        length (count old)]
+    (loop [index (max 0 from)]
+      (cond
+        (> (+ index length) total) nil
+        (= old (subvec lines index (+ index length))) index
+        :else (recur (inc index))))))
+
+(defn- trailing-blank-tolerant-index
+  "`sublist-index` comparing lines without their trailing whitespace."
+  [lines old from]
+  (sublist-index (mapv str/trimr lines) (mapv str/trimr old) from))
+
+(defn- apply-patch-hunks
+  "Apply one Update operation's hunks to `current`, or say why it cannot."
+  [current operation]
+  (loop [lines (content-lines current)
+         cursor 0
+         hunks (hunk-sections (:seon.patch/lines operation))]
+    (if-let [hunk (first hunks)]
+      (let [{:seon.patch/keys [old new unexpected]} (hunk-lines (:seon.patch/lines hunk))
+            anchor (:seon.patch/anchor hunk)
+            anchored (when-not (str/blank? anchor)
+                       (sublist-index lines [anchor] cursor))
+            from (or anchored cursor)
+            at (or (sublist-index lines old from)
+                   (trailing-blank-tolerant-index lines old from))]
+        (cond
+          unexpected
+          {:seon.hook.reconstruction/status :unavailable
+           :seon.hook.reconstruction/reason
+           (str "the patch carries a line the hook cannot classify: "
+                (pr-str unexpected))}
+
+          (nil? at)
+          {:seon.hook.reconstruction/status :unavailable
+           :seon.hook.reconstruction/reason
+           (str "a hunk's context is not present in the file: "
+                (pr-str (first old)))}
+
+          :else
+          (recur (into (into (subvec lines 0 at) new)
+                       (subvec lines (+ at (count old))))
+                 (+ at (count new))
+                 (rest hunks))))
+      {:seon.hook.reconstruction/status :available
+       :seon.hook.reconstruction/source (str/join "\n" lines)})))
+
+(defn- patch-operation
+  "The operation in `operations` whose source or destination is `file-path`."
+  [operations file-path]
+  (let [target (absolute-file-path file-path)]
+    (first
+     (filter (fn [operation]
+               (contains?
+                (into #{} (remove nil?)
+                      [(absolute-file-path (:seon.patch/path operation))
+                       (some-> (:seon.patch/destination operation)
+                               absolute-file-path)])
+                target))
+             operations))))
+
+(defn- reconstruct-patched-file
+  "The prospective content of `file-path` after a Codex patch, or why not.
+
+  Every outcome is typed. A path the patch does not name, a path whose file
+  is absent, and an unapplicable hunk are each `:unavailable` — the hook
+  cannot lint what it cannot build, and it says so instead of passing."
+  [patch file-path]
+  (if-not (string? patch)
+    {:seon.hook.reconstruction/status :unavailable
+     :seon.hook.reconstruction/reason
+     (str "the apply_patch payload carries no patch text: " (pr-str patch))}
+    (let [operations (parse-patch patch)
+          operation (patch-operation operations file-path)
+          absolute (absolute-file-path file-path)
+          file (some-> absolute io/file)
+          ;; an Update whose Move to renames the file still reads its hunks
+          ;; against the file on disk under the OLD name
+          source (some-> (:seon.patch/path operation) absolute-file-path io/file)
+          moved-away? (and operation
+                           (:seon.patch/destination operation)
+                           (= absolute (absolute-file-path
+                                        (:seon.patch/path operation))))]
+      (cond
+        (nil? operation)
+        {:seon.hook.reconstruction/status :unavailable
+         :seon.hook.reconstruction/reason
+         (str "the patch declares no file operation for " (display-path file-path))}
+
+        (or moved-away? (= :seon.patch/delete (:seon.patch/operation operation)))
+        {:seon.hook.reconstruction/status :deleted}
+
+        (= :seon.patch/add (:seon.patch/operation operation))
+        (if (and file (.exists file))
+          {:seon.hook.reconstruction/status :unavailable
+           :seon.hook.reconstruction/reason
+           (str "the patch adds a file that already exists: "
+                (display-path file-path))}
+          (let [{:seon.patch/keys [new unexpected]}
+                (hunk-lines (remove #(str/starts-with? % "@@")
+                                    (:seon.patch/lines operation)))]
+            (if unexpected
+              {:seon.hook.reconstruction/status :unavailable
+               :seon.hook.reconstruction/reason
+               (str "the patch carries a line the hook cannot classify: "
+                    (pr-str unexpected))}
+              {:seon.hook.reconstruction/status :available
+               :seon.hook.reconstruction/source (str (str/join "\n" new) "\n")})))
+
+        (not (and source (.isFile source)))
+        {:seon.hook.reconstruction/status :unavailable
+         :seon.hook.reconstruction/reason
+         (str "the patch updates a path that does not exist: "
+              (or (some-> source .getPath) absolute file-path))}
+
+        :else
+        (try
+          (apply-patch-hunks (slurp source) operation)
+          (catch Exception error
+            {:seon.hook.reconstruction/status :unavailable
+             :seon.hook.reconstruction/reason (throwable-message error)}))))))
+
 (defn- reconstruct-file-content [event]
   (let [tool-name (:tool_name event)
         tool-input (:tool_input event)
         file-path (get-file-path event)]
     (cond
+      (= tool-name "apply_patch")
+      (reconstruct-patched-file (:command tool-input) file-path)
+
       (= tool-name "Write")
       {:seon.hook.reconstruction/status :available
        :seon.hook.reconstruction/source (:content tool-input)}
 
       (= tool-name "Edit")
-      (when (and file-path (:old_string tool-input))
+      (if-not (and file-path (:old_string tool-input))
+        {:seon.hook.reconstruction/status :unavailable
+         :seon.hook.reconstruction/reason
+         "the Edit payload names no file path and replaced text"}
         (try
           (reconstruct-exact-edit
            (slurp (absolute-file-path file-path)) tool-input)
@@ -503,7 +726,13 @@
             {:seon.hook.reconstruction/status :unavailable
              :seon.hook.reconstruction/reason (throwable-message error)})))
 
-      :else nil)))
+      ;; an edit tool the hook has no reconstruction for is a file it cannot
+      ;; lint; naming that is the whole point of the check
+      :else
+      {:seon.hook.reconstruction/status :unavailable
+       :seon.hook.reconstruction/reason
+       (str "the hook reconstructs no prospective content for tool "
+            (pr-str tool-name))})))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Validation Functions (return block response or nil)
@@ -515,7 +744,11 @@
   (let [file-path (get-file-path event)]
     (when (and (= (:hook_event_name event) "PreToolUse")
                (clojure-file? file-path))
-      (when-let [reconstruction (reconstruct-file-content event)]
+      (let [reconstruction
+            (or (reconstruct-file-content event)
+                {:seon.hook.reconstruction/status :unavailable
+                 :seon.hook.reconstruction/reason
+                 "the hook built no prospective content for this edit"})]
         (if (= :unavailable (:seon.hook.reconstruction/status reconstruction))
           {:decision "block"
            :reason (str "BLOCKED: edit reconstruction failed: "
@@ -548,7 +781,11 @@
   (let [file-path (get-file-path event)]
     (when (and (= (:hook_event_name event) "PreToolUse")
                (schema-resource-path? file-path))
-      (when-let [reconstruction (reconstruct-file-content event)]
+      (let [reconstruction
+            (or (reconstruct-file-content event)
+                {:seon.hook.reconstruction/status :unavailable
+                 :seon.hook.reconstruction/reason
+                 "the hook built no prospective content for this edit"})]
         (if (= :unavailable (:seon.hook.reconstruction/status reconstruction))
           {:decision "block"
            :reason (str "BLOCKED: edit reconstruction failed: "
@@ -616,24 +853,68 @@
 
            :else nil)}))))
 
+(defn- patch-deleted-paths
+  "The paths this event's patch removes, which are absent by design."
+  [event]
+  (if (= "apply_patch" (:tool_name event))
+    (->> (parse-patch (get-in event [:tool_input :command]))
+         (mapcat (fn [operation]
+                   (cond
+                     (= :seon.patch/delete (:seon.patch/operation operation))
+                     [(:seon.patch/path operation)]
+
+                     (:seon.patch/destination operation)
+                     [(:seon.patch/path operation)]
+
+                     :else nil)))
+         (keep absolute-file-path)
+         set)
+    #{}))
+
 (defn- clj-kondo-feedback
-  "Return one advisory clj-kondo result for all resulting edited files."
+  "Findings for the resulting edited files, with any syntax refusal named.
+
+  A Clojure path the event claims to have written but that is absent
+  afterwards is reported, never dropped: the whole failure this check
+  exists for reads absence as health."
   [event config]
-  (let [paths (->> (event-file-paths event)
-                   (filter clojure-file?)
-                   (filter #(some-> % absolute-file-path io/file .isFile))
-                   vec)]
-    (when (and (= (:hook_event_name event) "PostToolUse") (seq paths))
-      (let [analysis (run-clj-kondo {:seon.hook/file-paths paths})
-            findings (:seon.hook.analysis/findings analysis)]
-        (cond
-          (analysis-error analysis)
-          (str "ADVISORY — " (analysis-error analysis))
+  (when (= (:hook_event_name event) "PostToolUse")
+    (let [named (->> (event-file-paths event) (filter clojure-file?) vec)
+          deleted (patch-deleted-paths event)
+          present (filterv #(some-> % absolute-file-path io/file .isFile) named)
+          absent (->> named
+                      (remove (set present))
+                      (remove #(contains? deleted (absolute-file-path %)))
+                      vec)
+          analysis (when (seq present)
+                     (run-clj-kondo {:seon.hook/file-paths present}))
+          findings (:seon.hook.analysis/findings analysis)
+          syntax-errors (filterv #(and (= :error (:level %))
+                                       (= :syntax (:type %)))
+                                 findings)]
+      {:seon.hook.lint/refusal
+       (cond
+         (seq syntax-errors)
+         (str "REFUSED: the edit left unreadable Clojure on disk. "
+              "Repair it in the next edit — the file loads for nothing "
+              "until then:\n"
+              (format-clj-kondo-findings syntax-errors))
 
-          (seq findings)
-          (findings-feedback config "clj-kondo findings:" findings)
+         (seq absent)
+         (str "REFUSED: this edit named " (count absent)
+              " Clojure path(s) that do not exist afterwards, so the hook "
+              "checked nothing for them: "
+              (str/join ", " (map #(str (or (absolute-file-path %) %)) absent))))
 
-          :else nil)))))
+       :seon.hook.lint/feedback
+       (cond
+         (and (seq present) (analysis-error analysis))
+         (str "ADVISORY — " (analysis-error analysis))
+
+         (seq findings)
+         (findings-feedback config "clj-kondo findings:" findings)
+
+         :else nil)})))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Markdown File Detection
@@ -1342,14 +1623,22 @@
              " with seon.cluster.source/current. Result: " (source-result-path id))))))
 
 
-(defn- feedback-response [feedback]
+(defn- feedback-response
+  "One PostToolUse response: advisory context, and a refusal when one stands.
+
+  A refusal is a decision, not a paragraph in the advisory tail: the edit
+  already wrote its bytes, so the only honest thing left is to say loudly
+  that the result is broken and must be repaired now."
+  [feedback refusal]
   (let [messages (vec (remove str/blank? feedback))]
-    (if (seq messages)
-      {:continue true
-       :hookSpecificOutput
-       {:hookEventName "PostToolUse"
-        :additionalContext (str/join "\n\n" messages)}}
-      {:continue true})))
+    (cond-> (if (seq messages)
+              {:continue true
+               :hookSpecificOutput
+               {:hookEventName "PostToolUse"
+                :additionalContext (str/join "\n\n" messages)}}
+              {:continue true})
+      (not (str/blank? refusal))
+      (assoc :decision "block" :reason refusal))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Main Entry Point
@@ -1367,12 +1656,28 @@
         local-paths (filterv repository-file? file-paths)
         mixed-scope? (and (seq local-paths)
                           (not= (count local-paths) (count file-paths)))
+        ;; an edit whose payload names no path at all is an edit the hook
+        ;; cannot check: it is refused, never waved through as "nothing here"
+        pathless-edit? (and edit-event? (empty? file-paths))
         local-edit? (and edit-event?
                          (seq file-paths)
                          (= (count local-paths) (count file-paths)))]
-    (if mixed-scope?
+    (cond
+      pathless-edit?
+      (do (log! "PATHLESS_EDIT" (str "tool=" tool-name)
+                (str "input=" (pr-str (:tool_input event))))
+          (output!
+           {:decision "block"
+            :reason (str "BLOCKED: the hook found no file path in this "
+                         tool-name
+                         " payload, so it cannot check what the edit writes. "
+                         "Reissue the edit naming its file explicitly.")}))
+
+      mixed-scope?
       (output! {:decision "block"
                 :reason "BLOCKED: one edit cannot mix Seon files with paths outside this checkout."})
+
+      :else
       (if-not local-edit?
       (output! {:continue true})
       (try
@@ -1402,8 +1707,9 @@
                                [(markdown-feedback path-event config)
                                 (docstring-feedback path-event config)])
                              path-events)
+                  lint (clj-kondo-feedback event config)
                   feedback
-                  (into [(clj-kondo-feedback event config)
+                  (into [(:seon.hook.lint/feedback lint)
                          (:seon.hook.schema-admission/feedback
                           schema-admission)]
                         feedback)
@@ -1413,8 +1719,10 @@
                     (not (:seon.hook.schema-admission/errors?
                           schema-admission))
                     (conj (current-source-feedback event config)))
-                  feedback (vec feedback)]
-              (output! (feedback-response feedback)))))
+                  feedback (vec feedback)
+                  refusal (:seon.hook.lint/refusal lint)]
+              (when-not (str/blank? refusal) (log! "CLOJURE_REFUSAL" refusal))
+              (output! (feedback-response feedback refusal)))))
         (catch Exception e
           (let [message (throwable-message e)
                 stack (with-out-str

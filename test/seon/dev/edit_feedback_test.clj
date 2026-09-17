@@ -267,7 +267,7 @@
       (finally
         (delete-files! [schema-file config directory])))))
 
-(deftest post-edit-reports-valid-sibling-findings-after-a-syntax-error
+(deftest post-edit-refuses-unreadable-clojure-and-still-reports-siblings
   (let [directory (fixture-directory)
         config (io/file directory "hook.edn")
         broken (io/file directory "broken.clj")
@@ -308,6 +308,11 @@
                              [:hookSpecificOutput :additionalContext])]
         (is (zero? (::exit result)) (::stderr result))
         (is (true? (:continue response)))
+        (is (= "block" (:decision response))
+            "Unreadable Clojure on disk is a refusal, never an advisory line.")
+        (is (str/includes? (:reason response) "REFUSED"))
+        (is (str/includes? (:reason response)
+                           (str (relative broken) ":1:1 [error/syntax]")))
         (is (str/includes? feedback
                            (str (relative broken) ":1:1 [error/syntax]")))
         (is (str/includes? feedback
@@ -450,3 +455,170 @@
                   (:seon.dev.changed-test/findings analysis))))
       (finally
         (delete-files! [broken valid source-directory directory])))))
+
+(def ^:private patch-grammar-probe
+  '(do
+     (binding [*in* (java.io.StringReader. "{}")
+               *out* (java.io.StringWriter.)]
+       (load-file "bin/seon-hook"))
+     (let [directory (System/getenv "SEON_PROBE_DIRECTORY")
+           relative (fn [name] (str directory "/" name))
+           patch
+           (str "*** Begin Patch\n"
+                "*** Add File: " (relative "added.clj") "\n"
+                "+(ns added)\n"
+                "+(def value 1)\n"
+                "*** Update File: " (relative "updated.clj") "\n"
+                "@@\n"
+                " (ns updated)\n"
+                "-(def value 1)\n"
+                "+(def value 2)\n"
+                "*** Update File: " (relative "moved.clj") "\n"
+                "*** Move to: " (relative "destination.clj") "\n"
+                "@@\n"
+                "-(def moved 1)\n"
+                "+(def moved 2)\n"
+                "*** Delete File: " (relative "gone.clj") "\n"
+                "*** End Patch")
+           reconstruct (fn [path] (reconstruct-patched-file patch path))]
+       (prn {:seon.probe/paths (patch-file-paths patch)
+             :seon.probe/added (reconstruct (relative "added.clj"))
+             :seon.probe/updated (reconstruct (relative "updated.clj"))
+             :seon.probe/moved-source (reconstruct (relative "moved.clj"))
+             :seon.probe/moved-destination (reconstruct (relative "destination.clj"))
+             :seon.probe/deleted (reconstruct (relative "gone.clj"))
+             :seon.probe/unnamed (reconstruct (relative "stranger.clj"))
+             :seon.probe/absent
+             (reconstruct-patched-file
+              (str "*** Begin Patch\n*** Update File: " (relative "nowhere.clj")
+                   "\n@@\n-(def a 1)\n+(def a 2)\n*** End Patch")
+              (relative "nowhere.clj"))
+             :seon.probe/unapplicable
+             (reconstruct-patched-file
+              (str "*** Begin Patch\n*** Update File: " (relative "updated.clj")
+                   "\n@@\n-(def absent 1)\n+(def absent 2)\n*** End Patch")
+              (relative "updated.clj"))}))))
+
+(deftest every-apply-patch-header-form-resolves-against-the-repository-root
+  (let [directory (fixture-directory)
+        relative (str "tmp/" (.getName directory))
+        named (fn [name] (io/file directory name))]
+    (try
+      (spit (named "updated.clj") "(ns updated)\n(def value 1)\n")
+      (spit (named "moved.clj") "(def moved 1)\n")
+      (spit (named "gone.clj") "(def gone 1)\n")
+      (let [result (run-process
+                    {::command ["bb" "-e" (pr-str patch-grammar-probe)]
+                     ::directory repo-root
+                     ::environment {"SEON_PROBE_DIRECTORY" relative}})
+            observed (edn/read-string (::stdout result))]
+        (is (zero? (::exit result)) (::stderr result))
+        (testing "every header form contributes its exact declared path"
+          (is (= (mapv #(str relative "/" %)
+                       ["added.clj" "updated.clj" "moved.clj"
+                        "destination.clj" "gone.clj"])
+                 (:seon.probe/paths observed))))
+        (testing "an Add File header carries the whole prospective file"
+          (is (= {:seon.hook.reconstruction/status :available
+                  :seon.hook.reconstruction/source "(ns added)\n(def value 1)\n"}
+                 (:seon.probe/added observed))))
+        (testing "an Update File header applies its hunks to the file on disk"
+          (is (= {:seon.hook.reconstruction/status :available
+                  :seon.hook.reconstruction/source "(ns updated)\n(def value 2)\n"}
+                 (:seon.probe/updated observed))))
+        (testing "a Move to header lints the destination and retires the source"
+          (is (= {:seon.hook.reconstruction/status :deleted}
+                 (:seon.probe/moved-source observed)))
+          (is (= {:seon.hook.reconstruction/status :available
+                  :seon.hook.reconstruction/source "(def moved 2)\n"}
+                 (:seon.probe/moved-destination observed))))
+        (testing "a Delete File header needs no prospective content"
+          (is (= {:seon.hook.reconstruction/status :deleted}
+                 (:seon.probe/deleted observed))))
+        (testing "an unbuildable prospective file is named, never passed"
+          (doseq [key [:seon.probe/unnamed :seon.probe/absent
+                       :seon.probe/unapplicable]]
+            (is (= :unavailable
+                   (:seon.hook.reconstruction/status (get observed key)))
+                (str key " must refuse rather than report nothing to check")))
+          (is (str/includes? (:seon.hook.reconstruction/reason
+                              (:seon.probe/absent observed))
+                             "does not exist"))))
+      (finally (test-support/delete-recursively! directory)))))
+
+(deftest pre-edit-refuses-a-patch-path-that-does-not-exist
+  (let [directory (fixture-directory)
+        config (io/file directory "hook.edn")
+        absent (io/file repo-root "db.clj")]
+    (try
+      (spit config
+            (str "{:seon.config/on-core-error :log\n"
+                 " :changed-tests {:enabled false}\n"
+                 " :review {:enabled false}}\n"))
+      (is (not (.exists absent))
+          "The probe's premise is a path the repository does not have.")
+      (let [result
+            (run-process
+             {::command [(str (io/file repo-root "bin/seon-hook"))]
+              ::directory repo-root
+              ::environment {"SEON_HOOK_CONFIG" (str config)}
+              ::input
+              (json/generate-string
+               {:hook_event_name "PreToolUse"
+                :tool_name "apply_patch"
+                :tool_input
+                {:command (str "*** Begin Patch\n*** Update File: "
+                               absent "\n@@\n-(def a 1)\n+(def a 2)\n"
+                               "*** End Patch")}})})
+            response (json/parse-string (str/trim (::stdout result)) true)]
+        (is (zero? (::exit result)) (::stderr result))
+        (is (= "block" (:decision response))
+            "A path the hook cannot lint is refused, never waved through.")
+        (is (str/includes? (:reason response) (str absent))))
+      (finally (delete-files! [config directory])))))
+
+(deftest pre-edit-blocks-a-patch-that-writes-unreadable-clojure
+  (let [directory (fixture-directory)
+        config (io/file directory "hook.edn")
+        source (io/file directory "prospective.clj")]
+    (try
+      (spit config
+            (str "{:seon.config/on-core-error :log\n"
+                 " :changed-tests {:enabled false}\n"
+                 " :review {:enabled false}}\n"))
+      (spit source "(ns prospective)\n(def value 1)\n")
+      (let [result
+            (run-process
+             {::command [(str (io/file repo-root "bin/seon-hook"))]
+              ::directory repo-root
+              ::environment {"SEON_HOOK_CONFIG" (str config)}
+              ::input
+              (json/generate-string
+               {:hook_event_name "PreToolUse"
+                :tool_name "apply_patch"
+                :tool_input
+                {:command (str "*** Begin Patch\n*** Update File: "
+                               source "\n@@\n-(def value 1)\n"
+                               "+(def value (inc 1)\n*** End Patch")}})})
+            response (json/parse-string (str/trim (::stdout result)) true)]
+        (is (zero? (::exit result)) (::stderr result))
+        (is (= "block" (:decision response))
+            "An unmatched delimiter is refused before the bytes land.")
+        (is (str/includes? (:reason response) "[error/syntax]")))
+      (finally (delete-files! [source config directory])))))
+
+(deftest pre-edit-refuses-an-edit-payload-that-names-no-file
+  (let [result
+        (run-process
+         {::command [(str (io/file repo-root "bin/seon-hook"))]
+          ::directory repo-root
+          ::input
+          (json/generate-string
+           {:hook_event_name "PreToolUse"
+            :tool_name "apply_patch"
+            :tool_input {:command "*** Begin Patch\n*** End Patch"}})})
+        response (json/parse-string (str/trim (::stdout result)) true)]
+    (is (zero? (::exit result)) (::stderr result))
+    (is (= "block" (:decision response))
+        "An edit naming no path is an edit the hook cannot check.")
+    (is (str/includes? (:reason response) "no file path"))))
