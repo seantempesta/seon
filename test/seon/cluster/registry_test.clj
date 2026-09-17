@@ -30,6 +30,7 @@
             [seon.cluster.registry :as registry]
             [seon.cluster.store :as store]
             [seon.schema]
+            [seon.schema.datahike :as schema-datahike]
             [seon.test-support :as test-support])
   (:import [java.util.concurrent CountDownLatch]))
 
@@ -47,14 +48,21 @@
     :db/cardinality :db.cardinality/one}
    {:db/ident :seon.registry.test/archive-blob
     :db/valueType :db.type/string
-    :db/cardinality :db.cardinality/one}
-   {:db/ident :seon.schema/key
-    :db/valueType :db.type/keyword
-    :db/cardinality :db.cardinality/one
-    :db/unique :db.unique/identity}
-   {:db/ident :seon.schema/form
-    :db/valueType :db.type/string
     :db/cardinality :db.cardinality/one}])
+
+(defn- probe-schema-rows [forms probe-keys]
+  ;; Keep the canonical dependency closure of the synthetic declarations.
+  ;; Unrelated render declarations require program definitions, not this
+  ;; file-store fixture's schema-only population.
+  (let [rows (into {} (map (juxt :seon.schema/key identity))
+                   (seon.schema/canonical-schema-rows forms))]
+    (loop [needed (set probe-keys)]
+      (let [expanded (into needed
+                           (mapcat #(map second (:seon.schema/references (get rows %))))
+                           needed)]
+        (if (= needed expanded)
+          (mapv rows (sort expanded))
+          (recur expanded))))))
 
 (def ^:private source-branch :current-src)
 
@@ -93,18 +101,18 @@
      (let [opened
            (store/open-store! (assoc store-request :seon.store/dir dir))]
        (try
-         (test-support/transacted! (:seon.store/connection-object opened) probe-schema)
-         (let [report
-               (db/transact! (:seon.store/connection-object opened)
-                             [[:db/add "payload-schema" :seon.schema/key
-                               :seon.registry.test/payload-blob]
-                              [:db/add "payload-schema" :seon.schema/form
-                               ":seon.blob/digest"]
-                              [:db/add "archive-schema" :seon.schema/key
-                               :seon.registry.test/archive-blob]
-                              [:db/add "archive-schema" :seon.schema/form
-                               ":seon.blob/digest"]])]
-           (assert (:db-after report) (pr-str report)))
+         (let [probe-forms {:seon.registry.test/payload-blob :seon.blob/digest
+                            :seon.registry.test/archive-blob :seon.blob/digest}
+               forms (merge (seon.schema/declaration-population) probe-forms)
+               projection {:seon.schema.projection/forms forms}
+               connection (:seon.store/connection-object opened)]
+           (test-support/transacted!
+            connection
+            (into (schema-datahike/malli->datahike-schema-in
+                   projection (seon.schema/canonical-database-attributes forms))
+                  probe-schema))
+           (test-support/transacted!
+            connection (probe-schema-rows forms (keys probe-forms))))
          (write-marker! (:seon.store/connection-object opened) "ancestral")
          (registry/branch! {:seon.store/store opened
                             :seon.cluster.registry/from :db

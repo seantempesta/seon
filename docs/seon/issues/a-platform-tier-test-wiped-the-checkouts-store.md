@@ -202,3 +202,25 @@ checker and the in-process refusal derive the owner set from that one
 attribute. A test's host is derived per question by `seon.test/host` over
 `:seon.fn/calls`, never stored, and the test entity's AI and HTML renders
 say where the test runs and why.
+
+
+## Batch 115: file uncertainty escaped its file (2026-09-17)
+
+The cold checker falsely refused the registry fixtures because its
+`tests-reaching-rows` helper collapsed every non-owner row into one synthetic
+file. The selector's conservative unresolved-file reach then selected every
+test in that artificial file. No fs admission declaration caused this:
+`seon.fs/admit-destructive-path!` and `create-store!` remain undeclared.
+The fix preserves actual artifacts through both destructive and expensive
+fixture selection. The Flow graph census genuinely references scheduled root
+cleanup and moves to the ordinary tier; its construction-refusal sibling
+remains platform. The checker and all destroyer declarations remain intact.
+Evidence and verification:
+[platform destroyer file boundaries](../../prds/steward-platform/research/platform-destroyer-file-boundaries-2026-09-17.md).
+
+The scoped verification also exposed the registry fixture's incomplete
+production schema roster: its two blob schema rows lacked admission
+provenance. That fixture now derives production attributes canonically and
+stores the canonical dependency closure of its synthetic blob declarations,
+using checked writes. It keeps its real file-store/branch observations and
+introduces no published-root destruction path.

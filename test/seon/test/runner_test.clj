@@ -10,6 +10,7 @@
             [seon.id :as id]
             [seon.instrument :as instrument]
             [seon.program :as program]
+            [seon.test :as seon-test]
             [seon.test.arm :as arm]
             [seon.test.cache :as cache]
             [seon.schema :as schema]
@@ -73,6 +74,21 @@
          (finally
            (remove-ns namespace-name)
            (test-support/delete-recursively! root)))))
+
+(deftest the-canonical-platform-tier-preserves-file-local-uncertainty
+  (test-support/with-database
+    (fn [connection]
+      (let [manifest @test-support/source-manifest
+            declarations (#'runner/platform-declarations manifest)
+            platform-vars (mapv #(requiring-resolve (symbol %)) (keys declarations))
+            report (seon-test/host
+                    (db/db connection)
+                    "seon.cluster.registry-test/a-concurrent-create-wave-loses-nothing")]
+        (is (seq platform-vars) "An absent platform tier is not a proof.")
+        (is (= :seon.test.host/in-process (:seon.test/host report)) (pr-str report))
+        (is (nil? (#'runner/verify-platform-tier-carries-no-destructive-drill!
+                   manifest platform-vars)))
+        (println "Canonical platform destroyer check:" (count platform-vars) "tests admitted")))))
 
 (deftest the-platform-tier-declares-no-destructive-drill
   ;; The platform tier runs FIRST on every bin/test invocation. A test there

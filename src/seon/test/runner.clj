@@ -983,12 +983,12 @@
               tasks)))
 
 (defn- tests-reaching-rows
-  [rows seeds]
+  "Select from explicit seed rows while retaining real file uncertainty."
+  [artifacts seeds]
   (set (selection/reaching-tests
-        [{:seon.fn.file/relative-path "fixture-selection"
-          :seon.fn.file/rows (filterv seeds rows)}
-         {:seon.fn.file/relative-path "remaining-program"
-          :seon.fn.file/rows (filterv (complement seeds) rows)}]
+        (into [{:seon.fn.file/relative-path "fixture-selection"
+                :seon.fn.file/rows (vec seeds)}]
+              artifacts)
         ["fixture-selection"])))
 
 ;;; ---------------------------------------------------------------------------
@@ -1063,7 +1063,7 @@
     (let [rows (manifest-rows manifest)
           owner-rows (destructive-owner-rows rows)
           owner-symbols (set (map :seon.fn/sym owner-rows))
-          destructive (tests-reaching-rows rows (set owner-rows))
+          destructive (tests-reaching-rows (:seon.fn.manifest/artifacts manifest) (set owner-rows))
           offenders (vec (for [test-var platform-vars
                                :let [test-symbol (str (var-symbol test-var))]
                                :when (destructive test-symbol)]
@@ -1100,18 +1100,29 @@
     (when (seq missing)
       (throw (ex-info "Fixture selection cannot resolve its fixture owners."
                       {::missing-fixture-owners (vec (sort missing))})))
-    (let [rows (mapv (fn [row]
-                       (if (= "seon.test-support/with-database" (:seon.fn/sym row))
-                         (update row :seon.fn/calls disj
-                                 [:seon.fn/sym "seon.test-support/with-fresh-database"])
-                         row)) rows)
-          direct (tests-reaching-rows rows (set owner-rows))
-          callers (mapv #(cond-> % (:seon.fn/sym %)
-                            (assoc :seon.test/sym (:seon.fn/sym %))) rows)
+    (let [artifacts
+          (mapv (fn [artifact]
+                  (update artifact :seon.fn.file/rows
+                          (fn [rows]
+                            (mapv (fn [row]
+                                    (if (= "seon.test-support/with-database" (:seon.fn/sym row))
+                                      (update row :seon.fn/calls disj
+                                              [:seon.fn/sym "seon.test-support/with-fresh-database"])
+                                      row)) rows))))
+                (:seon.fn.manifest/artifacts manifest))
+          rows (mapcat :seon.fn.file/rows artifacts)
+          direct (tests-reaching-rows artifacts (set owner-rows))
+          callers (mapv (fn [artifact]
+                          (update artifact :seon.fn.file/rows
+                                  #(mapv (fn [row]
+                                           (cond-> row (:seon.fn/sym row)
+                                             (assoc :seon.test/sym (:seon.fn/sym row)))) %)))
+                        artifacts)
           branch-callers (tests-reaching-rows
                           callers
                           (set (filter #(= "seon.test-support/with-database"
-                                           (:seon.fn/sym %)) callers)))
+                                           (:seon.fn/sym %))
+                                       (mapcat :seon.fn.file/rows callers))))
           request-rows
           (filterv #(and (not= "seon.test-support/with-database" (:seon.fn/sym %))
                          (branch-callers (or (:seon.test/sym %) (:seon.fn/sym %)))
@@ -1119,7 +1130,7 @@
                                  :seon.test-support/database-id}
                                (:seon.fn/keywords %))) rows)]
       (set/union direct
-                 (tests-reaching-rows rows (set request-rows))
+                 (tests-reaching-rows artifacts (set request-rows))
                  (set (keep :seon.test/sym request-rows))))))
 
 (defn- verify-fixture-observations!
