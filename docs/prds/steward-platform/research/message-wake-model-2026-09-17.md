@@ -425,3 +425,66 @@ probe must still be run after the owner releases adoption. Canonical fixture
 history/answeredness is not a deployed default proof. Cold namespace and
 platform proof remain the orchestrator's responsibility. Stop for review at
 this checkpoint.
+
+## Live wake flip completed — 2026-09-17, adopted default PID 94566
+
+The previously owed live proof is complete on the owner-adopted default,
+PID **94566**, using explicit `(seon.operator/connection "default")` custody.
+Four MCP evaluations were used. The first refused at compilation because
+`ProcessHandle` required Java qualification; it changed nothing.
+[Exact successful forms](message-wake-live-proof-2026-09-17.clj) and
+[complete tool envelopes](message-wake-live-proof-2026-09-17.json) are retained.
+
+Exactly one message was sent through the canonical Juniper `submit!` wrapper
+evaluating `my.message/send`. Its identity is **3168e0a55d3d**. The subsequent
+ordinary no-provider turn settled naturally; no second reply was injected.
+The sender evaluation was a submitted system turn. The answering turn was
+the ordinary no-provider turn: reply-t is later than opening-t.
+No raw transaction, reload, adoption, stop/start, or reset was performed.
+`seon.cluster.message/unanswered` is absent from current source; the owner
+actually queried is `seon.turn/unanswered-wakes` with
+`seon.turn/latest-answering-turn-t`.
+
+Verbatim pre-send and before output:
+
+```clojure
+#:probe{:phase :pre-send, :pid 94566, :basis 536871178, :no-provider true}
+#:probe{:pid 94566, :unanswered [{:db/id 85457, :seon.wake/attribute :seon.message/to, :seon.wake/t 536871180, :seon.message/id "3168e0a55d3d"}], :answering-t 536871113, :message "3168e0a55d3d", :listened true, :claims #{}, :basis 536871182, :phase :before, :route #{[85457 81760 536871180]}, :all [{:db/id 85457, :seon.wake/attribute :seon.message/to, :seon.wake/t 536871180, :seon.message/id "3168e0a55d3d"}]}
+```
+
+Verbatim after output:
+
+```clojure
+#:probe{:pid 94566, :unanswered [], :answering-t 536871184, :no-provider true, :message "3168e0a55d3d", :open nil, :claims #{["3ded5c0bc8a4" 536871184 536871185 536871186 536871186]}, :basis 536871186, :phase :after, :route #{[85457 81760 536871180]}, :all [{:db/id 85457, :seon.wake/attribute :seon.message/to, :seon.wake/t 536871180, :seon.message/id "3168e0a55d3d"}]}
+```
+
+Verbatim temporal corroboration:
+
+```clojure
+#:probe{:pid 94566, :basis 536871186, :open-at-536871184 "3ded5c0bc8a4", :claims-at-opening #{}, :attempts #{}, :answered-by-t true, :error-signatures nil}
+```
+
+The listened route remains **[85457 81760 536871180]** before and after.
+Before, the answering basis **536871113** precedes the message wake and
+the unanswered result contains it. Afterwards, unanswered is `[]`, while
+`:answered? :any` still returns the same historical message wake.
+
+The claim tuple is **[turn-id opening-t reply-t closed-t claim-t]**:
+**["3ded5c0bc8a4" 536871184 536871185 536871186 536871186]**.
+The as-of query confirms the turn was open at **536871184**, without a claim.
+Its settlement writes the handling claim and close together at **536871186**.
+Answering is independently **536871180 ≤ 536871184**, not claim presence.
+Datahike's inclusive as-of predicate is grounded at
+`reference-code/datahike/src/datahike/db.cljc:142–147`.
+
+Provider suppression is true before and after; the handling turn has **zero
+provider attempts**. The error-signature aggregate returned literal `nil`
+(no matching rows), preserved verbatim rather than rewritten as zero.
+Runtime status likewise reported no error-signature family; its other
+reported families were four errored evaluations and 23 failed-test facts.
+This note does not claim those broader families are empty.
+
+Git status was clean before this evidence-only slice. No foreign session
+or file was touched. No test JVM or cold gate was run. This proves the
+adopted pre-reset cluster above, not any subsequent reset's new store.
+Stopped for review.
