@@ -2772,3 +2772,11 @@ working tree, never Sonnet.
   path). Only stage 2 is running (38 min into resolution / claims /
   unchanged-result reuse); the merge of `reset-batch` and the one reset
   follow its stop.
+- **Batch 123 A (HEAD 312f60560): platform 100/750/0/0.** B crashed at the
+  coordinator: I named `seon.test.cache-test`, which has no file (my own
+  rule: verify each namespace maps to a file — violated), and the runner
+  threw FileNotFoundException after loading 13/14 namespaces, printing the
+  whole published manifest (19 MB log) — the open nonexistent-namespace
+  issue raised to blocker with this evidence (a typed refusal before any
+  load, and no manifest in the exception). B relaunched with verified
+  namespaces (`batch-123b.log`).

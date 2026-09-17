@@ -1,7 +1,7 @@
 ---
 type: issue
 status: open
-severity: friction
+severity: blocker
 tags: [test, runner, bounded-execution, total-tally]
 ---
 
@@ -40,3 +40,16 @@ shape the worker-exchange bound already uses), continue with the rest,
 and exit red with the entry printed. Regression: a selection with one
 nonexistent namespace runs the others and reports exactly one typed
 unloadable entry.
+
+## 2026-09-17 06:50Z — second observation, with an 18 MB dump
+
+Batch 123 B (`tmp/orchestrator/gate-results/batch-123.log`, HEAD `312f60560`)
+named `seon.test.cache-test`, which has no file. The coordinator threw
+`FileNotFoundException` at `seon.test.runner/run-coordinator!` (runner.clj:4026)
+after loading 13 of 14 namespaces, and the gate log grew to **19,165,764
+bytes** because the failure printed the complete published manifest (every
+row of every artifact) before the exception. Two defects: the crash instead
+of a typed tally naming the missing namespace BEFORE any load, and the
+exception evidence carrying the whole manifest (UGLY OUTPUT IS A DEFECT).
+Raised to blocker: every namespace-selection typo costs a slot, a run root
+and a 19 MB log.
