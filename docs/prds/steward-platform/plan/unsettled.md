@@ -3503,3 +3503,25 @@ as orchestrator/astra lanes, easy pool as the first live-agent slice).
   (`my.generated.after-resume` vs `my.agents.namespace-resume`), empty
   seeds. QUEUED as lane `turn-settlement-post-reset` for the next free
   editing slot (turn.clj free). Baseline worktree removed.
+
+## 2026-09-18 ~04:10Z — Datahike fix in the fork; stage 1 checkpoint; manifest merged
+
+- `datahike-listener-completion` COMPLETE: fork `e11845ba` (reports
+  delivered before listener notification; each listener Throwable logged
+  and contained; fork tests 27/237 green), gitlink `95e2e1983`, Seon
+  regression `d443d295c` (58 tests green), issue resolved `ff628ae99`.
+  **OWNER ACTION: push the Datahike fork (`reference-code/datahike`, one
+  commit ahead of origin/main).**
+- `test-system-stage1` checkpoint GREEN: `fe2f1e816` (union gate-set
+  traversal + refused-read propagation = triage #14 absorbed), `a47ecb926`
+  (runner regressions on symbol identities; bounded launcher waits); fast
+  141 tests, 1,026 assertions, 0/0. Stopped at a named dependency: the
+  publisher must record `:seon.source/test-input-digest` (design §"Inputs
+  outside the program graph") before `select`'s external-input
+  invalidation can land; `selection-is-one-function-on-both-hosts` still
+  owed. Its selector draft remains uncommitted (shelved around the merge
+  below and restored).
+- The additive error manifest branch merged into `steward-platform`
+  (`git merge --no-ff error-declaration-manifest-slice1`); cold gate and
+  slice 2 (wrapper enforcement) next. Launched sol
+  `turn-settlement-post-reset` (the inherited 31F/10E class).
