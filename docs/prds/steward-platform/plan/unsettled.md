@@ -2797,3 +2797,11 @@ working tree, never Sonnet.
 - Guardrails `b63bd01e9`: the dependency-cache regression exercises the
   public `refresh` with real dependency source changes (obsolete digest
   stub removed); 1/10 green. Lane parked (all items complete).
+- **Cold-only reds ROOT-CAUSED by message-wake** (`3170a0060`): the cold
+  worker caches SCI callables BEFORE arming JVM contracts (fast runs arm
+  first) — `copy-var*` copies the unarmed roots, so an outer contract never
+  refuses under the cold gate. The same class S3 fixed for adoption
+  ("acquire! after JVM instrumentation"). Fix is in runner.clj (held by
+  stage 2); exact patch in the lane's note; resume message-wake to land it
+  the moment stage 2 stops. Suspect for other cold-only reds too (the
+  eval_test deadline red is under investigation separately).
