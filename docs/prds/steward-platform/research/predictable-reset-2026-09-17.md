@@ -151,3 +151,47 @@ concurrent `boot-load-bounds` lane landed the same resulting bytes in
 `940f4b426`; no implementation hunk in its protected region was touched here.
 The shared tree's dirty `src/seon/db.clj`, `src/seon/fn.clj`, and their tests
 remained outside every fast snapshot.
+
+## 2026-09-17 follow-up — bare cold gates are HEAD-exact
+
+The retained `tmp/test-runs/run.OZGw7Q` evidence showed a bare platform gate
+loading an uncommitted test while reporting no difference from HEAD. The
+launcher had two conflicting meanings for a missing `--paths`: it documented
+HEAD-exact behavior but populated `overlay_paths` from every dirty tracked and
+untracked file.
+
+That implicit overlay is removed. `git archive HEAD` is now the complete bare
+snapshot constructor; only explicit `--paths` add working-tree bytes. The
+difference report separately builds a private index from
+`git ls-tree -r -z HEAD` and refreshes it against the run root. It refuses
+before dependency preparation or a JVM if any non-named tracked path has a
+different Git mode or blob. The private index avoids the original false-clean
+class: the invoking checkout's index may carry stat information for a
+different work tree.
+
+The platform regression proves the ordinary and failure paths. A dirty tracked
+test file omitted from `--paths` remains at its committed bytes in the bare run
+root and worker. A fixture archive extractor then injects those dirty bytes
+after extraction; snapshot admission exits 64 and names the exact test path
+before the fake JVM runs.
+
+The focused regression passed in a HEAD worktree with only `bin/test` and
+`test/seon/test_runner_test.clj` overlaid. The worktree was necessary because a
+concurrent lane left a transient reader error in the shared working tree; no
+foreign path entered the diagnostic snapshot. The required combined fast tally
+used HEAD `b56410f55` plus only the four requested paths:
+
+```text
+bin/test-fast --paths script/seon/fresh_operator.clj bin/test test/seon/dev/fresh_operator_reset_test.clj test/seon/test_runner_test.clj -- seon.dev.fresh-operator-reset-test seon.test-runner-test
+```
+
+The new isolated boot and snapshot regressions both passed. The total was 60
+tests and 490 assertions, with 7 failures and 5 errors in pre-existing
+`seon.test-runner-test` result-recording expectations on that HEAD. The named
+foreign boundary is the concurrent program-facts symbol transition: examples
+were empty captured per-test maps, the writer now refusing a retracted test as
+`:seon.test.runner/test-definition-absent`, and
+`gate-completions-travel-as-a-file-not-as-code` still supplying a string where
+the installed contract requires a namespaced symbol. None is in the launcher
+snapshot hunk. The focused snapshot regression also passed alone in the clean
+HEAD worktree. The orchestrator still owns the cold gate and platform proof.

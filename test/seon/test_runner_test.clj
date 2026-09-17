@@ -2495,8 +2495,8 @@
              "printf '{:paths [\"src\"]}\\n' > bb.edn\n"
              "printf 'tmp/\\ntarget/\\n' > .gitignore\n"
              "printf 'base\\n' > src/owned.txt\n"
-             "printf 'base\\n' > src/foreign.txt\n"
              "printf 'base\\n' > src/deleted.txt\n"
+             "printf '(ns dirty-tracked-test)\\n' > test/dirty_tracked_test.clj\n"
              "touch test/fixture_test.clj .agents/skills/fixture .clj-kondo/fixture\n"
              "ln -s .agents/skills seon-skills\n"
              "ln -s ../.agents/skills .claude/skills\n"
@@ -2510,39 +2510,74 @@
       (publish-fixture-head! (io/file root "checkout"))
       (spit script (str "set -euo pipefail\norigin=$1\nfixture=$2\ncd \"$fixture\"\n"
              "printf 'owned\\n' > src/owned.txt\n"
-             "printf 'foreign\\n' > src/foreign.txt\n"
              "printf 'added\\n' > src/added.txt\n"
              "rm src/deleted.txt\n"
              "cat > tmp/fake-bin/clojure <<'SH'\n"
              "#!/usr/bin/env bash\n"
              "set -euo pipefail\n"
-             "test \"$(cat src/owned.txt)\" = owned\n"
-             "test \"$(cat src/foreign.txt)\" = \"${SEON_EXPECT_FOREIGN:-base}\"\n"
-             "test \"$(cat src/added.txt)\" = added\n"
-             "test ! -e src/deleted.txt\n"
+             "if [ \"${SEON_EXPECT_BARE:-0}\" = 1 ]; then\n"
+             "  test \"$(cat src/owned.txt)\" = base\n"
+             "  test \"$(tail -n 1 test/dirty_tracked_test.clj)\" = '(ns dirty-tracked-test)'\n"
+             "  test ! -e src/added.txt\n"
+             "  test \"$(cat src/deleted.txt)\" = base\n"
+             "else\n"
+             "  test \"$(cat src/owned.txt)\" = owned\n"
+             "  test \"$(tail -n 1 test/dirty_tracked_test.clj)\" = '(ns dirty-tracked-test)'\n"
+             "  test \"$(cat src/added.txt)\" = added\n"
+             "  test ! -e src/deleted.txt\n"
+             "fi\n"
              fake-dev-cache-prologue
              "for argument in \"$@\"; do\n"
              "  if [ \"$argument\" = --prepare-base ]; then mkdir -p \"${!#}/data/store\"; echo '{}' > \"${!#}/manifest.edn\"; exit 0; fi\n"
              "done\n"
              "for worker in workers/*; do\n"
-             "  test \"$(cat \"$worker/src/owned.txt\")\" = owned\n"
-             "  test \"$(cat \"$worker/src/foreign.txt\")\" = \"${SEON_EXPECT_FOREIGN:-base}\"\n"
-             "  test \"$(cat \"$worker/src/added.txt\")\" = added\n"
-             "  test ! -e \"$worker/src/deleted.txt\"\n"
+             "  if [ \"${SEON_EXPECT_BARE:-0}\" = 1 ]; then\n"
+             "    test \"$(cat \"$worker/src/owned.txt\")\" = base\n"
+             "    test \"$(tail -n 1 \"$worker/test/dirty_tracked_test.clj\")\" = '(ns dirty-tracked-test)'\n"
+             "    test ! -e \"$worker/src/added.txt\"\n"
+             "    test \"$(cat \"$worker/src/deleted.txt\")\" = base\n"
+             "  else\n"
+             "    test \"$(cat \"$worker/src/owned.txt\")\" = owned\n"
+             "    test \"$(tail -n 1 \"$worker/test/dirty_tracked_test.clj\")\" = '(ns dirty-tracked-test)'\n"
+             "    test \"$(cat \"$worker/src/added.txt\")\" = added\n"
+             "    test ! -e \"$worker/src/deleted.txt\"\n"
+             "  fi\n"
              "done\n"
              "echo SNAPSHOT_VERIFIED\n"
              "SH\n"
              "printf '#!/usr/bin/env bash\\necho 2\\n' > tmp/fake-bin/getconf\n"
+             "cat > tmp/fake-bin/tar <<'SH'\n"
+             "#!/usr/bin/env bash\nset -euo pipefail\n"
+             "\"$SEON_REAL_TAR\" \"$@\"\n"
+             "if [ \"${SEON_CONTAMINATE_SNAPSHOT:-0}\" = 1 ]; then\n"
+             "  cp \"$SEON_CONTAMINATION_SOURCE\" \"${!#}/test/dirty_tracked_test.clj\"\n"
+             "fi\n"
+             "SH\n"
+             "export SEON_REAL_TAR=$(command -v tar)\n"
              "chmod +x tmp/fake-bin/*\n"
              "export PATH=\"$fixture/tmp/fake-bin:$PATH\"\n"
              "export SEON_FAKE_CACHE_DIGEST=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
              "export SEON_FAKE_CACHE_PATH=\"$fixture/tmp/cache/$SEON_FAKE_CACHE_DIGEST\"\n"
              "mkdir -p \"$SEON_FAKE_CACHE_PATH\"\n"
-             "bin/test --paths src/owned.txt src/added.txt src/deleted.txt -- seon.fixture-test\n"
-             "export SEON_EXPECT_FOREIGN=foreign\n"
-             "bin/test seon.fixture-test > tmp/default.log 2>&1\n"
-             "case \"$(cat tmp/default.log)\" in *src/foreign.txt*) ;; *) cat tmp/default.log; exit 1 ;; esac\n"
-             "echo DEFAULT_SNAPSHOT_VERIFIED\n"))
+             "if ! bin/test --paths src/owned.txt src/added.txt src/deleted.txt -- seon.fixture-test > tmp/selected.log 2>&1; then tail -100 tmp/selected.log; exit 81; fi\n"
+             "grep -F 'src/owned.txt' tmp/selected.log\n"
+             "grep -F 'src/added.txt' tmp/selected.log\n"
+             "grep -F 'src/deleted.txt' tmp/selected.log\n"
+             "echo SNAPSHOT_VERIFIED\n"
+             "printf '(ns dirty-tracked-test)\\n;; dirty working tree\\n' > test/dirty_tracked_test.clj\n"
+             "export SEON_EXPECT_BARE=1\n"
+             "if ! bin/test seon.fixture-test > tmp/default.log 2>&1; then tail -100 tmp/default.log; exit 82; fi\n"
+             "grep -F 'SNAPSHOT_VERIFIED' tmp/default.log\n"
+             "if grep -F 'test/dirty_tracked_test.clj' tmp/default.log; then cat tmp/default.log; exit 1; fi\n"
+             "echo DEFAULT_SNAPSHOT_VERIFIED\n"
+             ;; Deliberately contaminate the run root after archive extraction.
+             ;; The independent ls-tree proof must refuse before fake clojure
+             ;; can observe the dirty, non-named tracked test file.
+             "export SEON_CONTAMINATE_SNAPSHOT=1\n"
+             "export SEON_CONTAMINATION_SOURCE=$fixture/test/dirty_tracked_test.clj\n"
+             "if bin/test seon.fixture-test > tmp/contaminated.log 2>&1; then cat tmp/contaminated.log; exit 92; else test \"$?\" = 64; fi\n"
+             "grep -F 'non-named tracked path differs from HEAD: test/dirty_tracked_test.clj' tmp/contaminated.log\n"
+             "echo CONTAMINATION_REFUSAL_VERIFIED\n"))
       (let [process (.start (doto (ProcessBuilder. ^java.util.List
                                  ["/bin/bash" (.getPath script)
                                   (.getPath project-root) (.getPath (io/file root "checkout"))])
@@ -2557,10 +2592,13 @@
             (is (zero? (.exitValue process)) output)
             (is (str/includes? output "SNAPSHOT_VERIFIED") output)
             (is (str/includes? output "DEFAULT_SNAPSHOT_VERIFIED") output)
+            (is (str/includes? output "CONTAMINATION_REFUSAL_VERIFIED") output)
             (is (str/includes? output "src/owned.txt") output)
             (is (str/includes? output "src/added.txt") output)
             (is (str/includes? output "src/deleted.txt") output)
-            (is (not (str/includes? output "src/foreign.txt")) output))))
+            (is (str/includes? output
+                               "non-named tracked path differs from HEAD: test/dirty_tracked_test.clj")
+                output))))
       (finally
         (when-let [process @child] (stop-process-tree! process))
         (test-support/delete-recursively! root)))))

@@ -727,8 +727,8 @@ populate_checkout_root() {
 
 begin_phase snapshot
 
-# One snapshot mechanism: HEAD plus the selected working bytes. Without
-# --paths, overlay every tracked change and every non-ignored new file.
+# One snapshot mechanism: HEAD plus only explicitly selected working bytes.
+# A bare cold gate is exactly HEAD even when the invoking checkout is dirty.
 git archive "$git_sha" | tar -x -C "$run_root"
 rm -rf "$run_root/reference-code"
 ln -s "$source_root/reference-code" "$run_root/reference-code"
@@ -745,13 +745,6 @@ if [ "$prepare_head_base" -eq 1 ]; then
   echo "bin/test: preparing the program graph for HEAD $git_sha"
 elif [ ${#snapshot_paths[@]} -gt 0 ]; then
   overlay_paths=("${snapshot_paths[@]}")
-else
-  git diff --no-renames --name-only -z "$git_sha" -- . ':!reference-code' >"$run_root/.snapshot-paths"
-  git ls-files --others --exclude-standard -z -- . ':!workers' >>"$run_root/.snapshot-paths"
-  while IFS= read -r -d '' entry; do
-    overlay_paths+=("$entry")
-  done <"$run_root/.snapshot-paths"
-  rm "$run_root/.snapshot-paths"
 fi
 if [ ${#overlay_paths[@]} -gt 0 ]; then
   for entry in "${overlay_paths[@]}"; do
@@ -775,7 +768,42 @@ if [ -e "$source_root/.env" ] && [ ! -e "$run_root/.env" ]; then
 fi
 mkdir -p "$run_root/data" "$run_root/logs" "$run_root/target" "$run_root/tmp"
 
-# Compare the bytes actually copied, including untracked files, against HEAD.
+# Independently prove that every tracked path outside the named overlay still
+# has HEAD's mode and blob. The archive is the constructor; `ls-tree` is the
+# separately derived authority that catches a contaminated run root before a
+# dependency tool or test JVM can consume it.
+non_named_head_differences="$run_root/tmp/non-named-head-differences"
+: >"$non_named_head_differences"
+snapshot_path_named() {
+  local candidate=$1 named
+  for named in ${snapshot_paths[@]+"${snapshot_paths[@]}"}; do
+    if [ "$candidate" = "$named" ]; then
+      return 0
+    fi
+  done
+  return 1
+}
+head_tree="$run_root/tmp/head-tree"
+head_index="$run_root/tmp/head-index"
+head_differences="$run_root/tmp/head-differences"
+git -C "$source_root" ls-tree -rz "$git_sha" -- . >"$head_tree"
+GIT_INDEX_FILE="$head_index" git -C "$source_root" update-index -z --index-info <"$head_tree"
+GIT_INDEX_FILE="$head_index" git -C "$source_root" --work-tree="$run_root" \
+  update-index -q --refresh || true
+GIT_INDEX_FILE="$head_index" git -C "$source_root" --work-tree="$run_root" \
+  diff-files --name-only -z >"$head_differences"
+while IFS= read -r -d '' entry; do
+  case "$entry" in
+    reference-code|reference-code/*) continue ;;
+  esac
+  if ! snapshot_path_named "$entry"; then
+    printf '%s\n' "$entry" >>"$non_named_head_differences"
+  fi
+done <"$head_differences"
+rm "$head_tree" "$head_index" "$head_differences"
+
+# Compare the bytes actually selected against HEAD, and make any contamination
+# found by the independent tree proof part of the same bounded report.
 echo "bin/test: snapshot differences from HEAD $git_sha:"
 git -C "$source_root" --work-tree="$run_root" diff --name-status "$git_sha" -- \
   . ':!reference-code' | while IFS= read -r entry; do
@@ -785,7 +813,17 @@ git -C "$source_root" --work-tree="$run_root" ls-files --others --exclude-standa
   . ':!data' ':!logs' ':!target' ':!tmp' ':!workers' ':!reference-code' ':!test-run.txt' | while IFS= read -r entry; do
     printf 'bin/test:   A %s\n' "$entry"
   done
+while IFS= read -r entry; do
+  printf 'bin/test:   REFUSED %s (non-named tracked path differs from HEAD)\n' "$entry"
+done <"$non_named_head_differences"
 echo "bin/test: end snapshot differences"
+if [ -s "$non_named_head_differences" ]; then
+  while IFS= read -r entry; do
+    printf 'bin/test: refusing contaminated snapshot; non-named tracked path differs from HEAD: %s\n' "$entry" >&2
+  done <"$non_named_head_differences"
+  exit 64
+fi
+rm "$non_named_head_differences"
 record_phase snapshot
 
 # An exact HEAD snapshot has no overlay to close over callers. Do not require
