@@ -61,6 +61,11 @@
 
 (def ^:private subprocess-deadline-ms 300000)
 
+(def clj-kondo-output-config
+  "The one output/analysis configuration shared by the edit hook and operator
+  preflight. Partial first-party lint runs keep the persistent cache disabled."
+  "{:output {:format :edn} :analysis {:var-usages true}}")
+
 (defn- cache-contents
   [root]
   (let [directory (fs/path root ".clj-kondo/.cache")]

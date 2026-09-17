@@ -36,6 +36,12 @@
   ^java.io.File [& parts]
   (apply io/file repo-root parts))
 
+(classpath/add-classpath
+ (str (root-file "script") java.io.File/pathSeparator
+      (root-file "src") java.io.File/pathSeparator
+      (root-file "resources")))
+(require '[seon.dev.clj-kondo :as dev.kondo])
+
 (def config-path
   (or (System/getenv "SEON_HOOK_CONFIG")
       (str (root-file ".claude/seon-hook.edn"))))
@@ -223,9 +229,6 @@
 ;;; Static Analysis
 ;;; ---------------------------------------------------------------------------
 
-(def ^:private clj-kondo-output-config
-  "{:output {:format :edn} :analysis {:var-usages true}}")
-
 (def ^:private clj-kondo-definition-output-config
   (str "{:output {:format :edn} "
        ":analysis {:var-usages true :var-definitions true}}"))
@@ -255,14 +258,14 @@
                  ["clj-kondo" "--lint" "-"
                   "--filename" (first absolute-paths)
                   "--cache" "false"
-                  "--config" clj-kondo-output-config]
+                  "--config" dev.kondo/clj-kondo-output-config]
                  ;; the post-edit single-file lint is also a partial view;
                  ;; complete source publication owns first-party cache
                  ;; refresh — the hook never persists analysis
                  (into ["clj-kondo" "--lint"]
                        (concat absolute-paths
                                ["--cache" "false"
-                                "--config" clj-kondo-output-config])))
+                                "--config" dev.kondo/clj-kondo-output-config])))
           result (process/sh {:cmd argv
                               :dir repo-root
                               :in (or prospective-content "")

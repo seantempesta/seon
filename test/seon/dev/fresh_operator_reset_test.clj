@@ -1,7 +1,13 @@
-(ns seon.dev.fresh-operator-reset-test
+(ns ^{:seon.test/platform
+      "Reset preflight and recovery are required before the bulk tier."
+      :seon.test/long
+      "The namespace boots real isolated operator roots."
+      :seon.test/long-ms 600000}
+    seon.dev.fresh-operator-reset-test
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is]]
+            [seon.dev.clj-kondo :as dev.kondo]
             [seon.dev.fresh-operator-test :as operator-test]
             [seon.operator.state :as operator.state])
   (:import [java.util Date]))
@@ -79,7 +85,9 @@
                    :seon.operator.lock/hold-timeout-ms 30000}
                   #(do (deliver acquired true) (deref release 30000 :expired))))]
     (try
-      (doseq [path ["bin/seon" "bb.edn" "script/seon/fresh_operator.clj"
+      (doseq [path ["bin/seon" "bb.edn" "deps.edn"
+                    ".clj-kondo/config.edn"
+                    "script/seon/fresh_operator.clj"
                     "script/seon/dev/clj_kondo.clj" "script/seon/dev/state.clj"
                     "resources/seon/operator/state.clj" "src/seon/fs.clj"
                     "src/seon/id.clj" "src/seon/db.clj" ".claude/seon-hook.edn"
@@ -91,7 +99,27 @@
        (.toPath (io/file source "reference-code"))
        (.toPath (io/file @#'operator-test/project-root "reference-code"))
        (make-array java.nio.file.attribute.FileAttribute 0))
-      (spit (io/file source "src/seon/db.clj") "\n)\n" :append true)
+      (java.nio.file.Files/createSymbolicLink
+       (.toPath (io/file source "src/seon/test"))
+       (.toPath (io/file @#'operator-test/project-root "src/seon/test"))
+       (make-array java.nio.file.attribute.FileAttribute 0))
+      (let [git-common
+            (operator.state/run-process!
+             {:seon.operator.subprocess/argv ["git" "rev-parse" "--git-common-dir"]
+              :seon.operator.subprocess/directory (str @#'operator-test/project-root)
+              :seon.operator.subprocess/deadline-ms immediate-refusal-bound-ms})
+            common-file (io/file @#'operator-test/project-root
+                                 (str/trim (:seon.operator.subprocess/output git-common)))
+            checkout (.getParentFile (.getCanonicalFile common-file))
+            result
+            (operator.state/run-process!
+             {:seon.operator.subprocess/argv
+              ["cp" "-R"
+               (str (io/file checkout ".clj-kondo/.cache"))
+               (str (io/file source ".clj-kondo/.cache"))]
+              :seon.operator.subprocess/deadline-ms immediate-refusal-bound-ms})]
+        (is (zero? (:seon.operator.subprocess/exit git-common)) (pr-str git-common))
+        (is (zero? (:seon.operator.subprocess/exit result)) (pr-str result)))
       (io/make-parents sentinel)
       (spit sentinel "preserved")
       (let [result (operator.state/run-process!
@@ -99,16 +127,37 @@
                      :seon.operator.subprocess/directory (str source)
                      :seon.operator.subprocess/deadline-ms immediate-refusal-bound-ms})]
         (is (zero? (:seon.operator.subprocess/exit result)) (pr-str result)))
-      ; An empty commit makes every copied source an untracked preflight input.
+      (let [result (operator.state/run-process!
+                    {:seon.operator.subprocess/argv ["git" "add" "."]
+                     :seon.operator.subprocess/directory (str source)
+                     :seon.operator.subprocess/deadline-ms immediate-refusal-bound-ms})]
+        (is (zero? (:seon.operator.subprocess/exit result)) (pr-str result)))
       (let [result (operator.state/run-process!
                     {:seon.operator.subprocess/argv
                      ["git" "-c" "core.hooksPath=/dev/null" "-c" "commit.gpgsign=false"
                       "-c" "user.name=Test" "-c" "user.email=test@example.invalid"
-                      "commit" "--allow-empty" "-qm" "fixture"]
+                      "commit" "-qm" "fixture"]
                      :seon.operator.subprocess/directory (str source)
                      :seon.operator.subprocess/deadline-ms immediate-refusal-bound-ms})]
         (is (zero? (:seon.operator.subprocess/exit result)) (pr-str result)))
+      (let [classpath-result
+            (operator.state/run-process!
+             {:seon.operator.subprocess/argv ["clojure" "-Spath"]
+              :seon.operator.subprocess/directory (str source)
+              :seon.operator.subprocess/deadline-ms immediate-refusal-bound-ms})
+            classpath (str/trim (:seon.operator.subprocess/output classpath-result))
+            input-digest ((var-get (ns-resolve 'seon.dev.clj-kondo 'input-digest))
+                          (str source) classpath)
+            contents ((var-get (ns-resolve 'seon.dev.clj-kondo 'cache-contents))
+                      (str source))]
+        (is (zero? (:seon.operator.subprocess/exit classpath-result))
+            (pr-str classpath-result))
+        (operator.state/write-edn!
+         (io/file source "tmp/test-changed/dependency-cache.edn")
+         {::dev.kondo/input-digest input-digest
+          ::dev.kondo/contents contents}))
       (is (= true (deref acquired immediate-refusal-bound-ms :expired)))
+      (spit (io/file source "src/seon/db.clj") "\n)\n" :append true)
       (doseq [arguments [["reset" "--force"] ["start"] ["init"]]]
         (let [started (System/nanoTime)
               result (operator.state/run-process!
@@ -129,6 +178,47 @@
           (when (= "reset" (first arguments))
             (is (str/includes? output "store NOT destroyed (9 bytes remain)")))
           (is (< elapsed immediate-refusal-bound-ms))))
+      (io/copy (io/file @#'operator-test/project-root "src/seon/db.clj")
+               (io/file source "src/seon/db.clj"))
+      (let [broken (io/file source "test/seon/preflight_broken_test.clj")]
+        (io/make-parents broken)
+        (spit broken
+              "(ns seon.preflight-broken-test)\n(def observed (d/listen! nil nil))\n")
+        (let [result (operator.state/run-process!
+                      {:seon.operator.subprocess/argv
+                       ["bash" "bin/seon" "--root" (str root) "reset" "--force"]
+                       :seon.operator.subprocess/directory (str source)
+                       :seon.operator.subprocess/deadline-ms immediate-refusal-bound-ms
+                       :seon.operator.subprocess/merge-error? true})
+              output (:seon.operator.subprocess/output result)]
+          (is (= 1 (:seon.operator.subprocess/exit result)) output)
+          (is (str/includes? output "test/seon/preflight_broken_test.clj:") output)
+          (is (str/includes? output "Unresolved namespace d") output)
+          (is (not (str/includes? output "! waiting")) output)
+          (is (not (str/includes? output "phase=down")) output)
+          (is (= "preserved" (slurp sentinel))))
+        (.delete broken)
+        (let [baseline
+              (:seon.fresh-operator/source-snapshot
+               ((var-get (ns-resolve 'seon.fresh-operator 'source-preflight!))
+                source))]
+          (spit broken
+                "(ns seon.preflight-broken-test)\n(def observed (d/listen! nil nil))\n")
+          (let [outcome
+                (operator-private-outcome
+                 'phase! (str root) "reset" :start
+                 #((var-get (ns-resolve 'seon.fresh-operator 'source-preflight!))
+                   source baseline))]
+            (is (= :start
+                   (:seon.fresh-operator/phase (::data outcome)))
+                (pr-str outcome))
+            (is (str/includes? (::message outcome)
+                               "test/seon/preflight_broken_test.clj")
+                (pr-str outcome)))
+          (.delete broken)
+          (is (map?
+               ((var-get (ns-resolve 'seon.fresh-operator 'source-preflight!))
+                source baseline)))))
       (deliver release :done)
       (is (not= :expired (deref holder immediate-refusal-bound-ms :expired)))
       (let [form `(do
@@ -189,6 +279,62 @@
           (is (str/includes? (::message outcome) (str "phase=" (name failed))))
           (is (str/includes? (slurp (:seon.fresh-operator/log data)) "planted phase failure"))
           (is (< (/ (- (System/nanoTime) started) 1000000) immediate-refusal-bound-ms))))
+      (finally (delete-recursively! root)))))
+
+(deftest reset-phase-records-derive-incomplete-status-and-continuation
+  (let [root (fresh-root)
+        operations (io/file root "data/operator/operations")
+        operation-id "4242"]
+    (try
+      (.mkdirs operations)
+      (doseq [phase [:lifecycle :down :destroy :republish :refork :start]]
+        (spit (io/file operations (str "reset-" (name phase) "-" operation-id ".log"))
+              (if (= :start phase)
+                "phase=start started\nplanted failure\n"
+                (str "phase=" (name phase) " started\nphase=" (name phase) " complete\n"))))
+      (is (= :start
+             ((var-get (ns-resolve 'seon.fresh-operator 'reset-incomplete-phase))
+              (str root))))
+      (is (= ["bin/seon start default" "bin/seon init --dev default"]
+             ((var-get (ns-resolve 'seon.fresh-operator 'reset-continuation))
+              :start)))
+      (let [output
+            (with-out-str
+              ((var-get (ns-resolve 'seon.fresh-operator
+                                    'print-reset-continuation!)) :start))]
+        (is (= (str "reset continuation:\n"
+                    "bin/seon start default\n"
+                    "bin/seon init --dev default\n")
+               output)))
+      (let [output
+            (with-out-str
+              ((var-get (ns-resolve 'seon.fresh-operator 'status!))
+               (str root) []))]
+        (is (str/includes? output "reset incomplete at start") output))
+      ; A later reset refusal before destroy must not hide the prior gap.
+      (let [path (io/file operations "reset-lifecycle-4343.log")]
+        (spit path "phase=lifecycle started\n")
+        (java.nio.file.Files/setLastModifiedTime
+         (.toPath path)
+         (java.nio.file.attribute.FileTime/fromMillis
+          (+ 1000 (System/currentTimeMillis)))))
+      (is (= :start
+             ((var-get (ns-resolve 'seon.fresh-operator 'reset-incomplete-phase))
+              (str root))))
+      (let [path (io/file operations "start-start-5252.log")]
+        (spit path "phase=start started\nphase=start complete\n")
+        (java.nio.file.Files/setLastModifiedTime
+         (.toPath path)
+         (java.nio.file.attribute.FileTime/fromMillis
+          (+ 2000 (System/currentTimeMillis)))))
+      (is (nil?
+           ((var-get (ns-resolve 'seon.fresh-operator 'reset-incomplete-phase))
+            (str root))))
+      (let [output
+            (with-out-str
+              ((var-get (ns-resolve 'seon.fresh-operator 'status!))
+               (str root) []))]
+        (is (not (str/includes? output "reset incomplete at")) output))
       (finally (delete-recursively! root)))))
 
 (deftest managed-root-cleanup-loads-no-program-and-never-follows-symlinks

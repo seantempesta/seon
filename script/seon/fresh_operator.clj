@@ -243,6 +243,16 @@
 
 (def ^:private syntax-preflight-bound-ms 5000)
 
+(def ^:private source-pathspecs
+  ["src" "script" "resources" "test" "config" ".claude/seon-hook.edn"])
+
+(def ^:private boot-refusing-linter-config
+  (str "{:linters {:syntax {:level :error} "
+       ":unresolved-namespace {:level :error} "
+       ":unresolved-var {:level :error} "
+       ":unresolved-symbol {:level :error}} "
+       ":output {:format :edn} :analysis {:var-usages true}}"))
+
 (defn- publication-bound-ms
   []
   (let [path (or (System/getenv "SEON_HOOK_CONFIG")
@@ -290,8 +300,17 @@
           (flush)
           (spit log (str line "\n") :append true))))))
 
-(defn- syntax-preflight!
-  [source-root]
+(defn- source-file-digest
+  [source-root path]
+  (let [digest (java.security.MessageDigest/getInstance "SHA-256")]
+    (.update digest (java.nio.file.Files/readAllBytes
+                     (.toPath (io/file source-root path))))
+    (format "%064x" (java.math.BigInteger. 1 (.digest digest)))))
+
+(defn- source-preflight!
+  ([source-root]
+   (source-preflight! source-root nil))
+  ([source-root baseline]
   (let [started (System/nanoTime)
         run-bounded! (fn [argv]
                (operator.state/run-process!
@@ -301,43 +320,83 @@
                  (max 1 (- syntax-preflight-bound-ms
                            (long (/ (- (System/nanoTime) started) 1000000))))
                  :seon.operator.subprocess/merge-error? true}))
-        changes (run-bounded! ["git" "diff" "--name-only" "--ignore-submodules=all"
-                       "-z" "HEAD" "--" "src" "script" "resources" "test" "config" ".claude/seon-hook.edn"])
+        changes (run-bounded! (into ["git" "diff" "--name-only"
+                                     "--ignore-submodules=all" "-z" "HEAD" "--"]
+                                    source-pathspecs))
         _ (when-not (zero? (:seon.operator.subprocess/exit changes))
             (fail! "Cannot enumerate source preflight inputs." changes))
-        untracked (run-bounded! ["git" "ls-files" "--others" "--exclude-standard"
-                         "-z" "--" "src" "script" "resources" "test" "config" ".claude/seon-hook.edn"])
+        untracked (run-bounded! (into ["git" "ls-files" "--others"
+                                       "--exclude-standard" "-z" "--"]
+                                      source-pathspecs))
         _ (when-not (zero? (:seon.operator.subprocess/exit untracked))
             (fail! "Cannot enumerate untracked source preflight inputs." untracked))
-        changed (filterv #(and (some (fn [suffix] (str/ends-with? % suffix))
-                                    [".clj" ".cljc" ".edn"])
-                              (.isFile (io/file source-root %)))
-                         (vec (enumeration-seq
-                          (java.util.StringTokenizer.
-                           (str (:seon.operator.subprocess/output changes)
-                                (:seon.operator.subprocess/output untracked)) (str (char 0))))))
+        changed (->> (enumeration-seq
+                      (java.util.StringTokenizer.
+                       (str (:seon.operator.subprocess/output changes)
+                            (:seon.operator.subprocess/output untracked))
+                       (str (char 0))))
+                     distinct
+                     (filter #(and (some (fn [suffix] (str/ends-with? % suffix))
+                                         [".clj" ".cljc" ".edn"])
+                                   (.isFile (io/file source-root %))))
+                     sort
+                     vec)
+        snapshot (into (sorted-map)
+                       (map (fn [path] [path (source-file-digest source-root path)]))
+                       changed)
+        lint-paths (if baseline
+                     (filterv #(not= (get baseline %) (get snapshot %)) changed)
+                     changed)
         lint! (fn [paths]
-                (let [result (run-bounded! (into ["clj-kondo" "--cache" "false" "--parallel"
-                                         "--config"
-                                         "^:replace {:linters {:syntax {:level :error}} :output {:format :edn}}"
-                                         "--lint"] paths))
+                (let [cache-result
+                      (run-bounded!
+                       ["bb" "--config" (str (io/file source-root "bb.edn"))
+                        "--deps-root" (str source-root)
+                        "--classpath"
+                        (str (io/file source-root "script") java.io.File/pathSeparator
+                             (io/file source-root "src") java.io.File/pathSeparator
+                             (io/file source-root "resources"))
+                        "-e"
+                        (str "(require 'seon.dev.clj-kondo) "
+                             "(let [result (seon.dev.clj-kondo/ensure-dependency-cache! "
+                             (pr-str (str source-root)) ")] "
+                             "(prn result) "
+                             "(when (= :unavailable (:seon.dev.clj-kondo/status result)) "
+                             "(System/exit 1)))")])
+                      _ (when-not (zero? (:seon.operator.subprocess/exit cache-result))
+                          (fail! "The clj-kondo dependency cache could not be prepared."
+                                 cache-result))
+                      result (run-bounded! (into ["clj-kondo" "--cache" "false"
+                                                  "--parallel" "--config"
+                                                  dev.kondo/clj-kondo-output-config
+                                                  "--config" boot-refusing-linter-config
+                                                  "--lint"] paths))
                       output (:seon.operator.subprocess/output result)
                       report (try (edn/read-string output)
                                   (catch Throwable _ nil))
-                      findings (:findings report)]
+                      findings (:findings report)
+                      errors (filterv #(= :error (:level %)) findings)]
                   (when-not (and (map? report) (vector? findings))
-                    (fail! "Source syntax preflight returned no readable findings." result))
-                  (when (or (seq findings)
+                    (fail! "Source preflight returned no readable findings." result))
+                  (when (or (seq errors)
                             (not (zero? (:seon.operator.subprocess/exit result))))
-                    (fail! (str "Source syntax preflight refused: "
+                    (fail! (str "Source preflight refused: "
                                 (str/join "; "
                                           (map #(str (:filename %) ":" (:row %) ":"
-                                                     (:col %) " " (:message %)) findings)))
+                                                     (:col %) " [" (name (:type %)) "] "
+                                                     (:message %)) errors)))
                            result))))]
-    (when (seq changed) (lint! changed))
+    (when (seq lint-paths) (lint! lint-paths))
     (let [elapsed (long (/ (- (System/nanoTime) started) 1000000))]
-      (println (str "● changed-source syntax checked: " (count changed) " files in " elapsed " ms"))
-      {:seon.fresh-operator/elapsed-ms elapsed})))
+      (when (> elapsed syntax-preflight-bound-ms)
+        (fail! "Source preflight exceeded its declared bound."
+               {:seon.fresh-operator/elapsed-ms elapsed
+                :seon.fresh-operator/bound-ms syntax-preflight-bound-ms}))
+      (println (str "● changed-source boot lint checked: " (count lint-paths)
+                    " files in " elapsed " ms"))
+      {:seon.fresh-operator/elapsed-ms elapsed
+       :seon.fresh-operator/source-snapshot snapshot
+       :seon.fresh-operator/linted-paths lint-paths}))))
 
 (defn- with-operator-lock
   "Serialize one operator root's lifecycle transitions on that root's own lock.
@@ -2868,6 +2927,73 @@
            orphaned " orphaned for absent roots; " malformed
            " malformed); reclaim with `bin/seon reset --force`."))))
 
+(defn- phase-log-complete?
+  [path phase]
+  (and (fs/regular-file? path)
+       (some #{(str "phase=" (name phase) " complete")}
+             (str/split-lines (slurp (str path))))))
+
+(defn- phase-log-path
+  [operations command phase operation-id]
+  (fs/path operations
+           (str command "-" (name phase) "-" operation-id ".log")))
+
+(defn- operation-id
+  [path prefix]
+  (let [filename (str (fs/file-name path))
+        suffix ".log"]
+    (when (and (str/starts-with? filename prefix)
+               (str/ends-with? filename suffix))
+      (subs filename (count prefix) (- (count filename) (count suffix))))))
+
+(defn- latest-phase-log
+  [operations command phase]
+  (let [prefix (str command "-" (name phase) "-")]
+    (when (fs/directory? operations)
+      (->> (fs/list-dir operations)
+           (filter #(operation-id % prefix))
+           (sort-by #(fs/last-modified-time %))
+           last))))
+
+(defn- phase-logs
+  [operations command phase]
+  (let [prefix (str command "-" (name phase) "-")]
+    (if (fs/directory? operations)
+      (->> (fs/list-dir operations)
+           (filter #(operation-id % prefix))
+           (sort-by #(fs/last-modified-time %))
+           vec)
+      [])))
+
+(defn- reset-incomplete-phase
+  "Derive an interrupted reset from its phase logs. A later completed start is
+  the recovery boundary; no second lifecycle flag mirrors those records."
+  [root]
+  (let [operations (fs/path root "data/operator/operations")
+        lifecycle
+        (->> (phase-logs operations "reset" :lifecycle)
+             reverse
+             (filter
+              (fn [log]
+                (let [id (operation-id log "reset-lifecycle-")]
+                  (phase-log-complete?
+                   (phase-log-path operations "reset" :destroy id) :destroy))))
+             first)
+        reset-id (some-> lifecycle (operation-id "reset-lifecycle-"))
+        reset-at (some-> lifecycle fs/last-modified-time)
+        path #(phase-log-path operations "reset" % reset-id)
+        destroyed? (and reset-id (phase-log-complete? (path :destroy) :destroy))
+        reset-started? (and reset-id (phase-log-complete? (path :start) :start))
+        later-started?
+        (when (and destroyed? reset-at)
+          (when-let [start-log (latest-phase-log operations "start" :start)]
+            (and (pos? (compare (fs/last-modified-time start-log) reset-at))
+                 (phase-log-complete? start-log :start))))]
+    (when (and destroyed? (not reset-started?) (not later-started?))
+      (some (fn [phase]
+              (when-not (phase-log-complete? (path phase) phase) phase))
+            [:republish :refork :start]))))
+
 (defn- status!
   {:seon.fn/external-sink :ai-visible-text
    :seon.fn/projection-boundary :none}
@@ -2924,6 +3050,8 @@
           {:seon.error/kind :seon.error/unknown
            :seon.error/message "not queried by descriptor-only status; use status --verbose"})
         status-now (java.util.Date.)]
+    (when-let [phase (reset-incomplete-phase root)]
+      (println (str "reset incomplete at " (name phase))))
     (println (format row-format
                      "CLUSTER" "PID" "STATE" "PREPL" "URL" "DRIFT"))
     (println (apply str (repeat (+ 90 name-width) "-")))
@@ -3311,7 +3439,9 @@
       (str (repository-root)) root root)))
 
 (defn- reset!
-  [root arguments]
+  ([root arguments]
+   (reset! root arguments nil))
+  ([root arguments initial-source-snapshot]
   (parse-reset-arguments arguments)
   (phase! root "reset" :down
           #(do
@@ -3331,9 +3461,39 @@
              cleanup))
   (phase! root "reset" :republish #(init! root []))
   (phase! root "reset" :refork #(init! root ["default"]))
-  (phase! root "reset" :start #(start! root ["default"]))
-  (phase! root "reset" :adopt #(init! root ["--dev" "default"]))
-  (println "● reset republished current-src and reforked default; started and adopted default"))
+  (phase! root "reset" :start
+          #(do
+             (when initial-source-snapshot
+               (source-preflight! (repository-root) initial-source-snapshot))
+             (start! root ["default"])))
+  (phase! root "reset" :adopt
+          #(do
+             (when initial-source-snapshot
+               (source-preflight! (repository-root) initial-source-snapshot))
+             (init! root ["--dev" "default"])))
+  (println "● reset republished current-src and reforked default; started and adopted default")))
+
+(defn- reset-continuation
+  [phase]
+  (case phase
+    :republish ["bin/seon init"
+                "bin/seon init default"
+                "bin/seon start default"
+                "bin/seon init --dev default"]
+    :refork ["bin/seon init default"
+             "bin/seon start default"
+             "bin/seon init --dev default"]
+    :start ["bin/seon start default"
+            "bin/seon init --dev default"]
+    :adopt ["bin/seon init --dev default"]
+    nil))
+
+(defn- print-reset-continuation!
+  [phase]
+  (when-let [commands (seq (reset-continuation phase))]
+    (println "reset continuation:")
+    (doseq [command commands]
+      (println command))))
 
 (defn- logs!
   {:seon.fn/external-sink :ai-visible-text
@@ -3406,6 +3566,7 @@
   (let [[root arguments] (parse-root raw-arguments)
         command (first arguments)
         command-arguments (vec (rest arguments))
+        first-source-snapshot (volatile! nil)
         request (if (and (= "init" command) (some #{"--dev"} command-arguments))
                   {:seon.config.operator/event-silence-backstop-ms
                    (operator-silence-backstop-ms {})
@@ -3422,7 +3583,7 @@
             "open" (open! root command-arguments)
             "stop" (stop! root command-arguments)
             "down" (down! root command-arguments)
-            "reset" (reset! root command-arguments)
+            "reset" (reset! root command-arguments @first-source-snapshot)
             "logs" (logs! root command-arguments)
             ("help" "--help" "-h" nil) (help!)
             (fail! "Unknown fresh Seon command."
@@ -3440,7 +3601,9 @@
                      "init" (parse-init-arguments
                               (if (= "--result-file" (first command-arguments))
                                 (vec (drop 2 command-arguments)) command-arguments)))
-                   (syntax-preflight! (repository-root))
+                   (let [preflight (source-preflight! (repository-root))]
+                     (vreset! first-source-snapshot
+                              (:seon.fresh-operator/source-snapshot preflight)))
                    (publication-bound-ms)
                    (operator-silence-backstop-ms {}))))
       (if (contains? #{"start" "config" "export" "init"
@@ -3452,7 +3615,9 @@
                      ; The tree can change while another publication owns the lock.
                      (when (contains? #{"start" "init" "reset"} command)
                        (phase! root command :preflight
-                               (fn [] (syntax-preflight! (repository-root)))))
+                               (fn []
+                                 (source-preflight!
+                                  (repository-root) @first-source-snapshot))))
                      (if (= "reset" command)
                        (run-command)
                        (phase! root command (keyword command) run-command)))))
@@ -3476,6 +3641,9 @@
             (let [remaining (:seon.operator.footprint/file-bytes
                              (operator.state/footprint (str (store-directory root))))]
               (println (str "store NOT destroyed (" remaining " bytes remain)"))))
+          (when (= "reset" command)
+            (print-reset-continuation!
+             (:seon.fresh-operator/phase (ex-data error))))
           (when-let [data (not-empty (ex-data error))]
             (prn data))
           (when (:seon.fresh-operator/usage? (ex-data error))
