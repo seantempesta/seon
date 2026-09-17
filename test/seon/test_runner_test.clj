@@ -695,10 +695,10 @@
               "signal.pause()\n"))]
     (try
       (let [result
-            ;; task exchanges bound at the suite silence horizon; the
-            ;; matrix injects a one-second horizon to trip it fast
+            ;; Inject at the task admission bound, including its declared
+            ;; body and priming terms, so this fixture trips in one second.
             (with-redefs-fn
-              {#'runner/exchange-bound-seconds (constantly 1)}
+              {#'runner/task-exchange-bound-seconds (constantly 1)}
               #(execute-injected-task! worker (exchange-task "bounded")))]
         (assert-one-terminal-error! "bounded" result
                                     ::runner/worker-exchange-bound)
@@ -1159,9 +1159,15 @@
         (when (.exists fixture-root)
           (test-support/delete-recursively! fixture-root))))))
 
+(def ^:private launcher-source-copy
+  (str "cp \"$origin/src/seon/fs.clj\" src/seon/fs.clj\n"
+       "mkdir -p src/seon/test\n"
+       "cp -R \"$origin/src/seon/test/.\" src/seon/test/\n"))
+
 (defn- launcher-checkout!
   "Give a launcher fixture its own cache authority as well as its own run roots."
-  [fixture-root]
+  ([fixture-root] (launcher-checkout! fixture-root project-root))
+  ([fixture-root origin]
   (let [checkout (io/file fixture-root "checkout")
         log (io/file fixture-root "checkout.log")
         script (str "set -euo pipefail\n"
@@ -1169,13 +1175,7 @@
                     "mkdir -p \"$checkout/docs\" \"$checkout/bin\" \"$checkout/src/seon/test\" \"$checkout/test\" \"$checkout/.agents/skills\" \"$checkout/.claude\" \"$checkout/.clj-kondo\"\n"
                     "cd \"$checkout\"\n"
                     "cp -R \"$origin/bin/.\" bin/\n"
-                    "cp \"$origin/src/seon/fs.clj\" src/seon/fs.clj\n"
-                    "cp \"$origin/src/seon/test/cache.clj\" src/seon/test/cache.clj\n"
-                    ;; `seon.test.cache` requires `seon.test.selection`; the
-                    ;; babashka base that loads it here has only what this
-                    ;; checkout carries, so a missing require is a launch
-                    ;; failure in every launcher fixture, not a slow path.
-                    "cp \"$origin/src/seon/test/selection.clj\" src/seon/test/selection.clj\n"
+                    launcher-source-copy
                     "printf '{:paths [\"src\"]}\\n' > bb.edn\n"
                     "printf 'tmp/\\ntarget/\\n' > .gitignore\n"
                     "touch docs/fixture test/fixture_test.clj .agents/skills/fixture .clj-kondo/fixture\n"
@@ -1187,7 +1187,7 @@
         _ (.mkdirs fixture-root)
         child (.start (doto (ProcessBuilder. ^java.util.List
                                              ["/bin/bash" "-c" script "launcher-checkout"
-                                              (.getPath project-root) (.getPath checkout)])
+                                              (.getPath origin) (.getPath checkout)])
                         (.redirectErrorStream true)
                         (.redirectOutput log)))]
     (try
@@ -1198,7 +1198,35 @@
         (throw (ex-info "Launcher fixture checkout failed."
                         {::runner/task-output (slurp log)})))
       checkout
-      (finally (stop-process-tree! child)))))
+      (finally (stop-process-tree! child))))))
+
+(deftest ^{:seon.test/platform "Launcher fixtures carry newly required test helpers."}
+  launcher-checkout-carries-new-cache-dependencies
+  (let [root (doto (io/file project-root "tmp" (str "launcher-dependencies-" (random-uuid))) .mkdirs)]
+    (try
+      (let [origin (launcher-checkout! (io/file root "origin"))
+            cache-file (io/file origin "src/seon/test/cache.clj")
+            dependency (io/file origin "src/seon/test/fixture_dependency.clj")
+            log (io/file root "require.log")]
+        (spit dependency "(ns seon.test.fixture-dependency)\n(def loaded :new-dependency-loaded)\n")
+        (spit cache-file
+              (str (slurp cache-file)
+                   "\n(require '[seon.test.fixture-dependency])\n"))
+        (let [checkout (launcher-checkout! (io/file root "consumer") origin)
+              child (.start
+                     (doto (ProcessBuilder.
+                            ^java.util.List
+                            ["bb" "-e"
+                             "(require 'seon.test.cache) (prn seon.test.fixture-dependency/loaded)"])
+                       (.directory checkout)
+                       (.redirectErrorStream true)
+                       (.redirectOutput log)))]
+          (try
+            (is (.waitFor child test-support/event-backstop-seconds TimeUnit/SECONDS))
+            (is (and (not (.isAlive child)) (zero? (.exitValue child))) (slurp log))
+            (is (str/includes? (slurp log) ":new-dependency-loaded"))
+            (finally (stop-process-tree! child)))))
+      (finally (test-support/delete-recursively! root)))))
 
 (deftest interrupted-launcher-awaits-its-runner-before-retaining-the-root
   (let [fixture-root
@@ -2168,12 +2196,7 @@
              "mkdir -p \"$fixture/bin\" \"$fixture/src/seon\" \"$fixture/test\" \"$fixture/.agents/skills\" \"$fixture/.claude\" \"$fixture/.clj-kondo\" \"$fixture/tmp/fake-bin\"\n"
              "cd \"$fixture\"\n"
              "cp -R \"$origin/bin/.\" bin/\n"
-             "cp \"$origin/src/seon/fs.clj\" src/seon/fs.clj\n"
-             "mkdir -p src/seon/test\n"
-             "cp \"$origin/src/seon/test/cache.clj\" src/seon/test/cache.clj\n"
-             ;; `seon.test.cache` requires `seon.test.selection`: a checkout
-             ;; without it fails the published-base child at load.
-             "cp \"$origin/src/seon/test/selection.clj\" src/seon/test/selection.clj\n"
+             launcher-source-copy
              "printf '{:paths [\"src\"]}\\n' > bb.edn\n"
              "printf 'tmp/\\ntarget/\\n' > .gitignore\n"
              "printf 'base\\n' > src/owned.txt\n"

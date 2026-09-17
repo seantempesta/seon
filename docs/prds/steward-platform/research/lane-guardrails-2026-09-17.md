@@ -313,3 +313,84 @@ Owned paths: `bin/_test-slot`, `bin/test`, `bin/test-fast`,
 `src/seon/test/runner.clj`, `test/seon/test/bounds_test.clj`,
 `test/seon/test/runner_test.clj`, AGENTS.md's new bound sentences, and
 this note. Items 3–4 remain pending at this review checkpoint.
+
+## Launcher fixture dependencies — 2026-09-17
+
+The integrated bounds change (`0db8b71bc`) exposed a fixture defect:
+`batch-117.log` and `batch-118.log` under `tmp/orchestrator/gate-results/`
+both report `Could not locate seon/test/bounds.bb, seon/test/bounds.clj or
+seon/test/bounds.cljc on classpath.` The two launcher checkout builders in
+`test/seon/test_runner_test.clj` copied a hand-maintained list that had
+already needed a patch for `selection.clj`.
+
+Both builders now use one copy step carrying the complete `src/seon/test`
+tree plus the launcher's `src/seon/fs.clj` entry point. Adding another
+helper under the test tree requires no fixture-list edit. The platform
+regression `launcher-checkout-carries-new-cache-dependencies` adds a new
+namespace and a cache require in a disposable source checkout, builds a
+second checkout through the actual helper, then requires `seon.test.cache`
+with real Babashka and observes the new dependency's value. It would fail
+even with today's `bounds.clj` added to the old list.
+
+The same namespace also injected a one-second timeout by redefining the
+old exchange default. Declared body plus priming bounds now take the
+maximum at task admission, so that fixture instead waited the real 290 s
+bound. Its injection now targets `task-exchange-bound-seconds`, retaining
+the real process/exchange and the same terminal-error assertions.
+
+Verification command (one foreground run, no environment overrides):
+
+```sh
+timeout 2400 bin/test-fast --paths test/seon/test_runner_test.clj -- seon.test-runner-test
+```
+
+The first run at HEAD `e1de7c75d` acquired a slot immediately and passed
+**48 tests / 312 assertions / 0 failures / 0 errors**, exit **0**, ending
+**2026-09-17T05:05:39.913119Z**. This includes the new dependency regression
+and all three launcher fixtures cited in batches 117–118. It also measured
+the stale timeout injection: **290 s** before the wanted terminal error.
+
+The final full-namespace rerun at HEAD `19251d646` waited **181 s** for a
+slot, passed the new dependency regression and the selected-path/cache
+fixtures again, then exited **124** at the **320 s** silence watchdog during
+the concurrent-gate fixture. It produced no final tally. This is the
+existing [silent concurrent-gate fixture issue](../../../seon/issues/a-test-that-drives-two-real-gates-reports-no-progress-to-the-silence-bound.md),
+not a reason to raise an environment bound. The watchdog began collecting
+its diagnostic before the fixture ended at `05:17:42.839969Z`; subsequent
+reporter progress appears in the dump while it was being collected.
+
+The final changed bodies were therefore run through this exact disposable
+entry point, saved as `tmp/lane_guardrails_fixture_probe.clj` and removed
+after verification (the source here preserves the probe):
+
+```clojure
+(ns tmp.lane-guardrails-fixture-probe
+  (:require [clojure.test :as test :refer [deftest]]
+            [seon.test-runner-test]))
+(deftest changed-launcher-fixtures
+  (doseq [test-var
+          [#'seon.test-runner-test/launcher-checkout-carries-new-cache-dependencies
+           #'seon.test-runner-test/live-worker-exceeding-its-bound-is-one-attributed-task-result]]
+    ((:test (meta test-var)))))
+```
+
+```sh
+timeout 2400 bin/test-fast --paths test/seon/test_runner_test.clj tmp/lane_guardrails_fixture_probe.clj -- tmp.lane-guardrails-fixture-probe
+```
+
+This uses the same armed fast runner and the unchanged owning test bodies.
+An initial wrapper using nested `test-vars` passed both children but was
+correctly refused as an assertionless outer test; the direct-body version
+above passed **1 test / 9 assertions / 0 failures / 0 errors**, exit **0**,
+at HEAD `b6562f1ce`, ending **2026-09-17T05:19:39.323123Z**. The timeout
+fixture announced **1 s** and completed its exchange in **1.004 s**.
+Owned-path `git diff --check` passed. The documentation hook reported 31
+repository-wide Markdown lint errors, including stale dependency gitlinks
+in the existing `agents-md-audit-2026-09-15.md`; no such pins were added here.
+All verification processes exited and their selected snapshots were removed.
+
+The selected snapshot excludes the foreign message/wake/turn/SCI edits
+reported by `git status`; AGENTS.md is foreign-held and untouched. Default
+PID 66052 was not operated. The edit hook queued publication; this is a
+fixture proof, not a claim of default adoption. Cold gate and platform
+integration remain the orchestrator's proof. Items 3–4 remain pending.
