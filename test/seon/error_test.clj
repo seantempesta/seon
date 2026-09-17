@@ -1136,19 +1136,20 @@
   (test-support/with-database
    (fn [connection]
      (let [projection (schema/projection-from-database (db/db connection))
-           forms (:seon.schema.projection/forms projection)
            base {:seon.error/at #inst "2026-09-18T00:00:00Z"
                  :seon.error/layer :seon.db/read :seon.error/operation 'seon.db/q}
-           facet-keys (into #{} (keep (fn [[k v]]
-                                       (when (and (vector? v) (not= k :seon.error/base)
-                                                  (schema.form/extends-schema? forms v :seon.error/base)) k))) forms)
-           matching (fn [value] (into #{} (filter #((schema/projection-validator projection %) value)) facet-keys))
+           matching (partial error/facets projection)
            read-error (gen/generate error/read-operation-agrees-generator 4 20260918)
            combined (assoc read-error :seon.agent/error-agent-id "manifest-agent"
                            :seon.turn/error-turn-id "manifest-turn")
            missing (dissoc combined :seon.agent/error-agent-id)]
        (is ((schema/projection-validator projection :seon.error/base) base))
        (is (= #{} (matching base)) "Valid base-only error: no domain facet matched.")
+       (is (= #{} (matching (dissoc combined :seon.error/operation)))
+           "A malformed base cannot satisfy a facet.")
+       (is (not ((matching combined) :seon.error/base)))
+       (is (identical? (error/facet-keys projection) (error/facet-keys projection))
+           "Only projection-derived population is memoised.")
        (is (every? (matching combined) [:seon.db.read/error :seon.turn/error :seon.agent/error]))
        (is (false? ((schema/projection-validator projection :seon.turn/error) missing)))
        (is (some #(= [:seon.agent/error-agent-id] (:in %))

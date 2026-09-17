@@ -553,6 +553,16 @@
   (find (get-in (contract-violation-data error-value) [:seon.error/problems 0])
         :seon.error/offending))
 
+(defn project-observation
+  "Project one observed value under the supplied admission caps."
+  {:malli/schema [:=> [:cat :seon.sci.admit/caps :seon.schema/value] :map]}
+  [caps value]
+  (let [admitted (bounded-admission value caps)]
+    {:seon.error/capped? (boolean (or (::marker admitted)
+                                    (:seon.sci.admit/capped? admitted)))
+     :seon.error.projection/bound-bytes (:seon.config.eval.result/max-bytes caps)
+     :seon.instrument/actual (:seon.sci.admit/edn admitted)}))
+
 (defn- admitted-size
   "One value's own size, measured by the same admission that stores it.
 
@@ -1470,6 +1480,8 @@
                                                 notification)))
    :seon.message/about (:seon.error/signature fact)})
 
+(declare facets facet-keys)
+
 (defn commit-call
   "Upsert one error occurrence and its bounded notifications at the writer."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.error/commit-tx-request]
@@ -1480,6 +1492,17 @@
         occurrence-id (:seon.error.occurrence/id request)
         occurrence-ref [:seon.error.occurrence/id occurrence-id]
         old (db/pull database '[*] occurrence-ref)
+        projection (schema/projection-from-database database)
+        forms (:seon.schema.projection/forms projection)
+        diagnostic-attributes
+        (schema/projection-cache-value
+         projection ::facet-attributes
+         #(into #{} (mapcat (fn [facet]
+                              (map first (schema.form/map-entries forms (get forms facet)))))
+                (conj (facet-keys projection) :seon.error/base)))
+        replacements (mapv (fn [attribute]
+                             [:db.fn/retractAttribute occurrence-ref attribute])
+                           (filter diagnostic-attributes (keys old)))
         at (:seon.error/at fact)
         process (:seon.error/process fact)
         agent-id (second (:seon.error/agent fact))
@@ -1506,6 +1529,15 @@
                                    :seon.instrument/actual-size])
         digest (:seon.error/data-blob fact)
         occurrence (cond-> (merge evidence
+                                 (let [source (:seon.error/source request)
+                                       base? (schema/projection-cache-value
+                                              projection ::base-validator
+                                              #(schema/projection-validator projection :seon.error/base))]
+                                   (when (and (map? source) (base? source))
+                                     (let [attributes (into #{}
+                                                            (mapcat #(map first (schema.form/map-entries forms (get forms %))))
+                                                            (conj (facets projection source) :seon.error/base))]
+                                       (select-keys source attributes))))
                                  {:seon.error.occurrence/id occurrence-id
                                   :seon.error.occurrence/count count
                                   :seon.error.occurrence/first-at (or (:seon.error.occurrence/first-at old) at)
@@ -1536,7 +1568,7 @@
                      (and recurring? escalate-to (not= escalate-to agent-id))
                      (assoc escalate-to :recurring)
                      (and steward-id (not silent?)) (assoc steward-id :recurring))]
-    (into (cond-> [{:seon.db.process/id process}]
+    (into (cond-> (into [{:seon.db.process/id process}] replacements)
             digest (conj {:seon.error.occurrence/blob-digest digest :seon.error/data-blob digest})
             (and (nil? digest) (:seon.error.occurrence/data-blob old))
             (conj [:db/retract occurrence-ref :seon.error.occurrence/data-blob
@@ -1657,6 +1689,46 @@
                      (true? (:seon.error/class
                              (class-properties forms schema-key)))))
            vec))))
+
+(defn facet-keys
+  "Canonical base-extension declarations in this projection, excluding aliases.
+  The immutable projection retains the derived population, never error values."
+  {:malli/schema [:=> [:cat :map] [:set :qualified-keyword]]}
+  [projection]
+  (schema/projection-cache-value
+   projection ::facet-keys
+   (fn []
+     (let [forms (:seon.schema.projection/forms projection)]
+       (into #{}
+             (keep (fn [[k definition]]
+                     (when (and (not= k :seon.error/base)
+                                (vector? definition)
+                                (= :and (first definition))
+                                (schema.form/extends-schema?
+                                 forms definition :seon.error/base))
+                       k)))
+             forms)))))
+
+(defn facets
+  "All canonical error facets satisfied by a complete value in projection.
+  Candidate membership never substitutes for predicate-bearing validation."
+  {:malli/schema [:=> [:cat :map :seon.schema/value] [:set :qualified-keyword]]}
+  [projection value]
+  (let [candidate-projection
+        (schema/projection-cache-value
+         projection ::facet-projection
+         (fn []
+           (let [allowed (facet-keys projection)]
+             (assoc projection
+                    :seon.schema.projection/shape-rows
+                    (select-keys (:seon.schema.projection/shape-rows projection) allowed)
+                    :seon.schema.projection/shape-index
+                    (into {} (map (fn [[attribute candidates]]
+                                    [attribute (filterv allowed candidates)]))
+                          (:seon.schema.projection/shape-index projection))))))]
+    (into #{}
+          (map :seon.schema/key)
+          (schema/matching-shapes-in candidate-projection value))))
 
 (defn error?
   "True when `value` matches at least one declared error-class schema.
