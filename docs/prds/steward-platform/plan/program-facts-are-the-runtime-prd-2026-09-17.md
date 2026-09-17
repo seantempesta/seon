@@ -463,6 +463,35 @@ facts executed by the running system (the in-process runner, resolution by
 identity, `run-owned`), with isolated snapshot workers reserved for the
 platform and destructive tier.
 
+### 1o. Owner rulings 2026-09-17 ~22:35Z — errors are entities; facets compose; data first, render for humans
+
+From the design dialogue in chat (the orchestrator's proposal: an error is an
+entity whose schema says what it is — a shared base plus per-domain schemas
+that require the domain's own facts; no kind attribute, no class marker, no
+boolean domain marker; "kinds are a code smell"):
+
+1. **Composition.** Facets compose: a read failure inside a turn satisfies
+   both the database-read schema and the turn schema, and renders the base
+   block plus one block per satisfied facet. No most-specific-wins dispatch.
+2. **Data first; humans get render functions.** The system consumes the DATA
+   version. The human version comes from the render pairs declared on the
+   base and on each facet schema — including Malli's own human-readable
+   explanation helpers (`malli.error`) for contract violations — not from a
+   required prose message carried on every value. Owner: "look into malli's
+   human readable functions … maybe we should use our render functions too".
+3. **Attachment (delegated to the orchestrator, decided):** the seam that
+   knows the turn and agent attaches them as members of the value (a value
+   carries its world); the recorder adds the refs that connect the stored
+   fault to its agent, turn, evaluation and cluster.
+4. **Every function that can return an error declares which** in its output
+   contract, so "which functions can return a database-read error" is a
+   program-graph query — the error facets a function can return become an
+   indexed program fact derived from the contract at analysis time.
+5. **This is big: the whole schema-modification plan and the wiring are to
+   be written down** before constructor changes (the design lane owns that
+   document; it supersedes the "kind" spellings of
+   `research/error-and-data-model-design-2026-09-17.md`).
+
 ## 2. What exists today, with the seams named
 
 Verified on `steward-platform` at `a36d55c3b`/`849bbce0b` on 2026-09-17.
