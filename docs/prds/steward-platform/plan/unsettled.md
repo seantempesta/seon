@@ -1827,6 +1827,14 @@ complete-publication cost (issue-index 13 s and friends), not the bound; the
 incremental base publication and the publication-cost issues are the fix.
 7/89 fast green; cold gate owed.
 
+**Tier 1 LANDED** (`5a5359205`, integrator): render-target and
+preparation-aware arity refusals in the final-report validator; the two
+accidental-refusal regressions; 165 tests then 24/632 path-isolated. Cold
+gate owed (batch 116). Integrator resumed on the edge retype with the three
+seal-triage items (eight sibling unsatisfiable-required schemas; the
+validator-on-the-writer-thread cost blocker — on the critical path since
+republish already runs at 173 s of 180; the sparse-upsert expectation).
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
