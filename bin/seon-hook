@@ -1623,6 +1623,142 @@
              " with seon.cluster.source/current. Result: " (source-result-path id))))))
 
 
+
+;;; ---------------------------------------------------------------------------
+;;; Writes no tool payload names
+;;; ---------------------------------------------------------------------------
+
+;; A tool whose payload names no file still writes files: `apply_patch` from
+;; a heredoc, `python`, `sed`, `cat >`. Those tools carry no path for the
+;; hook to check, so the changed files are DERIVED — every declared root is
+;; walked and each Clojure file's content digest compared with the digest
+;; recorded at this session's previous PostToolUse. Never a modification
+;; time: a write that restores an old mtime, or two writes inside one clock
+;; tick, are exactly the cases a digest still sees.
+;;
+;; Measured in this checkout, 2026-09-17: walking the five declared roots and
+;; digesting all 553 Clojure files (9 MB) is 112 ms, inside a 212 ms bb
+;; process. `git status --porcelain` — the cheaper-sounding option — is 2.7 s
+;; warm and 9.6 s cold here, because the working tree carries tmp/ run roots
+;; and the reference-code submodules. The complete scan is 25x cheaper than
+;; scoping by git status, so the scan is complete.
+
+(def ^:private session-digest-root (io/file review-state-root "session-digests"))
+(def ^:private session-digest-lifetime-ms (* 24 60 60 1000))
+
+(defn- content-digest
+  "The SHA-256 of a file's exact bytes."
+  [^java.io.File file]
+  (let [digest (java.security.MessageDigest/getInstance "SHA-256")]
+    (apply str (map #(format "%02x" %)
+                    (.digest digest
+                             (java.nio.file.Files/readAllBytes (.toPath file)))))))
+
+(defn- scan-roots [config]
+  (let [roots (get-in config [:shell-writes :roots])]
+    (when-not (and (vector? roots) (seq roots) (every? string? roots))
+      (throw (ex-info "Hook configuration requires shell-write scan roots."
+                      {:seon.hook/config-path [:shell-writes :roots]
+                       :seon.hook/config-file config-path
+                       :seon.hook/config-value roots})))
+    roots))
+
+(defn- tree-digests
+  "Every Clojure file under the declared roots, keyed by its repository path."
+  [config]
+  (into {}
+        (comp (mapcat #(file-seq (root-file %)))
+              (filter #(.isFile ^java.io.File %))
+              (map #(.getPath ^java.io.File %))
+              (filter clojure-file?)
+              (map (juxt display-path #(content-digest (io/file %)))))
+        (scan-roots config)))
+
+(defn- session-key
+  "A file-safe name for one session's recorded digests."
+  [session]
+  (let [allowed (set "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_")
+        text (apply str (filter allowed (str session)))]
+    (if (str/blank? text) "orchestrator" (subs text 0 (min 64 (count text))))))
+
+(defn- session-digest-path [session]
+  (io/file session-digest-root (str (session-key session) ".edn")))
+
+(defn- prune-session-digests! []
+  (doseq [^java.io.File file (or (.listFiles session-digest-root) [])]
+    (when (> (- (System/currentTimeMillis) (.lastModified file))
+             session-digest-lifetime-ms)
+      (.delete file))))
+
+(defn- recorded-digests [session]
+  (try
+    (let [file (session-digest-path session)]
+      (when (.isFile file)
+        (let [recorded (edn/read-string (slurp file))]
+          (when (map? recorded) recorded))))
+    (catch Exception _ nil)))
+
+(defn- record-digests! [session digests]
+  (let [file (session-digest-path session)]
+    (io/make-parents file)
+    (spit file (pr-str digests))
+    (prune-session-digests!)))
+
+(defn- record-edited-digests!
+  "Fold a payload-named edit into this session's digests, when it has some.
+
+  Without this the next derived scan would re-report files the hook already
+  checked at the edit itself."
+  [session file-paths]
+  (when-let [recorded (recorded-digests session)]
+    (record-digests!
+     session
+     (reduce (fn [digests path]
+               (let [file (io/file (or (absolute-file-path path) path))
+                     key (display-path path)]
+                 (if (and (clojure-file? path) (.isFile file))
+                   (assoc digests key (content-digest file))
+                   (dissoc digests key))))
+             recorded
+             file-paths))))
+
+(defn- derived-write-refusal
+  "Refuse when a tool that named no path left unreadable Clojure on disk.
+
+  The bytes are already written — a shell write has no payload to check
+  before it lands — so the refusal fires the moment the tool returns and
+  names the path and the tool that wrote it."
+  [event config]
+  (when (and (= "PostToolUse" (:hook_event_name event))
+             (get-in config [:shell-writes :enabled] true))
+    (let [session (or (:session_id event) "orchestrator")
+          previous (recorded-digests session)
+          digests (tree-digests config)
+          changed (when previous
+                    (vec (sort (keep (fn [[path digest]]
+                                       (when (not= digest (get previous path))
+                                         path))
+                                     digests))))]
+      (record-digests! session digests)
+      (when (seq changed)
+        (let [analysis (run-clj-kondo {:seon.hook/file-paths changed})
+              syntax-errors (filterv #(and (= :error (:level %))
+                                           (= :syntax (:type %)))
+                                     (:seon.hook.analysis/findings analysis))]
+          (log! "DERIVED_WRITE" (str "tool=" (:tool_name event))
+                (str "changed=" (pr-str changed)))
+          (cond
+            (analysis-error analysis)
+            (str "BLOCKED: " (:tool_name event) " changed "
+                 (count changed) " Clojure file(s) and the hook could not "
+                 "check them: " (analysis-error analysis))
+
+            (seq syntax-errors)
+            (str "BLOCKED: " (:tool_name event)
+                 " left unreadable Clojure on disk. The bytes are already "
+                 "written — repair them before anything else loads them:\n"
+                 (format-clj-kondo-findings syntax-errors))))))))
+
 (defn- feedback-response
   "One PostToolUse response: advisory context, and a refusal when one stands.
 
@@ -1677,9 +1813,30 @@
       (output! {:decision "block"
                 :reason "BLOCKED: one edit cannot mix Seon files with paths outside this checkout."})
 
+      ;; a tool whose payload names no path can still have written one:
+      ;; derive the change from the tree instead of reading "no path named"
+      ;; as "nothing was written"
+      (not local-edit?)
+      (try
+        (let [config (load-config)
+              refusal (when (#{"PreToolUse" "PostToolUse"} event-name)
+                        (derived-write-refusal event config))]
+          (if refusal
+            (do (log! "DERIVED_BLOCK" (str "tool=" tool-name) refusal)
+                (output! {:decision "block" :reason refusal}))
+            (output! {:continue true})))
+        ;; a derived scan that throws has checked nothing; saying so is the
+        ;; only honest answer, because silence here is what let a shell write
+        ;; break the tree in the first place
+        (catch Exception e
+          (let [message (throwable-message e)]
+            (log! "DERIVED_SCAN_FAILED" (str "tool=" tool-name) message)
+            (output!
+             {:decision "block"
+              :reason (str "BLOCKED: the hook could not tell whether this "
+                           tool-name " wrote Clojure source: " message)}))))
+
       :else
-      (if-not local-edit?
-      (output! {:continue true})
       (try
         (let [config (load-config)]
           (log! event-name
@@ -1721,6 +1878,8 @@
                     (conj (current-source-feedback event config)))
                   feedback (vec feedback)
                   refusal (:seon.hook.lint/refusal lint)]
+              (record-edited-digests! (or (:session_id event) "orchestrator")
+                                      file-paths)
               (when-not (str/blank? refusal) (log! "CLOJURE_REFUSAL" refusal))
               (output! (feedback-response feedback refusal)))))
         (catch Exception e
@@ -1733,7 +1892,7 @@
             (log! "ERROR" message (str/replace stack "\n" " | "))
             (binding [*out* *err*]
               (println "HOOK ERROR:" message))
-            (output! {:continue true}))))))))
+            (output! {:continue true})))))))
 
 (cond
   (= "--source-worker" (first *command-line-args*)) (run-source-worker!)

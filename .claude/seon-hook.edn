@@ -22,6 +22,18 @@
  :docstring-lint
  {:enabled true}
 
+ ;; Writes no tool payload names. A shell tool — `apply_patch` from a
+ ;; heredoc, `python`, `sed`, `cat >` — hands the hook no path, so the
+ ;; changed files are derived: every root below is walked after the tool
+ ;; returns and each Clojure file's content digest is compared with the
+ ;; digest recorded at this session's previous event. A syntax error left
+ ;; on disk blocks immediately, naming the path and the tool. Measured
+ ;; 2026-09-17: the complete walk plus digests is 112 ms over 553 files,
+ ;; where scoping by `git status --porcelain` would cost 2.7 s warm.
+ :shell-writes
+ {:enabled true
+  :roots ["src" "test" "resources" "script" "bin"]}
+
  ;; THE DEFAULT CLUSTER IS THE DEVELOPMENT ENVIRONMENT (owner, 2026-09-08):
  ;; the main operator root, cluster `default`. Every admitted edit publishes
  ;; to current-src and `default` adopts it in place. No side root, no

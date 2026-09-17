@@ -2,7 +2,7 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "^(apply_patch|Edit|Write)$",
+        "matcher": ".*",
         "hooks": [
           {
             "type": "command",
@@ -13,7 +13,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "^(apply_patch|Edit|Write)$",
+        "matcher": ".*",
         "hooks": [
           {
             "type": "command",

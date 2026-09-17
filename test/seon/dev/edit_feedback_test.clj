@@ -622,3 +622,86 @@
     (is (= "block" (:decision response))
         "An edit naming no path is an edit the hook cannot check.")
     (is (str/includes? (:reason response) "no file path"))))
+
+;;; A tool whose payload names no path — codex's `exec` running `apply_patch`
+;;; from a heredoc, `sed`, `python`, `cat >` — writes files the hook is never
+;;; handed. These regressions drive the real hook against real shell writes.
+
+(defn- shell-write-config
+  "A hook config whose derived scan is scoped to one fixture root."
+  [root]
+  (str "{:seon.config/on-core-error :log\n"
+       " :lint {:enabled true}\n"
+       " :markdown-lint {:enabled false}\n"
+       " :docstring-lint {:enabled false}\n"
+       " :current-source {:enabled false}\n"
+       " :changed-tests {:enabled false}\n"
+       " :review {:enabled false}\n"
+       " :feedback {:max-tokens 10000}\n"
+       " :shell-writes {:enabled true :roots [" (pr-str root) "]}}\n"))
+
+(deftest a-shell-write-the-hook-was-never-handed-is-derived-and-refused
+  (let [directory (fixture-directory)
+        root (str "tmp/" (.getName directory))
+        config (io/file directory "hook.edn")
+        state (doto (io/file directory "state") .mkdirs)
+        source (io/file directory "probe.clj")
+        shell (fn [command]
+                (run-process {::command ["/bin/sh" "-c" command]
+                              ::directory repo-root}))
+        event (fn [command]
+                (let [result
+                      (run-process
+                       {::command [(str (io/file repo-root "bin/seon-hook"))]
+                        ::directory repo-root
+                        ::environment {"SEON_HOOK_CONFIG" (str config)
+                                       "SEON_HOOK_STATE_DIR" (str state)}
+                        ::input
+                        (json/generate-string
+                         {:hook_event_name "PostToolUse"
+                          :tool_name "exec"
+                          :session_id "shell-write-regression"
+                          :tool_input {:command command}})})]
+                  (is (zero? (::exit result)) (::stderr result))
+                  (json/parse-string (str/trim (::stdout result)) true)))]
+    (try
+      (spit config (shell-write-config root))
+      (spit source "(ns probe)\n(def value 1)\n")
+      (testing "the session's first event records the digests it will compare"
+        (is (true? (:continue (event "ls")))))
+      (testing "a heredoc patch through a payload-less tool is derived"
+        ;; codex ordinal 947 in shape: the apply_patch CLI reading its patch
+        ;; from a heredoc inside the shell tool. The gate has no apply_patch
+        ;; binary, so the shell writes the same resulting bytes directly.
+        (let [command (str "cat > " (.getPath source) " <<'PATCH'\n"
+                           "(ns probe)\n(def value (inc 1)\nPATCH")]
+          (is (zero? (::exit (shell command))))
+          (let [response (event command)]
+            (is (= "block" (:decision response))
+                "A write the hook was never handed is still the hook's problem.")
+            (is (str/includes? (:reason response) root)
+                "The refusal names the path that is broken.")
+            (is (str/includes? (:reason response) "exec")
+                "The refusal names the tool that wrote it.")
+            (is (str/includes? (:reason response) "[error/syntax]")))))
+      (testing "a shell sed that breaks a form is refused the same way"
+        (spit source "(ns probe)\n(def value 1)\n")
+        (is (true? (:continue (event "repair"))))
+        (let [command (str "sed -i '' 's/(def value 1)/(def value (inc 1)/' "
+                           (.getPath source))]
+          (is (zero? (::exit (shell command))))
+          (let [response (event command)]
+            (is (= "block" (:decision response)))
+            (is (str/includes? (:reason response) "[error/syntax]")))))
+      (testing "a command that touches no Clojure file costs only the scan"
+        (spit source "(ns probe)\n(def value 1)\n")
+        (is (true? (:continue (event "repair"))))
+        (let [started (System/nanoTime)
+              response (event "echo nothing-to-see")
+              elapsed-ms (quot (- (System/nanoTime) started) 1000000)]
+          (is (true? (:continue response)))
+          (is (nil? (:decision response)))
+          (is (< elapsed-ms 3000)
+              (str "One derived scan must stay well inside a second of work; "
+                   "measured " elapsed-ms " ms including process startup."))))
+      (finally (test-support/delete-recursively! directory)))))
