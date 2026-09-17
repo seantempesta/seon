@@ -621,15 +621,6 @@
     (symbol? value) (framed "y" (str value))
     (string? value) (framed "s" value)
     (number? value) (framed "d" (str value))
-    ; EDN literals `seon.db/stable-value` admits as stable read data
-    ; (`src/seon/db.clj:422-424`). Rejecting them made every read result
-    ; carrying a `:db/instant` or a commit id undigestable, so the agent
-    ; history's retained read could never prove itself current and ANY
-    ; commit re-walked it (2026-09-16). Their tags are new, so no
-    ; fingerprint that encoded before this change encodes differently.
-    (inst? value) (framed "i" (str (inst-ms value)))
-    (uuid? value) (framed "u" (str value))
-    (char? value) (framed "c" (str value))
     (vector? value) (canonical-coll-string "v" value)
     (set? value) (canonical-coll-string
                    "t" (sort (map canonical-value-string value)))
@@ -641,6 +632,18 @@
                         (canonical-value-string v)))
                  value)))
     (sequential? value) (canonical-coll-string "q" value)
+    ; EDN literals `seon.db/stable-value` admits as stable read data
+    ; (`src/seon/db.clj:422-424`). Rejecting them made every read result
+    ; carrying a `:db/instant` or a commit id undigestable, so the agent
+    ; history's retained read could never prove itself current and ANY
+    ; commit re-walked it (2026-09-16). Their tags are new, so no
+    ; fingerprint that encoded before this change encodes differently.
+    (instance? java.util.Date value)
+    (framed "i" (str (.getTime ^java.util.Date value)))
+    (instance? java.time.Instant value)
+    (framed "i" (str (.toEpochMilli ^java.time.Instant value)))
+    (uuid? value) (framed "u" (str value))
+    (char? value) (framed "c" (str value))
     :else
     (throw (ex-info "Schema projection fingerprint contains non-EDN data."
                     {:seon.schema/error

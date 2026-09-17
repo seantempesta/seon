@@ -2,7 +2,9 @@
   "Regression proofs for the canonical schema registration boundary."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
+            [clojure.test.check.properties :as prop]
             [clojure.walk :as walk]
             [datahike.api :as d]
             [malli.core :as m]
@@ -17,6 +19,92 @@
             [seon.schema.form :as schema.form]
             [seon.schema.internal :as schema.internal]
             [seon.test-support :as test-support]))
+
+(defn- legacy-canonical-data-string
+  [value]
+  (letfn [(framed [tag payload]
+            (str tag (count payload) ":" payload))
+          (canonical-coll [tag values]
+            (framed tag (apply str (map encode values))))
+          (encode [value]
+            (cond
+              (nil? value) "n"
+              (true? value) "b1"
+              (false? value) "b0"
+              (keyword? value) (framed "k" (str value))
+              (symbol? value) (framed "y" (str value))
+              (string? value) (framed "s" value)
+              (number? value) (framed "d" (str value))
+              (inst? value) (framed "i" (str (inst-ms value)))
+              (uuid? value) (framed "u" (str value))
+              (char? value) (framed "c" (str value))
+              (vector? value) (canonical-coll "v" value)
+              (set? value) (canonical-coll "t" (sort (map encode value)))
+              (map? value)
+              (canonical-coll "m"
+                              (sort (map (fn [[k v]]
+                                           (str (encode k) (encode v)))
+                                         value)))
+              (sequential? value) (canonical-coll "q" value)
+              :else (throw (ex-info "Legacy encoder received non-EDN data."
+                                    {:value value}))))]
+    (encode value)))
+
+(def ^:private canonical-scalar-generator
+  (gen/one-of
+   [(gen/return nil)
+    gen/boolean
+    gen/small-integer
+    gen/ratio
+    gen/string-alphanumeric
+    gen/keyword
+    gen/symbol
+    gen/char
+    (gen/fmap #(java.util.Date. (long %)) gen/small-integer)
+    (gen/fmap #(java.time.Instant/ofEpochMilli (long %)) gen/small-integer)
+    (gen/fmap #(java.util.UUID/nameUUIDFromBytes (.getBytes ^String % "UTF-8"))
+              gen/string-alphanumeric)]))
+
+(def ^:private canonical-value-generator
+  (gen/recursive-gen
+   (fn [child]
+     (gen/one-of
+      [(gen/vector child 0 8)
+       (gen/fmap #(apply list %) (gen/vector child 0 8))
+       (gen/set child {:max-elements 8})
+       (gen/map child child {:max-elements 5})]))
+   canonical-scalar-generator))
+
+(deftest canonical-encoding-remains-byte-identical-after-dispatch-reorder
+  (test-support/assert-check!
+   (tc/quick-check
+    500
+    (prop/for-all [value canonical-value-generator]
+      (= (legacy-canonical-data-string value)
+         (schema/canonical-data-string value)))
+    :seed 2026091706)
+   "Canonical projection encoding changed bytes:"))
+
+(deftest full-projection-fingerprint-dispatch-timing
+  (test-support/with-database
+    (fn [connection]
+      (let [projection (schema/projection-from-database (seon.db/db connection))
+            fingerprint
+            (ns-resolve 'seon.schema 'projection-fingerprint-from-data)
+            canonical-var (ns-resolve 'seon.schema 'canonical-data-string)
+            before-start (System/nanoTime)
+            before (with-redefs-fn {canonical-var legacy-canonical-data-string}
+                     #(fingerprint projection))
+            before-ms (/ (- (System/nanoTime) before-start) 1e6)
+            after-start (System/nanoTime)
+            after (fingerprint projection)
+            after-ms (/ (- (System/nanoTime) after-start) 1e6)]
+        (is (= before after) "the full projection fingerprint stays identical")
+        (println "full-projection-fingerprint-dispatch-ms"
+                 {:before before-ms :after after-ms
+                  :schemas (count (:seon.schema.projection/forms projection))
+                  :contracts
+                  (count (:seon.schema.projection/function-contracts projection))})))))
 
 (defn- reference-entry?
   [projection entry]
