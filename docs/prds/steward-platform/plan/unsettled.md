@@ -1713,6 +1713,16 @@ restarted with immediacy as requirement one (dead lock holder reclaimed at
 once; tree load probe in seconds before any destructive step; each phase
 fails the moment it fails, non-zero, named).
 
+**RESET DONE (~01:50Z, log `tmp/orchestrator/refork/reset-2026-09-17T0135Z.log`):**
+store 4.6 GB → 104 MB destroyed and regenerated; current-src republished
+`6aab3ac3`; default reforked, started pid 33583 (web 7994, prepl 62890),
+`init --dev` converged; store 180 MB after adoption; Juniper reseed issued
+via MCP future. Relaunched: codex `reset-batch-integration`,
+`repl-program-operations`, `acquisition-by-provenance-s3` (resume); Opus
+continuations no-default-cluster, fault-path, bin/test bounds, seal triage
+(resumed from their transcripts). Running fix lanes: `reset-is-total`
+(astra), hook path-resolution (Opus).
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
