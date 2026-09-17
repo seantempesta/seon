@@ -82,3 +82,35 @@ Found while fixing the source seal refusal
 `src/seon/db.clj` is held by the codex integrator, so that lane wrote the
 evidence and stopped rather than editing it. `seon.cluster.source-test` cannot
 reach a green tally until this is resolved.
+
+## Integrator measurement and candidate, 2026-09-17
+
+The original captured stack locates work on the writer; it does not establish
+that the entire publication elapsed time is spent there. An armed baseline
+at `defd915cd` passed the complete source namespace (17 tests, 149 assertions);
+the named regression took 260,583 ms including its initial canonical fixture.
+JDK execution sampling also found substantial schema serialization and
+repeated identity sort-key printing. Of 24,168 execution samples, 3,972 retained
+the final-report validator in their stack; 3,021 had the identity-sort
+comparator as their first Seon frame. These are sample counts, not durations.
+
+The selected local candidate retains final-report authority and every attempted
+and affected entity. It compiles/reuses attribute member validation, codec
+selection and collection normalization on the carried projection plus installed
+schema, including Datahike's implicit schema. It also computes program identity
+sort strings once. Existing per-schema Malli validators were already cached;
+that cache by itself was not the missing optimization. Off-writer prevalidation
+cannot decide expanded/swept results against a potentially newer branch basis.
+
+Measurement method, exact path snapshots, decisions and final results belong in
+[the reset writer-cost landing note](../../prds/context-generation/research/reset-writer-cost-2026-09-17.md).
+The measured candidate reduces fresh-store complete publication with a prebuilt
+canonical manifest from **75,941.046542 ms to 41,644.180417 ms** (45.16%).
+Function/source namespaces passed; the corrected database/schema rerun passed
+75 tests / 1,007 assertions. The landing note separates the one stale fixture
+failure from the corrected green proof. No timeout was increased.
+
+Keep this issue open for the orchestrator's cold/reset-boundary confirmation:
+the measurement is not `bin/seon reset` wall time, and the algorithm still has
+cost proportional to admitted datoms. This change neither introduces an
+arbitrary-transaction latency guarantee nor moves validation off the writer.

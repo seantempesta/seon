@@ -70,3 +70,15 @@ are held by the codex integrator.
 
 `complete-program-publication-is-refused-on-a-cardinality-many-set` is the other
 half of the same attribute-versus-member confusion, from the per-member side.
+
+## Reset integration, 2026-09-17
+
+The reset integrator folded the remaining 19 keys into the existing per-resource
+tables in [the single reset batch](../../prds/steward-platform/plan/reset-batch-2026-09-17.md):
+cluster, function arity, maintenance result, and test adoption. This is planning,
+not a claim those schema edits have landed. Each collection keeps its member
+contract and becomes optional in storage; an independently required producing
+fact owns the completed-empty distinction. Adoption already writes its required
+`adoption-cluster` ref on `:db/current-tx` only after successful adoption, so that
+family needs no extra marker. No generic required-collection exception is added
+to the database validator.

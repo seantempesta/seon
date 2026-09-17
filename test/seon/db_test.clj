@@ -1204,7 +1204,7 @@
    (fn [connection]
      (binding [db/*conn* connection]
        (let [basis (db/basis-t @connection)
-             identity-refusal (db/diff basis #'config/effective)
+             identity-refusal (db/diff basis #'config/effective "default")
              database-refusal (db/diff basis #'db/render-diff-ai {})
              impurity-refusal (db/diff basis #'render/render-ai {})]
          (doseq [refusal [identity-refusal database-refusal
@@ -1579,6 +1579,19 @@
                         :seon.schedule/zone-id "UTC"]])]
          (is (= :seon.db/invalid-write (:seon.error/kind refusal)))
          (is (= basis (:max-tx (db/db connection)))))
+       (let [basis (db/basis-t (db/db connection))
+             refusal (db/transact!
+                      connection
+                      [[:db.fn/call
+                        (fn [_]
+                          [[:db/add [:seon.schedule/id "f2-existing"]
+                            :seon.schedule/zone-id ""]
+                           [:db/add [:seon.schedule/id "f2-existing"]
+                            :seon.schedule/zone-id "UTC"]])]])]
+         (is (= :seon.db/invalid-write (:seon.error/kind refusal))
+             "expanded invalid assertions refuse even when a later operation repairs the row")
+         (is (= :seon.schedule/zone-id (:seon.db/attribute refusal)))
+         (is (= basis (db/basis-t (db/db connection))) "the expanded transaction is atomic"))
        (let [calls (atom 0)]
          (test-support/transacted!
           connection

@@ -67,3 +67,15 @@ the fixture cluster through direct check requests in
 must assert an omitted cluster yields a typed refusal naming `seon.test/check`
 and leaves the database basis unchanged; a non-default cluster must retain
 its name in the deferred command.
+
+## Related negative-fixture correction, 2026-09-17
+
+The reset writer-cost gate at `defd915cd` exposed one stale caller in
+`seon.db-test/diff-refuses-missing-identity-and-external-sinks`. After
+`cdfc01058`, `config/effective` requires a named cluster; `(db/diff basis
+#'config/effective)` therefore refuses `call-shape-absent` before reaching
+the test's intended `row-identity-absent` check. The fixture now supplies
+its explicit `"default"` cluster argument. This does not restore a production
+default or change the expected diagnostic. Verification is recorded in the
+[writer-cost landing note](../../prds/context-generation/research/reset-writer-cost-2026-09-17.md).
+The separate test/check supplier work above remains open.

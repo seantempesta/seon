@@ -2912,13 +2912,37 @@
                                   (nth entry 3 nil) [index 3] nil true))))
    (map-indexed vector (if (map? transaction) (:tx-data transaction) transaction))))
 
+(defn- write-attribute-plan
+  "Compile final-datom validation and collection normalization on the projection.
+   Datahike has already resolved refs; diagnostics still use the submission owner."
+  [projection attribute many?]
+  (schema/projection-cache-value
+   projection [::write-attribute-plan attribute many?]
+   (fn []
+     (let [authored (get (:seon.schema.projection/forms projection) attribute)
+           form (when authored
+                  (schema.datahike/resolve-datahike-form-in projection attribute))
+           decode (if (and authored (schema.datahike/edn-encoded-attr-in? projection attribute))
+                    #(schema.datahike/decode-attribute-value-in projection attribute %)
+                    identity)]
+       {::decode decode
+        ::normalize-many (if (= :set (schema.datahike/form-head form)) set vec)
+        ::validate (when authored
+                     (write-validator projection
+                                      (if many?
+                                        (first (schema.datahike/form-children form))
+                                        attribute)))}))))
+
 (defn- write-entity-value
   "Read a resulting entity as logical values without expanding reference graphs."
-  [database projection entity-id]
+  [database projection attribute-plans entity-id]
   (reduce
    (fn [row datom]
      (let [attribute (:a datom)
-           value (schema.datahike/decode-attribute-value-in projection attribute (:v datom))]
+           plan (or (get attribute-plans attribute)
+                    (write-attribute-plan projection attribute
+                                          (db.utils/multival? database attribute)))
+           value ((::decode plan) (:v datom))]
        (if (db.utils/multival? database attribute)
          (update row attribute (fnil conj #{}) value)
          (assoc row attribute value))))
@@ -2961,7 +2985,7 @@
 
 (defn- write-entity-error
   "Validate the whole resulting entity, including identities present before a retraction."
-  [database projection entity-id identities row before]
+  [database projection attribute-plans entity-id identities row before]
   (when (seq row)
     (let [forms (:seon.schema.projection/forms projection)
           schemas (write-entity-schemas projection)
@@ -2971,11 +2995,7 @@
                                          ;; Final EAVT values are already resolved. A many-value
                                          ;; collection here cannot be submission lookup-ref syntax.
                                          (if (db.utils/multival? database attribute)
-                                           (case (schema.datahike/form-head
-                                                  (schema.datahike/resolve-datahike-form-in
-                                                   projection attribute))
-                                             :set (set value)
-                                             (vec value))
+                                           ((::normalize-many (get attribute-plans attribute)) value)
                                            value)))
                                 {} row)]
       (some
@@ -3139,30 +3159,44 @@
         attempted (:datahike/attempted-tx-data report)
         affected (distinct (map :e (concat attempted (:tx-data report))))
         identity-attrs (set/union (set (identity-attributes before))
-                                  (set (identity-attributes database)))]
+                                  (set (identity-attributes database)))
+        attribute-plans (schema/projection-cache-value
+                         projection [::write-attribute-plans (dbi/-schema database)]
+                         #(into {}
+                                (map (fn [[attribute installed]]
+                                       [attribute (write-attribute-plan
+                                                   projection attribute
+                                                   (= :db.cardinality/many
+                                                      (:db/cardinality installed)))]))
+                                (merge datahike.schema/implicit-schema-spec
+                                       (dbi/-schema database))))]
     (or
      (some (fn [datom]
              (when (:added datom)
                (let [attribute (:a datom)
-                     value (schema.datahike/decode-attribute-value-in
-                            projection attribute (:v datom))]
-                 (when-let [failure (write-attribute-error
-                                     database projection attribute value
-                                     [(:e datom) attribute] nil true)]
-                   (write-error-identity
-                    failure
-                    (select-keys (write-entity-value database projection (:e datom))
-                                 identity-attrs))))))
+                     plan (get attribute-plans attribute)
+                     value ((or (::decode plan) identity) (:v datom))
+                     validate (::validate plan)]
+                 (when (or (not (or (get (dbi/-schema database) attribute)
+                                    (contains? datahike.schema/schema-keys attribute)))
+                           (nil? plan) (and validate (not (validate value))))
+                   (when-let [failure (write-attribute-error
+                                       database projection attribute value
+                                       [(:e datom) attribute] nil true)]
+                     (write-error-identity
+                      failure
+                      (select-keys (write-entity-value database projection attribute-plans (:e datom))
+                                   identity-attrs)))))))
            attempted)
      (some (fn [entity-id]
-             (let [row (write-entity-value database projection entity-id)
+             (let [row (write-entity-value database projection attribute-plans entity-id)
                    prior-identities (into {}
                                           (keep (fn [datom]
                                                   (when (identity-attrs (:a datom))
                                                     [(:a datom) (:v datom)])))
                                           (d/datoms before :eavt entity-id))
                    identities (merge prior-identities (select-keys row identity-attrs))]
-               (write-entity-error database projection entity-id identities row before)))
+               (write-entity-error database projection attribute-plans entity-id identities row before)))
            affected)
      (when (some (comp #{:seon.schema/form :seon.schema/key :seon.fn/sym} :a)
                  (concat attempted (:tx-data report)))

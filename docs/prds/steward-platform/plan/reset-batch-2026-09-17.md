@@ -129,7 +129,7 @@ grammar, retaining row admission and reference-target checks; it no longer
 claims a stored schema validates a wildcard pull. The focused schema rerun passed 24 tests / 632 assertions, zero failures
 and errors, with unchanged production bytes. Group 1's derived reader contracts remain incomplete and the
 [existing issue](../../../seon/issues/wildcard-pulled-collections-do-not-satisfy-entity-set-contracts.md)
-stays open. This is the first coherent landed seam; stop here for review.
+stays open. This checkpoint was reviewed and accepted at `5a5359205`; the resumed edge batch and its writer-cost prerequisite are recorded below.
 Tier 1 needs no reset; the edge retype still does. The current
 [implementation note](../../context-generation/research/reset-tier1-prepared-admission-2026-09-17.md)
 records the exact test boundary and live observation.
@@ -240,7 +240,7 @@ not permission to reset or to weaken contracts.
 | Order / group | Atomic contents and dependency | Ownership at assignment |
 |---|---|---|
 | 0 — landed prerequisite | Platform declaration, fixture exclusion and runner partition. Preserve these while changing program identity/result schemas. | **Landed** `f54771e84` (test schema/program), `8d4b3689f` (runner/gates); inspected commit stats. No reimplementation. |
-| 1 — writer and declaration foundation | Q1 program value-edge check (authorized, combined with group 2 retype), complete G5 parent validation, canonical stored/selector-derived forms, plain digest format. Constructors of newly checked components travel here. No deletion enabled before this unit accepts valid writes and rejects invalid native/expanded writes. | **Integrator owns G5 groundwork** unless E reports otherwise; bridge/schema overlaps remain held. **Authorized:** Q1 program deletion refusal; no universal ref rule. Derived forms/digest are authorized only on released files; source digest is currently modified. |
+| 1 — writer and declaration foundation | First remove measured publication overhead while retaining final-report authority: reuse attribute validation/codec/normalization plans and format index identity sort keys once; prove complete publication timing and incomplete-create refusal. Then Q1 program value-edge check (authorized, combined with group 2 retype), complete G5 parent validation, canonical stored/selector-derived forms, plain digest format. Constructors of newly checked components travel here. No deletion enabled before this unit accepts valid writes and rejects invalid native/expanded writes. | **Integrator owns G5 groundwork** unless E reports otherwise; bridge/schema overlaps remain held. **Authorized:** Q1 program deletion refusal; no universal ref rule. Derived forms/digest are authorized only on released files; source digest is currently modified. |
 | 2 — program names and provenance | All symbol identities and aliases, indexed calls/references/reach/writes/schema references/arity references, source digest and required derivables, full constructors, every graph reader and emitted form. Subject and capability changes extend E. Name-valued schedule/citation readers that join program identities travel in this same publication. Includes canonical fixtures. | **Integrator now owns the released fn/program/db and schema seam.** Held source/selection/SCI consumers must land or be released in the same coherent unit. **No-default-cluster lane owns config/schedule/sci-eval edits.** R extensions are **unowned**, to integrate only after owner release; never assume its schedule work already implements N9. |
 | 3 — entity deletion | Reconcile and ns-unmap/schema removal use retractEntity; delete tombstone fallback/minting/pending resolution after groups 1–2; preserve test result evidence as values; deleted result subject refuses. Issue deletion keeps existing retention rules. | **Integrator owns released deletion/refusal work.** Held source/SCI publication seams remain boundaries; no tombstone removal before their value consumers land. |
 | 4 — lifecycle and names beyond graph | Evaluation consolidation/read observation; test result/run/failure derivation; error signature/occurrence cleanup; typed issue citations/status transitions; listeners excluded by current assignment; agent/plan/import required constructors. Requires 1–2 and coherent ownership release. | **Unowned**, with held `sci/eval`, schedule/config, runner and turn seams coordinated through the orchestrator. |
@@ -299,6 +299,7 @@ removing keys superseded by these decisions.
 
 | Group | Edit | Source finding | Kind | Writers in the same publication | Readers in the same publication | Regression that proves it |
 |---|---|---|---|---|---|---|
+| 4 | G4 correction: make cluster instructions/toolkit collection entries optional in the stored cluster map. Preserve required cluster/config identity as construction provenance; an authored empty collection stores no datom. Do not infer configuration acquisition from member presence. | required-many blocker (seal triage 543f03258); P G4 | required | cluster constructors and config acquisition | cluster readers normalize absent members only from acquired config provenance | canonical cluster with empty instructions/toolkit admits; incomplete cluster without required config refuses |
 | 1 | Retain canonical required entries; add explicit component/empty-collection and per-family deletion-behavior docstrings where applicable. No identity invented for observation maps. Validate actual constructor result through the canonical parent/selector; absence is not evidence of coverage. | A seon.cluster reset row; P G5 | add | `seon.cluster/ensure-cluster-entity!` (`src/seon/cluster.clj:2492`) | seon.operator and cluster custody/acquisition | seon.db-test: actual canonical constructor accepted, malformed required value refused; child-only update checks owning root |
 | 1 | Audit actual storable refs by their writer: components cascade; required refs refuse through existing whole-entity validation; optional refs may deliberately sweep. Historical tokens become identity values. Document the chosen behavior; no universal enforcement or fork extension (K/X). | R C.1; Q1 | add | `seon.cluster/ensure-cluster-entity!` (`src/seon/cluster.clj:2492`) | seon.operator and cluster custody/acquisition | seon.db-test: installed-ref census distinguishes stored refs from API forms; required-ref sweep refuses, optional sweep remains intentional, components validate with parent |
 
@@ -424,6 +425,7 @@ removing keys superseded by these decisions.
 
 | Group | Edit | Source finding | Kind | Writers in the same publication | Readers in the same publication | Regression that proves it |
 |---|---|---|---|---|---|---|
+| 2 | G4 correction: arguments is optional in the stored arity row; zero arguments emits no member datom. Keep required argument-count/min plus the parent definition analyzed-source-digest as positive construction evidence; validate the component with its parent. | required-many blocker; P G4/G5 | required | seon.program/arity-row and all declaration constructors | call-preparation and arity reports | zero-argument declaration round-trips; missing required count/provenance refuses, not silently empty |
 | 2 | input-refs/output-refs/guard-refs become indexed qualified-keyword sets; arity becomes nonnegative integer or :varargs, not printed EDN. Declare arguments child schema for G5; zero arguments valid under parent provenance. | A arity; R N4/N30; E §4 | retype; add | seon.program/arity-row, schema-references | seon.fn reach/arity reports; seon.call-preparation; schema/accretion queries | seon.program-test: fixed/variadic/zero arities round-trip; schema deletion preserves reference keyword; malformed argument refuses at parent path |
 | 4 | Add absence-condition docstrings for surviving optional entries: `:seon.fn.arity/guard`, `:seon.fn.arity/guard-refs`, `:seon.fn.arity/guard-schema`, `:seon.fn.arity/input-refs`, `:seon.fn.arity/max`, `:seon.fn.arity/output-refs`. Keep optionality unless the specific required/transition row above changes it; for renamed entries apply the condition to the replacement. | A seon.fn.arity reset row | add | `seon.program/arity-row` (`src/seon/program.cljc:683`) | seon.fn reach/arity reports; seon.call-preparation; schema/accretion queries | seon.program-test: fixed/variadic/zero arities round-trip; schema deletion preserves reference keyword; malformed argument refuses at parent path |
 
@@ -479,6 +481,7 @@ removing keys superseded by these decisions.
 
 | Group | Edit | Source finding | Kind | Writers in the same publication | Readers in the same publication | Regression that proves it |
 |---|---|---|---|---|---|---|
+| 2 | G4 correction: adoption-identities/adoption-inputs are optional stored collections on adoption. Keep required adoption-cluster on the producing `:db/current-tx` entity as the positive completion fact: cluster/adopt records it only after indexing, reload, SCI acquisition and arming succeed. No new marker is needed; interpret absent members as empty only when that transaction fact exists. | required-many blocker; P G4 | required | cluster adoption constructor and publication verification | adoption readers and tests | successful adoption with empty members is present via provenance; absent provenance is incomplete and refuses a success claim |
 | 2 | sym qualified-symbol; reach indexed qualified-symbol set; subject qualified-symbol; delete pending-subject and pending-calls entries. changed drops string arm; destructive-path is symbol vector. Require ns/source/analyzed-source-digest; preserve platform and fixture-exclusion declarations from landed commits. | P G2/G4/S2; E §1–3; S §1.1; A test; R N7 | retype; required; delete | seon.fn/var-row; seon.program/declaration-row; seon.sci.eval; seon.turn; seon.test.runner/record-tx; source preservation | seon.test reach/changed-since-green, selection, runner digests, effect/accretion, render/test, issue checks | seon.test-reaching-test and seon.test.runner-test: >1,000 members survive, no-op recording, subject-target deletion refuses while the subject survives; stale reach symbols survive and select reruns |
 | 4 | Require completed result counts/run together; require reach-digest on successful recorded closure, not on unrun definition. Delete reach-unknown only after failed computation refuses recording. Delete failing-assertions, run-at/run-basis-t copies; derive result schema from entity plus selector; remove reach digest identity-negation. The failure-identity format alias is separate contract-only work (X2). | A result/test; R N15/N32/N35/N36/N40/B.3 | required; delete; retype | seon.test.runner/provenance, record-tx, failure handling; seon.cluster.source/result-preservation-tx | seon.test/verified?, changed-since-green; render/test/transcript; issue completion | seon.test.runner-test: analyzed-but-unrun is unknown, computed-empty reach is known, failed reach never green, counts cannot default to zero |
 | 4 | Add absence-condition docstrings for surviving optional entries: `:seon.fn/call-arities`, `:seon.fn/file`, `:seon.fn/form-span`, `:seon.fn/keywords`, `:seon.fn/references`, `:seon.fn/writes`, `:seon.test/error-count`, `:seon.test/fail-count`, `:seon.test/failure-message`, `:seon.test/failures`, `:seon.test/fixture-observation`, `:seon.test/long`, `:seon.test/long-ms`, `:seon.test/pass-count`, `:seon.test/reach`, `:seon.test/reach-digest`, `:seon.test/run`, `:seon.test/subject`, `:seon.test/usage`. Keep optionality unless the specific required/transition row above changes it; for renamed entries apply the condition to the replacement. | A seon.test reset row | add | `seon.cluster.source/mintable-identity` (`src/seon/cluster/source.clj:305`); `seon.cluster.source/result-preservation-tx` (`src/seon/cluster/source.clj:392`); `seon.cluster/development-source-refresh!` (`src/seon/cluster.clj:2211`); `seon.fn/var-row` (`src/seon/fn.clj:584`); `seon.program/declaration-row` (`src/seon/program.cljc:906`); `seon.sci.eval/definition-row` (`src/seon/sci/eval.clj:392`); `seon.test.runner/record-tx` (`src/seon/test/runner.clj:2095`) | seon.test reach/changed-since-green, selection, runner digests, effect/accretion, render/test, issue checks | seon.test-reaching-test and seon.test.runner-test: >1,000 members survive, no-op recording, subject-target deletion refuses while the subject survives; stale reach symbols survive and select reruns |
@@ -590,6 +593,7 @@ removing keys superseded by these decisions.
 
 | Group | Edit | Source finding | Kind | Writers in the same publication | Readers in the same publication | Regression that proves it |
 |---|---|---|---|---|---|---|
+| 5 | G4 correction: optional stored member entries for cluster-cleanup remaining/removed, collect collect-branches, census claim-errors/dead/processes/roots/unclaimed/unresponsive, census-process advertisements, and reap reap-refused/reap-roots/reap-stopped-processes/eligible-root-claims (14 keys). Require the producing completed transaction on the result parent before absent members mean an observed empty result; child observations validate with that parent. Never require a many-key to prove execution. | required-many blocker; P G4/G5 | required | seon.maintenance operation projections and seon.schedule settlement | maintenance result readers and renderers | all four completed operations with empty results round-trip; unfinished/missing producing transaction is explicit incomplete, not a completed empty result |
 | 4 | Add absence-condition docstrings for surviving optional entries: `:seon.dev.process/generation`, `:seon.error/kind`, `:seon.operator.claim/path`. Keep optionality unless the specific required/transition row above changes it; for renamed entries apply the condition to the replacement. | A seon.maintenance.result reset row | add | `seon.maintenance/claim-error` (`src/seon/maintenance.clj:106`); `seon.maintenance/collection-component` (`src/seon/maintenance.clj:200`); `seon.maintenance/process-identity` (`src/seon/maintenance.clj:73`); `seon.maintenance/process-observation` (`src/seon/maintenance.clj:81`); `seon.maintenance/project-cluster-cleanup-result` (`src/seon/maintenance.clj:213`); `seon.maintenance/project-collect-result` (`src/seon/maintenance.clj:177`); `seon.maintenance/project-process-census-result` (`src/seon/maintenance.clj:115`); `seon.maintenance/project-reap-result` (`src/seon/maintenance.clj:141`); `seon.maintenance/root-claim` (`src/seon/maintenance.clj:92`); `seon.schedule/settle-call` (`src/seon/schedule.clj:419`) | maintenance render/query and whole-parent validator | seon.maintenance-schema-test: all four real projections valid; malformed last nested child rejects root and sibling writes; id-only root refuses |
 | 5 | The same root that receives the merged maintenance lifecycle declares actual optional operation component attributes (census/reap/collect/cleanup), exactly one operation shape on successful completed result by attribute presence (open creation requires start provenance; error settlement requires error). The value map is nonstored: its replacement by a derived API union is contract-only work (X2), not a reset gate. G5 validates all nested components; no synthetic identities for anonymous children. | R C.3/N44/B.9; A result; E §4 | add; delete; retype | seon.maintenance project-process-census-result/project-reap-result/project-collect-result/project-cluster-cleanup-result and nested constructors; seon.schedule/settle-call | maintenance render/query and whole-parent validator | seon.maintenance-schema-test: all four real projections valid; malformed last nested child rejects root and sibling writes; id-only root refuses |
 
@@ -1139,3 +1143,58 @@ landing note retain the exact query. This verifies the inherited model, not
 the proposed refusal. Default remains PID 41413; no transaction or lifecycle
 operation was performed. No bin/test or fast test was run for this docs-only
 correction. Production implementation is **not landed** at this boundary.
+
+## Resumed edge batch — writer-cost prerequisite (2026-09-17)
+
+Tier 1 `5a5359205` is owner-reviewed and accepted. The next publication is
+the edge retype, with **RESET NEEDED** retained. The two new blocker notes
+were read end to end: required-many declarations and unbounded final-report
+validation. The 19 remaining collection keys are folded into their resource
+tables above, not a second edit inventory. Activation's six keys were already
+fixed at `543f03258`. Required collection presence is never an event; the
+producing scalar/ref fact and parent validation own that distinction.
+
+Before exposing the incompatible edge schemas, measure and fix the final-report
+validation cost, retaining its atomic writer decision and all expanded/swept
+operations. Existing validators are already cached per projection, so simply
+adding another validator cache is not evidence of a fix. The sparse
+`seon.id/id` write in source-test targets a populated canonical identity:
+it must be tested separately from an incomplete create.
+
+Entry boundary: `src/seon/program.cljc`, `resources/seon/schemas/seon.program.edn`,
+and `src/seon/schema.clj` carry foreign uncommitted edits. These directly bound
+the coordinated definition/provenance and schema-key deletion seams; they do
+not prevent the owned database validator investigation. Recheck before landing.
+Default was verified alive at PID 33583; no lifecycle command was run.
+
+While measuring, `src/seon/sci/eval.clj` became dirty again: its in-flight
+`build-base-ctx` now requires a projection whereas HEAD still accepts zero
+arguments. The source-test `removed-source` regression is a direct consumer
+and must change with that release. No compatibility arity is invented and no
+foreign SCI hunk is included in the current path-isolated proof.
+
+
+### Writer-cost prerequisite checkpoint
+
+Measured full program publication to a fresh source store, with the canonical
+manifest already built: **75,941.046542 ms before → 41,644.180417 ms after**
+(45.16% reduction). This is not an end-to-end reset measurement. Final-report
+admission still checks every attempted attribute and affected entity. Native,
+expanded, swept-reference, render-target and prepared-arity decisions remain
+on the writer. The sparse source test now distinguishes an existing complete
+row's upsert from an incomplete create; both are proven on the canonical fixture.
+
+The combined fast run's fn/source namespaces passed; its sole database failure
+was a stale config/effective caller after `cdfc01058`. Supplying the fixture's
+explicit cluster preserved the intended row-identity refusal. The corrected
+database/schema run passed **75 tests / 1,007 assertions**, with unchanged
+production bytes. Exact runs and limitations are in the
+[writer-cost landing note](../../context-generation/research/reset-writer-cost-2026-09-17.md).
+
+Rechecked at `7e193e85b`: `resources/seon/schemas/seon.program.edn` and
+`src/seon/test/selection.clj` are released. `src/seon/program.cljc`,
+`src/seon/schema.clj`, and `src/seon/sci/eval.clj` remain foreign-modified direct
+consumers of the coordinated edge/provenance change. This checkpoint lands
+the measured prerequisite only and stops for review. **The edge retype is not
+landed; RESET NEEDED remains for that publication.** Default stayed PID 33583;
+no default publication, restart or reset was performed by this lane.

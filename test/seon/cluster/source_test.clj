@@ -328,16 +328,28 @@
         (is (every? #(= :core (:seon.schema.admission/source %)) rows))
         (test-support/with-database
           (fn [connection]
-            (let [sparse [{:seon.fn/sym "seon.id/id" :seon.fn/doc "incomplete"}]
-                  refused (db/transact! connection sparse)
-                  report (db/transact! connection rows)]
+            (let [existing (db/pull (db/db connection) '[*] [:seon.fn/sym "seon.id/id"])
+                  sparse [{:seon.fn/sym "seon.id/id" :seon.fn/doc "updated documentation"}]
+                  updated (db/transact! connection sparse)
+                  basis (db/basis-t (db/db connection))
+                  refused (db/transact! connection
+                                       [{:seon.fn/sym "seon.source.test/incomplete"
+                                         :seon.fn/doc "incomplete"}])]
+              (is (some? (:db/id existing)) "the sparse write updates a complete fixture row")
+              (is (some? (:db-after updated)) (pr-str updated))
               (is (= :seon.db/invalid-write (:seon.error/kind refused))
-                  "the canonical fixture has authored entity validation armed")
-              (is (some? (:db-after report)) (pr-str report)))))
+                  "an incomplete create still refuses under whole-entity validation")
+              (is (= basis (db/basis-t (db/db connection))) "refusal commits nothing")
+              (let [report (db/transact! connection rows)]
+                (is (some? (:db-after report)) (pr-str report))))))
         (with-store
           (fn [opened]
-            (let [published (publish opened digest-a 'seon.cluster/populate-source!
-                                     {:seon.fn/manifest manifest})
+            (let [published (let [started (System/nanoTime)
+                                  result (publish opened digest-a 'seon.cluster/populate-source!
+                                                  {:seon.fn/manifest manifest})]
+                              (println "complete-program-publication-ms"
+                                       (/ (- (System/nanoTime) started) 1e6))
+                              result)
                   database-before (source/database opened (:seon.source/commit-id published))
                   selector [:seon.ns/aliases :seon.ns/imports :seon.ns/refers
                             :seon.fn/arities :seon.fn/ast]

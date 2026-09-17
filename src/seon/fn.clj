@@ -2355,7 +2355,7 @@
 (defn- index-tempids
   [rows identity-attributes]
   (let [identities
-        (into (sorted-set-by #(compare (pr-str %1) (pr-str %2)))
+        (into #{}
               (comp
                (filter map?)
                (mapcat (fn [entity]
@@ -2376,7 +2376,7 @@
     (into {}
           (map-indexed (fn [index program-identity]
                          [program-identity (str "seon.fn.index/" index)]))
-          identities)))
+          (map second (sort-by first (map (juxt pr-str identity) identities))))))
 
 (defn- compile-index-transaction
   "Flatten one program population through transaction-local identities.
