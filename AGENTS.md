@@ -193,7 +193,7 @@ ordinary clusters are never synchronized. `bin/seon init --dev NAME` adopts
 the publication on an explicitly selected development cluster in its
 hosting JVM; the edit hook's `:current-source` root and cluster select that target.
 Its adoption commit is recorded only after schema and program reconciliation,
-loaded definitions, SCI acquisition, and JVM instrumentation succeed. Publication
+loaded definitions, JVM instrumentation, and SCI acquisition succeed. Publication
 re-arms wrappers when their contract or a transitively referenced declaration
 changes; unrelated wrappers retain identity (`src/seon/instrument.clj:593`).
 The wrapper captures the canonical dependency definitions and their contract
@@ -218,10 +218,15 @@ Any design where channel loss breaks recovery is wrong by definition.
 is implemented by boot recovery (`src/seon/turn.clj:1680`): close open turns and
 mark unfinished evaluations interrupted.
 The agent adapts from stored shown text. Private defs, atoms, and result objects
-disappear with the JVM; they are neither serialized nor restored. Each agent
-owns one persistent SCI context, forked once from the program base and updated
-with accepted base diffs before later turns (`src/seon/sci/eval.clj:1709`,
-`src/seon/cluster/agent.clj:636`).
+disappear with the JVM; they are neither serialized nor restored. The cluster's
+program-only SCI base derives from one database value through
+`seon.sci.eval/base-ctx`: current core admission copies the loaded JVM root;
+current agent admission interprets the stored source in every namespace, with
+an explicit typed JVM fallback if SCI cannot evaluate it. Before later turns,
+`fork-for-turn` regenerates the agent fork and reapplies its private objects
+in memory, preserving the agent's context handle. Accepted-row installation
+is the measured optimization of base regeneration, checked against it by the
+canonical acquisition regression.
 
 **Waking and the loop.** Schema-declared listened
 attributes identify wake datoms; answering derives from their `:t` and a
@@ -407,6 +412,12 @@ constraint first, marked recommendation, each with guarantee, cost, and
 what we give up.
 
 ## 3. Data and schema
+
+**Every decision this project has made about deletion, refs, identities,
+components, required-ness and derivation is consolidated, with its ruling and
+its Datahike grounding, in
+[the data-modeling decision guide](docs/seon/architecture/data-modeling-guide.md)
+— read it when a modeling question is not answered below.**
 
 Use the `data-oriented-clojure` skill before writing or reviewing Seon
 Clojure — at design time, not only before the edit. The compact invariants:
@@ -663,7 +674,8 @@ writing.
 | namespace page | one namespace's web surface: route → namespace → owner agent → walk in `/html` (`src/seon/render/route.clj`) | page, screen, dashboard |
 | **[TARGET]** block | One entity rendered through its schema pair, covering a whole concern. Scalars share its own block; components and declared derived queries supply their blocks. The identified output is the HTML morph target ([turn PRD §13–§15](docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md); `src/seon/render/block.clj:61`) | widget, component, panel, scalar block |
 | package, keyframe, delta | the delivery units: one revisioned package per change; a revision gap snaps to keyframe | frame, bundle |
-| base SCI context / agent SCI context / prompt | The cluster's acquired program-only context; each agent's persistent context forked once and receiving base diffs; the ordered rendering of its stored evaluations. Neither private objects nor prompt visibility gates callability ([turn PRD §13–§15](docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md); `src/seon/sci/eval.clj:1709`; SCI `init`: `reference-code/sci/src/sci/core.cljc:331`, `fork`: `reference-code/sci/src/sci/core.cljc:345`, `intern`: `reference-code/sci/src/sci/core.cljc:260`) | turn fork, "the context" for all three |
+| base SCI context / agent SCI context / prompt | The cluster's program-only context derived by `seon.sci.eval/base-ctx` from one database value; each agent's retained handle receives a new fork with its private objects reapplied before later turns; the ordered rendering of its stored evaluations. Neither private objects nor prompt visibility gates callability ([turn PRD §13–§15](docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md); `src/seon/sci/eval.clj:1709`; SCI `init`: `reference-code/sci/src/sci/core.cljc:331`, `fork`: `reference-code/sci/src/sci/core.cljc:345`, `intern`: `reference-code/sci/src/sci/core.cljc:260`) | turn fork, "the context" for all three |
+| override | A function identity whose current admission is `:agent` in an indexed `src` namespace; `seon.program/overrides` queries current admission and historical declaration/file relations from one database value (`src/seon/program.cljc:20`). It is never a stored flag. | override flag, namespace kind |
 | candidate context | a built context used to test a definition before installing it; `sci/fork` is admissible (copy-on-write Vars) | sandbox ctx, scratch fork |
 | compaction | Wipe the agent's evaluations; the next system turn regenerates the opening from current record facts using the same algorithm. There is no manual curation path ([turn PRD §13–§15](docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md); `src/seon/turn.clj:2207`) | editor, revision, proof, curation, supersession |
 | render profile | The presentation policy applied by the value renderer once at evaluation time; the evaluation stores the resulting shown text. History never clips again; HTML renders the live object without presentation clipping, or saved text after restart ([turn PRD §13–§15](docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md); `resources/seon/schemas/seon.render.profile.edn`) | cap, window, separate result storage bound |

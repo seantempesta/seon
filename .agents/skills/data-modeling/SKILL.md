@@ -9,6 +9,10 @@ Use [AGENTS.md](../../../AGENTS.md) for the design laws and
 [the turn PRD](../../../docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md)
 §13–§15 for the current record, rendering, and result target.
 Start by querying the merged registry before declaring another shape.
+[The data-modeling decision guide](../../../docs/seon/architecture/data-modeling-guide.md)
+consolidates every ruled answer — retract versus close by a positive fact, ref
+versus value versus component versus tuple, required-ness, events, and what is
+a query instead — with its ruling and its Datahike grounding.
 
 ## One declaration, derived storage
 

@@ -30,6 +30,11 @@ A database value is immutable. Hand one value through a pure
 derivation; obtain a new value between forms when a preceding form
 transacted.
 
+The MODELING consequences of everything below — when to retract, when to
+close by a positive fact, ref versus value, component versus peer, required
+versus optional — are consolidated with their rulings in
+[the data-modeling decision guide](../../../docs/seon/architecture/data-modeling-guide.md).
+
 ## Deletion is retraction, and it reaches the neighbours
 
 `[:db/retractEntity e]` and `[:db.fn/retractEntity e]` are the same
