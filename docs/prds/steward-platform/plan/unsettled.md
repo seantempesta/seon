@@ -1582,6 +1582,31 @@ we can update the database." Every S12 operation is ours; the database
 write is the act; native forms that bypass the facts are forbidden or
 wrapped. Research pass told.
 
+**REPL-native retraction research LANDED** (`ac2ed1ac0`, 955 lines). The
+ORDER TODAY, answering the owner: for `defn` the Var is interned in the
+agent's fork during evaluation, `gate-function-install` runs the reaching
+tests in a CANDIDATE context and installs into the base only on green, the
+row is written at settlement (good); for `ns-unmap` the SCI context loses
+the Var DURING evaluation and the facts are retracted at settlement —
+context first, database second, nothing refuses: the wrong order.
+`remove-ns`, `ns-unalias`, `intern`, `alter-var-root` bypass the facts
+entirely. Redefinition already good (in place, same eid, edges re-analysed,
+test-gated). The arity and render-target checks in `write-report-error` are
+in the working tree (integrator's tier 1). 826 source-less identity rows are
+external targets, byte-identical to tombstones — G4's required provenance
+fact is a hard precondition for the deletion contract. Design ruled from the
+note: our operation calls `breaks` FIRST and returns the refusal as its own
+value (touching neither db nor ctx); on clean, write the facts, THEN the
+native SCI call; seam B stays the backstop for publication/system origins
+(a refused settlement costs the whole turn's installs). Plan = detector
+`seon.program/unresolved-callers` + `start!`, no new mechanism. Astra lane
+`repl-program-operations` (high effort) launched on §9 items 1–4 (reads,
+two regressions, hook arms forbidding the bypass forms, `ns-unmap!`/
+`remove-ns!`/`ns-unalias!` over existing writers, vocabulary rows in
+AGENTS.md); items 5–7 wait for the reset; 8–9 for write-back. Open probe
+first: a predicate clause over `:seon.fn/sym` returned empty where pull
+answered.
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
