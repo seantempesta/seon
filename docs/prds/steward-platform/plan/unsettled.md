@@ -1619,6 +1619,11 @@ first-party namespace (C3), override set as a query, base diffs carry it,
 rebuilt base keeps it, `doc` states the JVM-still-runs-compiled line,
 revert restores the JVM Var.
 
+**Owner ~02:10Z:** the SCI context is a FUNCTION OF THE DATABASE — "update
+the database and regenerate". S3 lane stopped and resumed with that shape:
+pure `(base-ctx db)`, fork + private layer per agent, base diffs proven
+equal to regeneration or deleted by measured cost. Recorded in PRD S3.
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test

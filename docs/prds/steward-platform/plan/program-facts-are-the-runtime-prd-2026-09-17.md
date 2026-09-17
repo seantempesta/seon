@@ -508,6 +508,14 @@ the base diff. `dir` and `doc` (`src/seon/sci/eval.clj:1194`, `:1222`) render
 the source of record, i.e. the database row, so an agent sees what it will
 run.
 
+**Owner, 2026-09-16 ~02:10Z:** "We should have a function that can generate
+the SCI context for an agent from the database and that way we can just
+update the database and regenerate right?" — S3 is built as ONE pure
+`(base-ctx db)` over a database value; an agent's context is a fork of it
+plus its private layer (in-memory only, §15); accepted change = regenerate;
+the base-diff path is an optimization proven equal to regeneration or
+deleted, decided by measured cost.
+
 **The override set is a query, declared once as a public read** in the
 program namespace: identities whose current admitted row is `:agent` and
 whose namespace has a file entity under the `src` root
