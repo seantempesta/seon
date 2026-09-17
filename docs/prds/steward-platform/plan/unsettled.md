@@ -3734,3 +3734,12 @@ as orchestrator/astra lanes, easy pool as the first live-agent slice).
   launched), preflight deadline (Opus, running), render.value union (Opus,
   running); db items 2/3 and stage 1 continue as Opus agents when a slot
   frees.
+- `074cc4f46` (Opus): `seon.render.value/transacted` declares the 63-facet
+  pass-through union (both arities; drift regression); the five wrapper
+  errors it caused are gone. Two findings filed: `value-floor-fixtures-
+  still-hand-strings-to-symbol-typed-attributes` (26 stale assertions, the
+  honest-fixture class) and **`the-agent-profile-no-longer-cuts-an-oversized-
+  rendered-string`** (`elision-in` returns nil for a 6,000-char string — the
+  ONE clipping spot silently stopped firing; absence-as-health; next Opus
+  slot). Opus continuation of the db items 2-4 launched from the dead lane's
+  partial edits.
