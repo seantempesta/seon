@@ -210,6 +210,7 @@
               "naming the refork that resolves it"))))))
 
 (def ^:private indexable-marker ::indexable)
+(def ^:private indexable-row-id ::indexable-row-id)
 
 (deftest an-added-index-adopts-in-place-instead-of-forcing-a-refork
   ;; Adding `:db/index` to an already-installed attribute is accretion, and
@@ -221,7 +222,11 @@
   ;; `docs/seon/issues/adoption-refuses-a-monotonic-index-addition-datahike-supports.md`).
   (test-support/with-database
     {::test-support/extra-schema
-     [{:db/ident indexable-marker
+     [{:db/ident indexable-row-id
+       :db/valueType :db.type/string
+       :db/cardinality :db.cardinality/one
+       :db/unique :db.unique/identity}
+      {:db/ident indexable-marker
        :db/valueType :db.type/string
        :db/cardinality :db.cardinality/one}]}
     (fn [connection]
@@ -247,7 +252,8 @@
             written (db/transact!
                      connection
                      {:tx-data (mapv (fn [index]
-                                       {indexable-marker (str "marker-" index)})
+                                       {indexable-row-id (str "row-" index)
+                                        indexable-marker (str "marker-" index)})
                                      (range 3))})]
         (is (some? (:db-after written))
             "the fixture writes its rows through the one write path")
