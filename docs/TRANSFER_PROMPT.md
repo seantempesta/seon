@@ -306,6 +306,58 @@ the parts and none ran the composition. Public entry points acquire
 once; internal compositions call `-under-lock!` arms; and the
 regression forces the real composed operation on a real store.
 
+**The overnight of 2026-09-17: the mistakes the orchestrator repeated,
+and the rule that stops each** (written at the owner's request after a
+compaction — "make sure the mistakes the agent kept making are corrected").
+
+1. *Presenting a blanket rule as a ruling request* ("every non-component
+   ref is living"). The owner: "Doesn't it depend? DO NOT LOCK US INTO
+   BAD PRIOR DECISIONS." Rule: per-attribute research first; come with
+   "I've researched this and this is the best solution, with pros and
+   cons"; never letter codes; prior rulings are inputs, not constraints.
+2. *The questions tool while the owner is away.* It stops the main
+   thread. Rule: use it only with the owner present, with full background
+   and real rows; overnight, write options into the plan and keep working.
+3. *Load.* Nine-plus agents at once put load 161 on 18 cores; three test
+   slots with a dozen `bin/test-fast` wrappers queued and batch 116 waiting
+   17 minutes for a slot (load 71). Rule: at most four editing lanes; prune
+   before adding; research passes are read-only; a cold gate is launched
+   only when a slot is free NOW.
+4. *Lanes running cold gates and duplicate test JVMs.* Two lanes ran
+   forbidden `bin/test`; one ran duplicate JVMs. Now refused by exported
+   lane identity (`aba5d94a5`); Claude subagents still need the
+   instruction in their brief until hook-side admission lands.
+5. *Gate invocation mistakes.* `bin/test --platform` with named namespaces
+   exits 64 (a named selection takes no tier flag): run the platform tier
+   and the named list as two invocations. zsh does not word-split `$ns`:
+   write the namespaces out, and verify each maps to a file first.
+6. *Stopping a background shell that had launched lanes in a loop* killed
+   a live codex lane. Rule: one lane launch per shell, never a loop;
+   `stop` before `resume`; verify the pid is gone.
+7. *Trusting a lane's printed session id.* `resume` picked a fake id from
+   stdout. Rule: the launcher record is the identity (`e1d2347f4`
+   backfills); never quote transcript text.
+8. *Agents ending their turn with a run in flight.* Rule: foreground runs
+   with a long timeout in the brief; orphan gates are announced by the
+   slot wait.
+9. *Assuming a hook config took effect.* Codex hooks were silently OFF
+   for every lane after `.codex/hooks.json` was rewritten (trust snapshot
+   mismatch). Rule: the launcher passes
+   `--dangerously-bypass-hook-trust`; after any hook change, stop and
+   resume every codex lane; verify with hook log lines, never by assuming.
+10. *Reset that lied.* The first ordered reset waited on a dead lock
+    holder, died on a half-written `db.clj`, left 4.6 GB, exited 0. Rule:
+    a reset preflights syntax over changed files and lock-holder liveness,
+    refuses in seconds, exits non-zero, ends in an adopted cluster
+    (`c4d1be3ac`, `5cd10e8d4`); lint every dirty file before any restart.
+11. *My own "same-commit vocabulary rows" rule blocked a lane* because
+    AGENTS.md was held by another lane. Rule: commit the code; rows land in
+    a follow-up when the file frees.
+12. *Serialized adoptions past the lock hold* left default without its 68
+    required config facts. Rule: one `init --dev` at a time; a lock-hold
+    timeout inside reconciliation is a blocker to report the minute it is
+    seen, not a symptom to work around.
+
 ## The orchestrator's sweep (owner, 2026-09-08)
 
 "You are the orchestrator; you need to be finding problems and fixing them

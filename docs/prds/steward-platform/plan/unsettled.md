@@ -2266,3 +2266,24 @@ route gates to it.
 lifecycle lock; keep ≤3 editing lanes; Opus lanes die on API safeguards flags
 mid-slice (four today) — relaunch on Opus with neutral wording from the
 working tree, never Sonnet.
+
+## 2026-09-17 03:20Z — resumed after compaction (owner awake)
+
+- Verified live: default (pid 33583) still reports 68 missing required
+  config facts (`seon.config/missing-effective`); adoption still refused
+  tree-wide; both blockers unchanged. Batch 116 waited 1029 s for a slot
+  (three slots held by two lanes' `bin/test-fast` runs and one Opus
+  agent's) and is now in preparation; load 71 with a dozen queued
+  `bin/test` wrappers — the cap is exceeded again; nothing new launches
+  until it clears.
+- Data-modeling GUIDE landed (`ec350ece0`,
+  [data-modeling-guide.md](../../../seon/architecture/data-modeling-guide.md)):
+  every decision was already ruled somewhere, unindexed; nine contradictions
+  marked; nine provisional corrections O1–O9 carried from the modeling
+  study's skill edits (O9: a value edge needs `{:seon.db/index true}` or the
+  G2 retype loses reverse traversal — integrator must fold this in). Its
+  one-line links in AGENTS.md and both skills are on disk, uncommitted
+  (files held by S3 and the study lane).
+- The twelve repeated orchestrator mistakes and their rules written into
+  [docs/TRANSFER_PROMPT.md](../../../TRANSFER_PROMPT.md) (owner's
+  compaction ask).
