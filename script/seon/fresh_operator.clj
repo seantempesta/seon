@@ -21,7 +21,6 @@
 (def ^:private log-name "seon.log")
 (def ^:private init-result-prefix "SEON-INIT-RESULT ")
 (def ^:private roster-result-prefix "SEON-ROSTER-RESULT ")
-(def ^:private cleanup-result-prefix "SEON-CLEANUP-RESULT ")
 (def ^:private test-status-result-prefix "SEON-TEST-STATUS-RESULT ")
 
 (defn- repository-root
@@ -98,10 +97,12 @@
         ":seon.config.operator/event-silence-backstop-ms"))
   (flush))
 
+(declare publication-bound-ms)
+
 (defn- source-publication-silence-backstop-ms
   "Bound one atomic source population by the existing lifecycle deadline."
   []
-  operator.state/lifecycle-lock-timeout-ms)
+  (publication-bound-ms))
 
 (defn- parse-root
   [arguments]
@@ -246,6 +247,96 @@
             handle))))
     (catch Throwable _ nil)))
 
+(def ^:private syntax-preflight-bound-ms 5000)
+
+(defn- publication-bound-ms
+  []
+  (let [path (or (System/getenv "SEON_HOOK_CONFIG")
+                 (str (io/file (repository-root) ".claude/seon-hook.edn")))
+        seconds (get-in (edn/read-string (slurp path))
+                        [:current-source :timeout-seconds])]
+    (when-not (pos-int? seconds)
+      (fail! "Publication bound is missing: :current-source :timeout-seconds."
+             {:seon.fresh-operator/config path}))
+    (* 1000 seconds)))
+
+(defn- phase!
+  "Run a phase, preserving its complete failure and naming its output file."
+  [root command phase operation]
+  (let [directory (io/file root "data/operator/operations")
+        log (io/file directory
+                     (str command "-" (name phase) "-"
+                          (.pid (java.lang.ProcessHandle/current)) ".log"))]
+    (.mkdirs directory)
+    (spit log (str "phase=" (name phase) " started\n"))
+    (println (str "● " command " phase=" (name phase) " log=" log))
+    (flush)
+    (try
+      (let [result (operation)]
+        (spit log (str "phase=" (name phase) " complete\n" (pr-str result) "\n") :append true)
+        result)
+      (catch Throwable failure
+        (when (:seon.fresh-operator/log (ex-data failure))
+          (throw failure))
+        (spit log (str (ex-message failure) "\n"
+                       (pr-str (Throwable->map failure)) "\n") :append true)
+        (throw (ex-info
+                (str command " phase=" (name phase) " failed; output=" log
+                     "; " (ex-message failure))
+                (assoc (ex-data failure)
+                       :seon.fresh-operator/phase phase
+                       :seon.fresh-operator/log (str log))
+                failure))))))
+
+(defn- syntax-preflight!
+  [source-root]
+  (let [started (System/nanoTime)
+        run-bounded! (fn [argv]
+               (operator.state/run-process!
+                {:seon.operator.subprocess/argv argv
+                 :seon.operator.subprocess/directory (str source-root)
+                 :seon.operator.subprocess/deadline-ms
+                 (max 1 (- syntax-preflight-bound-ms
+                           (long (/ (- (System/nanoTime) started) 1000000))))
+                 :seon.operator.subprocess/merge-error? true}))
+        changes (run-bounded! ["git" "diff" "--name-only" "--ignore-submodules=all"
+                       "-z" "HEAD" "--" "src" "script" "resources" "test" "config" ".claude/seon-hook.edn"])
+        _ (when-not (zero? (:seon.operator.subprocess/exit changes))
+            (fail! "Cannot enumerate source preflight inputs." changes))
+        untracked (run-bounded! ["git" "ls-files" "--others" "--exclude-standard"
+                         "-z" "--" "src" "script" "resources" "test" "config" ".claude/seon-hook.edn"])
+        _ (when-not (zero? (:seon.operator.subprocess/exit untracked))
+            (fail! "Cannot enumerate untracked source preflight inputs." untracked))
+        changed (filterv #(and (some (fn [suffix] (str/ends-with? % suffix))
+                                    [".clj" ".cljc" ".edn"])
+                              (.isFile (io/file source-root %)))
+                         (vec (enumeration-seq
+                          (java.util.StringTokenizer.
+                           (str (:seon.operator.subprocess/output changes)
+                                (:seon.operator.subprocess/output untracked)) (str (char 0))))))
+        lint! (fn [paths]
+                (let [result (run-bounded! (into ["clj-kondo" "--cache" "false" "--parallel"
+                                         "--config"
+                                         "^:replace {:linters {:syntax {:level :error}} :output {:format :edn}}"
+                                         "--lint"] paths))
+                      output (:seon.operator.subprocess/output result)
+                      report (try (edn/read-string output)
+                                  (catch Throwable _ nil))
+                      findings (:findings report)]
+                  (when-not (and (map? report) (vector? findings))
+                    (fail! "Source syntax preflight returned no readable findings." result))
+                  (when (or (seq findings)
+                            (not (zero? (:seon.operator.subprocess/exit result))))
+                    (fail! (str "Source syntax preflight refused: "
+                                (str/join "; "
+                                          (map #(str (:filename %) ":" (:row %) ":"
+                                                     (:col %) " " (:message %)) findings)))
+                           result))))]
+    (when (seq changed) (lint! changed))
+    (let [elapsed (long (/ (- (System/nanoTime) started) 1000000))]
+      (println (str "● changed-source syntax checked: " (count changed) " files in " elapsed " ms"))
+      {:seon.fresh-operator/elapsed-ms elapsed})))
+
 (defn- with-operator-lock
   "Serialize one operator root's lifecycle transitions on that root's own lock.
 
@@ -256,10 +347,13 @@
    (operator.state/with-lifecycle-lock!
     {:seon.operator.lock/path (operator.state/root-lifecycle-lock-path root)
      :seon.operator.lock/command command
+     :seon.operator.lock/holder-timeout-ms (publication-bound-ms)
      :seon.operator.lock/acquisition-timeout-ms
-     operator.state/lifecycle-lock-timeout-ms
+     (publication-bound-ms)
      :seon.operator.lock/hold-timeout-ms
-     operator.state/lifecycle-lock-timeout-ms}
+     (if (str/starts-with? command "init")
+       (publication-bound-ms)
+       operator.state/lifecycle-lock-timeout-ms)}
     transition)))
 
 (defn- unquote-value
@@ -327,15 +421,31 @@
           child-command)]
     command))
 
+(declare ensure-dependency-cache!)
+
 (defn- run-child-jvm!
   [{root :seon.fresh-operator/root :as request}]
-  (operator.state/run-process!
-   {:seon.operator.subprocess/argv (child-jvm-command request)
-    :seon.operator.subprocess/deadline-ms
-    operator.state/lifecycle-lock-timeout-ms
-    :seon.operator.subprocess/directory (str (repository-root))
-    :seon.operator.subprocess/extra-env (child-environment root)
-    :seon.operator.subprocess/merge-error? true}))
+  (let [log (io/file root "data/operator/operations"
+                     (str "jvm-" (random-uuid) ".log"))]
+    (io/make-parents log)
+    (println (str "● JVM output=" log))
+    (flush)
+    (try
+      (let [result (operator.state/run-process!
+                    {:seon.operator.subprocess/argv (child-jvm-command request)
+                     :seon.operator.subprocess/deadline-ms
+                     (get request :seon.fresh-operator/deadline-ms
+                          operator.state/lifecycle-lock-timeout-ms)
+                     :seon.operator.subprocess/directory (str (repository-root))
+                     :seon.operator.subprocess/extra-env (child-environment root)
+                     :seon.operator.subprocess/output-file (str log)
+                     :seon.operator.subprocess/merge-error? true})]
+        (assoc result :seon.operator.subprocess/output (slurp log)))
+      (catch Throwable failure
+        (throw (ex-info (str (ex-message failure) "; child output=" log)
+                        (assoc (ex-data failure)
+                               :seon.fresh-operator/child-output (str log))
+                        failure))))))
 
 (defn- ensure-dependency-cache!
   []
@@ -674,6 +784,8 @@
            exit :seon.operator.subprocess/exit}
           (run-child-jvm!
            {:seon.fresh-operator/root root
+            :seon.fresh-operator/dependency-cache-path
+            (:seon.dev-cache/path (ensure-dependency-cache!))
             :seon.fresh-operator/arguments
             ["-e" (offline-roster-form root)]})]
       (when-not (zero? exit)
@@ -2513,6 +2625,9 @@
          exit :seon.operator.subprocess/exit}
         (run-child-jvm!
          {:seon.fresh-operator/root root
+          :seon.fresh-operator/dependency-cache-path
+          (:seon.dev-cache/path (ensure-dependency-cache!))
+          :seon.fresh-operator/deadline-ms (publication-bound-ms)
           :seon.fresh-operator/arguments ["-e" form]})
         output (StringBuilder.)
         result (volatile! nil)]
@@ -2973,7 +3088,10 @@
     (fs/delete-if-exists (:seon.fresh-operator/path observation))
     (println
      (str "↻ repaired " (:seon.fresh-operator/name observation)
-          ": removed stale advertisement"))))
+          ": removed stale advertisement; pid="
+          (get-in observation [:seon.fresh-operator/advertisement :seon.boot/pid])
+          " alive=false; log="
+          (log-path root (:seon.fresh-operator/name observation))))))
 
 (defn- print-process-record-census!
   [root records record-errors]
@@ -2987,7 +3105,9 @@
      (str "  pid=" (:seon.boot/pid record)
           " start=" (:seon.boot/start-instant record)
           " generation=" (:seon.operator.process-record/generation record)
-          " state=" (if (record-alive? record) "alive" "not-alive"))))
+          " state=" (if (record-alive? record) "alive" "not-alive")
+          " source=" (:seon.operator.process-record/repository-root record)
+          " log=" (:seon.operator.process-record/log record))))
   (doseq [error record-errors]
     (println
      (str "  unreadable=" (:seon.fresh-operator/path error)
@@ -3113,9 +3233,8 @@
       (confirm-exclusive-store-flock-free! root)
       (discard-unreadable-process-records! record-errors))
     (when verify-store?
-      (let [roster (offline-roster root)]
-        (println (str "● flock free; roster readable ("
-                      (count roster) " branches)")))))))
+      (confirm-exclusive-store-flock-free! root)
+      (println "● store flock free; all recorded JVMs stopped")))))
 
 (defn- down!
   [root arguments]
@@ -3123,64 +3242,37 @@
         (parse-down-arguments arguments)]
     (down-recorded-processes! root force? true)))
 
-(defn- cleanup-form
-  [root]
-  (pr-str
-   `(do
-      (require 'seon.operator)
-      (println
-       ~cleanup-result-prefix
-       (pr-str
-        ((ns-resolve 'seon.operator (symbol "cleanup-root-under-lock!"))
-         ~(str (repository-root))
-         ~root))))))
-
 (defn- cleanup-managed-root!
   [root]
-  (let [{output :seon.operator.subprocess/output
-         exit :seon.operator.subprocess/exit}
-        (run-child-jvm!
-         {:seon.fresh-operator/root root
-          :seon.fresh-operator/arguments ["-e" (cleanup-form root)]})
-        result
-        (some
-         (fn [line]
-           (when (str/starts-with? line cleanup-result-prefix)
-             (edn/read-string (subs line (count cleanup-result-prefix)))))
-         (str/split-lines output))]
-    (when-not (and (zero? exit)
-                   (map? result)
-                   (:seon.operator.cleanup/complete? result))
-      (fail! "The operations owner did not completely clean the managed root."
-             {:seon.fresh-operator/exit exit
-              :seon.fresh-operator/output output
-              :seon.operator/cleanup result}))
-    result))
+  (with-exclusive-store-flock-probe!
+    root
+    #(operator.state/cleanup-root-under-lock!
+      (str (repository-root)) root root)))
 
 (defn- reset!
   [root arguments]
   (parse-reset-arguments arguments)
-  (down-recorded-processes! root true false true)
-  (when (seq (:seon.fresh-operator/process-records
-              (reconcile-process-records! root)))
-    (fail! "Recorded JVMs remain after forced down; reset refused."
-           {:seon.fresh-operator/root root}))
-  (let [reclaimed (operator.state/reclaim-invalid-claims! (repository-root))]
-    (when (pos? (long reclaimed))
-      (println (str "● reclaimed " reclaimed " invalid external claims"))))
-  ;; The old store may be impossible to open because its persisted creation
-  ;; config predates the current one. The operations owner therefore performs
-  ;; unconditional no-follow deletion without opening Datahike. Exact process
-  ;; reaping above and the external lifecycle lock make the whole transition
-  ;; claim-first and race-free.
-  (let [cleanup (cleanup-managed-root! root)]
-    (println
-     (str "● cleanup complete; reclaimed "
-          (:seon.operator.cleanup/removed-file-bytes cleanup)
-          " bytes; removed "
-          (str/join ", " (:seon.operator.cleanup/removed cleanup)))))
-  (init! root ["default"] true)
-  (println "● reset republished current-src and reforked default"))
+  (phase! root "reset" :down
+          #(do
+             (down-recorded-processes! root true false true)
+             (let [reclaimed (operator.state/reclaim-invalid-claims! (repository-root))]
+               (when (pos? (long reclaimed))
+                 (println (str "● reclaimed " reclaimed " invalid external claims"))))
+             (when (seq (:seon.fresh-operator/process-records
+                         (reconcile-process-records! root)))
+               (fail! "Recorded JVMs remain after forced down; reset refused."
+                      {:seon.fresh-operator/root root}))))
+  (phase! root "reset" :destroy
+          #(let [cleanup (cleanup-managed-root! root)]
+             (println (str "● cleanup complete; reclaimed "
+                           (:seon.operator.cleanup/removed-file-bytes cleanup)
+                           " bytes"))
+             cleanup))
+  (phase! root "reset" :republish #(init! root []))
+  (phase! root "reset" :refork #(init! root ["default"]))
+  (phase! root "reset" :start #(start! root ["default"]))
+  (phase! root "reset" :adopt #(init! root ["--dev" "default"]))
+  (println "● reset republished current-src and reforked default; started and adopted default"))
 
 (defn- logs!
   {:seon.fn/external-sink :ai-visible-text
@@ -3244,7 +3336,7 @@
     "  down [--force]\n"
     "                 stop every recorded JVM; force skips graceful prepl\n"
     "  reset --force  down all JVMs, destroy the cluster root, republish,\n"
-    "                 and refork default without opening the old store\n"
+    "                 refork, start and adopt default; source preflight precedes destruction\n"
     "  logs [NAME]    show the cluster log\n")))
 
 (defn -main
@@ -3271,14 +3363,53 @@
                    {:seon.fresh-operator/command command
                     :seon.fresh-operator/usage? true})))]
     (try
+      (when (contains? #{"start" "init" "reset"} command)
+        (phase! root command :preflight
+                #(do
+                   (case command
+                     "start" (let [options (parse-start-arguments command-arguments)]
+                               (when-let [path (:seon.fresh-operator/config-path options)]
+                                 (sparse-manifest path)))
+                     "reset" (parse-reset-arguments command-arguments)
+                     "init" (parse-init-arguments
+                              (if (= "--result-file" (first command-arguments))
+                                (vec (drop 2 command-arguments)) command-arguments)))
+                   (syntax-preflight! (repository-root))
+                   (publication-bound-ms)
+                   (operator-silence-backstop-ms {}))))
       (if (contains? #{"start" "config" "export" "init"
                        "stop" "down" "reset"}
                      command)
-        (with-operator-lock root (str/join " " arguments) run-command)
+        (phase! root command :lifecycle
+                #(with-operator-lock root (str/join " " arguments)
+                   (fn []
+                     ; The tree can change while another publication owns the lock.
+                     (when (contains? #{"start" "init" "reset"} command)
+                       (phase! root command :preflight
+                               (fn [] (syntax-preflight! (repository-root)))))
+                     (if (= "reset" command)
+                       (run-command)
+                       (phase! root command (keyword command) run-command)))))
         (run-command))
       (catch Throwable error
+        (when (and (= "init" command)
+                   (= "--result-file" (first command-arguments))
+                   (second command-arguments))
+          (let [path (second command-arguments)]
+            (io/make-parents path)
+            (spit path (pr-str (assoc (ex-data error)
+                                     :seon.error/kind
+                                     (or (:seon.error/kind (ex-data error))
+                                         :seon.fresh-operator/init-failed)
+                                     :seon.error/message (ex-message error))))))
         (binding [*out* *err*]
           (println (str "✗ " (ex-message error)))
+          (when (and (= "reset" command)
+                     (contains? #{nil :preflight :lifecycle :down :destroy}
+                                (:seon.fresh-operator/phase (ex-data error))))
+            (let [remaining (:seon.operator.footprint/file-bytes
+                             (operator.state/footprint (str (store-directory root))))]
+              (println (str "store NOT destroyed (" remaining " bytes remain)"))))
           (when-let [data (not-empty (ex-data error))]
             (prn data))
           (when (:seon.fresh-operator/usage? (ex-data error))

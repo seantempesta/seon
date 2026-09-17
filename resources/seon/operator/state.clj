@@ -8,6 +8,8 @@
   (:require [babashka.fs :as fs]
             [babashka.process :as process]
             [clojure.edn :as edn]
+            [clojure.java.io :as io]
+            [seon.fs :as owned-fs]
             [clojure.string :as str])
   (:import [java.io PushbackReader RandomAccessFile]
            [java.net InetSocketAddress Socket]
@@ -156,7 +158,7 @@
   [pid]
   (try
     (let [optional (java.lang.ProcessHandle/of (long pid))]
-      (when (.isPresent optional)
+      (when (and (.isPresent optional) (.isAlive ^java.lang.ProcessHandle (.get optional)))
         (let [instant (.startInstant (.info (.get optional)))]
           (when (.isPresent instant) (Date/from (.get instant))))))
     (catch Throwable _ nil)))
@@ -327,14 +329,6 @@
   [repository-root generation]
   (fs/path (process-claim-directory repository-root) (str generation ".edn")))
 
-(def lifecycle-lock-announce-ms
-  "How long a lock wait stays silent before it announces itself."
-  1000)
-
-(def lifecycle-lock-repeat-ms
-  "How often an announced lock wait repeats while it keeps waiting."
-  5000)
-
 (def lifecycle-lock-timeout-ms
   "The acquisition and hold bound explicitly selected by internal callers."
   900000)
@@ -434,9 +428,9 @@
          " (started " (instant-text (:seon.boot/start-instant holder)) ")"
          " running `" (:seon.operator.lock/command holder) "`"
          " since " (instant-text (:seon.operator.lock/acquired-at holder))
+         " alive=" (:seon.operator.lock/holder-alive? holder)
          (when-not (:seon.operator.lock/holder-alive? holder)
-           (str " — that process is NOT alive, so the holder record is stale;"
-                " the kernel already released its lock")))
+           " — the recorded process identity is no longer alive"))
     "a process that left no holder record beside the lock"))
 
 (defn- declared-lock-timeout
@@ -526,7 +520,8 @@
                       acquisition-timeout-ms)]
     (fs/create-dirs (fs/parent path))
     (loop [announced-at nil]
-      (let [outcome
+      (let [previous-holder (lock-holder path)
+            outcome
             (when (acquire-lock-slot! lock-key)
               (let [held (try
                            (open-locked-file lock-key)
@@ -546,6 +541,12 @@
                                                 hold-timeout-ms)))
                         {:keys [completion completion-lock]}
                         (try
+                          (when (and previous-holder
+                                     (not (:seon.operator.lock/holder-alive? previous-holder)))
+                            (println (str "↻ reclaimed stale lifecycle holder record: "
+                                          (holder-sentence path)
+                                          "; kernel lock acquired"))
+                            (flush))
                           (write-edn! (lock-holder-path path) holder)
                           (start-lock-held-transition!
                            path held lock-key holder transition)
@@ -595,8 +596,24 @@
               ::returned value
               ::failed (throw value)))
           (let [now (System/currentTimeMillis)
-                waited (- now started)]
-            (when (<= deadline now)
+                waited (- now started)
+                holder (lock-holder path)
+                holder-deadline (:seon.operator.lock/hold-deadline holder)
+                holder-start (:seon.operator.lock/acquired-at holder)
+                holder-bound (:seon.operator.lock/holder-timeout-ms request)
+                effective-deadline
+                (min deadline
+                     (if (inst? holder-deadline) (.getTime ^Date holder-deadline) deadline)
+                     (if (and (inst? holder-start) (pos-int? holder-bound))
+                       (+ (.getTime ^Date holder-start) holder-bound) deadline))]
+            (when (and holder (not (:seon.operator.lock/holder-alive? holder)))
+              (throw (ex-info
+                      (str "Lifecycle holder is dead but the kernel lock remains held: "
+                           (holder-sentence path) ". Refusing to replace the locked inode.")
+                      {:seon.error/kind :seon.operator/lock-holder-inconsistent
+                       :seon.operator.lock/holder holder
+                       :seon.operator.lock/path lock-key})))
+            (when (<= effective-deadline now)
               (throw
                (ex-info
                 (str "Timed out after " waited
@@ -607,14 +624,12 @@
                  :seon.operator.lock/waited-ms waited
                  :seon.operator.lock/holder (lock-holder path)
                  :seon.operator.lock/waiter waiter :seon.operator/lock-acquisition-timeout true})))
-            (let [announce?
-                  (if announced-at
-                    (<= lifecycle-lock-repeat-ms (- now announced-at))
-                    (<= lifecycle-lock-announce-ms waited))]
+            (let [announce? (nil? announced-at)]
               (when announce?
                 (println
                  (str "! waiting " waited " ms for the operator lifecycle "
-                      "lock " lock-key " — held by " (holder-sentence path)))
+                      "lock " lock-key " — held by " (holder-sentence path)
+                      "; deadline=" (instant-text (Date. effective-deadline))))
                 (flush))
               (.sleep TimeUnit/MILLISECONDS 100)
               (recur (if announce? now announced-at)))))))))
@@ -1293,3 +1308,81 @@
     repository-root
     "mark managed root destroyed"
     #(mark-root-destroyed-under-lock! repository-root managed-root result)))
+
+(defn- declared-managed-root
+  "The canonical managed root, refusing a root that was never declared.
+
+  A nil, blank, or relative root names the process working directory, which
+  is the developer's checkout — the one spelling this owner must never
+  destroy by inference. The refusal happens before any path is derived."
+  [managed-root]
+  (let [spelling (cond
+                   (string? managed-root) managed-root
+                   (instance? java.io.File managed-root)
+                   (.getPath ^java.io.File managed-root))]
+    (when (or (str/blank? spelling)
+              (not (.isAbsolute (io/file spelling))))
+      (throw (ex-info
+              (str "The managed root " (pr-str managed-root)
+                   " is not a declared absolute root; its disposable data "
+                   "paths would resolve against the working directory "
+                   (pr-str (System/getProperty "user.dir")) ".")
+              {:seon.error/kind :seon.operator/undeclared-managed-root
+               :seon.operator/managed-root managed-root
+               :seon.operator/working-directory
+               (System/getProperty "user.dir")})))
+    (.getCanonicalPath (io/file spelling))))
+
+(defn- managed-data-paths
+  [managed-root]
+  (let [data-root (io/file (declared-managed-root managed-root) "data")]
+    (mapv #(.getCanonicalPath (io/file data-root %))
+          ["clusters" "store" "store.lock" "blob-staging"])))
+
+;;; Cleanup obeys the one destructive rule declared by
+;;; `seon.fs/admit-destructive-path!`: every path is admitted
+;;; BEFORE the first deletion, and the deletion is recorded with root,
+;;; canonical targets, bytes and caller so a future wipe names itself.
+(defn cleanup-root-under-lock!
+  "Remove admitted managed data without loading the cluster program; caller holds lifecycle custody."
+  {:seon.fn/destroys
+   "an operator root's whole data/ directory: its clusters, its store, the store lock and staged blobs, none of which this function created"}
+  [repository-root managed-root declared]
+  (let [managed-root (declared-managed-root managed-root)
+          target (.getCanonicalPath (io/file managed-root "data"))
+          paths (managed-data-paths managed-root)
+          present (filterv #(.exists (io/file %)) paths)
+          admitted (mapv #(owned-fs/admit-destructive-path!
+                           {:seon.cluster.store/root managed-root
+                            :seon.cluster.store/target %
+                            :seon.cluster.store/declared-root declared})
+                         present)
+          removed-file-bytes
+          (reduce + 0
+                  (map #(get (footprint %)
+                             :seon.operator.footprint/file-bytes)
+                       present))
+          _ (println "seon recursive deletion:"
+             {:seon.cluster.store/root managed-root
+              :seon.cluster.store/targets admitted
+              :seon.cluster.store/file-bytes (long removed-file-bytes)
+              :seon.cluster.store/pid (.pid (java.lang.ProcessHandle/current))
+              :seon.cluster.store/operation
+              "seon.operator.state/cleanup-root-under-lock!"})
+          _ (doseq [path admitted]
+              (owned-fs/delete-recursively! managed-root path))
+          remaining (filterv #(.exists (io/file %)) paths)
+          complete? (empty? remaining)
+          result {:seon.operator.cleanup/root managed-root
+                  :seon.operator.cleanup/target target
+                  :seon.operator.cleanup/removed present
+                  :seon.operator.cleanup/removed-file-bytes
+                  removed-file-bytes
+                  :seon.operator.cleanup/remaining remaining
+                  :seon.operator.cleanup/complete? complete?}]
+      (mark-root-destroyed-under-lock!
+       repository-root managed-root result)
+      (when-not complete?
+        (throw (ex-info "Managed root cleanup left residual paths."
+                        {:seon.operator/cleanup result})))
+      result))

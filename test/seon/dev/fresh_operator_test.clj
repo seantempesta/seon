@@ -461,9 +461,9 @@
    :seon.dev.fresh-operator-test/output @output-future})
 
 (deftest init-changed-paths-are-an-explicit-source-publication-mode
-  (is (= operator.state/lifecycle-lock-timeout-ms
+  (is (= (operator-private-value 'publication-bound-ms)
          (operator-private-value 'source-publication-silence-backstop-ms))
-      "an atomic source population uses the existing overall lifecycle bound")
+      "an atomic source population uses the hook publication bound")
   (is (= {:seon.fresh-operator/development-cluster "development"
           :seon.fresh-operator/changed-paths ["src/seon/fn.clj"]
           :seon.fresh-operator/force? false}
@@ -1304,6 +1304,10 @@
         (is (str/includes? (::output reset)
                            "reset republished current-src and reforked default")
             (::output reset)))
+      (is (operator.state/process-identity-alive?
+           (advertisement-process-identity root "default")))
+      (let [down (run-operator root "down" "--force")]
+        (is (= 0 (::exit down)) (::output down)))
       (let [opened (store/open-store! {:seon.store/dir store-dir})]
         (try
           (let [roster (registry/roster opened)]
@@ -1312,6 +1316,7 @@
           (finally
             (store/release-store! opened))))
       (finally
+        (run-operator root "down" "--force")
         (delete-recursively! root)))))
 
 (deftest reset-discards-only-enumerated-unreadable-claims-after-the-flock
@@ -1391,6 +1396,7 @@
         (is (not (.exists legacy-file))
             "reset wiped the ignored legacy managed-tree residue"))
       (finally
+        (run-operator root "down" "--force")
         (when-let [record @record*]
           (when (operator-private-value 'record-alive? record)
             (operator-private-value 'terminate-recorded-process! record))

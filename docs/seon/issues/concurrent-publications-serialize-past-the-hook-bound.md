@@ -56,3 +56,28 @@ The explicit caller subsequently exited with `Source changed while incremental
 publication was being analyzed.` Its before/after digests were
 `259ae978a6a4d85011bc77f5ad249405a5fbfdeb149e303028e63108d103eec5` and
 `a9b821678cb32cfa17338813ca23d23f0f46781f3b669a2612c6ca995d9d03cd`.
+
+## Reset boundary follow-up — 2026-09-17
+
+The reset slice now reports a holder once, immediately, with exact process
+identity and liveness, and caps acquisition by the hook's configured
+publication allowance. Dead metadata is reclaimed after kernel acquisition;
+a still-held kernel lock with dead metadata is an immediate inconsistency.
+Source syntax refusals precede acquisition and destruction. See
+[the reset landing note](../../prds/steward-platform/research/reset-is-total-2026-09-17.md).
+
+This does not resolve publication cost. An isolated full reset at snapshot
+`149ea07d1` plus the reset slice reached republish and exhausted the configured
+180,000 ms child deadline. The caller exited 1, reported `phase=republish`
+and its log, recorded `:seon.operator.subprocess/reaped? true`, and performed
+no refork/start/adopt. Its remaining partial store contained 4,242,024 regular
+file bytes. `down --force` subsequently verified the store lock free, and
+that scratch root was deleted. No main-root reset was issued by this lane.
+The live-adopted success path and `seon.fn/tests-reaching` against the scratch
+publication remain unproven because publication did not complete. The
+syntactic check is not represented as a semantic program-load proof.
+
+The owning regressions prove early refusal, phase short-circuiting, direct
+filesystem cleanup with broken program source, symlink preservation, and
+subprocess log retention after a deadline. The retained output prevents the
+next timeout from erasing the phase's own diagnostic evidence.

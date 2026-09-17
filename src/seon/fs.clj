@@ -1,6 +1,7 @@
 (ns seon.fs
   "Filesystem operations whose safety depends on path ownership."
-  (:require [clojure.java.io :as io])
+  (:require [clojure.java.io :as io]
+            [clojure.string :as str])
   (:import [java.nio.file Files LinkOption NoSuchFileException Path]
            [java.nio.file.attribute BasicFileAttributes]
            [java.util.concurrent TimeUnit]))
@@ -9,6 +10,102 @@
 
 (def ^:private ^"[Ljava.nio.file.LinkOption;" no-follow
   (into-array LinkOption [LinkOption/NOFOLLOW_LINKS]))
+
+(defn- destructive-canonical-path [path]
+  (.getCanonicalPath (io/file path)))
+
+(defn- refuse-deletion! [rule message data]
+  (throw (ex-info message
+                  (assoc data :seon.error/kind :seon.cluster.store/refused
+                         :seon.cluster.store/refused rule
+                         :seon.cluster.store/rule rule))))
+
+(defn- path-string
+  [value]
+  (cond
+    (string? value) value
+    (instance? java.io.File value) (.getPath ^java.io.File value)))
+
+(defn- under-path?
+  [ancestor descendant]
+  (or (= ancestor descendant)
+      (str/starts-with? descendant (str ancestor java.io.File/separator))))
+
+(defn admit-destructive-path!
+  "Admit one recursive deletion, or refuse BEFORE anything is deleted.
+
+  Takes `{:seon.cluster.store/root, :seon.cluster.store/target, :seon.cluster.store/declared-root}` and returns the canonical
+  target path. `:seon.cluster.store/root` is the caller's deletion authority, `:seon.cluster.store/target` the
+  path it wants removed, and `:seon.cluster.store/declared-root` the operator root this JVM was
+  launched to operate (`declared-operator-root`), absent when none was
+  declared.
+
+  THE RULE, refused as a typed store refusal naming the offending value:
+  the root and the target must be absolute (nil, \"\", \".\" and any relative
+  spelling resolve against the process working directory and are refused);
+  the canonical target must lie under the canonical root; and a target
+  inside the working directory's own `data/` is refused unless
+  `:seon.cluster.store/declared-root` is that working directory. So `bin/seon reset --force`
+  destroys the checkout's data because its JVM declared that root, while a
+  test worker, a fixture, or a lane JVM — which declare an isolated root or
+  none — cannot construct the deletion."
+  {:malli/schema
+   [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The admission judges caller-supplied path values of any shape, including nil and relative strings, and refuses them by typed value."}]]
+    :string]}
+  [request]
+  (let [root (:seon.cluster.store/root request)
+        target (:seon.cluster.store/target request)
+        declared (:seon.cluster.store/declared-root request)
+        root-string (path-string root)
+        target-string (path-string target)]
+    (when (str/blank? root-string)
+      (refuse-deletion! :seon.cluster.store/undeclared-destructive-root
+               (str "a recursive deletion was requested with no deletion "
+                    "authority (" (pr-str root) "); the root is the disposable "
+                    "root the caller holds, never the working directory")
+               {:seon.cluster.store/root root :seon.cluster.store/target target}))
+    (when (str/blank? target-string)
+      (refuse-deletion! :seon.cluster.store/undeclared-destructive-target
+               (str "a recursive deletion was requested with no target ("
+                    (pr-str target) ")")
+               {:seon.cluster.store/root root :seon.cluster.store/target target}))
+    (when-not (.isAbsolute (io/file root-string))
+      (refuse-deletion! :seon.cluster.store/relative-destructive-root
+               (str "the deletion authority " (pr-str root-string)
+                    " is relative, so it names the process working directory "
+                    (pr-str (System/getProperty "user.dir"))
+                    "; hand the absolute disposable root instead")
+               {:seon.cluster.store/root root-string :seon.cluster.store/target target-string}))
+    (when-not (.isAbsolute (io/file target-string))
+      (refuse-deletion! :seon.cluster.store/relative-destructive-target
+               (str "the deletion target " (pr-str target-string)
+                    " is relative, so it names the process working directory "
+                    (pr-str (System/getProperty "user.dir")))
+               {:seon.cluster.store/root root-string :seon.cluster.store/target target-string}))
+    (let [authority (destructive-canonical-path root-string)
+          resolved (destructive-canonical-path target-string)
+          working (destructive-canonical-path (System/getProperty "user.dir"))
+          working-data (destructive-canonical-path (io/file working "data"))]
+      (when-not (under-path? authority resolved)
+        (refuse-deletion! :seon.cluster.store/destructive-path-outside-root
+                 (str "refusing to delete " resolved
+                      " because it lies outside the deletion authority "
+                      authority)
+                 {:seon.cluster.store/root authority :seon.cluster.store/target resolved}))
+      (when (and (under-path? working-data resolved)
+                 (not= declared working))
+        (refuse-deletion! :seon.cluster.store/undeclared-checkout-deletion
+                 (str "refusing to delete " resolved
+                      " inside the working directory's own data directory: "
+                      "this JVM declared operator root " (pr-str declared)
+                      ", not " (pr-str working)
+                      "; only a JVM launched to operate that root (bin/seon "
+                      "[--root PATH]) may destroy it")
+                 {:seon.cluster.store/root authority
+                  :seon.cluster.store/target resolved
+                  :seon.cluster.store/declared-root declared
+                  :seon.cluster.store/working-directory working}))
+      resolved)))
 
 (defn source-directory
   "The checkout directory supplying the loaded filesystem owner."

@@ -241,17 +241,6 @@
     (when-not (str/blank? declared)
       (canonical-path declared))))
 
-(defn- path-string
-  [value]
-  (cond
-    (string? value) value
-    (instance? java.io.File value) (.getPath ^java.io.File value)))
-
-(defn- under-path?
-  [ancestor descendant]
-  (or (= ancestor descendant)
-      (str/starts-with? descendant (str ancestor java.io.File/separator))))
-
 (defn admit-destructive-path!
   "Admit one recursive deletion, or refuse BEFORE anything is deleted.
 
@@ -274,59 +263,7 @@
    [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The admission judges caller-supplied path values of any shape, including nil and relative strings, and refuses them by typed value."}]]
     :string]}
   [request]
-  (let [root (::root request)
-        target (::target request)
-        declared (::declared-root request)
-        root-string (path-string root)
-        target-string (path-string target)]
-    (when (str/blank? root-string)
-      (refuse! ::undeclared-destructive-root
-               (str "a recursive deletion was requested with no deletion "
-                    "authority (" (pr-str root) "); the root is the disposable "
-                    "root the caller holds, never the working directory")
-               {::root root ::target target}))
-    (when (str/blank? target-string)
-      (refuse! ::undeclared-destructive-target
-               (str "a recursive deletion was requested with no target ("
-                    (pr-str target) ")")
-               {::root root ::target target}))
-    (when-not (.isAbsolute (io/file root-string))
-      (refuse! ::relative-destructive-root
-               (str "the deletion authority " (pr-str root-string)
-                    " is relative, so it names the process working directory "
-                    (pr-str (System/getProperty "user.dir"))
-                    "; hand the absolute disposable root instead")
-               {::root root-string ::target target-string}))
-    (when-not (.isAbsolute (io/file target-string))
-      (refuse! ::relative-destructive-target
-               (str "the deletion target " (pr-str target-string)
-                    " is relative, so it names the process working directory "
-                    (pr-str (System/getProperty "user.dir")))
-               {::root root-string ::target target-string}))
-    (let [authority (canonical-path root-string)
-          resolved (canonical-path target-string)
-          working (canonical-path (System/getProperty "user.dir"))
-          working-data (canonical-path (io/file working "data"))]
-      (when-not (under-path? authority resolved)
-        (refuse! ::destructive-path-outside-root
-                 (str "refusing to delete " resolved
-                      " because it lies outside the deletion authority "
-                      authority)
-                 {::root authority ::target resolved}))
-      (when (and (under-path? working-data resolved)
-                 (not= declared working))
-        (refuse! ::undeclared-checkout-deletion
-                 (str "refusing to delete " resolved
-                      " inside the working directory's own data directory: "
-                      "this JVM declared operator root " (pr-str declared)
-                      ", not " (pr-str working)
-                      "; only a JVM launched to operate that root (bin/seon "
-                      "[--root PATH]) may destroy it")
-                 {::root authority
-                  ::target resolved
-                  ::declared-root declared
-                  ::working-directory working}))
-      resolved)))
+  (fs/admit-destructive-path! request))
 
 (defn- caller-frame
   []
