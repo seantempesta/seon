@@ -1051,29 +1051,29 @@
                     :seon.cluster.eval/at (java.util.Date.)}]
        (test-support/transacted!
         connection
-        (into [{:seon.ns/name 'my.agents.db-conflict}]
-              (concat (turn/receipt-start-tx
-                       (assoc request :seon.cluster.eval/ordinal 0))
-                      [[:db/add [:seon.cluster.eval/id owner-id]
-                        :seon.cluster.eval/refreshes
-                        [:seon.ns/name 'my.agents.db-conflict]]])))
-       (let [rejected
+        (into (turn/receipt-start-tx
+               (assoc request :seon.cluster.eval/ordinal 0))
+              (turn/receipt-start-tx
+               (assoc request :seon.cluster.eval/ordinal 1))))
+       (let [before (db/basis-t @connection)
+             contender (:db/id (db/pull @connection [:db/id]
+                                       [:seon.cluster.eval/id contender-id]))
+             rejected
              (binding [db/*conn* connection]
                (db/transact!
-                (into (turn/receipt-start-tx
-                       (assoc request :seon.cluster.eval/ordinal 1))
-                      [[:db/add [:seon.cluster.eval/id contender-id]
-                        :seon.cluster.eval/refreshes
-                        [:seon.ns/name 'my.agents.db-conflict]]])))
+                [[:db/add contender :seon.cluster.eval/id owner-id]]))
              conflict (:seon.error/data rejected)]
+         (is (= before (db/basis-t @connection)))
+         (is (= contender (:db/id (db/pull @connection [:db/id]
+                                          [:seon.cluster.eval/id contender-id]))))
          (is (= :seon.db/rejected (:seon.error/kind rejected)))
          (is (true? (:seon.db/transaction-refused rejected)))
          (is (= {:error :transact/unique
-                 :attribute :seon.cluster.eval/refreshes}
+                 :attribute :seon.cluster.eval/id}
                 (select-keys conflict [:error :attribute])))
          (is (instance? datahike.datom.Datom (:datom conflict)))
          (is (= {:seon.db/conflict-attribute
-                 :seon.cluster.eval/refreshes
+                 :seon.cluster.eval/id
                  :seon.db/conflict-owner
                  [:seon.cluster.eval/id owner-id]}
                 (select-keys conflict

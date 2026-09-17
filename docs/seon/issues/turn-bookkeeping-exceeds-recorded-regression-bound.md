@@ -42,3 +42,12 @@ run **55845** again passes all **14 semantic assertions** and fails the unchange
 **300 ms** bound: **5645.859042 ms**. The candidate uses the current contracted
 definition and saved shown text. It remains unlanded. This verifies the residual
 after refreshing the fixture; it does not attribute the cost to delimiter repair.
+
+## Message-wake review observation — 2026-09-17
+
+The isolated HEAD-plus-owned-paths fast run at base `8dff32220` measures
+**464.287208 ms** against the unchanged **300 ms** installation bound in
+`seon.cluster.turn-test/delimiter-repair-is-span-local-and-precedes-intent`.
+That test and the measured installation owner are unchanged in the slice.
+No cause is inferred from this shared-machine measurement. See the
+[landing evidence](../../prds/steward-platform/research/message-wake-model-2026-09-17.md).

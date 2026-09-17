@@ -147,26 +147,6 @@
                           [?step :my.plan.item/needs ?tx]
                           [?tx :db/txInstant ?instant]] @connection)))))))
 
-(deftest datahike-refusals-retain-their-classification
-  (test-support/with-database
-   (fn [connection]
-     (let [accepted
-           (db/transact! connection
-                         [{:seon.ns/name 'my.agents.feedback-target}
-                          [:db/add "feedback/owner" :seon.cluster.eval/id "feedback/owner"]
-                          [:db/add "feedback/owner" :seon.cluster.eval/refreshes
-                           [:seon.ns/name 'my.agents.feedback-target]]])
-           rejected
-           (db/transact! connection
-                         [[:db/add "feedback/contender" :seon.cluster.eval/id "feedback/contender"]
-                          [:db/add "feedback/contender" :seon.cluster.eval/refreshes
-                           [:seon.ns/name 'my.agents.feedback-target]]])]
-       (is (some? (:db-after accepted)) (pr-str accepted))
-       (is (= :seon.db/rejected (:seon.error/kind rejected)))
-       (is (= :transact/unique (get-in rejected [:seon.error/data :error])))
-       (is (= [:seon.cluster.eval/id "feedback/owner"]
-              (get-in rejected [:seon.error/data :seon.db/conflict-owner])))))))
-
 (deftest non-temporal-stores-admit-writes-while-a-retention-rule-is-in-force
   ;; Retention snapshotting asked Datahike for `history` unconditionally,
   ;; and a `:keep-history? false` store answers "history is only allowed on

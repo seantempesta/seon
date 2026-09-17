@@ -346,7 +346,7 @@
 ;; The *-tx wrappers reference their *-call VARS (#'f): datahike applies
 ;; the var, so redefining a transition against the running system updates
 ;; behavior immediately — the flow-dynamics live-update pattern.
-(declare close-call plan-call refresh-call
+(declare close-call plan-call
          open-call receipt-start-call receipt-settle-call
          recover-call)
 
@@ -800,75 +800,6 @@
            (open-tx
             (cond-> {::id run-id ::agent [:seon.agent/id agent-id] ::starting-ns [:seon.ns/name namespace-name] :seon.turn.work/situation :generate ::opened-tx "datomic.tx"}
               trigger (assoc ::trigger trigger)))])))
-
-(defn refresh-tx
-  "Transaction data refreshing one prior system-authored form."
-  {:malli/schema
-   [:=> [:cat :seon.cluster.eval/id] :seon.store/transaction-data]}
-  [prior-form-id]
-  [[:db.fn/call #'refresh-call prior-form-id]])
-
-(defn- refresh-run-id
-  [db prior-form-id]
-  (id/digest 12 [::refresh prior-form-id (db/basis-t db)]))
-
-(defn refresh-call
-  "Append one ordinary system run from a prior refreshable evaluation."
-  {:malli/schema
-   [:=> [:cat :seon.db/database-value :seon.cluster.eval/id]
-    :seon.store/transaction-data]}
-  [db prior-form-id]
-  (let [request {:seon.cluster.eval/id prior-form-id}
-        ;; ONE ENTITY: the frozen source and its terminal facts are the same
-        ;; evaluation, so this reads it once instead of joining a twin.
-        prior
-        (db/pull db
-                 '[* {:seon.cluster.eval/run
-                      [:db/id :seon.turn/id
-                       {:seon.turn/agent
-                        [:db/id :seon.agent/id]}]}
-                   {:seon.cluster.eval/ns [:db/id :seon.ns/name]}
-                   {:seon.cluster.eval/read-evidence [*]}]
-                 [:seon.cluster.eval/id prior-form-id])]
-    (when-not (:db/id prior)
-      (refuse! `refresh-call ::no-such-form request))
-    (when-not (= :system (:seon.cluster.eval/author prior))
-      (refuse! `refresh-call ::refresh-agent-authored request))
-    (let [prior-run (:seon.cluster.eval/run prior)
-          successor
-          (db/q '[:find ?successor .
-                  :in $ ?prior
-                  :where
-                  [?successor :seon.cluster.eval/refreshes ?prior]]
-                db (:db/id prior))]
-      (when-not (terminal? prior)
-        (refuse! `refresh-call ::refresh-receipt-not-terminal request))
-      (when-not (seq (:seon.cluster.eval/read-evidence prior))
-        (refuse! `refresh-call ::refresh-read-evidence-missing request))
-      (when successor
-        (refuse! `refresh-call ::refresh-successor-exists request))
-      (let [run-id (refresh-run-id db prior-form-id)
-            run-tempid (str "seon.turn/" run-id)
-            evaluation-id (receipt-identity run-id 0)
-            namespace (:seon.cluster.eval/ns prior)
-            source (:seon.cluster.eval/source prior)
-            opened-at (current-transaction-instant db)
-            open-rows
-            (open-call db
-                       {::id run-id ::agent (:db/id (::agent prior-run)) ::opened-tx "datomic.tx"})
-            evaluation {:db/id evaluation-id
-                        :seon.cluster.eval/id evaluation-id
-                        :seon.cluster.eval/run run-tempid
-                        :seon.cluster.eval/ordinal 0
-                        :seon.cluster.eval/at opened-at
-                        :seon.cluster.eval/author :system
-                        :seon.cluster.eval/source source
-                        :seon.cluster.eval/ns (:db/id namespace)
-                        :seon.cluster.eval/refreshes (:db/id prior)}]
-        (into open-rows
-              [[:db/add run-tempid ::reply-size (long (count source))]
-               [:db/add run-tempid ::starting-ns (:db/id namespace)]
-               evaluation])))))
 
 (defn- current-receipt
   "The receipt identified by run and ordinal, or nil.
