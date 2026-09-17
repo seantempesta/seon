@@ -3581,3 +3581,11 @@ as orchestrator/astra lanes, easy pool as the first live-agent slice).
   Platform gate 8 launched bare on this HEAD. Launched sol
   `indexer-error-keys-and-operator-graph` (B5: triage #15, #21; move
   `seon.operator.state` under src/).
+- Platform gate 8 (`post-reset-platform-8.log`, HEAD `ea676d0af`) is
+  INVALID as evidence: load average 22.7 (four lanes' fast JVMs + an Opus
+  agent's gate + the cluster); the serial worker missed its 290 s exchange
+  bound and was retired, so `seon.cluster.store-test` etc. were reported
+  failed unrun. Also seen: recording refused because `record-results!` got
+  a string `:seon.test/sym` at results index 18 — a runner results path
+  still passing strings (for the stage-1 resume). Rule applied: no cold
+  gate while four editing lanes iterate; next gate after two land.
