@@ -405,6 +405,22 @@ extends it to every check the audits are adding:
 - One predicate (`seon.error/error?`) decides "is this an error"; one
   helper decides throw-or-record from the dial; no per-namespace copies.
 
+### 1l. The best schemas we have ever written come out of this (owner, 2026-09-17 18:00Z)
+
+Owner: "I want the best schemas we've ever written to come out of this. We
+need a thoughtful analysis about the data model first, how we can improve
+it, and then we need to have the right checks in place and to return the
+best data for handling it in the future (system crash for critical so we
+immediately fix those)."
+
+Order: data-model analysis first (the error value family and every shape
+the audits found flowing uncontracted), then the checks, then the contract
+campaign. A contract written against a wrong or missing schema is the
+mirror class again. The error model must say what every error carries so
+that handling it later is a query (kind, class, layer, member, expected,
+offending value, fix, evidence, provenance) and which errors are critical
+(a crash in development, an immediate fix).
+
 ## 2. What exists today, with the seams named
 
 Verified on `steward-platform` at `a36d55c3b`/`849bbce0b` on 2026-09-17.
