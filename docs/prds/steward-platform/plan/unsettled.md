@@ -2864,3 +2864,15 @@ working tree, never Sonnet.
   `research/live-trial-1-2026-09-17.md`. The loop's pieces exist today
   (`generate!`, `start!`, `settle-call` runs the task's tests, unchanged-green
   reuse); the trial finds the cracks before the test system is complete.
+- **Hook verified from the lanes' own experience** (probe lanes on astra
+  low and gpt-5.6-luna, `7d129b2f4` `ad3324489`): a broken patch is blocked
+  BEFORE the write with kondo line:column; a broken shell heredoc lands and
+  is blocked immediately after; good writes get lint feedback and a
+  publication id. Owed: the hook should report the adoption OUTCOME, not a
+  command to check it; and when another agent's broken file blocks a write,
+  name whose file it is. `gpt-6-luna` does not exist on this account; the
+  models are astra, sol, terra, luna, 5.5 — `codex-lanes` skill written
+  (`046c4c713`); owner: sol ≥ Opus for implementation.
+- private-contracts slice 1 (`74a389ce1`): arming of contracted private
+  functions ALREADY existed (14 armed live); the gap is purely the missing
+  contracts. Resumed on slice 2.
