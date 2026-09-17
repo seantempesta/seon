@@ -466,3 +466,53 @@
                     (get-in result [:seon.ai.tokens/budget-report
                                     :seon.ai.tokens/basis]))
                  "the report names which basis measured it"))))))))
+
+(deftest a-replay-under-a-selecting-budget-reconstructs-its-own-capture
+  ;; The capture holds compose(select(units)) plus the frame — history under
+  ;; the agent's token budget. The comparison used to live at
+  ;; `seon.render/acquire-context!`, which holds the acquired units and not
+  ;; the composition, and matched the selected capture against the whole
+  ;; unselected join: equal only while the budget keeps every unit, and a
+  ;; false capture-mismatch at every smaller budget. The composing function
+  ;; makes the comparison now, so it is exact at any budget.
+  (planted
+   (fn [connection ctx]
+     (support/transacted! connection
+                          [{:seon.agent/id "walker"
+                            :seon.agent/settings
+                            {:seon.config.ai/prompt-token-budget 3}}])
+     (let [unit-text (apply str (repeat 40 "x"))
+           join (str unit-text "\n\n" unit-text)
+           acquire (fn [render-request]
+                     {:seon.cluster.prompt/text join
+                      :seon.render.history/entries
+                      [(history-unit 0 unit-text) (history-unit 1 unit-text)]
+                      :seon.render.history/segments
+                      [unit-text (str "\n\n" unit-text)]
+                      :seon.db/db (:seon.db/db render-request)})]
+       (with-redefs [render/acquire-context! acquire]
+         (let [composed (:seon.cluster.prompt/text
+                         (prompt/prompt @connection (request connection ctx)))]
+           (is (string? composed))
+           (is (not= composed (str join "\n\n" (repl/frame @connection "walker")))
+               "the budget selected, so the capture is not the unselected join")
+           (support/transacted!
+            connection
+            [{:seon.context.capture/id "replayed-capture"
+              :seon.context.capture/run [:seon.turn/id "walk-run"]
+              :seon.context.capture/basis-t (db/basis-t @connection)
+              :seon.context.capture/prompt composed}])
+           (let [replayed (prompt/prompt @connection (request connection ctx))]
+             (is (nil? (:seon.error/kind replayed))
+                 (str "a replay of its own capture is not a mismatch: "
+                      (pr-str replayed)))
+             (is (= composed (:seon.cluster.prompt/text replayed))))
+           (testing "changed saved evaluations are still refused by name"
+             (support/transacted!
+              connection
+              [{:seon.context.capture/id "replayed-capture"
+                :seon.context.capture/prompt (str composed " drifted")}])
+             (let [drifted (prompt/prompt @connection (request connection ctx))]
+               (is (= :seon.cluster.prompt/capture-mismatch
+                      (:seon.error/kind drifted)))
+               (is (= "walk-run" (:seon.turn/id drifted)))))))))))

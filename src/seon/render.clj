@@ -22,7 +22,6 @@
             [seon.error :as error]
             [seon.print :as print]
             [seon.render.hiccup :as hiccup]
-            [seon.repl :as repl]
             [seon.render.value :as render.value]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
@@ -1564,20 +1563,6 @@
          (swap! state #(if (:seon.render/cache %) %
                           (assoc % :seon.render/cache (atom {}))))))))
 
-(defn- captured-history [request acquired]
-  (let [capture (db/q '[:find ?text . :in $ ?id :where [?t :seon.turn/id ?id]
-                        [?c :seon.context.capture/run ?t] [?c :seon.context.capture/prompt ?text]]
-                      (:seon.db/db request) (:seon.turn/id request))]
-    (if (or (:seon.error/kind acquired)
-            (not (string? capture)) (= capture (:seon.cluster.prompt/text acquired))
-            (= capture (str (:seon.cluster.prompt/text acquired) "\n\n"
-                            (repl/frame
-                             (:seon.db/db acquired) (:seon.agent/id request)))))
-      acquired
-      {:seon.error/kind ::capture-mismatch
-       :seon.error/message "Saved evaluations do not reconstruct the captured provider prompt."
-       :seon.turn/id (:seon.turn/id request)})))
-
 (defn acquire-context!
   "Fold saved shown text into the agent's context.
 
@@ -1599,7 +1584,7 @@
       (if (:seon.error/kind basis) basis
         (let [acquired (@render-web-derive-context!
                         (assoc request :seon.db/db basis))]
-          (if turn-id (captured-history request acquired) acquired))))))
+          acquired)))))
 
 
 (defn- namespace-owner

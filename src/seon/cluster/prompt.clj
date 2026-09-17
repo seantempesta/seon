@@ -309,6 +309,30 @@
           selection
           (recur (dec kept)))))))
 
+(defn- capture-mismatch
+  "A replay whose recomposed prompt is not the bytes the provider was sent.
+
+  DERIVED AT THE AUTHORITY (owner law, 2026-08-29). A capture holds
+  `compose(select(units))` plus the turn frame — history under THIS
+  agent's token budget — so only the function that composes it can say
+  whether saved evaluations still reconstruct it. The check used to live
+  at `seon.render/acquire-context!`, which holds the acquired units and
+  not the composition, and compared the selected capture against the
+  whole unselected join: identical at a budget large enough to keep every
+  unit, and a false `capture-mismatch` at every smaller one. A live turn
+  has no capture yet, so this answers only for a replay."
+  [database turn-id text]
+  (let [capture (db/q '[:find ?text . :in $ ?id
+                        :where [?t :seon.turn/id ?id]
+                               [?c :seon.context.capture/run ?t]
+                               [?c :seon.context.capture/prompt ?text]]
+                      database turn-id)]
+    (when (and (string? capture) (not= capture text))
+      {:seon.error/kind ::capture-mismatch
+       :seon.error/message
+       "Saved evaluations do not reconstruct the captured provider prompt."
+       :seon.turn/id turn-id})))
+
 (defn- acquire-context-report
   "`settings` is the ONE resolution `prompt` already made (2.1): the turn
   frame reads the same resolved dial through it rather than deriving the
@@ -347,12 +371,14 @@
             segments (conj (selection-segments selection) frame)
             contributions (history-contributions segments calibration)
             report (tokens/budget-report text budget calibration)]
-        {:seon.cluster.prompt/text text
-         :seon.context/contributions
-         (update contributions (dec (count contributions))
-                 assoc :seon.render.block/name :frame)
-         :seon.ai.tokens/budget-report report
-         :seon.db/db (:seon.db/db acquired)}))))
+        (or (when-let [turn-id (:seon.turn/id request)]
+              (capture-mismatch database turn-id text))
+            {:seon.cluster.prompt/text text
+             :seon.context/contributions
+             (update contributions (dec (count contributions))
+                     assoc :seon.render.block/name :frame)
+             :seon.ai.tokens/budget-report report
+             :seon.db/db (:seon.db/db acquired)})))))
 
 (defn prompt
   "Acquire one retained walk for the agent holding the request's run.
