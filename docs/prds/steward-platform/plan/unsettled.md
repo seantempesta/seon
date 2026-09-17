@@ -1928,6 +1928,21 @@ the run entity, and the unchanged-request policy (recorded result returned
 as data with its basis :t, never re-executed). Stage 1 selection waits on
 the symbol-edge reset; stage 3 scheduling on 1+2.
 
+**~04:30Z owner: "don't drop the ball. anything else we discussed and you
+haven't scheduled? what is the long term plan? keep everything written
+down."** Audit done → the long-term plan and schedule (phases 0–5, every
+discussed item with owner and status, the six open owner decisions) written
+into [plan/README.md](README.md) at the top. Unscheduled items found and
+launched: the debug-page OUTLINE (turns → units → HTML with the AI-text
+toggle; owner's Q3) and a small-fixes lane (pull's 1,000-member cap on reach
+reads FIRST; captured-history compare; `:entity-id/syntax`; `:defined-by`;
+reporter ex-data). Queued with triggers in the plan: S12 post-reset
+operations, tier 3 implementations-as-declarations, S10 conversational
+reply, S8 collector trigger, republish margin, admission-bypass detector,
+the hook verifier, first paid agent tasks, S5 write-back. Integrator resumed
+to build the edge retype on an isolated worktree branch `reset-batch`
+(its three files are held by long lanes and the batch is RESET-only).
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
