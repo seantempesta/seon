@@ -1835,6 +1835,23 @@ seal-triage items (eight sibling unsatisfiable-required schemas; the
 validator-on-the-writer-thread cost blocker — on the critical path since
 republish already runs at 173 s of 180; the sparse-upsert expectation).
 
+**Batch 115 (HEAD ~96427e85e; log `tmp/orchestrator/gate-results/batch-115.log`):
+A PLATFORM TIER RED before any test** — the tier checker refuses: every
+`seon.cluster.registry-test` test now reaches a declared destroyer (new
+since `c4d1be3ac` moved the delete admission into `seon.fs`) → reset-is-total
+lane resumed, first. Retained root run.KjByqA. **B: 341 tests / 6,644
+assertions / 17 F / 4 E** (root run.Z4ufFh): `concurrent-bin-test-
+invocations…` 7 (the filed silence-bound issue), `result-recording-is-total-
+under-concurrent-test-retraction` 3 and `the-agent-fork-callable-returns-the-
+committed-projection` 2 (admission/source, the integrator's), `a-fault-wakes-
+the-steward…` 2E/1F (fault-path agent in flight), `incremental-first-party-
+publication-retains-complete-scalar-rows` 1 (incremental agent resumed),
+`gate-completions-travel-as-a-file-not-as-code` 1 (bin/test-bounds agent
+resumed), `declared-row-…-delta` 1 and `bare-test-macros…` 1F/1E (known
+baseline reds, unowned — queue). Everything else in the 24 namespaces GREEN
+cold: composable-history, wake-matchers, tier-0, hook, seal, no-default,
+schema, config, schedule, sci.eval, documentation, search, selection.
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
