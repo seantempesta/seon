@@ -3,6 +3,7 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [my.program :as my.program]
             [seon.cluster.store :as store]
             [datahike.api :as d]
             [seon.test.selection :as selection]
@@ -2358,6 +2359,31 @@
                             database sym))]
         (is (= ["src"] (root-of (quote seon.fn/build-manifest))))
         (is (= ["test"] (root-of (quote seon.test-support/with-database))))))))
+
+(deftest operator-state-is-a-queryable-program-namespace
+  (test-support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           target 'seon.operator.state/subprocess-remaining-ms
+           row (db/pull database
+                        [:seon.fn/sym :seon.fn/private?
+                         {:seon.fn/file [:seon.fn.file/relative-root
+                                         :seon.fn.file/relative-path]}]
+                        [:seon.fn/sym target])
+           callers (my.program/callers
+                    {:seon.db/db database :seon.program/subject target})]
+       (is (= target (:seon.fn/sym row))
+           "the canonical fixture indexes operator-state functions")
+       (is (true? (:seon.fn/private? row))
+           "private operator functions are program facts too")
+       (is (= "src" (get-in row [:seon.fn/file
+                                  :seon.fn.file/relative-root])))
+       (is (= "src/seon/operator/state.clj"
+              (get-in row [:seon.fn/file
+                           :seon.fn.file/relative-path])))
+       (is (some #(= "seon.operator.state" (namespace %))
+                 (:seon.program/callers callers))
+           (pr-str callers))))))
 
 (deftest the-walked-root-travels-with-its-file-relative-to-the-publication
   (let [root (fixture-root)]

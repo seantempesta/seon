@@ -146,9 +146,11 @@
     :as subject}]
   (when (contains? lifecycle-lock-symbols head)
     (let [forwarding-seam?
-          (and (= path "resources/seon/operator/state.clj")
-               (= owner 'with-control-lock!)
-               (= head 'seon.operator.state/with-lifecycle-lock!))
+          (and (= head 'seon.operator.state/with-lifecycle-lock!)
+               (or (and (= path "src/seon/operator/state.clj")
+                        (= owner 'with-control-lock!))
+                   (and (= path "script/seon/fresh_operator.clj")
+                        (= owner 'with-operator-lock))))
           request (if (= head 'seon.operator.state/with-control-lock!)
                     (nth form 2 nil)
                     (second form))
@@ -204,11 +206,11 @@
 (defn- exact-subprocess-seam-internal?
   [path owner head form]
   (or
-   (and (= path "resources/seon/operator/state.clj")
+   (and (= path "src/seon/operator/state.clj")
         (= owner 'run-process!)
         (or (= head 'babashka.process/process)
             (and (= head '.waitFor) (= 4 (count form)))))
-   (and (= path "resources/seon/operator/state.clj")
+   (and (= path "src/seon/operator/state.clj")
         (contains? '#{terminate-recorded-process! terminate-subprocess!} owner)
         (= head '.get)
         (= 4 (count form)))

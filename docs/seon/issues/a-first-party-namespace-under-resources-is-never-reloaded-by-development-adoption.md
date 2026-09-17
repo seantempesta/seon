@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [adoption, reload, operator, platform, class/absence-as-health]
 created: 2026-09-17
@@ -53,3 +53,14 @@ development adoption, assert the reloaded consumer resolves the new var.
 
 `bin/seon reset --force` (owner-authorized: "reset the system if you need
 to"); a fresh JVM boots from the tree and loads the current file.
+
+## Resolution on 2026-09-18
+
+Moved `seon.operator.state` from `resources/seon/operator/state.clj` to
+`src/seon/operator/state.clj`. The namespace now belongs to the one declared
+program source root, so static publication indexes its public and private
+functions and development adoption derives it in the ordinary reload set.
+The canonical-fixture regression
+`seon.fn-test/operator-state-is-a-queryable-program-namespace` proves a
+private function row carries the `src` root and that `my.program/callers`
+finds its in-namespace caller.

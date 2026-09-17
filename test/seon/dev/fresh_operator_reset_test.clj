@@ -91,7 +91,7 @@
                     ".clj-kondo/config.edn"
                     "script/seon/fresh_operator.clj"
                     "script/seon/dev/clj_kondo.clj" "script/seon/dev/state.clj"
-                    "resources/seon/operator/state.clj" "src/seon/fs.clj"
+                    "src/seon/operator/state.clj" "src/seon/fs.clj"
                     "src/seon/id.clj" "src/seon/db.clj" ".claude/seon-hook.edn"
                     "config/default.edn"]]
         (let [target (io/file source path)]
