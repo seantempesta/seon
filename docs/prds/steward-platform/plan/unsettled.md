@@ -3448,3 +3448,10 @@ as orchestrator/astra lanes, easy pool as the first live-agent slice).
   (findings, not its rows). Cold gate `b2-paths-gate.log` running.
   Launched sol `sci-arm-leak` (the standalone "different SCI context is
   already armed" class) into the freed slot.
+- `error-declaration-manifest` slice 1 GREEN on branch
+  `error-declaration-manifest-slice1` (`90d0454e7` records it): 315 new
+  keys, old declarations and constructors untouched; fast 129 tests, 3,816
+  assertions, 0/0; projection rebuild 519 → 1,186 ms (single samples —
+  the doubling is a finding to measure properly). Integration onto
+  `steward-platform` waits on the held `seon.fn.edn` (stage-1 lane).
+  RESET NEEDED. Slice 2 (wrapper enforcement) launches after integration.
