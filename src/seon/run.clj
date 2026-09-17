@@ -25,13 +25,13 @@
                    [?function :seon.fn/sym ?sym]
                    [?function :seon.fn/doc ?doc]]
                  database
-                 ["my.turn/complete" "my.turn/wait"])))]
+                 '[my.turn/complete my.turn/wait])))]
     (str (:seon.ns/doc unit)
          "\n\n1. complete — "
-         (or (get docs "my.turn/complete")
+         (or (get docs 'my.turn/complete)
              "Finish completed work with a reply for its requester.")
          "\n\n2. wait — "
-         (or (get docs "my.turn/wait")
+         (or (get docs 'my.turn/wait)
              "Finish paused work with the condition needed to continue."))))
 
 (defn walkthrough

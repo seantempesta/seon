@@ -1837,3 +1837,35 @@
                           (db/pull database
                                    [[::wide-members :limit 10]]
                                    eid)))))))))))
+
+(deftest query-symbol-values-use-the-declared-codec-in-every-binding-shape
+  (with-codec-database
+   {:seon.test-support/extra-schema
+    (schema.datahike/malli->datahike-schema-in
+     fixture-projection [::ai-declaration ::html-declaration ::row-id])}
+   (fn [connection]
+     (test-support/transacted! connection
+       [{::row-id "codec-symbol" ::ai-declaration 'example.render/ai
+         ::html-declaration 'example.render/html}])
+     (let [database (db/db connection)]
+       (is (= "codec-symbol"
+              (db/q database '[:find ?id . :where
+                               [?e ::ai-declaration example.render/ai] [?e ::row-id ?id]])))
+       (is (= "codec-symbol"
+              (db/q database '[:find ?id . :in $ ?value :where
+                               [?e ::ai-declaration ?value] [?e ::row-id ?id]] 'example.render/ai)))
+       (is (= ['example.render/ai]
+              (db/q database '[:find [?value ...] :in $ [?value ...] :where
+                               [?e ::ai-declaration ?value]] ['example.render/ai])))
+       (is (= #{[::ai-declaration 'example.render/ai] [::row-id "codec-symbol"]}
+              (db/q database '[:find ?attribute ?value :in $ [?attribute ...] :where
+                               [?e ::row-id "codec-symbol"] [?e ?attribute ?value]]
+                    [::ai-declaration ::row-id])))
+       (is (= #{'example.render/ai 'example.render/html}
+              (set (db/q database '[:find [?value ...] :in $ [?attribute ...] :where
+                                    [?e ::row-id "codec-symbol"] [?e ?attribute ?value]]
+                         [::ai-declaration ::html-declaration]))))
+       (is (integer? (db/q database '[:find ?e . :where [?e :seon.ns/name seon.db]])))
+       (is (= ['seon.db]
+              (db/q database '[:find [?name ...] :in $ [?name ...]
+                               :where [?e :seon.ns/name ?name]] ['seon.db])))))))

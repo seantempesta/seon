@@ -33,7 +33,7 @@
             [seon.schema.datahike :as schema.datahike]
             [seon.schema.form :as schema.form])
   (:import [datahike.db AsOfDB DB]
-           [datalog.parser.type And BindScalar Constant FindColl FindRel FindScalar
+           [datalog.parser.type And BindColl BindTuple BindScalar Constant FindColl FindRel FindScalar
             FindTuple Not Or Pattern Pull Variable]))
 
 ;;; ---------------------------------------------------------------------------
@@ -860,7 +860,7 @@
              (assoc :seon.db/read-result stable-result))))
          captured)))
 
-(declare decode-index-page decode-query-result decode-pull-result read-declarations)
+(declare decode-index-page decode-query-result decode-pull-result read-declarations encode-query-request)
 
 (defn- pull-plan-with-evidence
   [& arguments]
@@ -881,7 +881,9 @@
                   (fn [arguments]
                     (mapv #(if (= ::database %) database %) arguments)))
           parsed-query (query/memoized-parse-query (:query query-request))
-          response (d/q-with-evidence query-request)]
+          response (d/q-with-evidence
+                    (encode-query-request (read-declarations database 'seon.db/replay-read)
+                                          query-request parsed-query))]
       (decode-query-result (read-declarations database 'seon.db/replay-read)
                            query-request
                            parsed-query
@@ -1266,15 +1268,31 @@
            ::value-type (:db/valueType declaration)}
           :seon.error/diagnostic-evidence evidence :seon.db/invalid-read true})))))
 
+(defn- query-binding-values
+  "Collect every scalar value admitted by a Datalog input binding."
+  {:malli/schema [:=> [:cat :seon.schema/value :seon.schema/value] :map]}
+  [binding value]
+  (cond
+    (instance? BindScalar binding)
+    (if (instance? Variable (:variable binding))
+      {(:symbol (:variable binding)) #{value}} {})
+    (instance? BindColl binding)
+    (or (apply merge-with set/union (map #(query-binding-values (:binding binding) %) value)) {})
+    (instance? BindTuple binding)
+    (or (apply merge-with set/union (map query-binding-values (:bindings binding) value)) {})
+    :else {}))
+
+(defn- query-input-values
+  {:malli/schema [:=> [:cat :seon.schema/value [:sequential :seon.schema/value]] :map]}
+  [parsed-query arguments]
+  (or (apply merge-with set/union
+             (map query-binding-values (:qin parsed-query) arguments)) {}))
+
 (defn- query-input-bindings
   [parsed-query arguments]
-  (into {}
-        (keep (fn [[input-binding value]]
-                (let [variable (:variable input-binding)]
-                  (when (and (instance? BindScalar input-binding)
-                             (instance? Variable variable))
-                    [(:symbol variable) value]))))
-        (map vector (:qin parsed-query) arguments)))
+  (into {} (keep (fn [[variable values]]
+                   (when (= 1 (count values)) [variable (first values)])))
+        (query-input-values parsed-query arguments)))
 
 (defn- query-patterns
   [parsed-query]
@@ -1350,35 +1368,84 @@
 
 (defn- query-variable-attributes
   [parsed-query arguments]
-  (let [input-bindings (query-input-bindings parsed-query arguments)]
+  (let [input-bindings (query-input-values parsed-query arguments)]
     (reduce
      (fn [attributes pattern]
        (let [attribute-node (nth (:pattern pattern) 1 nil)
              value-node (nth (:pattern pattern) 2 nil)
-             attribute (if (instance? Constant attribute-node)
-                         (:value attribute-node)
-                         (get input-bindings (:symbol attribute-node)))
+             candidates (if (instance? Constant attribute-node)
+                          #{(:value attribute-node)}
+                          (get input-bindings (:symbol attribute-node)))
              variable (:symbol value-node)]
-         (if (and (keyword? attribute)
+         (if (and (seq candidates)
+                  (every? keyword? candidates)
                   (instance? Variable value-node))
-           (update attributes variable (fnil conj #{}) attribute)
+           (update attributes variable (fnil into #{}) candidates)
            attributes)))
      {}
      (filter #(instance? Pattern %) (parsed-nodes (:qwhere parsed-query))))))
 
 (defn- query-find-attributes
   [declarations parsed-query arguments]
-  (let [variable-attributes
-        (query-variable-attributes parsed-query arguments)]
+  (let [variable-attributes (query-variable-attributes parsed-query arguments)
+        elements (vec (parser/find-elements (:qfind parsed-query)))
+        positions (into {} (keep-indexed #(when (instance? Variable %2) [(:symbol %2) %1])) elements)]
     (mapv
      (fn [element]
        (when (instance? Variable element)
-         (let [attributes (get variable-attributes (:symbol element))]
-           (when (= 1 (count attributes))
-             (let [attribute (first attributes)]
-               (when (edn-encoded? declarations attribute)
-                 attribute))))))
-     (parser/find-elements (:qfind parsed-query)))))
+         (let [attributes (get variable-attributes (:symbol element))
+               encoded (filter #(edn-encoded? declarations %) attributes)]
+           (when (seq encoded)
+             (if (= 1 (count attributes))
+               (first attributes)
+               (if-let [position
+                        (some (fn [pattern]
+                                (let [[_ attribute value] (:pattern pattern)]
+                                  (when (= (:symbol element) (:symbol value))
+                                    (get positions (:symbol attribute)))))
+                              (query-patterns parsed-query))]
+                 {::attribute-position position}
+                 (if (= (count encoded) (count attributes))
+                   (first encoded)
+                   (throw (ex-info "Select the attribute alongside values with different storage codecs."
+                                   {:seon.error/kind ::invalid-read
+                                    ::attributes attributes})))))))))
+     elements)))
+
+(defn- encode-query-request
+  "Encode values at parsed Datalog value positions, using the write codec."
+  {:malli/schema [:=> [:cat :map :map :seon.schema/value] :map]}
+  [declarations request parsed-query]
+  (let [bindings (query-input-bindings parsed-query (:args request))
+        attributes (query-variable-attributes parsed-query (:args request))
+        encode (fn [attribute value]
+                 (if (and attribute (edn-encoded? declarations attribute))
+                   (ask-declarations declarations
+                     #(schema.datahike/encode-attribute-value-in % attribute value))
+                   value))
+        replacements
+        (into {}
+              (keep (fn [pattern]
+                      (let [[_ attribute value] (:pattern pattern)
+                            attribute (if (instance? Constant attribute) (:value attribute)
+                                          (get bindings (:symbol attribute)))]
+                        (when (and (keyword? attribute) (instance? Constant value)
+                                   (edn-encoded? declarations attribute))
+                          (let [form (parser.impl/get-source pattern)
+                                position (if (:source pattern) 3 2)]
+                            [form (assoc (vec form) position (encode attribute (:value value)))])))))
+              (query-patterns parsed-query))]
+    (letfn [(encode-binding [binding value]
+              (cond
+                (instance? BindScalar binding)
+                (let [candidates (get attributes (:symbol (:variable binding)))]
+                  (if (= 1 (count candidates)) (encode (first candidates) value) value))
+                (instance? BindColl binding) (mapv #(encode-binding (:binding binding) %) value)
+                (instance? BindTuple binding) (mapv encode-binding (:bindings binding) value)
+                :else value))]
+      (assoc request
+             :query (walk/postwalk #(get replacements % %) (:query request))
+             :args (mapv encode-binding (:qin parsed-query) (:args request))))))
 
 (defn- decode-query-field
   [declarations attribute value]
@@ -1388,7 +1455,9 @@
 
 (defn- decode-query-tuple
   [declarations attributes tuple]
-  (mapv #(decode-query-field declarations %1 %2) attributes tuple))
+  (mapv #(decode-query-field declarations
+                               (if (map? %1) (nth tuple (::attribute-position %1)) %1) %2)
+        attributes tuple))
 
 (defn- query-return-map-keys
   [return-maps]
@@ -1410,7 +1479,10 @@
           (assoc decoded mapping-key
                  (decode-query-field
                   declarations
-                  (get attributes-by-key mapping-key) value)))
+                  (let [attribute (get attributes-by-key mapping-key)]
+                    (if (map? attribute)
+                      (get row (nth mapping-keys (::attribute-position attribute)))
+                      attribute)) value)))
         (empty row)
         row))
      result)))
@@ -1733,7 +1805,9 @@
                 parsed-query (query/memoized-parse-query (:query request))]
             (or (malformed-query-pattern-error request parsed-query)
                 (query-attribute-error request parsed-query)
-                (let [response (d/q-with-evidence request)
+                (let [declarations (read-declarations
+                                    (some #(when (db.utils/db? %) %) aligned) 'seon.db/q)
+                      response (d/q-with-evidence (encode-query-request declarations request parsed-query))
                       result (decode-query-result
                               (read-declarations
                                (some #(when (db.utils/db? %) %) aligned)

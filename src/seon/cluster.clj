@@ -1389,7 +1389,7 @@
                 {:seon.activation/executable-symbol symbol})
               (sort
                (set/difference
-                (into #{} (map str) requested-symbols)
+                (set requested-symbols)
                 (:seon.activation/executable-symbols requirements))))]
     {:seon.activation/closure closure
      :seon.activation/lookup-rows lookup-rows

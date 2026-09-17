@@ -3475,11 +3475,11 @@
 (defn schemas-in-namespace
   "The `{keyword definition}` map of schemas registered under `ns-name`.
 
-   `ns-name` is a string, e.g. \"seon.agent\"."
+   `ns-name` is a namespace symbol, e.g. `seon.agent`."
   {:malli/schema [:=> [:catn [::namespace-name ::namespace-name]] :map]}
   [ns-name]
   (into {}
-        (filter (fn [[k _]] (= (namespace k) ns-name)))
+        (filter (fn [[k _]] (= (some-> k namespace symbol) ns-name)))
         (candidate-forms)))
 
 ;;; ---------------------------------------------------------------------------
