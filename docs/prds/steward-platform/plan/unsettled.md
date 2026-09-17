@@ -2554,3 +2554,14 @@ working tree, never Sonnet.
   batch 119 (17 namespaces + platform). S3 resumed on its cold reds and
   the live proof after the refork. Editing lanes at the cap: integrator,
   guardrails, stage 2, S3.
+- **Refork done (default pid 94566) but the first adoption TIMED OUT
+  HOLDING the lifecycle lock** (`init-lifecycle-94902.log`,
+  `:seon.operator/lock-hold-timeout`, holder = the adoption itself): the
+  post-fork adoption measured 170.7 s at 04:22Z against the 180 s hold
+  bound — the "republish margin" item is now a BLOCKER, not a queued
+  cleanup: any adoption after a fork is within 10 s of its own bound. The
+  cost is the complete-publication validation on the writer thread (41.6 s
+  after the integrator's cut), issue indexing (~13 s) and the development
+  reload. Retrying the adoption, timed (`adopt-0525Z.log`). Owner for the
+  cut: astra, the moment an editing slot frees (the integrator owns the
+  validator cost and is mid-rebase; do not fold it there).

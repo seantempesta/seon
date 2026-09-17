@@ -66,7 +66,7 @@ lanes is the cap and was exceeded all night — expect load; lanes never run
 | Hook: loophole inventory; `agent_id` recorded; codex drops PostToolUse blocks → every refusal exits 2 with stderr reason; scan on every PostToolUse | Opus hook agent | landed `db0c51fa6` `8952da44f` |
 | Independent end-to-end hook verifier on both platforms | Opus | queued behind the hook agent |
 | `datahike.api/with` admission-bypass detector | Opus | queued |
-| Republish margin (173 s of 180): issue-index at publication, complete-publication cost | Opus | queued |
+| **Adoption/republish margin: 170.7 s post-fork adoption vs a 180 s lock-hold bound; the 05:20Z adoption timed out holding the lock** — cut the complete-publication validation (writer thread), issue indexing at publication, and the reload cost, or derive the hold bound from the measured phases | astra (next free slot) | BLOCKER, queued first |
 | Cold gates owed for every slice landed since the resume | orchestrator | batch 116 running (platform A, then 25 namespaces B); waited 17 min for a slot under load 71 |
 | Load cap: ≤4 editing lanes, three test slots shared with iteration | orchestrator | EXCEEDED at 03:15Z (six codex + three Opus); nothing new launches until batch 116 has run; prune before adding |
 
