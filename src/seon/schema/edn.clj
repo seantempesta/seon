@@ -381,6 +381,25 @@
                      ::population population})
             population))))))
 
+(defn forget-packaged-population!
+  "Drop the retained packaged declaration population.
+
+  The next [[packaged-forms]] resolution then reads the schema resources again.
+
+  The population is retained under [[declaration-stamp]], so ordinary
+  declaration changes already miss and nothing needs this. It exists for a
+  measurement that must observe a FIRST resolution inside a JVM that has
+  already resolved one under the same stamp — the declaration-population
+  regressions count reads at the resource seam, and without an explicit
+  operation they would read the retention as behaviour and measure zero.
+  Returns true when a population was held."
+  {:malli/schema [:=> [:cat] :boolean]}
+  []
+  (locking packaged-population-cache
+    (let [held (some? @packaged-population-cache)]
+      (reset! packaged-population-cache nil)
+      held)))
+
 (defn declaration-digest
   "Stable digest of the merged schema declaration set."
   {:malli/schema [:=> [:cat] :seon.source/digest]}

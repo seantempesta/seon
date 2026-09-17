@@ -36,8 +36,18 @@
       (thunk))
     @reads))
 
+(defn- reads-of-first-resolution
+  "Schema resource reads performed by `thunk` with no population retained.
+
+  The packaged population is retained under its declaration stamp, so a
+  worker JVM that resolved it once already would otherwise measure zero and
+  read the retention as behaviour."
+  [thunk]
+  (schema.edn/forget-packaged-population!)
+  (resource-reads thunk))
+
 (defn- one-population-reads []
-  (resource-reads schema.edn/packaged-forms))
+  (reads-of-first-resolution schema.edn/packaged-forms))
 
 (def ^:private carrier-symbols
   '[*candidate-forms-overlay* *projection* *projection-state* *packaged-forms*])
@@ -55,11 +65,14 @@
     (testing "one explicit packaged resolution reads every schema resource"
       (is (pos? one)
           "the fallback must actually read resources, or this test is vacuous"))
+    (testing "a second resolution under the same declaration stamp reads nothing"
+      (is (zero? (resource-reads schema.edn/packaged-forms))
+          "the retained population is the whole point of retaining it"))
     (doseq [[operation thunk]
             [["seon.config/default-decisions" config/default-decisions]
              ["seon.config/default-population" config/default-population]]]
       (testing operation
-        (is (= one (resource-reads thunk))
+        (is (= one (reads-of-first-resolution thunk))
             (str operation
                  " must perform ONE declaration resolution, not one per item"))))
     (testing "shipped print defaults are already retained after their first acquisition"

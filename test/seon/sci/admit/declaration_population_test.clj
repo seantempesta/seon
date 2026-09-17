@@ -53,7 +53,13 @@
       @reads)))
 
 (defn- one-population-reads
+  "Reads performed by one packaged acquisition with no population retained.
+
+  The packaged population is retained under its declaration stamp, so a
+  worker JVM that acquired it once already would otherwise measure zero and
+  read the retention as behaviour."
   []
+  (schema.edn/forget-packaged-population!)
   (reads-of schema.edn/packaged-forms))
 
 (def ^:private carrier-symbols
@@ -81,6 +87,9 @@
     (testing "one explicit packaged acquisition reads every schema resource"
       (is (pos? one)
           "the acquisition measurement must read resources, or it is vacuous"))
+    (testing "a second acquisition under the same declaration stamp reads nothing"
+      (is (zero? (reads-of schema.edn/packaged-forms))
+          "the retained population is the whole point of retaining it"))
     (without-handed-projection
      (fn []
        (doseq [[label value]
