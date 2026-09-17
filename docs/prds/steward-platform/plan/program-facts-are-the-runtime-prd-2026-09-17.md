@@ -294,6 +294,32 @@ G5. **A component is part of its parent's value.** The whole-entity write
 G6. All of G1–G5 land in the ONE reset with symbols-everywhere and the
     required-derivables slice (S2). Database data is disposable; no migration.
 
+
+### 1g. Owner rulings 2026-09-17 ~05:10Z (deletion, agents, capability-fn)
+
+- **Deletion is strict with no escape** (owner, verbatim intent): "we want
+  either all the fixes in a single transaction (so we can verify with the
+  db-after that everything is still correct) or we will farm out in a
+  distributed way to agents to refactor and remove references to the
+  function so it can be removed. If an agent declares a function and
+  doesn't want it they just remove it and no one is depending on it so
+  there's no problem ... lets stick with being strict and figuring out how to
+  make this work with agents."
+- **Agents are never retracted; an archived positive fact hides them** (owner:
+  "Agents are always resumable but sure we can have an archived flag and if
+  so we don't surface it in the UI"): `:seon.agent/archived-tx`, derived
+  `archived?`; the debug page and lists filter it; nothing else changes.
+- **`:seon.fn/capability-fn`: the ref is deleted; the handler symbol joins
+  the deletion refusal set** (decided by the orchestrator from the
+  program-graph research: two live pairs, the docstring names the symbol
+  as the primary fact, `:seon.effect/capability` already carries it; cost
+  one lookup on the effect path; overturns G2's exception).
+- **The message/wake/provenance modeling is NOT settled by identity values**
+  (owner: "the message wake system is a hack and we need to refactor it ...
+  sometimes you need to refactor how the data is modeled"): research pass
+  `message-wake-and-provenance-modeling-2026-09-17` finds the prior notes
+  and proposes the model per case.
+
 ## 2. What exists today, with the seams named
 
 Verified on `steward-platform` at `a36d55c3b`/`849bbce0b` on 2026-09-17.

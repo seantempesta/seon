@@ -1965,6 +1965,26 @@ is a codex-only question); subagent tool calls fire the parent's hooks with
 timeout 600 s; matchers are unanchored case-sensitive regexes; parallel
 hooks, most restrictive decision wins. Handed to the hook agent.
 
+**~05:10Z OWNER RULINGS** (PRD §1g): deletion strict, no escape; agents never
+retracted, archived by a positive fact hidden from the UI; capability-fn ref
+deleted (decided from research); message/wake/provenance modeling → research
+from the prior notes (owner: identity values were not the right fix; refactor
+the model). **CODEX HOOKS WERE OFF**: verified A/B (`84bba40da`, codex-cli
+reference): codex silently skips a project hook whose trust entry no longer
+matches — ours stopped matching when hooks.json was rewritten at ~02:15Z; no
+codex lane fired a hook since. Fixed in bin/codex-agent (`--dangerously-
+bypass-hook-trust` on both exec paths); all six codex lanes stopped and
+resumed covered. Also verified: codex snapshots hooks at session start
+(docs say otherwise) — a hook change means restarting lanes; shell tool is
+`Bash`, patch is `apply_patch` with the envelope in `tool_input.command`;
+PostToolUse/PreToolUse `decision: block` and exit 2 reach the model
+verbatim; `permissionDecision`, `systemMessage`, `updatedInput` do NOT work
+under our flags. bin/test-bounds agent: the two reds are NOT its
+(`e9a405aa0`): `record-tx` creates a test row without the required
+admission source → blocker filed, folded into the stage-2 lane; the
+two-gates test concealed the other reds by eating the silence bound →
+raised to blocker.
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
