@@ -421,6 +421,28 @@ that handling it later is a query (kind, class, layer, member, expected,
 offending value, fix, evidence, provenance) and which errors are critical
 (a crash in development, an immediate fix).
 
+### 1m. Owner rulings 2026-09-17 ~21:10Z (answering the error design's options)
+
+- **Critical fault under `:panic`:** stop only the affected agent/cluster
+  graph and keep the JVM (the third option in
+  `research/error-and-data-model-design-2026-09-17.md` §1.3); this requires a
+  durable failed state and positive visibility at every status surface — the
+  dead-turn-proc blocker is the same requirement.
+- **Database errors:** "if the db is down panic because the system is down,
+  so shut down what we need to and the system REPL has to fix it. Otherwise
+  errors are just data so we store them and connect them to best surface
+  them." No durable side log with replay; a database failure is a system-down
+  panic handled at the REPL, and every other error is a stored fact.
+- **Error identity:** the owner's model is that the SCHEMAS are the kinds — a
+  shared base every error carries, plus the required members that make an
+  error a database failure, a system failure, a turn failure. The three
+  spellings offered were not accepted as posed; the design is to be
+  re-expressed in those terms (shared aspects + per-kind required aspects,
+  kind derived from which entity schema the value satisfies) before any
+  constructor changes.
+- **The one-predicate consolidation (B1) waits until the owner has read the
+  design note.**
+
 ## 2. What exists today, with the seams named
 
 Verified on `steward-platform` at `a36d55c3b`/`849bbce0b` on 2026-09-17.
