@@ -307,9 +307,7 @@
               issue-index (first (keep-indexed (fn [i s] (when (clojure.string/includes? s "my.issue/status") i)) sources))]
           (clojure.test/is (seq entries))
           (clojure.test/is (= issue-id
-                             (:seon.issue/id
-                              (seon.db/pull (seon.db/db c) [:seon.issue/id]
-                                            (get-in entries [issue-index :seon.eval/origin :db/id])))))
+                             (get-in entries [issue-index :seon.eval/origin])))
           (clojure.test/is (nil? (seon.db/pull (seon.db/db c) [:db/ident]
                                              [:db/ident :seon.issue/turns-remaining])))
           (clojure.test/is (every? :seon.eval/shown entries))

@@ -321,3 +321,30 @@ corrected to cover the six constructible stored states; a final focused run
 follows. The unresolved fixture/state-reader mismatch is recorded in
 [one lifecycle-fixture issue](../../../seon/issues/evaluation-fixtures-still-read-retired-lifecycle-shapes.md).
 These observations do not change the production evaluation lifecycle.
+
+### Final routing correction and review boundary
+
+The focused canonical rerun passes **4 tests / 19 assertions / 0 failures /
+0 errors**, exit 0, with contracts armed. Exact output:
+[routing rerun](message-wake-model-routing-2026-09-17.txt).
+
+Review commits: handling **a50424f6b**; subject/sender/protocol plus the busy
+system-append correction **57581f12f**; the following origin commit contains
+only the issue-ID schema, generating writer, turn carry-forward, outline
+consumer and their tests, together with this note. Both mixed owner files were
+split by their owned hunks; no foreign changes entered either commit.
+
+All requested remaining behavior has canonical fast evidence. The full combined
+run remains red at the explicitly recorded broader boundaries; no cold-gate
+or platform success is claimed. Final foreign edits are
+`test/seon/test_runner_test.clj` and the lane-guardrails research note. The SCI
+owner's changes landed during iteration and were not edited by this lane.
+
+**Publish these remaining seams together, under §§1h–1i. RESET NEEDED.** Default
+was never stopped, reset, adopted or otherwise mutated. Its measured before
+query is `[]`; the same real route datom yields an answered message under the
+ruled `to` derivation. A deployed after query on default remains explicitly
+**unperformed** because this lane was authorized to observe it read-only. The
+orchestrator must run the retained probe after the one publication/reset and
+reseed, then run the cold namespace gate and platform proof. The previously
+integrated refresh deletion `78cc3b9b7` is unchanged.

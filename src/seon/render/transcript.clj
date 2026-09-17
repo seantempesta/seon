@@ -1529,26 +1529,6 @@
       tokens/shipped-calibration
       fitted)))
 
-(defn- outline-origins
-  "Name the entity whose render declared each generated evaluation.
-
-  `:seon.eval/origin` is a ref, so the outline reads the identity attributes
-  actually installed on this database rather than guessing a naming
-  convention (2.2)."
-  [database saveds]
-  (let [eids (into [] (comp (keep #(get-in % [:seon.eval/origin :db/id])) (distinct))
-                   saveds)
-        attributes (identity-attributes database)
-        rows (pulled-many database (into [:db/id] attributes) eids)]
-    (into {}
-          (keep (fn [row]
-                  (when-let [pair (first (keep (fn [attribute]
-                                                 (when-some [value (get row attribute)]
-                                                   [attribute value]))
-                                               attributes))]
-                    [(:db/id row) pair])))
-          rows)))
-
 (defn- outline-renderer
   "The declared renderer that produced this unit's saved shown text.
 
@@ -1561,12 +1541,13 @@
 
 (defn- outline-unit
   "One collapsed unit line and, expanded, its two honest projections."
-  [request projection origins calibration database row entry saved]
+  [request projection calibration database row entry saved]
   (let [bytes (or (:seon.render.history/bytes entry) "")
         evaluation-id (:seon.cluster.eval/id saved)
         signal (outline-signal evaluation-id)
         origin (session-origin database row saved)
-        declared (get origins (get-in saved [:seon.eval/origin :db/id]))
+        declared (when-let [issue-id (:seon.eval/origin saved)]
+                   [:seon.issue/id issue-id])
         html (render/render-call
               (assoc request :seon.render/value saved
                      :seon.render/output :seon.render/html
@@ -1652,7 +1633,6 @@
         by-eid (into {} (map (juxt :db/id identity)) (if (vector? rows) rows []))
         projection (when-let [ctx (:seon.sci.eval/ctx request)]
                      ((requiring-resolve 'seon.sci.kernel/context-projection) ctx))
-        origins (outline-origins database saved)
         calibration (outline-calibration database agent-id (if (vector? rows) rows []))
         by-turn (group-by #(get-in (:seon.render/value %)
                                    [:seon.cluster.eval/run :db/id])
@@ -1695,7 +1675,7 @@
              (into [:div {:class "seon-outline-units"}]
                    (map (fn [entry]
                           (let [value (:seon.render/value entry)]
-                            (outline-unit request projection origins calibration database
+                            (outline-unit request projection calibration database
                                           (get by-eid (get-in value [:seon.cluster.eval/run :db/id]))
                                           entry value))))
                    units)

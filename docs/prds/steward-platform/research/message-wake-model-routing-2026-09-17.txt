@@ -1,0 +1,55 @@
+bin/test: snapshot differences from HEAD c9c914c8cf5f6efba9c493b564cca7e0e9d5908a:
+bin/test:   M	AGENTS.md
+bin/test:   M	docs/prds/steward-platform/plan/reset-batch-2026-09-17.md
+bin/test:   M	docs/prds/steward-platform/research/message-wake-model-2026-09-17.md
+bin/test:   M	docs/seon/issues/one-identity-string-names-two-entities.md
+bin/test:   M	resources/seon/schemas/my.message.edn
+bin/test:   M	resources/seon/schemas/seon.eval.edn
+bin/test:   M	resources/seon/schemas/seon.message.edn
+bin/test:   M	src/my/message.clj
+bin/test:   M	src/seon/cluster/agent.clj
+bin/test:   M	src/seon/cluster/message.clj
+bin/test:   M	src/seon/cluster/wake.clj
+bin/test:   M	src/seon/error.clj
+bin/test:   M	src/seon/problems.clj
+bin/test:   M	src/seon/render/transcript.clj
+bin/test:   M	src/seon/turn.clj
+bin/test:   M	test/my/message_test.clj
+bin/test:   M	test/seon/cluster/agent_test.clj
+bin/test:   M	test/seon/cluster/armed_test.clj
+bin/test:   M	test/seon/cluster/message_assignment_test.clj
+bin/test:   M	test/seon/cluster/message_test.clj
+bin/test:   M	test/seon/cluster/problem_routing_test.clj
+bin/test:   M	test/seon/cluster/turn_test.clj
+bin/test:   M	test/seon/cluster/wake_test.clj
+bin/test:   M	test/seon/context_blocks_fixture.clj
+bin/test:   M	test/seon/error_test.clj
+bin/test:   M	test/seon/gen/loop_test.clj
+bin/test:   M	test/seon/issue_test.clj
+bin/test:   M	test/seon/plan_completion_test.clj
+bin/test:   M	test/seon/render/transcript_test.clj
+bin/test:   M	test/seon/render/web_debug_test.clj
+bin/test:   M	test/seon/turn_test.clj
+bin/test: end snapshot differences
+bin/test: PHASE snapshot elapsed-seconds=3
+bin/test: PHASE test-slot elapsed-seconds=0
+bin/test-fast: selected snapshot /Users/sean/src/seon/tmp/test-runs/run.YZqmbe
+WARNING: Using incubator modules: jdk.incubator.vector
+bin/test: PACKAGED TEST PROJECTION ACQUIRED at= 2026-09-17T04:58:25.520048Z pid= 91908 role= test-fast
+bin/test: CONTRACTS ARMED at= 2026-09-17T04:58:32.238943Z worker= test-fast mode= :panic namespaces= 1 program-namespaces= 109 registered= 1123 instrumented= 1123 program-armable= 1118
+bin/test: 2026-09-17T04:58:32.304563Z BEGIN namespace seon.cluster.problem-routing-test
+
+Testing seon.cluster.problem-routing-test
+bin/test: 2026-09-17T04:58:32.327872Z BEGIN test seon.cluster.problem-routing-test/parse-time-owner-wins-and-absence-falls-back-to-the-author
+WARNING: reset! already refers to: #'clojure.core/reset! in namespace: seon.fresh-operator, being replaced by: #'seon.fresh-operator/reset!
+bin/test: 2026-09-17T04:59:23.108710Z END test seon.cluster.problem-routing-test/parse-time-owner-wins-and-absence-falls-back-to-the-author
+bin/test: 2026-09-17T04:59:23.108972Z BEGIN test seon.cluster.problem-routing-test/historical-reds-are-outside-the-live-attempt-chain
+bin/test: 2026-09-17T04:59:24.707393Z END test seon.cluster.problem-routing-test/historical-reds-are-outside-the-live-attempt-chain
+bin/test: 2026-09-17T04:59:24.707515Z BEGIN test seon.cluster.problem-routing-test/stored-evaluations-derive-routing-and-settlement
+bin/test: 2026-09-17T04:59:28.101448Z END test seon.cluster.problem-routing-test/stored-evaluations-derive-routing-and-settlement
+bin/test: 2026-09-17T04:59:28.101557Z BEGIN test seon.cluster.problem-routing-test/an-author-owned-red-form-remains-unsettled-without-self-assignment
+bin/test: 2026-09-17T04:59:29.534704Z END test seon.cluster.problem-routing-test/an-author-owned-red-form-remains-unsettled-without-self-assignment
+bin/test: 2026-09-17T04:59:29.534803Z END namespace seon.cluster.problem-routing-test
+
+Ran 4 tests containing 19 assertions.
+0 failures, 0 errors.

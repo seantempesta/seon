@@ -217,7 +217,7 @@
              (map (fn [issue-id]
                     {:seon.render/source
                      (issue.opening/source database issue-id)
-                     :seon.eval/origin [:seon.issue/id issue-id]}))
+                     :seon.eval/origin issue-id}))
              (sort issues))}
       identity-source)))
 

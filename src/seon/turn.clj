@@ -1471,8 +1471,6 @@
                               :seon.cluster.eval/author
                               :seon.cluster.eval/comment]
                              receipt-terminal-attributes))
-    (map? (:seon.eval/origin request))
-    (update :seon.eval/origin :db/id)
     (seq (:seon.cluster.eval/read-evidence request))
     (assoc :seon.cluster.eval/read-evidence
            (set (map #(dissoc % :db/id)
@@ -1542,11 +1540,6 @@
                                :seon.cluster.eval/id
                                (receipt-identity id ordinal)
                                :seon.cluster.eval/author :system)
-                  (:seon.eval/origin evaluation)
-                  (assoc :seon.eval/origin
-                         (:db/id (db/pull database [:db/id]
-                                          (let [origin (:seon.eval/origin evaluation)]
-                                            (if (map? origin) (:db/id origin) origin)))))
                   (nil? (:seon.cluster.eval/source evaluation))
                   (assoc :seon.cluster.eval/source
                          (:seon.cluster.eval/source source))))
@@ -2080,9 +2073,8 @@
 
 (defn- issue-origin-read? [database source]
   (when-let [origin (:seon.eval/origin source)]
-    (let [lookup (if (map? origin) (:db/id origin) origin)]
-      (some? (:seon.issue/agent
-              (db/pull database [:seon.issue/agent] lookup))))))
+    (some? (:seon.issue/agent
+            (db/pull database [:seon.issue/agent] [:seon.issue/id origin])))))
 
 (defn- generated-read-fault [database source evaluation]
   (let [inert (wake/inert-attributes database)
@@ -4033,8 +4025,7 @@
   [evaluation]
   (cond-> {:seon.cluster.eval/source (:seon.cluster.eval/source evaluation)}
     (:seon.eval/origin evaluation)
-    (assoc :seon.eval/origin (let [origin (:seon.eval/origin evaluation)]
-                              (if (map? origin) (:db/id origin) origin)))
+    (assoc :seon.eval/origin (:seon.eval/origin evaluation))
     (get-in evaluation [:seon.cluster.eval/ns :seon.ns/name])
     (assoc :seon.cluster.eval/ns
            [:seon.ns/name
