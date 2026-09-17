@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 created: 2026-09-18
 tags: [issue, datahike, writer, hang, bounded-execution]
@@ -47,4 +47,21 @@ with throwing and latch-blocked listeners, transaction and merge cases,
 and a subsequent successful write. Release the test latch in `finally`;
 all waits use the existing bounded completion helper. Recheck Seon's
 call-preparation basis fallback and wake delivery under the armed harness.
-This research changes no production code and claims no fixed regression.
+At filing time, the research changed no production code and claimed no fixed
+regression.
+
+## Resolution
+
+Resolved on 2026-09-18 by Datahike fork commit `e11845ba` and Seon gitlink
+commit `95e2e1983`. The writer now snapshots the connection's listeners,
+settles the committed report, then invokes each callback under independent
+Throwable containment. A callback failure emits
+`:datahike/listener-error` at error level with the listener key and exception;
+later listeners still run. The same completion seam is used by `transact!`
+and `merge-db!`.
+
+Datahike's focused test task passed **27 tests / 237 assertions / 0
+failures** across its configured JVM profiles. Seon's canonical-fixture
+regression landed at `d443d295c`; the required fast overlay passed **58 tests
+/ 436 assertions / 0 failures / 0 errors**. The dependency commit remains
+one commit ahead of `origin/main`; pushing it is explicitly owed to the owner.

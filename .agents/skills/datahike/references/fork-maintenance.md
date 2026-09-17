@@ -33,18 +33,18 @@ git -C reference-code/datahike rev-parse HEAD
 ```
 
 Both currently select
-`73afe78271a289861da236c5ac3457e64349653f`. Treat `357ffc87` and
+`e11845bac78e1241bca0766ddc07d978bd63d74a`. Treat `357ffc87` and
 `19f5cdd9` only as repair provenance; neither is the selected revision.
 
 | Mechanism | Selected-revision source | Seon acceptance |
 |---|---|---|
 | Planner | `reference-code/datahike/src/datahike/query.cljc:3377-3383,3448-3471`; `reference-code/datahike/src/datahike/query/lower.cljc:1050-1059`; `reference-code/datahike/src/datahike/query/plan.cljc:1524-1663` | `test/seon/datahike_fork_test.clj:12-50` |
 | Result and plan caches | `reference-code/datahike/src/datahike/query.cljc:72-75,129-164,2413-2418,2505-2510,2636-2656,4597-4612,4735-4754` | `reference-code/datahike/test/datahike/test/query_cache_test.cljc:44-82` |
-| Writer and ordered persistence | `reference-code/datahike/src/datahike/api/impl.cljc:30-48`; `reference-code/datahike/src/datahike/writer.cljc:85-220,363-387`; `reference-code/datahike/src/datahike/writing.cljc:497-552,862-879` | `test/seon/cluster/store_test.clj:94-126,164-203` |
+| Writer, listener completion and ordered persistence | `reference-code/datahike/src/datahike/api/impl.cljc:30-48`; `reference-code/datahike/src/datahike/writer.cljc:85-220,393-455`; `reference-code/datahike/src/datahike/writing.cljc:497-552,862-879` | `test/seon/cluster/store_test.clj:94-126,164-203`; `test/seon/db_test.clj:1235-1285` |
 | Store create/reopen | `reference-code/datahike/src/datahike/connector.cljc:183-237,275-365` | `src/seon/cluster/store.clj:155-183,266-398`; `test/seon/cluster/store_test.clj:94-162,248-266,380-390` |
 | Branch identity and roster | `reference-code/datahike/src/datahike/store.cljc:50-61`; `reference-code/datahike/src/datahike/versioning.cljc:179-203,207-214,237-321` | `src/seon/cluster/store.clj:288-398`; `test/seon/cluster/store_test.clj:107-162,380-390` |
 | Schema removal | `reference-code/datahike/src/datahike/db/transaction.cljc:136-142,276-305` | `src/seon/turn.clj:1275-1305`; `test/seon/schema_usage_guard_test.clj:80-397` |
-| Final report validation | `reference-code/datahike/src/datahike/db/transaction.cljc:1206-1276`; optional `:tx-meta :datahike/validate-report`, nil accepts, a returned value rejects before writer admission | `test/seon/db_test.clj:1479`; verification boundary in `docs/prds/steward-platform/research/write-admission-2026-09-17.md` |
+| Final report validation | `reference-code/datahike/src/datahike/db/transaction.cljc:1206-1276`; optional `:tx-meta :datahike/validate-report`, nil accepts, a returned value rejects before writer admission | `test/seon/db_test.clj:1526-1542`; verification boundary in `docs/prds/steward-platform/research/write-admission-2026-09-17.md` |
 | Test launchers | `reference-code/datahike/bb.edn:46-51`; `reference-code/datahike/bb/src/tools/test.clj:8-13`; `reference-code/datahike/tests.edn:1-30` | `bin/test`; `test/seon/datahike_fork_test.clj:1-50` |
 
 ## Planner entry point
