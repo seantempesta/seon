@@ -3043,3 +3043,70 @@ the two below it); the scratch-root proof was not reached.
 implementation, luna for probes (`codex-lanes` skill); lanes never
 `bin/test`; the orchestrator gates cold and merges to main; every landing
 written here in the same beat.
+
+## RESUME HERE (2026-09-17 ~19:40Z — new orchestrator; everything restarted from HEAD)
+
+**Handover.** The owner stopped the previous orchestrator session and its three
+lanes and handed orchestration to a fresh session. The stale-lanes note above
+(19:05Z) is superseded by this block.
+
+**Default is UP on the reset batch.** `bin/seon reset --force` from committed
+HEAD `6ea932372` converged (preflight → down → destroy → republish → refork →
+start → adopt; log `tmp/orchestrator/reset-2026-09-17-fresh.log`). Verified
+through MCP: `:seon.fn/sym` and `:seon.test/sym` are `:db.type/symbol`,
+`:seon.fn/calls` symbol-many indexed, 4,415 functions, 1,973 tests; a symbol
+literal in value position answers 314 callers of `seon.db/transact!` (the
+audit-4 blocker is dissolved). Juniper reseeded (turn `aa071259cfd8`);
+agents root, juniper, seon.db; two open turns (root, seon.db). Fast
+`seon.instrument-test seon.db-test`: 85 tests, 573 assertions, 0/0, armed.
+
+**First post-reset platform gate RED** (`tmp/orchestrator/gate-results/post-reset-platform.log`,
+100 tests, 15F/29E, retained root `tmp/test-runs/run.QrcCBO`), and result
+recording refused. Root cause proven on the live cluster: `seon.fn/usage-symbol`
+(`src/seon/fn.clj:331-336`) mints a symbol from kondo's
+`:clj-kondo/unknown-namespace` marker; 2 call and 48 reference members on
+default carry the namespace `":clj-kondo/unknown-namespace"`, and their printed
+form reads back as a keyword, which is the `:seon.test/reach` "Bad entity
+value" refusal and (through the cached published base) the workers'
+`:seon.fn/references` "expected a set, got a set" base refusal. In-process the
+base populates (fast `seon.test-support-test` 17 tests, 1F: schema
+reconciliation is not idempotent, `test_support_test.clj:293`, max-tx advances
+by one — separate small defect). Lanes launched: sol `fabricated-symbol-edges`
+(owns `src/seon/fn.clj`, the edge-member round-trip refusal, class regression;
+RESET NEEDED after it lands) and terra `post-reset-stale-fixtures-2` (registry
+helper reading the new `:seon.schema/references` shape; string-identity
+fixtures in `source_test.clj`; `selection/reaching-tests` symbol contract;
+the overlay-admission test stale against `25a705b4b`; the SCI arm leak after
+`publish!` throws — cascade or real). `seon.cluster.source/publish!` returning
+an unresolved-report without `:seon.db/basis-t` is treated as a cascade of
+the base refusal until the re-gate says otherwise. sol was at capacity for
+the second launch; terra took it.
+
+**Other findings this session:** one fault on the fresh cluster
+(`seon.agent/supervision-not-committed` from `armer-step`, mid-reseed; its
+refusal evidence was capped to `:over-bound 7820` bytes — the evidence-capping
+class from live trial 1; the supervision run `be3d39a5650a` is committed and
+closed, so historical). Namespace page `/ns/seon.id` serves 27.5 MB in 34 s
+(issue `a-namespace-page-serves-twenty-seven-megabytes-in-thirty-four-seconds`).
+An orphan test JVM from a deleted worktree (`tmp/adoption-margin-wt`, pid
+21966, 11 h) was killed. Stage 1's uncommitted draft is shelved as
+`git stash` "test-system-stage1 wip 2026-09-17" plus
+`tmp/orchestrator/worktree-patches/test-system-stage1-wip-2026-09-17.patch`;
+the lane is resumed with that patch reapplied, never from the stash silently.
+
+**Triage of the four audits landed:**
+[critical-findings-triage-2026-09-17.md](../research/critical-findings-triage-2026-09-17.md):
+22 critical classes open at HEAD (top: nine error-predicate copies;
+`require-open-run` reading a refused read as an open turn; the detector
+fabricating findings; the fault recorder destroying its record;
+`transact-call` relabelling refusals), 285 private database consumers with
+183 unchecked, 27 easy rows ready (best first slice: the four
+`seon.test.cache` members to one agent), the contract campaign not started
+(17 of 2,259 private functions contracted). Audit 2's F8 prerequisite is wrong
+(the env refusal classes were registered 2026-08-13). `audit3-blockers` landed
+nothing; its gate-set draft must be re-derived on the rewritten `gate-sets`.
+
+**Next, in order:** both lanes land → cold platform gate → reset default →
+the seven serial gates → resume `test-system-stage1` with its patch → the
+structured plan to the owner (test system stages 1–3, critical classes 1–5
+as orchestrator/astra lanes, easy pool as the first live-agent slice).
