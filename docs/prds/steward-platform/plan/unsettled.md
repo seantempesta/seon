@@ -2749,3 +2749,12 @@ working tree, never Sonnet.
   transaction 536871186; zero provider attempts. Ruling 70 ("retracting a
   routed edge would wake") is now the implemented behaviour. Lane resumed
   on its one cold red (the `my.message/send` docstring vs `doc`).
+- Message-wake landed its docstring fix (`2bcc067a4`, one grammar text, SCI
+  regression armed) but could not verify: the fast launcher refused "must
+  run `bin/test --prepare-head-base`" because its own one-file commit
+  changed HEAD's source inputs. With four lanes committing, keying the
+  fast path's graph on the exact source digest blocks iteration
+  continuously — guardrails resumed with the correction (a fast run uses
+  the NEWEST published base, names its digest and age, refuses only when
+  none exists); the orchestrator is preparing the current HEAD base now as
+  the interim. Message-wake parked, all items done pending cold gate.
