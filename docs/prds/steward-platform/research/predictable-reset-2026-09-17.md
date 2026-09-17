@@ -112,3 +112,42 @@ Foreign protected paths remained untouched:
    guarantee across development and production modes.
 
 No boot-policy option beyond the reset repair was implemented.
+
+## 2026-09-17 follow-up — boot carries no test namespaces
+
+The owner selected the former option A in
+`docs/prds/steward-platform/plan/program-facts-are-the-runtime-prd-2026-09-17.md`
+§1n: cluster boot is the platform from `src/`; tests are indexed program facts
+loaded after boot by the test system.
+
+`launch!` no longer hands the resolved test classpath to the detached cluster
+JVM. The publication JVM still receives that classpath, and `seon.test/run`
+continues to resolve test Vars under `seon.test/with-test-loader`; these are
+different processes and different phases. The launch-command regression now
+asserts that neither `-Scp` nor test-only JVM options enter cluster boot.
+
+The platform/long regression performs a complete publication, forks an
+isolated `default` branch, and starts it with a `test/` namespace whose
+top-level form throws if required. Boot reaches `ready`. Afterward the test
+constructs the existing resolved test loader, resolves a separately indexed
+test by identity, and runs it through `seon.test/run` with the isolated
+cluster's connection and carried database projection. Result: one pass, zero
+failures, zero errors.
+
+Fast snapshot proof:
+
+```text
+bin/test-fast --paths script/seon/fresh_operator.clj test/seon/dev/fresh_operator_reset_test.clj -- seon.dev.fresh-operator-reset-test
+```
+
+Measured tally: 9 tests, 115 assertions, 0 failures, 0 errors. Publication
+indexed 371 source inputs and 6,408 declarations; the isolated cluster reached
+every boot phase through web/ready. The test stopped the one isolated JVM and
+the runner removed its snapshot root.
+
+The `classpath-locatable?` docstring was clean when inspected and this lane
+edited only that docstring. While the real-boot regression was running, the
+concurrent `boot-load-bounds` lane landed the same resulting bytes in
+`940f4b426`; no implementation hunk in its protected region was touched here.
+The shared tree's dirty `src/seon/db.clj`, `src/seon/fn.clj`, and their tests
+remained outside every fast snapshot.

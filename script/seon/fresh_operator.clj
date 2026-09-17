@@ -2072,7 +2072,6 @@
         (run-child-jvm!
          {:seon.fresh-operator/root root
           :seon.fresh-operator/dependency-cache-path dependency-cache-path
-          :seon.fresh-operator/test-classpath (:seon.dev-cache/test-classpath dependency-cache)
           :seon.fresh-operator/jvm-options
           [(str "-J-Dseon.operator.generation=" generation)
            (str "-J-Dseon.operator.repository-root=" (.getCanonicalPath (repository-root)))

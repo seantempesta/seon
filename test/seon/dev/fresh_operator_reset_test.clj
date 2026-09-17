@@ -4,7 +4,8 @@
       "The namespace boots real isolated operator roots."
       :seon.test/long-ms 600000}
     seon.dev.fresh-operator-reset-test
-  (:require [clojure.java.io :as io]
+  (:require [clojure.edn :as edn]
+            [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [seon.dev.clj-kondo :as dev.kondo]
@@ -20,6 +21,7 @@
 
 
 (def ^:private immediate-refusal-bound-ms 5000)
+(def ^:private real-boot-bound-ms 300000)
 
 (deftest lifecycle-holder-evidence-is-immediate-and-stale-records-are-reclaimed
   (let [root (fresh-root)
@@ -244,6 +246,101 @@
         (deliver release :done)
         (deref holder immediate-refusal-bound-ms :expired)
         (delete-recursively! source)
+        (delete-recursively! root)))))
+
+(deftest cluster-boot-omits-test-namespaces-and-in-process-run-loads-one
+  (let [root (fresh-root)
+        project-root @#'operator-test/project-root
+        broken (io/file project-root "test/seon/boot_unloadable_test.clj")
+        runnable (io/file project-root "test/seon/boot_runner_smoke_test.clj")]
+    (try
+      (let [cache (dev.kondo/ensure-dependency-cache! (str project-root))]
+        (is (#{:current :warmed} (::dev.kondo/status cache)) (pr-str cache)))
+      (spit broken
+            (str "(ns seon.boot-unloadable-test)\n"
+                 "(throw (ex-info \"test namespace loaded during boot\" {}))\n"))
+      (spit runnable
+            (str "(ns seon.boot-runner-smoke-test\n"
+                 "  (:require [clojure.test :refer [deftest is]]))\n"
+                 "(deftest indexed-smoke (is (= 4 (+ 2 2))))\n"))
+      (operator.state/with-lifecycle-lock!
+       {:seon.operator.lock/path
+        (operator.state/root-lifecycle-lock-path (str root))
+        :seon.operator.lock/command "boot without test namespaces"
+        :seon.operator.lock/acquisition-timeout-ms real-boot-bound-ms
+        :seon.operator.lock/hold-timeout-ms real-boot-bound-ms}
+       (fn []
+         (doseq [[function-name arguments]
+                 [['init! []] ['init! ["default"]]
+                  ['start! ["default"]]]]
+           (let [outcome (operator-private-outcome
+                          function-name (str root) arguments)]
+             (is (nil? (::message outcome)) (pr-str outcome))
+             (when (::message outcome)
+               (throw (ex-info "The isolated operator phase refused."
+                               (::data outcome))))))))
+      (let [advertisement
+            (edn/read-string
+             (slurp (io/file root "data/clusters/default/prepl.edn")))
+            dependency-cache
+            ((var-get (ns-resolve 'seon.fresh-operator
+                                  'ensure-dependency-cache!)))
+            test-classpath (:seon.dev-cache/test-classpath dependency-cache)
+            form
+            (pr-str
+             `(do
+                (require 'seon.db 'seon.operator 'seon.schema 'seon.sci.eval
+                         'seon.test 'seon.test.runner)
+                (let [connection# (seon.operator/connection "default")
+                      database# (seon.db/db connection#)
+                      loader# (seon.test/test-loader ~test-classpath)
+                      projection# (seon.schema/projection-from-database database#)
+                      ctx# ((deref (ns-resolve 'seon.test
+                                               (symbol "with-test-loader")))
+                            loader#
+                            (fn [] (seon.sci.eval/cluster-ctx database# connection#)))
+                      test-var#
+                      (seon.test/resolve-test
+                       {:seon.db/db database#
+                        :seon.db/connection connection#
+                        :seon.test/identity
+                        'seon.boot-runner-smoke-test/indexed-smoke
+                        :seon.sci.eval/ctx ctx#
+                        :seon.test/class-loader loader#
+                        :seon.schema/projection projection#})
+                      provenance# (seon.test.runner/provenance database#)
+                      result#
+                      (if (:seon.error/kind test-var#)
+                        test-var#
+                        (seon.test/run
+                         test-var# connection#
+                         {:seon.db/db database#
+                          :seon.db/connection connection#
+                          :seon.sci.eval/ctx ctx#
+                          :seon.test.run/provenance provenance#
+                          :seon.test/remaining-ms 60000}))]
+                  (select-keys result#
+                               [:seon.error/kind :seon.test/sym
+                                :seon.test/pass-count :seon.test/fail-count
+                                :seon.test/error-count]))))
+            outcome
+            (operator-private-outcome 'prepl-eval! advertisement form 60000)
+            _ (is (nil? (::message outcome)) (pr-str outcome))
+            _ (when (::message outcome)
+                (throw (ex-info "The in-process test run refused."
+                                (::data outcome))))
+            result (edn/read-string (:val (last (::value outcome))))]
+        (is (= {:seon.test/sym
+                'seon.boot-runner-smoke-test/indexed-smoke
+                :seon.test/pass-count 1
+                :seon.test/fail-count 0
+                :seon.test/error-count 0}
+               result)
+            (pr-str result)))
+      (finally
+        (operator-private-outcome 'down! (str root) ["--force"])
+        (.delete broken)
+        (.delete runnable)
         (delete-recursively! root)))))
 
 (deftest reset-phase-failure-stops-the-command-and-retains-evidence

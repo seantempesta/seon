@@ -89,3 +89,18 @@ shape (1) — bounding the offending argument inside `seon.instrument`'s
 refusal — still deletes the failure mode rather than routing around it, and
 the fault-committer path is evidence that a bounded refusal plus a blob is
 enough for a reader.
+
+## 2026-09-17 — in-process test resolution reproduced the general class
+
+The boot-without-tests regression initially omitted `:seon.db/connection`
+from a `seon.test/resolve-test` request. Its armed contract correctly refused,
+but the refusal embedded the complete request, including the supplied schema
+projection. The fast runner emitted approximately **128 MB** before its tool
+output cap, overwhelmingly the projection's function-contract map. This is
+the same unbounded-offending-value construction, outside the render-specific
+consumer: one missing map key turned a small diagnostic into output four
+orders of magnitude larger than its useful evidence.
+
+This occurrence strengthens fix shape (1): instrumentation must describe a
+large offending value through bounded evidence at construction time. Each
+consumer cannot safely rediscover and clip the same embedded object.

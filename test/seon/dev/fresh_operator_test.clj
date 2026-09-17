@@ -1001,12 +1001,10 @@
                          (.getCanonicalPath root))}
                   child-command))
         (is (some #{"-M:dev:seon-cache"} child-command))
-        (is (some #{"-Scp"} child-command))
-        (is (some #{"-J-Dstage2.classpath=resolved"} child-command))
-        (is (some #{(str/join java.io.File/pathSeparator
-                             [(str (io/file project-root "src"))
-                              (str (io/file project-root "test"))
-                              "/dependency/classes"])} child-command))
+        (is (not-any? #{"-Scp"} child-command)
+            "cluster boot carries no resolved test classpath")
+        (is (not-any? #{"-J-Dstage2.classpath=resolved"} child-command)
+            "test-only JVM options do not enter cluster boot")
         (is (some #(str/starts-with?
                     % "-J-Dseon.dependency-cache.path=")
                   child-command))
