@@ -1896,6 +1896,25 @@ tonight's evidence (`SEON_TEST_SILENCE_SECONDS` raised by three lanes; lane
 `bin/test`; --paths omitting callers; `datahike.api/with`; turns ended with
 runs in flight; git checkout/stash/apply as unpayloaded writes).
 
+**Owner ~03:50Z: "launch agents to fix everything and to verify that things
+are working as expected and to do research for the proper documentation for
+these hooks for both platforms. our tools are very important."** Launched:
+claude-code-guide research → `docs/seon/reference/claude-code-hooks-
+2026-09-17.md` (events, payloads, block semantics, config reload, subagent
+reporting, verified against the current docs); Opus research →
+`docs/seon/reference/codex-cli-hooks-2026-09-17.md` (same for codex from
+the installed CLI, the npm package and the public docs, plus a live scratch
+codex probe of a patch write and a shell write); astra `lane-guardrails`
+(high): lane identity exported by bin/codex-agent, `bin/test` refused from a
+lane, bounds declared not environment knobs (`SEON_TEST_SILENCE_SECONDS`/
+`SEON_TEST_SLOTS` orchestrator-only), overlay completeness refusal before a
+JVM launches, `assert-clean-analysis!` names its findings, orphaned-gate
+announcement. Still running: hook agent (codex block verification +
+loophole inventory), integrator, program-ops, S3, reset-is-total,
+incremental, bin/test-bounds, baseline-reds. Queued: an independent
+verifier driving both platforms' probes end to end once the hook agent and
+the docs land; the admission-bypass (`datahike.api/with`) detector.
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
