@@ -16,6 +16,7 @@
   (:require [clojure.string :as str]
             [sci.core :as sci]
             [seon.db :as db]
+            [seon.error :as error]
             [seon.id :as id]
             [seon.issue :as issue]
             [seon.repl :as repl]
@@ -83,7 +84,7 @@
 
 (defn- error-value?
   [value]
-  (and (map? value) (keyword? (:seon.error/kind value))))
+  (error/error? value))
 
 (defn- refuse!
   [kind message data]
@@ -101,7 +102,18 @@
       data
       (throw throwable))))
 
+(defn- read-result!
+  "Return an ordinary database-read result or refuse with its error value."
+  [result]
+  (if (error/error? result)
+    (throw (ex-info (:seon.error/message result) result))
+    result))
+
 (defn- agent-eid
+  {:malli/schema
+   [:=> [:cat :seon.db/database-value :seon.agent/id]
+    [:or :int :nil :seon.db/invalid-read-error
+     :seon.schema/missing-projection-error]]}
   [database agent-id]
   (db/q '[:find ?agent .
           :in $ ?agent-id
@@ -109,12 +121,20 @@
         database agent-id))
 
 (defn- plan-eid
+  {:malli/schema
+   [:=> [:cat :seon.db/database-value [:or :int :nil]]
+    [:or :int :nil :seon.db/invalid-read-error
+     :seon.schema/missing-projection-error]]}
   [database agent-entity]
   (db/q '[:find ?plan . :in $ ?agent
           :where [?agent :seon.agent/plan ?plan]]
         database agent-entity))
 
 (defn- step-eid
+  {:malli/schema
+   [:=> [:cat :seon.db/database-value :my.plan.item/id]
+    [:or :int :nil :seon.db/invalid-read-error
+     :seon.schema/missing-projection-error]]}
   [database item-id]
   (db/q '[:find ?step .
           :in $ ?item-id
@@ -122,8 +142,13 @@
         database item-id))
 
 (defn- ref-eid
+  {:malli/schema
+   [:=> [:cat :seon.db/database-value :seon.schema/value]
+    [:or :int :nil :seon.db/invalid-read-error
+     :seon.schema/missing-projection-error]]}
   [database reference]
-  (some-> (db/entity database reference) :db/id))
+  (let [entity (db/entity database reference)]
+    (if (error/error? entity) entity (:db/id entity))))
 
 (defn- subject-eid
   [database token]
@@ -138,7 +163,7 @@
     (db/q '[:find ?subject .
             :in $ ?function
             :where [?subject :seon.fn/sym ?function]]
-          database (str token))
+          database token)
 
     :else
     (db/q '[:find ?subject .
@@ -148,10 +173,14 @@
 
 (defn- resolve-subject!
   [database token]
-  (or (subject-eid database token)
+  (let [subject (subject-eid database token)]
+    (cond
+      (error/error? subject) (read-result! subject)
+      subject subject
+      :else
       (refuse! :my.plan/subject-not-found
                (str "Plan subject " (pr-str token) " does not exist.")
-               {:my.plan.item/about token})))
+               {:my.plan.item/about token}))))
 
 (def ^:private owned-ids-query
   '[:find [?id ...]
@@ -501,40 +530,44 @@
 
 (defn- owned-step-eid!
   [database agent-entity reference member]
-  (let [step (ref-eid database reference)]
+  (let [step (read-result! (ref-eid database reference))]
     (when-not step
       (refuse! :my.plan/item-reference-not-found
                (str "Plan step reference " (pr-str reference)
                     " does not exist.")
                {member reference}))
-    (when-not (db/q '[:find ?step .
-                      :in $ % ?agent ?step
-                      :where (owned ?agent ?step)]
-                    database rules agent-entity step)
-      (refuse! :my.plan/item-reference-not-owned
-               (str "Plan step reference " (pr-str reference)
-                    " is not in this agent's plan.")
-               {member reference}))
+    (let [owned? (read-result!
+                  (db/q '[:find ?step .
+                          :in $ % ?agent ?step
+                          :where (owned ?agent ?step)]
+                        database rules agent-entity step))]
+      (when-not owned?
+        (refuse! :my.plan/item-reference-not-owned
+                 (str "Plan step reference " (pr-str reference)
+                      " is not in this agent's plan.")
+                 {member reference})))
     step))
 
 (defn- next-position
   [database owner attribute]
-  (inc (long (or (db/q '[:find (max ?position) .
-                         :in $ ?owner ?attribute
-                         :where [?owner ?attribute ?child]
-                                [?child :my.plan.item/position ?position]]
-                       database owner attribute) -1))))
+  (let [position (read-result!
+                  (db/q '[:find (max ?position) .
+                          :in $ ?owner ?attribute
+                          :where [?owner ?attribute ?child]
+                                 [?child :my.plan.item/position ?position]]
+                        database owner attribute))]
+    (inc (long (or position -1)))))
 
 (defn- add-step-call
   [database request]
   (let [item-id (:my.plan.item/id request)
         agent-id (:seon.agent/id request)
-        agent-entity (agent-eid database agent-id)]
+        agent-entity (read-result! (agent-eid database agent-id))]
     (when-not agent-entity
       (refuse! :my.plan/agent-not-found
                (str "There is no agent named " (pr-str agent-id) ".")
                {:seon.agent/id agent-id}))
-    (when (step-eid database item-id)
+    (when (read-result! (step-eid database item-id))
       (refuse! :my.plan/identity-exists
                (str "Plan step " (pr-str item-id) " already exists.")
                {:my.plan.item/id item-id}))
@@ -543,7 +576,7 @@
                                     :my.plan/parent-step))
           needs (into #{}
                       (map (fn [reference]
-                             (or (ref-eid database reference)
+                             (or (read-result! (ref-eid database reference))
                                  (refuse! :my.plan/dependency-not-found
                                           (str "Plan dependency "
                                                (pr-str reference)
@@ -552,7 +585,7 @@
                       (:my.plan.item/needs request))
           _ (doseq [token (:my.plan.item/about request)]
               (resolve-subject! database token))
-          existing-plan (plan-eid database agent-entity)
+          existing-plan (read-result! (plan-eid database agent-entity))
           plan-entity (or existing-plan "new-agent-plan")
           owner (or parent plan-entity)
           attribute (if parent :my.plan.item/steps :my.plan/steps)
@@ -749,17 +782,18 @@
   [database request]
   (let [item-id (:my.plan.item/id request)
         agent-id (:seon.agent/id request)
-        agent-entity (agent-eid database agent-id)
-        plan-entity (plan-eid database agent-entity)
-        step (step-eid database item-id)]
+        agent-entity (read-result! (agent-eid database agent-id))
+        plan-entity (read-result! (plan-eid database agent-entity))
+        step (read-result! (step-eid database item-id))]
     (when-not step
       (refuse! :my.plan/not-found
                (str "There is no plan step named " (pr-str item-id) ".")
                {:my.plan.item/id item-id}))
-    (when-not (db/q '[:find ?step .
-                      :in $ % ?agent ?step
-                      :where (owned ?agent ?step)]
-                    database rules agent-entity step)
+    (when-not (read-result!
+               (db/q '[:find ?step .
+                       :in $ % ?agent ?step
+                       :where (owned ?agent ?step)]
+                     database rules agent-entity step))
       (refuse! :my.plan/not-owned
                (str "Plan step " (pr-str item-id)
                     " is not in this agent's plan.")
@@ -822,9 +856,10 @@
 
 (defn- start-step-call
   [database agent-id item-id]
-  (let [agent-entity (agent-eid database agent-id)
-        step (step-eid database item-id)]
-    (when-not (and step (contains? (owned-ids database agent-id) item-id))
+  (let [agent-entity (read-result! (agent-eid database agent-id))
+        step (read-result! (step-eid database item-id))
+        ids (read-result! (owned-ids database agent-id))]
+    (when-not (and step (contains? ids item-id))
       (refuse! :my.plan/not-owned "Select a step owned by this agent."
                {:my.plan.item/id item-id :seon.agent/id agent-id}))
     (when (db/q '[:find ?completed . :in $ ?step
@@ -832,7 +867,8 @@
                 database step)
       (refuse! :my.plan/unusable-current-step "Select an open step."
                {:my.plan.item/id item-id}))
-    [[:db/add (plan-eid database agent-entity) :my.plan/current-step step]]))
+    [[:db/add (read-result! (plan-eid database agent-entity))
+      :my.plan/current-step step]]))
 
 (defn start!
   "Select one of your steps as current and return that step."
@@ -849,8 +885,9 @@
 (defn- update-step-call
   [database agent-id changes]
   (let [item-id (:my.plan.item/id changes)
-        step (step-eid database item-id)]
-    (when-not (and step (contains? (owned-ids database agent-id) item-id))
+        step (read-result! (step-eid database item-id))
+        ids (read-result! (owned-ids database agent-id))]
+    (when-not (and step (contains? ids item-id))
       (refuse! :my.plan/not-owned "Update a step owned by this agent."
                {:my.plan.item/id item-id :seon.agent/id agent-id}))
     (let [attributes (select-keys changes [:my.plan.item/title
@@ -1035,28 +1072,29 @@
               (set (get needs-by-id (:my.plan.item/id entry)))
               (:my.plan.item/done-query entry)
               (when-let [subject (:my.plan.item/subject entry)]
-                (ref-eid database subject))))
+                (read-result! (ref-eid database subject)))))
 
 (defn- compile-tree
   [database agent-id input]
-  (let [agent-entity (agent-eid database agent-id)]
+  (let [agent-entity (read-result! (agent-eid database agent-id))]
     (when-not agent-entity
       (refuse! :my.plan/agent-not-found
                (str "There is no agent named " (pr-str agent-id) ".")
                {:seon.agent/id agent-id}))
-    (let [existing-plan (plan-eid database agent-entity)
+    (let [existing-plan (read-result! (plan-eid database agent-entity))
           plan-entity (or existing-plan "new-agent-plan")
-          stored-objective (:my.plan/objective (agent-plan-pull database agent-id))
+          stored-objective (:my.plan/objective
+                            (read-result! (agent-plan-pull database agent-id)))
           objective (:my.plan/objective input)
           entries (input-entries (:my.plan/steps input))
           _ (refuse-duplicate-identities! entries)
           _ (refuse-duplicate-positions! entries)
           wanted-ids (into #{} (map :my.plan.item/id) entries)
-          existing (owned-ids database agent-id)
-          existing (if (error-value? existing) #{} existing)]
+          existing (read-result! (owned-ids database agent-id))]
       (doseq [entry entries
               :let [id (:my.plan.item/id entry)]]
-        (when (and (step-eid database id) (not (contains? existing id)))
+        (when (and (read-result! (step-eid database id))
+                   (not (contains? existing id)))
           (refuse! :my.plan/foreign-identity
                    (str "Plan step " (pr-str id)
                         " belongs to another agent's plan.")
@@ -1065,7 +1103,7 @@
           (resolve-subject! database token))
         (doseq [reference (:my.plan.item/needs entry)]
           (when-not (or (contains? wanted-ids (document-reference-id reference))
-                        (ref-eid database reference))
+                        (read-result! (ref-eid database reference)))
             (refuse! :my.plan/dependency-not-found
                      (str "Plan dependency " (pr-str reference)
                           " does not exist.")
@@ -1080,14 +1118,16 @@
                                                   reference)]
                                           (if (contains? wanted-ids id)
                                             id
-                                            (db/q '[:find ?id .
-                                                    :in $ ?step
-                                                    :where
-                                                    [?step :my.plan.item/id
-                                                     ?id]]
-                                                  database
-                                                  (ref-eid database
-                                                           reference))))))
+                                            (read-result!
+                                             (db/q '[:find ?id .
+                                                     :in $ ?step
+                                                     :where
+                                                     [?step :my.plan.item/id
+                                                      ?id]]
+                                                   database
+                                                   (read-result!
+                                                    (ref-eid database
+                                                             reference))))))))
                                 (:my.plan.item/needs entry))]))
                   entries)
             _ (refuse-dependency-cycle! needs-by-id)

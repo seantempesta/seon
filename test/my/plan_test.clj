@@ -6,6 +6,7 @@
             [seon.plan :as plan]
             [seon.config :as config]
             [seon.db :as db]
+            [seon.error :as error]
             [seon.env :as env]
             [seon.render :as render]
             [seon.schema]
@@ -63,17 +64,22 @@
     :else []))
 
 (deftest terminal-formatters-say-a-refusal-in-their-own-words
-  (let [failure {:seon.error/kind :seon.db/invalid-read
-                 :seon.error/message "plan read failed"
-                 :seon.error/data {:seon.agent/id "alice"}}]
-    (doseq [[subject line] [["Plan step" (plan/format-item-ai failure)]
-                            ["Ready work" (plan/format-ready-items-ai failure)]
-                            ["Plan" (plan/format-plan-ai failure)]]]
-      (is (string? line)
-          "a refusal reaching a projection is said, never handed on raw")
-      (is (str/starts-with? line (str subject " unavailable for \"alice\"")))
-      (is (str/includes? line ":seon.db/invalid-read"))
-      (is (str/includes? line "plan read failed")))))
+  (with-plan
+    (fn [connection]
+      (let [failure (-> (db/q '[:find ?entity .
+                                :where [?entity :seon.audit/poison _]]
+                              @connection)
+                        (assoc :seon.error/data {:seon.agent/id "alice"}))]
+        (is (error/error? failure) (pr-str failure))
+        (doseq [[subject line] [["Plan step" (plan/format-item-ai failure)]
+                                ["Ready work" (plan/format-ready-items-ai failure)]
+                                ["Plan" (plan/format-plan-ai failure)]]]
+          (is (string? line)
+              "a refusal reaching a projection is said, never handed on raw")
+          (is (str/starts-with? line
+                                (str subject " unavailable for \"alice\"")))
+          (is (str/includes? line ":seon.db/invalid-read"))
+          (is (str/includes? line "uninstalled attribute")))))))
 
 (deftest a-refused-derivation-renders-a-typed-line-where-instructions-belong
   (with-plan
@@ -403,7 +409,7 @@
     (fn [connection]
       (add connection "ship" "Ship the plan unit"
            {:my.plan.item/about ['seon.plan/plan! 'my.plan :my.plan.item/title]})
-      (is (= ["seon.plan/plan!" 'my.plan :my.plan.item/title]
+      (is (= ['seon.plan/plan! 'my.plan :my.plan.item/title]
              (mapv (fn [subject]
                      (or (db/q '[:find ?function .
                                  :in $ ?subject
@@ -418,6 +424,42 @@
                                  :where [?subject :seon.schema/key ?key]]
                                @connection subject)))
                    (plan/ready-subjects @connection "alice")))))))
+
+(deftest plan-reads-and-ownership-refuse-an-unreadable-database
+  (with-plan
+    (fn [connection]
+      (add connection "owned" "Owned")
+      (let [database @connection
+            refusal (db/q '[:find ?entity .
+                            :where [?entity :seon.audit/poison _]]
+                          database)
+            alice (db/q '[:find ?agent .
+                          :where [?agent :seon.agent/id "alice"]]
+                        database)
+            query db/q]
+        (is (error/error? refusal) (pr-str refusal))
+        (with-redefs [db/q (fn [& arguments]
+                            (let [form (first arguments)]
+                              (if (#{'[:find ?step .
+                                      :in $ % ?agent ?step
+                                      :where (owned ?agent ?step)]
+                                    '[:find (max ?position) .
+                                      :in $ ?owner ?attribute
+                                      :where [?owner ?attribute ?child]
+                                             [?child :my.plan.item/position ?position]]}
+                                   form)
+                                refusal
+                                (apply query arguments))))]
+          (is (= refusal
+                 (support/refusal-data
+                  #(#'plan/owned-step-eid!
+                    database alice [:my.plan.item/id "owned"]
+                    :my.plan/parent-step)))
+              "an unreadable ownership query refuses verbatim")
+          (is (= refusal
+                 (support/refusal-data
+                  #(#'plan/next-position database 1 :my.plan/steps)))
+              "an unreadable position query is never coerced to long"))))))
 
 (deftest a-second-agent-renders-through-the-same-defaults
   (with-plan
