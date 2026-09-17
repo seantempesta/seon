@@ -2578,3 +2578,18 @@ working tree, never Sonnet.
   fact; (B) per-phase elapsed instrumentation + cut the biggest costs;
   deliverable = a converged adoption on pid 94566 with phase timings.
   Editing lanes: integrator, guardrails, stage 2, adoption-margin.
+- **Batch 119 (HEAD 31ac4c05d / 19251d646; 17 namespaces): A platform
+  96/683/3F (the launcher-fixture class only, guardrails on it); B
+  339/2,676/17F/3E, recorded.** Message-wake's own residue (its resume
+  gets the lines): 3 ERRORs in `seon.gen.loop-test` — the lane's edited
+  `planner-census` (loop_test.clj:186) calls `inst-ms` on a Long (a tx id
+  or the origin value, not an instant) → three routing tests error;
+  `situation-totality-property` (turn_work_test.clj:513, shrunk to
+  `[true true true true nil []]`) failing after its `about` split. The
+  rest by class: turn_test retraction/provenance (8, S3 parked; program-
+  ops `native!`), `an-instrumented-multi-arity-miss-reads-like-clojure`
+  ×4 (the known sci arity-message parity diffs, unowned → queue an Opus
+  triage after the platform is green), delimiter timing (open issue),
+  requery render (open issue), rereads (S3). Message-test, my.message,
+  wake, transcript, cluster.turn, error, plan-completion, web-debug,
+  sci.eval (except the arity parity), eval: GREEN cold.
