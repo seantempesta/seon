@@ -7,6 +7,77 @@ tags: [test, database, admission, stage-2]
 
 # Test recording and pre-execution admission
 
+## Continuation after e1de7c75d: launcher handoff held
+
+The SCI files were released and work resumed. The next encountered hold is
+`script/seon/fresh_operator.clj`, needed for the design's shared resolved
+test-classpath handoff into the cluster JVM. It was clean when inspected
+and the draft was prepared in an isolated worktree. A later shared-tree
+check showed **42 insertions and 16 deletions belonging to another lane**.
+The hook also reported unmatched delimiters at lines 2509, 2611–2627 and
+2674–2776 in that shared file. These observations establish a concurrent
+edit, not a diagnosis of the other lane's final change. No shared launcher
+bytes or foreign session were changed. The owner's explicit “stop … at any
+held file” rule applies here.
+
+The unapplied work is retained in
+[the resolution draft](test-system-stage2-resolution-pending-2026-09-17.patch),
+against **19251d6469f0b87e7512f6dbd022dbb1a49db9ba**. It is **incomplete and
+not approved production code**. It contains the acquisition-evidence draft,
+provenance-based resolution, an analyzer-written source digest, the loader
+basis value and launcher handoff, a bounded SCI call into the existing
+capture owner, and a canonical regression. The shared SCI edit made before
+isolation was removed by reversing only this lane's exact hunk; its diff
+matched the saved patch before removal. No implementation from this
+continuation is landed.
+
+The initial schema-edit hook refused the shared population with
+`schema-unresolved-reference` for `:seon.cluster.eval/settle-request`.
+Following the assignment, work continued in
+`tmp/test-system-stage2-wt`, a HEAD worktree with linked `reference-code`,
+without modifying the shared evaluation schemas. Both runs below used
+HEAD-plus-owned-paths snapshots, foreground `timeout 2400`, one at a time,
+and no `SEON_TEST_*` overrides. No cold gate ran.
+
+1. `tmp/test-system-stage2-resolution-fast.log`: **52 tests, 108 assertions,
+   0 failures, 43 errors**, exit 1. The draft called `seon.id/digest` with a
+   string where its contract requires a sequence. This was this lane's bug;
+   the draft now uses `seon.id/id source 64` at writer and reader.
+2. `tmp/test-system-stage2-resolution-second-fast.log`: **5 tests,
+   28 assertions, 0 failures, 1 error**, exit 1. Test JVM pid **3465**,
+   **1128** armed contracts; namespace began
+   `2026-09-17T05:14:12.802936Z` and ended
+   `2026-09-17T05:15:48.483560Z`. The new regression stopped at the existing
+   three-argument `sci.eval/fork-cluster-ctx` delegation, which passes nil to
+   its four-argument contract's required projection state. Resolution and
+   execution acceptance are **not proven**. The refusal is recorded in
+   [the arity issue](../../../seon/issues/sci-fork-three-arity-passes-nil-to-a-required-projection-state.md).
+
+The second exact invocation, from the worktree:
+
+```bash
+timeout 2400 bin/test-fast --paths dev_cache.clj script/seon/fresh_operator.clj resources/seon/schemas/seon.program.edn resources/seon/schemas/seon.fn.edn resources/seon/schemas/seon.test.edn src/seon/fn.clj src/seon/sci/eval.clj src/seon/test.clj src/seon/test/runner.clj test/seon/test_test.clj -- seon.test-test
+```
+
+Remaining work within item (1), before any implementation commit: repair and
+rerun the regression; verify accepted-batch acquisition evidence against
+deletions and nested program facts; carry the acquired context through the
+agent protocol; remove the worker's independent resolver; finish shared
+classpath compatibility checks and selected-Var fixture handling. The
+source-digest additions are optional accretions in the draft; the reset
+integrator still owns their required-definition transition. Items **(2)**
+claim/completion and **(3)** recorded-result reuse have not been implemented.
+No Stage 1 selection was built.
+
+All named authorities were read end to end earlier in this lane; the Stage
+2/3 design and ownership table were revisited here. No explicit default
+status, evaluation, publication, adoption, start, stop or reset was issued
+in this continuation. File-edit hooks queued their configured publications;
+those automatic effects were not inspected or claimed as a live proof.
+Both owned test processes exited. The draft is committed before removing
+the disposable worktree and initial scratch patch; the orchestrator still
+owns cold-gate and platform/live proof.
+
 ## Continuation after e58a27c86: held acquisition regression
 
 `e58a27c86` was accepted. The recorder error-as-row class is now owned by
