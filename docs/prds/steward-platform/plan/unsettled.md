@@ -3568,3 +3568,16 @@ as orchestrator/astra lanes, easy pool as the first live-agent slice).
   `turn-settlement-post-reset`. Resumed on the HOST side only (instrument
   + cluster arming + error facets + regressions); the SCI side resumes when
   eval.clj frees.
+
+## 2026-09-18 ~05:40Z — the arm leak is fully closed; platform gate 8
+
+- `sci-arm-leak` COMPLETE `ea676d0af`: the cold-worker seam was
+  `run-task!` routing JVM test Vars through `seon.sci.eval/run-tests`,
+  which placed the canonical SCI base arm around each whole host test body
+  (the per-task arm ids; the shared interpreter = the canonical base). Host
+  Vars now run through `run-vars!` directly; only SCI Vars get an SCI arm;
+  mixed tasks refuse; foreign-arm errors print the bounded arming stack;
+  cold-worker regression at `runner_test.clj:24`; 49 tests green fast.
+  Platform gate 8 launched bare on this HEAD. Launched sol
+  `indexer-error-keys-and-operator-graph` (B5: triage #15, #21; move
+  `seon.operator.state` under src/).
