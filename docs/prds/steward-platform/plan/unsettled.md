@@ -2703,3 +2703,13 @@ working tree, never Sonnet.
   the merge touches runner.clj/eval.clj which stage 2 and S3 are editing,
   and the reset destroys the default S3 is probing — execute when both
   stop for review (both are on their last items). Batch 122 pending.
+- **S3 LIVE PROOF LANDED** (`789707bd2`) on the adopted default (pid 94566,
+  basis 536871131): base construction 2,142 ms, core-row installation 326
+  ms, private-layer regeneration 6.4 ms, second core-base construction 700
+  ms; 5,159 identities, 4,387 sourced functions, overrides `[]`. Scratch
+  cluster: a real accepted first-party override reached the base, an
+  existing agent B, a fresh agent C and a REBUILT base (25/25 auto-checks;
+  install 1,149 ms, regeneration 3.4 ms, rebuild 1,503 ms) — the owner's
+  "other agents use the definition in the database, not the base system"
+  is proven live. S3 parked (session preserved); Phase 2's S3 row is DONE
+  pending the cold gate (batch 122 covers its namespaces).
