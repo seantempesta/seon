@@ -2667,3 +2667,16 @@ working tree, never Sonnet.
   `--fast --paths` refuses. Batch 121 exited 64 ×3 (log kept). Opus triage
   launched on the sci arity-message parity reds. Editing: adoption-margin,
   integrator, guardrails, Opus triage.
+- **ADOPTION BLOCKER DISSOLVED** (astra `adoption-margin`, high):
+  `c772db2d3` the lifecycle HOLD bound is now liveness of the holder's
+  published phase progress (a progressing holder survived 540,838 ms; a
+  stalled phase refused after 30,075 ms naming the phase); `be9c90e2f`
+  adoption reports per-phase elapsed; `627a24047` + `ad75bab51` cost cuts
+  (fresh publication 43.9 → 34.0 s). **Default pid 94566 ADOPTED and
+  converged in 37.4 s** without restart; Juniper reseeded; `runtime_status`
+  healthy, zero error signatures (the run-exists and evaluator faults are
+  gone on this cluster). Five follow-up issues filed by the lane (issue
+  indexing 13 s at publication; a hand-maintained predicate-owner reload;
+  the declaration-world per file and per row; …). Stage 2 resumed (its
+  held file is free). Owed now that adoption works: S3 live regeneration
+  numbers, message-wake's live wake-flip — when slots free.

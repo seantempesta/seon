@@ -56,7 +56,7 @@ lanes is the cap and was exceeded all night — expect load; lanes never run
 | Gate recording refused `:seon.test.run/immutable` (runner.clj:2486) on batch 116 A — a run row with different provenance already exists for the run id; retained root `tmp/test-runs/run.jHOFSg` | astra `test-system-stage2` (owns the recorder) | fold at its next stop |
 | Guardrails item 2: declared bounds, overrides refused | orchestrator | integrated `0db8b71bc`; items 3–4 resume when a slot frees |
 | A first-party namespace under `resources/` (`seon.operator.state`) is never reloaded by development adoption → adoption fails after any change to it; move it under `src/` | Opus (spec in the issue) | queued; reset is tonight's repair |
-| **Adoption refused tree-wide** (activation closure names call-preparation suppliers whose rows the publication lacks) | astra `acquisition-by-provenance-s3` (owns the seam) | in flight |
+| Adoption refused tree-wide (S3's seam) | astra `acquisition-by-provenance-s3` | dissolved by `684f185f8`; then the invalid issue note, the resources reload gap, and the hold bound each blocked adoption in turn — all root-caused (see the working edge) |
 | Platform tier refused: registry tests reach a declared destroyer since the fs consolidation (batch 115 A) | astra `reset-is-total` | landed `d65cc688c`; cold proof = batch 116 A |
 | The whole-entity validator ADMITS an incomplete create (new `:seon.fn` row missing ns + admission source) | Opus | REFUTED by probe: the create path refuses at HEAD; class regression landed `770cf35d3`; the real hole is identity-less entities never validated (issue filed) |
 | `record-tx` creates test rows without admission source (3 batch-115 reds) | astra `test-system-stage2` | in flight (folded) |
@@ -66,7 +66,7 @@ lanes is the cap and was exceeded all night — expect load; lanes never run
 | Hook: loophole inventory; `agent_id` recorded; codex drops PostToolUse blocks → every refusal exits 2 with stderr reason; scan on every PostToolUse | Opus hook agent | landed `db0c51fa6` `8952da44f` |
 | Independent end-to-end hook verifier on both platforms | Opus | queued behind the hook agent |
 | `datahike.api/with` admission-bypass detector | Opus | queued |
-| **Adoption/republish margin: 170.7 s post-fork adoption vs a 180 s lock-hold bound; the 05:20Z adoption timed out holding the lock** — cut the complete-publication validation (writer thread), issue indexing at publication, and the reload cost, or derive the hold bound from the measured phases | astra (next free slot) | BLOCKER, queued first |
+| Adoption/republish margin: hold bound was a duration constant applied to the holder itself | astra `adoption-margin` | landed `c772db2d3` `be9c90e2f` `627a24047` `ad75bab51`: phase-liveness hold bound, per-phase timings, adoption 181 s → 37 s; default adopted |
 | Cold gates for every slice landed | orchestrator | batches 116–120 run and routed; **platform tier GREEN at batch 120 (97/686/0/0, HEAD ad5d09b01)** |
 | Load cap: ≤4 editing lanes, three test slots shared with iteration | orchestrator | EXCEEDED at 03:15Z (six codex + three Opus); nothing new launches until batch 116 has run; prune before adding |
 
