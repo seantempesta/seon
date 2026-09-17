@@ -1956,6 +1956,15 @@ an existing row keeps the ruled behaviour). Also seen: the gate's FAIL
 header points at the enclosing `let` line, not the failing `is` — issue to
 file.
 
+**Claude Code hooks reference LANDED** (`820769a3b`, `docs/seon/reference/
+claude-code-hooks-2026-09-17.md`, verified against the current docs): exit
+2 blocks unconditionally; PreToolUse deny feeds its reason to the model; a
+running session's file watcher picks up settings hook changes (stale config
+is a codex-only question); subagent tool calls fire the parent's hooks with
+`agent_id`/`agent_type` (Claude lane identity for the guardrails); default
+timeout 600 s; matchers are unanchored case-sensitive regexes; parallel
+hooks, most restrictive decision wins. Handed to the hook agent.
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
