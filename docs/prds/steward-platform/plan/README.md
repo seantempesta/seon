@@ -67,13 +67,13 @@ lanes is the cap and was exceeded all night — expect load; lanes never run
 | Independent end-to-end hook verifier on both platforms | Opus | queued behind the hook agent |
 | `datahike.api/with` admission-bypass detector | Opus | queued |
 | **Adoption/republish margin: 170.7 s post-fork adoption vs a 180 s lock-hold bound; the 05:20Z adoption timed out holding the lock** — cut the complete-publication validation (writer thread), issue indexing at publication, and the reload cost, or derive the hold bound from the measured phases | astra (next free slot) | BLOCKER, queued first |
-| Cold gates owed for every slice landed since the resume | orchestrator | batch 116 running (platform A, then 25 namespaces B); waited 17 min for a slot under load 71 |
+| Cold gates for every slice landed | orchestrator | batches 116–120 run and routed; **platform tier GREEN at batch 120 (97/686/0/0, HEAD ad5d09b01)** |
 | Load cap: ≤4 editing lanes, three test slots shared with iteration | orchestrator | EXCEEDED at 03:15Z (six codex + three Opus); nothing new launches until batch 116 has run; prune before adding |
 
 ### Phase 1 — the one reset
 | Item | Owner | Status |
 |---|---|---|
-| Edge retype (calls/references/reach as indexed symbol sets), stub minting + tombstones + second validator deleted, `:seon.fn/file` required, G4 provenance fact, the 19 unsatisfiable-required keys, deletion refusal in `write-report-error` (strict, no escape — ruled), `:seon.agent/archived-tx`, `capability-fn` ref deleted, fn.ast merge-then-delete, S2, S6 | integrator on worktree branch `reset-batch` (pushed) | in flight |
+| Edge retype (indexed symbol sets), stub minting + tombstones + second validator deleted, G4 digest required, the 19 unsatisfiable-required keys, strict deletion refusal, `archived-tx`, `capability-fn` deleted, fn.ast merge-then-delete (Q2 A), S2, S6 | integrator on worktree branch `reset-batch` (pushed) | retype + deletion landed on the branch (`357628778`), rebased on the study; G5 (projection-carried budget, option 1 taken) and the executable reset order in flight; query-cost contract = absolute budget + reported ratio (taken) |
 | Validator cost on the writer thread (75.9 → 41.6 s; more owed) | integrator | in flight |
 | Message/wake/provenance model (§1h): all seams landed (`78cc3b9b7`, `a50424f6b`, `57581f12f`, `31ac4c05d`); default reforked for the origin type change | astra `message-wake-model` (high) | landed; batch 119: its `gen.loop-test` `inst-ms`-on-a-Long errors (3) and `situation-totality-property` are its residue — resume with the lines when a slot frees; live wake-flip proof after adoption works |
 | SCI arity-message parity: `an-instrumented-multi-arity-miss-reads-like-clojure` 4F (eval_test), known since the no-default lane's baseline | Opus triage | queued after the platform tier is green |

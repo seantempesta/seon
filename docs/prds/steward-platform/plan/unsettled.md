@@ -2607,3 +2607,21 @@ working tree, never Sonnet.
   consumer checkout loads it. 48/312 green. **Batch 120 launched** (platform
   + runner/test-system/evaluator namespaces) — the platform tier should be
   GREEN for the first time tonight. Guardrails resumed on items 3–4.
+- **PLATFORM TIER GREEN — batch 120 A (HEAD ad5d09b01): 97 tests / 686
+  assertions / 0 F / 0 E, exit 0, recorded.** First green platform tier of
+  the night (batches 115–119 were red on the destroyer-derivation, the
+  declaration-population memo, then the launcher-fixture list). B (runner,
+  test-system, bounds, evaluator namespaces): 148/905 — only the known
+  `an-instrumented-multi-arity-miss-reads-like-clojure` ×4 (Opus triage
+  queued for the next free slot). Phase 0's gate condition is met except
+  for adoption (adoption-margin lane) — live proofs resume when it lands.
+- Integrator landed the edge retype rebased on the study (`357628778`,
+  `6095f46d8`, branch pushed): indexed `:qualified-symbol` sets for
+  calls/references/reach/subject, the analyzed-source-digest required,
+  pending-calls dissolved, N10 capability symbol; equal-population walk
+  parity: symbol within ~6% of ref (40.7 vs 43.1 ms on 2,093 identities).
+  Two decisions taken as recommended (vetoable): the query-cost contract is
+  the absolute 5 ms budget with the ratio reported (the 2×-raw assertion was
+  never a declared contract); G5's work budget is projection-carried (a
+  declared config fact handed to the final validator). Integrator resumed on
+  G5 (closes the identity-less-entity hole) and the executable reset order.
